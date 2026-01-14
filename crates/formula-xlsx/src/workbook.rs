@@ -210,15 +210,22 @@ impl XlsxPackage {
                     }
                 };
 
-                let (chart_rels_path, chart_rels_bytes) = if chart_part_path.is_empty() {
-                    (None, None)
-                } else {
-                    let rels = rels_for_part(&chart_part_path);
-                    match self.part(&rels) {
-                        Some(bytes) => (Some(rels), Some(bytes.to_vec())),
-                        None => (None, None),
-                    }
-                };
+                let (chart_rels_path, chart_rels_bytes) =
+                    if chart_part_path.is_empty() || chart_bytes.is_empty() {
+                        (None, None)
+                    } else {
+                        let rels_path = rels_for_part(&chart_part_path);
+                        let rels_bytes = self.part(&rels_path).map(|bytes| bytes.to_vec());
+                        if rels_bytes.is_none() {
+                            diagnostics.push(ChartDiagnostic {
+                                level: ChartDiagnosticLevel::Warning,
+                                message: format!("missing chart relationships part: {rels_path}"),
+                                part: Some(rels_path.clone()),
+                                xpath: None,
+                            });
+                        }
+                        (Some(rels_path), rels_bytes)
+                    };
 
                 let mut chart_ex_part = None;
                 let mut style_part = None;
@@ -292,9 +299,17 @@ impl XlsxPackage {
                     Some(bytes) => {
                         let rels_path = rels_for_part(&path);
                         let rels_bytes = self.part(&rels_path).map(|bytes| bytes.to_vec());
+                        if rels_bytes.is_none() {
+                            diagnostics.push(ChartDiagnostic {
+                                level: ChartDiagnosticLevel::Warning,
+                                message: format!("missing chartEx relationships part: {rels_path}"),
+                                part: Some(rels_path.clone()),
+                                xpath: None,
+                            });
+                        }
                         Some(OpcPart {
                             path,
-                            rels_path: rels_bytes.as_ref().map(|_| rels_path),
+                            rels_path: Some(rels_path),
                             rels_bytes,
                             bytes: bytes.to_vec(),
                         })
@@ -350,9 +365,19 @@ impl XlsxPackage {
                     Some(bytes) => {
                         let rels_path = rels_for_part(&path);
                         let rels_bytes = self.part(&rels_path).map(|bytes| bytes.to_vec());
+                        if rels_bytes.is_none() {
+                            diagnostics.push(ChartDiagnostic {
+                                level: ChartDiagnosticLevel::Warning,
+                                message: format!(
+                                    "missing chart userShapes relationships part: {rels_path}"
+                                ),
+                                part: Some(rels_path.clone()),
+                                xpath: None,
+                            });
+                        }
                         Some(OpcPart {
                             path,
-                            rels_path: rels_bytes.as_ref().map(|_| rels_path),
+                            rels_path: Some(rels_path),
                             rels_bytes,
                             bytes: bytes.to_vec(),
                         })

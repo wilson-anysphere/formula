@@ -813,7 +813,6 @@ mod negative_zero_xml_tests {
         assert!(xml.contains("ht=\"0\""), "expected ht=0: {xml}");
     }
 }
-
 #[derive(Clone, Debug, PartialEq)]
 struct ColXmlProps {
     width: Option<f32>,

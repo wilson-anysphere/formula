@@ -241,6 +241,113 @@ fn detects_and_preserves_chart_ex_part_from_chart_relationships() {
 }
 
 #[test]
+fn warns_when_chart_rels_part_is_missing() {
+    let bytes = build_workbook_with_chart();
+    let mut package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_part = package
+        .part_names()
+        .find(|p| p.starts_with("xl/charts/chart") && p.ends_with(".xml"))
+        .expect("chart part present")
+        .to_string();
+    let chart_rels_part = rels_for_part(&chart_part);
+    package.parts_map_mut().remove(&chart_rels_part);
+
+    let bytes = package.write_to_bytes().unwrap();
+    let package = XlsxPackage::from_bytes(&bytes).unwrap();
+    let chart_objects = package.extract_chart_objects().unwrap();
+    assert_eq!(chart_objects.len(), 1);
+
+    let chart_object = &chart_objects[0];
+    assert_eq!(
+        chart_object.parts.chart.rels_path.as_deref(),
+        Some(chart_rels_part.as_str()),
+        "expected chart rels path to be captured even when the rels part is missing"
+    );
+    assert!(
+        chart_object.parts.chart.rels_bytes.is_none(),
+        "expected missing chart rels bytes"
+    );
+    assert!(
+        chart_object.diagnostics.iter().any(|d| {
+            d.level == ChartDiagnosticLevel::Warning
+                && d.message.contains("missing chart relationships part")
+                && d.part.as_deref() == Some(chart_rels_part.as_str())
+        }),
+        "expected missing chart rels warning, got diagnostics: {:?}",
+        chart_object.diagnostics
+    );
+}
+
+#[test]
+fn warns_when_chart_ex_rels_part_is_missing() {
+    let bytes = build_workbook_with_chart();
+    let mut package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_part = package
+        .part_names()
+        .find(|p| p.starts_with("xl/charts/chart") && p.ends_with(".xml"))
+        .expect("chart part present")
+        .to_string();
+    let chart_rels_part = rels_for_part(&chart_part);
+
+    let mut updated_rels = package
+        .part(&chart_rels_part)
+        .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap())
+        .unwrap_or_else(|| {
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#.to_string()
+        });
+    let insert_idx = updated_rels
+        .rfind("</Relationships>")
+        .expect("closing Relationships tag");
+    updated_rels.insert_str(
+        insert_idx,
+        r#"  <Relationship Id="rId999" Type="http://schemas.microsoft.com/office/2014/relationships/chartEx" Target="chartEx1.xml"/>"#,
+    );
+    package.set_part(chart_rels_part.clone(), updated_rels.into_bytes());
+
+    let chart_ex_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"><cx:spPr/></cx:chartSpace>"#.to_vec();
+    package.set_part("xl/charts/chartEx1.xml", chart_ex_xml.clone());
+
+    // Deliberately omit `xl/charts/_rels/chartEx1.xml.rels` to ensure the extractor emits a warning
+    // and still records the rels path on the returned `OpcPart`.
+    package
+        .parts_map_mut()
+        .remove("xl/charts/_rels/chartEx1.xml.rels");
+
+    let bytes = package.write_to_bytes().unwrap();
+    let package = XlsxPackage::from_bytes(&bytes).unwrap();
+    let chart_objects = package.extract_chart_objects().unwrap();
+    assert_eq!(chart_objects.len(), 1);
+
+    let chart_object = &chart_objects[0];
+    let chart_ex = chart_object
+        .parts
+        .chart_ex
+        .as_ref()
+        .expect("chartEx part detected");
+    assert_eq!(chart_ex.path, "xl/charts/chartEx1.xml");
+    assert_eq!(chart_ex.bytes, chart_ex_xml);
+    assert_eq!(
+        chart_ex.rels_path.as_deref(),
+        Some("xl/charts/_rels/chartEx1.xml.rels")
+    );
+    assert!(
+        chart_ex.rels_bytes.is_none(),
+        "expected missing chartEx rels bytes"
+    );
+    assert!(
+        chart_object.diagnostics.iter().any(|d| {
+            d.level == ChartDiagnosticLevel::Warning
+                && d.message.contains("missing chartEx relationships part")
+                && d.part.as_deref() == Some("xl/charts/_rels/chartEx1.xml.rels")
+        }),
+        "expected missing chartEx rels warning, got diagnostics: {:?}",
+        chart_object.diagnostics
+    );
+}
+
+#[test]
 fn falls_back_to_chart_space_model_when_chart_ex_parse_fails() {
     let bytes = build_workbook_with_chart();
     let mut package = XlsxPackage::from_bytes(&bytes).unwrap();

@@ -1,5 +1,5 @@
-use formula_xlsx::XlsxPackage;
 use formula_xlsx::drawingml::charts::ChartDiagnosticLevel;
+use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Chart, ChartType, Workbook};
 
 const FIXTURE: &[u8] = include_bytes!("../../../fixtures/xlsx/charts/chart-user-shapes.xlsx");
@@ -208,6 +208,73 @@ fn warns_when_chart_user_shapes_relationship_targets_missing_part() {
                 && d.message.contains("missing chart userShapes part")
         }),
         "expected warning about missing chart userShapes part"
+    );
+}
+
+#[test]
+fn warns_when_chart_user_shapes_rels_part_is_missing() {
+    let bytes = build_workbook_with_chart();
+    let mut package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_part = package
+        .part_names()
+        .find(|p| p.starts_with("xl/charts/chart") && p.ends_with(".xml"))
+        .expect("chart part present")
+        .to_string();
+    let chart_rels_part = rels_for_part(&chart_part);
+
+    let mut updated_rels = package
+        .part(&chart_rels_part)
+        .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap())
+        .unwrap_or_else(|| {
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#.to_string()
+        });
+    let insert_idx = updated_rels
+        .rfind("</Relationships>")
+        .expect("closing Relationships tag");
+    updated_rels.insert_str(
+        insert_idx,
+        r#"  <Relationship Id="rId999" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartUserShapes" Target="../drawings/drawing99.xml"/>"#,
+    );
+    package.set_part(chart_rels_part.clone(), updated_rels.into_bytes());
+
+    let user_shapes_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cdr:wsDr xmlns:cdr="http://schemas.openxmlformats.org/drawingml/2006/chartDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"></cdr:wsDr>"#.to_vec();
+    package.set_part("xl/drawings/drawing99.xml", user_shapes_xml.clone());
+
+    // Deliberately omit `xl/drawings/_rels/drawing99.xml.rels` to ensure the extractor emits a
+    // warning while still recording the rels path on the returned `OpcPart`.
+    package
+        .parts_map_mut()
+        .remove("xl/drawings/_rels/drawing99.xml.rels");
+
+    let bytes = package.write_to_bytes().unwrap();
+    let package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_objects = package.extract_chart_objects().unwrap();
+    assert_eq!(chart_objects.len(), 1);
+
+    let chart_object = &chart_objects[0];
+    let user_shapes = chart_object
+        .parts
+        .user_shapes
+        .as_ref()
+        .expect("chart userShapes part detected");
+    assert_eq!(user_shapes.path, "xl/drawings/drawing99.xml");
+    assert_eq!(user_shapes.bytes, user_shapes_xml);
+    assert_eq!(
+        user_shapes.rels_path.as_deref(),
+        Some("xl/drawings/_rels/drawing99.xml.rels")
+    );
+    assert!(user_shapes.rels_bytes.is_none());
+    assert!(
+        chart_object.diagnostics.iter().any(|d| {
+            d.level == ChartDiagnosticLevel::Warning
+                && d.message
+                    .contains("missing chart userShapes relationships part")
+                && d.part.as_deref() == Some("xl/drawings/_rels/drawing99.xml.rels")
+        }),
+        "expected missing userShapes rels warning, got diagnostics: {:?}",
+        chart_object.diagnostics
     );
 }
 
@@ -458,7 +525,9 @@ fn extracts_chart_user_shapes_part_from_fixture_and_preserves_bytes() {
 
     // The drawing-parts preservation pipeline should also keep chartUserShapes reachable from the
     // chart's relationship graph.
-    let preserved = pkg.preserve_drawing_parts().expect("preserve drawing parts");
+    let preserved = pkg
+        .preserve_drawing_parts()
+        .expect("preserve drawing parts");
     assert!(
         preserved.parts.contains_key(&user_shapes.path),
         "expected preserved drawing parts to include chartUserShapes part"
@@ -471,7 +540,9 @@ fn extracts_chart_user_shapes_part_from_fixture_and_preserves_bytes() {
     // Apply preserved parts to a regenerated workbook and verify the userShapes part survives.
     let mut workbook = Workbook::new();
     workbook.add_worksheet();
-    let regenerated_bytes = workbook.save_to_buffer().expect("write regenerated workbook");
+    let regenerated_bytes = workbook
+        .save_to_buffer()
+        .expect("write regenerated workbook");
     let mut regenerated_pkg =
         XlsxPackage::from_bytes(&regenerated_bytes).expect("parse regenerated workbook");
     regenerated_pkg
