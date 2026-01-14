@@ -2554,7 +2554,11 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       // were applied via the full Format Cells UI.
       const signature = (compact.split(";")[0] ?? compact).replace(/[_()"]/g, "").replace(/\*/g, "");
 
-      if (/^[$€£¥](?:#,##0|0)(\.[0]+)?$/.test(signature)) return t("command.format.numberFormat.currency");
+      const hasCurrencySymbol = /[$€£¥]/.test(signature);
+      const hasNumericPlaceholders = /[#0]/.test(signature);
+      if (/^[$€£¥](?:#,##0|0)(\.[0]+)?$/.test(signature) || (hasCurrencySymbol && hasNumericPlaceholders)) {
+        return t("command.format.numberFormat.currency");
+      }
       if (signature.includes("yyyy-mm-dd")) return t("command.format.numberFormat.longDate");
       if (signature.includes("m/d/yyyy")) return t("command.format.numberFormat.shortDate");
       if (signature === NUMBER_FORMATS.date.toLowerCase()) return t("command.format.numberFormat.shortDate");
@@ -2562,7 +2566,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       if (signature.includes("%")) return t("command.format.numberFormat.percent");
       if (/^#,##0(\.[0]+)?$/.test(signature)) return t("ribbon.label.comma");
       if (/^0(\.[0]+)?$/.test(signature)) return t("command.format.numberFormat.number");
-      if (signature.includes("e")) return t("command.format.numberFormat.scientific");
+      // Be careful: `signature` can include "e" in locale codes (e.g. `[$€-de-de]...`).
+      // Only treat it as scientific when it looks like an exponent marker (e.g. `0.00e+00`).
+      if (/e[+-]?\d/.test(signature)) return t("command.format.numberFormat.scientific");
       if (signature.includes("/")) return t("command.format.numberFormat.fraction");
       if (signature === "@") return t("command.format.numberFormat.text");
 
