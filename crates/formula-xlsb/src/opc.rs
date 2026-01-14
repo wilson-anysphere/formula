@@ -3545,9 +3545,9 @@ fn read_zip_entry<R: Read + Seek>(
             });
         }
 
-        // Don't trust the ZIP metadata for preallocation; bound it to keep allocations modest.
-        let mut bytes =
-            Vec::with_capacity((size.min(ZIP_ENTRY_READ_PREALLOC_BYTES as u64)) as usize);
+        // Don't trust the ZIP metadata for preallocation; use a small fixed buffer to keep
+        // allocations modest even if `ZipFile::size()` is forged.
+        let mut bytes = Vec::with_capacity(ZIP_ENTRY_READ_PREALLOC_BYTES);
 
         // Guard against ZIP metadata lies (or unknown sizes) by enforcing a hard cap on bytes read.
         entry.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
