@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   patchAnchorExt,
@@ -492,6 +492,55 @@ describe("DrawingInteractionController commit-time patching", () => {
     // Commit callback should see the patched DrawingML rot attribute.
     const xml = (payload.after.kind as any).rawXml as string;
     expect(xml).toContain(`rot="5400000"`);
+  });
+
+  it("does not throw if onInteractionCommit throws (best-effort)", () => {
+    const startOffX = pxToEmu(10);
+    const startOffY = pxToEmu(20);
+    const obj: DrawingObject = {
+      id: 1,
+      kind: {
+        type: "shape",
+        rawXml: `<xdr:sp><xdr:nvSpPr><xdr:cNvPr id="1" name="Shape 1"/></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x="${startOffX}" y="${startOffY}"/><a:ext cx="${pxToEmu(
+          100,
+        )}" cy="${pxToEmu(100)}"/></a:xfrm></xdr:spPr></xdr:sp>`,
+      },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+    };
+
+    let objects: DrawingObject[] = [obj];
+    const el = createStubElement();
+    const commitObjects = vi.fn((next: DrawingObject[]) => {
+      objects = next;
+    });
+    const endBatch = vi.fn();
+
+    new DrawingInteractionController(el, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+      beginBatch: vi.fn(),
+      endBatch,
+      cancelBatch: vi.fn(),
+      commitObjects,
+      onInteractionCommit: () => {
+        throw new Error("boom");
+      },
+    });
+
+    el.dispatch("pointerdown", createPointerEvent({ clientX: 50, clientY: 50, pointerId: 13 }));
+    el.dispatch("pointermove", createPointerEvent({ clientX: 55, clientY: 57, pointerId: 13 }));
+
+    expect(() => el.dispatch("pointerup", createPointerEvent({ clientX: 55, clientY: 57, pointerId: 13 }))).not.toThrow();
+    expect(commitObjects).toHaveBeenCalledTimes(1);
+    expect(endBatch).toHaveBeenCalledTimes(1);
   });
 
   it("patches full-anchor wrapper <from>/<to> blocks on move commit for unknown objects", () => {
