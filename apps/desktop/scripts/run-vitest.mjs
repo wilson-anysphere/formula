@@ -17,25 +17,10 @@ let args = normalizeVitestArgs(process.argv.slice(2));
 
 const normalizedArgs = args.map((arg) => {
   if (typeof arg !== "string") return arg;
-  const preserveDrawingWrapper = (stripped) =>
-    stripped.startsWith("src/drawings/__tests__/") || stripped.startsWith(`src\\drawings\\__tests__\\`);
-
-  if (arg.startsWith(PREFIX_POSIX_DOT)) {
-    const stripped = arg.slice(PREFIX_POSIX_DOT.length);
-    return preserveDrawingWrapper(stripped) ? arg : stripped;
-  }
-  if (arg.startsWith(PREFIX_WIN_DOT)) {
-    const stripped = arg.slice(PREFIX_WIN_DOT.length);
-    return preserveDrawingWrapper(stripped) ? arg : stripped;
-  }
-  if (arg.startsWith(PREFIX_POSIX)) {
-    const stripped = arg.slice(PREFIX_POSIX.length);
-    return preserveDrawingWrapper(stripped) ? arg : stripped;
-  }
-  if (arg.startsWith(PREFIX_WIN)) {
-    const stripped = arg.slice(PREFIX_WIN.length);
-    return preserveDrawingWrapper(stripped) ? arg : stripped;
-  }
+  if (arg.startsWith(PREFIX_POSIX_DOT)) return arg.slice(PREFIX_POSIX_DOT.length);
+  if (arg.startsWith(PREFIX_WIN_DOT)) return arg.slice(PREFIX_WIN_DOT.length);
+  if (arg.startsWith(PREFIX_POSIX)) return arg.slice(PREFIX_POSIX.length);
+  if (arg.startsWith(PREFIX_WIN)) return arg.slice(PREFIX_WIN.length);
   return arg;
 });
 
