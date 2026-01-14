@@ -21243,73 +21243,6 @@ export class SpreadsheetApp {
       return changed ? out : null;
     };
 
-    const rewriteThisRowWholeRowReferences = (text: string): string | null => {
-      const input = String(text ?? "");
-      if (!input.includes("[") || !input.includes("@")) return null;
-
-      const isIdentifierPart = (ch: string): boolean =>
-        (ch >= "A" && ch <= "Z") ||
-        (ch >= "a" && ch <= "z") ||
-        (ch >= "0" && ch <= "9") ||
-        ch === "_" ||
-        ch === ".";
-
-      let out = "";
-      let inString = false;
-      let changed = false;
-      let i = 0;
-
-      while (i < input.length) {
-        const ch = input[i] ?? "";
-
-        if (inString) {
-          out += ch;
-          if (ch === '"') {
-            // Escaped quote inside a string literal: "" -> "
-            if (input[i + 1] === '"') {
-              out += '"';
-              i += 2;
-              continue;
-            }
-            inString = false;
-          }
-          i += 1;
-          continue;
-        }
-
-        if (ch === '"') {
-          out += ch;
-          inString = true;
-          i += 1;
-          continue;
-        }
-
-        // `tokenizeFormula` does not currently treat `Table[@]` (whole-row structured refs)
-        // as a single `reference` token, so the lightweight evaluator can't resolve it via
-        // `resolveStructuredRefToReference`. Rewrite these forms into an A1 range before
-        // evaluation so previews remain useful for calculated-column formulas.
-        const prev = i > 0 ? (input[i - 1] ?? "") : "";
-        if (!isIdentifierPart(prev)) {
-          const match = /^([A-Za-z_][A-Za-z0-9_.]*)\[\s*@\s*\]/.exec(input.slice(i));
-          if (match) {
-            const refText = match[0]!;
-            const resolved = resolveStructuredRefToReference(refText);
-            if (resolved) {
-              out += resolved;
-              changed = true;
-              i += refText.length;
-              continue;
-            }
-          }
-        }
-
-        out += ch;
-        i += 1;
-      }
-
-      return changed ? out : null;
-    };
-
     let reads = 0;
     const memo = new Map<string, SpreadsheetValue>();
     const stack = new Set<string>();
@@ -21398,8 +21331,7 @@ export class SpreadsheetApp {
     };
 
     try {
-      const evalExprBase = rewriteImplicitThisRowReferences(trimmedExpr) ?? trimmedExpr;
-      const evalExpr = rewriteThisRowWholeRowReferences(evalExprBase) ?? evalExprBase;
+      const evalExpr = rewriteImplicitThisRowReferences(trimmedExpr) ?? trimmedExpr;
       const value = evaluateFormula(`=${evalExpr}`, getCellValue, {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
