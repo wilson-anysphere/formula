@@ -225,6 +225,11 @@ fi
 if [ -z "$EXPECTED_IDENTIFIER" ]; then
   die "Unable to determine expected desktop identifier from $TAURI_CONF_PATH"
 fi
+# The app identifier is used as a filename on Linux:
+#   usr/share/mime/packages/<identifier>.xml
+if [[ "${EXPECTED_IDENTIFIER}" == */* || "${EXPECTED_IDENTIFIER}" == *\\* ]]; then
+  die "Expected ${TAURI_CONF_PATH} identifier to be a valid filename (no '/' or '\\' path separators). Found: ${EXPECTED_IDENTIFIER}"
+fi
 EXPECTED_MIME_DEFINITION_BASENAME="${EXPECTED_IDENTIFIER}.xml"
 
 # Expected deep-link URL scheme handlers advertised via desktop integration.

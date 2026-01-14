@@ -209,6 +209,11 @@ EXPECTED_IDENTIFIER="$(read_tauri_conf_value identifier)"
 if [[ -z "$EXPECTED_IDENTIFIER" ]]; then
   die "Expected $TAURI_CONF to contain a non-empty \"identifier\" field."
 fi
+# The app identifier is used as a filename on Linux:
+#   /usr/share/mime/packages/<identifier>.xml
+if [[ "${EXPECTED_IDENTIFIER}" == */* || "${EXPECTED_IDENTIFIER}" == *\\* ]]; then
+  die "Expected $TAURI_CONF identifier to be a valid filename (no '/' or '\\' path separators). Found: ${EXPECTED_IDENTIFIER}"
+fi
 EXPECTED_MIME_DEFINITION_BASENAME="${EXPECTED_IDENTIFIER}.xml"
 EXPECTED_MIME_DEFINITION_PATH="/usr/share/mime/packages/${EXPECTED_MIME_DEFINITION_BASENAME}"
 

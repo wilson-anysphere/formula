@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -340,6 +340,7 @@ function runValidator({
   fakeVersion,
   fakeName,
   rpmNameOverride,
+  tauriConfPath,
 }) {
   const proc = spawnSync(
     "bash",
@@ -356,12 +357,59 @@ function runValidator({
         FAKE_RPM_VERSION: fakeVersion ?? expectedVersion,
         FAKE_RPM_NAME: fakeName ?? expectedRpmName,
         ...(rpmNameOverride ? { FORMULA_RPM_NAME_OVERRIDE: rpmNameOverride } : {}),
+        ...(tauriConfPath ? { FORMULA_TAURI_CONF_PATH: tauriConfPath } : {}),
       },
     },
   );
   if (proc.error) throw proc.error;
   return proc;
 }
+
+test("validate-linux-rpm rejects tauri identifiers containing path separators", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFakeRpmExtractTools(binDir);
+
+  // Fake RPM artifact (contents unused by the validator; it calls our fake rpm tool).
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  const requiresFile = writeDefaultRequiresFile(tmp);
+  writeFileSync(
+    listFile,
+    [
+      `/usr/bin/${expectedMainBinary}`,
+      "/usr/share/applications/formula.desktop",
+      expectedMimeDefinitionPath,
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const confParent = join(repoRoot, "target");
+  mkdirSync(confParent, { recursive: true });
+  const confDir = mkdtempSync(join(confParent, "tauri-conf-override-"));
+  const confPath = join(confDir, "tauri.conf.json");
+  writeFileSync(confPath, JSON.stringify({ ...tauriConf, identifier: "com/example.formula.desktop" }), "utf8");
+
+  try {
+    const proc = runValidator({
+      cwd: tmp,
+      rpmArg: "Formula.rpm",
+      fakeListFile: listFile,
+      fakeRequiresFile: requiresFile,
+      tauriConfPath: relative(repoRoot, confPath),
+    });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /identifier.*valid filename/i);
+    assert.match(proc.stderr, /path separators/i);
+  } finally {
+    rmSync(confDir, { recursive: true, force: true });
+  }
+});
 
 test(
   "validate-linux-rpm accepts an RPM whose file list contains the expected payload",

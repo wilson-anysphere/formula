@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -254,6 +254,29 @@ test("validate-linux-appimage --help prints usage and exits 0", { skip: !hasBash
   assert.match(proc.stdout, /Usage:/);
   assert.match(proc.stdout, /FORMULA_TAURI_CONF_PATH/);
   assert.doesNotMatch(proc.stderr, /command not found/i);
+});
+
+test("validate-linux-appimage rejects tauri identifiers containing path separators", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, appImageVersion: expectedVersion });
+
+  const confParent = join(repoRoot, "target");
+  mkdirSync(confParent, { recursive: true });
+  const confDir = mkdtempSync(join(confParent, "tauri-conf-override-"));
+  const confPath = join(confDir, "tauri.conf.json");
+  writeFileSync(confPath, JSON.stringify({ ...tauriConfig, identifier: "com/example.formula.desktop" }), "utf8");
+
+  try {
+    const proc = runValidatorWithArgs(appImagePath, {
+      env: { FORMULA_TAURI_CONF_PATH: relative(repoRoot, confPath) },
+    });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /identifier.*valid filename/i);
+    assert.match(proc.stderr, /path separators/i);
+  } finally {
+    rmSync(confDir, { recursive: true, force: true });
+  }
 });
 
 test("validate-linux-appimage accepts a structurally valid AppImage", { skip: !hasBash }, () => {
