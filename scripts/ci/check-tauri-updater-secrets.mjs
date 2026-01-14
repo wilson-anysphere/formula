@@ -251,7 +251,7 @@ function validatePrivateKeyFormat(privateKey) {
     if (minisign.kind === "public") {
       errBlock(`Invalid TAURI_PRIVATE_KEY`, [
         `TAURI_PRIVATE_KEY looks like a minisign *public* key, not a private key.`,
-        `Did you accidentally paste apps/desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey ?`,
+        `Did you accidentally paste ${relativeConfigPath} → plugins.updater.pubkey ?`,
         `Set TAURI_PRIVATE_KEY to the private key printed by:`,
         `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
         `Then store it as the GitHub Actions secret TAURI_PRIVATE_KEY.`,
@@ -374,7 +374,7 @@ function main() {
       `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
       `  # When prompted for a password, leave it blank.`,
       `Then update BOTH:`,
-      `  - apps/desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey (public key; safe to commit)`,
+      `  - ${relativeConfigPath} → plugins.updater.pubkey (public key; safe to commit)`,
       `  - GitHub Actions secret TAURI_PRIVATE_KEY (private key)`,
       `See docs/release.md ("Tauri updater keys").`,
     ]);
@@ -437,12 +437,12 @@ function main() {
       if (pubkey.keyIdHex !== secret.keyIdHex) {
         errBlock(`Tauri updater key mismatch`, [
           `The updater public key embedded in the app does not match the private key used for signing.`,
-          `apps/desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey key id: ${pubkey.keyIdHex}`,
+          `${relativeConfigPath} → plugins.updater.pubkey key id: ${pubkey.keyIdHex}`,
           `GitHub Actions secret TAURI_PRIVATE_KEY key id: ${secret.keyIdHex}`,
           `Regenerate a matching keypair with:`,
           `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
           `Then update BOTH:`,
-          `  - tauri.conf.json plugins.updater.pubkey (public key; safe to commit)`,
+          `  - ${relativeConfigPath} plugins.updater.pubkey (public key; safe to commit)`,
           `  - GitHub Actions secret TAURI_PRIVATE_KEY (private key)`,
         ]);
         err(`\nUpdater signing secrets preflight failed. Fix the key mismatch above before tagging a release.\n`);
