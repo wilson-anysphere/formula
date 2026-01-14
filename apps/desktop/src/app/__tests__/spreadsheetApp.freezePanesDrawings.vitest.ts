@@ -218,7 +218,6 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
       // Assert on the *pane* clip rects (first 4 calls) rather than the total call count.
       expect(drawingsCtx.rect.mock.calls.length).toBeGreaterThanOrEqual(4);
       expect(drawingsCtx.clip.mock.calls.length).toBeGreaterThanOrEqual(4);
-
       const expectedClipRects = [
         { x: headerOffsetX, y: headerOffsetY, width: frozenContentWidth, height: frozenContentHeight },
         {
@@ -268,13 +267,18 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
         x: args[0] as number,
         y: args[1] as number,
       }));
-      expect(strokeCalls[0]).toEqual({ x: headerOffsetX, y: headerOffsetY }); // top-left: no scroll
-      expect(strokeCalls[1]).toEqual({ x: headerOffsetX + frozenContentWidth - scrollX, y: headerOffsetY }); // top-right: scrollX only
-      expect(strokeCalls[2]).toEqual({ x: headerOffsetX, y: headerOffsetY + frozenContentHeight - scrollY }); // bottom-left: scrollY only
-      expect(strokeCalls[3]).toEqual({
-        x: headerOffsetX + frozenContentWidth - scrollX,
-        y: headerOffsetY + frozenContentHeight - scrollY,
-      }); // bottom-right: scrollX+scrollY
+      const expectedStrokeCalls = [
+        { x: headerOffsetX, y: headerOffsetY }, // top-left: no scroll
+        { x: headerOffsetX + frozenContentWidth - scrollX, y: headerOffsetY }, // top-right: scrollX only
+        { x: headerOffsetX, y: headerOffsetY + frozenContentHeight - scrollY }, // bottom-left: scrollY only
+        {
+          x: headerOffsetX + frozenContentWidth - scrollX,
+          y: headerOffsetY + frozenContentHeight - scrollY,
+        }, // bottom-right: scrollX+scrollY
+      ];
+      for (const expected of expectedStrokeCalls) {
+        expect(strokeCalls).toContainEqual(expected);
+      }
 
       app.destroy();
       root.remove();

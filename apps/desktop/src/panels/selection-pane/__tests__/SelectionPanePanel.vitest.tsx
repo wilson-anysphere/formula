@@ -218,7 +218,7 @@ describe("Selection Pane panel", () => {
 
     const itemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
     expect(itemEls.length).toBe(3);
-    // Topmost first (highest z-order -> id=3). Within ties, reverse render order (id=2 before id=1).
+    // Topmost object first (highest z-order -> id=3). Within ties, reverse render order (id=2 before id=1).
     expect(itemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-3");
     expect(itemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
     expect(itemEls[2]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
@@ -231,12 +231,14 @@ describe("Selection Pane panel", () => {
     expect(sendBackward1).toBeInstanceOf(HTMLButtonElement);
     expect(sendBackward1!.disabled).toBe(true);
 
+    const picture1Row = panelBody.querySelector<HTMLElement>('[data-testid="selection-pane-item-1"]');
+    expect(picture1Row).toBeInstanceOf(HTMLElement);
     await act(async () => {
-      (itemEls[2] as HTMLElement).click();
+      picture1Row!.click();
     });
 
     expect(app.getSelectedDrawingId()).toBe(1);
-    expect(itemEls[2]?.getAttribute("aria-selected")).toBe("true");
+    expect(picture1Row?.getAttribute("aria-selected")).toBe("true");
 
     // Bring Forward should update z-order and re-render the list (Picture 1 moves one step forward,
     // swapping above Picture 2 while still staying below the topmost drawing).
@@ -270,6 +272,7 @@ describe("Selection Pane panel", () => {
     const updatedItemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
     expect(updatedItemEls.length).toBe(4);
     expect(updatedItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-4");
+    expect(updatedItemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-3");
 
     await act(async () => {
       unmountRibbon?.();
@@ -359,8 +362,10 @@ describe("Selection Pane panel", () => {
     const itemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
     expect(itemEls.length).toBe(3);
 
+    const picture1Row = panelBody.querySelector<HTMLElement>('[data-testid="selection-pane-item-1"]');
+    expect(picture1Row).toBeInstanceOf(HTMLElement);
     await act(async () => {
-      (itemEls[2] as HTMLElement).click();
+      picture1Row!.click();
     });
     expect(app.getSelectedDrawingId()).toBe(1);
 

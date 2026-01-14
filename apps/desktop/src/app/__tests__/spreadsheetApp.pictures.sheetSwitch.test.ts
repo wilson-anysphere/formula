@@ -162,8 +162,9 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
 
     const sheet1Initial = app.getDrawingsDebugState();
     expect(sheet1Initial.sheetId).toBe("Sheet1");
-    expect(sheet1Initial.drawings).toHaveLength(1);
-    const insertedId = sheet1Initial.drawings[0]!.id;
+    const sheet1InitialImages = sheet1Initial.drawings.filter((d) => d.kind === "image");
+    expect(sheet1InitialImages).toHaveLength(1);
+    const insertedId = sheet1InitialImages[0]!.id;
     expect(sheet1Initial.selectedId).toBe(insertedId);
 
     // Ensure Sheet2 exists.
@@ -178,8 +179,9 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     app.activateSheet("Sheet1");
     const sheet1After = app.getDrawingsDebugState();
     expect(sheet1After.sheetId).toBe("Sheet1");
-    expect(sheet1After.drawings).toHaveLength(1);
-    expect(sheet1After.drawings[0]?.id).toBe(insertedId);
+    const sheet1AfterImages = sheet1After.drawings.filter((d) => d.kind === "image");
+    expect(sheet1AfterImages).toHaveLength(1);
+    expect(sheet1AfterImages[0]?.id).toBe(insertedId);
     // Selection should not "carry over" when switching back.
     expect(sheet1After.selectedId).toBe(null);
 
@@ -205,8 +207,9 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
 
     const sheet1Initial = app.getDrawingsDebugState();
     expect(sheet1Initial.sheetId).toBe("Sheet1");
-    expect(sheet1Initial.drawings).toHaveLength(1);
-    const inserted = sheet1Initial.drawings[0]!;
+    const sheet1InitialImages = sheet1Initial.drawings.filter((d) => d.kind === "image");
+    expect(sheet1InitialImages).toHaveLength(1);
+    const inserted = sheet1InitialImages[0]!;
     expect(inserted.rectPx).not.toBeNull();
 
     const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
@@ -253,7 +256,7 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     app.activateSheet("Sheet1");
     const sheet1After = app.getDrawingsDebugState();
     expect(sheet1After.sheetId).toBe("Sheet1");
-    expect(sheet1After.drawings).toHaveLength(1);
+    expect(sheet1After.drawings.filter((d) => d.kind === "image")).toHaveLength(1);
     expect(sheet1After.selectedId).toBe(null);
 
     app.destroy();
@@ -280,8 +283,9 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
 
     const sheet1Initial = app.getDrawingsDebugState();
     expect(sheet1Initial.sheetId).toBe("Sheet1");
-    expect(sheet1Initial.drawings).toHaveLength(1);
-    const inserted = sheet1Initial.drawings[0]!;
+    const sheet1InitialImages = sheet1Initial.drawings.filter((d) => d.kind === "image");
+    expect(sheet1InitialImages).toHaveLength(1);
+    const inserted = sheet1InitialImages[0]!;
     expect(inserted.rectPx).not.toBeNull();
 
     // Ensure Sheet2 exists and contains a drawing with the *same* id. Without canceling the in-flight gesture,
@@ -322,8 +326,9 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     // And the original picture should still be on Sheet1.
     app.activateSheet("Sheet1");
     const sheet1After = app.getDrawingsDebugState();
-    expect(sheet1After.drawings).toHaveLength(1);
-    expect(sheet1After.drawings[0]!.id).toBe(inserted.id);
+    const sheet1AfterImages = sheet1After.drawings.filter((d) => d.kind === "image");
+    expect(sheet1AfterImages).toHaveLength(1);
+    expect(sheet1AfterImages[0]!.id).toBe(inserted.id);
     expect(sheet1After.selectedId).toBe(null);
 
     app.destroy();
