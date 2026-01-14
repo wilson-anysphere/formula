@@ -665,6 +665,7 @@ mod sheet_format_pr_tests {
     fn renders_expected_attributes_with_trimmed_floats() {
         let mut sheet = Worksheet::new(1, "Sheet1");
         sheet.base_col_width = Some(8);
+        // Excel's default column width is commonly 8.43; ensure we don't emit binary float noise.
         sheet.default_col_width = Some(8.43);
         sheet.default_row_height = Some(15.0);
 
