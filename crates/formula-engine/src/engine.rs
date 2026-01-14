@@ -1258,7 +1258,11 @@ impl Engine {
         self.workbook
             .sheet_ids_in_order()
             .iter()
-            .filter_map(|&id| self.workbook.sheet_key_name(id).map(|name| name.to_string()))
+            .filter_map(|&id| {
+                self.workbook
+                    .sheet_key_name(id)
+                    .map(|name| name.to_string())
+            })
             .collect()
     }
 
@@ -18474,7 +18478,10 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").expect("addr");
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         assert_eq!(
             engine
@@ -18521,7 +18528,10 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").expect("addr");
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         assert_eq!(
             engine
@@ -18610,7 +18620,10 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").unwrap();
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         // Simulate an inconsistent state (e.g. stale bytecode flags left behind after a refactor).
         {
@@ -18640,7 +18653,10 @@ mod tests {
         let mut engine = Engine::new();
         let sheet_id = engine.workbook.ensure_sheet("Sheet1");
         let addr = parse_a1("A1").unwrap();
-        let key = CellKey { sheet: sheet_id, addr };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr,
+        };
 
         // Insert a "default blank" cell that should not remain in sparse storage.
         {

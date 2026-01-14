@@ -1288,9 +1288,21 @@ fn external_table_structured_ref_with_workbook_name_containing_escaped_rbracket_
     let provider = Arc::new(TestExternalProvider::default());
     provider.set_table("Book[Name]].xlsx", "Sheet1", table_fixture_multi_col());
 
-    provider.set("[Book[Name]].xlsx]Sheet1", CellAddr { row: 1, col: 1 }, 10.0);
-    provider.set("[Book[Name]].xlsx]Sheet1", CellAddr { row: 2, col: 1 }, 20.0);
-    provider.set("[Book[Name]].xlsx]Sheet1", CellAddr { row: 3, col: 1 }, 30.0);
+    provider.set(
+        "[Book[Name]].xlsx]Sheet1",
+        CellAddr { row: 1, col: 1 },
+        10.0,
+    );
+    provider.set(
+        "[Book[Name]].xlsx]Sheet1",
+        CellAddr { row: 2, col: 1 },
+        20.0,
+    );
+    provider.set(
+        "[Book[Name]].xlsx]Sheet1",
+        CellAddr { row: 3, col: 1 },
+        30.0,
+    );
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));

@@ -1170,7 +1170,10 @@ fn workbook_contains_unescaped_rbracket(workbook: &str) -> bool {
             }
             return true;
         }
-        let ch = workbook[i..].chars().next().expect("i always at char boundary");
+        let ch = workbook[i..]
+            .chars()
+            .next()
+            .expect("i always at char boundary");
         i += ch.len_utf8();
     }
     false

@@ -493,7 +493,9 @@ fn auditing_sorts_cross_sheet_precedents_and_dependents_by_tab_order_after_reord
     engine
         .set_cell_formula("Sheet2", "A1", "=Sheet1!A1+Sheet3!A1")
         .unwrap();
-    engine.set_cell_formula("Sheet3", "B1", "=Sheet1!A1").unwrap();
+    engine
+        .set_cell_formula("Sheet3", "B1", "=Sheet1!A1")
+        .unwrap();
 
     engine.recalculate_single_threaded();
 
