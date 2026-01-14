@@ -145,6 +145,10 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     doc.setSheetDrawings(sheetId, [rawDrawing]);
 
     const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    expect(before.anchor.type).toBe("absolute");
+    if (before.anchor.type !== "absolute") {
+      throw new Error("Expected absolute anchor for test drawing");
+    }
     const after = {
       ...before,
       anchor: {
