@@ -231,6 +231,72 @@ fn build_minimal_xlsx_with_noncanonical_entries() -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
+fn build_minimal_xlsx_with_noncanonical_sheet_part_and_rels() -> Vec<u8> {
+    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let worksheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData/>
+  <hyperlinks>
+    <hyperlink ref="A1" r:id="rId1"/>
+  </hyperlinks>
+</worksheet>"#;
+
+    let sheet_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+    Target="https://example.com"
+    TargetMode="External"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options =
+        FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    fn add_file(
+        zip: &mut ZipWriter<Cursor<Vec<u8>>>,
+        options: FileOptions<()>,
+        name: &str,
+        bytes: &[u8],
+    ) {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+
+    add_file(&mut zip, options, "XL/Workbook.xml", workbook_xml);
+    add_file(&mut zip, options, "xl/_rels/workbook.xml.rels", workbook_rels);
+    add_file(
+        &mut zip,
+        options,
+        r#"xl\worksheets\sheet1.xml"#,
+        worksheet_xml,
+    );
+    add_file(
+        &mut zip,
+        options,
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        sheet_rels,
+    );
+
+    zip.finish().unwrap().into_inner()
+}
+
 // The CI filter uses `-- leading_slash_zip_entries`; wrapping tests in this module ensures the
 // substring matches and the intended subset runs.
 mod leading_slash_zip_entries_tests {
@@ -252,6 +318,22 @@ mod leading_slash_zip_entries_tests {
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0].name, "Sheet1");
         assert_eq!(parts[0].worksheet_part, "xl/worksheets/sheet1.xml");
+    }
+
+    #[test]
+    fn load_from_bytes_tolerates_noncanonical_worksheet_part_names_when_sheet_rels_are_required() {
+        use formula_model::HyperlinkTarget;
+
+        let bytes = build_minimal_xlsx_with_noncanonical_sheet_part_and_rels();
+        let doc = load_from_bytes(&bytes).expect("load xlsx document");
+        assert_eq!(doc.workbook.sheets.len(), 1);
+        let sheet = &doc.workbook.sheets[0];
+        assert_eq!(sheet.hyperlinks.len(), 1);
+        assert_eq!(sheet.hyperlinks[0].range.to_string(), "A1");
+        match &sheet.hyperlinks[0].target {
+            HyperlinkTarget::ExternalUrl { uri } => assert_eq!(uri, "https://example.com"),
+            other => panic!("expected external hyperlink target (got {other:?})"),
+        }
     }
 
     #[test]

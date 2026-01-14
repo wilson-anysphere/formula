@@ -939,11 +939,17 @@ fn load_from_zip_archive<R: Read + Seek>(
         if file.is_dir() {
             continue;
         }
-        // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
-        // producers that include it by normalizing to the canonical part name. This keeps all
-        // downstream lookups (which assume `xl/...`) working.
+        // ZIP entry names in valid XLSX/XLSM packages should not start with `/` (or `\`), but
+        // tolerate producers that include leading separators or Windows-style path separators by
+        // normalizing to canonical part names. This keeps all downstream lookups (which assume
+        // `xl/...`) working.
         let name = file.name();
-        let name = name.strip_prefix('/').unwrap_or(name).to_string();
+        let name = name.trim_start_matches(|c| c == '/' || c == '\\');
+        let name = if name.contains('\\') {
+            name.replace('\\', "/")
+        } else {
+            name.to_string()
+        };
         let buf = crate::zip_util::read_zip_file_bytes_with_budget(
             &mut file,
             &name,
