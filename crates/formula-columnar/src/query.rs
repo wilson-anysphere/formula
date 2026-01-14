@@ -450,7 +450,28 @@ fn eval_filter_expr_tri(table: &ColumnarTable, expr: &FilterExpr) -> Result<TriM
     match expr {
         FilterExpr::And(left, right) => {
             let left = eval_filter_expr_tri(table, left)?;
+            if left.true_mask.count_ones() == 0 && left.unknown_mask.count_ones() == 0 {
+                let rows = table.row_count();
+                return Ok(TriMask {
+                    true_mask: BitVec::with_len_all_false(rows),
+                    unknown_mask: BitVec::with_len_all_false(rows),
+                });
+            }
+            if left.true_mask.all_true() && left.unknown_mask.count_ones() == 0 {
+                return eval_filter_expr_tri(table, right);
+            }
+
             let right = eval_filter_expr_tri(table, right)?;
+            if right.true_mask.count_ones() == 0 && right.unknown_mask.count_ones() == 0 {
+                let rows = table.row_count();
+                return Ok(TriMask {
+                    true_mask: BitVec::with_len_all_false(rows),
+                    unknown_mask: BitVec::with_len_all_false(rows),
+                });
+            }
+            if right.true_mask.all_true() && right.unknown_mask.count_ones() == 0 {
+                return Ok(left);
+            }
 
             let mut true_mask = left.true_mask.clone();
             true_mask.and_inplace(&right.true_mask);
@@ -469,7 +490,28 @@ fn eval_filter_expr_tri(table: &ColumnarTable, expr: &FilterExpr) -> Result<TriM
         }
         FilterExpr::Or(left, right) => {
             let left = eval_filter_expr_tri(table, left)?;
+            if left.true_mask.all_true() && left.unknown_mask.count_ones() == 0 {
+                let rows = table.row_count();
+                return Ok(TriMask {
+                    true_mask: BitVec::with_len_all_true(rows),
+                    unknown_mask: BitVec::with_len_all_false(rows),
+                });
+            }
+            if left.true_mask.count_ones() == 0 && left.unknown_mask.count_ones() == 0 {
+                return eval_filter_expr_tri(table, right);
+            }
+
             let right = eval_filter_expr_tri(table, right)?;
+            if right.true_mask.all_true() && right.unknown_mask.count_ones() == 0 {
+                let rows = table.row_count();
+                return Ok(TriMask {
+                    true_mask: BitVec::with_len_all_true(rows),
+                    unknown_mask: BitVec::with_len_all_false(rows),
+                });
+            }
+            if right.true_mask.count_ones() == 0 && right.unknown_mask.count_ones() == 0 {
+                return Ok(left);
+            }
 
             let mut true_mask = left.true_mask.clone();
             true_mask.or_inplace(&right.true_mask);
@@ -488,6 +530,20 @@ fn eval_filter_expr_tri(table: &ColumnarTable, expr: &FilterExpr) -> Result<TriM
         }
         FilterExpr::Not(inner) => {
             let inner = eval_filter_expr_tri(table, inner)?;
+            if inner.true_mask.all_true() && inner.unknown_mask.count_ones() == 0 {
+                let rows = table.row_count();
+                return Ok(TriMask {
+                    true_mask: BitVec::with_len_all_false(rows),
+                    unknown_mask: BitVec::with_len_all_false(rows),
+                });
+            }
+            if inner.true_mask.count_ones() == 0 && inner.unknown_mask.count_ones() == 0 {
+                let rows = table.row_count();
+                return Ok(TriMask {
+                    true_mask: BitVec::with_len_all_true(rows),
+                    unknown_mask: BitVec::with_len_all_false(rows),
+                });
+            }
             Ok(TriMask {
                 true_mask: inner.false_mask(),
                 unknown_mask: inner.unknown_mask,
