@@ -459,7 +459,7 @@ Notable keys:
 The desktop app is shipped via **GitHub Releases** (see `docs/release.md` for the full checklist).
 Tagged builds are expected to produce:
 
-- **macOS:** universal `.dmg` (plus updater payload `.app.tar.gz`)
+- **macOS:** universal `.dmg` (plus updater tarball: `*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`)
 - **Windows:** installers for **x64** and **ARM64** (`.msi` + `.exe`)
 - **Linux:** installers for **x86_64** and **ARM64** (`.AppImage` + `.deb` + `.rpm`)
 
@@ -467,7 +467,7 @@ Auto-update is driven by the Tauri updater manifest (`latest.json`) uploaded to 
 in-app updater downloads whatever assets `latest.json.platforms[*].url` points at (not “an installer
 chosen from the Release page”):
 
-- macOS: `*.app.tar.gz` updater payload (not the `.dmg`)
+- macOS: updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (not the `.dmg`)
 - Windows: `.msi` installer referenced in `latest.json` (CI expects the manifest to reference the MSI; NSIS `.exe` is shipped for manual install/downgrade)
 - Linux: `*.AppImage` updater payload (not `.deb`/`.rpm`)
 
