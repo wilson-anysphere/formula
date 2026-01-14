@@ -821,8 +821,8 @@ https://releases.formula.app/{{target}}/{{current_version}}
 Replace it with your real update JSON URL(s) before tagging a release. CI enforces this via
 `scripts/check-updater-config.mjs` when `plugins.updater.active=true`.
 
-Note: `scripts/check-updater-config.mjs` also treats obvious placeholders like `example.com` and
-`localhost` endpoints as invalid on tagged releases.
+Note: `scripts/check-updater-config.mjs` also treats obvious placeholders like `example.com`,
+`localhost`, and URLs containing `REPLACE_WITH...` as invalid on tagged releases.
 
 ### Updater targets (`{{target}}`) and `latest.json`
 
