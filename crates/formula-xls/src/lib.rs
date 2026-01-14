@@ -1686,14 +1686,11 @@ fn import_xls_path_with_biff_reader(
                         defined_names,
                     };
 
-                    let mut apply_recovered_formulas =
-                        |mut recovered: biff::formulas::PtgExpFallbackResult| {
+                    let mut apply_recovered_formulas = |mut recovered: biff::formulas::PtgExpFallbackResult,
+                                                        warnings: &mut Vec<ImportWarning>,
+                                                        warnings_suppressed: &mut bool| {
                             for warning in recovered.warnings.drain(..) {
-                                push_import_warning(
-                                    &mut warnings,
-                                    warning,
-                                    &mut warnings_suppressed,
-                                );
+                                push_import_warning(warnings, warning, warnings_suppressed);
                             }
                             for (cell_ref, formula_text) in recovered.formulas {
                                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
@@ -1738,7 +1735,11 @@ fn import_xls_path_with_biff_reader(
                         sheet_info.offset,
                         &ctx,
                     ) {
-                        Ok(recovered) => apply_recovered_formulas(recovered),
+                        Ok(recovered) => apply_recovered_formulas(
+                            recovered,
+                            &mut warnings,
+                            &mut warnings_suppressed,
+                        ),
                         Err(err) => push_import_warning(
                             &mut warnings,
                             format!(
@@ -1753,7 +1754,11 @@ fn import_xls_path_with_biff_reader(
                         sheet_info.offset,
                         &ctx,
                     ) {
-                        Ok(recovered) => apply_recovered_formulas(recovered),
+                        Ok(recovered) => apply_recovered_formulas(
+                            recovered,
+                            &mut warnings,
+                            &mut warnings_suppressed,
+                        ),
                         Err(err) => push_import_warning(
                             &mut warnings,
                             format!(
