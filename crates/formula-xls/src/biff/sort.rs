@@ -600,12 +600,54 @@ mod tests {
         out
     }
 
+    fn frt_record(record_id: u16, rt: u16, payload: &[u8]) -> Vec<u8> {
+        // `FrtHeader` is an 8-byte structure:
+        // - rt (u16)
+        // - grbitFrt (u16)
+        // - reserved (u32)
+        let mut out = Vec::with_capacity(8 + payload.len());
+        out.extend_from_slice(&rt.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
+        out.extend_from_slice(&0u32.to_le_bytes()); // reserved
+        out.extend_from_slice(payload);
+        record(record_id, &out)
+    }
+
     const RECORD_BOF: u16 = 0x0809;
     const RECORD_EOF: u16 = 0x000A;
 
     fn bof_payload() -> Vec<u8> {
         // BIFF8 BOF payload is 16 bytes; for our parser any bytes are fine.
         vec![0u8; 16]
+    }
+
+    fn canonical_sort_payload_with_header() -> Vec<u8> {
+        // SORT range: A1:C5, 2 keys: B ascending, A descending, header present.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        payload.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        payload.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        payload.extend_from_slice(&2u16.to_le_bytes()); // colLast
+        payload.extend_from_slice(&(SORT_GRBIT_HEADER_LOW).to_le_bytes()); // grbit
+        payload.extend_from_slice(&2u16.to_le_bytes()); // cKey
+        // rgKey[3]
+        payload.extend_from_slice(&1u16.to_le_bytes()); // col B
+        payload.extend_from_slice(&0u16.to_le_bytes()); // col A
+        payload.extend_from_slice(&0xFFFFu16.to_le_bytes()); // unused
+        // rgOrder[3]
+        payload.extend_from_slice(&0u16.to_le_bytes()); // B ascending
+        payload.extend_from_slice(&1u16.to_le_bytes()); // A descending
+        payload.extend_from_slice(&0u16.to_le_bytes()); // unused
+        payload
+    }
+
+    fn ref8_payload_a1_c5() -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        payload.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        payload.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        payload.extend_from_slice(&2u16.to_le_bytes()); // colLast
+        payload
     }
 
     #[test]
@@ -691,6 +733,111 @@ mod tests {
                 range: Range::from_a1("C2:C5").unwrap(),
                 descending: true,
             }]
+        );
+    }
+
+    #[test]
+    fn parses_sort12_frt_record_with_embedded_canonical_sort() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(RT_SORT12, RT_SORT12, &canonical_sort_payload_with_header()),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+
+        let sort_state = parsed.sort_state.expect("expected sort_state");
+        assert_eq!(
+            sort_state.conditions,
+            vec![
+                SortCondition {
+                    range: Range::from_a1("B2:B5").unwrap(),
+                    descending: false,
+                },
+                SortCondition {
+                    range: Range::from_a1("A2:A5").unwrap(),
+                    descending: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn warns_once_on_unsupported_sort12_with_relevant_ref8() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        // Payload contains a relevant Ref8, but is too short to decode as a classic SORT record.
+        let payload = ref8_payload_a1_c5();
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(RT_SORT12, RT_SORT12, &payload),
+            frt_record(RT_SORT12, RT_SORT12, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.sort_state.is_none());
+        assert_eq!(parsed.warnings, vec!["unsupported Sort12".to_string()]);
+    }
+
+    #[test]
+    fn parses_sortdata12_frt_record_with_embedded_canonical_sort() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(RT_SORTDATA12, RT_SORTDATA12, &canonical_sort_payload_with_header()),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.warnings.is_empty(), "unexpected warnings: {:?}", parsed.warnings);
+
+        let sort_state = parsed.sort_state.expect("expected sort_state");
+        assert_eq!(
+            sort_state.conditions,
+            vec![
+                SortCondition {
+                    range: Range::from_a1("B2:B5").unwrap(),
+                    descending: false,
+                },
+                SortCondition {
+                    range: Range::from_a1("A2:A5").unwrap(),
+                    descending: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn warns_once_on_unsupported_sortdata12_with_relevant_ref8() {
+        // AutoFilter range: A1:C5.
+        let af = Range::from_a1("A1:C5").unwrap();
+
+        // Payload contains a relevant Ref8, but is too short to decode as a classic SORT record.
+        let payload = ref8_payload_a1_c5();
+        let stream = [
+            record(RECORD_BOF, &bof_payload()),
+            frt_record(RT_SORTDATA12, RT_SORTDATA12, &payload),
+            frt_record(RT_SORTDATA12, RT_SORTDATA12, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
+        assert!(parsed.sort_state.is_none());
+        assert_eq!(
+            parsed.warnings,
+            vec!["unsupported SortData12".to_string()]
         );
     }
 }
