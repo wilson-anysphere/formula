@@ -7053,6 +7053,17 @@ fn build_continued_name_record_workbook_stream() -> Vec<u8> {
     push_record(&mut globals, RECORD_CONTINUE, &cont1);
     push_record(&mut globals, RECORD_CONTINUE, &cont2);
 
+    // Add a malformed NAME record whose `cce` claims far more bytes than the physical payload.
+    //
+    // This should be repaired by `sanitize_biff8_continued_name_records_for_calamine()` (it patches
+    // `cce` to 0) and will trigger calamine panics in older/newer versions that still assume `cce`
+    // always fits in the record payload.
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record_malformed_claimed_cce("BadCce", 0xFFFF),
+    );
+
     push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
 
     // -- Sheet -------------------------------------------------------------------
@@ -8336,6 +8347,40 @@ fn name_record(
         write_unicode_string_no_cch(&mut out, desc);
     }
 
+    out
+}
+
+fn name_record_malformed_claimed_cce(name: &str, claimed_cce: u16) -> Vec<u8> {
+    // NAME record payload (BIFF8) with an intentionally inconsistent `cce` field.
+    //
+    // The `cce` header claims there are `claimed_cce` bytes of `rgce`, but we do not include any
+    // `rgce` bytes in the payload. This is used to exercise calamine hardening and our
+    // `sanitize_biff8_continued_name_records_for_calamine()` workaround, which patches `cce` to 0
+    // to prevent panics on out-of-bounds `rgce` slicing.
+    let mut out = Vec::<u8>::new();
+
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbit
+    out.push(0); // chKey
+
+    let cch: u8 = name
+        .len()
+        .try_into()
+        .expect("defined name too long for u8 length");
+    out.push(cch);
+
+    out.extend_from_slice(&claimed_cce.to_le_bytes()); // cce (malformed)
+    out.extend_from_slice(&0u16.to_le_bytes()); // ixals
+    out.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scoped)
+
+    out.push(0); // cchCustMenu
+    out.push(0); // cchDescription
+    out.push(0); // cchHelpTopic
+    out.push(0); // cchStatusText
+
+    // Name string (XLUnicodeStringNoCch).
+    write_unicode_string_no_cch(&mut out, name);
+
+    // Intentionally omit rgce bytes.
     out
 }
 
