@@ -184,17 +184,17 @@ if [[ -z "$EXPECTED_VERSION" ]]; then
 fi
 
 # The main installed binary name should match tauri.conf.json mainBinaryName.
-EXPECTED_MAIN_BINARY_NAME="$(read_tauri_conf_value mainBinaryName)"
-if [[ -z "$EXPECTED_MAIN_BINARY_NAME" ]]; then
-  EXPECTED_MAIN_BINARY_NAME="formula-desktop"
+EXPECTED_MAIN_BINARY="$(read_tauri_conf_value mainBinaryName)"
+if [[ -z "$EXPECTED_MAIN_BINARY" ]]; then
+  EXPECTED_MAIN_BINARY="formula-desktop"
 fi
 
 # RPM %{NAME} (package name) should match our decided package name. By default we keep this
 # in sync with tauri.conf.json mainBinaryName, but allow overriding just the *package name*
 # for validation purposes (some distros may prefer different naming conventions).
-EXPECTED_RPM_NAME="${FORMULA_RPM_NAME_OVERRIDE:-$EXPECTED_MAIN_BINARY_NAME}"
+EXPECTED_RPM_NAME="${FORMULA_RPM_NAME_OVERRIDE:-$EXPECTED_MAIN_BINARY}"
 if [[ -z "$EXPECTED_RPM_NAME" ]]; then
-  EXPECTED_RPM_NAME="$EXPECTED_MAIN_BINARY_NAME"
+  EXPECTED_RPM_NAME="$EXPECTED_MAIN_BINARY"
 fi
 
 rel_path() {
@@ -278,6 +278,45 @@ validate_desktop_mime_associations_extracted() {
     return 1
   fi
 
+  local desktop_file
+
+  # Filter to the desktop entry (or entries) that actually launch our app. It's
+  # possible for dependency packages to install unrelated .desktop files; we
+  # should validate *our* desktop integration.
+  local expected_binary_escaped
+  expected_binary_escaped="$(printf '%s' "$EXPECTED_MAIN_BINARY" | sed -e 's/[][(){}.^$*+?|\\]/\\&/g')"
+  local exec_token_re
+  exec_token_re="(^|[[:space:]])([^[:space:]]*/)?${expected_binary_escaped}([[:space:]]|$)"
+
+  declare -a matched_desktop_files=()
+  for desktop_file in "${desktop_files[@]}"; do
+    local exec_line
+    exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+    local exec_value
+    exec_value="$(printf '%s' "$exec_line" | sed -E "s/^[[:space:]]*Exec[[:space:]]*=[[:space:]]*//I")"
+    if [[ -n "$exec_value" ]] && printf '%s' "$exec_value" | grep -Eq "${exec_token_re}"; then
+      matched_desktop_files+=("$desktop_file")
+    fi
+  done
+
+  if [ "${#matched_desktop_files[@]}" -eq 0 ]; then
+    err "No extracted .desktop file referenced expected main binary '${EXPECTED_MAIN_BINARY}' in its Exec= entry."
+    err "Extracted .desktop files inspected:"
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#${tmpdir}/}"
+      local exec_line
+      exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+      if [[ -z "$exec_line" ]]; then
+        exec_line="(no Exec= entry)"
+      fi
+      echo "  - ${rel}: ${exec_line}" >&2
+    done
+    return 1
+  fi
+
+  desktop_files=("${matched_desktop_files[@]}")
+
   local has_any_mimetype=0
   local has_spreadsheet_mime=0
   local has_xlsx_mime=0
@@ -286,7 +325,6 @@ validate_desktop_mime_associations_extracted() {
   local bad_exec_count=0
   local required_scheme_mime="x-scheme-handler/formula"
 
-  local desktop_file
   for desktop_file in "${desktop_files[@]}"; do
     local mime_line
     mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
@@ -597,7 +635,7 @@ validate_static() {
   local file_list
   file_list="$(rpm -qp --list "${rpm_path}")" || die "rpm --list query failed for: ${rpm_path}"
 
-  local expected_binary_path="/usr/bin/${EXPECTED_MAIN_BINARY_NAME}"
+  local expected_binary_path="/usr/bin/${EXPECTED_MAIN_BINARY}"
   if ! grep -qx "${expected_binary_path}" <<<"${file_list}"; then
     err "RPM payload missing expected desktop binary path: ${expected_binary_path}"
     err "First 200 lines of rpm file list:"
@@ -664,7 +702,9 @@ validate_container() {
   # We generally do not GPG-sign the built RPM in CI; use --nogpgcheck so this
   # validates runtime deps/installability rather than signature policy.
   container_cmd+=$'dnf -y install --nogpgcheck --setopt=install_weak_deps=False /rpms/*.rpm\n'
-  container_cmd+=$'test -x /usr/bin/'"${EXPECTED_MAIN_BINARY_NAME}"$'\n'
+  container_cmd+=$'expected_binary="'"${EXPECTED_MAIN_BINARY}"$'"\n'
+  container_cmd+=$'binary_path="/usr/bin/${expected_binary}"\n'
+  container_cmd+=$'test -x "${binary_path}"\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/LICENSE\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/NOTICE\n'
   container_cmd+=$'\n'
@@ -677,6 +717,30 @@ validate_container() {
   container_cmd+=$'  echo "No .desktop files found under /usr/share/applications after RPM install." >&2\n'
   container_cmd+=$'  exit 1\n'
   container_cmd+=$'fi\n'
+  container_cmd+=$'\n'
+  container_cmd+=$'# Filter to the .desktop entries that actually launch our app (Exec= references the expected binary).\n'
+  container_cmd+=$'matching_desktop_files=()\n'
+  container_cmd+=$'for f in "${desktop_files[@]}"; do\n'
+  container_cmd+=$'  exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"\n'
+  container_cmd+=$'  exec_value="$(printf "%s" "${exec_line}" | sed -E "s/^[[:space:]]*Exec[[:space:]]*=[[:space:]]*//")"\n'
+  container_cmd+=$'  spaced=" ${exec_value} "\n'
+  container_cmd+=$'  if [ -n "${exec_value}" ] && (printf "%s" "${spaced}" | grep -Fq " ${expected_binary} " || printf "%s" "${spaced}" | grep -Fq " ${binary_path} "); then\n'
+  container_cmd+=$'    matching_desktop_files+=("$f")\n'
+  container_cmd+=$'  fi\n'
+  container_cmd+=$'done\n'
+  container_cmd+=$'if [ "${#matching_desktop_files[@]}" -eq 0 ]; then\n'
+  container_cmd+=$'  echo "No installed .desktop file under /usr/share/applications referenced expected main binary ${expected_binary} in its Exec= entry." >&2\n'
+  container_cmd+=$'  echo "Installed .desktop files inspected:" >&2\n'
+  container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
+  container_cmd+=$'    exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"\n'
+  container_cmd+=$'    if [ -z "${exec_line}" ]; then\n'
+  container_cmd+=$'      exec_line="(no Exec= entry)"\n'
+  container_cmd+=$'    fi\n'
+  container_cmd+=$'    echo "  - ${f}: ${exec_line}" >&2\n'
+  container_cmd+=$'  done\n'
+  container_cmd+=$'  exit 1\n'
+  container_cmd+=$'fi\n'
+  container_cmd+=$'desktop_files=("${matching_desktop_files[@]}")\n'
   container_cmd+=$'has_any_mimetype=0\n'
   container_cmd+=$'has_spreadsheet_mime=0\n'
   container_cmd+=$'has_xlsx_mime=0\n'
@@ -775,7 +839,7 @@ validate_container() {
   container_cmd+=$'  echo "WARN: No installed .desktop file explicitly listed xlsx MIME ${required_xlsx_mime}." >&2\n'
   container_cmd+=$'fi\n'
   container_cmd+=$'set +e\n'
-  container_cmd+=$'ldd_out="$(ldd /usr/bin/'"${EXPECTED_MAIN_BINARY_NAME}"$' 2>&1)"\n'
+  container_cmd+=$'ldd_out="$(ldd "${binary_path}" 2>&1)"\n'
   container_cmd+=$'ldd_status=$?\n'
   container_cmd+=$'set -e\n'
   container_cmd+=$'echo "${ldd_out}"\n'

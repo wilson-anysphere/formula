@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
 const expectedVersion = String(tauriConf?.version ?? "").trim();
-const expectedMainBinaryName = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
-const expectedRpmName = expectedMainBinaryName;
+const expectedMainBinary = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
+const expectedRpmName = expectedMainBinary;
 
 const hasBash = (() => {
   if (process.platform === "win32") return false;
@@ -122,7 +122,7 @@ function writeFakeRpmExtractTools(
     withMimeType = true,
     mimeTypeLine = "MimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;",
     withSchemeMime = true,
-    execLine = `Exec=${expectedMainBinaryName} %U`,
+    execLine = `Exec=${expectedMainBinary} %U`,
   } = {},
 ) {
   const rpm2cpioScript = `#!/usr/bin/env bash
@@ -221,7 +221,7 @@ test(
     writeFileSync(
       listFile,
       [
-        `/usr/bin/${expectedMainBinaryName}`,
+        `/usr/bin/${expectedMainBinary}`,
         "/usr/share/applications/formula.desktop",
         `/usr/share/doc/${expectedRpmName}/LICENSE`,
         `/usr/share/doc/${expectedRpmName}/NOTICE`,
@@ -256,7 +256,7 @@ test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip:
   writeFileSync(
     listFile,
     [
-      `/usr/bin/${expectedMainBinaryName}`,
+      `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
@@ -298,7 +298,7 @@ test("validate-linux-rpm accepts when RPM %{NAME} is overridden for validation",
   writeFileSync(
     listFile,
     [
-      `/usr/bin/${expectedMainBinaryName}`,
+      `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
       `/usr/share/doc/${overrideName}/LICENSE`,
       `/usr/share/doc/${overrideName}/NOTICE`,
@@ -326,7 +326,7 @@ test("validate-linux-rpm fails when no .desktop file exists under /usr/share/app
 
   const listFile = join(tmp, "rpm-list.txt");
   const requiresFile = writeDefaultRequiresFile(tmp);
-  writeFileSync(listFile, ["/usr/bin/formula-desktop"].join("\n"), { encoding: "utf8" });
+  writeFileSync(listFile, [`/usr/bin/${expectedMainBinary}`].join("\n"), { encoding: "utf8" });
 
   const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile, fakeRequiresFile: requiresFile });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
@@ -345,7 +345,7 @@ test("validate-linux-rpm fails when LICENSE is missing", { skip: !hasBash }, () 
   writeFileSync(
     listFile,
     [
-      "/usr/bin/formula-desktop",
+      `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
@@ -370,7 +370,7 @@ test("validate-linux-rpm fails when NOTICE is missing", { skip: !hasBash }, () =
   writeFileSync(
     listFile,
     [
-      "/usr/bin/formula-desktop",
+      `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
     ].join("\n"),
@@ -394,7 +394,7 @@ test("validate-linux-rpm fails when rpm --info query fails", { skip: !hasBash },
   const requiresFile = writeDefaultRequiresFile(tmp);
   writeFileSync(
     listFile,
-    ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop"].join("\n"),
+    [`/usr/bin/${expectedMainBinary}`, "/usr/share/applications/formula.desktop"].join("\n"),
     { encoding: "utf8" },
   );
 
@@ -420,7 +420,7 @@ test("validate-linux-rpm fails when rpm --queryformat fails", { skip: !hasBash }
   const requiresFile = writeDefaultRequiresFile(tmp);
   writeFileSync(
     listFile,
-    ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop"].join("\n"),
+    [`/usr/bin/${expectedMainBinary}`, "/usr/share/applications/formula.desktop"].join("\n"),
     { encoding: "utf8" },
   );
 
@@ -446,7 +446,7 @@ test("validate-linux-rpm fails when RPM version does not match tauri.conf.json",
   const requiresFile = writeDefaultRequiresFile(tmp);
   writeFileSync(
     listFile,
-    ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop"].join("\n"),
+    [`/usr/bin/${expectedMainBinary}`, "/usr/share/applications/formula.desktop"].join("\n"),
     { encoding: "utf8" },
   );
 
@@ -472,7 +472,7 @@ test("validate-linux-rpm fails when RPM name does not match tauri.conf.json", { 
   const requiresFile = writeDefaultRequiresFile(tmp);
   writeFileSync(
     listFile,
-    ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop"].join("\n"),
+    [`/usr/bin/${expectedMainBinary}`, "/usr/share/applications/formula.desktop"].join("\n"),
     { encoding: "utf8" },
   );
 
@@ -501,7 +501,7 @@ test("validate-linux-rpm fails when extracted .desktop is missing MimeType=", { 
   writeFileSync(
     listFile,
     [
-      "/usr/bin/formula-desktop",
+      `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
@@ -529,7 +529,7 @@ test("validate-linux-rpm fails when extracted .desktop lacks xlsx integration", 
   writeFileSync(
     listFile,
     [
-      "/usr/bin/formula-desktop",
+      `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
@@ -547,7 +547,7 @@ test("validate-linux-rpm fails when extracted .desktop Exec= lacks a file placeh
   const binDir = join(tmp, "bin");
   mkdirSync(binDir, { recursive: true });
   writeFakeRpmTool(binDir);
-  writeFakeRpmExtractTools(binDir, { execLine: "Exec=formula-desktop" });
+  writeFakeRpmExtractTools(binDir, { execLine: `Exec=${expectedMainBinary}` });
 
   writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
 
@@ -556,7 +556,7 @@ test("validate-linux-rpm fails when extracted .desktop Exec= lacks a file placeh
   writeFileSync(
     listFile,
     [
-      "/usr/bin/formula-desktop",
+      `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
