@@ -342,7 +342,8 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 /// password protection, including:
 /// - BIFF8 XOR obfuscation (`wEncryptionType=0x0000`)
 /// - BIFF8 RC4 "Standard Encryption" (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
-/// - BIFF8 RC4 CryptoAPI (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
+/// - BIFF8 RC4 CryptoAPI (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`), including legacy
+///   CryptoAPI `FILEPASS` layouts that use `wEncryptionInfo=0x0004`
 ///
 /// Notes on password handling:
 /// - BIFF8 RC4 *Standard* uses only the first 15 UTF-16 code units of the password (Excel truncation).

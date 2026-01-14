@@ -862,7 +862,13 @@ mod filepass_tests {
             let in_block = stream_pos % PAYLOAD_BLOCK_SIZE;
             let take = (data.len() - pos).min(PAYLOAD_BLOCK_SIZE - in_block);
 
-            let key = derive_block_key_spec(hash_alg, key_material, block, key_size_bits);
+            let key_len = (key_size_bits / 8) as usize;
+            let mut key = derive_block_key_spec(hash_alg, key_material, block, key_size_bits);
+            if key_len < 16 {
+                // Legacy BIFF8 CryptoAPI 40/56-bit keys are represented as a 16-byte RC4 key where
+                // the high bytes are zero.
+                key.resize(16, 0);
+            }
             let mut rc4 = Rc4::new(&key);
             rc4_discard_spec(&mut rc4, in_block);
             rc4.apply_keystream(&mut data[pos..pos + take]);
@@ -1502,7 +1508,13 @@ mod filepass_tests {
         ];
         let verifier_hash_plain: [u8; 20] = sha1_bytes(&[&verifier_plain]);
 
-        let key0 = derive_block_key_spec(hash_alg, &key_material, 0, effective_key_size_bits);
+        let key_len = (effective_key_size_bits / 8) as usize;
+        let mut key0 = derive_block_key_spec(hash_alg, &key_material, 0, effective_key_size_bits);
+        if key_len < 16 {
+            // Legacy BIFF8 CryptoAPI 40-bit keys are represented as a 16-byte RC4 key where the
+            // high bytes are zero.
+            key0.resize(16, 0);
+        }
         let mut rc4 = Rc4::new(&key0);
         let mut encrypted_verifier = verifier_plain;
         rc4.apply_keystream(&mut encrypted_verifier);
