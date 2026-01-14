@@ -209,6 +209,40 @@ test("dry-run merges manifests deterministically and produces a verifiable signa
   assert.equal(verify(null, latestJsonBytes, publicKey, sig), true);
 });
 
+test("fails when a runtime updater entry references an installer artifact (Linux .deb)", () => {
+  const tmp = makeTempDir();
+  const manifestsDir = path.join(tmp, "manifests");
+  mkdirSync(manifestsDir, { recursive: true });
+ 
+  const { env } = makeSigningEnv(tmp);
+ 
+  writeFileSync(
+    path.join(manifestsDir, "linux.json"),
+    JSON.stringify(
+      {
+        version: "0.1.0",
+        platforms: {
+          "linux-x86_64": {
+            url: "https://example.com/formula_0.1.0_amd64.deb",
+            signature: "sig",
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+ 
+  const proc = run({
+    cwd: tmp,
+    args: ["--dry-run", "v0.1.0", manifestsDir],
+    env,
+  });
+ 
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /Linux updater artifact must be an AppImage bundle/i);
+});
+
 test("fails loudly on conflicting top-level manifest fields", () => {
   const tmp = makeTempDir();
   const manifestsDir = path.join(tmp, "manifests");

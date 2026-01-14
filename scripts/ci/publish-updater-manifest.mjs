@@ -36,6 +36,7 @@ import {
   parseMinisignSecretKeyText,
   parseTauriUpdaterPubkey,
 } from "./tauri-minisign.mjs";
+import { validateTauriUpdaterManifest } from "../tauri-updater-manifest.mjs";
 
 // GitHub Actions sets GITHUB_API_URL for both github.com and GHES. Prefer it over a hard-coded
 // api.github.com base so this script works in enterprise installs.
@@ -488,6 +489,11 @@ async function main() {
     platforms: sortedPlatforms,
     ...extraRootFieldsSorted,
   };
+
+  // Validate the combined updater manifest's schema + per-platform updater artifact types before we
+  // sign/upload it. This catches regressions where `latest.json.platforms[*].url` points at an
+  // installer artifact (like `.deb`/`.rpm`/`.dmg`) instead of the updater-consumed payload type.
+  validateTauriUpdaterManifest(combined, { expectedVersion });
 
   const latestJsonText = `${JSON.stringify(combined, null, 2)}\n`;
   const latestJsonBytes = Buffer.from(latestJsonText, "utf8");
