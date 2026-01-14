@@ -72,6 +72,7 @@ jobs:
     # Pinned runner images keep release workflows deterministic and avoid breakages
     # when GitHub updates the default `*-latest` hosted runner images. Update
     # these pins deliberately after validating the newer runner images.
+    # See https://github.com/actions/runner-images for available images and deprecation notices.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -390,6 +391,7 @@ jobs:
         # Pinned runner images keep release workflows deterministic and avoid breakages
         # when GitHub updates the default `*-latest` hosted runner images. Update
         # these pins deliberately after validating the newer runner images.
+        # See https://github.com/actions/runner-images for available images and deprecation notices.
         include:
           - platform: macos-14
             label: macos-14
