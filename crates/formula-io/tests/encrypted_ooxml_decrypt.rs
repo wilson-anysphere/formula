@@ -376,6 +376,13 @@ fn decrypts_standard_large_fixture_with_correct_password() {
 }
 
 #[test]
+fn decrypts_standard_rc4_fixture_with_correct_password() {
+    let path = fixture_path("standard-rc4.xlsx");
+    let wb = open_model_with_password(&path, "password");
+    assert_expected_contents(&wb);
+}
+
+#[test]
 fn errors_on_missing_password_for_empty_password_fixture() {
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
 
