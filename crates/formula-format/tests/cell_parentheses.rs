@@ -1,4 +1,4 @@
-use formula_format::{cell_format_info, FormatOptions};
+use formula_format::{cell_format_info, cell_parentheses_flag, FormatOptions};
 
 #[test]
 fn cell_parentheses_returns_0_for_one_section_formats() {

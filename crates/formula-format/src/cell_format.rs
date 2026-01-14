@@ -292,7 +292,6 @@ fn resolve_builtin_placeholder(code: &str) -> Option<&'static str> {
 fn builtin_id_is_common_datetime(id: u16) -> bool {
     matches!(id, 14..=22 | 27..=36 | 45..=47 | 50..=58)
 }
-
 fn pattern_contains_balanced_parentheses(pattern: &str) -> bool {
     let mut in_quotes = false;
     let mut escape = false;
