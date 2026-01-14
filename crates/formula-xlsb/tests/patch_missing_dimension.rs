@@ -255,6 +255,63 @@ fn patch_sheet_bin_streaming_synthesized_dimension_includes_existing_cells() {
 }
 
 #[test]
+fn patch_sheet_bin_noop_edit_does_not_synthesize_dimension() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let xlsb_bytes = builder.build_bytes();
+    let sheet_bin = read_sheet_bin(xlsb_bytes);
+    let sheet_no_dim = remove_dimension_record(&sheet_bin);
+    assert_eq!(read_dimension_bounds(&sheet_no_dim), None);
+
+    // No-op: value is unchanged and no other fields are edited.
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(1.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+    let patched = patch_sheet_bin(&sheet_no_dim, &edits).expect("patch_sheet_bin");
+    assert_eq!(patched, sheet_no_dim);
+    assert_eq!(read_dimension_bounds(&patched), None);
+}
+
+#[test]
+fn patch_sheet_bin_streaming_noop_edit_does_not_synthesize_dimension() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let xlsb_bytes = builder.build_bytes();
+    let sheet_bin = read_sheet_bin(xlsb_bytes);
+    let sheet_no_dim = remove_dimension_record(&sheet_bin);
+    assert_eq!(read_dimension_bounds(&sheet_no_dim), None);
+
+    // No-op: value is unchanged and no other fields are edited.
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(1.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let mut patched = Vec::new();
+    let changed =
+        patch_sheet_bin_streaming(Cursor::new(&sheet_no_dim), &mut patched, &edits)
+            .expect("patch_sheet_bin_streaming");
+    assert!(!changed);
+    assert_eq!(patched, sheet_no_dim);
+    assert_eq!(read_dimension_bounds(&patched), None);
+}
+
+#[test]
 fn patch_sheet_bin_inserts_missing_dimension_when_converting_value_cell_to_formula() {
     let mut builder = XlsbFixtureBuilder::new();
     builder.set_cell_number(0, 0, 1.0);
