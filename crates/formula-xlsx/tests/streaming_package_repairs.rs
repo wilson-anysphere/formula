@@ -265,3 +265,68 @@ fn streaming_write_repairs_macro_with_backslash_rels_entry_without_appending_dup
 
     Ok(())
 }
+
+#[test]
+fn streaming_part_override_matches_backslash_entry_name_without_appending_duplicate(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let original_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let replacement_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>
+</Relationships>"#;
+
+    let bytes = build_zip(&[("xl\\_rels\\workbook.xml.rels", original_rels)]);
+
+    let mut overrides = HashMap::new();
+    // Provide a canonical override key, while the source ZIP uses backslashes.
+    overrides.insert(
+        "xl/_rels/workbook.xml.rels".to_string(),
+        PartOverride::Replace(replacement_rels.to_vec()),
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+        Cursor::new(bytes),
+        &mut out,
+        &WorkbookCellPatches::default(),
+        &overrides,
+    )?;
+    let out_bytes = out.into_inner();
+
+    let mut zip = ZipArchive::new(Cursor::new(&out_bytes))?;
+    let mut names = Vec::new();
+    for i in 0..zip.len() {
+        let file = zip.by_index(i)?;
+        if file.is_dir() {
+            continue;
+        }
+        names.push(file.name().to_string());
+    }
+    assert!(
+        names.iter().any(|n| n == "xl\\_rels\\workbook.xml.rels"),
+        "expected output to preserve the original backslash entry name, got: {names:?}"
+    );
+    assert!(
+        !names.iter().any(|n| n == "xl/_rels/workbook.xml.rels"),
+        "expected output to avoid appending a canonical duplicate rels part, got: {names:?}"
+    );
+
+    let mut rels_bytes = Vec::new();
+    zip.by_name("xl\\_rels\\workbook.xml.rels")?
+        .read_to_end(&mut rels_bytes)?;
+    let rels = parse_relationships(&rels_bytes)?;
+    assert!(
+        rels.iter().any(|rel| {
+            rel.type_uri == "http://schemas.microsoft.com/office/2006/relationships/vbaProject"
+                && rel.target == "vbaProject.bin"
+        }),
+        "expected overridden workbook rels to be written into the existing backslash entry, got: {rels:?}"
+    );
+
+    Ok(())
+}

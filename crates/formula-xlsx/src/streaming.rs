@@ -2781,6 +2781,29 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     let mut zip = ZipWriter::new(output);
     let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
     let mut applied_part_overrides: HashSet<String> = HashSet::new();
+    let mut repair_override_keys: Vec<&String> = repair_overrides.keys().collect();
+    repair_override_keys.sort();
+    let mut part_override_keys: Vec<&String> = part_overrides.keys().collect();
+    part_override_keys.sort();
+
+    fn find_part_override<'a>(
+        part_name: &str,
+        overrides: &'a HashMap<String, PartOverride>,
+        sorted_keys: &[&'a String],
+    ) -> Option<(&'a str, &'a PartOverride)> {
+        if let Some((key, op)) = overrides.get_key_value(part_name) {
+            return Some((key.as_str(), op));
+        }
+        for key in sorted_keys {
+            if crate::zip_util::zip_part_names_equivalent(key.as_str(), part_name) {
+                let op = overrides
+                    .get(key.as_str())
+                    .expect("override key came from override map");
+                return Some((key.as_str(), op));
+            }
+        }
+        None
+    }
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
@@ -2801,8 +2824,10 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             continue;
         }
 
-        if let Some(override_op) = repair_overrides.get(canonical_name) {
-            applied_part_overrides.insert(canonical_name.to_string());
+        if let Some((override_key, override_op)) =
+            find_part_override(canonical_name, &repair_overrides, &repair_override_keys)
+        {
+            applied_part_overrides.insert(override_key.to_string());
             match override_op {
                 PartOverride::Remove => {
                     continue;
@@ -2815,8 +2840,10 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             }
         }
 
-        if let Some(override_op) = part_overrides.get(canonical_name) {
-            applied_part_overrides.insert(canonical_name.to_string());
+        if let Some((override_key, override_op)) =
+            find_part_override(canonical_name, part_overrides, &part_override_keys)
+        {
+            applied_part_overrides.insert(override_key.to_string());
             match override_op {
                 PartOverride::Remove => {
                     continue;
