@@ -1003,7 +1003,10 @@ fn verify_password(info: &CryptoApiEncryptionInfo, password: &str) -> Result<[u8
 
     // RC4 CryptoAPI uses a fixed 16-byte salt.
     if info.verifier.salt.len() != 16 {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI salt length {} (expected 16)",
+            info.verifier.salt.len()
+        )));
     }
 
     let key_size_bits = info.header.key_size_bits;
