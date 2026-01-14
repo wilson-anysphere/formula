@@ -217,7 +217,8 @@ function conflictHeader(c: MergeConflict, sheetNameResolver: SheetNameResolver |
 
   if (c.type === "cell" || c.type === "move") {
     const sheetName = displayName(c.sheetId);
-    return `${formatSheetNameForA1(sheetName)}!${c.cell} (${formatConflictReason(c.reason)})`;
+    const ref = `${formatSheetNameForA1(sheetName)}!${c.cell}`;
+    return tWithVars("branchMerge.header.cellWithReason", { ref, reason: formatConflictReason(c.reason) });
   }
   if (c.type === "sheet") {
     if (c.reason === "rename") return tWithVars("branchMerge.header.sheetRename", { sheet: displayName(c.sheetId) });

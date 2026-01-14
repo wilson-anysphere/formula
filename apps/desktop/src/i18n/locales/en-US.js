@@ -176,6 +176,7 @@ export const enUS = {
   "branchMerge.prompt.manualJson": "Manual JSON value",
   "branchMerge.footer.resolveAllHint": "Resolve all conflicts to apply merge.",
   "branchMerge.footer.fixManualErrorsHint": "Fix manual resolution errors to apply merge.",
+  "branchMerge.header.cellWithReason": "{ref} ({reason})",
   "branchMerge.header.sheetRename": "Sheet rename: {sheet}",
   "branchMerge.header.sheetOrder": "Sheet order",
   "branchMerge.header.sheetPresence": "Sheet presence: {sheet}",
