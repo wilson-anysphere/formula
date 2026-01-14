@@ -118,6 +118,64 @@ function Get-ExpectedTauriVersion {
   return $v.Trim()
 }
 
+function Normalize-Guid {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Value
+  )
+ 
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return ""
+  }
+ 
+  $s = $Value.Trim()
+  # MSI tables sometimes store GUIDs wrapped in braces.
+  $s = $s.TrimStart("{").TrimEnd("}")
+ 
+  try {
+    return ([Guid]$s).ToString("D").ToLowerInvariant()
+  } catch {
+    return ""
+  }
+}
+ 
+function Get-ExpectedWixUpgradeCode {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot
+  )
+ 
+  $tauriConfPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+  if (-not (Test-Path -LiteralPath $tauriConfPath)) {
+    return ""
+  }
+ 
+  try {
+    $conf = Get-Content -Raw -LiteralPath $tauriConfPath | ConvertFrom-Json
+  } catch {
+    return ""
+  }
+ 
+  $bundleProp = $conf.PSObject.Properties["bundle"]
+  if ($null -eq $bundleProp -or $null -eq $bundleProp.Value) { return "" }
+  $bundle = $bundleProp.Value
+ 
+  $windowsProp = $bundle.PSObject.Properties["windows"]
+  if ($null -eq $windowsProp -or $null -eq $windowsProp.Value) { return "" }
+  $windows = $windowsProp.Value
+ 
+  $wixProp = $windows.PSObject.Properties["wix"]
+  if ($null -eq $wixProp -or $null -eq $wixProp.Value) { return "" }
+  $wix = $wixProp.Value
+ 
+  $upgradeProp = $wix.PSObject.Properties["upgradeCode"]
+  if ($null -eq $upgradeProp -or $null -eq $upgradeProp.Value) { return "" }
+  $v = [string]$upgradeProp.Value
+  if ([string]::IsNullOrWhiteSpace($v)) { return "" }
+ 
+  return $v.Trim()
+}
+
 function Normalize-Version {
   param(
     [Parameter(Mandatory = $true)]
@@ -1361,6 +1419,12 @@ try {
 
   $expectedVersion = Get-ExpectedTauriVersion -RepoRoot $repoRoot
   Write-Host ("Expected desktop version (tauri.conf.json): {0}" -f $expectedVersion)
+  $expectedUpgradeCode = Get-ExpectedWixUpgradeCode -RepoRoot $repoRoot
+  if (-not [string]::IsNullOrWhiteSpace($expectedUpgradeCode)) {
+    Write-Host ("Expected WiX UpgradeCode (tauri.conf.json): {0}" -f $expectedUpgradeCode)
+  } else {
+    Write-Warning "No bundle.windows.wix.upgradeCode found in tauri.conf.json. Skipping MSI UpgradeCode validation."
+  }
   Write-Host ""
 
   foreach ($installer in $exeInstallers) {
@@ -1390,6 +1454,23 @@ try {
       Write-Host ("version: OK (.msi) {0}" -f $installer.FullName)
     } else {
       Write-Warning ("Unable to read MSI ProductVersion for {0}. Skipping MSI version check because Windows Installer COM query failed. Consider enabling COM access or using an MSI inspection tool (lessmsi/msiinfo) in this environment." -f $installer.FullName)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($expectedUpgradeCode)) {
+      $msiUpgradeCode = Get-MsiProperty -MsiPath $installer.FullName -PropertyName "UpgradeCode"
+      if ($null -ne $msiUpgradeCode -and -not [string]::IsNullOrWhiteSpace([string]$msiUpgradeCode)) {
+        $expectedUpgradeNorm = Normalize-Guid -Value $expectedUpgradeCode
+        $foundUpgradeNorm = Normalize-Guid -Value ([string]$msiUpgradeCode)
+        if ([string]::IsNullOrWhiteSpace($expectedUpgradeNorm) -or [string]::IsNullOrWhiteSpace($foundUpgradeNorm)) {
+          throw "Unable to parse MSI UpgradeCode GUID.`n- MSI: $($installer.FullName)`n- Expected (tauri.conf.json bundle.windows.wix.upgradeCode): $expectedUpgradeCode`n- Found (MSI UpgradeCode): $msiUpgradeCode"
+        }
+        if ($expectedUpgradeNorm -ne $foundUpgradeNorm) {
+          throw "MSI UpgradeCode mismatch detected.`n- MSI: $($installer.FullName)`n- Expected (tauri.conf.json bundle.windows.wix.upgradeCode): $expectedUpgradeCode`n- Found (MSI UpgradeCode): $msiUpgradeCode"
+        }
+        Write-Host ("upgradeCode: OK (.msi) {0}" -f $installer.FullName)
+      } else {
+        Write-Warning ("Unable to read MSI UpgradeCode for {0}. Skipping MSI UpgradeCode check because Windows Installer COM query failed." -f $installer.FullName)
+      }
     }
   }
 

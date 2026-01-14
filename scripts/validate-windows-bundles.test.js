@@ -77,3 +77,21 @@ test("validate-windows-bundles.ps1 prefers validating the stable formula:// sche
     "Expected validator to explicitly prefer validating the 'formula' URL scheme when it exists in the configured scheme list.",
   );
 });
+
+test("validate-windows-bundles.ps1 validates MSI UpgradeCode against tauri.conf.json (WiX upgrades/downgrades)", () => {
+  assert.match(
+    text,
+    /Get-ExpectedWixUpgradeCode/,
+    "Expected validator to read bundle.windows.wix.upgradeCode from tauri.conf.json.",
+  );
+  assert.match(
+    text,
+    /PropertyName\s+\"UpgradeCode\"/,
+    "Expected validator to query the MSI Property table for UpgradeCode.",
+  );
+  assert.match(
+    text,
+    /Normalize-Guid/,
+    "Expected validator to normalize GUID formatting when comparing UpgradeCode values.",
+  );
+});
