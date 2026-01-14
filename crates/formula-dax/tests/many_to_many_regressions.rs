@@ -233,6 +233,57 @@ fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys() {
 }
 
 #[test]
+fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys_with_bidirectional_filtering() {
+    // Similar to `blank_foreign_keys_do_not_match_physical_blank_dimension_keys`, but with
+    // bidirectional filtering enabled.
+    //
+    // This exercises `propagate_filter(Direction::ToOne)`: filtering the fact table to BLANK()
+    // should not make a *physical* BLANK key row on the dimension side visible.
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    // Physical dimension row whose key is BLANK.
+    dim.push_row(vec![Value::Blank, "PhysicalBlank".into()])
+        .unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();
+    fact.push_row(vec![2.into(), Value::Blank, 7.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Both,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+
+    let filter = FilterContext::empty().with_column_equals("Fact", "Key", Value::Blank);
+    let result = engine
+        .evaluate(
+            &model,
+            r#"COUNTROWS(FILTER(VALUES(Dim[Attr]), Dim[Attr] = "PhysicalBlank"))"#,
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(result, 0.into());
+}
+
+#[test]
 fn relatedtable_from_virtual_blank_dimension_member_includes_unmatched_facts_m2m() {
     let mut model = DataModel::new();
 
