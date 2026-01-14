@@ -383,3 +383,36 @@ fn errors_on_u64_max_orig_size_without_panicking() {
         .expect_err("expected truncated ciphertext to error");
     assert_eq!(err.kind(), ErrorKind::InvalidData);
 }
+
+#[test]
+fn partial_read_returns_bytes_then_errors_on_next_call_when_next_segment_truncated() {
+    let key = [0x11u8; 16];
+    let salt = [0x22u8; 16];
+    let plaintext = make_plaintext(SEGMENT_LEN + 1); // 2 segments
+    let mut encrypted = make_encrypted_package(&plaintext, &key, &salt);
+
+    // Drop the entire final ciphertext segment. The reader should:
+    // - return the first segment's bytes
+    // - then error on the next `read` call
+    encrypted.truncate(8 + SEGMENT_LEN);
+
+    let cursor = Cursor::new(encrypted);
+    let mut reader =
+        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
+
+    let mut buf = vec![0u8; SEGMENT_LEN + 100];
+    let n = reader.read(&mut buf).expect("read");
+    assert_eq!(n, SEGMENT_LEN);
+    assert_eq!(&buf[..n], &plaintext[..SEGMENT_LEN]);
+
+    let err = reader.read(&mut buf).expect_err("expected error on follow-up read");
+    assert_eq!(err.kind(), ErrorKind::InvalidData);
+
+    // Seeking should clear the pending error, but the stream is still truncated so the next read
+    // will again succeed for the first segment and then fail.
+    reader.seek(SeekFrom::Start(0)).expect("seek");
+    let n2 = reader.read(&mut buf).expect("read after seek");
+    assert_eq!(n2, SEGMENT_LEN);
+    let err2 = reader.read(&mut buf).expect_err("expected error after seek");
+    assert_eq!(err2.kind(), ErrorKind::InvalidData);
+}
