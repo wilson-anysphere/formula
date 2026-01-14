@@ -13,6 +13,11 @@ function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: Arra
     beginPath: () => calls.push({ method: "beginPath", args: [] }),
     rect: (...args: unknown[]) => calls.push({ method: "rect", args }),
     clip: () => calls.push({ method: "clip", args: [] }),
+    // Placeholder rendering uses these Canvas APIs.
+    setLineDash: (...args: unknown[]) => calls.push({ method: "setLineDash", args }),
+    strokeRect: (...args: unknown[]) => calls.push({ method: "strokeRect", args }),
+    fillRect: (...args: unknown[]) => calls.push({ method: "fillRect", args }),
+    fillText: (...args: unknown[]) => calls.push({ method: "fillText", args }),
   };
 
   return { ctx: ctx as CanvasRenderingContext2D, calls };
@@ -45,6 +50,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+async function flushMicrotasks(times = 4): Promise<void> {
+  for (let idx = 0; idx < times; idx++) {
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+  }
+}
 
 describe("DrawingOverlay images", () => {
   it("dedupes in-flight decodes across render passes and requests a redraw when ready", async () => {
@@ -87,7 +98,7 @@ describe("DrawingOverlay images", () => {
 
     resolveDecode({} as ImageBitmap);
 
-    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await flushMicrotasks();
 
     expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
     expect(requestRender).toHaveBeenCalledTimes(1);
