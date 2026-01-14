@@ -115,7 +115,7 @@ export function AutoFilterDropdown({
       </div>
       <div className="formula-sort-filter__controls formula-table-filter-dropdown__controls">
         <button className="formula-sort-filter__button" type="button" onClick={onClose}>
-          Cancel
+          {t("chat.cancel")}
         </button>
         <button
           className="formula-sort-filter__button formula-sort-filter__button--primary"
@@ -125,7 +125,7 @@ export function AutoFilterDropdown({
             onClose();
           }}
         >
-          Apply
+          {t("filterDropdown.apply")}
         </button>
       </div>
     </div>
