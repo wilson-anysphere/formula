@@ -287,6 +287,20 @@ canonicalization would appear as:
 'C:\\path\\[Book.xlsx]Sheet1'!A1  =>  sheet key "[C:\\path\\Book.xlsx]Sheet1"
 ```
 
+Path-qualified external 3D spans are canonicalized the same way, and the provider sees the
+path-qualified workbook id in `sheet_order(...)`:
+
+```txt
+Formula: =SUM('C:\path\[Book.xlsx]Sheet1:Sheet3'!A1)
+
+sheet_order("C:\path\Book.xlsx") -> ["Sheet1", "Sheet2", "Sheet3", ...]
+
+Expanded lookups via `get(sheet, addr)` (conceptually):
+  get("[C:\path\Book.xlsx]Sheet1", A1)
+  get("[C:\path\Book.xlsx]Sheet2", A1)
+  get("[C:\path\Book.xlsx]Sheet3", A1)
+```
+
 Note: the canonical key format uses `[...]` as the workbook delimiter. The engine currently splits
 `"[workbook]sheet"` keys at the **first** `]`, so workbook identifiers that contain `]` are
 ambiguous. This can matter for uncommon paths containing bracket characters (e.g. a directory named

@@ -9896,6 +9896,9 @@ pub trait ExternalValueProvider: Send + Sync {
     /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"` or
     /// `"C:\\path\\Book.xlsx"`).
     ///
+    /// For example, `=SUM('C:\path\[Book.xlsx]Sheet1:Sheet3'!A1)` calls
+    /// `sheet_order("C:\path\Book.xlsx")`.
+    ///
     /// Note: the engine parses the workbook identifier by splitting the `"[workbook]..."` key at
     /// the first `]`. As a result, workbook ids containing `]` characters are ambiguous and are
     /// not currently supported for external 3D span expansion.
