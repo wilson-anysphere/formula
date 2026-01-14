@@ -219,7 +219,10 @@ fi
 # follow the same pinning rules as CI/release.
 mapfile -t node_workflows < <(
   {
-    git grep -l "actions/setup-node@" -- .github/workflows/*.yml
+    # `git grep` exits 1 when there are no matches. We always include CI + release workflows
+    # explicitly below, so treat "no matches" as an empty set (and fail later with a clearer
+    # message if needed).
+    git grep -l "actions/setup-node@" -- .github/workflows/*.yml || true
     printf '%s\n' "$ci_workflow" "$release_workflow"
   } | sort -u
 )
