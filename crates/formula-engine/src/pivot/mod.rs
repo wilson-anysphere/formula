@@ -3427,6 +3427,29 @@ mod tests {
     }
 
     #[test]
+    fn pivot_key_part_display_string_uses_general_number_formatting_and_does_not_saturate_large_ints()
+    {
+        let s = PivotKeyPart::Number((1e20_f64).to_bits()).display_string();
+        assert_ne!(s, i64::MAX.to_string());
+        assert!(s.contains('E'), "{s}");
+        assert!(s.starts_with('1'), "{s}");
+    }
+
+    #[test]
+    fn pivot_key_part_display_string_normalizes_negative_zero() {
+        assert_eq!(
+            PivotKeyPart::Number((-0.0_f64).to_bits()).display_string(),
+            "0"
+        );
+    }
+
+    #[test]
+    fn pivot_key_part_display_string_formats_booleans_like_excel() {
+        assert_eq!(PivotKeyPart::Bool(true).display_string(), "TRUE");
+        assert_eq!(PivotKeyPart::Bool(false).display_string(), "FALSE");
+    }
+
+    #[test]
     fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
         let cfg = PivotConfig {
             row_fields: vec![PivotField::new("Region")],
