@@ -477,6 +477,12 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
     getPivotSchema: async (sheet, sourceRangeA1, sampleSize, rpcOptions) =>
       await withEngine((connected) => connected.getPivotSchema(sheet, sourceRangeA1, sampleSize, rpcOptions)),
+    getPivotFieldItems: async (sheet, sourceRangeA1, field, rpcOptions) =>
+      await withEngine((connected) => connected.getPivotFieldItems(sheet, sourceRangeA1, field, rpcOptions)),
+    getPivotFieldItemsPaged: async (sheet, sourceRangeA1, field, offset, limit, rpcOptions) =>
+      await withEngine((connected) =>
+        connected.getPivotFieldItemsPaged(sheet, sourceRangeA1, field, offset, limit, rpcOptions)
+      ),
     calculatePivot: async (sheet, sourceRangeA1, destinationTopLeftA1, config, rpcOptions) =>
       await withEngine((connected) =>
         connected.calculatePivot(sheet, sourceRangeA1, destinationTopLeftA1, config, rpcOptions)
