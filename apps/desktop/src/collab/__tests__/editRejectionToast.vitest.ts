@@ -176,6 +176,7 @@ describe("collab edit rejection toast", () => {
   it.each([
     ["cellContents", "edit cell contents"],
     ["editCells", "edit cells"],
+    ["formatPainter", "Format Painter"],
     ["insertRows", "insert rows"],
     ["insertColumns", "insert columns"],
     ["deleteRows", "delete rows"],
@@ -184,6 +185,8 @@ describe("collab edit rejection toast", () => {
     ["printAreaSet", "set a print area"],
     ["printAreaClear", "clear the print area"],
     ["printAreaEdit", "edit the print area"],
+    ["dataQueriesRefresh", "refresh queries"],
+    ["macros", "run macros"],
   ] as const)("shows a %s toast for rejected actions", (rejectionKind, expectedText) => {
     showCollabEditRejectedToast([
       {

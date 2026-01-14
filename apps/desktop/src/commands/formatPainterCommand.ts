@@ -1,5 +1,6 @@
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import { t } from "../i18n/index.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast.js";
 
 export const FORMAT_PAINTER_COMMAND_ID = "format.toggleFormatPainter";
 
@@ -52,7 +53,10 @@ export function registerFormatPainterCommand(params: {
         return;
       }
       if (isEditingFn()) return;
-      if (isReadOnlyFn()) return;
+      if (isReadOnlyFn()) {
+        showCollabEditRejectedToast([{ rejectionKind: "formatPainter", rejectionReason: "permission" }]);
+        return;
+      }
       arm();
     },
     {

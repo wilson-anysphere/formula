@@ -3,6 +3,7 @@ import type { LayoutController } from "../layout/layoutController.js";
 import { getPanelPlacement } from "../layout/layoutState.js";
 import { PanelIds } from "../panels/panelRegistry.js";
 import { t } from "../i18n/index.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast.js";
 
 export const DATA_QUERIES_RIBBON_COMMANDS = {
   toggleQueriesConnections: "data.queriesConnections.queriesConnections",
@@ -146,7 +147,11 @@ export function registerDataQueriesCommands(params: {
 
   const refreshAll = () => {
     if (isEditingFn()) return;
-    if (isReadOnlyFn()) return;
+    if (isReadOnlyFn()) {
+      showCollabEditRejectedToast([{ rejectionKind: "dataQueriesRefresh", rejectionReason: "permission" }]);
+      focusAfterExecute?.();
+      return;
+    }
     void (async () => {
       const service = getPowerQueryService();
       if (!service) {

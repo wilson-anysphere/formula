@@ -1,6 +1,7 @@
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import { t } from "../i18n/index.js";
 import { PanelIds } from "../panels/panelRegistry.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast.js";
 
 export type MacrosPanelFocusTarget =
   | "runner-select"
@@ -238,7 +239,10 @@ export function registerRibbonMacroCommands(params: {
       titleForCommand(commandId),
       () => {
         if (isEditingFn()) return;
-        if (isReadOnlyFn()) return;
+        if (isReadOnlyFn()) {
+          showCollabEditRejectedToast([{ rejectionKind: "macros", rejectionReason: "permission" }]);
+          return;
+        }
         return delegateTo ? commandRegistry.executeCommand(delegateTo) : runCommand(commandId);
       },
       {

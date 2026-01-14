@@ -6,6 +6,7 @@ type RejectionKind =
   | "cell"
   | "cellContents"
   | "editCells"
+  | "formatPainter"
   | "format"
   | "formatDefaults"
   | "insertPictures"
@@ -21,6 +22,8 @@ type RejectionKind =
   | "printAreaSet"
   | "printAreaClear"
   | "printAreaEdit"
+  | "dataQueriesRefresh"
+  | "macros"
   | "rangeRun"
   | "drawing"
   | "chart"
@@ -74,6 +77,7 @@ function inferRejectionKind(rejected: any[]): RejectionKind {
       kind === "cell" ||
       kind === "cellContents" ||
       kind === "editCells" ||
+      kind === "formatPainter" ||
       kind === "format" ||
       kind === "formatDefaults" ||
       kind === "insertPictures" ||
@@ -89,6 +93,8 @@ function inferRejectionKind(rejected: any[]): RejectionKind {
       kind === "printAreaSet" ||
       kind === "printAreaClear" ||
       kind === "printAreaEdit" ||
+      kind === "dataQueriesRefresh" ||
+      kind === "macros" ||
       kind === "rangeRun" ||
       kind === "drawing" ||
       kind === "chart" ||
@@ -132,6 +138,7 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
   if (
     kind === "cellContents" ||
     kind === "editCells" ||
+    kind === "formatPainter" ||
     kind === "formatDefaults" ||
     kind === "insertPictures" ||
     kind === "backgroundImage" ||
@@ -146,6 +153,8 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
     kind === "printAreaSet" ||
     kind === "printAreaClear" ||
     kind === "printAreaEdit" ||
+    kind === "dataQueriesRefresh" ||
+    kind === "macros" ||
     kind === "drawing" ||
     kind === "chart" ||
     kind === "undoRedo" ||
@@ -237,6 +246,10 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
       return "Read-only: you don't have permission to edit cells.";
     }
 
+    if (kind === "formatPainter") {
+      return "Read-only: you don't have permission to use Format Painter.";
+    }
+
     if (kind === "formatDefaults") {
       return "Read-only: select an entire row, column, or sheet to change formatting defaults.";
     }
@@ -291,6 +304,14 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
 
     if (kind === "printAreaEdit") {
       return "Read-only: you don't have permission to edit the print area.";
+    }
+
+    if (kind === "dataQueriesRefresh") {
+      return "Read-only: you don't have permission to refresh queries.";
+    }
+
+    if (kind === "macros") {
+      return "Read-only: you don't have permission to run macros.";
     }
 
     if (kind === "drawing") {
