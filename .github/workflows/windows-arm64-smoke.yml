@@ -430,6 +430,9 @@ jobs:
           cd apps/desktop
           cargo tauri build --target aarch64-pc-windows-msvc --bundles msi,nsis
 
+      - name: Verify desktop binary is stripped (no symbols)
+        run: python scripts/verify_desktop_binary_stripped.py
+
       - name: Desktop dist asset report
         run: node scripts/desktop_dist_asset_report.mjs --json-out desktop-dist-assets-report.json
         env:

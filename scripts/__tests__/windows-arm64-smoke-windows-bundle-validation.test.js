@@ -21,3 +21,26 @@ test("windows-arm64-smoke workflow validates built bundles via validate-windows-
     /pwsh\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File\s+(?:\.\/)?scripts\/validate-windows-bundles\.ps1/,
   );
 });
+
+test("windows-arm64-smoke workflow verifies the produced desktop binary is stripped", async () => {
+  const text = await readWorkflow();
+  const lines = text.split(/\r?\n/);
+
+  const buildNeedle = "Build Windows ARM64 bundles (MSI + NSIS)";
+  const buildIdx = lines.findIndex((line) => line.includes(buildNeedle));
+  assert.ok(
+    buildIdx >= 0,
+    `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${buildNeedle}`,
+  );
+
+  const stripNeedle = "Verify desktop binary is stripped (no symbols)";
+  const stripIdx = lines.findIndex((line) => line.includes(stripNeedle));
+  assert.ok(
+    stripIdx >= 0,
+    `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${stripNeedle}`,
+  );
+  assert.ok(stripIdx > buildIdx, `Expected strip verification to run after the build step.`);
+
+  const snippet = lines.slice(stripIdx, stripIdx + 10).join("\n");
+  assert.match(snippet, /run:\s*python(?:3)?\s+scripts\/verify_desktop_binary_stripped\.py\b/);
+});
