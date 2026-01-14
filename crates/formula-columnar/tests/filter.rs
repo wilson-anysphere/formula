@@ -134,6 +134,54 @@ fn filter_numeric_comparisons() {
 }
 
 #[test]
+fn filter_boolean_without_nulls() {
+    let schema = vec![ColumnSchema {
+        name: "b".to_owned(),
+        column_type: ColumnType::Boolean,
+    }];
+    let mut builder = ColumnarTableBuilder::new(schema, options());
+    let rows = [
+        Value::Boolean(true),
+        Value::Boolean(false),
+        Value::Boolean(false),
+        Value::Boolean(true),
+        Value::Boolean(true),
+        Value::Boolean(false),
+        Value::Boolean(true),
+        Value::Boolean(false),
+        Value::Boolean(false),
+    ];
+    for v in rows {
+        builder.append_row(&[v]);
+    }
+    let table = builder.finalize();
+
+    let eq_true = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Eq,
+            value: FilterValue::Boolean(true),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq_true),
+        vec![true, false, false, true, true, false, true, false, false]
+    );
+
+    let ne_true = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Ne,
+            value: FilterValue::Boolean(true),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&ne_true),
+        vec![false, true, true, false, false, true, false, true, true]
+    );
+}
+
+#[test]
 fn filter_number_canonicalizes_negative_zero_and_nans_for_equality() {
     let schema = vec![ColumnSchema {
         name: "n".to_owned(),
