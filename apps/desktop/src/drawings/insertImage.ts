@@ -38,7 +38,11 @@ export function insertImageFromBytes(
     imageId: string;
     mimeType: string;
     anchor: Anchor;
-    nextObjectId: number;
+    /**
+     * @deprecated Drawing object ids must be globally unique across collaborators; callers should not
+     *             pass incrementing counters anymore. This field is ignored.
+     */
+    nextObjectId?: number;
     objects: DrawingObject[];
     images: ImageStore;
   },
@@ -47,7 +51,7 @@ export function insertImageFromBytes(
   opts.images.set(image);
 
   const object: DrawingObject = {
-    id: opts.nextObjectId,
+    id: createDrawingObjectId(),
     kind: { type: "image", imageId: image.id },
     anchor: opts.anchor,
     zOrder: opts.objects.length,
