@@ -20,7 +20,7 @@ defaults), see `docs/office-encryption.md`.
 
 ---
 
-## 1) Detecting “Standard” encryption (`versionMinor == 2`)
+## 1) Detecting “Standard” encryption (`versionMinor == 2`, commonly 3.2)
 
 An encrypted OOXML file is an **OLE Compound File** (CFB) containing (at minimum) these streams:
 
@@ -35,12 +35,16 @@ To detect **Standard (CryptoAPI)** encryption:
    * `major: u16le`
    * `minor: u16le`
    * `flags: u32le`
-4. Standard encryption is identified by:
+4. Standard encryption (as produced by Excel/Office 2007-era “Standard” encryption) is identified by:
 
 ```text
+major = 3
 minor = 2
-major ∈ {2, 3, 4}   // observed in the wild
 ```
+
+Some producers also emit other `*.2` major versions (e.g. `4.2`) while still using the same
+CryptoAPI/Standard container layout. A tolerant reader can treat `versionMinor == 2` as
+“Standard/CryptoAPI” and then validate the rest of the structure defensively.
 
 The `flags` field is part of the `EncryptionInfo` header (and must be consumed to keep offsets correct),
 but it is not needed for the scheme dispatch.
