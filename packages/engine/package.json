@@ -9,7 +9,7 @@
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
     "smoke:wasm": "node scripts/smoke-wasm.mjs",
-    "test": "cd ../.. && node scripts/run-vitest.mjs packages/engine/src/**/*.test.ts"
+    "test": "cd ../.. && node scripts/run-vitest.mjs packages/engine/src"
   },
   "exports": {
     ".": "./src/index.ts",

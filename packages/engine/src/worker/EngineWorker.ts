@@ -633,7 +633,7 @@ export class EngineWorker {
     await this.invoke("setRange", { range, values: normalizedValues, sheet }, options);
   }
 
-  async internStyle(style: WorkbookStyleDto | null, options?: RpcOptions): Promise<number> {
+  async internStyle(style: unknown, options?: RpcOptions): Promise<number> {
     await this.flush();
     return (await this.invoke("internStyle", { style }, options)) as number;
   }
@@ -709,14 +709,41 @@ export class EngineWorker {
     await this.invoke("setWorkbookFileMetadata", { directory, filename }, options);
   }
 
+  async setCellStyleId(sheet: string, address: string, styleId: number, options?: RpcOptions): Promise<void>;
+  async setCellStyleId(address: string, styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
   async setCellStyleId(
-    address: string,
-    styleId: number,
-    sheet?: string,
+    sheetOrAddress: string,
+    addressOrStyleId: string | number,
+    styleIdOrSheet?: number | string | RpcOptions,
     options?: RpcOptions
   ): Promise<void> {
     await this.flush();
-    await this.invoke("setCellStyleId", { sheet, address, styleId }, options);
+    let sheet: string | undefined;
+    let address: string;
+    let styleId: number;
+    let finalRpcOptions: RpcOptions | undefined;
+
+    if (typeof addressOrStyleId === "string") {
+      // Signature: (sheet, address, styleId, options?)
+      sheet = sheetOrAddress;
+      address = addressOrStyleId;
+      styleId = styleIdOrSheet as number;
+      finalRpcOptions = options;
+    } else {
+      // Signature: (address, styleId, sheet?, options?)
+      address = sheetOrAddress;
+      styleId = addressOrStyleId;
+      if (typeof styleIdOrSheet === "string" || styleIdOrSheet == null) {
+        sheet = typeof styleIdOrSheet === "string" ? styleIdOrSheet : undefined;
+        finalRpcOptions = options;
+      } else {
+        // Allow: setCellStyleId(address, styleId, rpcOptions)
+        sheet = undefined;
+        finalRpcOptions = styleIdOrSheet as RpcOptions;
+      }
+    }
+
+    await this.invoke("setCellStyleId", { sheet, address, styleId }, finalRpcOptions);
   }
 
   async setRowStyleId(sheet: string, row: number, styleId: number | null, options?: RpcOptions): Promise<void>;
@@ -869,9 +896,39 @@ export class EngineWorker {
    *
    * Prefer `setColWidthChars(sheet, col, widthChars)` for an explicit unit name.
    */
-  async setColWidth(col: number, width: number | null, sheet?: string, options?: RpcOptions): Promise<void> {
+  async setColWidth(sheet: string, col: number, width: number | null, options?: RpcOptions): Promise<void>;
+  async setColWidth(col: number, width: number | null, sheet?: string, options?: RpcOptions): Promise<void>;
+  async setColWidth(
+    sheetOrCol: string | number,
+    colOrWidth: number | null,
+    widthOrSheet?: number | string | null | RpcOptions,
+    options?: RpcOptions
+  ): Promise<void> {
     await this.flush();
-    await this.invoke("setColWidth", { sheet, col, width }, options);
+    let sheet: string | undefined;
+    let col: number;
+    let width: number | null;
+    let finalRpcOptions: RpcOptions | undefined;
+
+    if (typeof sheetOrCol === "string") {
+      sheet = sheetOrCol;
+      col = colOrWidth as number;
+      width = widthOrSheet as number | null;
+      finalRpcOptions = options;
+    } else {
+      col = sheetOrCol;
+      width = colOrWidth;
+      if (typeof widthOrSheet === "string" || widthOrSheet == null) {
+        sheet = typeof widthOrSheet === "string" ? widthOrSheet : undefined;
+        finalRpcOptions = options;
+      } else {
+        // Allow: setColWidth(col, width, rpcOptions)
+        sheet = undefined;
+        finalRpcOptions = widthOrSheet as RpcOptions;
+      }
+    }
+
+    await this.invoke("setColWidth", { sheet, col, width }, finalRpcOptions);
   }
 
   async setColHidden(col: number, hidden: boolean, sheet?: string, options?: RpcOptions): Promise<void> {
