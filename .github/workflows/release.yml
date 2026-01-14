@@ -974,6 +974,7 @@ jobs:
 
       - name: Upload provenance bundle to the draft release (macOS)
         if: steps.provenance_macos.outcome == 'success'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PROVENANCE_BUNDLE_PATH: ${{ steps.provenance_macos.outputs.bundle-path }}
@@ -1238,6 +1239,7 @@ jobs:
 
       - name: Upload provenance bundle to the draft release
         if: steps.provenance_non_macos.outcome == 'success'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PROVENANCE_BUNDLE_PATH: ${{ steps.provenance_non_macos.outputs.bundle-path }}
@@ -2590,6 +2592,7 @@ jobs:
 
       - name: Upload SBOM to the draft release
         if: needs.preflight.outputs.upload == 'true' && steps.generate_sbom.outcome == 'success'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
