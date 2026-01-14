@@ -17138,9 +17138,9 @@ mod tests {
     fn cell_width_reflects_column_metadata() {
         let mut engine = Engine::new();
         engine
-            // Place the formula outside of the referenced column to avoid creating a circular
-            // dependency in the calc graph. `CELL("width")` returns column metadata, not the
-            // referenced cell's computed value.
+            // Place the formula outside of the referenced column so this test stays focused on
+            // column metadata changes; self-reference behavior is covered by
+            // `cell_width_self_reference_is_not_circular`.
             .set_cell_formula("Sheet1", "B1", r#"=CELL("width", A1)"#)
             .unwrap();
         engine.recalculate_single_threaded();
