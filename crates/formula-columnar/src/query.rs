@@ -187,7 +187,7 @@ pub enum QueryError {
 impl std::fmt::Display for QueryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::EmptyKeys => write!(f, "GROUP BY requires at least one key column"),
+            Self::EmptyKeys => write!(f, "at least one key column is required"),
             Self::ColumnOutOfBounds { col, column_count } => write!(
                 f,
                 "column index {} out of bounds (table has {} columns)",
@@ -2631,12 +2631,12 @@ pub fn group_by_mask(
 
 /// Output of `hash_join`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct JoinResult {
-    pub left_indices: Vec<usize>,
-    pub right_indices: Vec<usize>,
+pub struct JoinResult<L = usize, R = usize> {
+    pub left_indices: Vec<L>,
+    pub right_indices: Vec<R>,
 }
 
-impl JoinResult {
+impl<L, R> JoinResult<L, R> {
     pub fn len(&self) -> usize {
         self.left_indices.len()
     }
@@ -2821,4 +2821,389 @@ pub fn hash_join(
     }
 
     Ok(out)
+}
+
+struct JoinKeyPlan {
+    left_col: usize,
+    right_col: usize,
+    column_type: ColumnType,
+    kind: KeyKind,
+    /// For string keys, maps right dictionary indices into the left dictionary index space.
+    /// Missing entries mean the right value is not present in the left dictionary and can never match.
+    right_dict_to_left: Option<Vec<Option<u32>>>,
+}
+
+fn plan_join_keys(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_keys: &[usize],
+    right_keys: &[usize],
+) -> Result<Vec<JoinKeyPlan>, QueryError> {
+    if left_keys.is_empty() {
+        return Err(QueryError::EmptyKeys);
+    }
+    if left_keys.len() != right_keys.len() {
+        return Err(QueryError::InternalInvariant(
+            "join key column counts must match",
+        ));
+    }
+
+    let mut plans = Vec::with_capacity(left_keys.len());
+    for (&left_col, &right_col) in left_keys.iter().zip(right_keys.iter()) {
+        let left_type = left
+            .schema()
+            .get(left_col)
+            .map(|s| s.column_type)
+            .ok_or(QueryError::ColumnOutOfBounds {
+                col: left_col,
+                column_count: left.column_count(),
+            })?;
+        let right_type = right
+            .schema()
+            .get(right_col)
+            .map(|s| s.column_type)
+            .ok_or(QueryError::ColumnOutOfBounds {
+                col: right_col,
+                column_count: right.column_count(),
+            })?;
+
+        if left_type != right_type {
+            return Err(QueryError::MismatchedJoinKeyTypes {
+                left_type,
+                right_type,
+            });
+        }
+
+        let kind = key_kind_for_column_type(left_type).ok_or(QueryError::UnsupportedColumnType {
+            col: left_col,
+            column_type: left_type,
+            operation: "JOIN key",
+        })?;
+
+        let right_dict_to_left = if left_type == ColumnType::String {
+            let left_dict = left
+                .dictionary(left_col)
+                .ok_or(QueryError::MissingDictionary { col: left_col })?;
+            let right_dict = right
+                .dictionary(right_col)
+                .ok_or(QueryError::MissingDictionary { col: right_col })?;
+            Some(build_dict_mapping(&left_dict, &right_dict))
+        } else {
+            None
+        };
+
+        plans.push(JoinKeyPlan {
+            left_col,
+            right_col,
+            column_type: left_type,
+            kind,
+            right_dict_to_left,
+        });
+    }
+
+    Ok(plans)
+}
+
+fn join_key_from_scalar_for_right(
+    plan: &JoinKeyPlan,
+    scalar: Scalar,
+) -> Option<KeyValue> {
+    match (plan.kind, scalar) {
+        (_, Scalar::Null) => None,
+        (KeyKind::Dict, Scalar::U32(ix)) => {
+            let mapping = plan.right_dict_to_left.as_ref()?;
+            mapping.get(ix as usize).and_then(|m| *m).map(KeyValue::Dict)
+        }
+        (kind, s) => {
+            let key = scalar_to_key(kind, s);
+            if matches!(key, KeyValue::Null) {
+                None
+            } else {
+                Some(key)
+            }
+        }
+    }
+}
+
+fn join_key_from_scalar_for_left(plan: &JoinKeyPlan, scalar: Scalar) -> Option<KeyValue> {
+    match (plan.kind, scalar) {
+        (_, Scalar::Null) => None,
+        (KeyKind::Dict, Scalar::U32(ix)) => Some(KeyValue::Dict(ix)),
+        (kind, s) => {
+            let key = scalar_to_key(kind, s);
+            if matches!(key, KeyValue::Null) {
+                None
+            } else {
+                Some(key)
+            }
+        }
+    }
+}
+
+fn hash_join_multi_core<L, R, FMatch, FLeft, FRight>(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_keys: &[usize],
+    right_keys: &[usize],
+    mut push_match: FMatch,
+    mut push_left_unmatched: FLeft,
+    mut push_right_unmatched: FRight,
+    track_unmatched_right: bool,
+) -> Result<JoinResult<L, R>, QueryError>
+where
+    FMatch: FnMut(&mut JoinResult<L, R>, usize, usize),
+    FLeft: FnMut(&mut JoinResult<L, R>, usize),
+    FRight: FnMut(&mut JoinResult<L, R>, usize),
+{
+    let plans = plan_join_keys(left, right, left_keys, right_keys)?;
+
+    let right_rows = right.row_count();
+    let mut next: Vec<usize> = vec![usize::MAX; right_rows];
+
+    // Capacity hint: when stats exist for all key columns, approximate distinct composite keys
+    // as the product of per-column distinct counts (capped by row count).
+    let capacity_hint = {
+        let mut est: u128 = 1;
+        for plan in &plans {
+            let Some(stats) = right.scan().stats(plan.right_col) else {
+                est = 0;
+                break;
+            };
+            est = est.saturating_mul(stats.distinct_count as u128);
+            est = est.min(right_rows as u128);
+        }
+        (est as usize).min(right_rows)
+    };
+
+    let mut map: FastHashMap<Box<[KeyValue]>, usize> =
+        FastHashMap::with_capacity_and_hasher(capacity_hint, FastBuildHasher::default());
+
+    // Build phase (right).
+    let page = right.page_size_rows();
+    let chunk_count = (right_rows + page - 1) / page;
+    let mut scratch_keys: Vec<KeyValue> = vec![KeyValue::Null; plans.len()];
+    for chunk_idx in 0..chunk_count {
+        let base = chunk_idx * page;
+        if base >= right_rows {
+            break;
+        }
+        let chunk_rows = (right_rows - base).min(page);
+
+        let mut cursors: Vec<ScalarChunkCursor<'_>> = Vec::with_capacity(plans.len());
+        for plan in &plans {
+            let chunks = right
+                .encoded_chunks(plan.right_col)
+                .ok_or(QueryError::ColumnOutOfBounds {
+                    col: plan.right_col,
+                    column_count: right.column_count(),
+                })?;
+            let chunk = chunks.get(chunk_idx).ok_or(QueryError::RowOutOfBounds {
+                row: base,
+                row_count: right_rows,
+            })?;
+            cursors.push(ScalarChunkCursor::from_column_chunk(
+                plan.right_col,
+                plan.column_type,
+                chunk,
+            )?);
+        }
+
+        for i in 0..chunk_rows {
+            let row = base + i;
+
+            let mut valid = true;
+            for (pos, plan) in plans.iter().enumerate() {
+                let scalar = cursors[pos].next();
+                if !valid {
+                    continue;
+                }
+                match join_key_from_scalar_for_right(plan, scalar) {
+                    Some(key) => scratch_keys[pos] = key,
+                    None => valid = false,
+                }
+            }
+            if !valid {
+                continue;
+            }
+
+            let key_slice = scratch_keys.as_slice();
+            if let Some(head) = map.get_mut(key_slice) {
+                next[row] = *head;
+                *head = row;
+            } else {
+                map.insert(scratch_keys.to_vec().into_boxed_slice(), row);
+            }
+        }
+    }
+
+    // Probe phase (left).
+    let left_rows = left.row_count();
+    let mut out: JoinResult<L, R> = JoinResult {
+        left_indices: Vec::new(),
+        right_indices: Vec::new(),
+    };
+
+    // Reserve something reasonable; outer joins can exceed this, but `reserve` is just a hint.
+    let reserve_hint = match track_unmatched_right {
+        true => left_rows.saturating_add(right_rows).min(left_rows.saturating_mul(2).max(1024)),
+        false => left_rows.min(right_rows).max(1024),
+    };
+    out.left_indices.reserve(reserve_hint);
+    out.right_indices.reserve(reserve_hint);
+
+    let mut matched_right: Option<Vec<bool>> = track_unmatched_right.then(|| vec![false; right_rows]);
+
+    let page = left.page_size_rows();
+    let chunk_count = (left_rows + page - 1) / page;
+    for chunk_idx in 0..chunk_count {
+        let base = chunk_idx * page;
+        if base >= left_rows {
+            break;
+        }
+        let chunk_rows = (left_rows - base).min(page);
+
+        let mut cursors: Vec<ScalarChunkCursor<'_>> = Vec::with_capacity(plans.len());
+        for plan in &plans {
+            let chunks = left
+                .encoded_chunks(plan.left_col)
+                .ok_or(QueryError::ColumnOutOfBounds {
+                    col: plan.left_col,
+                    column_count: left.column_count(),
+                })?;
+            let chunk = chunks.get(chunk_idx).ok_or(QueryError::RowOutOfBounds {
+                row: base,
+                row_count: left_rows,
+            })?;
+            cursors.push(ScalarChunkCursor::from_column_chunk(
+                plan.left_col,
+                plan.column_type,
+                chunk,
+            )?);
+        }
+
+        for i in 0..chunk_rows {
+            let row = base + i;
+
+            let mut valid = true;
+            for (pos, plan) in plans.iter().enumerate() {
+                let scalar = cursors[pos].next();
+                if !valid {
+                    continue;
+                }
+                match join_key_from_scalar_for_left(plan, scalar) {
+                    Some(key) => scratch_keys[pos] = key,
+                    None => valid = false,
+                }
+            }
+            if !valid {
+                push_left_unmatched(&mut out, row);
+                continue;
+            }
+
+            let Some(&head) = map.get(scratch_keys.as_slice()) else {
+                push_left_unmatched(&mut out, row);
+                continue;
+            };
+
+            let mut r = head;
+            while r != usize::MAX {
+                push_match(&mut out, row, r);
+                if let Some(ref mut matched) = matched_right {
+                    matched[r] = true;
+                }
+                r = next[r];
+            }
+        }
+    }
+
+    // Emit unmatched right rows (full outer join).
+    if let Some(matched) = matched_right {
+        for r in 0..right_rows {
+            if !matched[r] {
+                push_right_unmatched(&mut out, r);
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+/// Hash join on multiple key columns (inner join).
+pub fn hash_join_multi(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_keys: &[usize],
+    right_keys: &[usize],
+) -> Result<JoinResult, QueryError> {
+    hash_join_multi_core(
+        left,
+        right,
+        left_keys,
+        right_keys,
+        |out: &mut JoinResult, l, r| {
+            out.left_indices.push(l);
+            out.right_indices.push(r);
+        },
+        |_out: &mut JoinResult, _l| {},
+        |_out: &mut JoinResult, _r| {},
+        false,
+    )
+}
+
+/// Hash join on multiple key columns (left join).
+///
+/// Rows from the left table with no match (or NULL in any join key) are included with `None`
+/// for the right index.
+pub fn hash_left_join_multi(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_keys: &[usize],
+    right_keys: &[usize],
+) -> Result<JoinResult<usize, Option<usize>>, QueryError> {
+    hash_join_multi_core(
+        left,
+        right,
+        left_keys,
+        right_keys,
+        |out: &mut JoinResult<usize, Option<usize>>, l, r| {
+            out.left_indices.push(l);
+            out.right_indices.push(Some(r));
+        },
+        |out: &mut JoinResult<usize, Option<usize>>, l| {
+            out.left_indices.push(l);
+            out.right_indices.push(None);
+        },
+        |_out: &mut JoinResult<usize, Option<usize>>, _r| {},
+        false,
+    )
+}
+
+/// Hash join on multiple key columns (full outer join).
+///
+/// Unmatched rows from either side are included with `None` for the missing partner index.
+pub fn hash_full_outer_join_multi(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_keys: &[usize],
+    right_keys: &[usize],
+) -> Result<JoinResult<Option<usize>, Option<usize>>, QueryError> {
+    hash_join_multi_core(
+        left,
+        right,
+        left_keys,
+        right_keys,
+        |out: &mut JoinResult<Option<usize>, Option<usize>>, l, r| {
+            out.left_indices.push(Some(l));
+            out.right_indices.push(Some(r));
+        },
+        |out: &mut JoinResult<Option<usize>, Option<usize>>, l| {
+            out.left_indices.push(Some(l));
+            out.right_indices.push(None);
+        },
+        |out: &mut JoinResult<Option<usize>, Option<usize>>, r| {
+            out.left_indices.push(None);
+            out.right_indices.push(Some(r));
+        },
+        true,
+    )
 }

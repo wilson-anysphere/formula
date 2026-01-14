@@ -1,6 +1,6 @@
 use formula_columnar::{
     AggSpec, BitVec, ColumnSchema, ColumnType, ColumnarTable, ColumnarTableBuilder, PageCacheConfig,
-    TableOptions, Value,
+    QueryError, TableOptions, Value,
 };
 use std::sync::Arc;
 
@@ -971,5 +971,225 @@ fn hash_join_string_works_with_different_dictionaries() {
     assert_eq!(
         pairs,
         vec![(0, 1), (0, 2), (1, 0), (2, 1), (2, 2)]
+    );
+}
+
+#[test]
+fn hash_join_multi_inner_two_keys() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::DateTime,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::String,
+        },
+    ];
+
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![Value::DateTime(1), Value::String(Arc::<str>::from("A"))],
+            vec![Value::DateTime(1), Value::String(Arc::<str>::from("A"))],
+            vec![Value::DateTime(1), Value::String(Arc::<str>::from("B"))],
+            vec![Value::DateTime(2), Value::String(Arc::<str>::from("A"))],
+        ],
+    );
+
+    let right = build_table(
+        schema,
+        vec![
+            vec![Value::DateTime(1), Value::String(Arc::<str>::from("A"))],
+            vec![Value::DateTime(1), Value::String(Arc::<str>::from("A"))],
+            vec![Value::DateTime(1), Value::String(Arc::<str>::from("B"))],
+            vec![Value::DateTime(3), Value::String(Arc::<str>::from("A"))],
+        ],
+    );
+
+    let join = left.hash_join_multi(&right, &[0, 1], &[0, 1]).unwrap();
+    assert_eq!(join.len(), 5);
+
+    let mut pairs: Vec<(usize, usize)> = join
+        .left_indices
+        .into_iter()
+        .zip(join.right_indices.into_iter())
+        .collect();
+    pairs.sort();
+
+    assert_eq!(pairs, vec![(0, 0), (0, 1), (1, 0), (1, 1), (2, 2)]);
+}
+
+#[test]
+fn hash_left_join_multi_includes_unmatched_and_null_keys() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::DateTime,
+        },
+    ];
+
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("B")), Value::DateTime(1)],
+            vec![Value::Null, Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("A")), Value::Null],
+            vec![Value::String(Arc::<str>::from("C")), Value::DateTime(2)],
+        ],
+    );
+
+    let right = build_table(
+        schema,
+        vec![
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("C")), Value::DateTime(2)],
+        ],
+    );
+
+    let join = left
+        .hash_left_join_multi(&right, &[0, 1], &[0, 1])
+        .unwrap();
+
+    assert_eq!(join.left_indices, vec![0, 1, 2, 3, 4]);
+    assert_eq!(
+        join.right_indices,
+        vec![Some(0), None, None, None, Some(1)]
+    );
+}
+
+#[test]
+fn hash_join_multi_string_uses_dictionary_mapping() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::DateTime,
+        },
+    ];
+
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("B")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(2)],
+        ],
+    );
+    // Insert in different order so the dictionaries differ.
+    let right = build_table(
+        schema,
+        vec![
+            vec![Value::String(Arc::<str>::from("B")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(2)],
+        ],
+    );
+
+    let join = left.hash_join_multi(&right, &[0, 1], &[0, 1]).unwrap();
+    let mut pairs: Vec<(usize, usize)> = join
+        .left_indices
+        .into_iter()
+        .zip(join.right_indices.into_iter())
+        .collect();
+    pairs.sort();
+    assert_eq!(pairs, vec![(0, 1), (1, 0), (2, 2)]);
+}
+
+#[test]
+fn hash_join_multi_errors_on_mismatched_key_types() {
+    let left_schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::DateTime,
+        },
+    ];
+    let right_schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::Number,
+        },
+    ];
+
+    let left = build_table(
+        left_schema,
+        vec![vec![
+            Value::String(Arc::<str>::from("A")),
+            Value::DateTime(1),
+        ]],
+    );
+    let right = build_table(
+        right_schema,
+        vec![vec![
+            Value::String(Arc::<str>::from("A")),
+            Value::Number(1.0),
+        ]],
+    );
+
+    let err = left
+        .hash_join_multi(&right, &[0, 1], &[0, 1])
+        .unwrap_err();
+    assert!(matches!(err, QueryError::MismatchedJoinKeyTypes { .. }));
+}
+
+#[test]
+fn hash_full_outer_join_multi_includes_unmatched_right_rows_and_respects_nulls() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::DateTime,
+        },
+    ];
+
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("B")), Value::DateTime(1)],
+            vec![Value::Null, Value::DateTime(1)],
+        ],
+    );
+
+    let right = build_table(
+        schema,
+        vec![
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("C")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("B")), Value::Null],
+            vec![Value::Null, Value::DateTime(1)],
+        ],
+    );
+
+    let join = left
+        .hash_full_outer_join_multi(&right, &[0, 1], &[0, 1])
+        .unwrap();
+
+    assert_eq!(
+        join.left_indices,
+        vec![Some(0), Some(1), Some(2), None, None, None]
+    );
+    assert_eq!(
+        join.right_indices,
+        vec![Some(0), None, None, Some(1), Some(2), Some(3)]
     );
 }

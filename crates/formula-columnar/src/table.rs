@@ -640,6 +640,39 @@ impl ColumnarTable {
     ) -> Result<crate::query::JoinResult, crate::query::QueryError> {
         crate::query::hash_join(self, right, left_on, right_on)
     }
+
+    /// Hash join on multiple key columns (inner join).
+    pub fn hash_join_multi(
+        &self,
+        right: &ColumnarTable,
+        left_keys: &[usize],
+        right_keys: &[usize],
+    ) -> Result<crate::query::JoinResult, crate::query::QueryError> {
+        crate::query::hash_join_multi(self, right, left_keys, right_keys)
+    }
+
+    /// Hash join on multiple key columns (left join).
+    ///
+    /// Rows from the left table with no match (or NULL in any join key) are included with `None`
+    /// for the right index.
+    pub fn hash_left_join_multi(
+        &self,
+        right: &ColumnarTable,
+        left_keys: &[usize],
+        right_keys: &[usize],
+    ) -> Result<crate::query::JoinResult<usize, Option<usize>>, crate::query::QueryError> {
+        crate::query::hash_left_join_multi(self, right, left_keys, right_keys)
+    }
+
+    /// Hash join on multiple key columns (full outer join).
+    pub fn hash_full_outer_join_multi(
+        &self,
+        right: &ColumnarTable,
+        left_keys: &[usize],
+        right_keys: &[usize],
+    ) -> Result<crate::query::JoinResult<Option<usize>, Option<usize>>, crate::query::QueryError> {
+        crate::query::hash_full_outer_join_multi(self, right, left_keys, right_keys)
+    }
 }
 
 /// A mutable, incrementally updatable columnar table.
