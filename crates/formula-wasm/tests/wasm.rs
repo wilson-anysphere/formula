@@ -350,6 +350,42 @@ fn canonicalize_and_localize_formula_roundtrip_r1c1_reference_style() {
 }
 
 #[wasm_bindgen_test]
+fn canonicalize_formula_normalizes_locale_id_variants() {
+    let localized = "=SUMME(1,5;2)";
+    let expected = "=SUM(1.5,2)";
+
+    // JS callers may provide OS/browser locale spellings or case/whitespace variants. Ensure the
+    // wasm public API remains compatible with the engine's locale-id normalization rules.
+    for locale_id in ["de_DE.UTF-8", "de_DE", "  de-DE  ", "DE-de", "de"] {
+        let canonical = canonicalize_formula(localized, locale_id, None).unwrap();
+        assert_eq!(
+            canonical, expected,
+            "expected canonicalize_formula to accept locale id variant {locale_id:?}"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
+fn set_locale_accepts_normalized_locale_ids_and_aliases() {
+    // POSIX-like locale tags should work (normalization drops the encoding/modifier suffix).
+    let mut wb = WasmWorkbook::new();
+    assert!(wb.set_locale("de_DE.UTF-8".to_string()));
+
+    // Aliases (added in Task 456).
+    let mut failures = Vec::new();
+    for locale_id in ["C", "POSIX"] {
+        let mut wb = WasmWorkbook::new();
+        if !wb.set_locale(locale_id.to_string()) {
+            failures.push(locale_id);
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "expected set_locale to accept locale aliases: {failures:?}"
+    );
+}
+
+#[wasm_bindgen_test]
 fn canonicalize_formula_rejects_unknown_locale_id_with_supported_list() {
     let err = canonicalize_formula("=1+2", "xx-XX", None).unwrap_err();
     let message = err
