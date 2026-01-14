@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("numberFormat resolution does not fall back to snake_case number_format (null/undefined should override)", () => {
@@ -20,7 +22,7 @@ test("numberFormat resolution does not fall back to snake_case number_format (nu
   const legacyOrFallbackRe = /\bnumberFormat\s*\|\|\s*[^;\n]*\bnumber_format\b/;
 
   for (const file of files) {
-    const text = fs.readFileSync(file, "utf8");
+    const text = stripComments(fs.readFileSync(file, "utf8"));
     const rel = path.relative(srcRoot, file);
     assert.doesNotMatch(
       text,

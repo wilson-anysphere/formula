@@ -4,14 +4,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("React comments components avoid inline styles (except tooltip positioning)", () => {
   const commentsPanelPath = path.join(__dirname, "..", "src", "comments", "CommentsPanel.tsx");
   const tooltipPath = path.join(__dirname, "..", "src", "comments", "CommentTooltip.tsx");
 
-  const panel = fs.readFileSync(commentsPanelPath, "utf8");
-  const tooltip = fs.readFileSync(tooltipPath, "utf8");
+  const panel = stripComments(fs.readFileSync(commentsPanelPath, "utf8"));
+  const tooltip = stripComments(fs.readFileSync(tooltipPath, "utf8"));
 
   assert.equal(
     /\bstyle\s*=/.test(panel),
@@ -33,4 +35,3 @@ test("React comments components avoid inline styles (except tooltip positioning)
     "CommentTooltip.tsx should include the .comment-tooltip class so styling lives in comments.css",
   );
 });
-

@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("PivotTable ribbon alias is hidden from the command palette", () => {
   const sourcePath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
-  const source = fs.readFileSync(sourcePath, "utf8");
+  const source = stripComments(fs.readFileSync(sourcePath, "utf8"));
 
   function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

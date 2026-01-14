@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function extractBlock(source, startNeedle) {
@@ -28,7 +30,7 @@ function extractBlock(source, startNeedle) {
 
 test("SpreadsheetApp.renderCommentThread is styled via CSS classes (no inline style.*)", () => {
   const filePath = path.join(__dirname, "..", "src", "app", "spreadsheetApp.ts");
-  const content = fs.readFileSync(filePath, "utf8");
+  const content = stripComments(fs.readFileSync(filePath, "utf8"));
   const fn = extractBlock(content, "private renderCommentThread(");
 
   assert.equal(
@@ -62,7 +64,7 @@ test("SpreadsheetApp.renderCommentThread is styled via CSS classes (no inline st
 
 test("comment tooltip is token-styled and positioned via CSS variables (not left/top inline styles)", () => {
   const appPath = path.join(__dirname, "..", "src", "app", "spreadsheetApp.ts");
-  const app = fs.readFileSync(appPath, "utf8");
+  const app = stripComments(fs.readFileSync(appPath, "utf8"));
 
   assert.equal(
     /commentTooltip\.style\.(left|top)\b/.test(app),

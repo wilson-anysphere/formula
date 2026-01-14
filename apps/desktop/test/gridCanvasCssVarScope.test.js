@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("SelectionRenderer resolves theme CSS vars relative to a provided root element", () => {
   const filePath = path.join(__dirname, "..", "src", "selection", "renderer.ts");
-  const source = fs.readFileSync(filePath, "utf8");
+  const source = stripComments(fs.readFileSync(filePath, "utf8"));
 
   assert.match(
     source,
@@ -25,7 +27,7 @@ test("SelectionRenderer resolves theme CSS vars relative to a provided root elem
 
 test("DocumentCellProvider can resolve --formula-grid-link relative to a provided cssVarRoot", () => {
   const filePath = path.join(__dirname, "..", "src", "grid", "shared", "documentCellProvider.ts");
-  const source = fs.readFileSync(filePath, "utf8");
+  const source = stripComments(fs.readFileSync(filePath, "utf8"));
 
   assert.match(
     source,
@@ -42,7 +44,7 @@ test("DocumentCellProvider can resolve --formula-grid-link relative to a provide
 
 test("DrawingOverlay can resolve CSS variables relative to a provided root element", () => {
   const filePath = path.join(__dirname, "..", "src", "drawings", "overlay.ts");
-  const source = fs.readFileSync(filePath, "utf8");
+  const source = stripComments(fs.readFileSync(filePath, "utf8"));
 
   assert.match(
     source,
@@ -56,4 +58,3 @@ test("DrawingOverlay can resolve CSS variables relative to a provided root eleme
     "Expected DrawingOverlay to prefer cssVarRoot when reading computed styles",
   );
 });
-

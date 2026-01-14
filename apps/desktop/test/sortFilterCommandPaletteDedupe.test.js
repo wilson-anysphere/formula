@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("Sort/Filter ribbon custom sort aliases are hidden from the command palette", () => {
   const sourcePath = path.join(__dirname, "..", "src", "commands", "registerSortFilterCommands.ts");
-  const source = fs.readFileSync(sourcePath, "utf8");
+  const source = stripComments(fs.readFileSync(sourcePath, "utf8"));
 
   // The Home tab uses a ribbon-scoped id for Custom Sort, but it is an alias of the
   // Data tab command. Ensure it's hidden to avoid duplicate "Custom Sort…" entries
@@ -19,4 +21,3 @@ test("Sort/Filter ribbon custom sort aliases are hidden from the command palette
   // not be explicitly hidden).
   assert.doesNotMatch(source, /\bregisterCustomSortCommand\(\s*SORT_FILTER_RIBBON_COMMANDS\.dataCustomSort[\s\S]*?\bwhen:\s*["']false["']/);
 });
-

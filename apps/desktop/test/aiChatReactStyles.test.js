@@ -14,9 +14,9 @@ test("AI chat React panels avoid inline styles (use ai-chat.css classes)", () =>
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
 
   const sources = {
-    container: fs.readFileSync(path.join(panelDir, "AIChatPanelContainer.tsx"), "utf8"),
-    panel: fs.readFileSync(path.join(panelDir, "AIChatPanel.tsx"), "utf8"),
-    modal: fs.readFileSync(path.join(panelDir, "ApprovalModal.tsx"), "utf8"),
+    container: stripComments(fs.readFileSync(path.join(panelDir, "AIChatPanelContainer.tsx"), "utf8")),
+    panel: stripComments(fs.readFileSync(path.join(panelDir, "AIChatPanel.tsx"), "utf8")),
+    modal: stripComments(fs.readFileSync(path.join(panelDir, "ApprovalModal.tsx"), "utf8")),
   };
 
   for (const [name, content] of Object.entries(sources)) {

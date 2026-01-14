@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("CellEditorOverlay avoids inline display/z-index style assignments", () => {
   const filePath = path.join(__dirname, "..", "src", "editor", "cellEditorOverlay.ts");
-  const content = fs.readFileSync(filePath, "utf8");
+  const content = stripComments(fs.readFileSync(filePath, "utf8"));
 
   const forbiddenAssignments = [
     // Direct property assignments (e.g. `this.element.style.display = "none"`).
@@ -121,7 +123,7 @@ test("CellEditorOverlay static visibility + z-index are defined in CSS", () => {
 
 test("CellEditorOverlay keeps geometry dynamic via inline styles", () => {
   const filePath = path.join(__dirname, "..", "src", "editor", "cellEditorOverlay.ts");
-  const content = fs.readFileSync(filePath, "utf8");
+  const content = stripComments(fs.readFileSync(filePath, "utf8"));
 
   for (const prop of ["left", "top", "width", "height"]) {
     assert.match(
@@ -134,7 +136,7 @@ test("CellEditorOverlay keeps geometry dynamic via inline styles", () => {
 
 test("CellEditorOverlay only uses inline styles for dynamic geometry", () => {
   const filePath = path.join(__dirname, "..", "src", "editor", "cellEditorOverlay.ts");
-  const content = fs.readFileSync(filePath, "utf8");
+  const content = stripComments(fs.readFileSync(filePath, "utf8"));
 
   const allowed = new Set(["left", "top", "width", "height"]);
 

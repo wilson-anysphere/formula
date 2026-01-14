@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("ContextMenu is styled via CSS classes (no inline style.* except positioning)", () => {
   const filePath = path.join(__dirname, "..", "src", "menus", "contextMenu.ts");
-  const content = fs.readFileSync(filePath, "utf8");
+  const content = stripComments(fs.readFileSync(filePath, "utf8"));
 
   const matches = [...content.matchAll(/\.style\.([a-zA-Z]+)/g)];
   const disallowed = matches.filter((m) => !["left", "top"].includes(m[1]));

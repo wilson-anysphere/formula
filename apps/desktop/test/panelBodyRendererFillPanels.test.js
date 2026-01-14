@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function extractSection(source, startMarker, endMarker) {
@@ -18,7 +20,7 @@ function extractSection(source, startMarker, endMarker) {
 
 test("panelBodyRenderer keeps key dock panels full-height (panel-body--fill)", () => {
   const filePath = path.join(__dirname, "..", "src", "panels", "panelBodyRenderer.tsx");
-  const source = fs.readFileSync(filePath, "utf8");
+  const source = stripComments(fs.readFileSync(filePath, "utf8"));
 
   const fillPanels = [
     {

@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("TableHeaderCell avoids inline style blocks (use CSS classes)", () => {
   const filePath = path.join(__dirname, "..", "src", "table", "TableHeaderCell.tsx");
-  const source = fs.readFileSync(filePath, "utf8");
+  const source = stripComments(fs.readFileSync(filePath, "utf8"));
 
   assert.equal(
     source.includes("style={{"),
@@ -43,4 +45,3 @@ test("TableHeaderCell header + filter button styles are defined in ui.css", () =
     assert.ok(selector.test(css), `Expected ui.css to define ${selector}`);
   }
 });
-

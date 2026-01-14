@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function escapeRegExp(value) {
@@ -12,7 +14,7 @@ function escapeRegExp(value) {
 
 test("Insert → Pictures ribbon aliases are hidden from the command palette", () => {
   const sourcePath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
-  const source = fs.readFileSync(sourcePath, "utf8");
+  const source = stripComments(fs.readFileSync(sourcePath, "utf8"));
 
   // Guardrail: ensure the Insert → Pictures helper passes through `when` so hiding
   // menu-item aliases from the command palette is effective.
@@ -56,4 +58,3 @@ test("Insert → Pictures ribbon aliases are hidden from the command palette", (
     "Expected insert.illustrations.pictures.thisDevice to delegate to insert.illustrations.pictures",
   );
 });
-

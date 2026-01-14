@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("FormulaBarView avoids inline display toggles (use CSS state classes)", () => {
   const viewPath = path.join(__dirname, "..", "src", "formula-bar", "FormulaBarView.ts");
-  const source = fs.readFileSync(viewPath, "utf8");
+  const source = stripComments(fs.readFileSync(viewPath, "utf8"));
 
   assert.equal(
     source.includes(".style.display"),
@@ -35,4 +37,3 @@ test("FormulaBarView avoids inline display toggles (use CSS state classes)", () 
     assert.ok(css.includes(selector), `Expected ui.css to define ${selector}`);
   }
 });
-

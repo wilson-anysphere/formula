@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function extractSection(source, startMarker, endMarker) {
@@ -18,7 +20,7 @@ function extractSection(source, startMarker, endMarker) {
 
 test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", () => {
   const filePath = path.join(__dirname, "..", "src", "panels", "panelBodyRenderer.tsx");
-  const source = fs.readFileSync(filePath, "utf8");
+  const source = stripComments(fs.readFileSync(filePath, "utf8"));
   const versionHistoryPath = path.join(
     __dirname,
     "..",
@@ -27,7 +29,7 @@ test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", (
     "version-history",
     "CollabVersionHistoryPanel.tsx",
   );
-  const versionHistorySource = fs.readFileSync(versionHistoryPath, "utf8");
+  const versionHistorySource = stripComments(fs.readFileSync(versionHistoryPath, "utf8"));
   const branchManagerPath = path.join(
     __dirname,
     "..",
@@ -36,7 +38,7 @@ test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", (
     "branch-manager",
     "CollabBranchManagerPanel.tsx",
   );
-  const branchManagerSource = fs.readFileSync(branchManagerPath, "utf8");
+  const branchManagerSource = stripComments(fs.readFileSync(branchManagerPath, "utf8"));
 
   assert.equal(
     /<[^>]*\bstyle\s*=\s*\{/.test(source),

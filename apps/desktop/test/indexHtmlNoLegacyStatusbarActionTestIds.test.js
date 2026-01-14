@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function extractTestIdsFromIndexHtml(html) {
@@ -65,7 +67,7 @@ function collectRibbonTestIds() {
       if (!entry.isFile()) continue;
       if (!/\.(ts|tsx)$/.test(entry.name)) continue;
 
-      const source = fs.readFileSync(fullPath, "utf8");
+      const source = stripComments(fs.readFileSync(fullPath, "utf8"));
       ids.push(...extractRibbonTestIdsFromSource(source));
     }
   };
@@ -101,7 +103,7 @@ function collectNonRibbonDesktopTestIds() {
       if (isTestFile(entry.name)) continue;
 
       const fullPath = path.join(dir, entry.name);
-      const source = fs.readFileSync(fullPath, "utf8");
+      const source = stripComments(fs.readFileSync(fullPath, "utf8"));
       const extracted = extractRibbonTestIdsFromSource(source);
       for (const testId of extracted) {
         const existing = ids.get(testId) ?? new Set();

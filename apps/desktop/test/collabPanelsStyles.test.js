@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("Collab Version History / Branch Manager panels are class-driven + styled via workspace.css", () => {
@@ -14,11 +16,11 @@ test("Collab Version History / Branch Manager panels are class-driven + styled v
   const mergeBranchPath = path.join(__dirname, "..", "src", "panels", "branch-manager", "MergeBranchPanel.tsx");
   const cssPath = path.join(__dirname, "..", "src", "styles", "workspace.css");
 
-  const renderer = fs.readFileSync(rendererPath, "utf8");
-  const versionHistory = fs.readFileSync(versionHistoryPath, "utf8");
-  const collabBranchManager = fs.readFileSync(collabBranchManagerPath, "utf8");
-  const branchManager = fs.readFileSync(branchManagerPath, "utf8");
-  const mergeBranch = fs.readFileSync(mergeBranchPath, "utf8");
+  const renderer = stripComments(fs.readFileSync(rendererPath, "utf8"));
+  const versionHistory = stripComments(fs.readFileSync(versionHistoryPath, "utf8"));
+  const collabBranchManager = stripComments(fs.readFileSync(collabBranchManagerPath, "utf8"));
+  const branchManager = stripComments(fs.readFileSync(branchManagerPath, "utf8"));
+  const mergeBranch = stripComments(fs.readFileSync(mergeBranchPath, "utf8"));
   const css = fs.readFileSync(cssPath, "utf8");
 
   // Avoid React inline styles in the collab panels (and their renderer mount point).

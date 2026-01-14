@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function extractBlock(source, startNeedle) {
@@ -28,7 +30,7 @@ function extractBlock(source, startNeedle) {
 
 test("SpreadsheetApp comments panel/tooltip use CSS classes (no inline style.*)", () => {
   const filePath = path.join(__dirname, "..", "src", "app", "spreadsheetApp.ts");
-  const content = fs.readFileSync(filePath, "utf8");
+  const content = stripComments(fs.readFileSync(filePath, "utf8"));
 
   const togglePanel = extractBlock(content, "toggleCommentsPanel(): void");
   const createPanel = extractBlock(content, "private createCommentsPanel(");

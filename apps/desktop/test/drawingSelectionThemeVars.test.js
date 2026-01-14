@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("SpreadsheetApp drawing selection handles use --formula-grid-* tokens", () => {
   const filePath = path.join(__dirname, "..", "src", "app", "spreadsheetApp.ts");
-  const source = fs.readFileSync(filePath, "utf8");
+  const source = stripComments(fs.readFileSync(filePath, "utf8"));
 
   // Drawings/images selection handles are painted on the grid selection canvas.
   // They should follow the grid theme bridge so theming can diverge from app chrome.
@@ -35,4 +37,3 @@ test("SpreadsheetApp drawing selection handles use --formula-grid-* tokens", () 
     "Drawing selection handles should not resolve --bg-primary directly (use the grid token bridge)",
   );
 });
-

@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,10 +20,10 @@ test("Solver panel React components avoid inline styles (use solver.css classes)
   const desktopRoot = path.join(__dirname, "..");
 
   const sources = {
-    panel: fs.readFileSync(path.join(panelDir, "SolverPanel.tsx"), "utf8"),
-    dialog: fs.readFileSync(path.join(panelDir, "SolverDialog.tsx"), "utf8"),
-    progress: fs.readFileSync(path.join(panelDir, "SolverProgress.tsx"), "utf8"),
-    summary: fs.readFileSync(path.join(panelDir, "SolverResultSummary.tsx"), "utf8"),
+    panel: stripComments(fs.readFileSync(path.join(panelDir, "SolverPanel.tsx"), "utf8")),
+    dialog: stripComments(fs.readFileSync(path.join(panelDir, "SolverDialog.tsx"), "utf8")),
+    progress: stripComments(fs.readFileSync(path.join(panelDir, "SolverProgress.tsx"), "utf8")),
+    summary: stripComments(fs.readFileSync(path.join(panelDir, "SolverResultSummary.tsx"), "utf8")),
   };
 
   for (const [name, content] of Object.entries(sources)) {
@@ -131,10 +132,10 @@ test("Solver panel React components avoid inline styles (use solver.css classes)
       .join("\n")}`,
   );
 
-  const mainSrc = fs.readFileSync(mainPath, "utf8");
+  const mainSrc = stripComments(fs.readFileSync(mainPath, "utf8"));
   assert.match(
     mainSrc,
-    /import\s+["'][^"']*styles\/solver\.css["']/,
+    /^\s*import\s+["'][^"']*styles\/solver\.css["']\s*;?/m,
     "apps/desktop/src/main.ts should import src/styles/solver.css so the Solver panel UI is styled in production builds",
   );
 });
