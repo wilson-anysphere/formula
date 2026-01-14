@@ -420,16 +420,19 @@ describe("Drawing context menu (main wiring helper)", () => {
     }
   });
 
-  it("treats hashed (far-negative) drawing ids as workbook drawings, not canvas charts", () => {
-    const contextMenu = new ContextMenu({ testId: "context-menu-drawing-hashed-id" });
+  it("enables z-order actions for hashed (far-negative) drawing ids within the workbook drawings stack", () => {
+    const contextMenu = new ContextMenu({ testId: "context-menu-drawing-hashed-id-mid-stack" });
     const hashedId = -0x200000000; // -2^33 (hashed drawing id namespace floor)
     let selectedId: number | null = hashedId;
     const app = {
       hitTestDrawingAtClientPoint: vi.fn(() => ({ id: hashedId })),
       getSelectedDrawingId: vi.fn(() => selectedId),
-      // Topmost-first ordering: charts first (negative small magnitude), then workbook drawings.
-      listDrawingsForSheet: vi.fn(() => [{ id: -1 }, { id: -2 }, { id: hashedId }, { id: 1 }]),
+      // Topmost-first ordering: ChartStore charts first (negative 32-bit), then workbook drawings.
+      // The hashed drawing id is mid-stack within the workbook drawings group, so it should be able
+      // to move in either direction *within that group*.
+      listDrawingsForSheet: vi.fn(() => [{ id: -1 }, { id: -2 }, { id: 1 }, { id: hashedId }, { id: 2 }]),
       isSelectedDrawingImage: vi.fn(() => false),
+      isReadOnly: vi.fn(() => false),
       selectDrawingById: vi.fn((id: number | null) => {
         selectedId = id;
       }),
@@ -450,17 +453,16 @@ describe("Drawing context menu (main wiring helper)", () => {
         isEditing: false,
       });
 
-      const overlay = document.querySelector<HTMLElement>('[data-testid="context-menu-drawing-hashed-id"]');
+      const overlay = document.querySelector<HTMLElement>('[data-testid="context-menu-drawing-hashed-id-mid-stack"]');
       const buttons = Array.from(overlay?.querySelectorAll<HTMLButtonElement>("button") ?? []);
       const buttonByLabel = (label: string) =>
         buttons.find((btn) => (btn.querySelector(".context-menu__label")?.textContent ?? "").trim() === label) ?? null;
 
-      // The hashed drawing is topmost within the workbook drawings stack (but not within the chart stack).
-      expect(buttonByLabel("Bring Forward")?.disabled).toBe(true);
+      expect(buttonByLabel("Bring Forward")?.disabled).toBe(false);
       expect(buttonByLabel("Send Backward")?.disabled).toBe(false);
     } finally {
       contextMenu.close();
-      document.querySelector('[data-testid="context-menu-drawing-hashed-id"]')?.remove();
+      document.querySelector('[data-testid="context-menu-drawing-hashed-id-mid-stack"]')?.remove();
     }
   });
 });
