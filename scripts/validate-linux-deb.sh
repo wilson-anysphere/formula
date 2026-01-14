@@ -335,7 +335,7 @@ validate_desktop_integration_extracted() {
   local expected_binary_escaped
   expected_binary_escaped="$(printf '%s' "$EXPECTED_MAIN_BINARY" | sed -e 's/[][(){}.^$*+?|\\]/\\&/g')"
   local exec_token_re
-  exec_token_re="(^|[[:space:]])([^[:space:]]*/)?${expected_binary_escaped}([[:space:]]|$)"
+  exec_token_re="(^|[[:space:]])[\"']?([^[:space:]]*/)?${expected_binary_escaped}[\"']?([[:space:]]|$)"
 
   local -a matched_desktop_files=()
   local desktop_file
@@ -350,7 +350,7 @@ validate_desktop_integration_extracted() {
   done
 
   if [[ ${#matched_desktop_files[@]} -eq 0 ]]; then
-    err "No extracted .desktop file referenced expected main binary '${EXPECTED_MAIN_BINARY}' in its Exec= entry."
+    err "No extracted .desktop files appear to target the expected executable '${EXPECTED_MAIN_BINARY}' in their Exec= entry."
     err "Extracted .desktop files inspected:"
     for desktop_file in "${desktop_files[@]}"; do
       local rel

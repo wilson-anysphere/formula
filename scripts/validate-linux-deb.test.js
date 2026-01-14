@@ -193,6 +193,7 @@ function runValidator({
   fakePackage,
   fakeBinary,
   desktopMimeValue,
+  desktopExecLine,
   debNameOverride,
 } = {}) {
   const proc = spawnSync(
@@ -211,6 +212,7 @@ function runValidator({
         FAKE_DPKG_DEB_DEPENDS_FILE: dependsFile,
         FAKE_DPKG_DEB_CONTENTS_FILE: contentsFile,
         ...(desktopMimeValue ? { FAKE_DESKTOP_MIME_VALUE: desktopMimeValue } : {}),
+        ...(desktopExecLine ? { FAKE_DESKTOP_EXEC_LINE: desktopExecLine } : {}),
         ...(debNameOverride ? { FORMULA_DEB_NAME_OVERRIDE: debNameOverride } : {}),
       },
     },
@@ -356,6 +358,27 @@ test("validate-linux-deb fails when extracted .desktop lacks URL scheme handler 
   });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /x-scheme-handler\/formula/i);
+});
+
+test("validate-linux-deb fails when extracted .desktop Exec= does not reference the expected binary", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    desktopExecLine: "Exec=something-else %U",
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /target the expected executable/i);
 });
 
 test("validate-linux-deb fails when Parquet shared-mime-info definition is missing from the payload", { skip: !hasBash }, () => {
