@@ -84,6 +84,7 @@ matches="$(
 if [ -n "$matches" ]; then
   echo "error: ${workflow} uses forbidden GitHub Actions runner '*-latest' labels." >&2
   echo "Pin runner images instead (e.g., macos-14, windows-2022, ubuntu-24.04) to avoid alias drift." >&2
+  echo "See https://github.com/actions/runner-images for supported images and deprecation notices." >&2
   echo "" >&2
   echo "Found:" >&2
   echo "$matches" >&2
