@@ -1039,6 +1039,43 @@ fn hash_join_number_canonicalizes_negative_zero_and_nans() {
 }
 
 #[test]
+fn hash_join_handles_chunk_boundaries_and_different_page_sizes() {
+    let schema = vec![ColumnSchema {
+        name: "k".to_owned(),
+        column_type: ColumnType::DateTime,
+    }];
+
+    let left_options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let right_options = TableOptions {
+        page_size_rows: 128,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let rows = left_options.page_size_rows.max(right_options.page_size_rows) + 10;
+
+    let mut left_builder = ColumnarTableBuilder::new(schema.clone(), left_options);
+    let mut right_builder = ColumnarTableBuilder::new(schema, right_options);
+    for i in 0..rows {
+        left_builder.append_row(&[Value::DateTime(i as i64)]);
+        right_builder.append_row(&[Value::DateTime(i as i64)]);
+    }
+
+    let left = left_builder.finalize();
+    let right = right_builder.finalize();
+
+    let join = left.hash_join(&right, 0, 0).unwrap();
+    assert_eq!(join.len(), rows);
+
+    for (l, r) in join.left_indices.iter().zip(join.right_indices.iter()) {
+        assert_eq!(l, r);
+    }
+    assert_eq!(join.left_indices[0], 0);
+    assert_eq!(*join.left_indices.last().unwrap(), rows - 1);
+}
+
+#[test]
 fn hash_join_multi_inner_two_keys() {
     let schema = vec![
         ColumnSchema {
