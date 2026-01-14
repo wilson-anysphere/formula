@@ -649,7 +649,9 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
   if (!tag) return null;
 
   const getAttr = (name: string): string | null => {
-    const re = new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, "i");
+    // Match full attribute names only (avoid matching `data-width` / `stroke-width` / etc).
+    // Attributes in XML must be separated by whitespace, so we can safely require it here.
+    const re = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, "i");
     const match = re.exec(tag);
     return match ? String(match[2] ?? "").trim() : null;
   };

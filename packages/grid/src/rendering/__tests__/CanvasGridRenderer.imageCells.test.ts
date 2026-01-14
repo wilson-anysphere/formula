@@ -1199,7 +1199,7 @@ describe("CanvasGridRenderer image cells", () => {
     // on a small "header sniff" to discover SVG dimensions).
     const prefix = "a".repeat(300 * 1024);
     // Include a fake `<svg ...>` in a comment to ensure we don't accidentally parse comment contents.
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- <svg width="1" height="1"></svg> -->\n<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" width="10001" height="1"></svg>`;
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- <svg width="1" height="1"></svg> -->\n<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" data-width="1" data-height="1" width="10001" height="1"></svg>`;
     const imageResolver = vi.fn(async () => createSvgBytes(svg));
 
     const gridCanvas = document.createElement("canvas");
@@ -1268,7 +1268,7 @@ describe("CanvasGridRenderer image cells", () => {
     // larger SVG header read path in guardPngBlob.
     const leadingWhitespace = " ".repeat(40);
     const prefix = "a".repeat(300 * 1024);
-    const svg = `${leadingWhitespace}<!-- <svg width="1" height="1"></svg> -->\n<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" width="10001" height="1"></svg>`;
+    const svg = `${leadingWhitespace}<!-- <svg width="1" height="1"></svg> -->\n<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" data-width="1" data-height="1" width="10001" height="1"></svg>`;
     const bytes = createSvgBytes(svg);
     const imageResolver = vi.fn(async () => new Blob([bytes], { type: "image/svg+xml" }));
 

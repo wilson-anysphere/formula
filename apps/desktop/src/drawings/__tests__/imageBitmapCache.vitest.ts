@@ -503,7 +503,7 @@ describe("ImageBitmapCache", () => {
     // on a small "header sniff" to discover SVG dimensions).
     const prefix = "a".repeat(300 * 1024);
     // Also include a fake `<svg ...>` in a comment to ensure we don't accidentally parse comment contents.
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- <svg width="1" height="1"></svg> -->\n<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" width="10001" height="1"></svg>`;
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- <svg width="1" height="1"></svg> -->\n<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" data-width="1" data-height="1" width="10001" height="1"></svg>`;
     const entry: ImageEntry = { id: "svg_bomb", bytes: createSvgBytes(svg), mimeType: "image/svg+xml" };
 
     await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
