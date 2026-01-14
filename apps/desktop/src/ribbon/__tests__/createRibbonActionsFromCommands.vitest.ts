@@ -2,7 +2,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import { CommandRegistry } from "../../extensions/commandRegistry";
-import { createRibbonActionsFromCommands } from "../createRibbonActionsFromCommands";
+import { createRibbonActionsFromCommands, createRibbonFileActionsFromCommands } from "../createRibbonActionsFromCommands";
 
 async function flushMicrotasks(): Promise<void> {
   // Allow any `queueMicrotask` / async IIFE work to run.
@@ -129,5 +129,61 @@ describe("createRibbonActionsFromCommands", () => {
 
     const toast = toastRoot.querySelector<HTMLElement>("[data-testid=\"toast\"]");
     expect(toast?.textContent).toBe("Ribbon: ribbon.unknown");
+  });
+});
+
+describe("createRibbonFileActionsFromCommands", () => {
+  it("dispatches file actions through CommandRegistry", async () => {
+    const registry = new CommandRegistry();
+    const run = vi.fn();
+    registry.registerBuiltinCommand("workbench.newWorkbook", "New", run);
+
+    const fileActions = createRibbonFileActionsFromCommands({
+      commandRegistry: registry,
+      commandIds: { newWorkbook: "workbench.newWorkbook" },
+    });
+
+    fileActions.newWorkbook?.();
+    await flushMicrotasks();
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches toggleAutoSave with the enabled state", async () => {
+    const registry = new CommandRegistry();
+    const run = vi.fn();
+    registry.registerBuiltinCommand("workbench.setAutoSaveEnabled", "AutoSave", run);
+
+    const fileActions = createRibbonFileActionsFromCommands({
+      commandRegistry: registry,
+      commandIds: { toggleAutoSave: "workbench.setAutoSaveEnabled" },
+    });
+
+    fileActions.toggleAutoSave?.(true);
+    await flushMicrotasks();
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(true);
+  });
+
+  it("routes file action errors to onCommandError", async () => {
+    const registry = new CommandRegistry();
+    registry.registerBuiltinCommand("workbench.fail", "Fail", () => {
+      throw new Error("boom");
+    });
+
+    const onCommandError = vi.fn();
+    const fileActions = createRibbonFileActionsFromCommands({
+      commandRegistry: registry,
+      onCommandError,
+      commandIds: { newWorkbook: "workbench.fail" },
+    });
+
+    fileActions.newWorkbook?.();
+    await flushMicrotasks();
+
+    expect(onCommandError).toHaveBeenCalledTimes(1);
+    expect(onCommandError.mock.calls[0]?.[0]).toBe("workbench.fail");
+    expect(onCommandError.mock.calls[0]?.[1]).toBeInstanceOf(Error);
   });
 });

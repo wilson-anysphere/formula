@@ -1,6 +1,6 @@
 import type { CommandContribution, CommandRegistry } from "../extensions/commandRegistry.js";
 import { showToast } from "../extensions/ui.js";
-import type { RibbonActions } from "./ribbonSchema.js";
+import type { RibbonActions, RibbonFileActions } from "./ribbonSchema.js";
 
 type RibbonCommandOverride = () => void | Promise<void>;
 type RibbonToggleOverride = (pressed: boolean) => void | Promise<void>;
@@ -153,5 +153,72 @@ export function createRibbonActionsFromCommands(params: {
         // the default toast for unknown commands.
       });
     },
+  };
+}
+
+export function createRibbonFileActionsFromCommands(params: {
+  commandRegistry: CommandRegistry;
+  onCommandError?: (commandId: string, err: unknown) => void;
+  commandIds: {
+    newWorkbook?: string;
+    openWorkbook?: string;
+    saveWorkbook?: string;
+    saveWorkbookAs?: string;
+    toggleAutoSave?: string;
+    versionHistory?: string;
+    branchManager?: string;
+    print?: string;
+    printPreview?: string;
+    pageSetup?: string;
+    closeWindow?: string;
+    quit?: string;
+  };
+}): RibbonFileActions {
+  const { commandRegistry, onCommandError, commandIds } = params;
+
+  const reportError = (commandId: string, err: unknown): void => {
+    try {
+      onCommandError?.(commandId, err);
+    } catch {
+      // Avoid cascading failures (e.g. toast root missing) causing unhandled rejections.
+    }
+  };
+
+  const run = (commandId: string, fn: () => void | Promise<void>): void => {
+    void (async () => {
+      try {
+        await fn();
+      } catch (err) {
+        reportError(commandId, err);
+      }
+    })();
+  };
+
+  const command = (commandId: string | undefined): (() => void) | undefined => {
+    if (!commandId) return undefined;
+    return () =>
+      run(commandId, async () => {
+        await commandRegistry.executeCommand(commandId);
+      });
+  };
+
+  return {
+    newWorkbook: command(commandIds.newWorkbook),
+    openWorkbook: command(commandIds.openWorkbook),
+    saveWorkbook: command(commandIds.saveWorkbook),
+    saveWorkbookAs: command(commandIds.saveWorkbookAs),
+    toggleAutoSave: commandIds.toggleAutoSave
+      ? (enabled) =>
+          run(commandIds.toggleAutoSave!, async () => {
+            await commandRegistry.executeCommand(commandIds.toggleAutoSave!, enabled);
+          })
+      : undefined,
+    versionHistory: command(commandIds.versionHistory),
+    branchManager: command(commandIds.branchManager),
+    print: command(commandIds.print),
+    printPreview: command(commandIds.printPreview),
+    pageSetup: command(commandIds.pageSetup),
+    closeWindow: command(commandIds.closeWindow),
+    quit: command(commandIds.quit),
   };
 }

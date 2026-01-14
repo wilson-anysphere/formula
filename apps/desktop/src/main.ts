@@ -39,7 +39,7 @@ import { SheetTabStrip } from "./sheets/SheetTabStrip";
 
 import { ThemeController } from "./theme/themeController.js";
 
-import { createRibbonActionsFromCommands, mountRibbon } from "./ribbon/index.js";
+import { createRibbonActionsFromCommands, createRibbonFileActionsFromCommands, mountRibbon } from "./ribbon/index.js";
 
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
 import { computeRibbonDisabledByIdFromCommandRegistry } from "./ribbon/ribbonCommandRegistryDisabling.js";
@@ -8078,14 +8078,16 @@ async function handleRibbonExportPdf(): Promise<void> {
   }
 }
 
+const onRibbonCommandError = (_commandId: string, err: unknown): void => {
+  // DLP policy violations are already surfaced via a dedicated toast (e.g. clipboard copy blocked).
+  // Avoid double-toasting "Command failed" for expected policy restrictions.
+  if ((err as any)?.name === "DlpViolationError") return;
+  showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+};
+
 const ribbonActions = createRibbonActionsFromCommands({
   commandRegistry,
-  onCommandError: (_commandId, err) => {
-    // DLP policy violations are already surfaced via a dedicated toast (e.g. clipboard copy blocked).
-    // Avoid double-toasting "Command failed" for expected policy restrictions.
-    if ((err as any)?.name === "DlpViolationError") return;
-    showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-  },
+  onCommandError: onRibbonCommandError,
   commandOverrides: {
     // Insert → PivotTable dropdown contains Excel-style submenu variants. We only implement
     // the selection-based Pivot Builder flow today, so route "From Table/Range…" to the
@@ -8104,101 +8106,63 @@ const ribbonActions = createRibbonActionsFromCommands({
   // Ribbon toggles invoke both `onToggle` and `onCommand`. These overrides handle the
   // pressed state and suppress the follow-up `onCommand` call so we don't double-execute.
   toggleOverrides: {
-    "file.save.autoSave": (pressed) => {
-      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled, pressed).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-      app.focus();
+    "file.save.autoSave": async (pressed) => {
+      try {
+        await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled, pressed);
+      } finally {
+        app.focus();
+      }
     },
-    "view.toggleShowFormulas": (pressed) => {
+    "view.toggleShowFormulas": async (pressed) => {
       // Route all ribbon "Show Formulas" toggles through the canonical command so
       // ribbon, command palette, and keybindings share the same logic/guards.
-      if (app.getShowFormulas() !== pressed) {
-        void commandRegistry.executeCommand("view.toggleShowFormulas").catch((err) => {
-          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-        });
+      try {
+        if (app.getShowFormulas() !== pressed) {
+          await commandRegistry.executeCommand("view.toggleShowFormulas");
+        }
+      } finally {
+        app.focus();
       }
-      app.focus();
     },
-    "view.togglePerformanceStats": (pressed) => {
-      void commandRegistry.executeCommand("view.togglePerformanceStats", pressed).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-      app.focus();
+    "view.togglePerformanceStats": async (pressed) => {
+      try {
+        await commandRegistry.executeCommand("view.togglePerformanceStats", pressed);
+      } finally {
+        app.focus();
+      }
     },
-    "view.toggleSplitView": (pressed) => {
-      void commandRegistry.executeCommand("view.toggleSplitView", pressed).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-      app.focus();
+    "view.toggleSplitView": async (pressed) => {
+      try {
+        await commandRegistry.executeCommand("view.toggleSplitView", pressed);
+      } finally {
+        app.focus();
+      }
     },
   },
   onUnknownCommand: handleRibbonCommand,
 });
 
-mountRibbon(ribbonReactRoot, {
-  fileActions: {
-    newWorkbook: () => {
-      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    openWorkbook: () => {
-      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    saveWorkbook: () => {
-      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    saveWorkbookAs: () => {
-      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    toggleAutoSave: (enabled) => {
-      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled, enabled).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    versionHistory: () => {
-      void commandRegistry.executeCommand("view.togglePanel.versionHistory").catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    branchManager: () => {
-      void commandRegistry.executeCommand("view.togglePanel.branchManager").catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    pageSetup: () => {
-      void commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    printPreview: () => {
-      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.printPreview).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    print: () => {
-      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.print).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    closeWindow: () => {
-      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
-    quit: () => {
-      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.quit).catch((err) => {
-        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    },
+const ribbonFileActions = createRibbonFileActionsFromCommands({
+  commandRegistry,
+  onCommandError: onRibbonCommandError,
+  commandIds: {
+    newWorkbook: WORKBENCH_FILE_COMMANDS.newWorkbook,
+    openWorkbook: WORKBENCH_FILE_COMMANDS.openWorkbook,
+    saveWorkbook: WORKBENCH_FILE_COMMANDS.saveWorkbook,
+    saveWorkbookAs: WORKBENCH_FILE_COMMANDS.saveWorkbookAs,
+    toggleAutoSave: WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled,
+    versionHistory: "view.togglePanel.versionHistory",
+    branchManager: "view.togglePanel.branchManager",
+    pageSetup: PAGE_LAYOUT_COMMANDS.pageSetupDialog,
+    printPreview: WORKBENCH_FILE_COMMANDS.printPreview,
+    print: WORKBENCH_FILE_COMMANDS.print,
+    closeWindow: WORKBENCH_FILE_COMMANDS.closeWorkbook,
+    quit: WORKBENCH_FILE_COMMANDS.quit,
   },
+});
+
+mountRibbon(ribbonReactRoot, {
+  fileActions: ribbonFileActions,
   ...ribbonActions,
 });
 

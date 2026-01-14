@@ -2,7 +2,7 @@ export { Ribbon } from "./Ribbon.js";
 export { RibbonButton } from "./RibbonButton.js";
 export { RibbonGroup } from "./RibbonGroup.js";
 export { mountRibbon } from "./mountRibbon.js";
-export { createRibbonActionsFromCommands } from "./createRibbonActionsFromCommands.js";
+export { createRibbonActionsFromCommands, createRibbonFileActionsFromCommands } from "./createRibbonActionsFromCommands.js";
 export { defaultRibbonSchema } from "./ribbonSchema.js";
 export type {
   RibbonActions,
