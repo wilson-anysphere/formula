@@ -217,6 +217,30 @@ describe("drawings/modelAdapters", () => {
     expect(uiWithWhitespace.id).toBeLessThanOrEqual(-(2 ** 33));
   });
 
+  it("hashes very long string ids using a bounded summary (stable + whitespace-tolerant)", () => {
+    const long = "a".repeat(10_000);
+    const makeModel = (id: string) => ({
+      id,
+      kind: { Image: { image_id: "image1.png" } },
+      anchor: {
+        Absolute: {
+          pos: { x_emu: 0, y_emu: 0 },
+          ext: { cx: 10, cy: 20 },
+        },
+      },
+      z_order: 0,
+    });
+
+    const ui1 = convertModelDrawingObjectToUiDrawingObject(makeModel(long));
+    const ui2 = convertModelDrawingObjectToUiDrawingObject(makeModel(`  ${long}  `));
+    const ui3 = convertModelDrawingObjectToUiDrawingObject(makeModel(long));
+
+    expect(Number.isSafeInteger(ui1.id)).toBe(true);
+    expect(ui1.id).toBeLessThanOrEqual(-(2 ** 33));
+    expect(ui2.id).toBe(ui1.id);
+    expect(ui3.id).toBe(ui1.id);
+  });
+
   it("does not crash when drawing object ids are missing/undefined", () => {
     const model = {
       // Intentionally omit `id`.

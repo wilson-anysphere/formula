@@ -216,20 +216,37 @@ function normalizeDrawingIdForHash(unwrapped: unknown): unknown {
   if (typeof unwrapped === "string") {
     // DocumentController trims string ids before persisting; mirror that normalization here so
     // UI-layer hashed ids stay stable even if upstream snapshots include accidental whitespace.
-    const trimmed = unwrapped.trim();
+    //
     // Defensive guard: avoid hashing arbitrarily-large strings (potential collab DoS vector).
-    // For long ids we hash a stable summary (prefix/suffix + length) instead of the full value.
+    // For long ids we hash a stable *summary* (trimmed length + prefix/middle/suffix) instead of
+    // the full string to keep hashing bounded.
     const MAX_LEN = 4096;
-    if (trimmed.length > MAX_LEN) {
-      const SAMPLE = 1024;
-      return {
-        kind: "drawingId:longString",
-        len: trimmed.length,
-        prefix: trimmed.slice(0, SAMPLE),
-        suffix: trimmed.slice(-SAMPLE),
-      };
+    if (unwrapped.length <= MAX_LEN) {
+      return unwrapped.trim();
     }
-    return trimmed;
+
+    const SAMPLE = 1024;
+    const TRIM_SCAN = 2048;
+
+    // Best-effort trim without scanning the entire string: only inspect the first/last `TRIM_SCAN`
+    // characters to compute trim offsets and samples. This keeps costs bounded even for huge ids.
+    const startChunk = unwrapped.slice(0, TRIM_SCAN);
+    const startMatch = /^\s+/.exec(startChunk);
+    const start = startMatch ? startMatch[0].length : 0;
+
+    const endChunk = unwrapped.slice(Math.max(0, unwrapped.length - TRIM_SCAN));
+    const endMatch = /\s+$/.exec(endChunk);
+    const endTrim = endMatch ? endMatch[0].length : 0;
+    const end = Math.max(start, unwrapped.length - endTrim);
+
+    const trimmedLen = Math.max(0, end - start);
+
+    const prefix = unwrapped.slice(start, Math.min(end, start + SAMPLE));
+    const suffix = unwrapped.slice(Math.max(start, end - SAMPLE), end);
+    const midStart = start + Math.max(0, Math.floor(trimmedLen / 2) - Math.floor(SAMPLE / 2));
+    const mid = unwrapped.slice(midStart, Math.min(end, midStart + SAMPLE));
+
+    return { kind: "drawingId:longString", trimmedLen, prefix, mid, suffix };
   }
   return unwrapped;
 }
@@ -240,10 +257,15 @@ function parseDrawingObjectId(value: unknown): number {
     if (typeof unwrapped === "number") return readOptionalNumber(unwrapped);
     if (typeof unwrapped === "bigint") return readOptionalNumber(unwrapped);
     if (typeof unwrapped === "string") {
+      // Avoid expensive parsing work for huge string ids. Canonical safe-integer ids are at most
+      // 16 digits (and a small amount of surrounding whitespace), so longer strings should be
+      // treated as opaque and hashed.
+      if (unwrapped.length > 64) return undefined;
       const trimmed = unwrapped.trim();
       if (!trimmed) return undefined;
       // Only accept canonical base-10 integer strings so distinct raw ids like "001" and "1"
       // do not collide in the UI layer.
+      if (trimmed.length > 16) return undefined;
       if (!/^\d+$/.test(trimmed)) return undefined;
       const n = Number(trimmed);
       if (!Number.isFinite(n)) return undefined;
