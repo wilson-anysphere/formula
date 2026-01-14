@@ -906,10 +906,19 @@ jobs:
           restore-keys: |
             tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
 
+      - name: Cache Tauri permission list (cargo tauri permission ls)
+        if: runner.os == 'Linux'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: target/ci/tauri-permission-ls.txt
+          key: tauri-permission-ls-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}-${{ hashFiles('Cargo.lock', 'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/src-tauri/tauri.conf.json') }}
+
       - name: Validate Tauri capability permission identifiers
         # Fail the release early if `apps/desktop/src-tauri/capabilities/*.json` references
         # permissions that do not exist in the pinned toolchain (`cargo tauri permission ls`).
         if: runner.os == 'Linux'
+        env:
+          FORMULA_TAURI_PERMISSION_LS_CACHE_PATH: target/ci/tauri-permission-ls.txt
         run: node scripts/check-tauri-permissions.mjs
 
       # Ensure release builds produce separate debug symbol files for crash symbolication
