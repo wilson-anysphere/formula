@@ -165,12 +165,18 @@ export function validateTauriUpdaterManifest(manifest, opts = {}) {
       const os = inferOsFromPlatformKey(platformKey);
 
       if (os === "darwin") {
-        if (lower.endsWith(".dmg")) {
+        if (lower.endsWith(".dmg") || lower.endsWith(".pkg")) {
           errors.push(
-            `macOS updater artifact must be an update archive (.app.tar.gz), not a DMG installer: ${JSON.stringify(url)}`,
+            `macOS updater artifact must be an update archive tarball (.app.tar.gz preferred; allow .tar.gz/.tgz), not an installer (.dmg/.pkg): ${JSON.stringify(url)}`,
           );
-        } else if (!lower.endsWith(".app.tar.gz")) {
-          errors.push(`macOS updater artifact must end with .app.tar.gz: ${JSON.stringify(url)}`);
+        } else if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) {
+          errors.push(
+            `macOS updater artifact must not reference a Linux AppImage tarball: ${JSON.stringify(url)}`,
+          );
+        } else if (!(lower.endsWith(".tar.gz") || lower.endsWith(".tgz"))) {
+          errors.push(
+            `macOS updater artifact must be a tarball (.app.tar.gz preferred; allow .tar.gz/.tgz): ${JSON.stringify(url)}`,
+          );
         }
       } else if (os === "linux") {
         if (lower.endsWith(".deb") || lower.endsWith(".rpm")) {

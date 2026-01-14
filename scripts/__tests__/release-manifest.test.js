@@ -15,7 +15,7 @@ import {
   mergeTauriUpdaterManifests,
   normalizeVersion as normalizeVersionForMerge,
 } from "../merge-tauri-updater-manifests.mjs";
-import { verifyTauriManifestSignature } from "../tauri-updater-manifest.mjs";
+import { validateTauriUpdaterManifest, verifyTauriManifestSignature } from "../tauri-updater-manifest.mjs";
 import {
   ActionableError,
   filenameFromUrl,
@@ -496,6 +496,30 @@ test("tauri-updater-manifest: verifyTauriManifestSignature supports minisign key
   // 3) Minisign signature file (comment + payload line)
   const sigFileText = `untrusted comment: minisign signature: ${keyIdHex}\n${sigPayload.toString("base64")}\n`;
   assert.equal(verifyTauriManifestSignature(manifestText, sigFileText, pubkeyBase64), true);
+});
+
+test("tauri-updater-manifest: validateTauriUpdaterManifest accepts macOS updater archives ending with .tgz", () => {
+  assert.doesNotThrow(() =>
+    validateTauriUpdaterManifest({
+      version: "0.1.0",
+      platforms: {
+        "darwin-x86_64": { url: "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_macos_universal.tgz" },
+      },
+    }),
+  );
+});
+
+test("tauri-updater-manifest: validateTauriUpdaterManifest rejects Linux AppImage tarballs under macOS keys", () => {
+  assert.throws(
+    () =>
+      validateTauriUpdaterManifest({
+        version: "0.1.0",
+        platforms: {
+          "darwin-x86_64": { url: "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_x86_64.AppImage.tar.gz" },
+        },
+      }),
+    /AppImage tarball/i,
+  );
 });
 
 test("tauri-updater-manifest: verifyTauriManifestSignature returns false for a wrong signature", async () => {
