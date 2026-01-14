@@ -402,6 +402,30 @@ describe("drawings/modelAdapters", () => {
     expect(ui[0]?.transform).toEqual({ rotationDeg: 30, flipH: true, flipV: false });
   });
 
+  it("preserves preserved metadata even when falling back to the formula-model adapter", () => {
+    const drawings = [
+      {
+        id: 1,
+        kind: { Image: { image_id: "img1" } },
+        anchor: {
+          Absolute: {
+            pos: { x_emu: 0, y_emu: 0 },
+            ext: { cx: 10, cy: 10 },
+          },
+        },
+        z_order: 0,
+        preserved: {
+          "xlsx.pic_xml": "<xdr:pic>...</xdr:pic>",
+          other: 123,
+        },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.preserved).toEqual({ "xlsx.pic_xml": "<xdr:pic>...</xdr:pic>" });
+  });
+
   it("accepts workbook snapshots with sheets encoded as an object map", () => {
     const workbook = {
       images: {
