@@ -901,7 +901,8 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     // Pretend we're in row 3 (0-based row 2) inside the table.
     bar.setActiveCell({
       address: "B3",
-      input: "=SUM([@Amount], [@[Total Amount]], TableThisRow[@Amount], TableThisRow[@[Total Amount]])",
+      input:
+        "=SUM([@Amount], [@[Total Amount]], [@], TableThisRow[@Amount], TableThisRow[@[Total Amount]], TableThisRow[@])",
       value: null,
     });
 
@@ -910,8 +911,10 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     expect(refSpans.map((s) => s.textContent)).toEqual([
       "[@Amount]",
       "[@[Total Amount]]",
+      "[@]",
       "TableThisRow[@Amount]",
       "TableThisRow[@[Total Amount]]",
+      "TableThisRow[@]",
     ]);
 
     const hover = (text: string) => {
@@ -944,6 +947,109 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
       "TableThisRow[@[Total Amount]] (B3)"
     );
     expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["200"]);
+
+    // Whole-row refs resolve to the current row across all columns.
+    tooltip = hover("[@]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe("[@] (A3:B3)");
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["20", "200"]);
+
+    tooltip = hover("TableThisRow[@]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe(
+      "TableThisRow[@] (A3:B3)"
+    );
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["20", "200"]);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
+  it("renders a preview for implicit selector-qualified structured references inside tables ([[#All],[Column]])", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    // Table range includes header row at A1:B1 and data rows at A2:B4.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet1", { row: 0, col: 1 }, "Other");
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 10);
+    doc.setCellValue("Sheet1", { row: 2, col: 0 }, 20);
+    doc.setCellValue("Sheet1", { row: 3, col: 0 }, 30);
+    doc.setCellValue("Sheet1", { row: 1, col: 1 }, 100);
+    doc.setCellValue("Sheet1", { row: 2, col: 1 }, 200);
+    doc.setCellValue("Sheet1", { row: 3, col: 1 }, 300);
+
+    app.getSearchWorkbook().addTable({
+      name: "TableImplicit",
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 3,
+      endCol: 1,
+      columns: ["Amount", "Other"],
+    });
+
+    const bar = (app as any).formulaBar;
+    // Pretend we're in row 3 (0-based row 2) inside the table.
+    bar.setActiveCell({
+      address: "B3",
+      input: "=SUM([[#This Row],[Amount]], [[#All],[Amount]], [[#Headers],[Amount]], [[#Data],[Amount]], [[#Totals],[Amount]])",
+      value: null,
+    });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpans = Array.from(highlight?.querySelectorAll<HTMLElement>('span[data-kind="reference"]') ?? []);
+    expect(refSpans.map((s) => s.textContent)).toEqual([
+      "[[#This Row],[Amount]]",
+      "[[#All],[Amount]]",
+      "[[#Headers],[Amount]]",
+      "[[#Data],[Amount]]",
+      "[[#Totals],[Amount]]",
+    ]);
+
+    const hover = (text: string) => {
+      const span = refSpans.find((s) => s.textContent === text) ?? null;
+      expect(span?.textContent).toBe(text);
+      span?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+      const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+      expect(tooltip).not.toBeNull();
+      expect(tooltip?.hidden).toBe(false);
+      return tooltip!;
+    };
+
+    // This Row is the active data row => A3 (20).
+    let tooltip = hover("[[#This Row],[Amount]]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe("[[#This Row],[Amount]] (A3)");
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["20"]);
+
+    // #All includes the header row at A1 and data rows at A2:A4.
+    tooltip = hover("[[#All],[Amount]]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe("[[#All],[Amount]] (A1:A4)");
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["Amount", "10", "20"]);
+
+    // #Headers is header row only.
+    tooltip = hover("[[#Headers],[Amount]]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe("[[#Headers],[Amount]] (A1)");
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["Amount"]);
+
+    // #Data excludes header row.
+    tooltip = hover("[[#Data],[Amount]]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe("[[#Data],[Amount]] (A2:A4)");
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["10", "20", "30"]);
+
+    // #Totals maps to the last table row (best-effort).
+    tooltip = hover("[[#Totals],[Amount]]");
+    expect(tooltip.querySelector<HTMLElement>(".formula-range-preview-tooltip__header")?.textContent).toBe("[[#Totals],[Amount]] (A4)");
+    expect(Array.from(tooltip.querySelectorAll("td")).map((td) => td.textContent)).toEqual(["30"]);
 
     app.destroy();
     root.remove();
