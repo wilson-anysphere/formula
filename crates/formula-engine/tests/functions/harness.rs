@@ -4,7 +4,7 @@ use formula_engine::date::ExcelDateSystem;
 use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::pivot::PivotTable;
 use formula_engine::{Engine, Value};
-use formula_model::Range;
+use formula_model::{Range, Style};
 
 pub struct TestSheet {
     engine: Engine,
@@ -71,6 +71,31 @@ impl TestSheet {
 
     pub fn set_col_width(&mut self, col: u32, width: Option<f32>) {
         self.engine.set_col_width(self.sheet, col, width);
+    }
+
+    pub fn intern_style(&mut self, style: Style) -> u32 {
+        self.engine.intern_style(style)
+    }
+
+    pub fn set_col_style_id(&mut self, col_0based: u32, style_id: Option<u32>) {
+        self.engine
+            .set_col_style_id(self.sheet, col_0based, style_id);
+    }
+
+    pub fn set_row_style_id(&mut self, row_0based: u32, style_id: Option<u32>) {
+        self.engine
+            .set_row_style_id(self.sheet, row_0based, style_id);
+    }
+
+    pub fn set_cell_style_id(&mut self, addr: &str, style_id: u32) {
+        self.engine
+            .set_cell_style_id(self.sheet, addr, style_id)
+            .expect("set cell style id");
+    }
+
+    pub fn set_sheet_protection_enabled(&mut self, enabled: bool) {
+        self.engine
+            .set_sheet_protection_enabled(self.sheet, enabled);
     }
 
     pub fn recalc(&mut self) {

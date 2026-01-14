@@ -161,8 +161,8 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
         "filename" => Some(CellInfoType::Filename),
         // Notes:
         // - `CELL("width")` consults per-column metadata when available (defaulting to 8.43).
-        // - `CELL("protect")`/`CELL("prefix")` return best-effort defaults because this engine does
-        //   not currently track those properties.
+        // - `CELL("prefix")` returns best-effort defaults because this engine does not currently
+        //   track alignment/prefix formatting.
         // - `CELL("color")`/`CELL("parentheses")`/`CELL("format")` are implemented based on the
         //   cell number format string, but do not consider conditional formatting rules.
         _ => None,
@@ -442,6 +442,17 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let cell_ref = record_explicit_cell(ctx);
 
+            // Mirror `get_cell_value` bounds behavior: out-of-bounds references should surface
+            // `#REF!` rather than defaulting to "locked".
+            let (rows, cols) = ctx.sheet_dimensions(&cell_ref.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
+
+            // Excel's `CELL("protect")` reports the cell's locked formatting state:
+            // - All cells default to locked (`1`).
+            // - Formatting can explicitly set locked=FALSE (`0`).
+            // - The result does *not* depend on whether sheet protection is enabled.
             let locked = resolve_locked(ctx, &cell_ref.sheet_id, addr);
             Value::Number(if locked { 1.0 } else { 0.0 })
         }

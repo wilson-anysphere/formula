@@ -265,6 +265,10 @@ struct Sheet {
     default_style_id: Option<u32>,
     /// Sheet default column width in Excel "character" units.
     default_col_width: Option<f32>,
+    /// Whether worksheet protection is enabled.
+    ///
+    /// Note: This is currently informational only; the engine does not enforce edit restrictions.
+    sheet_protection_enabled: bool,
     /// Logical row count for the worksheet grid.
     ///
     /// Defaults to Excel's row limit, but can grow beyond Excel to support very large sheets. The
@@ -288,6 +292,7 @@ impl Default for Sheet {
             names: HashMap::new(),
             default_style_id: None,
             default_col_width: None,
+            sheet_protection_enabled: false,
             // Default to Excel-compatible sheet bounds.
             row_count: EXCEL_MAX_ROWS,
             col_count: EXCEL_MAX_COLS,
@@ -1394,6 +1399,39 @@ impl Engine {
         if let Some(s) = self.workbook.sheets.get_mut(sheet_id) {
             s.default_col_width = width;
         }
+    }
+
+    /// Enable/disable worksheet protection.
+    ///
+    /// This is currently informational only; it does not enforce edits. Worksheet information
+    /// functions like `CELL("protect")` must report the cell's locked formatting state regardless
+    /// of whether sheet protection is enabled (Excel behavior).
+    pub fn set_sheet_protection_enabled(&mut self, sheet: &str, enabled: bool) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
+            return;
+        };
+        if sheet.sheet_protection_enabled == enabled {
+            return;
+        }
+        sheet.sheet_protection_enabled = enabled;
+
+        // Worksheet protection is workbook metadata that can affect certain worksheet information
+        // functions. Conservatively mark compiled cells dirty so results can refresh on the next
+        // recalculation.
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
+    /// Returns whether worksheet protection is enabled for `sheet`.
+    pub fn sheet_protection_enabled(&self, sheet: &str) -> Option<bool> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        self.workbook
+            .sheets
+            .get(sheet_id)
+            .map(|sheet| sheet.sheet_protection_enabled)
     }
 
     /// Configure the logical worksheet grid size for `sheet`.

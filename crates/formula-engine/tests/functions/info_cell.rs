@@ -1,5 +1,5 @@
 use formula_engine::{ErrorKind, Value};
-use formula_model::Style;
+use formula_model::{Protection, Style};
 
 use super::harness::{assert_number, TestSheet};
 
@@ -294,6 +294,72 @@ fn cell_width_prefers_per_column_override_and_sets_custom_flag() {
 
     assert_number(&sheet.eval("=CELL(\"width\",A1)"), 25.1);
     assert_number(&sheet.eval("=CELL(\"width\",B1)"), 20.0);
+}
+
+#[test]
+fn cell_protect_defaults_to_locked() {
+    let mut sheet = TestSheet::new();
+    // Excel default: all cells are locked.
+    assert_number(&sheet.eval("=CELL(\"protect\",A1)"), 1.0);
+}
+
+#[test]
+fn cell_protect_inherits_column_locked_false() {
+    let mut sheet = TestSheet::new();
+    // Unlock the entire column A; A1 inherits it.
+    let unlocked = sheet.intern_style(Style {
+        protection: Some(Protection {
+            locked: false,
+            ..Protection::default()
+        }),
+        ..Style::default()
+    });
+    sheet.set_col_style_id(0, Some(unlocked));
+    assert_number(&sheet.eval("=CELL(\"protect\",A1)"), 0.0);
+}
+
+#[test]
+fn cell_protect_cell_override_beats_column() {
+    let mut sheet = TestSheet::new();
+    let unlocked = sheet.intern_style(Style {
+        protection: Some(Protection {
+            locked: false,
+            ..Protection::default()
+        }),
+        ..Style::default()
+    });
+    sheet.set_col_style_id(0, Some(unlocked));
+    // Explicit cell-level override should win over the unlocked column.
+    let locked = sheet.intern_style(Style {
+        protection: Some(Protection {
+            locked: true,
+            ..Protection::default()
+        }),
+        ..Style::default()
+    });
+    sheet.set_cell_style_id("A1", locked);
+    assert_number(&sheet.eval("=CELL(\"protect\",A1)"), 1.0);
+}
+
+#[test]
+fn cell_protect_ignores_sheet_protection_enabled() {
+    let mut sheet = TestSheet::new();
+    let unlocked = sheet.intern_style(Style {
+        protection: Some(Protection {
+            locked: false,
+            ..Protection::default()
+        }),
+        ..Style::default()
+    });
+    sheet.set_col_style_id(0, Some(unlocked));
+    assert_number(&sheet.eval("=CELL(\"protect\",A1)"), 0.0);
+
+    // Enabling/disabling sheet protection does not change CELL("protect"): it reports formatting
+    // state, not whether the protection is enforced.
+    sheet.set_sheet_protection_enabled(true);
+    assert_number(&sheet.eval("=CELL(\"protect\",A1)"), 0.0);
+    sheet.set_sheet_protection_enabled(false);
+    assert_number(&sheet.eval("=CELL(\"protect\",A1)"), 0.0);
 }
 
 #[test]
