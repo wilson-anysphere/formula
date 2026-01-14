@@ -117,6 +117,20 @@ describe("SpreadsheetApp drawing interaction commits", () => {
       observe() {}
       disconnect() {}
     };
+
+    // jsdom doesn't always ship PointerEvent. Provide a minimal polyfill so we can
+    // exercise pointer-driven drawing interactions when needed (commitObjects fallback).
+    if (!(globalThis as any).PointerEvent) {
+      (globalThis as any).PointerEvent = class PointerEvent extends MouseEvent {
+        pointerId: number;
+        pointerType: string;
+        constructor(type: string, init: any = {}) {
+          super(type, init);
+          this.pointerId = Number(init.pointerId ?? 0);
+          this.pointerType = String(init.pointerType ?? "");
+        }
+      };
+    }
   });
 
   it("persists drawing anchor/transform/preserved updates to DocumentController via onInteractionCommit (undoable)", () => {
@@ -535,6 +549,89 @@ describe("SpreadsheetApp drawing interaction commits", () => {
 
     const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
     expect(updated?.transform).toEqual(rawDrawing.transform);
+
+    app.dispose();
+    root.remove();
+  });
+
+  it("commitObjects fallback does not rewrite raw string ids when onInteractionCommit throws", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    // Ensure hit testing reads the updated DocumentController snapshot.
+    (app as any).drawingObjectsCache = null;
+
+    // Force DrawingInteractionController to fall back to commitObjects.
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit = () => {
+      throw new Error("boom");
+    };
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+
+    const startClientX = rowHeaderWidth + 10;
+    const startClientY = colHeaderHeight + 10;
+
+    selectionCanvas.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        clientX: startClientX,
+        clientY: startClientY,
+        pointerId: 1,
+        button: 0,
+        buttons: 1,
+        pointerType: "mouse",
+      }),
+    );
+    selectionCanvas.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        clientX: startClientX + 10,
+        clientY: startClientY,
+        pointerId: 1,
+        buttons: 1,
+        pointerType: "mouse",
+      }),
+    );
+    selectionCanvas.dispatchEvent(
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        cancelable: true,
+        clientX: startClientX + 10,
+        clientY: startClientY,
+        pointerId: 1,
+        pointerType: "mouse",
+      }),
+    );
+
+    const updated = doc.getSheetDrawings(sheetId)[0];
+    expect(updated.id).toBe("drawing_foo");
+    expect(updated.anchor.type).toBe("absolute");
+    expect(updated.anchor.pos.xEmu).toBe(pxToEmu(10));
 
     app.dispose();
     root.remove();
