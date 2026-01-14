@@ -69,6 +69,12 @@ function isSubpath(parentDir, maybeChild) {
   return true;
 }
 
+function formatLogPath(p) {
+  const rel = path.relative(repoRoot, p);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return p;
+  return rel;
+}
+
 function resolvePerfHome() {
   const fromEnv = process.env.FORMULA_PERF_HOME;
   if (fromEnv && fromEnv.trim() !== "") {
@@ -634,7 +640,7 @@ function main() {
   ensureCleanPerfHome(perfHome);
 
   // eslint-disable-next-line no-console
-  console.log(`[perf-desktop] Using isolated desktop HOME root=${path.relative(repoRoot, perfHome)}`);
+  console.log(`[perf-desktop] Using isolated desktop HOME root=${formatLogPath(perfHome)}`);
   // eslint-disable-next-line no-console
   console.log(
     "[perf-desktop] Tip: set FORMULA_PERF_PRESERVE_HOME=1 to avoid clearing the perf HOME between runs.\n" +

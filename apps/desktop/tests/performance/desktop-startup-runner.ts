@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 import {
   defaultDesktopBinPath,
@@ -35,6 +35,12 @@ type Summary = {
   enforce: boolean;
   webviewLoaded?: { p50: number; p95: number; targetMs: number };
 };
+
+function formatLogPath(path: string): string {
+  const rel = relative(repoRoot, path);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return path;
+  return rel;
+}
 
 function usage(): string {
   return [
@@ -244,8 +250,8 @@ async function main(): Promise<void> {
       `- tti target: ${ttiTargetMs}ms (override via --tti-target-ms)\n` +
       "- targets env (full): FORMULA_DESKTOP_{COLD,WARM}_{WINDOW_VISIBLE,FIRST_RENDER,TTI}_TARGET_MS + FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS\n" +
       "- targets env (shell overrides): FORMULA_DESKTOP_SHELL_{COLD,WARM}_{WINDOW_VISIBLE,TTI}_TARGET_MS + FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS\n" +
-      `- perf-home: ${relative(repoRoot, perfHome) || perfHome} (override with FORMULA_PERF_HOME)\n` +
-      `- profile-root: ${relative(repoRoot, profileRoot) || profileRoot}\n` +
+      `- perf-home: ${formatLogPath(perfHome)} (override with FORMULA_PERF_HOME)\n` +
+      `- profile-root: ${formatLogPath(profileRoot)}\n` +
       (enforce
         ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=0 to disable)\n"
         : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1 or pass --enforce to fail on regression)\n"),
@@ -259,7 +265,7 @@ async function main(): Promise<void> {
     argv,
     profileRoot,
     onProgress: ({ phase, mode: runMode, iteration, total, profileDir }) => {
-      const profileLabel = relative(repoRoot, profileDir) || profileDir;
+      const profileLabel = formatLogPath(profileDir);
       // eslint-disable-next-line no-console
       if (phase === "warmup") {
         console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileLabel})...`);
