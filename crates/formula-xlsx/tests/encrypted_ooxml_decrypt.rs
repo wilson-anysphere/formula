@@ -119,7 +119,7 @@ fn decrypts_standard_small_fixtures_match_plaintext_bytes() {
 
 #[test]
 fn xlsxpackage_from_bytes_with_password_supports_agile_and_standard() {
-    for encrypted in ["agile-large.xlsx", "standard-large.xlsx"] {
+    for encrypted in ["agile.xlsx", "standard.xlsx", "agile-large.xlsx", "standard-large.xlsx"] {
         let path = fixture_path_buf(encrypted);
         let bytes = std::fs::read(&path).unwrap_or_else(|err| panic!("read fixture {path:?}: {err}"));
 
