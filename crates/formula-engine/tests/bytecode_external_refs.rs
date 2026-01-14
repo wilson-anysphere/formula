@@ -1,11 +1,27 @@
 use formula_engine::eval::CellAddr;
 use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-struct Provider;
+struct Provider {
+    calls: AtomicUsize,
+}
+
+impl Provider {
+    fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
 
 impl ExternalValueProvider for Provider {
     fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
         if sheet == "[Book.xlsx]Sheet1" && addr.row == 0 && addr.col == 0 {
             return Some(Value::Number(41.0));
         }
@@ -16,7 +32,8 @@ impl ExternalValueProvider for Provider {
 #[test]
 fn bytecode_external_cell_ref_evaluates_via_provider() {
     let mut engine = Engine::new();
-    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    let provider = Arc::new(Provider::new());
+    engine.set_external_value_provider(Some(provider));
     engine.set_bytecode_enabled(true);
     engine
         .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1!A1+1")
@@ -96,7 +113,8 @@ fn bytecode_missing_external_cell_ref_is_ref_error() {
 #[test]
 fn bytecode_indirect_external_cell_ref_is_ref_error() {
     let mut engine = Engine::new();
-    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    let provider = Arc::new(Provider::new());
+    engine.set_external_value_provider(Some(provider.clone()));
     engine.set_bytecode_enabled(true);
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")+1"#)
@@ -116,5 +134,10 @@ fn bytecode_indirect_external_cell_ref_is_ref_error() {
     assert_eq!(
         engine.get_cell_value("Sheet1", "A1"),
         Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        provider.calls(),
+        0,
+        "bytecode INDIRECT should not consult the external provider for unsupported external workbook refs"
     );
 }
