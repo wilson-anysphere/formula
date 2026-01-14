@@ -108,12 +108,13 @@ test("ContextManager.buildWorkbookContext: avoids scanning classification record
   // Minimal structured DLP record set. If `buildWorkbookContext` regresses to calling
   // `effectiveRangeClassification(..., classificationRecords)` for each hit, we'd see one
   // pass over this list per retrieved chunk.
-  const classificationRecords = [
-    {
-      selector: { scope: "document", documentId: workbookId },
-      classification: { level: "Public", labels: [] },
-    },
-  ];
+  // Note: we intentionally include a handful of redundant Public records so that even
+  // a regression that clones the record array once (bypassing iterator/index counters)
+  // will still drive up record *property reads* when scanned per hit.
+  const classificationRecords = Array.from({ length: 10 }, (_, idx) => ({
+    selector: { scope: "document", documentId: workbookId, idx },
+    classification: { level: "Public", labels: [] },
+  }));
   const { proxy: recordsProxy, getPasses, getElementGets, getPropGets } = instrumentRecordList(classificationRecords);
 
   const cm = new ContextManager({
@@ -144,7 +145,7 @@ test("ContextManager.buildWorkbookContext: avoids scanning classification record
   // falls back to scanning `classificationRecords` for each hit, this would jump above 40.
   assert.ok(getPasses() < 20, `expected < 20 record iteration passes, got ${getPasses()}`);
   // Defense-in-depth: catch per-hit scans even if implemented without Symbol.iterator.
-  assert.ok(getElementGets() < 20, `expected < 20 record element reads, got ${getElementGets()}`);
+  assert.ok(getElementGets() < 200, `expected < 200 record element reads, got ${getElementGets()}`);
   // Defense-in-depth: catch per-hit scans even if the record list is cloned once and scanned repeatedly.
-  assert.ok(getPropGets() < 200, `expected < 200 record property reads, got ${getPropGets()}`);
+  assert.ok(getPropGets() < 500, `expected < 500 record property reads, got ${getPropGets()}`);
 });
