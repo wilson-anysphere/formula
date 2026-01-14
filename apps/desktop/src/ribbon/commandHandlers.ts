@@ -903,6 +903,7 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       });
       return true;
     case "home.number.moreFormats.custom":
+      if (ctx.isEditing?.()) return true;
       if (ctx.promptCustomNumberFormat) {
         ctx.promptCustomNumberFormat();
       } else {
@@ -940,6 +941,7 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     case "home.number.moreFormats.formatCells":
     case "home.cells.format.formatCells":
     case "format.openFormatCells":
+      if (ctx.isEditing?.()) return true;
       ctx.executeCommand?.("format.openFormatCells");
       ctx.openFormatCells?.();
       return true;
@@ -951,13 +953,16 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       return true;
 
     case "data.sortFilter.sortAtoZ":
+      if (ctx.isEditing?.()) return true;
       ctx.sortSelection?.({ order: "ascending" });
       return true;
     case "data.sortFilter.sortZtoA":
+      if (ctx.isEditing?.()) return true;
       ctx.sortSelection?.({ order: "descending" });
       return true;
     case "home.editing.sortFilter.customSort":
     case "data.sortFilter.sort.customSort":
+      if (ctx.isEditing?.()) return true;
       if (ctx.openCustomSort) {
         ctx.openCustomSort(commandId);
       } else {
@@ -967,6 +972,7 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       return true;
     case "home.editing.sortFilter.filter":
     case "data.sortFilter.filter":
+      if (ctx.isEditing?.()) return true;
       if (ctx.toggleAutoFilter) {
         ctx.toggleAutoFilter();
       } else {
@@ -977,6 +983,7 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     case "home.editing.sortFilter.clear":
     case "data.sortFilter.clear":
     case "data.sortFilter.advanced.clearFilter":
+      if (ctx.isEditing?.()) return true;
       if (ctx.clearAutoFilter) {
         ctx.clearAutoFilter();
       } else {
@@ -986,6 +993,7 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       return true;
     case "home.editing.sortFilter.reapply":
     case "data.sortFilter.reapply":
+      if (ctx.isEditing?.()) return true;
       if (ctx.reapplyAutoFilter) {
         ctx.reapplyAutoFilter();
       } else {

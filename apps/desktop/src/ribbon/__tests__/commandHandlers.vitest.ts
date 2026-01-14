@@ -260,6 +260,38 @@ describe("handleRibbonCommand", () => {
     expect(ctx.reapplyAutoFilter).toHaveBeenCalledTimes(1);
   });
 
+  it("no-ops sort/filter and picker commands while editing", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc, { isEditing: true });
+    ctx.sortSelection = vi.fn();
+    ctx.openCustomSort = vi.fn();
+    ctx.toggleAutoFilter = vi.fn();
+    ctx.clearAutoFilter = vi.fn();
+    ctx.reapplyAutoFilter = vi.fn();
+    ctx.promptCustomNumberFormat = vi.fn();
+    ctx.executeCommand = vi.fn();
+    ctx.openFormatCells = vi.fn();
+
+    expect(handleRibbonCommand(ctx, "data.sortFilter.sortAtoZ")).toBe(true);
+    expect(handleRibbonCommand(ctx, "data.sortFilter.sortZtoA")).toBe(true);
+    expect(handleRibbonCommand(ctx, "data.sortFilter.sort.customSort")).toBe(true);
+    expect(handleRibbonCommand(ctx, "data.sortFilter.filter")).toBe(true);
+    expect(handleRibbonCommand(ctx, "data.sortFilter.clear")).toBe(true);
+    expect(handleRibbonCommand(ctx, "data.sortFilter.reapply")).toBe(true);
+
+    expect(handleRibbonCommand(ctx, "home.number.moreFormats.custom")).toBe(true);
+    expect(handleRibbonCommand(ctx, "format.openFormatCells")).toBe(true);
+
+    expect(ctx.sortSelection).not.toHaveBeenCalled();
+    expect(ctx.openCustomSort).not.toHaveBeenCalled();
+    expect(ctx.toggleAutoFilter).not.toHaveBeenCalled();
+    expect(ctx.clearAutoFilter).not.toHaveBeenCalled();
+    expect(ctx.reapplyAutoFilter).not.toHaveBeenCalled();
+    expect(ctx.promptCustomNumberFormat).not.toHaveBeenCalled();
+    expect(ctx.executeCommand).not.toHaveBeenCalled();
+    expect(ctx.openFormatCells).not.toHaveBeenCalled();
+  });
+
   it("treats dropdown trigger ids as no-op fallbacks and delegates where appropriate", () => {
     const doc = new DocumentController();
     const ctx = createCtx(doc);
