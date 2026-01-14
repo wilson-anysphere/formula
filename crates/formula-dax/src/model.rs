@@ -572,7 +572,6 @@ impl UnmatchedFactRows {
             }
         }
     }
-
     pub(crate) fn for_each_row(&self, mut f: impl FnMut(usize)) {
         match self {
             UnmatchedFactRows::Sparse(rows) => {
@@ -1046,7 +1045,8 @@ impl DataModel {
                     ref mut count,
                 } => {
                     let key = &key_for_updates;
-                    let clear_row = |row: usize, bits: &mut [u64], len: usize, count: &mut usize| {
+                    let len = *len;
+                    let mut clear_row = |row: usize| {
                         if row >= len {
                             return;
                         }
@@ -1061,7 +1061,7 @@ impl DataModel {
 
                     if let Some(rows) = from_table_ref.filter_eq(from_idx, key) {
                         for row in rows {
-                            clear_row(row, bits.as_mut_slice(), *len, count);
+                            clear_row(row);
                         }
                     } else {
                         // Fallback: scan and compare.
@@ -1070,7 +1070,7 @@ impl DataModel {
                                 .value_by_idx(row, from_idx)
                                 .unwrap_or(Value::Blank);
                             if &v == key {
-                                clear_row(row, bits.as_mut_slice(), *len, count);
+                                clear_row(row);
                             }
                         }
                     }
