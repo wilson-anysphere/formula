@@ -1635,8 +1635,9 @@ Also verify **cross-origin isolation** is enabled in the packaged app (required 
 The release workflow also inspects the **built artifacts** to ensure OS
 integration metadata made it into the final bundles (not just `tauri.conf.json`):
 
-- macOS: `CFBundleDocumentTypes` includes `.xlsx`/`.csv`/`.parquet` (etc) and
-  `CFBundleURLTypes` includes the `formula` scheme.
+- macOS: the built app bundle `Info.plist` registers the configured file associations
+  (`bundle.fileAssociations` from `tauri.conf.json`) via `CFBundleDocumentTypes`, and registers the
+  `formula` deep-link scheme via `CFBundleURLTypes`.
 - Windows: the built installers register:
   - file associations from `apps/desktop/src-tauri/tauri.conf.json` (`bundle.fileAssociations`)
   - the `formula://` URL protocol handler
