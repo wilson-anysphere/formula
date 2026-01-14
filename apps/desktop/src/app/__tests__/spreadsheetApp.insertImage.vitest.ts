@@ -183,6 +183,38 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     root.remove();
   });
 
+  it("blocks insert image in read-only mode with a throttled insert-pictures toast", () => {
+    document.body.innerHTML = `<div id="toast-root"></div>`;
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    // `isReadOnly()` consults the collab session when present.
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    app.insertImageFromLocalFile();
+    app.insertImageFromLocalFile();
+
+    // Should not open/attach a file input when read-only.
+    const input = root.querySelector<HTMLInputElement>('input[data-testid="insert-image-input"]');
+    expect(input).toBeNull();
+
+    // Throttled toast should only appear once (avoid spam on repeated commands).
+    expect(document.querySelectorAll('[data-testid="toast"]')).toHaveLength(1);
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("insert pictures");
+
+    // Cleanup toast to avoid leaving timers running.
+    (document.querySelector<HTMLElement>('[data-testid="toast"]') as any)?.click?.();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("does not enable drawing interactions in shared-grid mode when inserting via file picker", async () => {
     process.env.DESKTOP_GRID_MODE = "shared";
 

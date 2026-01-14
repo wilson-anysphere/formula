@@ -1,6 +1,7 @@
 import type { SpreadsheetApp } from "./app/spreadsheetApp";
 import { showToast } from "./extensions/ui.js";
 import { pickLocalImageFiles } from "./drawings/pickLocalImageFiles.js";
+import { showCollabEditRejectedToast } from "./collab/editRejectionToast";
 
 export type InsertPicturesRibbonCommandApp = Pick<SpreadsheetApp, "insertPicturesFromFiles" | "focus">;
 
@@ -28,11 +29,7 @@ export async function handleInsertPicturesRibbonCommand(commandId: string, app: 
       //
       // Guard early so we don't open a file picker only to reject the insertion after selection.
       if (typeof appAny?.isReadOnly === "function" && appAny.isReadOnly() === true) {
-        try {
-          showToast("Read-only: you don't have permission to insert pictures.", "warning");
-        } catch {
-          // `showToast` requires a #toast-root; ignore in headless contexts/tests.
-        }
+        showCollabEditRejectedToast([{ rejectionKind: "insertPictures", rejectionReason: "permission" }]);
         try {
           app.focus();
         } catch {

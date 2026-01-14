@@ -77,6 +77,18 @@ describe("collab edit rejection toast", () => {
     expect(content).toContain("formatting defaults");
   });
 
+  it("shows an insert pictures toast for rejected picture insertion", () => {
+    showCollabEditRejectedToast([
+      {
+        rejectionKind: "insertPictures",
+        rejectionReason: "permission",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("insert pictures");
+  });
+
   it("shows a drawing toast for rejected drawing edits", () => {
     showCollabEditRejectedToast([
       {

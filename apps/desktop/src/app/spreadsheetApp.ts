@@ -11617,7 +11617,7 @@ export class SpreadsheetApp {
     if (drawingId == null) return;
 
     if (this.isReadOnly()) {
-      showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
+      showCollabEditRejectedToast([{ rejectionKind: "insertPictures", rejectionReason: "permission" }]);
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
@@ -12343,10 +12343,7 @@ export class SpreadsheetApp {
 
   insertImageFromLocalFile(): void {
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
+      showCollabEditRejectedToast([{ rejectionKind: "insertPictures", rejectionReason: "permission" }]);
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
@@ -12508,11 +12505,7 @@ export class SpreadsheetApp {
       }
     };
     if (this.isReadOnly()) {
-      try {
-        showToast("Read-only: you don't have permission to insert pictures.", "warning");
-      } catch {
-        // `showToast` requires a #toast-root; some test-only contexts don't include it.
-      }
+      showCollabEditRejectedToast([{ rejectionKind: "insertPictures", rejectionReason: "permission" }]);
       focusIfStillOnSheet();
       return;
     }
