@@ -13,6 +13,14 @@ import { fileURLToPath } from "node:url";
  * mappings. Some locales were initially extracted with all identity mappings
  * included, which is noisy and confusing.
  *
+ * Note: this normalizer does **not** validate that a locale source is complete.
+ * If a source JSON was generated from a partial table (or a misconfigured Excel
+ * install), missing entries will still silently fall back to canonical (English)
+ * spellings in the generated TSVs. For `es-ES` in particular, sources should be
+ * extracted from a real Excel install via:
+ *   tools/excel-oracle/extract-function-translations.ps1
+ * and should cover the full function catalog.
+ *
  * This script rewrites sources into a minimal deterministic form:
  * - Keep only non-identity mappings: casefold(localized) !== canonical
  * - Trim whitespace around localized values
@@ -270,4 +278,3 @@ if (check) {
     console.log("Locale source JSONs are normalized.");
   }
 }
-
