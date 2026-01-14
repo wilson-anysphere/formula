@@ -59,6 +59,12 @@ const REL_TYPE_COMMENTS: &str =
 const REL_TYPE_THREADED_COMMENTS: &str =
     "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment";
 
+fn is_threaded_comment_rel_type(type_uri: &str) -> bool {
+    // Excel has emitted a few variants over time; accept the canonical URI and tolerate
+    // other future variants that contain "threadedComment" (mirrors the importer).
+    type_uri == REL_TYPE_THREADED_COMMENTS || type_uri.contains("threadedComment")
+}
+
 #[derive(Debug, Error)]
 pub enum ReadError {
     #[error("io error: {0}")]
@@ -1246,24 +1252,20 @@ fn discover_worksheet_comment_part_names(
             continue;
         }
 
-        match rel.type_uri.as_str() {
-            REL_TYPE_COMMENTS => {
-                if out.legacy_comments.is_none() {
-                    let target = resolve_target(worksheet_part, &rel.target);
-                    if !target.is_empty() {
-                        out.legacy_comments = Some(target);
-                    }
+        if rel.type_uri == REL_TYPE_COMMENTS {
+            if out.legacy_comments.is_none() {
+                let target = resolve_target(worksheet_part, &rel.target);
+                if !target.is_empty() {
+                    out.legacy_comments = Some(target);
                 }
             }
-            REL_TYPE_THREADED_COMMENTS => {
-                if out.threaded_comments.is_none() {
-                    let target = resolve_target(worksheet_part, &rel.target);
-                    if !target.is_empty() {
-                        out.threaded_comments = Some(target);
-                    }
+        } else if is_threaded_comment_rel_type(&rel.type_uri) {
+            if out.threaded_comments.is_none() {
+                let target = resolve_target(worksheet_part, &rel.target);
+                if !target.is_empty() {
+                    out.threaded_comments = Some(target);
                 }
             }
-            _ => {}
         }
     }
 
