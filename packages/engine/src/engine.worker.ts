@@ -714,22 +714,22 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setRowStyleId !== "function") {
                 throw new Error("setRowStyleId: WasmWorkbook.setRowStyleId is not available in this WASM build");
               }
-              (wb as any).setRowStyleId(
-                params.sheet ?? "Sheet1",
-                params.row,
-                params.styleId === null || params.styleId === undefined ? undefined : params.styleId
-              );
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const styleId = params.styleId == null ? undefined : params.styleId;
+                (wb as any).setRowStyleId(sheet, params.row, styleId);
+              }
               result = null;
               break;
             case "setColStyleId":
               if (typeof (wb as any).setColStyleId !== "function") {
                 throw new Error("setColStyleId: WasmWorkbook.setColStyleId is not available in this WASM build");
               }
-              (wb as any).setColStyleId(
-                params.sheet ?? "Sheet1",
-                params.col,
-                params.styleId === null || params.styleId === undefined ? undefined : params.styleId
-              );
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const styleId = params.styleId == null ? undefined : params.styleId;
+                (wb as any).setColStyleId(sheet, params.col, styleId);
+              }
               result = null;
               break;
             case "setSheetDefaultStyleId":
@@ -738,10 +738,11 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                   "setSheetDefaultStyleId: WasmWorkbook.setSheetDefaultStyleId is not available in this WASM build"
                 );
               }
-              (wb as any).setSheetDefaultStyleId(
-                params.sheet ?? "Sheet1",
-                params.styleId === null || params.styleId === undefined ? undefined : params.styleId
-              );
+              {
+                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const styleId = params.styleId == null ? undefined : params.styleId;
+                (wb as any).setSheetDefaultStyleId(sheet, styleId);
+              }
               result = null;
               break;
             case "setColWidth":
