@@ -980,13 +980,17 @@ fn parse_axis_title(
 ) -> Option<TextModel> {
     let tx_node = title_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "tx");
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_tx_node))
+        .find(|n| n.tag_name().name() == "tx");
     let context = format!("axis[{axis_id}].title.tx");
     let mut parsed = tx_node.and_then(|tx| parse_text_from_tx(tx, diagnostics, &context));
 
     let style = title_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "txPr")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_txpr_node))
+        .find(|n| n.tag_name().name() == "txPr")
         .and_then(parse_txpr);
     if let (Some(style), Some(text)) = (style, parsed.as_mut()) {
         text.style = Some(style);
@@ -994,7 +998,9 @@ fn parse_axis_title(
 
     let box_style = title_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_sppr_node))
+        .find(|n| n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
     if let (Some(box_style), Some(text)) = (box_style, parsed.as_mut()) {
         text.box_style = Some(box_style);

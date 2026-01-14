@@ -7,7 +7,8 @@ fn parses_title_and_legend_shape_properties() {
     let xml = r#"
         <c:chartSpace
             xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
-            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
           <c:chart>
             <c:title>
               <c:tx><c:v>My Title</c:v></c:tx>
@@ -34,12 +35,21 @@ fn parses_title_and_legend_shape_properties() {
                 <c:axId val="123"/>
                 <c:title>
                   <c:tx><c:v>X Axis</c:v></c:tx>
-                  <c:spPr>
-                    <a:solidFill><a:srgbClr val="FFFF00"/></a:solidFill>
-                    <a:ln w="25400">
-                      <a:solidFill><a:srgbClr val="000000"/></a:solidFill>
-                    </a:ln>
-                  </c:spPr>
+                  <mc:AlternateContent>
+                    <mc:Choice Requires="x16">
+                      <c:spPr>
+                        <a:solidFill><a:srgbClr val="FFFF00"/></a:solidFill>
+                        <a:ln w="25400">
+                          <a:solidFill><a:srgbClr val="000000"/></a:solidFill>
+                        </a:ln>
+                      </c:spPr>
+                    </mc:Choice>
+                    <mc:Fallback>
+                      <c:spPr>
+                        <a:solidFill><a:srgbClr val="FF00FF"/></a:solidFill>
+                      </c:spPr>
+                    </mc:Fallback>
+                  </mc:AlternateContent>
                 </c:title>
               </c:catAx>
             </c:plotArea>
