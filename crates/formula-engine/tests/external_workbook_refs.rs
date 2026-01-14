@@ -101,6 +101,25 @@ fn external_cell_ref_participates_in_arithmetic() {
 }
 
 #[test]
+fn external_cell_ref_with_path_qualified_workbook_resolves_via_provider() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[C:\\path\\Book.xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        41.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "='C:\\path\\[Book.xlsx]Sheet1'!A1")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+}
+
+#[test]
 fn sum_over_external_range_uses_reference_semantics() {
     // Excel quirk: SUM over references ignores logicals/text stored in cells.
     let provider = Arc::new(TestExternalProvider::default());

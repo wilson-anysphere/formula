@@ -3750,7 +3750,32 @@ fn parse_row_number_literal(raw: &str) -> Option<u32> {
 
 fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
     let Some(rest) = name.strip_prefix('[') else {
-        return (None, name.to_string());
+        // Excel sometimes emits external workbook references with an absolute/relative path prefix
+        // inside the quoted sheet identifier, e.g. `'C:\path\[Book.xlsx]Sheet1'!A1`.
+        //
+        // In these cases the raw quoted identifier does not start with `[`, but still contains a
+        // `[workbook]sheet` segment. Canonicalize these by folding the path prefix into the
+        // workbook id so external sheet keys remain unique:
+        // `C:\path\[Book.xlsx]Sheet1` -> workbook `C:\path\Book.xlsx`, sheet `Sheet1`.
+        //
+        // Keep the legacy behavior unchanged for non-bracketed prefixes.
+        let Some(open) = name.rfind('[') else {
+            return (None, name.to_string());
+        };
+        let Some(close_rel) = name[open + 1..].find(']') else {
+            return (None, name.to_string());
+        };
+        let close = open + 1 + close_rel;
+        let path_prefix = &name[..open];
+        let book = &name[open + 1..close];
+        let sheet = &name[close + 1..];
+        if book.is_empty() || sheet.is_empty() {
+            return (None, name.to_string());
+        }
+        let mut workbook = String::with_capacity(path_prefix.len().saturating_add(book.len()));
+        workbook.push_str(path_prefix);
+        workbook.push_str(book);
+        return (Some(workbook), sheet.to_string());
     };
     let Some(end) = rest.find(']') else {
         return (None, name.to_string());
