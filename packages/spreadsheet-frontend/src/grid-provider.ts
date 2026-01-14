@@ -155,10 +155,21 @@ export class EngineGridProvider implements CellProvider {
     }
   }
 
-  async recalculate(sheet?: string): Promise<CellChange[]> {
-    const changes = await this.cache.engine.recalculate(sheet ?? this.sheet);
-    this.applyRecalcChanges(changes);
-    return changes;
+  recalculate(sheet?: string): Promise<CellChange[]> {
+    const promise = (async () => {
+      const changes = await this.cache.engine.recalculate(sheet ?? this.sheet);
+      this.applyRecalcChanges(changes);
+      return changes;
+    })();
+
+    // Recalc is sometimes fired-and-forgotten (e.g. demo UI sheet switch). Attach a no-op
+    // rejection handler so a failing recalc doesn't surface as an unhandled rejection when
+    // callers don't await.
+    //
+    // Awaiting the returned promise still observes the rejection.
+    void promise.catch(() => {});
+
+    return promise;
   }
 
   subscribe(listener: (update: CellProviderUpdate) => void): () => void {

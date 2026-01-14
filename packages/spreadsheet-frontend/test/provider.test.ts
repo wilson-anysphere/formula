@@ -302,4 +302,28 @@ describe("EngineGridProvider", () => {
     expect(cache.getValue(0, 1)).toBe(2);
     expect(updates).toEqual([{ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 2 } }]);
   });
+
+  it("does not emit unhandled rejections when recalculate is fire-and-forgotten and fails", async () => {
+    const unhandled: unknown[] = [];
+    const handler = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", handler);
+
+    try {
+      const engine = {
+        async recalculate() {
+          throw new Error("recalc failed");
+        },
+      } as any;
+      const cache = new EngineCellCache(engine as unknown as EngineClient);
+      const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
+
+      void provider.recalculate();
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", handler);
+    }
+  });
 });
