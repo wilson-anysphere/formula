@@ -412,4 +412,63 @@ describe("OrganizeSheetsDialog", () => {
 
     expect(focusGrid).toHaveBeenCalledTimes(1);
   });
+
+  it("disables sheet-structure mutations in readOnly mode", () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+      { id: "s3", name: "Hidden", visibility: "hidden" },
+    ]);
+    let activeSheetId = "s1";
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        readOnly: true,
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    // Visible-sheet activation should remain available.
+    const activateVisible = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-activate-s2"]');
+    expect(activateVisible).toBeInstanceOf(HTMLButtonElement);
+    expect(activateVisible!.disabled).toBe(false);
+
+    // Mutations should be disabled.
+    const renameBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-rename-s1"]');
+    expect(renameBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(renameBtn!.disabled).toBe(true);
+
+    const hideBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-hide-s1"]');
+    expect(hideBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(hideBtn!.disabled).toBe(true);
+
+    const deleteBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-delete-s1"]');
+    expect(deleteBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(deleteBtn!.disabled).toBe(true);
+
+    const moveDownBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-move-down-s1"]');
+    expect(moveDownBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(moveDownBtn!.disabled).toBe(true);
+
+    // Hidden-sheet activation requires unhide, so it should be disabled in read-only.
+    const activateHidden = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-activate-s3"]');
+    expect(activateHidden).toBeInstanceOf(HTMLButtonElement);
+    expect(activateHidden!.disabled).toBe(true);
+
+    const unhideBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-unhide-s3"]');
+    expect(unhideBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(unhideBtn!.disabled).toBe(true);
+  });
 });
