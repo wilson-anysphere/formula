@@ -190,11 +190,13 @@ function buildXmlWrapper(rawXml: string): string {
   const attrPrefixRe = /\s([A-Za-z_][\w.-]*):[A-Za-z_][\w.-]*\s*=/g;
   for (const match of rawXml.matchAll(tagPrefixRe)) {
     const prefix = match[1];
-    if (prefix && prefix !== "xml") prefixes.add(prefix);
+    if (prefix && prefix !== "xml" && prefix !== "xmlns") prefixes.add(prefix);
   }
   for (const match of rawXml.matchAll(attrPrefixRe)) {
     const prefix = match[1];
-    if (prefix && prefix !== "xml") prefixes.add(prefix);
+    // `xmlns:` attributes declare namespaces and use the reserved `xmlns` prefix; attempting to
+    // bind it in our wrapper would produce invalid XML (`xmlns:xmlns="..."`). Skip it.
+    if (prefix && prefix !== "xml" && prefix !== "xmlns") prefixes.add(prefix);
   }
 
   const attrs: string[] = [];
@@ -364,7 +366,8 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
     const paraDefaultStyle = mergeStyle(shapeDefaultStyle, parseRunStyleFromXmlSnippet(extractFirstElementXml(pPrXml ?? "", "defRPr")));
 
     // Walk runs + breaks in order within the paragraph.
-    const nodeRe = /<(?:[A-Za-z_][\w.-]*:)?(r|fld)\b[^>]*>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?\1\s*>|<(?:[A-Za-z_][\w.-]*:)?br\b[^>]*\/>/gi;
+    const nodeRe =
+      /<(?:[A-Za-z_][\w.-]*:)?(r|fld)\b[^>]*>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?\1\s*>|<(?:[A-Za-z_][\w.-]*:)?br\b[^>]*\/>|<(?:[A-Za-z_][\w.-]*:)?br\b[^>]*>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?br\s*>/gi;
     for (const match of pInner.matchAll(nodeRe)) {
       const chunk = match[0] ?? "";
       if (/(?:^|<)[^>]*?\bbr\b/i.test(chunk)) {
@@ -408,4 +411,3 @@ export function parseDrawingMLShapeText(rawXml: string): ShapeTextLayout | null 
     return null;
   }
 }
-

@@ -69,5 +69,30 @@ describe("parseDrawingMLShapeText", () => {
       color: "#00FF00",
     });
   });
-});
 
+  it("handles namespace declarations and non-self-closing line breaks", () => {
+    // When raw snippets include `xmlns:` attributes, our DOMParser wrapper must avoid
+    // generating invalid `xmlns:xmlns="..."` declarations. This case also uses an explicit
+    // `<a:br></a:br>` pair (valid XML), which the regex fallback does not treat as a break.
+    const rawXml = `
+      <xdr:sp
+        xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+      >
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p>
+            <a:r><a:t>Hello</a:t></a:r>
+            <a:br></a:br>
+            <a:r><a:t>World</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("Hello\nWorld");
+  });
+});
