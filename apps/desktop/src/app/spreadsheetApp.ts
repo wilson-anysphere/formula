@@ -2310,6 +2310,20 @@ export class SpreadsheetApp {
     this.commentsPanel = this.createCommentsPanel();
     this.root.appendChild(this.commentsPanel);
 
+    // The desktop shell owns a unified "spreadsheet editing" signal that includes split-view
+    // secondary pane edits. Listen for it so comment mutation controls stay disabled even when
+    // SpreadsheetApp's primary editor isn't the active editor.
+    if (typeof window !== "undefined") {
+      window.addEventListener(
+        "formula:spreadsheet-editing-changed",
+        () => {
+          if (!this.commentsPanelVisible) return;
+          this.renderCommentsPanel();
+        },
+        { signal: this.domAbort.signal },
+      );
+    }
+
     this.commentTooltip = this.createCommentTooltip();
     this.root.appendChild(this.commentTooltip);
 
@@ -5093,6 +5107,17 @@ export class SpreadsheetApp {
     this.editState = next;
     for (const listener of this.editStateListeners) {
       listener(next);
+    }
+
+    // Keep ancillary UI (like the Comments panel composer) in sync with edit mode.
+    // This is intentionally not part of the edit-state listener contract because it is
+    // SpreadsheetApp-owned UI, and we want it to run even when no listeners are registered.
+    if (this.commentsPanelVisible) {
+      try {
+        this.renderCommentsPanel();
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -12351,6 +12376,14 @@ export class SpreadsheetApp {
     return this.commentsPanelVisible;
   }
 
+  private isSpreadsheetEditingForCommentsUi(): boolean {
+    const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+    // `__formulaSpreadsheetIsEditing` is owned by the desktop shell (`main.ts`) and includes
+    // split-view secondary editor state. Fall back to SpreadsheetApp's primary edit-state
+    // when the shell signal is missing or stale.
+    return this.isEditing() || globalEditing === true;
+  }
+
   /**
    * Opens the comments panel (idempotent) and focuses the new-comment input.
    */
@@ -12377,6 +12410,8 @@ export class SpreadsheetApp {
     // Viewer roles can open the comments panel to read, but should not be routed
     // into disabled composer UI.
     if (!this.canUserComment()) return;
+    // Excel-style: avoid routing focus into comment mutation controls while a cell/formula edit is active.
+    if (this.isSpreadsheetEditingForCommentsUi()) return;
     try {
       const input =
         this.root.querySelector<HTMLInputElement>('[data-testid="new-comment-input"]') ??
@@ -13244,6 +13279,7 @@ export class SpreadsheetApp {
 
   private renderCommentThread(comment: Comment): HTMLElement {
     const canComment = this.canUserComment();
+    const mutationsDisabled = !canComment || this.isSpreadsheetEditingForCommentsUi();
     const container = document.createElement("div");
     container.dataset.testid = "comment-thread";
     container.dataset.commentId = comment.id;
@@ -13262,9 +13298,10 @@ export class SpreadsheetApp {
     resolve.textContent = comment.resolved ? t("comments.unresolve") : t("comments.resolve");
     resolve.type = "button";
     resolve.className = "comment-thread__resolve-button";
-    resolve.disabled = !canComment;
+    resolve.disabled = mutationsDisabled;
     resolve.addEventListener("click", () => {
       if (!this.canUserComment()) return;
+      if (this.isSpreadsheetEditingForCommentsUi()) return;
       this.commentManager.setResolved({
         commentId: comment.id,
         resolved: !comment.resolved,
@@ -13306,16 +13343,17 @@ export class SpreadsheetApp {
     replyInput.type = "text";
     replyInput.placeholder = t("comments.reply.placeholder");
     replyInput.className = "comment-thread__reply-input";
-    replyInput.disabled = !canComment;
+    replyInput.disabled = mutationsDisabled;
 
     const submitReply = document.createElement("button");
     submitReply.dataset.testid = "submit-reply";
     submitReply.textContent = t("comments.reply.send");
     submitReply.type = "button";
     submitReply.className = "comment-thread__submit-reply-button";
-    submitReply.disabled = !canComment;
+    submitReply.disabled = mutationsDisabled;
     submitReply.addEventListener("click", () => {
       if (!this.canUserComment()) return;
+      if (this.isSpreadsheetEditingForCommentsUi()) return;
       const content = replyInput.value.trim();
       if (!content) return;
       this.commentManager.addReply({
@@ -13336,6 +13374,7 @@ export class SpreadsheetApp {
 
   private submitNewComment(): void {
     if (!this.canUserComment()) return;
+    if (this.isSpreadsheetEditingForCommentsUi()) return;
     const content = this.newCommentInput.value.trim();
     if (!content) return;
     const cellRef = this.commentCellRef(this.selection.active);
@@ -13375,9 +13414,21 @@ export class SpreadsheetApp {
     // without running the constructor.
     if (!this.newCommentInput || !this.newCommentSubmitButton || !this.commentsPanelReadOnlyHint) return;
     const canComment = this.canUserComment();
-    this.newCommentInput.disabled = !canComment;
-    this.newCommentSubmitButton.disabled = !canComment;
-    this.commentsPanelReadOnlyHint.hidden = canComment;
+    const editing = this.isSpreadsheetEditingForCommentsUi();
+    const mutationsDisabled = !canComment || editing;
+
+    this.newCommentInput.disabled = mutationsDisabled;
+    this.newCommentSubmitButton.disabled = mutationsDisabled;
+
+    if (!canComment) {
+      this.commentsPanelReadOnlyHint.textContent = t("comments.readOnlyHint");
+      this.commentsPanelReadOnlyHint.hidden = false;
+    } else if (editing) {
+      this.commentsPanelReadOnlyHint.textContent = "Finish editing to add comments.";
+      this.commentsPanelReadOnlyHint.hidden = false;
+    } else {
+      this.commentsPanelReadOnlyHint.hidden = true;
+    }
   }
 
   private onResize(): void {

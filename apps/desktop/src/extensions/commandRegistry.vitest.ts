@@ -87,5 +87,30 @@ describe("CommandRegistry", () => {
     expect(events[0]).toMatchObject({ commandId: "builtin.exec", args: [1, 2], result: 3 });
     expect(events[1]).toMatchObject({ commandId: "ext.exec", args: ["hi"], result: "ok:hi" });
   });
-});
 
+  it("allows pre-execution hooks to block command execution", async () => {
+    const registry = new CommandRegistry();
+    const didRun = { value: false };
+
+    registry.registerBuiltinCommand("blocked.cmd", "Blocked", () => {
+      didRun.value = true;
+      return "ok";
+    });
+
+    const events: Array<{ commandId: string; args: any[]; result?: any; error?: unknown }> = [];
+    const disposeDidExecute = registry.onDidExecuteCommand((evt) => events.push(evt));
+
+    const disposeWillExecute = registry.onWillExecuteCommand(() => {
+      throw new Error("blocked");
+    });
+
+    await expect(registry.executeCommand("blocked.cmd")).rejects.toThrow(/blocked/);
+    expect(didRun.value).toBe(false);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.commandId).toBe("blocked.cmd");
+    expect("error" in events[0]!).toBe(true);
+
+    disposeWillExecute();
+    disposeDidExecute();
+  });
+});

@@ -1,5 +1,6 @@
 import type { CommandContribution, CommandRegistry } from "../extensions/commandRegistry.js";
 import type { ContextKeyService } from "../extensions/contextKeys.js";
+import { isSpreadsheetEditingCommandBlockedError } from "../commands/spreadsheetEditingCommandBlockedError.js";
 
 import { t, tWithVars } from "../i18n/index.js";
 import { markKeybindingBarrier } from "../keybindingBarrier.js";
@@ -409,6 +410,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
   const executeCommand = (commandId: string): void => {
     void commandRegistry.executeCommand(commandId).catch((err) => {
+      if (isSpreadsheetEditingCommandBlockedError(err)) return;
       console.error(`Command failed (${commandId}):`, err);
     });
   };

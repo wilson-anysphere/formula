@@ -26,9 +26,17 @@ export type CommandExecutionEvent = {
   error?: unknown;
 };
 
+export type CommandWillExecuteEvent = {
+  commandId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  args: any[];
+  command: CommandContribution;
+};
+
 export class CommandRegistry {
   private readonly commands = new Map<string, CommandContribution & { run: (...args: any[]) => Promise<any> }>();
   private readonly listeners = new Set<() => void>();
+  private readonly willExecuteListeners = new Set<(evt: CommandWillExecuteEvent) => void | Promise<void>>();
   private readonly executeListeners = new Set<(evt: CommandExecutionEvent) => void>();
 
   subscribe(listener: () => void): () => void {
@@ -41,6 +49,11 @@ export class CommandRegistry {
     return () => this.executeListeners.delete(listener);
   }
 
+  onWillExecuteCommand(listener: (evt: CommandWillExecuteEvent) => void | Promise<void>): () => void {
+    this.willExecuteListeners.add(listener);
+    return () => this.willExecuteListeners.delete(listener);
+  }
+
   private emit(): void {
     for (const listener of [...this.listeners]) {
       try {
@@ -48,6 +61,12 @@ export class CommandRegistry {
       } catch {
         // ignore
       }
+    }
+  }
+
+  private async emitWillExecute(evt: CommandWillExecuteEvent): Promise<void> {
+    for (const listener of [...this.willExecuteListeners]) {
+      await listener(evt);
     }
   }
 
@@ -150,11 +169,13 @@ export class CommandRegistry {
     const id = String(commandId);
     const entry = this.commands.get(id);
     if (!entry) throw new Error(`Unknown command: ${commandId}`);
+    const { run, ...command } = entry;
     let result: any;
     let error: unknown = null;
     let didThrow = false;
     try {
-      result = await entry.run(...args);
+      await this.emitWillExecute({ commandId: id, args, command });
+      result = await run(...args);
       return result;
     } catch (err) {
       didThrow = true;

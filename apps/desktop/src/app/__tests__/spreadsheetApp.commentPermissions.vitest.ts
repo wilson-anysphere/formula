@@ -280,6 +280,103 @@ describe("SpreadsheetApp comment permissions", () => {
     }
   });
 
+  it("disables the comments panel composer while editing (Excel-style edit mode)", () => {
+    const priorGridMode = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { collabMode: true });
+      (app as any).collabSession = { canComment: () => true };
+
+      app.toggleCommentsPanel();
+
+      const panel = root.querySelector('[data-testid="comments-panel"]') as HTMLDivElement | null;
+      if (!panel) throw new Error("Missing comments panel");
+      const input = panel.querySelector('[data-testid="new-comment-input"]') as HTMLInputElement | null;
+      if (!input) throw new Error("Missing new comment input");
+      const submit = panel.querySelector('[data-testid="submit-comment"]') as HTMLButtonElement | null;
+      if (!submit) throw new Error("Missing submit button");
+      const hint = panel.querySelector('[data-testid="comments-readonly-hint"]') as HTMLDivElement | null;
+      if (!hint) throw new Error("Missing hint");
+
+      expect(input.disabled).toBe(false);
+      expect(submit.disabled).toBe(false);
+      expect(hint.hidden).toBe(true);
+
+      app.openCellEditorAtActiveCell();
+
+      expect(input.disabled).toBe(true);
+      expect(submit.disabled).toBe(true);
+      expect(hint.hidden).toBe(false);
+      expect(hint.textContent ?? "").toContain("Finish editing");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    }
+  });
+
+  it("disables the comments panel composer when the desktop shell reports secondary edit mode", () => {
+    const priorGridMode = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { collabMode: true });
+      (app as any).collabSession = { canComment: () => true };
+
+      app.toggleCommentsPanel();
+
+      const panel = root.querySelector('[data-testid="comments-panel"]') as HTMLDivElement | null;
+      if (!panel) throw new Error("Missing comments panel");
+      const input = panel.querySelector('[data-testid="new-comment-input"]') as HTMLInputElement | null;
+      if (!input) throw new Error("Missing new comment input");
+      const submit = panel.querySelector('[data-testid="submit-comment"]') as HTMLButtonElement | null;
+      if (!submit) throw new Error("Missing submit button");
+      const hint = panel.querySelector('[data-testid="comments-readonly-hint"]') as HTMLDivElement | null;
+      if (!hint) throw new Error("Missing hint");
+
+      expect(input.disabled).toBe(false);
+      expect(submit.disabled).toBe(false);
+      expect(hint.hidden).toBe(true);
+
+      (globalThis as any).__formulaSpreadsheetIsEditing = true;
+      window.dispatchEvent(new CustomEvent("formula:spreadsheet-editing-changed", { detail: { isEditing: true } }));
+
+      expect(input.disabled).toBe(true);
+      expect(submit.disabled).toBe(true);
+      expect(hint.hidden).toBe(false);
+      expect(hint.textContent ?? "").toContain("Finish editing");
+
+      (globalThis as any).__formulaSpreadsheetIsEditing = false;
+      window.dispatchEvent(new CustomEvent("formula:spreadsheet-editing-changed", { detail: { isEditing: false } }));
+
+      expect(input.disabled).toBe(false);
+      expect(submit.disabled).toBe(false);
+      expect(hint.hidden).toBe(true);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+      if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    }
+  });
+
   it("shows a read-only toast and opens the comments panel when viewers press Shift+F2", () => {
     const priorGridMode = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";

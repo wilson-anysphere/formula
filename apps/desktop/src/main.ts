@@ -146,6 +146,10 @@ import {
   FORMAT_FONT_NAME_PRESET_COMMAND_IDS,
   FORMAT_FONT_SIZE_PRESET_COMMAND_IDS,
 } from "./commands/registerBuiltinFormatFontCommands.js";
+import {
+  isSpreadsheetEditingCommandBlockedError,
+  SpreadsheetEditingCommandBlockedError,
+} from "./commands/spreadsheetEditingCommandBlockedError.js";
 import { PAGE_LAYOUT_COMMANDS } from "./commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { FORMAT_PAINTER_COMMAND_ID } from "./commands/formatPainterCommand.js";
@@ -3138,6 +3142,29 @@ function currentSelectionRect(): SelectionRect {
 
 let openCommandPalette: (() => void) | null = null;
 const commandRegistry = new CommandRegistry();
+
+// Excel-style edit mode: some commands are disabled while a cell/formula edit is active.
+// This prevents bypassing ribbon-disabled actions via non-ribbon surfaces (command palette,
+// keybindings, etc) and avoids "click does nothing" UX when command implementations no-op.
+const shouldBlockCommandWhileEditing = (commandId: string): boolean => {
+  const id = String(commandId);
+  // Comments can still be opened/read while editing, but add/mutate actions should not trigger.
+  if (id === "comments.addComment") return true;
+  // Format commands can open pickers/dialogs and should not run while editing.
+  if (id.startsWith("format.")) return true;
+  return RIBBON_DISABLED_BY_ID_WHILE_EDITING[id] === true;
+};
+
+commandRegistry.onWillExecuteCommand(({ commandId }) => {
+  if (!isSpreadsheetEditing()) return;
+  if (!shouldBlockCommandWhileEditing(commandId)) return;
+  try {
+    showToast("Finish editing to use this command.", "warning");
+  } catch {
+    // ignore (toast root missing in non-UI test environments)
+  }
+  throw new SpreadsheetEditingCommandBlockedError(commandId);
+});
 
 // Ribbon AutoFilter MVP command wiring.
 //
@@ -6174,6 +6201,7 @@ if (
       syncContributedCommands();
     },
     onCommandError: (commandId, err) => {
+      if (isSpreadsheetEditingCommandBlockedError(err)) return;
       showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
     },
   });

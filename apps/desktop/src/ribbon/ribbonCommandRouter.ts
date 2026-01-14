@@ -1,5 +1,6 @@
 import type { SpreadsheetApp } from "../app/spreadsheetApp.js";
 import type { CommandContribution, CommandRegistry } from "../extensions/commandRegistry.js";
+import { isSpreadsheetEditingCommandBlockedError } from "../commands/spreadsheetEditingCommandBlockedError.js";
 import { PAGE_LAYOUT_COMMANDS } from "../commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "../commands/registerWorkbenchFileCommands.js";
 import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../collab/permissionGuards.js";
@@ -77,6 +78,8 @@ function reportRibbonCommandError(deps: RibbonCommandRouterDeps, commandId: stri
   // DLP policy violations are already surfaced via a dedicated toast (e.g. clipboard copy blocked).
   // Avoid double-toasting "Command failed" for expected policy restrictions.
   if ((err as any)?.name === "DlpViolationError") return;
+  // Edit-mode command guards already surface a dedicated warning toast.
+  if (isSpreadsheetEditingCommandBlockedError(err)) return;
   deps.showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
 }
 
