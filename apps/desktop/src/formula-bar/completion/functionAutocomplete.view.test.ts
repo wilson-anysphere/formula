@@ -55,6 +55,56 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     }
   });
 
+  it("supports dotted localized function-name suggestions in es-ES (=CONTAR.S → CONTAR.SI)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "es-ES";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=CONTAR.S";
+      view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+      expect(dropdown?.hasAttribute("hidden")).toBe(false);
+      expect(dropdown?.textContent).toContain("CONTAR.SI");
+    } finally {
+      host.remove();
+      document.documentElement.lang = prevLang;
+    }
+  });
+
+  it("supports dotted localized function-name suggestions in fr-FR (=NB.S → NB.SI)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "fr-FR";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=NB.S";
+      view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+      expect(dropdown?.hasAttribute("hidden")).toBe(false);
+      expect(dropdown?.textContent).toContain("NB.SI");
+    } finally {
+      host.remove();
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("uses the provided getLocaleId() for signature previews (even if document.lang differs)", async () => {
     const prevLang = document.documentElement.lang;
     document.documentElement.lang = "en-US";
