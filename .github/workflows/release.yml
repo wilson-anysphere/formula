@@ -1370,6 +1370,25 @@ jobs:
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
           Compress-Archive -Path "debug-symbols/formula-desktop.pdb" -DestinationPath $zipPath
 
+          # If any PDB files were emitted into `**/release/bundle/**`, remove them so they don't
+          # bloat dry-run bundle artifacts or trip strip/symbol checks.
+          $bundleCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if ($bundleDir) {
+            $bundlePdbs = Get-ChildItem -Path $bundleDir -Recurse -File -Filter "*.pdb" -ErrorAction SilentlyContinue
+            if ($bundlePdbs -and $bundlePdbs.Count -gt 0) {
+              Write-Host "debug-symbols: removing bundle-local PDB(s):"
+              $bundlePdbs | ForEach-Object {
+                Write-Host "- $($_.FullName)"
+                Remove-Item -Force $_.FullName
+              }
+            }
+          }
+
           Get-ChildItem -Path "debug-symbols" | Format-Table Name,Length
 
       - name: Upload debug symbol archives (Windows)
