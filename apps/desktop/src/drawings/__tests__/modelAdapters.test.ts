@@ -319,6 +319,24 @@ describe("drawings/modelAdapters", () => {
     expect(ui[0]?.transform).toEqual({ rotationDeg: 30, flipH: true, flipV: false });
   });
 
+  it("ignores malformed DocumentController drawing transform payloads (best-effort)", () => {
+    const drawings = [
+      {
+        id: "1",
+        zOrder: 0,
+        anchor: { type: "cell", row: 0, col: 0 },
+        kind: { type: "image", imageId: "img1" },
+        size: { width: 10, height: 10 },
+        // rotationDeg is invalid and flipH/flipV are not booleans -> should be ignored.
+        transform: { rotationDeg: "not-a-number", flipH: 1, flipV: 0 },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.transform).toBeUndefined();
+  });
+
   it("preserves DocumentController drawing preserved metadata maps", () => {
     const drawings = [
       {
