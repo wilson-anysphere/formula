@@ -750,6 +750,28 @@ export class SecondaryGridView {
       this.sheetId = sheetId;
     }
 
+    // Avoid resurrecting deleted sheets.
+    //
+    // DocumentController lazily materializes sheets when `getSheetView()` is called. During
+    // sheet-structure operations (delete/undo/redo), `getSheetId()` can briefly return a sheet id
+    // that no longer exists. Calling `getSheetView` in that window would recreate the sheet as an
+    // untracked side-effect, breaking undo semantics and sheet-tab consistency.
+    const docAny: any = this.document as any;
+    try {
+      if (typeof docAny.getSheetMeta === "function") {
+        const meta = docAny.getSheetMeta(sheetId);
+        if (!meta) {
+          const ids = typeof docAny.getSheetIds === "function" ? docAny.getSheetIds() : [];
+          if (Array.isArray(ids) && ids.length > 0) return;
+        }
+      } else if (typeof docAny.getSheetIds === "function") {
+        const ids = docAny.getSheetIds();
+        if (Array.isArray(ids) && ids.length > 0 && !ids.includes(sheetId)) return;
+      }
+    } catch {
+      // Best-effort: if sheet existence probing fails, continue with the prior behavior.
+    }
+
     const view = this.document.getSheetView(sheetId) as {
       frozenRows?: number;
       frozenCols?: number;

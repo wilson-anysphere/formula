@@ -1816,6 +1816,15 @@ function armFormatPainter(): void {
 
   let captured: unknown = {};
   try {
+    const docAny: any = doc as any;
+    // Avoid resurrecting deleted sheets: only capture formatting if the sheet still exists.
+    if (typeof docAny.getSheetMeta === "function") {
+      const meta = docAny.getSheetMeta(sheetId);
+      if (!meta) {
+        const ids = typeof docAny.getSheetIds === "function" ? docAny.getSheetIds() : [];
+        if (Array.isArray(ids) && ids.length > 0) return;
+      }
+    }
     captured = doc.getCellFormat(sheetId, activeCell);
   } catch {
     captured = {};
@@ -5493,11 +5502,32 @@ if (
         // allocations by selecting an entire sheet/row/column.
         assertExtensionRangeWithinLimits(range, { label: "Selection" });
 
+        const doc: any = app.getDocument();
+        const readCell = (sheetId: string, coord: { row: number; col: number }) => {
+          // Avoid resurrecting deleted sheets: prefer the non-materializing read when available.
+          if (typeof doc.peekCell === "function") {
+            return doc.peekCell(sheetId, coord) as any;
+          }
+          // Fallback: if the sheet is known missing, return a null cell.
+          if (typeof doc.getSheetMeta === "function") {
+            try {
+              const meta = doc.getSheetMeta(sheetId);
+              if (!meta) {
+                const ids = typeof doc.getSheetIds === "function" ? doc.getSheetIds() : [];
+                if (Array.isArray(ids) && ids.length > 0) return null;
+              }
+            } catch {
+              // ignore
+            }
+          }
+          return doc.getCell(sheetId, coord) as any;
+        };
+
         values = [];
         for (let r = range.startRow; r <= range.endRow; r++) {
           const row: Array<string | number | boolean | null> = [];
           for (let c = range.startCol; c <= range.endCol; c++) {
-            const cell = app.getDocument().getCell(rect.sheetId, { row: r, col: c }) as any;
+            const cell = readCell(rect.sheetId, { row: r, col: c });
             row.push(normalizeExtensionCellValue(cell?.value ?? null));
           }
           values.push(row);
@@ -5873,11 +5903,12 @@ if (
         app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
       );
       assertExtensionRangeWithinLimits(range, { label: "Selection" });
+      const doc: any = app.getDocument();
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = range.startRow; r <= range.endRow; r++) {
         const row: Array<string | number | boolean | null> = [];
         for (let c = range.startCol; c <= range.endCol; c++) {
-          const cell = app.getDocument().getCell(sheetId, { row: r, col: c }) as any;
+          const cell = typeof doc.peekCell === "function" ? (doc.peekCell(sheetId, { row: r, col: c }) as any) : (doc.getCell(sheetId, { row: r, col: c }) as any);
           row.push(normalizeExtensionCellValue(cell?.value ?? null));
         }
         values.push(row);
@@ -5886,7 +5917,8 @@ if (
     },
     async getCell(row: number, col: number) {
       const sheetId = app.getCurrentSheetId();
-      const cell = app.getDocument().getCell(sheetId, { row, col }) as any;
+      const doc: any = app.getDocument();
+      const cell = typeof doc.peekCell === "function" ? (doc.peekCell(sheetId, { row, col }) as any) : (doc.getCell(sheetId, { row, col }) as any);
       return normalizeExtensionCellValue(cell?.value ?? null);
     },
     async setCell(row: number, col: number, value: unknown) {
@@ -5899,11 +5931,12 @@ if (
     async getRange(ref: string) {
       const { sheetId, startRow, startCol, endRow, endCol } = parseSheetQualifiedRange(ref);
       assertExtensionRangeWithinLimits({ startRow, startCol, endRow, endCol });
+      const doc: any = app.getDocument();
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = startRow; r <= endRow; r++) {
         const row: Array<string | number | boolean | null> = [];
         for (let c = startCol; c <= endCol; c++) {
-          const cell = app.getDocument().getCell(sheetId, { row: r, col: c }) as any;
+          const cell = typeof doc.peekCell === "function" ? (doc.peekCell(sheetId, { row: r, col: c }) as any) : (doc.getCell(sheetId, { row: r, col: c }) as any);
           row.push(normalizeExtensionCellValue(cell?.value ?? null));
         }
         values.push(row);
@@ -9629,7 +9662,11 @@ const DEFAULT_RIBBON_AUTOFILTER_UNIQUE_VALUE_LIMIT = 5_000;
 
 function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: number }): string {
   const doc = app.getDocument();
-  const state = doc.getCell(sheetId, cell) as { value?: unknown; formula?: string | null } | null;
+  const docAny: any = doc as any;
+  const state =
+    typeof docAny.peekCell === "function"
+      ? (docAny.peekCell(sheetId, cell) as { value?: unknown; formula?: string | null } | null)
+      : (docAny.getCell(sheetId, cell) as { value?: unknown; formula?: string | null } | null);
 
   const formatValue = (raw: unknown): string => {
     if (raw == null) return "";
