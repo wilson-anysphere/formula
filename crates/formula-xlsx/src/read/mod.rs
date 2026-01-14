@@ -250,9 +250,9 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
     } else {
         read_zip_part_optional(archive, "xl/sharedStrings.xml")?
     };
-    let (shared_strings, shared_string_phonetics) = match shared_strings_bytes {
+    let shared_strings = match shared_strings_bytes {
         Some(bytes) => parse_shared_strings(&bytes)?,
-        None => (Vec::new(), Vec::new()),
+        None => Vec::new(),
     };
 
     let metadata_part_bytes = if let Some(target) = rels_info.metadata_target.as_deref() {
@@ -438,7 +438,6 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
             ws_id,
             &sheet_xml,
             &shared_strings,
-            &shared_string_phonetics,
             &styles_part,
             None,
             None,
@@ -1010,10 +1009,10 @@ fn load_from_zip_archive<R: Read + Seek>(
     } else {
         part_bytes_tolerant(&parts, "xl/sharedStrings.xml")
     };
-    let (shared_strings, shared_string_phonetics) = if let Some(bytes) = shared_strings_bytes {
+    let shared_strings = if let Some(bytes) = shared_strings_bytes {
         parse_shared_strings(bytes)?
     } else {
-        (Vec::new(), Vec::new())
+        Vec::new()
     };
 
     let metadata_bytes = if let Some(target) = rels_info.metadata_target.as_deref() {
@@ -1219,7 +1218,6 @@ fn load_from_zip_archive<R: Read + Seek>(
                 ws_id,
                 sheet_xml,
                 &shared_strings,
-                &shared_string_phonetics,
                 &styles_part,
                 Some(&mut cell_meta),
                 Some(&mut rich_value_cells),
@@ -2328,66 +2326,10 @@ fn worksheet_contains_vm_zero(xml: &[u8]) -> bool {
     false
 }
 
-fn parse_shared_strings(bytes: &[u8]) -> Result<(Vec<RichText>, Vec<Option<String>>), ReadError> {
+fn parse_shared_strings(bytes: &[u8]) -> Result<Vec<RichText>, ReadError> {
     let xml = std::str::from_utf8(bytes)?;
     let parsed = parse_shared_strings_xml(xml)?;
-    let mut phonetics = parse_shared_strings_phonetics_xml(xml)?;
-    if phonetics.len() < parsed.items.len() {
-        phonetics.resize(parsed.items.len(), None);
-    } else if phonetics.len() > parsed.items.len() {
-        phonetics.truncate(parsed.items.len());
-    }
-    Ok((parsed.items, phonetics))
-}
-
-fn parse_shared_strings_phonetics_xml(xml: &str) -> Result<Vec<Option<String>>, ReadError> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(false);
-
-    let mut buf = Vec::new();
-    let mut out = Vec::new();
-    let mut in_si = false;
-    let mut in_rph = false;
-    let mut phonetic = String::new();
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.local_name().as_ref() == b"si" => {
-                in_si = true;
-                in_rph = false;
-                phonetic.clear();
-            }
-            Event::Empty(e) if e.local_name().as_ref() == b"si" => {
-                if in_si {
-                    // Malformed; treat as a missing entry to preserve alignment.
-                    out.push(None);
-                } else {
-                    out.push(None);
-                }
-            }
-            Event::End(e) if e.local_name().as_ref() == b"si" => {
-                in_si = false;
-                in_rph = false;
-                out.push((!phonetic.is_empty()).then(|| phonetic.clone()));
-                phonetic.clear();
-            }
-            Event::Start(e) if in_si && e.local_name().as_ref() == b"rPh" => {
-                in_rph = true;
-            }
-            Event::End(e) if in_si && e.local_name().as_ref() == b"rPh" => {
-                in_rph = false;
-            }
-            Event::Start(e) if in_si && in_rph && e.local_name().as_ref() == b"t" => {
-                phonetic.push_str(&read_text(&mut reader, b"t")?);
-            }
-            Event::Empty(e) if in_si && in_rph && e.local_name().as_ref() == b"t" => {}
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    Ok(out)
+    Ok(parsed.items)
 }
 
 #[derive(Debug, Clone)]
@@ -2685,7 +2627,6 @@ fn parse_worksheet_into_model(
     worksheet_id: formula_model::WorksheetId,
     worksheet_xml: &[u8],
     shared_strings: &[RichText],
-    shared_string_phonetics: &[Option<String>],
     styles_part: &StylesPart,
     mut cell_meta_map: Option<
         &mut std::collections::HashMap<(formula_model::WorksheetId, CellRef), CellMeta>,
@@ -3255,9 +3196,10 @@ fn parse_worksheet_into_model(
                                 let idx = current_value_text
                                     .as_deref()
                                     .unwrap_or("0")
+                                    .trim()
                                     .parse::<usize>()
                                     .unwrap_or(0);
-                                shared_string_phonetics.get(idx).and_then(|p| p.clone())
+                                shared_strings.get(idx).and_then(|s| s.phonetic.clone())
                             }
                             Some("inlineStr") => current_inline_phonetic.take(),
                             _ => None,

@@ -11,10 +11,12 @@ use crate::Color;
 /// Run `start`/`end` offsets are **Unicode scalar value** (`char`) indices into
 /// `text` (not UTF-8 byte offsets). This makes indices stable across UTF-8
 /// encodings but still does not correspond to user-perceived grapheme clusters.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RichText {
     pub text: String,
     pub runs: Vec<RichTextRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phonetic: Option<String>,
 }
 
 impl RichText {
@@ -22,6 +24,7 @@ impl RichText {
         Self {
             text: text.into(),
             runs: Vec::new(),
+            phonetic: None,
         }
     }
 
@@ -50,11 +53,23 @@ impl RichText {
             runs.push(RichTextRun { start, end, style });
         }
 
-        Self { text, runs }
+        Self {
+            text,
+            runs,
+            phonetic: None,
+        }
     }
 
     pub fn slice_run_text(&self, run: &RichTextRun) -> &str {
         slice_by_char_range(&self.text, run.start, run.end)
+    }
+}
+
+impl PartialEq for RichText {
+    fn eq(&self, other: &Self) -> bool {
+        // Preserve historical RichText semantics: equality is based on the visible
+        // text + style runs only.
+        self.text == other.text && self.runs == other.runs
     }
 }
 

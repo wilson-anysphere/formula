@@ -53,6 +53,8 @@ pub fn parse_shared_strings_xml(xml: &str) -> Result<SharedStrings, SharedString
 fn parse_si(reader: &mut Reader<&[u8]>) -> Result<RichText, SharedStringsError> {
     let mut buf = Vec::new();
     let mut segments: Vec<(String, RichTextRunStyle)> = Vec::new();
+    let mut phonetic_runs: Vec<(Option<u32>, usize, String)> = Vec::new();
+    let mut phonetic_order: usize = 0;
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -62,6 +64,15 @@ fn parse_si(reader: &mut Reader<&[u8]>) -> Result<RichText, SharedStringsError> 
             }
             Event::Start(e) if e.local_name().as_ref() == b"r" => {
                 segments.push(parse_r(reader)?);
+            }
+            Event::Start(e) if e.local_name().as_ref() == b"rPh" => {
+                // Phonetic guide text ("ruby") runs. These `<t>` nodes are not part of the
+                // displayed string. Capture them separately so callers can access the phonetic
+                // text without polluting `RichText.text`.
+                let sb = attr_value(&e, b"sb")?.and_then(|s| s.parse::<u32>().ok());
+                let text = parse_rph(reader)?;
+                phonetic_runs.push((sb, phonetic_order, text));
+                phonetic_order = phonetic_order.saturating_add(1);
             }
             Event::Start(e) => {
                 // Only treat `<t>` as visible text when it is a direct child of `<si>` or
@@ -80,12 +91,31 @@ fn parse_si(reader: &mut Reader<&[u8]>) -> Result<RichText, SharedStringsError> 
         buf.clear();
     }
 
-    if segments.iter().all(|(_, style)| style.is_empty()) {
-        Ok(RichText::new(
-            segments.into_iter().map(|(text, _)| text).collect::<String>(),
-        ))
+    let mut phonetic = if phonetic_runs.is_empty() {
+        None
     } else {
-        Ok(RichText::from_segments(segments))
+        let has_sb_for_all = phonetic_runs.iter().all(|(sb, _, _)| sb.is_some());
+        if has_sb_for_all {
+            phonetic_runs.sort_by(|(a_sb, a_order, _), (b_sb, b_order, _)| {
+                a_sb.cmp(b_sb).then(a_order.cmp(b_order))
+            });
+        }
+
+        let mut out = String::new();
+        for (_, _, t) in phonetic_runs {
+            out.push_str(&t);
+        }
+        (!out.is_empty()).then_some(out)
+    };
+
+    if segments.iter().all(|(_, style)| style.is_empty()) {
+        let mut rt = RichText::new(segments.into_iter().map(|(text, _)| text).collect::<String>());
+        rt.phonetic = phonetic.take();
+        Ok(rt)
+    } else {
+        let mut rt = RichText::from_segments(segments);
+        rt.phonetic = phonetic.take();
+        Ok(rt)
     }
 }
 
@@ -115,6 +145,23 @@ fn parse_r(reader: &mut Reader<&[u8]>) -> Result<(String, RichTextRunStyle), Sha
     }
 
     Ok((text, style))
+}
+
+fn parse_rph(reader: &mut Reader<&[u8]>) -> Result<String, SharedStringsError> {
+    let mut buf = Vec::new();
+    let mut text = String::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.local_name().as_ref() == b"t" => {
+                text.push_str(&read_text(reader, QName(b"t"))?);
+            }
+            Event::End(e) if e.local_name().as_ref() == b"rPh" => break,
+            Event::Eof => return Err(SharedStringsError::Malformed("unexpected eof in <rPh>")),
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(text)
 }
 
 fn parse_rpr(reader: &mut Reader<&[u8]>) -> Result<RichTextRunStyle, SharedStringsError> {
@@ -156,6 +203,7 @@ mod tests {
         let shared = parse_shared_strings_xml(xml).expect("parse sharedStrings.xml");
         assert_eq!(shared.items.len(), 1);
         assert_eq!(shared.items[0].text, "Base");
+        assert_eq!(shared.items[0].phonetic.as_deref(), Some("PHO"));
     }
 }
 
