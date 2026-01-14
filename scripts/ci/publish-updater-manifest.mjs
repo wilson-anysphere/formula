@@ -23,10 +23,13 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import {
   ed25519PrivateKeyFromSeed,
+  ed25519PublicKeyFromRaw,
   parseMinisignSecretKeyPayload,
   parseMinisignSecretKeyText,
+  parseTauriUpdaterPubkey,
 } from "./tauri-minisign.mjs";
 
 /**
@@ -267,6 +270,7 @@ async function uploadReleaseAsset({ uploadUrl, name, bytes, contentType, token }
 }
 
 async function main() {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const refName = process.argv[2] ?? process.env.GITHUB_REF_NAME;
   const manifestsDir = process.argv[3];
 
@@ -366,6 +370,44 @@ async function main() {
   const signatureBytes = crypto.sign(null, latestJsonBytes, privateKey);
   if (signatureBytes.length !== 64) {
     throw new Error(`Unexpected Ed25519 signature length: ${signatureBytes.length} bytes (expected 64).`);
+  }
+
+  // Defense-in-depth: verify that the combined manifest signature we are about to upload validates
+  // under the updater public key embedded in the app config. If this fails, clients will reject
+  // updates even though CI was able to sign artifacts.
+  const tauriConfigPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+  /** @type {string} */
+  let pubkeyValue = "";
+  try {
+    const tauriConfig = JSON.parse(fs.readFileSync(tauriConfigPath, "utf8"));
+    pubkeyValue = tauriConfig?.plugins?.updater?.pubkey ?? "";
+  } catch (err) {
+    throw new Error(
+      `Failed to read/parse ${tauriConfigPath} while verifying updater manifest signature: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  if (typeof pubkeyValue !== "string" || pubkeyValue.trim().length === 0) {
+    throw new Error(
+      `Cannot verify updater manifest signature: missing plugins.updater.pubkey in ${tauriConfigPath}.`,
+    );
+  }
+  if (pubkeyValue.includes("REPLACE_WITH")) {
+    throw new Error(
+      `Cannot verify updater manifest signature: plugins.updater.pubkey looks like a placeholder value in ${tauriConfigPath}.`,
+    );
+  }
+
+  const updaterPubkey = parseTauriUpdaterPubkey(pubkeyValue);
+  const publicKey = ed25519PublicKeyFromRaw(updaterPubkey.publicKeyBytes);
+  const ok = crypto.verify(null, latestJsonBytes, publicKey, signatureBytes);
+  if (!ok) {
+    throw new Error(
+      `Generated latest.json.sig does not verify latest.json with the configured updater public key. ` +
+        `This typically means TAURI_PRIVATE_KEY does not correspond to apps/desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey.`,
+    );
   }
   const latestSigText = `${signatureBytes.toString("base64")}\n`;
   const latestSigBytes = Buffer.from(latestSigText, "utf8");
