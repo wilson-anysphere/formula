@@ -8,8 +8,11 @@ use formula_io::offcrypto::{
 
 const FIXTURE_PASSWORD: &str = "password";
 
-/// Fixture produced with Apache POI (standard encryption / CryptoAPI) and then patched to use
-/// `EncryptionInfo` version `3.2` (Office 2007-style Standard encryption).
+/// Fixture produced with Apache POI (standard encryption / CryptoAPI).
+///
+/// Standard encryption is identified by `versionMinor == 2`, but `versionMajor` varies in the wild
+/// (commonly 3.2 or 4.2). This fixture uses a Standard header and should remain valid across those
+/// variants.
 ///
 /// The workbook contains a single sheet ("Sheet1") with cell A1="hello".
 fn fixture_path() -> PathBuf {
@@ -41,7 +44,10 @@ fn parses_encryption_info_and_verifies_password() {
     assert!(buf.len() >= 4, "EncryptionInfo stream is too short");
     let major = u16::from_le_bytes([buf[0], buf[1]]);
     let minor = u16::from_le_bytes([buf[2], buf[3]]);
-    assert_eq!((major, minor), (3, 2), "expected Standard encryption version 3.2");
+    assert!(
+        minor == 2 && matches!(major, 2 | 3 | 4),
+        "expected Standard EncryptionInfo version *.2 with major=2/3/4, got {major}.{minor}"
+    );
 
     let info = parse_encryption_info_standard(&buf).expect("parse Standard EncryptionInfo");
 
@@ -64,4 +70,3 @@ fn parses_encryption_info_and_verifies_password() {
         verify_password_standard(&info, "not-the-password").expect("verify wrong password");
     assert!(!bad, "expected wrong password to fail verification");
 }
-
