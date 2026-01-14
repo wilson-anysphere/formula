@@ -6,12 +6,11 @@
 //! handling for codepoints outside the BMP, where UTF-16 uses surrogate pairs.
 #![cfg(all(feature = "encrypted-workbooks", not(target_arch = "wasm32")))]
 
-use std::io::{Cursor, Write as _};
+use std::io::Cursor;
 
 use formula_io::{open_workbook_model_with_password, open_workbook_with_password, Error, Workbook};
 use formula_model::{CellRef, CellValue};
-use ms_offcrypto_writer::Ecma376AgileWriter;
-use rand::{rngs::StdRng, SeedableRng as _};
+use formula_office_crypto::{encrypt_package_to_ole, EncryptOptions, EncryptionScheme, HashAlgorithm};
 
 fn build_tiny_xlsx() -> Vec<u8> {
     let mut workbook = formula_model::Workbook::new();
@@ -28,15 +27,20 @@ fn build_tiny_xlsx() -> Vec<u8> {
 }
 
 fn encrypt_bytes_with_password(plain: &[u8], password: &str) -> Vec<u8> {
-    let mut cursor = Cursor::new(Vec::new());
-    let mut rng = StdRng::from_seed([0u8; 32]);
-    let mut agile = Ecma376AgileWriter::create(&mut rng, password, &mut cursor)
-        .expect("create agile writer");
-    agile
-        .write_all(plain)
-        .expect("write plaintext to agile writer");
-    agile.finalize().expect("finalize agile writer");
-    cursor.into_inner()
+    // Encrypt with a *small* spinCount to keep this test fast. This test is primarily about
+    // password *string* handling (no trimming / no normalization), not about matching Excel's exact
+    // Agile defaults.
+    encrypt_package_to_ole(
+        plain,
+        password,
+        EncryptOptions {
+            scheme: EncryptionScheme::Agile,
+            key_bits: 128,
+            hash_algorithm: HashAlgorithm::Sha256,
+            spin_count: 1_000,
+        },
+    )
+    .expect("encrypt to OLE EncryptedPackage wrapper")
 }
 
 #[test]
@@ -48,10 +52,7 @@ fn opens_encrypted_ooxml_with_unicode_passwords_including_emoji() {
     // - a non-BMP emoji (surrogate pair in UTF-16)
     // - leading/trailing whitespace to ensure caller input is not trimmed
     //
-    // Note: encrypting via `ms-offcrypto-writer` uses a real-world Agile spinCount (100k), which is
-    // expensive. Keep this list minimal while still covering both the whitespace and non-whitespace
-    // cases (so we exercise both branches of the trimming checks below).
-    let passwords = ["pässwörd🔒", " 密码🔒 "];
+    let passwords = ["pässwörd🔒", "密码🔒", "pässwörd🔒 ", " 密码🔒"];
 
     for password in passwords {
         let encrypted = encrypt_bytes_with_password(&plain_xlsx, password);
