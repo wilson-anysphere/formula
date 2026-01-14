@@ -78,8 +78,89 @@ PY
   printf '%s\n' "${val}"
 }
 
+read_deep_link_schemes() {
+  local conf="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
+  local val=""
+  if [[ -f "${conf}" ]] && command -v python3 >/dev/null 2>&1; then
+    val="$(
+      python3 - "${conf}" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+
+plugins = conf.get("plugins") or {}
+deep_link = plugins.get("deep-link") or {}
+desktop = deep_link.get("desktop")
+
+schemes = set()
+
+def add_from_protocol(protocol):
+    if not isinstance(protocol, dict):
+        return
+    raw = protocol.get("schemes")
+    values = []
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, list):
+        values = [v for v in raw if isinstance(v, str)]
+    for v in values:
+        s = v.strip().lower().rstrip("/:")  # normalize "formula://"
+        if s:
+            schemes.add(s)
+
+if isinstance(desktop, list):
+    for protocol in desktop:
+        add_from_protocol(protocol)
+else:
+    add_from_protocol(desktop)
+
+if not schemes:
+    schemes = {"formula"}
+
+print(",".join(sorted(schemes)))
+PY
+    )"
+  elif [[ -f "${conf}" ]] && command -v node >/dev/null 2>&1; then
+    val="$(
+      node - <<'NODE' "${conf}" 2>/dev/null || true
+const fs = require("fs");
+const confPath = process.argv[2];
+const conf = JSON.parse(fs.readFileSync(confPath, "utf8"));
+const plugins = conf?.plugins ?? {};
+const deep = plugins?.["deep-link"] ?? {};
+const desktop = deep?.desktop;
+const schemes = new Set();
+function addFromProtocol(protocol) {
+  if (!protocol || typeof protocol !== "object") return;
+  const raw = protocol.schemes;
+  const values = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+  for (const v of values) {
+    if (typeof v !== "string") continue;
+    const s = v.trim().toLowerCase().replace(/[:/]+$/, "");
+    if (s) schemes.add(s);
+  }
+}
+if (Array.isArray(desktop)) {
+  for (const p of desktop) addFromProtocol(p);
+} else {
+  addFromProtocol(desktop);
+}
+if (schemes.size === 0) schemes.add("formula");
+process.stdout.write(Array.from(schemes).sort().join(","));
+NODE
+    )"
+  fi
+  if [[ -z "${val}" ]]; then
+    val="formula"
+  fi
+  printf '%s\n' "${val}"
+}
+
 MAIN_BINARY_NAME="$(read_main_binary_name)"
 TAURI_IDENTIFIER="$(read_tauri_identifier)"
+DEEP_LINK_SCHEMES="$(read_deep_link_schemes)"
 
 kind="${1:-all}"
 case "${kind}" in
@@ -250,12 +331,14 @@ deb_smoke_test_dir() {
     ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
     -e "FORMULA_MAIN_BINARY_NAME=${MAIN_BINARY_NAME}" \
     -e "FORMULA_TAURI_IDENTIFIER=${TAURI_IDENTIFIER}" \
+    -e "FORMULA_DEEP_LINK_SCHEMES=${DEEP_LINK_SCHEMES}" \
     -v "${deb_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
       export DEBIAN_FRONTEND=noninteractive
       bin="${FORMULA_MAIN_BINARY_NAME:-formula-desktop}"
       ident="${FORMULA_TAURI_IDENTIFIER:-app.formula.desktop}"
+      schemes_csv="${FORMULA_DEEP_LINK_SCHEMES:-formula}"
       mime_xml="/usr/share/mime/packages/${ident}.xml"
       echo "Container OS:"; cat /etc/os-release
       echo "Mounted artifacts:"; ls -lah /mounted
@@ -321,7 +404,15 @@ deb_smoke_test_dir() {
       echo "Installed desktop entry: ${desktop_file}"
       grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
       grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"
-      grep -qi "x-scheme-handler/formula" "${desktop_file}"
+      IFS="," read -r -a schemes <<<"${schemes_csv}"
+      for scheme in "${schemes[@]}"; do
+        scheme="${scheme%%://}"
+        scheme="${scheme%%:}"
+        scheme="${scheme%%/}"
+        if [ -n "${scheme}" ]; then
+          grep -qi "x-scheme-handler/${scheme}" "${desktop_file}"
+        fi
+      done
       grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
       grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
       set +e
@@ -358,11 +449,13 @@ rpm_smoke_test_dir() {
     ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
     -e "FORMULA_MAIN_BINARY_NAME=${MAIN_BINARY_NAME}" \
     -e "FORMULA_TAURI_IDENTIFIER=${TAURI_IDENTIFIER}" \
+    -e "FORMULA_DEEP_LINK_SCHEMES=${DEEP_LINK_SCHEMES}" \
     -v "${rpm_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
       bin="${FORMULA_MAIN_BINARY_NAME:-formula-desktop}"
       ident="${FORMULA_TAURI_IDENTIFIER:-app.formula.desktop}"
+      schemes_csv="${FORMULA_DEEP_LINK_SCHEMES:-formula}"
       mime_xml="/usr/share/mime/packages/${ident}.xml"
       echo "Container OS:"; cat /etc/os-release
       echo "Mounted artifacts:"; ls -lah /mounted
@@ -438,7 +531,15 @@ rpm_smoke_test_dir() {
       echo "Installed desktop entry: ${desktop_file}"
       grep -E "^[[:space:]]*(Exec|MimeType)=" "${desktop_file}" || true
       grep -Eq "^[[:space:]]*Exec=.*%[uUfF]" "${desktop_file}"
-      grep -qi "x-scheme-handler/formula" "${desktop_file}"
+      IFS="," read -r -a schemes <<<"${schemes_csv}"
+      for scheme in "${schemes[@]}"; do
+        scheme="${scheme%%://}"
+        scheme="${scheme%%:}"
+        scheme="${scheme%%/}"
+        if [ -n "${scheme}" ]; then
+          grep -qi "x-scheme-handler/${scheme}" "${desktop_file}"
+        fi
+      done
       grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
       grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
       set +e

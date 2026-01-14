@@ -51,3 +51,10 @@ test("linux-package-install-smoke: uses identifier-based Parquet shared-mime-inf
   // Avoid hardcoding the current identifier filename so we don't regress if identifier changes.
   assert.doesNotMatch(script, /app\\.formula\\.desktop\\.xml/);
 });
+
+test("linux-package-install-smoke: validates URL scheme handler(s) from tauri.conf.json (no hardcoded formula)", () => {
+  const script = readFileSync(scriptPath, "utf8");
+  assert.match(script, /FORMULA_DEEP_LINK_SCHEMES/);
+  // Validate that the script doesn't hardcode only the `formula` scheme in its desktop entry checks.
+  assert.doesNotMatch(script, /x-scheme-handler\/formula/);
+});
