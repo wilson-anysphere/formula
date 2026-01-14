@@ -423,8 +423,6 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     try {
-      const selectSpy = vi.spyOn(DrawingOverlay.prototype, "setSelectedId");
-
       const root = createRoot();
       const status = {
         activeCell: document.createElement("div"),
@@ -450,8 +448,6 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
         },
       ]);
 
-      selectSpy.mockClear();
-
       const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
       expect(selectionCanvas).not.toBeNull();
 
@@ -465,7 +461,7 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       });
       selectionCanvas!.dispatchEvent(event);
 
-      expect(selectSpy).toHaveBeenCalledWith(1);
+      expect(app.getSelectedDrawingId()).toBe(1);
 
       app.destroy();
       root.remove();
