@@ -279,6 +279,45 @@ describe("F6 focus cycling keybinding dispatch", () => {
     expect(document.activeElement).toBe(elements.grid);
   });
 
+  it("treats focus within nested grid elements as part of the grid region", async () => {
+    const { service, elements } = createHarness();
+    const { grid } = elements;
+
+    const nested = document.createElement("button");
+    nested.type = "button";
+    nested.textContent = "Cell";
+    grid.appendChild(nested);
+
+    nested.focus();
+    expect(document.activeElement).toBe(nested);
+
+    // Forward from grid -> sheet tabs.
+    let res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.sheetTab);
+
+    // Reverse from sheet tabs -> grid (focus restored via `app.focus()`).
+    res = await dispatchF6(service, document.activeElement, { shiftKey: true });
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.grid);
+
+    // Reverse from nested grid focus -> formula bar.
+    nested.focus();
+    expect(document.activeElement).toBe(nested);
+    res = await dispatchF6(service, document.activeElement, { shiftKey: true });
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.formulaAddress);
+
+    // Forward back into the grid.
+    res = await dispatchF6(service, document.activeElement);
+    expect(res.handled).toBe(true);
+    expect(res.event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(elements.grid);
+  });
+
   it("falls back to the first enabled status bar control when the zoom dropdown is disabled", async () => {
     const { service, elements } = createHarness({ zoomDisabled: true });
     expect(elements.versionHistoryButton).not.toBeNull();
