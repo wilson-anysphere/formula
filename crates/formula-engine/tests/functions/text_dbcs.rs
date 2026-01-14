@@ -214,8 +214,8 @@ fn lenb_counts_bytes_for_chinese_korean_and_big5_dbcs_codepages() {
 
     // Simplified Chinese (GBK / cp936).
     sheet.set_text_codepage(936);
-    assert_eq!(sheet.eval(r#"=LENB("汉")"#), Value::Number(2.0));
-    assert_eq!(sheet.eval(r#"=LENB("A汉")"#), Value::Number(3.0));
+    assert_eq!(sheet.eval(r#"=LENB("你")"#), Value::Number(2.0));
+    assert_eq!(sheet.eval(r#"=LENB("A你")"#), Value::Number(3.0));
 
     // Korean (EUC-KR / cp949).
     sheet.set_text_codepage(949);
@@ -224,8 +224,8 @@ fn lenb_counts_bytes_for_chinese_korean_and_big5_dbcs_codepages() {
 
     // Traditional Chinese (Big5 / cp950).
     sheet.set_text_codepage(950);
-    assert_eq!(sheet.eval(r#"=LENB("漢")"#), Value::Number(2.0));
-    assert_eq!(sheet.eval(r#"=LENB("A漢")"#), Value::Number(3.0));
+    assert_eq!(sheet.eval(r#"=LENB("國")"#), Value::Number(2.0));
+    assert_eq!(sheet.eval(r#"=LENB("A國")"#), Value::Number(3.0));
 }
 
 #[test]
@@ -253,9 +253,9 @@ fn byte_count_text_functions_use_dbcs_semantics_for_other_dbcs_codepages() {
     let mut sheet = TestSheet::new();
 
     let cases = [
-        (936, "汉"), // GBK (Simplified Chinese)
+        (936, "你"), // GBK (Simplified Chinese)
         (949, "가"), // EUC-KR (Korean)
-        (950, "漢"), // Big5 (Traditional Chinese)
+        (950, "國"), // Big5 (Traditional Chinese)
     ];
 
     for (cp, ch) in cases {
