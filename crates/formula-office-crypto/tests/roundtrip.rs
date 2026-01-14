@@ -529,6 +529,47 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
         block_index = block_index.checked_add(1).expect("block counter overflow");
     }
 
+    // Guard: ensure we re-key at the correct Standard/CryptoAPI RC4 boundary (0x200 bytes) and
+    // not at the BIFF8/FILEPASS interval (0x400 bytes).
+    //
+    // This avoids a potential "encrypt+decrypt with the same bug" false positive if both
+    // implementations mistakenly use the BIFF8 interval.
+    if plaintext.len() >= 0x400 && ciphertext.len() >= 0x400 {
+        let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
+        let key1 = standard_rc4_derive_key(hash_alg, &spun, key_len, 1);
+
+        let (k0, k1) = if key_bits == 40 {
+            let mut k0p = vec![0u8; 16];
+            k0p[..5].copy_from_slice(&key0);
+            let mut k1p = vec![0u8; 16];
+            k1p[..5].copy_from_slice(&key1);
+            (k0p, k1p)
+        } else {
+            (key0, key1)
+        };
+
+        // If we (incorrectly) used a 0x400-byte re-key interval, bytes [0x200..0x3ff] would be
+        // encrypted by *continuing* the RC4 stream with block0 key.
+        let mut block0_400 = plaintext[..0x400].to_vec();
+        rc4_apply(&k0, &mut block0_400);
+
+        // With the correct 0x200-byte interval, bytes [0x200..0x3ff] must be encrypted with a
+        // fresh RC4 state using block1 key.
+        let mut expected_block1 = plaintext[0x200..0x400].to_vec();
+        rc4_apply(&k1, &mut expected_block1);
+
+        assert_eq!(
+            &ciphertext[0x200..0x400],
+            expected_block1.as_slice(),
+            "expected Standard RC4 to re-key at 0x200-byte boundary"
+        );
+        assert_ne!(
+            &ciphertext[0x200..0x400],
+            &block0_400[0x200..0x400],
+            "ciphertext suggests incorrect 0x400-byte RC4 re-key interval"
+        );
+    }
+
     let mut encrypted_package = Vec::new();
     encrypted_package.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
     encrypted_package.extend_from_slice(&ciphertext);
