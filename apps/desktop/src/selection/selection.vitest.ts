@@ -121,4 +121,40 @@ describe("keyboard navigation", () => {
     expect(right).not.toBeNull();
     expect(cellToA1(right!.active)).toBe("C1"); // column B hidden
   });
+
+  it("Arrow navigation does not land on hidden boundary rows/cols", () => {
+    const sheet = new SheetModel();
+    sheet.setCellValue({ row: 0, col: 0 }, "A1");
+
+    const data = {
+      getUsedRange: () => sheet.getUsedRange(),
+      isCellEmpty: (cell: { row: number; col: number }) => sheet.isCellEmpty(cell),
+      // Hide the first and last row/col to exercise boundary behavior.
+      isRowHidden: (row: number) => row === 0 || row === limits.maxRows - 1,
+      isColHidden: (col: number) => col === 0 || col === limits.maxCols - 1,
+    };
+
+    // Moving up into a hidden first row should keep us on the current row.
+    const start = createSelection({ row: 1, col: 1 }, limits);
+    const up = navigateSelectionByKey(start, "ArrowUp", { shift: false, primary: false }, data, limits);
+    expect(up).not.toBeNull();
+    expect(up!.active).toEqual({ row: 1, col: 1 });
+
+    // Moving left into a hidden first col should keep us on the current col.
+    const left = navigateSelectionByKey(start, "ArrowLeft", { shift: false, primary: false }, data, limits);
+    expect(left).not.toBeNull();
+    expect(left!.active).toEqual({ row: 1, col: 1 });
+
+    // Moving down into a hidden last row should keep us on the current row.
+    const bottomStart = createSelection({ row: limits.maxRows - 2, col: 1 }, limits);
+    const down = navigateSelectionByKey(bottomStart, "ArrowDown", { shift: false, primary: false }, data, limits);
+    expect(down).not.toBeNull();
+    expect(down!.active).toEqual({ row: limits.maxRows - 2, col: 1 });
+
+    // Moving right into a hidden last col should keep us on the current col.
+    const rightStart = createSelection({ row: 1, col: limits.maxCols - 2 }, limits);
+    const right = navigateSelectionByKey(rightStart, "ArrowRight", { shift: false, primary: false }, data, limits);
+    expect(right).not.toBeNull();
+    expect(right!.active).toEqual({ row: 1, col: limits.maxCols - 2 });
+  });
 });

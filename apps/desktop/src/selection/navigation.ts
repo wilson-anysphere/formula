@@ -263,8 +263,14 @@ function nextVisibleRow(row: number, dir: number, data: UsedRangeProvider, limit
   while (r >= 0 && r < limits.maxRows && data.isRowHidden(r)) {
     r += dir;
   }
-  if (r < 0) return 0;
-  if (r >= limits.maxRows) return limits.maxRows - 1;
+  // If we ran off the sheet bounds without finding a visible row, keep the selection anchored
+  // on the last in-bounds row in the opposite direction (Excel-like: Arrow keys should not land
+  // on hidden boundary rows).
+  if (r < 0 || r >= limits.maxRows) {
+    const fallback = r < 0 ? row - dir : row - dir;
+    if (fallback >= 0 && fallback < limits.maxRows) return fallback;
+    return Math.min(limits.maxRows - 1, Math.max(0, row));
+  }
   return r;
 }
 
@@ -274,8 +280,11 @@ function nextVisibleCol(col: number, dir: number, data: UsedRangeProvider, limit
   while (c >= 0 && c < limits.maxCols && data.isColHidden(c)) {
     c += dir;
   }
-  if (c < 0) return 0;
-  if (c >= limits.maxCols) return limits.maxCols - 1;
+  if (c < 0 || c >= limits.maxCols) {
+    const fallback = c < 0 ? col - dir : col - dir;
+    if (fallback >= 0 && fallback < limits.maxCols) return fallback;
+    return Math.min(limits.maxCols - 1, Math.max(0, col));
+  }
   return c;
 }
 
