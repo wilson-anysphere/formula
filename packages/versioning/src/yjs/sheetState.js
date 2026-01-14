@@ -270,6 +270,45 @@ function isCanonicalUnsignedIntSegment(segment) {
 }
 
 /**
+ * Parse a run of ASCII digits into a number.
+ *
+ * Leading zeros are allowed (this is used for legacy cell key formats).
+ *
+ * @param {string} value
+ * @param {number} start
+ * @param {number} end
+ * @returns {number | null}
+ */
+function parseUnsignedInt(value, start, end) {
+  if (end <= start) return null;
+  let out = 0;
+  for (let i = start; i < end; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 48 || code > 57) return null;
+    out = out * 10 + (code - 48);
+  }
+  return out;
+}
+
+/**
+ * Parse a versioning-internal `cellKey(row, col)` string: `r{row}c{col}`.
+ *
+ * @param {string} key
+ * @returns {{ row: number, col: number } | null}
+ */
+function parseVersioningCellKey(key) {
+  if (typeof key !== "string" || key.length < 3) return null;
+  if (key.charCodeAt(0) !== 114) return null; // 'r'
+  const cIdx = key.indexOf("c", 1);
+  if (cIdx === -1) return null;
+  const row = parseUnsignedInt(key, 1, cIdx);
+  if (row == null) return null;
+  const col = parseUnsignedInt(key, cIdx + 1, key.length);
+  if (col == null) return null;
+  return { row, col };
+}
+
+/**
  * Parse a spreadsheet cell key. Supports:
  * - `${sheetId}:${row}:${col}` (docs/06-collaboration.md)
  * - `${sheetId}:${row},${col}` (legacy internal encoding)
@@ -310,15 +349,18 @@ export function parseSpreadsheetCellKey(key, opts = {}) {
 
     // Legacy `${sheetId}:${row},${col}` encoding.
     const sheetId = key.slice(0, firstColon) || defaultSheetId;
-    const rest = key.slice(firstColon + 1);
-    const m = rest.match(/^(\d+),(\d+)$/);
-    if (!m) return null;
-    return { sheetId, row: Number(m[1]), col: Number(m[2]), isCanonical: false };
+    const comma = key.indexOf(",", firstColon + 1);
+    if (comma === -1) return null;
+    const row = parseUnsignedInt(key, firstColon + 1, comma);
+    if (row == null) return null;
+    const col = parseUnsignedInt(key, comma + 1, key.length);
+    if (col == null) return null;
+    return { sheetId, row, col, isCanonical: false };
   }
 
   // Unit-test convenience `r{row}c{col}` encoding.
-  const m = key.match(/^r(\d+)c(\d+)$/);
-  if (m) return { sheetId: defaultSheetId, row: Number(m[1]), col: Number(m[2]), isCanonical: false };
+  const rxc = parseVersioningCellKey(key);
+  if (rxc) return { sheetId: defaultSheetId, row: rxc.row, col: rxc.col, isCanonical: false };
 
   return null;
 }
@@ -486,11 +528,9 @@ export function applyLayeredFormatsToCells(cells, layers) {
   };
 
   for (const [key, cell] of cells.entries()) {
-    const m = String(key).match(/^r(\d+)c(\d+)$/);
-    if (!m) continue;
-    const row = Number(m[1]);
-    const col = Number(m[2]);
-    if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
+    const addr = parseVersioningCellKey(key);
+    if (!addr) continue;
+    const { row, col } = addr;
 
     const cellFormat = extractStyleObject(yjsValueToJson(cell?.format ?? cell?.style));
     let merged = deepMerge(
