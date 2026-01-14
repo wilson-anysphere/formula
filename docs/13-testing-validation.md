@@ -924,7 +924,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       # Pin Rust for deterministic builds (this repo uses rust-toolchain.toml).
-      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.92.0
       - run: npm ci
       - run: npm run test:integration
 
