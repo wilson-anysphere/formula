@@ -2490,9 +2490,7 @@ export class FormulaBarView {
     // Merge pending render options; if any caller needs to overwrite the textarea
     // value, the combined render must also overwrite it.
     if (this.#pendingRender) {
-      this.#pendingRender = {
-        preserveTextareaValue: this.#pendingRender.preserveTextareaValue && opts.preserveTextareaValue,
-      };
+      this.#pendingRender.preserveTextareaValue = this.#pendingRender.preserveTextareaValue && opts.preserveTextareaValue;
     } else {
       this.#pendingRender = opts;
     }
@@ -2562,7 +2560,15 @@ export class FormulaBarView {
     const cursor = this.model.cursorStart;
     const requestId = ++this.#toolingRequestId;
 
-    this.#toolingPending = { requestId, draft, cursor, localeId: localeId || "en-US", referenceStyle };
+    if (this.#toolingPending) {
+      this.#toolingPending.requestId = requestId;
+      this.#toolingPending.draft = draft;
+      this.#toolingPending.cursor = cursor;
+      this.#toolingPending.localeId = localeId || "en-US";
+      this.#toolingPending.referenceStyle = referenceStyle;
+    } else {
+      this.#toolingPending = { requestId, draft, cursor, localeId: localeId || "en-US", referenceStyle };
+    }
 
     // Coalesce multiple rapid edits/selection changes into one tooling request per frame.
     if (this.#toolingScheduled) return;
