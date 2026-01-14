@@ -80,17 +80,23 @@ describe("Ribbon command wiring coverage (Home → Font dropdowns)", () => {
     expect(ids).toContain("format.clearFormats");
   });
 
-  it("does not use `home.font.*` prefix parsing for font dropdown menu items in main.ts", () => {
-    const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
-    const source = readFileSync(mainTsPath, "utf8");
+  it("does not use `home.font.*` prefix parsing for font dropdown menu items", () => {
+    const sources = [
+      { label: "main.ts", path: fileURLToPath(new URL("../../main.ts", import.meta.url)) },
+      { label: "ribbon/commandHandlers.ts", path: fileURLToPath(new URL("../commandHandlers.ts", import.meta.url)) },
+    ];
 
-    // Ensure the old prefix-parsing blocks were removed. (The dropdown trigger ids
-    // like `home.font.fillColor` may still exist as fallbacks; only the menu item
-    // prefix parsing is disallowed.)
-    expect(source).not.toContain("home.font.fillColor.");
-    expect(source).not.toContain("home.font.fontColor.");
-    expect(source).not.toContain("home.font.borders.");
-    expect(source).not.toContain("home.font.clearFormatting.");
+    for (const { label, path } of sources) {
+      const source = readFileSync(path, "utf8");
+
+      // Ensure the old prefix-parsing blocks were removed. (The dropdown trigger ids
+      // like `home.font.fillColor` may still exist as fallbacks; only the menu item
+      // prefix parsing is disallowed.)
+      expect(source, `${label} should not include legacy Home→Font menu id prefixes`).not.toContain("home.font.fillColor.");
+      expect(source, `${label} should not include legacy Home→Font menu id prefixes`).not.toContain("home.font.fontColor.");
+      expect(source, `${label} should not include legacy Home→Font menu id prefixes`).not.toContain("home.font.borders.");
+      expect(source, `${label} should not include legacy Home→Font menu id prefixes`).not.toContain("home.font.clearFormatting.");
+    }
   });
 });
 
@@ -278,4 +284,3 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
     ).toEqual([]);
   });
 });
-
