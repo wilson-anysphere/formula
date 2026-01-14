@@ -132,11 +132,14 @@ pub fn extract_chart_object_refs(
             let (drawing_object_id, drawing_object_name) = frame
                 .children()
                 .find(|n| n.is_element() && n.tag_name().name() == "nvGraphicFramePr")
-                .and_then(|nv| {
-                    nv.children()
+                // `cNvPr` can occasionally be wrapped in `mc:AlternateContent`, so search descendants
+                // of the canonical container before falling back to a whole-subtree search.
+                .and_then(|nv| nv.descendants().find(|n| n.is_element() && n.tag_name().name() == "cNvPr"))
+                .or_else(|| {
+                    frame
+                        .descendants()
                         .find(|n| n.is_element() && n.tag_name().name() == "cNvPr")
                 })
-                .or_else(|| frame.descendants().find(|n| n.is_element() && n.tag_name().name() == "cNvPr"))
                 .map(|c_nv_pr| {
                     let id = c_nv_pr
                         .attribute("id")
@@ -169,6 +172,7 @@ mod tests {
 <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
           xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
           xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+          xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <xdr:twoCellAnchor>
     <xdr:from>
@@ -196,7 +200,13 @@ mod tests {
           </a:graphicData>
         </a:graphic>
         <xdr:nvGraphicFramePr>
-          <xdr:cNvPr id="7" name="Chart 7"/>
+          <!-- Some producers wrap the canonical `cNvPr` in markup-compat blocks; ensure we still
+               prefer it over non-canonical matches elsewhere in the subtree. -->
+          <mc:AlternateContent>
+            <mc:Choice Requires="xdr">
+              <xdr:cNvPr id="7" name="Chart 7"/>
+            </mc:Choice>
+          </mc:AlternateContent>
           <xdr:cNvGraphicFramePr/>
         </xdr:nvGraphicFramePr>
         <xdr:xfrm/>
