@@ -215,8 +215,8 @@ describe("engine sync helpers", () => {
     const engine = new FakeEngine([]);
     await engineHydrateFromDocument(engine, doc);
 
-    // 120px -> Excel character width (1/256 precision): floor(((120-5)/7)*256)/256
-    expect(engine.colWidthCalls).toEqual([{ sheet: "Sheet1", col: 0, widthChars: 16.42578125 }]);
+    // 120px -> Excel character width (default Calibri 11 metrics).
+    expect(engine.colWidthCalls).toEqual([{ sheet: "Sheet1", col: 0, widthChars: 16.43 }]);
   });
 
   it("engineApplyDeltas propagates formatting-only deltas via internStyle + setCellStyleId", async () => {
@@ -369,8 +369,8 @@ describe("engine sync helpers", () => {
     const engine = new FakeEngine([]);
     await engineApplyDocumentChange(engine, payload);
 
-    // 120px -> Excel character width (1/256 precision): floor(((120-5)/7)*256)/256
-    expect(engine.colWidthCalls).toEqual([{ sheet: "Sheet1", col: 0, widthChars: 16.42578125 }]);
+    // 120px -> Excel character width (default Calibri 11 metrics).
+    expect(engine.colWidthCalls).toEqual([{ sheet: "Sheet1", col: 0, widthChars: 16.43 }]);
     // Column resizes should trigger a recalc even though DocumentController emits `recalc: false`.
     expect(engine.recalcCalls).toEqual([undefined]);
   });
