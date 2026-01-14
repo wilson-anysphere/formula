@@ -34,6 +34,30 @@ class TriageRustHelperReuseTests(unittest.TestCase):
             self.assertEqual(built, exe)
             self.assertIn("warning: failed to build Rust triage helper", stderr.getvalue())
 
+    def test_treats_ci_zero_as_non_ci(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        with tempfile.TemporaryDirectory(prefix="corpus-triage-helper-") as td:
+            root = Path(td)
+            exe = root / "target" / "debug" / triage_mod._rust_exe_name()  # noqa: SLF001
+            exe.parent.mkdir(parents=True, exist_ok=True)
+            exe.write_bytes(b"")
+
+            with mock.patch.object(triage_mod, "_repo_root", return_value=root):  # noqa: SLF001
+                with mock.patch.dict(os.environ, {"CI": "0"}, clear=True):
+                    with mock.patch.object(triage_mod.shutil, "which", return_value=None):
+                        with mock.patch.object(
+                            triage_mod.subprocess,
+                            "run",
+                            side_effect=subprocess.CalledProcessError(101, ["cargo", "build"]),
+                        ):
+                            stderr = io.StringIO()
+                            with mock.patch("sys.stderr", stderr):
+                                built = triage_mod._build_rust_helper()  # noqa: SLF001
+
+        self.assertEqual(built, exe)
+        self.assertIn("warning: failed to build Rust triage helper", stderr.getvalue())
+
     def test_does_not_reuse_existing_helper_in_ci(self) -> None:
         import tools.corpus.triage as triage_mod
 

@@ -1112,6 +1112,8 @@ def _build_rust_helper() -> Path:
 
     root = _repo_root()
     env = os.environ.copy()
+    ci_raw = env.get("CI")
+    is_ci = bool(ci_raw and ci_raw.strip().casefold() not in ("0", "false", "no"))
     # `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml`. Some environments set it
     # globally (often to `stable`), which would bypass the pinned toolchain and reintroduce
     # "whatever stable is today" drift when building the helper.
@@ -1121,7 +1123,7 @@ def _build_rust_helper() -> Path:
     cargo_home = env.get("CARGO_HOME")
     cargo_home_path = Path(cargo_home).expanduser() if cargo_home else None
     if not cargo_home or (
-        not env.get("CI")
+        not is_ci
         and not env.get("FORMULA_ALLOW_GLOBAL_CARGO_HOME")
         and cargo_home_path == default_global_cargo_home
     ):
@@ -1209,7 +1211,7 @@ def _build_rust_helper() -> Path:
         # corpora without waiting on the workspace to compile again.
         #
         # In CI, always treat build failures as fatal to avoid masking real regressions.
-        if exe.exists() and not env.get("CI"):
+        if exe.exists() and not is_ci:
             print(
                 f"warning: failed to build Rust triage helper (exit {e.returncode}); using existing binary: {exe}",
                 file=sys.stderr,
@@ -1217,7 +1219,7 @@ def _build_rust_helper() -> Path:
             return exe
         raise
     except FileNotFoundError as e:  # noqa: PERF203 (CI signal)
-        if exe.exists() and not env.get("CI"):
+        if exe.exists() and not is_ci:
             missing = e.filename or "cargo"
             print(
                 f"warning: {missing} not found; using existing Rust triage helper: {exe}",
