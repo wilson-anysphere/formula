@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
 use formula_dax::{
     Cardinality, CrossFilterDirection, DataModel, FilterContext, Relationship, Table, Value,
@@ -171,6 +171,7 @@ fn bench_relationship_propagation(c: &mut Criterion) {
     let mut group = c.benchmark_group("relationship_propagation");
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(10));
+    group.throughput(Throughput::Elements(rows as u64));
 
     group.bench_with_input(BenchmarkId::new("single_direction", rows), &rows, |b, _| {
         b.iter(|| {
@@ -220,6 +221,7 @@ fn bench_relationship_propagation(c: &mut Criterion) {
     let mut rows_group = c.benchmark_group("relationship_propagation_countrows");
     rows_group.sample_size(10);
     rows_group.measurement_time(Duration::from_secs(5));
+    rows_group.throughput(Throughput::Elements(rows as u64));
 
     rows_group.bench_with_input(BenchmarkId::new("single_direction", rows), &rows, |b, _| {
         b.iter(|| {

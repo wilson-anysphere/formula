@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
 use formula_dax::{
     pivot, Cardinality, CrossFilterDirection, DataModel, FilterContext, GroupByColumn, PivotMeasure,
@@ -328,6 +328,7 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
     let mut group = c.benchmark_group("pivot_star_schema");
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(10));
+    group.throughput(Throughput::Elements(rows as u64));
 
     group.bench_with_input(BenchmarkId::new("base_table_group_by", rows), &rows, |b, _| {
         b.iter(|| {
@@ -387,6 +388,7 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
     // measurement window to keep runtime reasonable.
     row_scan_group.sample_size(10);
     row_scan_group.measurement_time(Duration::from_secs(5));
+    row_scan_group.throughput(Throughput::Elements(rows as u64));
 
     row_scan_group.bench_with_input(
         BenchmarkId::new("dimension_group_by_region_unplannable", rows),
