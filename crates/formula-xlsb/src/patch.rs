@@ -2132,6 +2132,10 @@ fn patch_fixed_value_cell_preserving_trailing_bytes<W: io::Write>(
 
     match (record_id, &edit.new_value) {
         (biff12::FLOAT, CellValue::Number(v)) => {
+            // Fast path: the spec-defined payload is 16 bytes.
+            if payload.len() == 16 {
+                return patch_value_cell(writer, col, style, edit, existing);
+            }
             if payload.len() < 16 {
                 return Err(Error::UnexpectedEof);
             }
@@ -2143,6 +2147,10 @@ fn patch_fixed_value_cell_preserving_trailing_bytes<W: io::Write>(
             Ok(())
         }
         (biff12::BOOL, CellValue::Bool(v)) => {
+            // Fast path: the spec-defined payload is 9 bytes.
+            if payload.len() == 9 {
+                return patch_value_cell(writer, col, style, edit, existing);
+            }
             if payload.len() < 9 {
                 return Err(Error::UnexpectedEof);
             }
@@ -2154,6 +2162,10 @@ fn patch_fixed_value_cell_preserving_trailing_bytes<W: io::Write>(
             Ok(())
         }
         (biff12::BOOLERR, CellValue::Error(v)) => {
+            // Fast path: the spec-defined payload is 9 bytes.
+            if payload.len() == 9 {
+                return patch_value_cell(writer, col, style, edit, existing);
+            }
             if payload.len() < 9 {
                 return Err(Error::UnexpectedEof);
             }
@@ -2165,6 +2177,10 @@ fn patch_fixed_value_cell_preserving_trailing_bytes<W: io::Write>(
             Ok(())
         }
         (biff12::BLANK, CellValue::Blank) => {
+            // Fast path: the spec-defined payload is 8 bytes.
+            if payload.len() == 8 {
+                return patch_value_cell(writer, col, style, edit, existing);
+            }
             if payload.len() < 8 {
                 return Err(Error::UnexpectedEof);
             }
@@ -2295,11 +2311,19 @@ fn patch_rk_cell<W: io::Write>(
                 if payload.len() < 12 {
                     return Err(Error::UnexpectedEof);
                 }
-                let mut patched = payload.to_vec();
-                patched[0..4].copy_from_slice(&col.to_le_bytes());
-                patched[4..8].copy_from_slice(&style.to_le_bytes());
-                patched[8..12].copy_from_slice(&rk.to_le_bytes());
-                write_record_preserving_varints(writer, biff12::NUM, &patched, existing)?;
+                if payload.len() == 12 {
+                    let mut payload = [0u8; 12];
+                    payload[0..4].copy_from_slice(&col.to_le_bytes());
+                    payload[4..8].copy_from_slice(&style.to_le_bytes());
+                    payload[8..12].copy_from_slice(&rk.to_le_bytes());
+                    write_record_preserving_varints(writer, biff12::NUM, &payload, existing)?;
+                } else {
+                    let mut patched = payload.to_vec();
+                    patched[0..4].copy_from_slice(&col.to_le_bytes());
+                    patched[4..8].copy_from_slice(&style.to_le_bytes());
+                    patched[8..12].copy_from_slice(&rk.to_le_bytes());
+                    write_record_preserving_varints(writer, biff12::NUM, &patched, existing)?;
+                }
                 return Ok(());
             }
         }
