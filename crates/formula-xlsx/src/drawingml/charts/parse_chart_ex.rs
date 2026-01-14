@@ -7,7 +7,7 @@ use formula_model::RichText;
 use roxmltree::{Document, Node};
 use std::collections::{HashMap, HashSet};
 
-use crate::drawingml::anchor::flatten_alternate_content;
+use crate::drawingml::anchor::{descendants_selecting_alternate_content, flatten_alternate_content};
 
 use super::cache::{parse_num_cache, parse_num_ref, parse_str_cache, parse_str_ref};
 use super::parse_chart_space::parse_rich_text;
@@ -98,7 +98,9 @@ pub fn parse_chart_ex(
         .and_then(|chart| {
             chart
                 .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "plotArea")
+                .filter(|n| n.is_element())
+                .flat_map(|n| flatten_alternate_content(n, is_plot_area_node))
+                .find(|n| n.tag_name().name() == "plotArea")
         })
         .and_then(parse_layout_manual);
     let chart_data = parse_chart_data(&doc, &mut diagnostics);
@@ -108,18 +110,29 @@ pub fn parse_chart_ex(
     // `<cx:chart>`, so scan the chart subtree for series nodes and exclude
     // `<cx:chartData>` definitions.
     let mut series = Vec::new();
-    for series_node in doc.descendants().filter(|n| {
-        is_series_node(n) && has_ancestor_named(*n, "chart") && !has_ancestor_named(*n, "chartData")
-    }) {
-        series.push(parse_series(series_node, &chart_data, &mut diagnostics));
+    if let Some(chart) = chart_node {
+        for series_node in descendants_selecting_alternate_content(
+            chart,
+            is_series_node,
+            is_series_node,
+        )
+        .into_iter()
+        .filter(|n| !has_ancestor_named(*n, "chartData"))
+        {
+            series.push(parse_series(series_node, &chart_data, &mut diagnostics));
+        }
     }
 
     if series.is_empty() {
         // Defensive fallback: if the part omits `<cx:chart>`, parse any series
         // nodes outside of `<cx:chartData>`.
-        for series_node in doc
-            .descendants()
-            .filter(|n| is_series_node(n) && !has_ancestor_named(*n, "chartData"))
+        for series_node in descendants_selecting_alternate_content(
+            doc.root_element(),
+            is_series_node,
+            is_series_node,
+        )
+        .into_iter()
+        .filter(|n| !has_ancestor_named(*n, "chartData"))
         {
             series.push(parse_series(series_node, &chart_data, &mut diagnostics));
         }
@@ -181,14 +194,18 @@ fn parse_title(
 
     let Some(title_node) = chart_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "title")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_title_node))
+        .find(|n| n.tag_name().name() == "title")
     else {
         return None;
     };
 
     let mut parsed = title_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "tx")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_tx_node))
+        .find(|n| n.tag_name().name() == "tx")
         .and_then(|tx| parse_text_from_tx(tx, diagnostics, "title.tx"));
 
     if parsed.is_none() {
@@ -224,18 +241,24 @@ fn parse_legend(
 ) -> Option<LegendModel> {
     let legend_node = chart_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "legend")?;
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_legend_node))
+        .find(|n| n.tag_name().name() == "legend")?;
 
     let position = legend_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "legendPos")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_legend_pos_node))
+        .find(|n| n.tag_name().name() == "legendPos")
         .and_then(|n| n.attribute("val"))
         .map(|v| parse_legend_position(v, diagnostics))
         .unwrap_or(LegendPosition::Unknown);
 
     let overlay = legend_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "overlay")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_overlay_node))
+        .find(|n| n.tag_name().name() == "overlay")
         .and_then(|n| n.attribute("val"))
         .map(parse_ooxml_bool)
         .unwrap_or(false);
@@ -435,7 +458,7 @@ fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {
     })
 }
 
-fn is_series_node(node: &Node<'_, '_>) -> bool {
+fn is_series_node(node: Node<'_, '_>) -> bool {
     node.is_element() && (node.tag_name().name() == "ser" || node.tag_name().name() == "series")
 }
 
@@ -1053,6 +1076,30 @@ fn child_attr<'a>(node: Node<'a, 'a>, child: &str, attr: &str) -> Option<&'a str
         .and_then(|n| n.attribute(attr))
 }
 
+fn is_title_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "title"
+}
+
+fn is_tx_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "tx"
+}
+
+fn is_legend_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "legend"
+}
+
+fn is_legend_pos_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "legendPos"
+}
+
+fn is_overlay_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "overlay"
+}
+
+fn is_plot_area_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "plotArea"
+}
+
 fn is_layout_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "layout"
 }
@@ -1242,6 +1289,160 @@ mod tests {
         let legend = model.legend.expect("legend should be parsed");
         let layout = legend.layout.expect("legend should contain layout");
         assert_eq!(layout.x, Some(0.1));
+    }
+
+    #[test]
+    fn parses_legend_wrapped_in_mc_alternate_content() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="cx">
+  <cx:chart>
+    <mc:AlternateContent>
+      <mc:Choice Requires="cx">
+        <cx:legend>
+          <cx:legendPos val="r"/>
+          <cx:layout>
+            <cx:manualLayout>
+              <cx:x val="0.1"/>
+            </cx:manualLayout>
+          </cx:layout>
+        </cx:legend>
+      </mc:Choice>
+      <mc:Fallback>
+        <cx:legend>
+          <cx:legendPos val="l"/>
+          <cx:layout>
+            <cx:manualLayout>
+              <cx:x val="0.2"/>
+            </cx:manualLayout>
+          </cx:layout>
+        </cx:legend>
+      </mc:Fallback>
+    </mc:AlternateContent>
+    <cx:plotArea>
+      <cx:histogramChart/>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        let legend = model.legend.expect("legend should be parsed");
+        assert_eq!(legend.position, LegendPosition::Right);
+        assert_eq!(legend.layout.as_ref().and_then(|l| l.x), Some(0.1));
+    }
+
+    #[test]
+    fn parses_title_wrapped_in_mc_alternate_content() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="cx">
+  <cx:chart>
+    <mc:AlternateContent>
+      <mc:Choice Requires="cx">
+        <cx:title>
+          <cx:layout>
+            <cx:manualLayout>
+              <cx:x val="0.3"/>
+            </cx:manualLayout>
+          </cx:layout>
+          <cx:tx><cx:v>Choice title</cx:v></cx:tx>
+        </cx:title>
+      </mc:Choice>
+      <mc:Fallback>
+        <cx:title>
+          <cx:layout>
+            <cx:manualLayout>
+              <cx:x val="0.4"/>
+            </cx:manualLayout>
+          </cx:layout>
+          <cx:tx><cx:v>Fallback title</cx:v></cx:tx>
+        </cx:title>
+      </mc:Fallback>
+    </mc:AlternateContent>
+    <cx:plotArea>
+      <cx:histogramChart/>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        let title = model.title.expect("title should be parsed");
+        assert_eq!(title.rich_text.plain_text(), "Choice title");
+        assert_eq!(title.layout.as_ref().and_then(|l| l.x), Some(0.3));
+    }
+
+    #[test]
+    fn parses_plot_area_wrapped_in_mc_alternate_content() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="cx">
+  <cx:chart>
+    <mc:AlternateContent>
+      <mc:Choice Requires="cx">
+        <cx:plotArea>
+          <cx:layout>
+            <cx:manualLayout>
+              <cx:y val="0.4"/>
+            </cx:manualLayout>
+          </cx:layout>
+          <cx:histogramChart/>
+        </cx:plotArea>
+      </mc:Choice>
+      <mc:Fallback>
+        <cx:plotArea>
+          <cx:layout>
+            <cx:manualLayout>
+              <cx:y val="0.5"/>
+            </cx:manualLayout>
+          </cx:layout>
+          <cx:histogramChart/>
+        </cx:plotArea>
+      </mc:Fallback>
+    </mc:AlternateContent>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        let layout = model.plot_area_layout.expect("plot area layout present");
+        assert_eq!(layout.y, Some(0.4));
+    }
+
+    #[test]
+    fn chart_ex_series_under_alternate_content_avoids_duplicates() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="cx">
+  <cx:chart>
+    <cx:plotArea>
+      <mc:AlternateContent>
+        <mc:Choice Requires="cx">
+          <cx:histogramChart>
+            <cx:series>
+              <cx:tx><cx:v>Choice series</cx:v></cx:tx>
+            </cx:series>
+          </cx:histogramChart>
+        </mc:Choice>
+        <mc:Fallback>
+          <cx:histogramChart>
+            <cx:series>
+              <cx:tx><cx:v>Fallback series</cx:v></cx:tx>
+            </cx:series>
+          </cx:histogramChart>
+        </mc:Fallback>
+      </mc:AlternateContent>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        assert_eq!(model.series.len(), 1);
+        let name = model.series[0]
+            .name
+            .as_ref()
+            .expect("series name present")
+            .rich_text
+            .plain_text();
+        assert_eq!(name, "Choice series");
     }
 
     #[test]
