@@ -192,8 +192,10 @@ The encryption *mode* differs by scheme:
 - **Standard (CryptoAPI; `versionMinor == 2`):** decrypt the ciphertext bytes (after the 8-byte size
   prefix) with **AES-ECB** (no IV). The ciphertext is block-aligned (`len % 16 == 0`); after
   decrypting, **truncate the plaintext to `original_package_size`** (see
-  `docs/offcrypto-standard-encryptedpackage.md`). Standard has **no per-segment IV**; per-segment IV
-  derivation is Agile-only.
+  `docs/offcrypto-standard-encryptedpackage.md`). Excel-default Standard AES has **no per-segment
+  IV** (ECB). Some third-party producers use a non-standard segmented **AES-CBC** variant with a
+  per-segment IV derived from the verifier salt; our decryptors may attempt that as a fallback (see
+  `docs/offcrypto-standard-encryptedpackage.md`).
 - **Agile (4.4):** encrypted in **4096-byte plaintext segments** with a per-segment IV derived from
   `keyData/@saltValue` and the segment index, and cipher/chaining parameters specified by the XML
   descriptor.

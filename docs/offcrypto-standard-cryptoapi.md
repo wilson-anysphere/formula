@@ -498,7 +498,8 @@ Notes:
   OLE sector slack. **Always truncate** to the declared size after decrypting.
 * Some producers pad the ciphertext to a fixed size (e.g. to 4096 bytes for very small packages).
   Truncation handles this.
-* AES-ECB has no IV. Per-segment IV derivation is for **Agile (4.4)** encryption, not Standard AES.
+* AES-ECB has no IV. Excel-default Standard AES therefore has **no per-segment IV** (unlike Agile).
+  Some non-Excel producers use a segmented AES-CBC variant with derived per-segment IVs (see below).
 
 Even in the ECB baseline, many implementations decrypt `EncryptedPackage` in **0x1000-byte (4096)**
 segments for streaming/bounded memory:

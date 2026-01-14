@@ -297,8 +297,10 @@ Verifier nuances (very common bug source):
   blob is padded to an AES block boundary (for SHA-1, typically **32 bytes** on disk).
 
 Implementation note: in this repo (matching `crates/formula-offcrypto`), Standard/CryptoAPI **AES**
-uses **AES-ECB** (no IV) for both the verifier fields **and** `EncryptedPackage`. Any per-segment IV
-derivation is Agile-only.
+uses **AES-ECB** (no IV) for both the verifier fields **and** `EncryptedPackage` for
+Excel-default/ECMA-376 Standard AES. Some third-party producers use a non-standard segmented
+AES-CBC variant with a per-segment IV derived from the verifier salt; `formula-io` includes
+compatibility fallbacks for some of these cases (see `docs/offcrypto-standard-encryptedpackage.md`).
 
 ### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-ECB, no IV)
 
