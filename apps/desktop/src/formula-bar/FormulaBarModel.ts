@@ -637,11 +637,9 @@ export class FormulaBarModel {
 
     const start = Math.min(this.#cursorStart, this.#cursorEnd);
     const end = Math.max(this.#cursorStart, this.#cursorEnd);
-    const prefix = this.#draft.slice(0, start);
-    const suffix = this.#draft.slice(end);
-    const looksLikeFullSuggestion =
-      suggestionText.startsWith(prefix) && (!suffix || suggestionText.endsWith(suffix));
-    this.#aiSuggestion = looksLikeFullSuggestion ? suggestionText : prefix + suggestionText + suffix;
+    const draft = this.#draft;
+    const looksLikeFullSuggestion = matchesDraftFrame(draft, start, end, suggestionText);
+    this.#aiSuggestion = looksLikeFullSuggestion ? suggestionText : draft.slice(0, start) + suggestionText + draft.slice(end);
     this.#aiSuggestionIsFullDraft = true;
     this.#aiSuggestionPreview = preview;
   }
@@ -681,23 +679,22 @@ export class FormulaBarModel {
     const start = Math.min(this.#cursorStart, this.#cursorEnd);
     const end = Math.max(this.#cursorStart, this.#cursorEnd);
 
-    const prefix = this.#draft.slice(0, start);
-    const suffix = this.#draft.slice(end);
+    const draft = this.#draft;
+    const suffixLen = draft.length - end;
 
     // The completion engine typically supplies the full suggested text, but some
     // surfaces may pass only the "ghost" tail (text to insert at the caret).
-    const looksLikeFullReplacement =
-      suggestionText.startsWith(prefix) && (suffix.length === 0 || suggestionText.endsWith(suffix));
+    const looksLikeFullReplacement = this.#aiSuggestionIsFullDraft || matchesDraftFrame(draft, start, end, suggestionText);
 
     if (looksLikeFullReplacement) {
       const ghost = this.aiGhostText();
       this.#draft = suggestionText;
       this.#draftVersion += 1;
-      const newCursor = ghost ? start + ghost.length : suggestionText.length - suffix.length;
+      const newCursor = ghost ? start + ghost.length : suggestionText.length - suffixLen;
       this.#cursorStart = newCursor;
       this.#cursorEnd = newCursor;
     } else {
-      this.#draft = this.#draft.slice(0, start) + suggestionText + this.#draft.slice(end);
+      this.#draft = draft.slice(0, start) + suggestionText + draft.slice(end);
       this.#draftVersion += 1;
       const newCursor = start + suggestionText.length;
       this.#cursorStart = newCursor;
@@ -909,6 +906,28 @@ export class FormulaBarModel {
 
 function isWhitespaceChar(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+}
+
+function matchesDraftFrame(draft: string, start: number, end: number, suggestion: string): boolean {
+  const startIndex = Math.max(0, Math.min(start, draft.length));
+  const endIndex = Math.max(startIndex, Math.min(end, draft.length));
+  if (suggestion.length < startIndex) return false;
+
+  for (let i = 0; i < startIndex; i += 1) {
+    if (draft.charCodeAt(i) !== suggestion.charCodeAt(i)) return false;
+  }
+
+  const suffixLen = draft.length - endIndex;
+  if (suffixLen === 0) return true;
+
+  const suggestionSuffixStart = suggestion.length - suffixLen;
+  if (suggestionSuffixStart < startIndex) return false;
+
+  for (let i = 0; i < suffixLen; i += 1) {
+    if (draft.charCodeAt(endIndex + i) !== suggestion.charCodeAt(suggestionSuffixStart + i)) return false;
+  }
+
+  return true;
 }
 
 function isFormulaText(text: string): boolean {
