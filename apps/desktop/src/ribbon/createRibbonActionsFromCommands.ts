@@ -83,16 +83,16 @@ export function createRibbonActionsFromCommands(params: {
   const scheduleMicrotask =
     typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
   // Prefer a macrotask boundary so the suppression survives follow-up `onCommand` calls that are
-  // scheduled asynchronously (microtasks or timers). When `setTimeout` is available, we schedule
-  // the *timer* after two microtask turns so that hosts can enqueue follow-up work in microtasks
-  // (including scheduling their own `setTimeout(..., 0)` calls) before we enqueue the cleanup timer.
+  // scheduled asynchronously (microtasks or timers). When `setTimeout` is available, we use a
+  // nested timer so cleanup always runs after any same-turn `setTimeout(..., 0)` follow-ups,
+  // regardless of how many microtask turns the host uses before scheduling its timer.
   const scheduleToggleSuppressCleanup = (cb: () => void): void => {
     if (typeof setTimeout !== "function") {
       // Queue two microtasks so host follow-up `onCommand` microtasks run before cleanup.
       scheduleMicrotask(() => scheduleMicrotask(cb));
       return;
     }
-    scheduleMicrotask(() => scheduleMicrotask(() => void setTimeout(cb, 0)));
+    void setTimeout(() => void setTimeout(cb, 0), 0);
   };
   const markToggleHandled = (commandId: string): void => {
     const token = (nextToggleSuppressCleanupToken += 1);
