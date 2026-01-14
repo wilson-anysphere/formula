@@ -75,6 +75,63 @@ function extractPinnedCliVersionsFromWorkflow(workflowText) {
   return versions;
 }
 
+function findTauriActionScriptIssues(workflowText) {
+  // Enforce that any workflow using tauri-apps/tauri-action runs it through the
+  // Cargo-installed Tauri CLI (`cargo tauri`) so we don't drift to a floating
+  // `@tauri-apps/cli@v2` toolchain.
+  //
+  // We intentionally keep this YAML parsing very lightweight/dependency-free.
+  const issues = [];
+  const lines = workflowText.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("#")) continue;
+
+    const usesMatch = line.match(/^(\s*)-\s+uses:\s*tauri-apps\/tauri-action@/);
+    if (!usesMatch) continue;
+
+    const baseIndent = usesMatch[1] ?? "";
+    const baseIndentLen = baseIndent.length;
+
+    let tauriScriptValue = null;
+    let tauriScriptLine = null;
+
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const nextLine = lines[j];
+      const nextTrimmed = nextLine.trimStart();
+      if (nextTrimmed.startsWith("#")) continue;
+
+      const stepStart = nextLine.match(/^(\s*)-\s+/);
+      if (stepStart && (stepStart[1] ?? "").length <= baseIndentLen) break;
+
+      const tsMatch = nextLine.match(/^\s*tauriScript:\s*["']?([^"'\n#]+)["']?\s*(?:#.*)?$/);
+      if (tsMatch) {
+        tauriScriptValue = tsMatch[1].trim();
+        tauriScriptLine = j + 1;
+        break;
+      }
+    }
+
+    if (!tauriScriptValue) {
+      issues.push({
+        line: i + 1,
+        message: "tauri-action step must set tauriScript: cargo tauri",
+      });
+      continue;
+    }
+
+    if (tauriScriptValue !== "cargo tauri") {
+      issues.push({
+        line: tauriScriptLine ?? i + 1,
+        message: `tauriScript must be \"cargo tauri\" (found ${JSON.stringify(tauriScriptValue)})`,
+      });
+    }
+  }
+
+  return issues;
+}
+
 function extractPinnedCliVersionsFromDocs(markdownText) {
   // Look for shell-style assignments like:
   //   TAURI_CLI_VERSION=2.9.5
@@ -163,6 +220,7 @@ if (releaseWorkflowPinnedCliVersion) {
   try {
     const entries = fs.readdirSync(workflowsDirPath, { withFileTypes: true });
     const mismatchLines = [];
+    const tauriActionIssues = [];
     for (const entry of entries) {
       if (!entry.isFile()) continue;
       if (!entry.name.endsWith(".yml") && !entry.name.endsWith(".yaml")) continue;
@@ -175,6 +233,11 @@ if (releaseWorkflowPinnedCliVersion) {
           mismatchLines.push(`- ${rel}: TAURI_CLI_VERSION="${v}"`);
         }
       }
+
+      const issues = findTauriActionScriptIssues(text);
+      for (const issue of issues) {
+        tauriActionIssues.push(`- ${rel}:${issue.line}: ${issue.message}`);
+      }
     }
     if (mismatchLines.length > 0) {
       console.error("TAURI_CLI_VERSION mismatch across workflow files detected.");
@@ -186,6 +249,15 @@ if (releaseWorkflowPinnedCliVersion) {
       console.error(
         `- Update all workflow TAURI_CLI_VERSION values to match ${releaseWorkflowRelativePath} (${releaseWorkflowPinnedCliVersion}).`,
       );
+      process.exit(1);
+    }
+
+    if (tauriActionIssues.length > 0) {
+      console.error("tauri-apps/tauri-action must use the pinned Cargo-installed Tauri CLI.");
+      console.error("Set: tauriScript: cargo tauri");
+      console.error("");
+      tauriActionIssues.sort();
+      for (const line of tauriActionIssues) console.error(line);
       process.exit(1);
     }
   } catch {
