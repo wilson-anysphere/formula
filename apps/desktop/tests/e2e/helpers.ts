@@ -175,13 +175,24 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      const sawNetworkChanged = requestFailures.some((failure) => failure.includes("net::ERR_NETWORK_CHANGED"));
       if (
         attempt === 0 &&
         (message.includes("Execution context was destroyed") ||
           message.includes("net::ERR_ABORTED") ||
           message.includes("interrupted by another navigation") ||
-          message.includes("frame was detached"))
+          message.includes("frame was detached") ||
+          // Occasionally the Vite dev server will restart under us (or the browser will observe a
+          // transient network reset). In that case, the app never finishes bootstrapping and we
+          // time out waiting for `__formulaApp`. If we saw `net::ERR_NETWORK_CHANGED` while
+          // fetching modules, retry once.
+          sawNetworkChanged)
       ) {
+        // Clear captured diagnostics for the retry so a successful second attempt doesn't inherit
+        // errors from the first attempt.
+        consoleErrors.length = 0;
+        pageErrors.length = 0;
+        requestFailures.length = 0;
         await page.waitForLoadState("domcontentloaded");
         continue;
       }
@@ -215,6 +226,7 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
         attempt === 0 &&
         (message.includes("Execution context was destroyed") ||
           message.includes("net::ERR_ABORTED") ||
+          message.includes("net::ERR_NETWORK_CHANGED") ||
           message.includes("frame was detached"))
       ) {
         await page.waitForLoadState("domcontentloaded");
