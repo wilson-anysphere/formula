@@ -435,6 +435,14 @@ export class DocumentImageStore implements ImageStore {
    */
   dispose(): void {
     this.fallback.clear();
+    // Clear ephemeral bytes stored on the controller so disposing a SpreadsheetApp does not
+    // retain large collab-hydrated images if the app object is still referenced.
+    try {
+      const doc: any = this.document as any;
+      doc?.imageCache?.clear?.();
+    } catch {
+      // ignore
+    }
     try {
       this.persisted.clearMemory();
     } catch {
@@ -516,13 +524,23 @@ export class DocumentImageStore implements ImageStore {
     const images = doc?.images;
     if (images instanceof Map) {
       images.delete(imageId);
-      this.fallback.delete(imageId);
-      return;
-    }
-    if (images && typeof images === "object") {
+    } else if (images && typeof images === "object") {
       try {
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete (images as any)[imageId];
+      } catch {
+        // ignore
+      }
+    }
+
+    // Also clear the ephemeral collab hydration cache if present.
+    const cache = doc?.imageCache;
+    if (cache instanceof Map) {
+      cache.delete(imageId);
+    } else if (cache && typeof cache === "object") {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (cache as any)[imageId];
       } catch {
         // ignore
       }
@@ -541,6 +559,19 @@ export class DocumentImageStore implements ImageStore {
         for (const key of Object.keys(images)) {
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete (images as any)[key];
+        }
+      } catch {
+        // ignore
+      }
+    }
+    const cache = doc?.imageCache;
+    if (cache instanceof Map) {
+      cache.clear();
+    } else if (cache && typeof cache === "object") {
+      try {
+        for (const key of Object.keys(cache)) {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete (cache as any)[key];
         }
       } catch {
         // ignore
@@ -578,6 +609,16 @@ export class DocumentImageStore implements ImageStore {
     // Also drop any now-unreferenced in-memory cached entries.
     for (const id of Array.from(this.fallback.keys())) {
       if (!keepSet.has(id)) this.fallback.delete(id);
+    }
+
+    // Finally, drop any now-unreferenced entries from the controller's ephemeral cache.
+    // This keeps memory bounded after picture deletion/GC in collab docs.
+    const doc: any = this.document as any;
+    const cache = doc?.imageCache;
+    if (cache instanceof Map) {
+      for (const id of Array.from(cache.keys())) {
+        if (!keepSet.has(id)) cache.delete(id);
+      }
     }
   }
 }

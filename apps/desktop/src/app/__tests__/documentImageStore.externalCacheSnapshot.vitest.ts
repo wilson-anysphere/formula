@@ -32,6 +32,9 @@ describe("DocumentImageStore (external mode) + DocumentController image cache", 
     expect(entry).toBeTruthy();
     expect(entry?.mimeType).toBe("image/png");
     expect(Array.from(entry?.bytes ?? [])).toEqual([1, 2, 3]);
+
+    // Deleting through the ImageStore should also clear the controller's ephemeral cache.
+    store.delete("img1");
+    expect(doc.getImage("img1")).toBeNull();
   });
 });
-
