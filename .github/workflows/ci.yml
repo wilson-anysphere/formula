@@ -538,7 +538,9 @@ jobs:
   desktop-tauri-check-windows:
     name: Desktop (Tauri) Rust compile check (Windows)
     needs: conflict-marker-guard
-    runs-on: windows-latest
+    # Pin runner image versions for reproducibility and to keep CI aligned with
+    # the Desktop Release workflow (avoid `windows-latest` alias drift).
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -562,7 +564,9 @@ jobs:
   desktop-tauri-check-macos:
     name: Desktop (Tauri) Rust compile check (macOS)
     needs: conflict-marker-guard
-    runs-on: macos-latest
+    # Pin runner image versions for reproducibility and to keep CI aligned with
+    # the Desktop Release workflow (avoid `macos-latest` alias drift).
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Node (for static preflight scripts)
