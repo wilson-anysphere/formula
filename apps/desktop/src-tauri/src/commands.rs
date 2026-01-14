@@ -4,14 +4,13 @@ use formula_engine::pivot::{
 };
 use formula_model::{SheetVisibility as ModelSheetVisibility, TabColor};
 use serde::{de, Deserialize, Serialize};
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 use serde_json::json;
 use serde_json::Value as JsonValue;
 #[cfg(feature = "desktop")]
 use formula_model::charts::ChartModel as FormulaChartModel;
 #[cfg(feature = "desktop")]
 use formula_model::drawings::Anchor as FormulaDrawingAnchor;
-#[cfg(feature = "desktop")]
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
@@ -485,7 +484,7 @@ pub struct SheetUsedRange {
     pub end_col: usize,
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 const SHEET_FORMATTING_METADATA_KEY: &str = "formula_ui_formatting";
 #[cfg(any(feature = "desktop", test))]
 const SHEET_FORMATTING_SCHEMA_VERSION: i64 = 1;
@@ -4302,12 +4301,11 @@ pub fn get_sheet_view_state(
         .unwrap_or_else(|| json!({ "schemaVersion": SHEET_VIEW_SCHEMA_VERSION })))
 }
 
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub fn apply_sheet_formatting_deltas(
+#[cfg(any(feature = "desktop", test))]
+pub(crate) fn apply_sheet_formatting_deltas_inner(
+    state: &mut AppState,
     payload: ApplySheetFormattingDeltasRequest,
-    state: State<'_, SharedAppState>,
-) -> Result<(), String> {
+) -> Result<(), AppStateError> {
     #[derive(Clone, Debug, PartialEq)]
     struct FormatRun {
         start_row: i64,
@@ -4503,19 +4501,16 @@ pub fn apply_sheet_formatting_deltas(
         JsonValue::Object(out)
     }
 
-    let mut state = state.inner().lock().unwrap();
-    let sheet_uuid = state
-        .persistent_sheet_uuid(&payload.sheet_id)
-        .map_err(app_error)?;
+    let sheet_uuid = state.persistent_sheet_uuid(&payload.sheet_id)?;
     let Some(storage) = state.persistent_storage() else {
-        return Err(app_error(AppStateError::Persistence(
+        return Err(AppStateError::Persistence(
             "workbook is not backed by persistent storage".to_string(),
-        )));
+        ));
     };
 
     let sheet_meta = storage
         .get_sheet_meta(sheet_uuid)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppStateError::Persistence(e.to_string()))?;
     let mut metadata_root = match sheet_meta.metadata {
         Some(JsonValue::Object(map)) => map,
         _ => serde_json::Map::new(),
@@ -4593,9 +4588,7 @@ pub fn apply_sheet_formatting_deltas(
                 continue;
             }
             if delta.format.is_null() {
-                formatting_state
-                    .cell_formats
-                    .remove(&(delta.row, delta.col));
+                formatting_state.cell_formats.remove(&(delta.row, delta.col));
             } else {
                 formatting_state
                     .cell_formats
@@ -4605,45 +4598,21 @@ pub fn apply_sheet_formatting_deltas(
     }
 
     let next_formatting = serialize_formatting_state(formatting_state);
-    validate_sheet_formatting_metadata_size(&next_formatting)?;
+    validate_sheet_formatting_metadata_size(&next_formatting)
+        .map_err(AppStateError::Persistence)?;
 
     metadata_root.insert(SHEET_FORMATTING_METADATA_KEY.to_string(), next_formatting);
     storage
         .set_sheet_metadata(sheet_uuid, Some(JsonValue::Object(metadata_root)))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppStateError::Persistence(e.to_string()))?;
 
-    // Best-effort: reflect formatting metadata into the engine's style table/ids so worksheet
-    // information functions (`CELL(...)`) can consult it.
-    if let Some(LimitedSheetRowFormatDeltas(deltas)) = payload.row_formats.as_ref() {
-        for delta in deltas {
-            state
-                .apply_ui_row_format_delta_to_engine(&payload.sheet_id, delta.row, &delta.format)
-                .map_err(app_error)?;
-        }
-    }
-    if let Some(LimitedSheetColFormatDeltas(deltas)) = payload.col_formats.as_ref() {
-        for delta in deltas {
-            state
-                .apply_ui_col_format_delta_to_engine(&payload.sheet_id, delta.col, &delta.format)
-                .map_err(app_error)?;
-        }
-    }
-    if let Some(LimitedSheetCellFormatDeltas(deltas)) = payload.cell_formats.as_ref() {
-        for delta in deltas {
-            state
-                .apply_ui_cell_format_delta_to_engine(
-                    &payload.sheet_id,
-                    delta.row,
-                    delta.col,
-                    &delta.format,
-                )
-                .map_err(app_error)?;
-        }
-    }
+    // Apply the same deltas to the in-memory engine so style-aware functions (e.g. `CELL()`)
+    // reflect formatting edits immediately, without requiring a full engine rebuild.
+    state.apply_sheet_formatting_deltas_to_engine(&payload)?;
 
     // Formatting changes affect persistence/export behavior; force full regeneration on save.
     state.mark_dirty();
-    let workbook = state.get_workbook_mut().map_err(app_error)?;
+    let workbook = state.get_workbook_mut()?;
     workbook.origin_xlsx_bytes = None;
 
     Ok(())
@@ -4848,6 +4817,16 @@ pub fn apply_sheet_view_deltas(
     state.mark_dirty();
 
     Ok(())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn apply_sheet_formatting_deltas(
+    payload: ApplySheetFormattingDeltasRequest,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
+    let mut state = state.inner().lock().unwrap();
+    apply_sheet_formatting_deltas_inner(&mut state, payload).map_err(app_error)
 }
 
 #[cfg(feature = "desktop")]
