@@ -41,6 +41,9 @@ const CALG_SHA1: u32 = 0x0000_8004;
 
 const PAYLOAD_BLOCK_SIZE: usize = 1024;
 const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
+// CryptoAPI EncryptionHeader is 32 bytes of fixed fields plus an optional CSP name.
+// Cap this defensively so malformed files cannot request unbounded allocations.
+const MAX_ENCRYPTION_HEADER_SIZE: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CryptoApiHashAlg {
@@ -433,6 +436,11 @@ fn parse_cryptoapi_encryption_info_legacy_filepass(
         read_u32_le(payload, 10).ok_or_else(|| {
             DecryptError::InvalidFormat("FILEPASS missing headerSize".to_string())
         })? as usize;
+    if header_size > MAX_ENCRYPTION_HEADER_SIZE {
+        return Err(DecryptError::InvalidFormat(format!(
+            "FILEPASS headerSize {header_size} exceeds max {MAX_ENCRYPTION_HEADER_SIZE}",
+        )));
+    }
 
     let header_start = 14usize;
     let header_end = header_start
@@ -467,6 +475,11 @@ fn parse_cryptoapi_encryption_info(bytes: &[u8]) -> Result<CryptoApiEncryptionIn
     let header_size = read_u32_le(bytes, 8).ok_or_else(|| {
         DecryptError::InvalidFormat("EncryptionInfo missing HeaderSize".to_string())
     })? as usize;
+    if header_size > MAX_ENCRYPTION_HEADER_SIZE {
+        return Err(DecryptError::InvalidFormat(format!(
+            "EncryptionInfo HeaderSize {header_size} exceeds max {MAX_ENCRYPTION_HEADER_SIZE}",
+        )));
+    }
 
     let header_start = 12usize;
     let header_end = header_start
@@ -580,6 +593,7 @@ fn rc4_discard(rc4: &mut Rc4, mut n: usize) {
         rc4.apply_keystream(&mut scratch[..take]);
         n -= take;
     }
+    scratch.zeroize();
 }
 
 fn decrypt_range_by_offset(
