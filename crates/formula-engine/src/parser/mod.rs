@@ -1363,10 +1363,17 @@ impl<'a> Lexer<'a> {
             if matches!(ch, 'E' | 'e') {
                 break;
             }
+            // Some locales (notably fr-FR) commonly use NBSP (U+00A0) for thousands grouping, but
+            // narrow NBSP (U+202F) also appears in spreadsheets. When configured for either,
+            // accept both while scanning the mantissa so we can still detect the decimal
+            // separator later in the literal.
+            let is_thousands_sep = Some(ch) == self.locale.thousands_separator
+                || (self.locale.thousands_separator == Some('\u{00A0}') && ch == '\u{202F}')
+                || (self.locale.thousands_separator == Some('\u{202F}') && ch == '\u{00A0}');
             if is_digit(ch)
                 || ch == self.locale.decimal_separator
                 || ch == '.'
-                || Some(ch) == self.locale.thousands_separator
+                || is_thousands_sep
             {
                 end = start + rel + ch.len_utf8();
                 continue;
