@@ -5,7 +5,12 @@ use std::path::PathBuf;
 
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+use cbc::cipher::block_padding::NoPadding;
+use cbc::cipher::{BlockEncryptMut, KeyIvInit};
 use cfb::CompoundFile;
+use hmac::{Hmac, Mac as _};
 use ms_offcrypto_writer::Ecma376AgileWriter;
 use rand::{rngs::StdRng, SeedableRng as _};
 use sha1::{Digest as _, Sha1};
@@ -187,6 +192,202 @@ fn decrypt_agile_appended_ciphertext_fails_integrity() {
     )
     .expect_err("tampered EncryptedPackage should fail integrity");
     assert_eq!(err, OffcryptoError::IntegrityCheckFailed);
+}
+
+fn password_to_utf16le_bytes(password: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(password.len() * 2);
+    for unit in password.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
+fn derive_iterated_hash_sha1(password: &str, salt_value: &[u8], spin_count: u32) -> Vec<u8> {
+    let password_utf16 = password_to_utf16le_bytes(password);
+    let mut buf = Vec::with_capacity(salt_value.len() + password_utf16.len());
+    buf.extend_from_slice(salt_value);
+    buf.extend_from_slice(&password_utf16);
+
+    let mut h = Sha1::digest(&buf).to_vec();
+    for i in 0..spin_count {
+        let mut round = Vec::with_capacity(4 + h.len());
+        round.extend_from_slice(&i.to_le_bytes());
+        round.extend_from_slice(&h);
+        h = Sha1::digest(&round).to_vec();
+    }
+    h
+}
+
+fn derive_encryption_key_sha1(h: &[u8], block_key: &[u8; 8], key_bits: usize) -> Vec<u8> {
+    assert_eq!(
+        key_bits % 8,
+        0,
+        "keyBits must be divisible by 8 for AES"
+    );
+    let key_len = key_bits / 8;
+    let mut buf = Vec::with_capacity(h.len() + block_key.len());
+    buf.extend_from_slice(h);
+    buf.extend_from_slice(block_key);
+    let digest = Sha1::digest(&buf);
+    digest[..key_len].to_vec()
+}
+
+fn derive_iv_sha1(salt: &[u8], suffix: &[u8]) -> [u8; 16] {
+    let mut h = Sha1::new();
+    h.update(salt);
+    h.update(suffix);
+    let digest = h.finalize();
+    let mut iv = [0u8; 16];
+    iv.copy_from_slice(&digest[..16]);
+    iv
+}
+
+fn aes128_cbc_encrypt_no_padding(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Vec<u8> {
+    assert_eq!(key.len(), 16);
+    assert_eq!(iv.len(), 16);
+    assert_eq!(
+        plaintext.len() % 16,
+        0,
+        "AES-CBC NoPadding requires block-aligned plaintext"
+    );
+
+    let mut buf = plaintext.to_vec();
+    let len = buf.len();
+    cbc::Encryptor::<Aes128>::new_from_slices(key, iv)
+        .expect("valid key/iv")
+        .encrypt_padded_mut::<NoPadding>(&mut buf, len)
+        .expect("encrypt");
+    buf
+}
+
+fn compute_hmac_sha1(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut mac: Hmac<Sha1> =
+        <Hmac<Sha1> as hmac::Mac>::new_from_slice(key).expect("HMAC key length is unrestricted");
+    mac.update(data);
+    mac.finalize().into_bytes().to_vec()
+}
+
+#[test]
+fn decrypt_agile_accepts_short_hmac_key() {
+    // Some producers emit a decrypted `encryptedHmacKey` whose length is shorter than the hash
+    // output size (`SHA1`=20). HMAC accepts any key length, so we should accept such files as long
+    // as the computed digest matches `encryptedHmacValue` (first `hash_len` bytes).
+    let password = "pw";
+    let plain_zip = build_tiny_zip();
+
+    // Use SHA1 so `hash_len=20` is not AES-block aligned (16), forcing padding/extra bytes in
+    // `encryptedHmacValue`.
+    let hash_len = 20usize;
+    let block_size = 16usize;
+    let key_bits = 128usize;
+    let spin_count = 10u32;
+
+    let key_data_salt: Vec<u8> = (0u8..=15).collect();
+    let password_salt: Vec<u8> = (16u8..=31).collect();
+    let package_key: Vec<u8> = (32u8..=47).collect(); // AES-128 package key
+
+    // Agile block keys (MS-OFFCRYPTO).
+    const BLK_KEY_VERIFIER_HASH_INPUT: [u8; 8] =
+        [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B, 0x9E, 0x79];
+    const BLK_KEY_VERIFIER_HASH_VALUE: [u8; 8] =
+        [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x34, 0x4E];
+    const BLK_KEY_ENCRYPTED_KEY_VALUE: [u8; 8] =
+        [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
+    const BLK_KEY_HMAC_KEY: [u8; 8] = [0x5F, 0xB2, 0xAD, 0x01, 0x0C, 0xB9, 0xE1, 0xF6];
+    const BLK_KEY_HMAC_VALUE: [u8; 8] = [0xA0, 0x67, 0x7F, 0x02, 0xB2, 0x2C, 0x84, 0x33];
+
+    // --- Build EncryptedPackage stream ---------------------------------------------------------
+    let iv0 = derive_iv_sha1(&key_data_salt, &0u32.to_le_bytes());
+    let padded_plain_zip = {
+        let mut out = plain_zip.clone();
+        out.extend(std::iter::repeat(0u8).take((16 - (out.len() % 16)) % 16));
+        out
+    };
+    let ciphertext = aes128_cbc_encrypt_no_padding(&package_key, &iv0, &padded_plain_zip);
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&(plain_zip.len() as u64).to_le_bytes());
+    encrypted_package.extend_from_slice(&ciphertext);
+
+    // --- Build password key-encryptor fields ---------------------------------------------------
+    let password_hash = derive_iterated_hash_sha1(password, &password_salt, spin_count);
+    let verifier_iv = &password_salt[..block_size];
+
+    let verifier_input: Vec<u8> = b"abcdefghijklmnop".to_vec();
+    let verifier_hash: Vec<u8> = Sha1::digest(&verifier_input).to_vec();
+
+    let mut verifier_hash_value_plain = verifier_hash.clone();
+    verifier_hash_value_plain.extend_from_slice(&[0xA5u8; 12]); // garbage beyond hash_len
+    assert_eq!(verifier_hash_value_plain.len(), 32);
+
+    let encrypt_pw_blob = |block_key: &[u8; 8], plaintext: &[u8]| -> Vec<u8> {
+        let k = derive_encryption_key_sha1(&password_hash, block_key, key_bits);
+        aes128_cbc_encrypt_no_padding(&k, verifier_iv, plaintext)
+    };
+
+    let encrypted_verifier_hash_input =
+        encrypt_pw_blob(&BLK_KEY_VERIFIER_HASH_INPUT, &verifier_input);
+    let encrypted_verifier_hash_value =
+        encrypt_pw_blob(&BLK_KEY_VERIFIER_HASH_VALUE, &verifier_hash_value_plain);
+    let encrypted_key_value = encrypt_pw_blob(&BLK_KEY_ENCRYPTED_KEY_VALUE, &package_key);
+
+    // --- Build dataIntegrity fields ------------------------------------------------------------
+    let hmac_key_plain: Vec<u8> = vec![0x11u8; 16]; // shorter than hash_len=20
+    let actual_hmac = compute_hmac_sha1(&hmac_key_plain, &encrypted_package);
+    assert_eq!(actual_hmac.len(), hash_len);
+
+    // Non-zero garbage padding after hash_len.
+    let mut hmac_value_blob = actual_hmac.clone();
+    hmac_value_blob.extend_from_slice(&[0xC3u8; 12]);
+    assert_eq!(hmac_value_blob.len(), 32);
+
+    let iv_hmac_key = derive_iv_sha1(&key_data_salt, &BLK_KEY_HMAC_KEY);
+    let encrypted_hmac_key = aes128_cbc_encrypt_no_padding(&package_key, &iv_hmac_key, &hmac_key_plain);
+    let iv_hmac_value = derive_iv_sha1(&key_data_salt, &BLK_KEY_HMAC_VALUE);
+    let encrypted_hmac_value =
+        aes128_cbc_encrypt_no_padding(&package_key, &iv_hmac_value, &hmac_value_blob);
+
+    // --- Build EncryptionInfo stream -----------------------------------------------------------
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltSize="16" blockSize="{block_size}" keyBits="128" hashSize="{hash_len}"
+           cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+           saltValue="{key_data_salt_b64}"/>
+  <dataIntegrity encryptedHmacKey="{ehk_b64}" encryptedHmacValue="{ehv_b64}"/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey saltSize="16" blockSize="{block_size}" keyBits="128" hashSize="{hash_len}"
+                      spinCount="{spin_count}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                      saltValue="{password_salt_b64}"
+                      encryptedVerifierHashInput="{evhi_b64}"
+                      encryptedVerifierHashValue="{evhv_b64}"
+                      encryptedKeyValue="{ekv_b64}"/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#,
+        key_data_salt_b64 = BASE64.encode(&key_data_salt),
+        password_salt_b64 = BASE64.encode(&password_salt),
+        ehk_b64 = BASE64.encode(&encrypted_hmac_key),
+        ehv_b64 = BASE64.encode(&encrypted_hmac_value),
+        evhi_b64 = BASE64.encode(&encrypted_verifier_hash_input),
+        evhv_b64 = BASE64.encode(&encrypted_verifier_hash_value),
+        ekv_b64 = BASE64.encode(&encrypted_key_value),
+    );
+
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&4u16.to_le_bytes()); // major
+    encryption_info.extend_from_slice(&4u16.to_le_bytes()); // minor
+    encryption_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+    encryption_info.extend_from_slice(xml.as_bytes());
+
+    let options = DecryptOptions {
+        verify_integrity: true,
+        ..DecryptOptions::default()
+    };
+    let decrypted = decrypt_encrypted_package(&encryption_info, &encrypted_package, password, options)
+        .expect("decrypt agile package with short HMAC key");
+    assert_eq!(decrypted, plain_zip);
 }
 
 fn aes128_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
