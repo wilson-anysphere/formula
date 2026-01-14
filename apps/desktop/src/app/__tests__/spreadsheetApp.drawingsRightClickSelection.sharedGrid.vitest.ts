@@ -245,6 +245,144 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     root.remove();
   });
 
+  it("treats Ctrl+click as a context-click on macOS (drawing interactions enabled)", () => {
+    const originalPlatform = navigator.platform;
+    const restorePlatform = () => {
+      try {
+        Object.defineProperty(navigator, "platform", { configurable: true, value: originalPlatform });
+      } catch {
+        // ignore
+      }
+    };
+    try {
+      Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+    } catch {
+      // If the runtime doesn't allow stubbing `navigator.platform`, skip the test.
+      restorePlatform();
+      return;
+    }
+
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+      expect(app.getGridMode()).toBe("shared");
+
+      app.activateCell({ row: 5, col: 5 }, { scrollIntoView: false, focus: false });
+      const beforeActive = app.getActiveCell();
+
+      const drawing: DrawingObject = {
+        id: 1,
+        kind: { type: "image", imageId: "img-1" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+          size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+        },
+        zOrder: 0,
+      };
+      app.setDrawingObjects([drawing]);
+
+      const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+      const bubbled = vi.fn();
+      root.addEventListener("pointerdown", bubbled);
+      selectionCanvas.getBoundingClientRect = root.getBoundingClientRect as any;
+
+      const down = createPointerLikeMouseEvent("pointerdown", {
+        clientX: 60,
+        clientY: 30,
+        button: 0,
+        ctrlKey: true,
+        metaKey: false,
+      });
+      selectionCanvas.dispatchEvent(down);
+
+      expect(app.getSelectedDrawingId()).toBe(1);
+      expect(app.getActiveCell()).toEqual(beforeActive);
+      expect((down as any).__formulaDrawingContextClick).toBe(true);
+      expect(down.defaultPrevented).toBe(false);
+      expect(bubbled).toHaveBeenCalledTimes(1);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      restorePlatform();
+    }
+  });
+
+  it("treats Ctrl+click as a context-click on macOS (drawing interactions disabled)", () => {
+    const originalPlatform = navigator.platform;
+    const restorePlatform = () => {
+      try {
+        Object.defineProperty(navigator, "platform", { configurable: true, value: originalPlatform });
+      } catch {
+        // ignore
+      }
+    };
+    try {
+      Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+    } catch {
+      restorePlatform();
+      return;
+    }
+
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
+      expect(app.getGridMode()).toBe("shared");
+
+      app.activateCell({ row: 5, col: 5 }, { scrollIntoView: false, focus: false });
+      const beforeActive = app.getActiveCell();
+
+      const drawing: DrawingObject = {
+        id: 1,
+        kind: { type: "image", imageId: "img-1" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+          size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+        },
+        zOrder: 0,
+      };
+      app.setDrawingObjects([drawing]);
+
+      const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+      const bubbled = vi.fn();
+      root.addEventListener("pointerdown", bubbled);
+
+      const down = createPointerLikeMouseEvent("pointerdown", {
+        clientX: 60,
+        clientY: 30,
+        button: 0,
+        ctrlKey: true,
+        metaKey: false,
+      });
+      selectionCanvas.dispatchEvent(down);
+
+      expect(app.getSelectedDrawingId()).toBe(1);
+      expect(app.getActiveCell()).toEqual(beforeActive);
+      expect((down as any).__formulaDrawingContextClick).toBe(true);
+      expect(down.defaultPrevented).toBe(false);
+      expect(bubbled).toHaveBeenCalledTimes(1);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      restorePlatform();
+    }
+  });
+
   it("keeps selection and tags context-click when right-clicking a selection handle", () => {
     const root = createRoot();
     const status = {
