@@ -7,6 +7,10 @@ This directory contains **password-protected OOXML workbooks** (`.xlsx`, `.xlsm`
 These fixtures intentionally live **outside** `fixtures/xlsx/` so they are not picked up by the
 ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 
+Note: this directory currently vendors encrypted `.xlsx`/`.xlsm` samples only. For an encrypted
+`.xlsb` fixture, see `fixtures/encrypted/encrypted.xlsb` (real-world Apache POI corpus; password
+`tika`).
+
 ## Passwords
 
 - `agile.xlsx` / `standard.xlsx` / `standard-4.2.xlsx` / `standard-rc4.xlsx` / `agile-large.xlsx` / `standard-large.xlsx`: `password`
