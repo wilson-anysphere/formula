@@ -15,6 +15,26 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "formulas.formulaAuditing.traceDependents": true,
   "formulas.formulaAuditing.removeArrows": true,
 
+  // --- Macros -----------------------------------------------------------------
+  // Macro commands can trigger workbook mutations and should not run while a cell edit is active.
+  "view.macros.viewMacros": true,
+  "view.macros.viewMacros.run": true,
+  "view.macros.viewMacros.edit": true,
+  "view.macros.viewMacros.delete": true,
+  "view.macros.recordMacro": true,
+  "view.macros.recordMacro.stop": true,
+  "view.macros.useRelativeReferences": true,
+
+  "developer.code.visualBasic": true,
+  "developer.code.macros": true,
+  "developer.code.macros.run": true,
+  "developer.code.macros.edit": true,
+  "developer.code.recordMacro": true,
+  "developer.code.recordMacro.stop": true,
+  "developer.code.useRelativeReferences": true,
+  "developer.code.macroSecurity": true,
+  "developer.code.macroSecurity.trustCenter": true,
+
   // --- Formatting ------------------------------------------------------------
   "format.toggleSubscript": true,
   "format.toggleSuperscript": true,
