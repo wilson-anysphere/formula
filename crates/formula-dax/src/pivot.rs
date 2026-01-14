@@ -2873,7 +2873,7 @@ mod tests {
         ]);
         sales.append_row(&[
             formula_columnar::Value::Number(2.0),
-            formula_columnar::Value::Number(5.0),
+            formula_columnar::Value::Null,
         ]);
         sales.append_row(&[
             formula_columnar::Value::Number(3.0),
@@ -2906,10 +2906,20 @@ mod tests {
         model
             .add_measure("Avg Amount", "AVERAGE(Sales[Amount])")
             .unwrap();
+        model.add_measure("Rows", "COUNTROWS(Sales)").unwrap();
+        model.add_measure("Count Numbers", "COUNT(Sales[Amount])").unwrap();
+        model.add_measure("Count NonBlank", "COUNTA(Sales[Amount])").unwrap();
+        model
+            .add_measure("Blank Amounts", "COUNTBLANK(Sales[Amount])")
+            .unwrap();
 
         let measures = vec![
             PivotMeasure::new("Total Sales", "[Total Sales]").unwrap(),
             PivotMeasure::new("Avg Amount", "[Avg Amount]").unwrap(),
+            PivotMeasure::new("Rows", "[Rows]").unwrap(),
+            PivotMeasure::new("Count Numbers", "[Count Numbers]").unwrap(),
+            PivotMeasure::new("Count NonBlank", "[Count NonBlank]").unwrap(),
+            PivotMeasure::new("Blank Amounts", "[Blank Amounts]").unwrap(),
         ];
         let group_by = vec![GroupByColumn::new("Customers", "Region")];
 
@@ -2929,8 +2939,24 @@ mod tests {
         assert_eq!(
             result.rows,
             vec![
-                vec![Value::from("East"), 15.0.into(), 7.5.into()],
-                vec![Value::from("West"), 7.0.into(), 7.0.into()],
+                vec![
+                    Value::from("East"),
+                    10.0.into(),
+                    10.0.into(),
+                    2.0.into(),
+                    1.0.into(),
+                    1.0.into(),
+                    1.0.into(),
+                ],
+                vec![
+                    Value::from("West"),
+                    7.0.into(),
+                    7.0.into(),
+                    1.0.into(),
+                    1.0.into(),
+                    1.0.into(),
+                    0.0.into(),
+                ],
             ]
         );
     }
