@@ -1803,46 +1803,99 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                         // `preserve_parsed_parts=false` so downstream consumers (e.g. model export)
                         // can access metadata like phonetic guides without requiring raw part
                         // preservation.
-                        let parsed = match read_xl_wide_string(&mut rr, FlagsWidth::U8) {
-                            Ok(parsed) => parsed,
-                            Err(Error::UnexpectedEof) => {
-                                // Some files use the "simple" inline-string layout without a flags
-                                // byte, while others include a flags byte that may imply rich/
-                                // phonetic blocks that are not actually present.
-                                //
-                                // `read_xl_wide_string` expects the full `XLWideString` layout, so
-                                // it can fail with `UnexpectedEof` in both cases:
-                                // - simple layout: missing flags byte (EOF while reading text)
-                                // - malformed flagged layout: rich/phonetic bits set but blocks
-                                //   missing (EOF while reading those blocks)
-                                //
-                                // Be lenient and try a minimal flagged parse first
-                                // (`[cch][flags:u8][utf16...]`), then fall back to the simple parse
-                                // (`[cch][utf16...]`) if that fails.
-                                rr.offset = start_offset;
-                                let flagged = (|| -> Result<ParsedXlsbString, Error> {
-                                    let cch = rr.read_u32()? as usize;
+                        // Some streams contain malformed/mixed layout strings (e.g. a missing
+                        // rich/phonetic block when the corresponding flag bit is set, or trailing
+                        // junk bytes after a simple inline string). Be tolerant and choose between
+                        // the simple vs flagged UTF-16 start offsets based on which slice looks
+                        // more like UTF-16LE text.
+                        let cch = {
+                            let bytes: [u8; 4] = rr
+                                .data
+                                .get(start_offset..start_offset + 4)
+                                .ok_or(Error::UnexpectedEof)?
+                                .try_into()
+                                .unwrap();
+                            u32::from_le_bytes(bytes) as usize
+                        };
+                        let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+                        let simple_utf16_start = start_offset.checked_add(4).ok_or(Error::UnexpectedEof)?;
+                        let simple_utf16_end = simple_utf16_start
+                            .checked_add(utf16_len)
+                            .ok_or(Error::UnexpectedEof)?;
+                        let flagged_utf16_start = simple_utf16_start
+                            .checked_add(1)
+                            .ok_or(Error::UnexpectedEof)?;
+                        let flagged_utf16_end = flagged_utf16_start
+                            .checked_add(utf16_len)
+                            .ok_or(Error::UnexpectedEof)?;
+
+                        let has_simple_bytes = simple_utf16_end <= rr.data.len();
+                        let has_flagged_bytes = flagged_utf16_end <= rr.data.len();
+
+                        let score_utf16_le_bytes = |raw: &[u8]| -> i32 {
+                            // Heuristic: reward UTF-16LE slices with many 0 high bytes (common for
+                            // ASCII/Latin-1 text) and penalize the byte-swapped pattern (0 low
+                            // bytes with printable ASCII highs), which is typical of misaligned
+                            // parsing when a flags byte is mistaken for UTF-16.
+                            let mut score = 0i32;
+                            for pair in raw.chunks_exact(2) {
+                                let low = pair[0];
+                                let high = pair[1];
+                                if high == 0 {
+                                    score += 2;
+                                    if (0x20..=0x7E).contains(&low) {
+                                        score += 2;
+                                    }
+                                }
+                                if low == 0 && (0x20..=0x7E).contains(&high) {
+                                    score -= 1;
+                                }
+                            }
+                            score
+                        };
+
+                        let choose_flagged = match (has_simple_bytes, has_flagged_bytes) {
+                            (true, false) => false,
+                            (false, true) => true,
+                            (false, false) => return Err(Error::UnexpectedEof),
+                            (true, true) => {
+                                let simple_score =
+                                    score_utf16_le_bytes(&rr.data[simple_utf16_start..simple_utf16_end]);
+                                let flagged_score = score_utf16_le_bytes(
+                                    &rr.data[flagged_utf16_start..flagged_utf16_end],
+                                );
+                                // Tie-break in favor of the flagged layout (more common in the
+                                // wild and required for rich/phonetic preservation).
+                                flagged_score >= simple_score
+                            }
+                        };
+
+                        let parsed = if choose_flagged {
+                            // Flagged layout: try the full `XLWideString` parse first so rich /
+                            // phonetic extras are preserved. If the extras are missing (malformed
+                            // flags) fall back to a minimal parse that reads only `[cch][flags][utf16]`.
+                            rr.offset = start_offset;
+                            match read_xl_wide_string(&mut rr, FlagsWidth::U8) {
+                                Ok(parsed) => parsed,
+                                Err(Error::UnexpectedEof) => {
+                                    rr.offset = start_offset;
+                                    let _cch = rr.read_u32()? as usize;
                                     let _flags = rr.read_u8()?;
-                                    Ok(ParsedXlsbString {
+                                    ParsedXlsbString {
                                         text: rr.read_utf16_chars(cch)?,
                                         rich: None,
                                         phonetic: None,
-                                    })
-                                })();
-                                match flagged {
-                                    Ok(parsed) => parsed,
-                                    Err(Error::UnexpectedEof) => {
-                                        rr.offset = start_offset;
-                                        ParsedXlsbString {
-                                            text: rr.read_utf16_string()?,
-                                            rich: None,
-                                            phonetic: None,
-                                        }
                                     }
-                                    Err(e) => return Err(e),
                                 }
+                                Err(e) => return Err(e),
                             }
-                            Err(e) => return Err(e),
+                        } else {
+                            rr.offset = start_offset;
+                            ParsedXlsbString {
+                                text: rr.read_utf16_string()?,
+                                rich: None,
+                                phonetic: None,
+                            }
                         };
 
                         if parsed.rich.is_some() || parsed.phonetic.is_some() {
