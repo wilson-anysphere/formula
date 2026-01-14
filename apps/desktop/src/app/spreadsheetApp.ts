@@ -1470,6 +1470,7 @@ export class SpreadsheetApp {
   private dragState: DragState | null = null;
   private dragPointerPos: { x: number; y: number } | null = null;
   private dragAutoScrollRaf: number | null = null;
+  private readonly dragPointerCellScratch: CellCoord = { row: 0, col: 0 };
 
   private drawingGesture: DrawingGestureState | null = null;
   private drawingGesturePointerPos: { x: number; y: number; shiftKey: boolean } | null = null;
@@ -18098,7 +18099,7 @@ export class SpreadsheetApp {
     };
   }
 
-  private cellFromPoint(pointX: number, pointY: number): CellCoord {
+  private cellFromPoint(pointX: number, pointY: number, out?: CellCoord): CellCoord {
     // Pointer capture means we can receive coordinates outside the grid bounds
     // while the user is dragging a selection. Clamp to the current viewport so
     // we select the edge cell instead of snapping to the end of the sheet.
@@ -18123,6 +18124,11 @@ export class SpreadsheetApp {
 
     const col = this.colIndexByVisual[safeColVisual] ?? 0;
     const row = this.rowIndexByVisual[safeRowVisual] ?? 0;
+    if (out) {
+      out.row = row;
+      out.col = col;
+      return out;
+    }
     return { row, col };
   }
 
@@ -18259,7 +18265,7 @@ export class SpreadsheetApp {
       const didScroll = this.setScrollInternal(this.scrollX + deltaX, this.scrollY + deltaY);
       if (!didScroll) return;
 
-      const cell = this.cellFromPoint(px, py);
+      const cell = this.cellFromPoint(px, py, this.dragPointerCellScratch);
       if (this.dragState.mode === "fill") {
         const state = this.dragState;
         const source = state.sourceRange;
@@ -19055,7 +19061,7 @@ export class SpreadsheetApp {
       if (e.pointerId !== this.dragState.pointerId) return;
       if (this.editor.isOpen()) return;
       this.hideCommentTooltip();
-      const cell = this.cellFromPoint(x, y);
+      const cell = this.cellFromPoint(x, y, this.dragPointerCellScratch);
 
       if (this.dragState.mode === "fill") {
         const state = this.dragState;
@@ -19155,7 +19161,7 @@ export class SpreadsheetApp {
       return;
     }
 
-    const cell = this.cellFromPoint(x, y);
+    const cell = this.cellFromPoint(x, y, this.dragPointerCellScratch);
     const metaKey = cell.row * COMMENT_COORD_COL_STRIDE + cell.col;
     const preview = this.commentPreviewByCoord.get(metaKey);
     if (preview === undefined) {
