@@ -4,6 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js";
+import { stripComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.join(__dirname, "..");
@@ -33,92 +34,6 @@ function getLineNumber(text, index) {
   return text.slice(0, Math.max(0, index)).split("\n").length;
 }
 
-/**
- * Strip JS/TS line + block comments while preserving string literals.
- *
- * This matches the approach used by noHardcodedColors.test.js so guardrails stay
- * high-signal without attempting to fully parse JavaScript.
- *
- * @param {string} input
- */
-function stripJsComments(input) {
-  const text = String(input);
-  let out = "";
-  /** @type {"code" | "single" | "double" | "template" | "lineComment" | "blockComment"} */
-  let state = "code";
-
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    const next = i + 1 < text.length ? text[i + 1] : "";
-
-    if (state === "code") {
-      if (ch === "'" || ch === '"' || ch === "`") {
-        state = ch === "'" ? "single" : ch === '"' ? "double" : "template";
-        out += ch;
-        continue;
-      }
-
-      if (ch === "/" && next === "/") {
-        state = "lineComment";
-        out += "  ";
-        i += 1;
-        continue;
-      }
-
-      if (ch === "/" && next === "*") {
-        state = "blockComment";
-        out += "  ";
-        i += 1;
-        continue;
-      }
-
-      out += ch;
-      continue;
-    }
-
-    if (state === "lineComment") {
-      if (ch === "\n") {
-        state = "code";
-        out += "\n";
-      } else {
-        out += " ";
-      }
-      continue;
-    }
-
-    if (state === "blockComment") {
-      if (ch === "*" && next === "/") {
-        state = "code";
-        out += "  ";
-        i += 1;
-        continue;
-      }
-      out += ch === "\n" ? "\n" : " ";
-      continue;
-    }
-
-    // String literals: preserve as-is so we can scan inline style strings.
-    out += ch;
-    if (ch === "\\") {
-      if (next) {
-        out += next;
-        i += 1;
-      }
-      continue;
-    }
-
-    if (state === "single" && ch === "'") {
-      state = "code";
-    } else if (state === "double" && ch === '"') {
-      state = "code";
-    } else if (state === "template" && ch === "`") {
-      state = "code";
-    }
-  }
-
-  return out;
-}
-
 test("desktop UI scripts should not hardcode border-radius values in inline styles", () => {
   const files = walkScriptFiles(srcRoot).filter((file) => {
     const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
@@ -139,7 +54,7 @@ test("desktop UI scripts should not hardcode border-radius values in inline styl
 
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
-    const stripped = stripJsComments(source);
+    const stripped = stripComments(source);
 
     /** @type {{ re: RegExp, kind: string }[]} */
     const patterns = [
