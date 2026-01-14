@@ -1173,6 +1173,63 @@ mod tests {
     }
 
     #[test]
+    fn parse_sheet_stream_preserves_shared_string_phonetic_bytes() {
+        let ctx = WorkbookContext::default();
+        let shared_strings = vec!["Base".to_string()];
+        let phonetic_bytes = vec![0xDE, 0xAD, 0xBE, 0xEF];
+
+        let shared_strings_table = vec![SharedString {
+            rich_text: RichText::new("Base".to_string()),
+            run_formats: Vec::new(),
+            phonetic: Some(phonetic_bytes.clone()),
+            raw_si: Some(Vec::new()),
+        }];
+
+        // Worksheet containing a single BrtCellIsst (`biff12::STRING`) cell referencing `isst=0`.
+        let mut sheet_bin = Vec::new();
+        write_record(&mut sheet_bin, biff12::SHEETDATA, &[]);
+
+        // Row 0.
+        let mut row = Vec::new();
+        row.extend_from_slice(&0u32.to_le_bytes());
+        write_record(&mut sheet_bin, biff12::ROW, &row);
+
+        // Col 0: shared string index 0.
+        let mut cell = Vec::new();
+        cell.extend_from_slice(&0u32.to_le_bytes()); // col
+        cell.extend_from_slice(&0u32.to_le_bytes()); // style
+        cell.extend_from_slice(&0u32.to_le_bytes()); // isst
+        write_record(&mut sheet_bin, biff12::STRING, &cell);
+
+        write_record(&mut sheet_bin, biff12::SHEETDATA_END, &[]);
+
+        let mut cells = Vec::new();
+        parse_sheet_stream(
+            &mut Cursor::new(&sheet_bin),
+            &shared_strings,
+            Some(&shared_strings_table),
+            &ctx,
+            true,
+            false,
+            |cell| {
+                cells.push(cell);
+                ControlFlow::Continue(())
+            },
+        )
+        .expect("parse sheet");
+
+        assert_eq!(cells.len(), 1);
+        let cell = &cells[0];
+        assert_eq!(cell.value, CellValue::Text("Base".to_string()));
+        assert_eq!(
+            cell.preserved_string
+                .as_ref()
+                .and_then(|s| s.phonetic.as_deref()),
+            Some(phonetic_bytes.as_slice())
+        );
+    }
+
+    #[test]
     fn parse_sheet_stream_decodes_each_formula_cell_once() {
         reset_formula_decode_attempts();
 
@@ -1816,14 +1873,13 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                             rich,
                                             phonetic: s.phonetic.clone(),
                                         })
-                                    } else {
-                                        None
-                                    }
+                                     } else {
+                                         None
+                                     }
                                 })
                         } else {
                             None
                         };
-
                         (CellValue::Text(text), None, preserved)
                     }
                     biff12::FORMULA_STRING => {

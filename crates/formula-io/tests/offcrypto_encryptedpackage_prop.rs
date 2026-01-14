@@ -13,25 +13,25 @@ const KEY: [u8; 16] = [0x42; 16];
 const SALT: [u8; 16] = [0x24; 16];
 
 fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
-    assert!(
-        buf.len() % AES_BLOCK_LEN == 0,
-        "plaintext must be block-aligned for AES-ECB"
-    );
     fn encrypt_with<C>(key: &[u8], buf: &mut [u8])
     where
         C: BlockEncrypt + KeyInit,
     {
-        let cipher = C::new_from_slice(key).expect("valid AES key length");
+        let cipher = C::new_from_slice(key).expect("key length validated by caller");
         for block in buf.chunks_mut(AES_BLOCK_LEN) {
             cipher.encrypt_block(GenericArray::from_mut_slice(block));
         }
     }
 
+    assert!(
+        buf.len() % AES_BLOCK_LEN == 0,
+        "plaintext must be block-aligned for AES-ECB"
+    );
     match key.len() {
         16 => encrypt_with::<Aes128>(key, buf),
         24 => encrypt_with::<Aes192>(key, buf),
         32 => encrypt_with::<Aes256>(key, buf),
-        other => panic!("unsupported AES key length {other} (expected 16/24/32)"),
+        other => panic!("unsupported AES key length {other}"),
     }
 }
 
@@ -219,7 +219,8 @@ proptest! {
             (proptest::collection::vec(any::<u8>(), 0..=20_000), Just(Corruption::FlipHeaderLenHuge)),
             (proptest::collection::vec(any::<u8>(), 1..=20_000), Just(Corruption::TruncateCiphertext)),
             (proptest::collection::vec(any::<u8>(), 0..=20_000), Just(Corruption::MakeCiphertextNotBlockAligned)),
-            (proptest::collection::vec(any::<u8>(), ENCRYPTED_PACKAGE_SEGMENT_LEN..=20_000), Just(Corruption::RemoveBytesFromNonFinalSegment)),
+            // Keep payload large enough that we can safely remove bytes from the middle of the ciphertext.
+            (proptest::collection::vec(any::<u8>(), 4_096..=20_000), Just(Corruption::RemoveBytesFromNonFinalSegment)),
         ]
     ) {
         let mut ciphertext = encrypt_standard_encrypted_package_stream(&plaintext, &KEY);

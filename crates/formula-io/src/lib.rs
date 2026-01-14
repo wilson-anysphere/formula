@@ -3429,7 +3429,70 @@ mod tests {
     use super::xlsb_error_code_to_model_error;
     use super::xlsb_to_model_workbook;
     use formula_model::{CellRef, CellValue, DateSystem, ErrorValue};
+    use std::io::{Cursor, Write};
     use std::path::Path;
+    use zip::write::FileOptions;
+    use zip::{CompressionMethod, ZipWriter};
+
+    fn biff12_record(id: u32, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        crate::xlsb::biff12_varint::write_record_id(&mut out, id).expect("write record id");
+        crate::xlsb::biff12_varint::write_record_len(&mut out, payload.len() as u32)
+            .expect("write record len");
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn write_utf16_string(out: &mut Vec<u8>, s: &str) {
+        let units: Vec<u16> = s.encode_utf16().collect();
+        out.extend_from_slice(&(units.len() as u32).to_le_bytes());
+        for u in units {
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+    }
+
+    fn build_minimal_xlsb_with_parts(sheet_bin: &[u8], shared_strings_bin: &[u8]) -> Vec<u8> {
+        // workbook.bin containing only a single BrtSheet followed by BrtEndSheets.
+        // BrtSheet record data:
+        //   [state_flags:u32][sheet_id:u32][relId:XLWideString][name:XLWideString]
+        const BRT_SHEET: u32 = 0x009C;
+        const BRT_END_SHEETS: u32 = 0x0090;
+
+        let mut sheet_rec = Vec::new();
+        sheet_rec.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet_rec.extend_from_slice(&1u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet_rec, "rId1");
+        write_utf16_string(&mut sheet_rec, "Sheet1");
+
+        let workbook_bin = [
+            biff12_record(BRT_SHEET, &sheet_rec),
+            biff12_record(BRT_END_SHEETS, &[]),
+        ]
+        .concat();
+
+        // Minimal workbook relationships: Id->Target mapping (Type omitted; parser tolerates this).
+        let workbook_rels = br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.bin"/></Relationships>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.bin", options.clone()).unwrap();
+        zip.write_all(&workbook_bin).unwrap();
+
+        zip.start_file("xl/_rels/workbook.bin.rels", options.clone())
+            .unwrap();
+        zip.write_all(workbook_rels).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.bin", options.clone())
+            .unwrap();
+        zip.write_all(sheet_bin).unwrap();
+
+        zip.start_file("xl/sharedStrings.bin", options).unwrap();
+        zip.write_all(shared_strings_bin).unwrap();
+
+        zip.finish().unwrap().into_inner()
+    }
 
     #[test]
     fn xlsb_to_model_strips_leading_equals_from_formulas() {
@@ -3597,6 +3660,74 @@ mod tests {
             .get(cell.style_id)
             .expect("style id should exist");
         assert_eq!(style.number_format.as_deref(), Some("m/d/yyyy"));
+    }
+
+    #[test]
+    fn xlsb_to_model_preserves_shared_string_phonetic_bytes() {
+        // Shared strings (`sharedStrings.bin`) record ids (subset):
+        // - BrtSST    0x009F
+        // - BrtSI     0x0013
+        // - BrtSSTEnd 0x00A0
+        const BRT_SST: u32 = 0x009F;
+        const BRT_SI: u32 = 0x0013;
+        const BRT_SST_END: u32 = 0x00A0;
+
+        // Worksheet record ids (subset):
+        // - BrtBeginSheetData 0x0091
+        // - BrtEndSheetData   0x0092
+        // - BrtRow            0x0000
+        // - BrtCellIsst       0x0007
+        const BRT_SHEETDATA: u32 = 0x0091;
+        const BRT_SHEETDATA_END: u32 = 0x0092;
+        const BRT_ROW: u32 = 0x0000;
+        const BRT_STRING: u32 = 0x0007;
+
+        let phonetic_text = "PHO_MARKER_123";
+        let mut phonetic_bytes = Vec::new();
+        write_utf16_string(&mut phonetic_bytes, phonetic_text);
+
+        // Build sharedStrings.bin with a single SI that has the phonetic bit set.
+        // BrtSI payload:
+        //   [flags:u8][text:XLWideString][phonetic tail bytes...]
+        let mut si_payload = Vec::new();
+        si_payload.push(0x02); // phonetic flag
+        write_utf16_string(&mut si_payload, "Base");
+        si_payload.extend_from_slice(&phonetic_bytes);
+
+        let mut shared_strings_bin = Vec::new();
+        shared_strings_bin.extend_from_slice(&biff12_record(
+            BRT_SST,
+            &[1u32.to_le_bytes(), 1u32.to_le_bytes()].concat(),
+        ));
+        shared_strings_bin.extend_from_slice(&biff12_record(BRT_SI, &si_payload));
+        shared_strings_bin.extend_from_slice(&biff12_record(BRT_SST_END, &[]));
+
+        // Build sheet1.bin with A1 as a shared string (`isst=0`).
+        let mut sheet_bin = Vec::new();
+        sheet_bin.extend_from_slice(&biff12_record(BRT_SHEETDATA, &[]));
+        sheet_bin.extend_from_slice(&biff12_record(BRT_ROW, &0u32.to_le_bytes()));
+
+        let mut cell_payload = Vec::new();
+        cell_payload.extend_from_slice(&0u32.to_le_bytes()); // col
+        cell_payload.extend_from_slice(&0u32.to_le_bytes()); // style
+        cell_payload.extend_from_slice(&0u32.to_le_bytes()); // isst
+        sheet_bin.extend_from_slice(&biff12_record(BRT_STRING, &cell_payload));
+
+        sheet_bin.extend_from_slice(&biff12_record(BRT_SHEETDATA_END, &[]));
+
+        let xlsb_bytes = build_minimal_xlsb_with_parts(&sheet_bin, &shared_strings_bin);
+        let tmp = tempfile::NamedTempFile::new().expect("temp file");
+        std::fs::write(tmp.path(), xlsb_bytes).expect("write temp xlsb");
+
+        let wb = crate::xlsb::XlsbWorkbook::open(tmp.path()).expect("open xlsb");
+        let model = xlsb_to_model_workbook(&wb).expect("convert to model");
+        let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
+
+        let cell = sheet
+            .cell(CellRef::from_a1("A1").unwrap())
+            .expect("A1 missing");
+        assert_eq!(cell.value, CellValue::String("Base".to_string()));
+        assert_eq!(cell.phonetic.as_deref(), Some(phonetic_text));
     }
 
     #[test]
