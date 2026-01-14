@@ -150,6 +150,11 @@ Example (real fixture in this repo):
 * Correct decryption therefore requires: decrypt all 4096 ciphertext bytes, then truncate the
   plaintext to 3179 bytes.
 
+Fixture canary: `crates/formula-offcrypto/tests/standard_encryptedpackage_mode.rs` asserts that the
+committed Standard AES OOXML fixtures (`fixtures/encrypted/ooxml/standard*`) use the baseline
+**AES-ECB** `EncryptedPackage` mode (and will fail loudly if fixtures are regenerated in a
+segmented-CBC mode).
+
 Rationale:
 
 * MS-OFFCRYPTO §2.3.4.4 defines `StreamSize`/`orig_size` as authoritative for the unencrypted size,
