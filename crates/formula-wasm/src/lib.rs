@@ -5082,6 +5082,12 @@ impl WasmWorkbook {
             if let Some(locale_id) = locale_id.as_deref() {
                 wb.set_locale_id(locale_id);
             }
+            // Preserve an explicit `textCodepage` override when present. `set_locale_id` maps some
+            // locales onto default DBCS codepages; workbook JSON should still respect an explicit
+            // `textCodepage` value regardless of `formulaLanguage`.
+            if let Some(codepage) = text_codepage {
+                wb.engine.set_text_codepage(codepage);
+            }
         }
 
         // Apply any explicit text codepage after the workbook locale is set (regardless of when the
@@ -8887,6 +8893,46 @@ mod tests {
             json!("=SUM(1,2)")
         );
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A2"], json!("=1.5+1"));
+    }
+
+    #[test]
+    fn formula_language_canonical_roundtrips_through_to_json_for_de_de() {
+        let input = json!({
+            "localeId": "de-DE",
+            "formulaLanguage": "canonical",
+            "sheets": {
+                "Sheet1": {
+                    "cells": {
+                        // `=LOG(8,2)` is ambiguous in de-DE if treated as localized (it would parse
+                        // as LOG(8.2)). `formulaLanguage: "canonical"` disambiguates the payload.
+                        "A1": "=LOG(8,2)",
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let mut wb = WasmWorkbook::from_json(&input).unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+        let value = wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1");
+        let EngineValue::Number(n) = value else {
+            panic!("expected number result for LOG formula, got: {value:?}");
+        };
+        assert!((n - 3.0).abs() < 1e-12);
+
+        let json_str = wb.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed["localeId"], json!("de-DE"));
+        assert_eq!(parsed["formulaLanguage"], json!("canonical"));
+        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!("=LOG(8,2)"));
+
+        let mut wb2 = WasmWorkbook::from_json(&json_str).unwrap();
+        wb2.inner.recalculate_internal(None).unwrap();
+        let value2 = wb2.inner.engine.get_cell_value(DEFAULT_SHEET, "A1");
+        let EngineValue::Number(n2) = value2 else {
+            panic!("expected number result after roundtrip, got: {value2:?}");
+        };
+        assert!((n2 - 3.0).abs() < 1e-12);
     }
 
     #[test]
