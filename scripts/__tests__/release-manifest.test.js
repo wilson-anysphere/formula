@@ -602,6 +602,57 @@ test("verify-updater-manifest-signature.mjs verifies latest.json.sig against a t
   }
 });
 
+test("verify-tauri-latest-json.mjs validates local manifest files (no GitHub API)", async () => {
+  const latestJsonPath = path.join(fixtureDir, "latest.multi-platform.json");
+  const latestSigPath = path.join(fixtureDir, "latest.multi-platform.json.sig");
+
+  const child = spawnSync(
+    process.execPath,
+    [
+      path.join(repoRoot, "scripts", "verify-tauri-latest-json.mjs"),
+      "--manifest",
+      latestJsonPath,
+      "--sig",
+      latestSigPath,
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+
+  assert.equal(
+    child.status,
+    0,
+    `verify-tauri-latest-json.mjs failed (exit ${child.status})\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+  );
+  assert.match(child.stdout, /verification passed/i);
+});
+
+test("verify-tauri-latest-json.mjs fails when signature file is empty", async () => {
+  const latestJsonPath = path.join(fixtureDir, "latest.multi-platform.json");
+
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "formula-updater-latest-json-"));
+  try {
+    const emptySigPath = path.join(tmpDir, "latest.json.sig");
+    await writeFile(emptySigPath, "", "utf8");
+
+    const child = spawnSync(
+      process.execPath,
+      [
+        path.join(repoRoot, "scripts", "verify-tauri-latest-json.mjs"),
+        "--manifest",
+        latestJsonPath,
+        "--sig",
+        emptySigPath,
+      ],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+
+    assert.notEqual(child.status, 0, "expected non-zero exit status");
+    assert.match(child.stderr, /signature file is empty/i);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("merge-tauri-updater-manifests.mjs CLI merges manifests and writes output JSON", async () => {
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "formula-updater-merge-"));
   try {
