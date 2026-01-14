@@ -34,9 +34,11 @@ pub use encrypted_package::{
     decrypt_encrypted_package_standard_aes_to_writer,
     decrypt_standard_cryptoapi_rc4_encrypted_package_stream,
     decrypt_standard_encrypted_package_stream,
+    EncryptedPackageDecryptError,
     EncryptedPackageError,
     EncryptedPackageToWriterError,
     HashAlg,
+    InvalidCiphertextLenReason,
 };
 pub use standard::{
     parse_encryption_info_standard, verify_password_standard, EncryptionHeader, EncryptionVerifier,

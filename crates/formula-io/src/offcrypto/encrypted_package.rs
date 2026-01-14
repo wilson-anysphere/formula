@@ -23,7 +23,51 @@ pub enum HashAlg {
     Sha256,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidCiphertextLenReason {
+    #[error("segment index/offset overflow")]
+    SegmentIndexOverflow,
+}
+
 /// Errors returned by [`decrypt_standard_encrypted_package_stream`].
+///
+/// These errors aim to provide enough context (segment index + offset/length) to debug corrupt
+/// `EncryptedPackage` streams without needing to re-run with a debugger.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum EncryptedPackageDecryptError {
+    #[error("truncated `EncryptedPackage` size prefix: expected {ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN} bytes, got {len}")]
+    TruncatedPrefix { len: usize },
+
+    #[error("invalid AES key length {len} (expected 16, 24, or 32 bytes)")]
+    InvalidKeyLength { len: usize },
+
+    #[error("invalid ciphertext length for segment {segment} at offset {offset}: len={len} ({reason})")]
+    InvalidCiphertextLen {
+        segment: u32,
+        offset: usize,
+        len: usize,
+        reason: InvalidCiphertextLenReason,
+    },
+
+    #[error("truncated ciphertext segment {segment} at offset {offset}: expected {expected} bytes, got {got}")]
+    TruncatedSegment {
+        segment: u32,
+        offset: usize,
+        expected: usize,
+        got: usize,
+    },
+
+    #[error("ciphertext segment {segment} at offset {offset} is not AES-block aligned: len={len}")]
+    CiphertextNotBlockAligned { segment: u32, offset: usize, len: usize },
+
+    #[error("`EncryptedPackage` orig_size {orig_size} is too large for ciphertext length {ciphertext_len}")]
+    OrigSizeTooLarge { orig_size: u64, ciphertext_len: usize },
+
+    #[error("crypto error while decrypting segment {segment} at offset {offset}")]
+    CryptoError { segment: u32, offset: usize },
+}
+
+/// Errors returned by the legacy RC4 `EncryptedPackage` helpers in this module.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum EncryptedPackageError {
     #[error(
@@ -299,108 +343,284 @@ pub fn decrypt_standard_encrypted_package_stream(
     encrypted_package_stream: &[u8],
     key: &[u8],
     salt: &[u8],
-) -> Result<Vec<u8>, EncryptedPackageError> {
+) -> Result<Vec<u8>, EncryptedPackageDecryptError> {
     if encrypted_package_stream.len() < ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN {
-        return Err(EncryptedPackageError::StreamTooShort {
+        return Err(EncryptedPackageDecryptError::TruncatedPrefix {
             len: encrypted_package_stream.len(),
         });
+    }
+
+    if !matches!(key.len(), 16 | 24 | 32) {
+        return Err(EncryptedPackageDecryptError::InvalidKeyLength { len: key.len() });
     }
 
     let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
     size_bytes.copy_from_slice(&encrypted_package_stream[..ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN]);
     let orig_size = u64::from_le_bytes(size_bytes);
     let ciphertext = &encrypted_package_stream[ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN..];
+    let ciphertext_len = ciphertext.len();
+    if ciphertext_len == 0 && orig_size == 0 {
+        return Ok(Vec::new());
+    }
 
-    if ciphertext.len() % AES_BLOCK_LEN != 0 {
-        return Err(EncryptedPackageError::CiphertextLenNotBlockAligned {
-            ciphertext_len: ciphertext.len(),
+    if orig_size > ciphertext_len as u64 {
+        return Err(EncryptedPackageDecryptError::OrigSizeTooLarge {
+            orig_size,
+            ciphertext_len,
         });
     }
 
-    let orig_size_usize = usize::try_from(orig_size)
-        .map_err(|_| EncryptedPackageError::OrigSizeTooLargeForPlatform { orig_size })?;
+    let orig_size_usize = usize::try_from(orig_size).map_err(|_| {
+        EncryptedPackageDecryptError::OrigSizeTooLarge {
+            orig_size,
+            ciphertext_len,
+        }
+    })?;
+    if orig_size_usize == 0 {
+        // Be permissive: treat non-empty ciphertext as trailing padding bytes.
+        return Ok(Vec::new());
+    }
 
-    // Guardrail: `EncryptedPackage` carries the original plaintext size separately. Treat inputs as
-    // malformed when the ciphertext is too short to possibly contain `orig_size` bytes (accounting
-    // for AES block padding).
+    let segment_count = orig_size_usize.div_ceil(ENCRYPTED_PACKAGE_SEGMENT_LEN);
+    let full_segments = segment_count.saturating_sub(1);
+    let full_cipher_len = full_segments.checked_mul(ENCRYPTED_PACKAGE_SEGMENT_LEN).ok_or(
+        EncryptedPackageDecryptError::InvalidCiphertextLen {
+            segment: 0,
+            offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN,
+            len: ciphertext_len,
+            reason: InvalidCiphertextLenReason::SegmentIndexOverflow,
+        },
+    )?;
+
+    // --- Segment-level truncation checks (before block-alignment checks) ---
     //
-    // This prevents:
-    // - panics from integer overflow when computing padded sizes
-    // - OOM from allocating based on attacker-controlled `orig_size`
-    let expected_min_ciphertext_len = orig_size
-        .checked_add((AES_BLOCK_LEN - 1) as u64)
-        .and_then(|v| v.checked_div(AES_BLOCK_LEN as u64))
-        .and_then(|blocks| blocks.checked_mul(AES_BLOCK_LEN as u64))
-        .ok_or(EncryptedPackageError::ImplausibleOrigSize {
-            orig_size,
-            ciphertext_len: ciphertext.len(),
-        })?;
-    if (ciphertext.len() as u64) < expected_min_ciphertext_len {
-        return Err(EncryptedPackageError::ImplausibleOrigSize {
-            orig_size,
-            ciphertext_len: ciphertext.len(),
+    // Prefer `TruncatedSegment` when the ciphertext is clearly missing bytes, even if the remaining
+    // bytes are also not block-aligned. This yields more actionable diagnostics (expected/got).
+    if ciphertext_len < full_cipher_len {
+        let seg = ciphertext_len / ENCRYPTED_PACKAGE_SEGMENT_LEN;
+        let seg_u32 =
+            u32::try_from(seg).map_err(|_| EncryptedPackageDecryptError::InvalidCiphertextLen {
+                segment: 0,
+                offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN,
+                len: ciphertext_len,
+                reason: InvalidCiphertextLenReason::SegmentIndexOverflow,
+            })?;
+        let seg_offset = seg * ENCRYPTED_PACKAGE_SEGMENT_LEN;
+        let got = ciphertext_len - seg_offset;
+        return Err(EncryptedPackageDecryptError::TruncatedSegment {
+            segment: seg_u32,
+            offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + seg_offset,
+            expected: ENCRYPTED_PACKAGE_SEGMENT_LEN,
+            got,
         });
     }
 
-    let mut plaintext = if !salt.is_empty() {
-        // Some producers encrypt Standard/CryptoAPI `EncryptedPackage` using a non-standard
-        // segmented mode.
-        //
-        // Unfortunately, some real-world files still use AES-ECB while also carrying a salt, so
-        // we cannot select the mode purely from `salt.is_empty()`.
-        //
-        // Approach:
-        // - Try both candidate decryptions (ECB and the segmented fallback).
-        // - Prefer whichever candidate looks like a valid ZIP (OOXML payload).
-        // - If neither looks like a ZIP, fall back to PKCS#7 padding shape as a weak heuristic,
-        //   then default to ECB for compatibility.
-
-        let mut cbc = ciphertext.to_vec();
-        for (segment_index, segment) in cbc.chunks_mut(ENCRYPTED_PACKAGE_SEGMENT_LEN).enumerate() {
-            let iv = derive_standard_cryptoapi_iv_sha1(salt, segment_index as u32);
-            aes_cbc_decrypt_in_place(key, &iv, segment)?;
-        }
-
-        let mut ecb = ciphertext.to_vec();
-        aes_ecb_decrypt_in_place(key, &mut ecb)?;
-
-        let cbc_prefix = cbc.get(..orig_size_usize.min(cbc.len())).unwrap_or(&[]);
-        if looks_like_zip_prefix(cbc_prefix) {
-            cbc
-        } else {
-            let ecb_prefix = ecb.get(..orig_size_usize.min(ecb.len())).unwrap_or(&[]);
-            if looks_like_zip_prefix(ecb_prefix) {
-                ecb
-            } else if pkcs7_padding_matches(&cbc, orig_size_usize)
-                && !pkcs7_padding_matches(&ecb, orig_size_usize)
-            {
-                cbc
-            } else if !pkcs7_padding_matches(&cbc, orig_size_usize)
-                && pkcs7_padding_matches(&ecb, orig_size_usize)
-            {
-                ecb
-            } else if pkcs7_padding_matches(&cbc, orig_size_usize) {
-                cbc
-            } else {
-                ecb
+    let last_plain_len = orig_size_usize - full_cipher_len;
+    let expected_min_last_cipher_len = padded_aes_len(last_plain_len);
+    let last_cipher_available = ciphertext_len - full_cipher_len;
+    if last_cipher_available < expected_min_last_cipher_len {
+        let seg_u32 = u32::try_from(full_segments).map_err(|_| {
+            EncryptedPackageDecryptError::InvalidCiphertextLen {
+                segment: 0,
+                offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN,
+                len: ciphertext_len,
+                reason: InvalidCiphertextLenReason::SegmentIndexOverflow,
             }
-        }
-    } else {
-        // AES-ECB variant (no IV).
-        let mut out = ciphertext.to_vec();
-        aes_ecb_decrypt_in_place(key, &mut out)?;
-        out
-    };
-
-    if plaintext.len() < orig_size_usize {
-        return Err(EncryptedPackageError::DecryptedTooShort {
-            decrypted_len: plaintext.len(),
-            orig_size,
+        })?;
+        return Err(EncryptedPackageDecryptError::TruncatedSegment {
+            segment: seg_u32,
+            offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + full_cipher_len,
+            expected: expected_min_last_cipher_len,
+            got: last_cipher_available,
         });
     }
 
-    plaintext.truncate(orig_size_usize);
-    Ok(plaintext)
+    if ciphertext_len % AES_BLOCK_LEN != 0 {
+        let seg = ciphertext_len / ENCRYPTED_PACKAGE_SEGMENT_LEN;
+        let seg_u32 =
+            u32::try_from(seg).map_err(|_| EncryptedPackageDecryptError::InvalidCiphertextLen {
+                segment: 0,
+                offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN,
+                len: ciphertext_len,
+                reason: InvalidCiphertextLenReason::SegmentIndexOverflow,
+            })?;
+        let seg_offset = seg * ENCRYPTED_PACKAGE_SEGMENT_LEN;
+        let seg_len = ciphertext_len - seg_offset;
+        return Err(EncryptedPackageDecryptError::CiphertextNotBlockAligned {
+            segment: seg_u32,
+            offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + seg_offset,
+            len: seg_len,
+        });
+    }
+
+    fn decrypt_with<C: BlockDecrypt + KeyInit>(
+        key: &[u8],
+        ciphertext: &[u8],
+        salt: &[u8],
+        orig_size_usize: usize,
+        ciphertext_len: usize,
+    ) -> Result<Vec<u8>, EncryptedPackageDecryptError> {
+        let cipher = C::new_from_slice(key).map_err(|_| EncryptedPackageDecryptError::CryptoError {
+            segment: 0,
+            offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN,
+        })?;
+
+        let use_cbc = if salt.is_empty() || ciphertext.len() < AES_BLOCK_LEN {
+            false
+        } else {
+            // Some producers encrypt Standard/CryptoAPI `EncryptedPackage` using a non-standard
+            // segmented CBC mode with a per-segment IV derived from the Standard salt.
+            //
+            // Unfortunately, some real-world files still use AES-ECB while also carrying a salt, so
+            // we cannot select the mode purely from `salt.is_empty()`.
+            //
+            // Approach:
+            // - First, try a cheap ZIP signature check on the first block.
+            // - If ambiguous, decrypt both candidates and fall back to PKCS#7 padding shape as a
+            //   weak heuristic.
+            let first_cipher_block = &ciphertext[..AES_BLOCK_LEN];
+
+            // ECB decrypt of the first block yields:
+            // - For true ECB files: plaintext.
+            // - For segmented CBC files: plaintext XOR IV (CBC intermediate).
+            let mut ecb_first = [0u8; AES_BLOCK_LEN];
+            ecb_first.copy_from_slice(first_cipher_block);
+            cipher.decrypt_block(GenericArray::from_mut_slice(&mut ecb_first));
+
+            // CBC plaintext is ECB-decrypt XOR IV.
+            let mut cbc_first = ecb_first;
+            let iv0 = derive_standard_cryptoapi_iv_sha1(salt, 0);
+            for (b, p) in cbc_first.iter_mut().zip(iv0.iter()) {
+                *b ^= *p;
+            }
+
+            let ecb_zip = looks_like_zip_prefix(&ecb_first);
+            let cbc_zip = looks_like_zip_prefix(&cbc_first);
+
+            if cbc_zip != ecb_zip {
+                cbc_zip
+            } else {
+                // Ambiguous: decrypt both candidates and pick the most plausible output.
+                let mut cbc = ciphertext.to_vec();
+                for (segment_index, segment) in
+                    cbc.chunks_mut(ENCRYPTED_PACKAGE_SEGMENT_LEN).enumerate()
+                {
+                    let iv = derive_standard_cryptoapi_iv_sha1(salt, segment_index as u32);
+                    aes_cbc_decrypt_in_place(key, &iv, segment).map_err(|_| {
+                        EncryptedPackageDecryptError::CryptoError {
+                            segment: segment_index as u32,
+                            offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN
+                                + (segment_index * ENCRYPTED_PACKAGE_SEGMENT_LEN),
+                        }
+                    })?;
+                }
+
+                let mut ecb = ciphertext.to_vec();
+                for block in ecb.chunks_exact_mut(AES_BLOCK_LEN) {
+                    cipher.decrypt_block(GenericArray::from_mut_slice(block));
+                }
+
+                let cbc_prefix = cbc.get(..orig_size_usize.min(cbc.len())).unwrap_or(&[]);
+                let mut chosen = if looks_like_zip_prefix(cbc_prefix) {
+                    cbc
+                } else {
+                    let ecb_prefix = ecb.get(..orig_size_usize.min(ecb.len())).unwrap_or(&[]);
+                    if looks_like_zip_prefix(ecb_prefix) {
+                        ecb
+                    } else if pkcs7_padding_matches(&cbc, orig_size_usize)
+                        && !pkcs7_padding_matches(&ecb, orig_size_usize)
+                    {
+                        cbc
+                    } else if !pkcs7_padding_matches(&cbc, orig_size_usize)
+                        && pkcs7_padding_matches(&ecb, orig_size_usize)
+                    {
+                        ecb
+                    } else if pkcs7_padding_matches(&cbc, orig_size_usize) {
+                        cbc
+                    } else {
+                        ecb
+                    }
+                };
+
+                chosen.truncate(orig_size_usize);
+                return Ok(chosen);
+            }
+        };
+
+        let mut out = Vec::with_capacity(orig_size_usize);
+        let mut segment_index: u32 = 0;
+        while out.len() < orig_size_usize {
+            let seg_offset = (segment_index as usize)
+                .checked_mul(ENCRYPTED_PACKAGE_SEGMENT_LEN)
+                .ok_or(EncryptedPackageDecryptError::InvalidCiphertextLen {
+                    segment: segment_index,
+                    offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN,
+                    len: ciphertext_len,
+                    reason: InvalidCiphertextLenReason::SegmentIndexOverflow,
+                })?;
+
+            let plain_len = (orig_size_usize - out.len()).min(ENCRYPTED_PACKAGE_SEGMENT_LEN);
+            let cipher_len = padded_aes_len(plain_len);
+
+            let seg_end = seg_offset.checked_add(cipher_len).ok_or(
+                EncryptedPackageDecryptError::InvalidCiphertextLen {
+                    segment: segment_index,
+                    offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + seg_offset,
+                    len: ciphertext_len,
+                    reason: InvalidCiphertextLenReason::SegmentIndexOverflow,
+                },
+            )?;
+            let Some(seg_cipher) = ciphertext.get(seg_offset..seg_end) else {
+                let got = ciphertext_len.saturating_sub(seg_offset);
+                return Err(EncryptedPackageDecryptError::TruncatedSegment {
+                    segment: segment_index,
+                    offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + seg_offset,
+                    expected: cipher_len,
+                    got,
+                });
+            };
+
+            let mut decrypted = seg_cipher.to_vec();
+            if use_cbc {
+                let iv = derive_standard_cryptoapi_iv_sha1(salt, segment_index);
+                let mut prev = iv;
+                for block in decrypted.chunks_exact_mut(AES_BLOCK_LEN) {
+                    let mut cur = [0u8; AES_BLOCK_LEN];
+                    cur.copy_from_slice(block);
+                    cipher.decrypt_block(GenericArray::from_mut_slice(block));
+                    for (b, p) in block.iter_mut().zip(prev.iter()) {
+                        *b ^= *p;
+                    }
+                    prev = cur;
+                }
+            } else {
+                for block in decrypted.chunks_exact_mut(AES_BLOCK_LEN) {
+                    cipher.decrypt_block(GenericArray::from_mut_slice(block));
+                }
+            }
+
+            out.extend_from_slice(&decrypted[..plain_len]);
+
+            segment_index = segment_index.checked_add(1).ok_or(
+                EncryptedPackageDecryptError::InvalidCiphertextLen {
+                    segment: segment_index,
+                    offset: ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + seg_offset,
+                    len: ciphertext_len,
+                    reason: InvalidCiphertextLenReason::SegmentIndexOverflow,
+                },
+            )?;
+        }
+
+        out.truncate(orig_size_usize);
+        Ok(out)
+    }
+
+    match key.len() {
+        16 => decrypt_with::<Aes128>(key, ciphertext, salt, orig_size_usize, ciphertext_len),
+        24 => decrypt_with::<Aes192>(key, ciphertext, salt, orig_size_usize, ciphertext_len),
+        32 => decrypt_with::<Aes256>(key, ciphertext, salt, orig_size_usize, ciphertext_len),
+        other => Err(EncryptedPackageDecryptError::InvalidKeyLength { len: other }),
+    }
 }
 
 /// Decrypt a Standard (CryptoAPI) AES `EncryptedPackage` stream using the
@@ -951,11 +1171,11 @@ mod tests {
         let key = fixed_key_16();
 
         let err = decrypt_standard_encrypted_package_stream(&[0u8; 7], &key, &[]).unwrap_err();
-        assert_eq!(err, EncryptedPackageError::StreamTooShort { len: 7 });
+        assert_eq!(err, EncryptedPackageDecryptError::TruncatedPrefix { len: 7 });
     }
 
     #[test]
-    fn errors_on_non_block_aligned_ciphertext() {
+    fn errors_on_truncated_ciphertext() {
         let key = fixed_key_16();
 
         let mut encrypted = Vec::new();
@@ -965,7 +1185,12 @@ mod tests {
         let err = decrypt_standard_encrypted_package_stream(&encrypted, &key, &[]).unwrap_err();
         assert_eq!(
             err,
-            EncryptedPackageError::CiphertextLenNotBlockAligned { ciphertext_len: 15 }
+            EncryptedPackageDecryptError::TruncatedSegment {
+                segment: 0,
+                offset: 8,
+                expected: 16,
+                got: 15
+            }
         );
     }
 
@@ -981,21 +1206,43 @@ mod tests {
         let err = decrypt_standard_encrypted_package_stream(&encrypted, &key, &[]).unwrap_err();
         assert_eq!(
             err,
-            EncryptedPackageError::ImplausibleOrigSize {
+            EncryptedPackageDecryptError::OrigSizeTooLarge {
                 orig_size: 32,
-                ciphertext_len: 16
+                ciphertext_len: 16,
             }
         );
     }
 
     #[test]
-    fn errors_on_invalid_aes_key_length() {
-        let key = [0u8; 17];
+    fn errors_on_invalid_key_length() {
+        let key = vec![0u8; 15];
         let encrypted = 0u64.to_le_bytes().to_vec();
+
         let err = decrypt_standard_encrypted_package_stream(&encrypted, &key, &[]).unwrap_err();
-        assert_eq!(
-            err,
-            EncryptedPackageError::InvalidAesKeyLength { key_len: 17 }
+        assert_eq!(err, EncryptedPackageDecryptError::InvalidKeyLength { len: 15 });
+    }
+
+    #[test]
+    fn errors_truncated_segment_reports_segment_index() {
+        let key = fixed_key_16();
+
+        // Two segments required, but the final segment is 1 byte short of the minimum 16-byte block.
+        let mut encrypted = Vec::new();
+        encrypted.extend_from_slice(&(4096u64 + 1).to_le_bytes());
+        encrypted.extend_from_slice(&vec![0u8; 4096 + 15]);
+
+        let err = decrypt_standard_encrypted_package_stream(&encrypted, &key, &[]).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EncryptedPackageDecryptError::TruncatedSegment {
+                    segment: 1,
+                    expected: 16,
+                    got: 15,
+                    ..
+                }
+            ),
+            "unexpected error: {err:?}"
         );
     }
 
@@ -1047,6 +1294,29 @@ mod tests {
             .expect("open ZIP from decrypted bytes");
         zip.by_name("xl/workbook.xml")
             .expect("expected xl/workbook.xml in decrypted ZIP");
+    }
+
+    #[test]
+    fn errors_ciphertext_not_block_aligned_reports_segment_index() {
+        let key = fixed_key_16();
+
+        // Two segments required, but the final segment has 17 bytes (not block aligned).
+        let mut encrypted = Vec::new();
+        encrypted.extend_from_slice(&(4096u64 + 1).to_le_bytes());
+        encrypted.extend_from_slice(&vec![0u8; 4096 + 17]);
+
+        let err = decrypt_standard_encrypted_package_stream(&encrypted, &key, &[]).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EncryptedPackageDecryptError::CiphertextNotBlockAligned {
+                    segment: 1,
+                    len: 17,
+                    ..
+                }
+            ),
+            "unexpected error: {err:?}"
+        );
     }
 
     struct TestRc4 {
@@ -1260,10 +1530,10 @@ mod tests {
         let err = res
             .unwrap()
             .expect_err("expected error on orig_size > usize::MAX");
-        assert_eq!(
+        assert!(matches!(
             err,
-            EncryptedPackageError::OrigSizeTooLargeForPlatform { orig_size }
-        );
+            EncryptedPackageDecryptError::OrigSizeTooLarge { orig_size: _, .. }
+        ));
     }
 
     #[test]
