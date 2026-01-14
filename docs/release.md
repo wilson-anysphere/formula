@@ -6,8 +6,8 @@ macOS (Apple Silicon + Intel), Windows, and Linux and uploads them to a **draft*
 
 Platform/architecture expectations for a release:
 
-- **macOS:** **universal** build (Intel + Apple Silicon): `.dmg` (manual installer) + `.app.tar.gz`
-  (auto-update payload).
+- **macOS:** **universal** build (Intel + Apple Silicon): `.dmg` (manual installer) + updater payload
+  archive (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`).
 - **Windows:** **x64** + **ARM64**: `.msi` (manual installer **and** auto-update payload) + `.exe`
   (manual installer) for each architecture.
 - **Linux:** **x86_64** + **ARM64**: `.AppImage` (auto-update payload; also a portable/manual option)
