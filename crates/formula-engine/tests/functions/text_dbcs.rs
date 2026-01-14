@@ -170,6 +170,10 @@ fn byte_count_text_functions_use_dbcs_byte_semantics_under_cp932() {
     assert_eq!(sheet.eval(r#"=LENB("あ")"#), Value::Number(2.0));
     assert_eq!(sheet.eval(r#"=LENB("Aあ")"#), Value::Number(3.0));
 
+    // Shift_JIS encodes halfwidth katakana as single-byte and fullwidth katakana as double-byte.
+    assert_eq!(sheet.eval(r#"=LENB("ｱ")"#), Value::Number(1.0));
+    assert_eq!(sheet.eval(r#"=LENB("ア")"#), Value::Number(2.0));
+
     // LEFTB/RIGHTB/MIDB operate on byte counts, truncating at character boundaries.
     assert_eq!(
         sheet.eval(r#"=LEFTB("A漢B",2)"#),
