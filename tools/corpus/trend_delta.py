@@ -210,7 +210,8 @@ def trend_delta_markdown(
         f"- Round-trip p90: **{_ms(cur.get('round_trip_p90_ms'))}** ({_delta_ms(prev.get('round_trip_p90_ms'), cur.get('round_trip_p90_ms'))})"
     )
     lines.append(
-        f"- Calc rate (attempted): **{_pct(cur.get('calc_rate'))}** ({_delta_pct(prev.get('calc_rate'), cur.get('calc_rate'))}); attempted {cur.get('calc_attempted', 0)}"
+        f"- Calc rate (attempted): **{_pct(cur.get('calc_rate'))}** ({_delta_pct(prev.get('calc_rate'), cur.get('calc_rate'))}); "
+        f"attempted {cur.get('calc_attempted', 0)} ({_delta_int(prev.get('calc_attempted'), cur.get('calc_attempted'))})"
     )
     if cur.get("calc_cell_fidelity") is not None:
         lines.append(
@@ -220,13 +221,14 @@ def trend_delta_markdown(
             f"mismatches {cur.get('calc_mismatched_cells_total', 0)} / {cur.get('calc_formula_cells_total', 0)}"
         )
     lines.append(
-        f"- Render rate (attempted): **{_pct(cur.get('render_rate'))}** ({_delta_pct(prev.get('render_rate'), cur.get('render_rate'))}); attempted {cur.get('render_attempted', 0)}"
+        f"- Render rate (attempted): **{_pct(cur.get('render_rate'))}** ({_delta_pct(prev.get('render_rate'), cur.get('render_rate'))}); "
+        f"attempted {cur.get('render_attempted', 0)} ({_delta_int(prev.get('render_attempted'), cur.get('render_attempted'))})"
     )
     lines.append(
         "- Size ratio p90 (output/input): "
         f"**{_ratio(cur.get('size_overhead_p90'))}** "
         f"({_delta_ratio(prev.get('size_overhead_p90'), cur.get('size_overhead_p90'))}); "
-        f"samples {cur.get('size_overhead_samples', 0)}"
+        f"samples {cur.get('size_overhead_samples', 0)} ({_delta_int(prev.get('size_overhead_samples'), cur.get('size_overhead_samples'))})"
     )
     lines.append(
         f"- Part change ratio p90: **{_pct(cur.get('part_change_ratio_p90'))}** ({_delta_pct(prev.get('part_change_ratio_p90'), cur.get('part_change_ratio_p90'))})"
