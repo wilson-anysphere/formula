@@ -68,6 +68,47 @@ describe("OrganizeSheetsDialog", () => {
     expect(document.querySelector('dialog[data-testid="organize-sheets-dialog"]')).toBeNull();
   });
 
+  it("adds a sheet via host.addSheet when provided", async () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
+    let activeSheetId = "s1";
+    const addSheet = vi.fn(async () => {
+      store.addAfter(activeSheetId, { id: "s2", name: "Sheet2" });
+      activeSheetId = "s2";
+    });
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        addSheet,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const addBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheets-add"]');
+    expect(addBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(addBtn!.disabled).toBe(false);
+
+    await act(async () => {
+      addBtn!.click();
+      await Promise.resolve();
+    });
+
+    expect(addSheet).toHaveBeenCalledTimes(1);
+    expect(store.listAll().map((s) => s.id)).toEqual(["s1", "s2"]);
+    expect(dialog!.querySelector('[data-testid="organize-sheet-row-s2"]')).toBeInstanceOf(HTMLElement);
+  });
+
   it("renders a tab color indicator when present", () => {
     const doc = new DocumentController();
     const store = new WorkbookSheetStore([

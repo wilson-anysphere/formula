@@ -1795,9 +1795,18 @@ const openFormatCells = createOpenFormatCells({
 
 function openOrganizeSheets(): void {
   const getStore = () => createPermissionGuardedSheetStore(workbookSheetStore, () => app.getCollabSession?.() ?? null);
+  // Reuse the existing add-sheet command logic, but avoid restoring focus to the grid while the
+  // dialog is open (the dialog will restore focus on close instead).
+  const addSheet = createAddSheetCommand({
+    app,
+    getWorkbookSheetStore: () => workbookSheetStore,
+    restoreFocusAfterSheetNavigation: () => {},
+    showToast,
+  });
   openOrganizeSheetsDialog({
     store: getStore(),
     getStore,
+    addSheet,
     getActiveSheetId: () => app.getCurrentSheetId(),
     activateSheet: (sheetId) => {
       app.activateSheet(sheetId);

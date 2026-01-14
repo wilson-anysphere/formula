@@ -198,13 +198,19 @@ dialog.custom-sort-dialog::backdrop {
   gap: 12px;
 }
 
+.organize-sheets-dialog__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .organize-sheets-dialog__title {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
 }
 
-.organize-sheets-dialog__close {
+.organize-sheets-dialog__header-button {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 6px 10px;
@@ -213,14 +219,19 @@ dialog.custom-sort-dialog::backdrop {
   cursor: pointer;
 }
 
-.organize-sheets-dialog__close:hover {
+.organize-sheets-dialog__header-button:hover:not(:disabled) {
   background: var(--bg-hover);
 }
 
-.organize-sheets-dialog__close:focus-visible {
+.organize-sheets-dialog__header-button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
   box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.organize-sheets-dialog__header-button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .organize-sheets-dialog__list {

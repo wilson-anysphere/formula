@@ -18,6 +18,13 @@ export type OrganizeSheetsDialogHost = {
    */
   getStore?: () => WorkbookSheetStore;
   /**
+   * Optional: add a new sheet to the workbook.
+   *
+   * This should handle both local and collaboration mode persistence (e.g. in desktop
+   * `main.ts` this can reuse the existing add-sheet command wiring).
+   */
+  addSheet?: () => Promise<void> | void;
+  /**
    * Read the current active sheet id.
    *
    * Used to:
@@ -194,6 +201,22 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
     setError(null);
   }, []);
 
+  const addSheet = React.useCallback(async () => {
+    if (isSpreadsheetEditing || isReadOnly) return;
+    if (typeof host.addSheet !== "function") return;
+    setError(null);
+    setRenameSheetId(null);
+    setDeleteConfirmSheetId(null);
+    setBusy(true);
+    try {
+      await host.addSheet();
+    } catch (err) {
+      reportError(err);
+    } finally {
+      setBusy(false);
+    }
+  }, [host, isReadOnly, isSpreadsheetEditing, reportError]);
+
   const activate = React.useCallback(
     (sheetId: string) => {
       if (isSpreadsheetEditing) return;
@@ -345,14 +368,27 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
     >
       <header className="organize-sheets-dialog__header">
         <h2 className="organize-sheets-dialog__title">Organize Sheets</h2>
-        <button
-          type="button"
-          className="organize-sheets-dialog__close"
-          onClick={onClose}
-          data-testid="organize-sheets-close"
-        >
-          Close
-        </button>
+        <div className="organize-sheets-dialog__header-actions">
+          {typeof host.addSheet === "function" ? (
+            <button
+              type="button"
+              className="organize-sheets-dialog__header-button"
+              onClick={() => void addSheet()}
+              disabled={busy || isSpreadsheetEditing || isReadOnly || renameSheetId != null || deleteConfirmSheetId != null}
+              data-testid="organize-sheets-add"
+            >
+              Add Sheet
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="organize-sheets-dialog__header-button"
+            onClick={onClose}
+            data-testid="organize-sheets-close"
+          >
+            Close
+          </button>
+        </div>
       </header>
 
       <div className="organize-sheets-dialog__list" role="list" data-testid="organize-sheets-list">
