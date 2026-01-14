@@ -302,6 +302,40 @@ test(
   },
 );
 
+test("validate-linux-rpm accepts when extracted .desktop Exec= wraps the binary in quotes", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFakeRpmExtractTools(binDir, { execLine: `Exec="/usr/bin/${expectedMainBinary}" %U` });
+
+  // Fake RPM artifact (contents unused by the validator; it calls our fake rpm tool).
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  const requiresFile = writeDefaultRequiresFile(tmp);
+  writeFileSync(
+    listFile,
+    [
+      `/usr/bin/${expectedMainBinary}`,
+      "/usr/share/applications/formula.desktop",
+      "/usr/share/mime/packages/app.formula.desktop.xml",
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({
+    cwd: tmp,
+    rpmArg: "Formula.rpm",
+    fakeListFile: listFile,
+    fakeRequiresFile: requiresFile,
+    fakeMode: "ok",
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
   const binDir = join(tmp, "bin");
@@ -328,6 +362,34 @@ test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip:
 
   const proc = runValidator({ cwd: tmp, rpmArg: ".", fakeListFile: listFile, fakeRequiresFile: requiresFile });
   assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("validate-linux-rpm fails when extracted .desktop Exec= does not reference the expected binary", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFakeRpmExtractTools(binDir, { execLine: "Exec=something-else %U" });
+
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  const requiresFile = writeDefaultRequiresFile(tmp);
+  writeFileSync(
+    listFile,
+    [
+      `/usr/bin/${expectedMainBinary}`,
+      "/usr/share/applications/formula.desktop",
+      "/usr/share/mime/packages/app.formula.desktop.xml",
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile, fakeRequiresFile: requiresFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /target the expected executable/i);
 });
 
 test("validate-linux-rpm fails when the expected desktop binary path is missing", { skip: !hasBash }, () => {

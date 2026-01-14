@@ -303,7 +303,7 @@ validate_desktop_mime_associations_extracted() {
   local expected_binary_escaped
   expected_binary_escaped="$(printf '%s' "$EXPECTED_MAIN_BINARY" | sed -e 's/[][(){}.^$*+?|\\]/\\&/g')"
   local exec_token_re
-  exec_token_re="(^|[[:space:]])([^[:space:]]*/)?${expected_binary_escaped}([[:space:]]|$)"
+  exec_token_re="(^|[[:space:]])[\"']?([^[:space:]]*/)?${expected_binary_escaped}[\"']?([[:space:]]|$)"
 
   declare -a matched_desktop_files=()
   for desktop_file in "${desktop_files[@]}"; do
@@ -317,7 +317,7 @@ validate_desktop_mime_associations_extracted() {
   done
 
   if [ "${#matched_desktop_files[@]}" -eq 0 ]; then
-    err "No extracted .desktop file referenced expected main binary '${EXPECTED_MAIN_BINARY}' in its Exec= entry."
+    err "No extracted .desktop files appear to target the expected executable '${EXPECTED_MAIN_BINARY}' in their Exec= entry."
     err "Extracted .desktop files inspected:"
     for desktop_file in "${desktop_files[@]}"; do
       local rel
@@ -803,6 +803,9 @@ validate_container() {
   container_cmd+=$'for f in "${desktop_files[@]}"; do\n'
   container_cmd+=$'  exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"\n'
   container_cmd+=$'  exec_value="$(printf "%s" "${exec_line}" | sed -E "s/^[[:space:]]*Exec[[:space:]]*=[[:space:]]*//")"\n'
+  container_cmd+=$'  # Normalize quoted Exec tokens (e.g. Exec="/usr/bin/formula-desktop" %U)\n'
+  container_cmd+=$'  exec_value="${exec_value//\\\"/}"\n'
+  container_cmd+=$'  exec_value="${exec_value//\\\'/}"\n'
   container_cmd+=$'  spaced=" ${exec_value} "\n'
   container_cmd+=$'  if [ -n "${exec_value}" ] && (printf "%s" "${spaced}" | grep -Fq " ${expected_binary} " || printf "%s" "${spaced}" | grep -Fq " ${binary_path} "); then\n'
   container_cmd+=$'    matching_desktop_files+=("$f")\n'
