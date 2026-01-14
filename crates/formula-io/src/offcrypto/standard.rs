@@ -454,8 +454,7 @@ pub fn verify_password_standard(
             }
 
             // Baseline MS-OFFCRYPTO Standard AES uses AES-ECB (no IV) for verifier fields.
-            // However, some producers use CBC-style variants; fall back to the derived-IV CBC
-            // scheme if ECB does not verify.
+            // Compatibility fallback: AES-CBC (no padding) with a derived IV if ECB does not verify.
             let mut ecb_plaintext = ciphertext.clone();
             aes_ecb_decrypt_in_place(&key, &mut ecb_plaintext)?;
             if verifier_hash_matches(info, &ecb_plaintext)? {
