@@ -12,6 +12,7 @@ import type { DesktopExtensionHostManager } from "../extensions/extensionHostMan
 import type { PanelRegistry } from "./panelRegistry.js";
 import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import type { SheetNameResolver } from "../sheet/sheetNameResolver.js";
+import { t } from "../i18n/index.js";
 
 type MarketplaceClient = import("@formula/extension-marketplace").MarketplaceClient;
 type WebExtensionManager = import("@formula/extension-marketplace").WebExtensionManager;
@@ -741,7 +742,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     if (panelId === PanelIds.VERSION_HISTORY) {
       const session = options.getCollabSession?.() ?? null;
       if (!session) {
-        body.textContent = "Version history will appear here.";
+        body.textContent = t("versionHistory.panel.noSession");
         return;
       }
       makeBodyFillAvailableHeight(body);
