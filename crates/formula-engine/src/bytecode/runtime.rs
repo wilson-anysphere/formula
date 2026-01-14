@@ -826,6 +826,43 @@ pub(crate) fn apply_spill_range(
                 Ref::new(spill_end.row as i32, spill_end.col as i32, true, true),
             ))
         }
+        Value::MultiRange(r) => match r.areas.as_ref() {
+            [] => Value::Error(ErrorKind::Ref),
+            [only] => {
+                let start = only.range.start.resolve(base);
+                let end = only.range.end.resolve(base);
+                if start.row != end.row || start.col != end.col {
+                    return Value::Error(ErrorKind::Value);
+                }
+                if !grid.in_bounds_on_sheet(&only.sheet, start) {
+                    return Value::Error(ErrorKind::Ref);
+                }
+
+                let addr = crate::eval::CellAddr {
+                    row: start.row as u32,
+                    col: start.col as u32,
+                };
+                let Some(origin) = grid.spill_origin(&only.sheet, addr) else {
+                    return Value::Error(ErrorKind::Ref);
+                };
+                let Some((spill_start, spill_end)) = grid.spill_range(&only.sheet, origin) else {
+                    return Value::Error(ErrorKind::Ref);
+                };
+
+                let range = RangeRef::new(
+                    Ref::new(spill_start.row as i32, spill_start.col as i32, true, true),
+                    Ref::new(spill_end.row as i32, spill_end.col as i32, true, true),
+                );
+                if only.sheet == SheetId::Local(sheet_id) {
+                    Value::Range(range)
+                } else {
+                    Value::MultiRange(MultiRangeRef::new(
+                        vec![SheetRangeRef::new(only.sheet.clone(), range)].into(),
+                    ))
+                }
+            }
+            _ => Value::Error(ErrorKind::Value),
+        },
         _ => Value::Error(ErrorKind::Value),
     }
 }
@@ -4643,68 +4680,75 @@ fn fn_t(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 }
 
 fn fn_row(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
-    match args {
-        [] => Value::Number((base.row + 1) as f64),
-        [Value::Range(r)] => {
-            let reference = r.resolve(base);
-            if !range_in_bounds(grid, reference) {
-                return Value::Error(ErrorKind::Ref);
-            }
+    fn eval_row_for_range(grid: &dyn Grid, sheet: &SheetId, reference: ResolvedRange) -> Value {
+        if !range_in_bounds_on_sheet(grid, sheet, reference) {
+            return Value::Error(ErrorKind::Ref);
+        }
 
-            if reference.rows() == 1 && reference.cols() == 1 {
-                return Value::Number((reference.row_start + 1) as f64);
-            }
+        if reference.rows() == 1 && reference.cols() == 1 {
+            return Value::Number((reference.row_start + 1) as f64);
+        }
 
-            let rows = match usize::try_from(reference.rows()) {
-                Ok(v) => v,
-                Err(_) => return Value::Error(ErrorKind::Num),
-            };
-            let cols = match usize::try_from(reference.cols()) {
-                Ok(v) => v,
-                Err(_) => return Value::Error(ErrorKind::Num),
-            };
+        let rows = match usize::try_from(reference.rows()) {
+            Ok(v) => v,
+            Err(_) => return Value::Error(ErrorKind::Num),
+        };
+        let cols = match usize::try_from(reference.cols()) {
+            Ok(v) => v,
+            Err(_) => return Value::Error(ErrorKind::Num),
+        };
 
-            let spans_all_cols = reference.col_start == 0
-                && reference.col_end == (EXCEL_MAX_COLS as i32).saturating_sub(1);
-            let spans_all_rows = reference.row_start == 0
-                && reference.row_end == (EXCEL_MAX_ROWS as i32).saturating_sub(1);
+        let (sheet_rows, sheet_cols) = grid.bounds_on_sheet(sheet);
+        let spans_all_cols =
+            reference.col_start == 0 && reference.col_end == sheet_cols.saturating_sub(1);
+        let spans_all_rows =
+            reference.row_start == 0 && reference.row_end == sheet_rows.saturating_sub(1);
 
-            if spans_all_cols || spans_all_rows {
-                if rows > MAX_MATERIALIZED_ARRAY_CELLS {
-                    return Value::Error(ErrorKind::Spill);
-                }
-                let mut values = Vec::new();
-                if values.try_reserve_exact(rows).is_err() {
-                    return Value::Error(ErrorKind::Num);
-                }
-                for row in reference.row_start..=reference.row_end {
-                    values.push(Value::Number((row + 1) as f64));
-                }
-                if rows == 1 {
-                    return values.first().cloned().unwrap_or(Value::Empty);
-                }
-                return Value::Array(ArrayValue::new(rows, 1, values));
-            }
-
-            let total = match rows.checked_mul(cols) {
-                Some(v) => v,
-                None => return Value::Error(ErrorKind::Spill),
-            };
-            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+        if spans_all_cols || spans_all_rows {
+            if rows > MAX_MATERIALIZED_ARRAY_CELLS {
                 return Value::Error(ErrorKind::Spill);
             }
             let mut values = Vec::new();
-            if values.try_reserve_exact(total).is_err() {
+            if values.try_reserve_exact(rows).is_err() {
                 return Value::Error(ErrorKind::Num);
             }
             for row in reference.row_start..=reference.row_end {
-                let n = Value::Number((row + 1) as f64);
-                for _ in reference.col_start..=reference.col_end {
-                    values.push(n.clone());
-                }
+                values.push(Value::Number((row + 1) as f64));
             }
-            Value::Array(ArrayValue::new(rows, cols, values))
+            if rows == 1 {
+                return values.first().cloned().unwrap_or(Value::Empty);
+            }
+            return Value::Array(ArrayValue::new(rows, 1, values));
         }
+
+        let total = match rows.checked_mul(cols) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Spill),
+        };
+        if total > MAX_MATERIALIZED_ARRAY_CELLS {
+            return Value::Error(ErrorKind::Spill);
+        }
+        let mut values = Vec::new();
+        if values.try_reserve_exact(total).is_err() {
+            return Value::Error(ErrorKind::Num);
+        }
+        for row in reference.row_start..=reference.row_end {
+            let n = Value::Number((row + 1) as f64);
+            for _ in reference.col_start..=reference.col_end {
+                values.push(n.clone());
+            }
+        }
+        Value::Array(ArrayValue::new(rows, cols, values))
+    }
+
+    match args {
+        [] => Value::Number((base.row + 1) as f64),
+        [Value::Range(r)] => eval_row_for_range(grid, &SheetId::Local(grid.sheet_id()), r.resolve(base)),
+        [Value::MultiRange(r)] => match r.areas.as_ref() {
+            [] => Value::Error(ErrorKind::Ref),
+            [only] => eval_row_for_range(grid, &only.sheet, only.range.resolve(base)),
+            _ => Value::Error(ErrorKind::Value),
+        },
         [Value::Error(e)] => Value::Error(*e),
         [_] => Value::Error(ErrorKind::Value),
         _ => Value::Error(ErrorKind::Value),
@@ -4712,73 +4756,82 @@ fn fn_row(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 }
 
 fn fn_column(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
-    match args {
-        [] => Value::Number((base.col + 1) as f64),
-        [Value::Range(r)] => {
-            let reference = r.resolve(base);
-            if !range_in_bounds(grid, reference) {
-                return Value::Error(ErrorKind::Ref);
-            }
+    fn eval_column_for_range(grid: &dyn Grid, sheet: &SheetId, reference: ResolvedRange) -> Value {
+        if !range_in_bounds_on_sheet(grid, sheet, reference) {
+            return Value::Error(ErrorKind::Ref);
+        }
 
-            if reference.rows() == 1 && reference.cols() == 1 {
-                return Value::Number((reference.col_start + 1) as f64);
-            }
+        if reference.rows() == 1 && reference.cols() == 1 {
+            return Value::Number((reference.col_start + 1) as f64);
+        }
 
-            let rows = match usize::try_from(reference.rows()) {
-                Ok(v) => v,
-                Err(_) => return Value::Error(ErrorKind::Num),
-            };
-            let cols = match usize::try_from(reference.cols()) {
-                Ok(v) => v,
-                Err(_) => return Value::Error(ErrorKind::Num),
-            };
+        let rows = match usize::try_from(reference.rows()) {
+            Ok(v) => v,
+            Err(_) => return Value::Error(ErrorKind::Num),
+        };
+        let cols = match usize::try_from(reference.cols()) {
+            Ok(v) => v,
+            Err(_) => return Value::Error(ErrorKind::Num),
+        };
 
-            let spans_all_cols = reference.col_start == 0
-                && reference.col_end == (EXCEL_MAX_COLS as i32).saturating_sub(1);
-            let spans_all_rows = reference.row_start == 0
-                && reference.row_end == (EXCEL_MAX_ROWS as i32).saturating_sub(1);
+        let (sheet_rows, sheet_cols) = grid.bounds_on_sheet(sheet);
+        let spans_all_cols =
+            reference.col_start == 0 && reference.col_end == sheet_cols.saturating_sub(1);
+        let spans_all_rows =
+            reference.row_start == 0 && reference.row_end == sheet_rows.saturating_sub(1);
 
-            if spans_all_cols || spans_all_rows {
-                if cols > MAX_MATERIALIZED_ARRAY_CELLS {
-                    return Value::Error(ErrorKind::Spill);
-                }
-                let mut values = Vec::new();
-                if values.try_reserve_exact(cols).is_err() {
-                    return Value::Error(ErrorKind::Num);
-                }
-                for col in reference.col_start..=reference.col_end {
-                    values.push(Value::Number((col + 1) as f64));
-                }
-                if cols == 1 {
-                    return values.first().cloned().unwrap_or(Value::Empty);
-                }
-                return Value::Array(ArrayValue::new(1, cols, values));
-            }
-
-            let total = match rows.checked_mul(cols) {
-                Some(v) => v,
-                None => return Value::Error(ErrorKind::Spill),
-            };
-            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+        if spans_all_cols || spans_all_rows {
+            if cols > MAX_MATERIALIZED_ARRAY_CELLS {
                 return Value::Error(ErrorKind::Spill);
             }
             let mut values = Vec::new();
-            if values.try_reserve_exact(total).is_err() {
-                return Value::Error(ErrorKind::Num);
-            }
-            let mut row_values = Vec::new();
-            if row_values.try_reserve_exact(cols).is_err() {
+            if values.try_reserve_exact(cols).is_err() {
                 return Value::Error(ErrorKind::Num);
             }
             for col in reference.col_start..=reference.col_end {
-                row_values.push(Value::Number((col + 1) as f64));
+                values.push(Value::Number((col + 1) as f64));
             }
-            for _ in 0..rows {
-                values.extend(row_values.iter().cloned());
+            if cols == 1 {
+                return values.first().cloned().unwrap_or(Value::Empty);
             }
-
-            Value::Array(ArrayValue::new(rows, cols, values))
+            return Value::Array(ArrayValue::new(1, cols, values));
         }
+
+        let total = match rows.checked_mul(cols) {
+            Some(v) => v,
+            None => return Value::Error(ErrorKind::Spill),
+        };
+        if total > MAX_MATERIALIZED_ARRAY_CELLS {
+            return Value::Error(ErrorKind::Spill);
+        }
+        let mut values = Vec::new();
+        if values.try_reserve_exact(total).is_err() {
+            return Value::Error(ErrorKind::Num);
+        }
+        let mut row_values = Vec::new();
+        if row_values.try_reserve_exact(cols).is_err() {
+            return Value::Error(ErrorKind::Num);
+        }
+        for col in reference.col_start..=reference.col_end {
+            row_values.push(Value::Number((col + 1) as f64));
+        }
+        for _ in 0..rows {
+            values.extend(row_values.iter().cloned());
+        }
+
+        Value::Array(ArrayValue::new(rows, cols, values))
+    }
+
+    match args {
+        [] => Value::Number((base.col + 1) as f64),
+        [Value::Range(r)] => {
+            eval_column_for_range(grid, &SheetId::Local(grid.sheet_id()), r.resolve(base))
+        }
+        [Value::MultiRange(r)] => match r.areas.as_ref() {
+            [] => Value::Error(ErrorKind::Ref),
+            [only] => eval_column_for_range(grid, &only.sheet, only.range.resolve(base)),
+            _ => Value::Error(ErrorKind::Value),
+        },
         [Value::Error(e)] => Value::Error(*e),
         [_] => Value::Error(ErrorKind::Value),
         _ => Value::Error(ErrorKind::Value),
@@ -4791,6 +4844,11 @@ fn fn_rows(args: &[Value], base: CellCoord) -> Value {
     }
     match &args[0] {
         Value::Range(r) => Value::Number(r.resolve(base).rows() as f64),
+        Value::MultiRange(r) => match r.areas.as_ref() {
+            [] => Value::Error(ErrorKind::Ref),
+            [only] => Value::Number(only.range.resolve(base).rows() as f64),
+            _ => Value::Error(ErrorKind::Value),
+        },
         Value::Array(a) => Value::Number(a.rows as f64),
         Value::Error(e) => Value::Error(*e),
         _ => Value::Error(ErrorKind::Value),
@@ -4803,6 +4861,11 @@ fn fn_columns(args: &[Value], base: CellCoord) -> Value {
     }
     match &args[0] {
         Value::Range(r) => Value::Number(r.resolve(base).cols() as f64),
+        Value::MultiRange(r) => match r.areas.as_ref() {
+            [] => Value::Error(ErrorKind::Ref),
+            [only] => Value::Number(only.range.resolve(base).cols() as f64),
+            _ => Value::Error(ErrorKind::Value),
+        },
         Value::Array(a) => Value::Number(a.cols as f64),
         Value::Error(e) => Value::Error(*e),
         _ => Value::Error(ErrorKind::Value),

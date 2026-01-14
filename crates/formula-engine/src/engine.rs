@@ -409,6 +409,7 @@ impl Workbook {
         self.sheet_order.insert(new_index, id);
         true
     }
+
     #[cfg(test)]
     fn set_sheet_order(&mut self, new_order: Vec<SheetId>) {
         // Keep invariants explicit: sheet order is a permutation of the currently-live sheets.

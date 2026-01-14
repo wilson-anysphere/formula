@@ -213,7 +213,6 @@ fn parse_legend(
         layout,
     })
 }
-
 fn detect_chart_kind(
     doc: &Document<'_>,
     diagnostics: &mut Vec<ChartDiagnostic>,
