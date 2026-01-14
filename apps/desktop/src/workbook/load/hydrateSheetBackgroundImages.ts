@@ -4,6 +4,28 @@ import { MAX_PNG_DIMENSION, MAX_PNG_PIXELS, readImageDimensions } from "../../dr
 import type { WorkbookSheetStore } from "../../sheets/workbookSheetStore";
 import type { ImportedSheetBackgroundImageInfo } from "../../tauri/workbookBackend";
 
+function isSheetKnownMissing(doc: any, sheetId: string): boolean {
+  const id = String(sheetId ?? "").trim();
+  if (!id) return true;
+
+  const sheets: any = doc?.model?.sheets;
+  const sheetMeta: any = doc?.sheetMeta;
+  if (
+    sheets &&
+    typeof sheets.has === "function" &&
+    typeof sheets.size === "number" &&
+    sheetMeta &&
+    typeof sheetMeta.has === "function" &&
+    typeof sheetMeta.size === "number"
+  ) {
+    const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+    if (!workbookHasAnySheets) return false;
+    return !sheets.has(id) && !sheetMeta.has(id);
+  }
+
+  return false;
+}
+
 export async function hydrateSheetBackgroundImagesFromBackend(opts: {
   app: SpreadsheetApp;
   workbookSheetStore: WorkbookSheetStore;
@@ -113,6 +135,7 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
     for (const sheet of sheets) {
       const sheetId = typeof (sheet as any)?.id === "string" ? String((sheet as any).id).trim() : "";
       if (!sheetId) continue;
+      if (isSheetKnownMissing(docAny, sheetId)) continue;
       const before = typeof docAny.getSheetView === "function" ? docAny.getSheetView(sheetId) : null;
       const desired = backgroundImageIdBySheetId.get(sheetId) ?? null;
       const currentRaw = typeof (before as any)?.backgroundImageId === "string" ? String((before as any).backgroundImageId).trim() : "";
@@ -136,6 +159,7 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
     for (const sheet of sheets) {
       const sheetId = typeof (sheet as any)?.id === "string" ? String((sheet as any).id).trim() : "";
       if (!sheetId) continue;
+      if (isSheetKnownMissing(docAny, sheetId)) continue;
       const desired = backgroundImageIdBySheetId.get(sheetId) ?? null;
       try {
         app.setSheetBackgroundImageId(sheetId, desired);
