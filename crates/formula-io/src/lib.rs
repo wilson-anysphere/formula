@@ -2562,7 +2562,9 @@ fn decrypt_encrypted_ooxml_package(
                     path: path.to_path_buf(),
                 });
             }
-            if key_size_bits == 0 || key_size_bits % 8 != 0 {
+            // MS-OFFCRYPTO specifies that `keySize=0` MUST be interpreted as 40-bit.
+            let key_size_bits = if key_size_bits == 0 { 40 } else { key_size_bits };
+            if key_size_bits % 8 != 0 {
                 return Err(Error::InvalidPassword {
                     path: path.to_path_buf(),
                 });
