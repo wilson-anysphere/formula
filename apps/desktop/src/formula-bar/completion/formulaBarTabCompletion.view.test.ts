@@ -149,9 +149,10 @@ describe("FormulaBarView tab completion (integration)", () => {
     const engineStub = {
       parseFormulaPartial: async (...args: unknown[]) => {
         calls.push(args);
-        // In de-DE Excel, VLOOKUP is localized as SVERWEIS. The WASM engine returns canonical
-        // function metadata so tab-completion can still apply range-arg heuristics.
-        return { context: { function: { name: "VLOOKUP", argIndex: 1 } }, error: null, ast: {} };
+        // In de-DE, `SUM` is localized as `SUMME`. The engine returns the locale's function name,
+        // and the desktop adapter canonicalizes it so completion can still look up range-arg
+        // metadata against the canonical FunctionRegistry.
+        return { context: { function: { name: "SUMME", argIndex: 0 } }, error: null, ast: {} };
       },
     };
     const completion = new FormulaBarTabCompletionController({
@@ -167,17 +168,15 @@ describe("FormulaBarView tab completion (integration)", () => {
       }
       view.setActiveCell({ address: "B11", input: "", value: null });
 
-      // In semicolon locales like de-DE, `,` is commonly used as the decimal separator while `;`
-      // separates arguments.
       view.focus({ cursor: "end" });
-      view.textarea.value = "=SVERWEIS(1,2;A";
+      view.textarea.value = "=SUMME(A";
       view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
       view.textarea.dispatchEvent(new Event("input"));
 
       await completion.flushTabCompletion();
 
       expect(calls).toHaveLength(1);
-      expect(view.model.aiSuggestion()).toBe("=SVERWEIS(1,2;A1:A10");
+      expect(view.model.aiSuggestion()).toBe("=SUMME(A1:A10)");
     } finally {
       completion.destroy();
       host.remove();
