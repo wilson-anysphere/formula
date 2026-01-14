@@ -116,14 +116,26 @@ fn de_de_function_translation_table_covers_all_registered_functions() {
     let mut localized_to_canon = HashMap::<String, String>::new();
     let mut localized_collisions = Vec::<(String, String, String)>::new();
 
-    for line in tsv.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+    for (idx, raw_line) in tsv.lines().enumerate() {
+        let line_no = idx + 1;
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let (canon_name, loc_name) = line.split_once('\t').unwrap_or_else(|| {
-            panic!("invalid function translation line (expected TSV): {line:?}")
+
+        // Parse the raw line (not the trimmed line) so trailing empty columns like
+        // `SUM\tSUMME\t` are not silently accepted.
+        let mut parts = raw_line.split('\t');
+        let canon_name = parts.next().unwrap_or("");
+        let loc_name = parts.next().unwrap_or_else(|| {
+            panic!("invalid function translation line (expected TSV) at line {line_no}: {raw_line:?}")
         });
+        if parts.next().is_some() {
+            panic!(
+                "invalid function translation line (too many columns) at line {line_no}: {raw_line:?}"
+            );
+        }
+
         assert!(
             canon.insert(canon_name.to_string()),
             "duplicate canonical function translation entry: {canon_name}"
@@ -627,14 +639,20 @@ fn external_workbook_prefixes_inside_brackets_are_not_translated() {
 fn de_de_translation_table_covers_function_catalog() {
     let mut covered = HashSet::new();
     let tsv = include_str!("../src/locale/data/de-DE.tsv");
-    for line in tsv.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+    for (idx, raw_line) in tsv.lines().enumerate() {
+        let line_no = idx + 1;
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let (canon, _loc) = line
-            .split_once('\t')
-            .unwrap_or_else(|| panic!("invalid TSV line in de-DE.tsv: {line:?}"));
+        let mut parts = raw_line.split('\t');
+        let canon = parts.next().unwrap_or("");
+        let _loc = parts.next().unwrap_or_else(|| {
+            panic!("invalid TSV line in de-DE.tsv (expected Canonical<TAB>Localized) at line {line_no}: {raw_line:?}")
+        });
+        if parts.next().is_some() {
+            panic!("invalid TSV line in de-DE.tsv (too many columns) at line {line_no}: {raw_line:?}");
+        }
         assert!(
             covered.insert(canon),
             "duplicate canonical entry in de-DE.tsv: {canon}"
@@ -661,14 +679,20 @@ fn de_de_translation_table_covers_function_catalog() {
 fn fr_fr_translation_table_covers_function_catalog() {
     let mut covered = HashSet::new();
     let tsv = include_str!("../src/locale/data/fr-FR.tsv");
-    for line in tsv.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+    for (idx, raw_line) in tsv.lines().enumerate() {
+        let line_no = idx + 1;
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let (canon, _loc) = line
-            .split_once('\t')
-            .unwrap_or_else(|| panic!("invalid TSV line in fr-FR.tsv: {line:?}"));
+        let mut parts = raw_line.split('\t');
+        let canon = parts.next().unwrap_or("");
+        let _loc = parts.next().unwrap_or_else(|| {
+            panic!("invalid TSV line in fr-FR.tsv (expected Canonical<TAB>Localized) at line {line_no}: {raw_line:?}")
+        });
+        if parts.next().is_some() {
+            panic!("invalid TSV line in fr-FR.tsv (too many columns) at line {line_no}: {raw_line:?}");
+        }
         assert!(
             covered.insert(canon),
             "duplicate canonical entry in fr-FR.tsv: {canon}"
@@ -695,14 +719,20 @@ fn fr_fr_translation_table_covers_function_catalog() {
 fn es_es_translation_table_covers_function_catalog() {
     let mut covered = HashSet::new();
     let tsv = include_str!("../src/locale/data/es-ES.tsv");
-    for line in tsv.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+    for (idx, raw_line) in tsv.lines().enumerate() {
+        let line_no = idx + 1;
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let (canon, _loc) = line
-            .split_once('\t')
-            .unwrap_or_else(|| panic!("invalid TSV line in es-ES.tsv: {line:?}"));
+        let mut parts = raw_line.split('\t');
+        let canon = parts.next().unwrap_or("");
+        let _loc = parts.next().unwrap_or_else(|| {
+            panic!("invalid TSV line in es-ES.tsv (expected Canonical<TAB>Localized) at line {line_no}: {raw_line:?}")
+        });
+        if parts.next().is_some() {
+            panic!("invalid TSV line in es-ES.tsv (too many columns) at line {line_no}: {raw_line:?}");
+        }
         assert!(
             covered.insert(canon),
             "duplicate canonical entry in es-ES.tsv: {canon}"
@@ -742,9 +772,14 @@ fn locale_error_literal_maps_match_generated_error_tsvs() {
                 continue;
             }
 
-            let (canonical, localized) = raw_line
-                .split_once('\t')
-                .unwrap_or_else(|| panic!("invalid TSV line in {label}:{line_no}: {raw_line:?}"));
+            let mut parts = raw_line.split('\t');
+            let canonical = parts.next().unwrap_or("");
+            let localized = parts.next().unwrap_or_else(|| {
+                panic!("invalid TSV line in {label}:{line_no} (expected Canonical<TAB>Localized): {raw_line:?}")
+            });
+            if parts.next().is_some() {
+                panic!("invalid TSV line in {label}:{line_no} (too many columns): {raw_line:?}");
+            }
             let canonical = canonical.trim();
             let localized = localized.trim();
             assert!(

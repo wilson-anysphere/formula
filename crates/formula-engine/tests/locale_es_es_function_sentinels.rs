@@ -195,13 +195,24 @@ fn locale_es_es_identity_mapping_rate_is_not_suspiciously_high() {
 
     let mut total = 0usize;
     let mut identity = 0usize;
-    for line in ES_ES_TSV.lines() {
-        if line.is_empty() || line.starts_with('#') {
+    for (idx, raw_line) in ES_ES_TSV.lines().enumerate() {
+        let line_no = idx + 1;
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let (canonical, localized) = line.split_once('\t').unwrap_or_else(|| {
-            panic!("invalid TSV entry (expected Canonical<TAB>Localized): {line}")
+
+        // Parse the raw line (not the trimmed line) so trailing empty columns like
+        // `SUM\tSUMA\t` are not silently accepted.
+        let mut parts = raw_line.split('\t');
+        let canonical = parts.next().unwrap_or("");
+        let localized = parts.next().unwrap_or_else(|| {
+            panic!("invalid TSV entry (expected Canonical<TAB>Localized) at line {line_no}: {raw_line}")
         });
+        if parts.next().is_some() {
+            panic!("invalid TSV entry (too many columns) at line {line_no}: {raw_line}");
+        }
+
         total += 1;
         if canonical == localized {
             identity += 1;

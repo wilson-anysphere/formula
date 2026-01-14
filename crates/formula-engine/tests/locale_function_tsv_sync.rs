@@ -28,30 +28,34 @@ fn parse_function_tsv(path: &Path) -> Vec<(String, String)> {
 
     for (idx, raw_line) in raw.lines().enumerate() {
         let line_no = idx + 1;
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
 
-        let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
+        // Parse the raw line (not the trimmed line) so trailing empty columns like
+        // `SUM\tSUMME\t` are not silently accepted.
+        let mut parts = raw_line.split('\t');
+        let canon = parts.next().unwrap_or("");
+        let loc = parts.next().unwrap_or_else(|| {
             panic!(
-                "invalid function TSV line (expected Canonical<TAB>Localized) at {}:{}: {line:?}",
+                "invalid function TSV line (expected Canonical<TAB>Localized) at {}:{}: {raw_line:?}",
                 path.display(),
                 line_no
             )
         });
-        let canon = canon.trim();
-        let loc = loc.trim();
-        if canon.is_empty() || loc.is_empty() {
+        if parts.next().is_some() {
             panic!(
-                "invalid function TSV line (empty entry) at {}:{}: {line:?}",
+                "invalid function TSV line (too many columns) at {}:{}: {raw_line:?}",
                 path.display(),
                 line_no
             );
         }
-        if loc.contains('\t') {
+        let canon = canon.trim();
+        let loc = loc.trim();
+        if canon.is_empty() || loc.is_empty() {
             panic!(
-                "invalid function TSV line (too many columns) at {}:{}: {line:?}",
+                "invalid function TSV line (empty entry) at {}:{}: {raw_line:?}",
                 path.display(),
                 line_no
             );
@@ -62,7 +66,7 @@ fn parse_function_tsv(path: &Path) -> Vec<(String, String)> {
 
         if let Some((prev_no, prev_line)) = canon_line.get(&canon_key) {
             panic!(
-                "duplicate canonical function translation key {canon_key:?}\n  first: {}:{}: {prev_line:?}\n  second: {}:{}: {line:?}",
+                "duplicate canonical function translation key {canon_key:?}\n  first: {}:{}: {prev_line:?}\n  second: {}:{}: {raw_line:?}",
                 path.display(),
                 prev_no,
                 path.display(),
@@ -71,7 +75,7 @@ fn parse_function_tsv(path: &Path) -> Vec<(String, String)> {
         }
         if let Some((prev_no, prev_line)) = loc_line.get(&loc_key) {
             panic!(
-                "duplicate localized function translation key {loc_key:?}\n  first: {}:{}: {prev_line:?}\n  second: {}:{}: {line:?}",
+                "duplicate localized function translation key {loc_key:?}\n  first: {}:{}: {prev_line:?}\n  second: {}:{}: {raw_line:?}",
                 path.display(),
                 prev_no,
                 path.display(),
@@ -79,8 +83,8 @@ fn parse_function_tsv(path: &Path) -> Vec<(String, String)> {
             );
         }
 
-        canon_line.insert(canon_key, (line_no, line.to_string()));
-        loc_line.insert(loc_key, (line_no, line.to_string()));
+        canon_line.insert(canon_key, (line_no, raw_line.to_string()));
+        loc_line.insert(loc_key, (line_no, raw_line.to_string()));
         rows.push((canon.to_string(), loc.to_string()));
     }
 
