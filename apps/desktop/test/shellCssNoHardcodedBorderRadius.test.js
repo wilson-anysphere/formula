@@ -12,25 +12,39 @@ function getLineNumber(text, index) {
   return text.slice(0, Math.max(0, index)).split("\n").length;
 }
 
-test("shell.css should not hardcode border-radius pixel values (except 0)", () => {
+test("shell.css should not hardcode border-radius values (except 0)", () => {
   const css = fs.readFileSync(shellCssPath, "utf8");
   // Avoid false positives in comments while keeping line numbers stable for error messages.
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
 
   /** @type {string[]} */
   const violations = [];
-  const regex = /\bborder(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius\s*:\s*(\d+(?:\.\d+)?)px\b/gi;
-  let match;
-  while ((match = regex.exec(stripped))) {
-    const value = Number(match[1]);
-    if (value === 0) continue;
-    violations.push(`L${getLineNumber(stripped, match.index)}: border-radius: ${match[1]}px`);
+
+  const declRegex = /\bborder(?:-(?:top|bottom|start|end)-(?:left|right|start|end))?-radius\s*:\s*([^;}]*)/gi;
+  let declMatch;
+  while ((declMatch = declRegex.exec(stripped))) {
+    const value = declMatch[1] ?? "";
+    const valueStart = declMatch.index + declMatch[0].length - value.length;
+
+    const unitRegex =
+      /(-?\d+(?:\.\d+)?)(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;
+    let unitMatch;
+    while ((unitMatch = unitRegex.exec(value))) {
+      const numeric = unitMatch[1];
+      const unit = unitMatch[2] ?? "";
+      const n = Number(numeric);
+      if (!Number.isFinite(n)) continue;
+      if (n === 0) continue;
+
+      const absIndex = valueStart + unitMatch.index;
+      violations.push(`L${getLineNumber(stripped, absIndex)}: border-radius: ${numeric}${unit}`);
+    }
   }
 
   assert.deepEqual(
     violations,
     [],
-    `Found hardcoded border-radius pixel values in shell.css. Use radius tokens (var(--radius*)), except for 0:\n${violations
+    `Found hardcoded border-radius values in shell.css. Use radius tokens (var(--radius*)), except for 0:\n${violations
       .map((v) => `- ${v}`)
       .join("\n")}`,
   );

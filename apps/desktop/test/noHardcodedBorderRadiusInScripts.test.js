@@ -118,7 +118,7 @@ function stripJsComments(input) {
   return out;
 }
 
-test("desktop UI scripts should not hardcode border-radius pixel values in inline styles", () => {
+test("desktop UI scripts should not hardcode border-radius values in inline styles", () => {
   const files = walkScriptFiles(srcRoot).filter((file) => {
     const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
     // Demo/sandbox assets are not part of the shipped UI bundle.
@@ -139,52 +139,67 @@ test("desktop UI scripts should not hardcode border-radius pixel values in inlin
     /** @type {{ re: RegExp, kind: string }[]} */
     const patterns = [
       // Style strings (e.g. `style: "border-radius: 4px;"`, or arrays joined into style strings)
-      { re: /\bborder-radius\s*:\s*(\d+(?:\.\d+)?)px\b/gi, kind: "border-radius" },
+      {
+        re: /\bborder-radius\s*:\s*(?<num>-?\d+(?:\.\d+)?)(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
+        kind: "border-radius",
+      },
       // Longhand border radii in style strings (e.g. `border-top-left-radius: 4px`)
       {
-        re: /\bborder-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\s*:\s*(\d+(?:\.\d+)?)px\b/gi,
+        re: /\bborder-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\s*:\s*(?<num>-?\d+(?:\.\d+)?)(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
         kind: "border-*-radius",
       },
       // React style objects (e.g. `{ borderRadius: 4 }`) interpret numeric values as px.
-      { re: /\bborderRadius\s*:\s*(\d+(?:\.\d+)?)\b/gi, kind: "borderRadius-number" },
+      { re: /\bborderRadius\s*:\s*(?<num>-?\d+(?:\.\d+)?)\b/gi, kind: "borderRadius-number" },
       // Longhand border radii in React style objects (numeric => px).
       {
-        re: /\bborder(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*:\s*(\d+(?:\.\d+)?)\b/gi,
+        re: /\bborder(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*:\s*(?<num>-?\d+(?:\.\d+)?)\b/gi,
         kind: "border*Radius-number",
       },
       // React/DOM style objects (e.g. `{ borderRadius: "4px" }`)
-      { re: /\bborderRadius\s*:\s*(["'`])\s*(\d+(?:\.\d+)?)px\b/gi, kind: "borderRadius" },
+      {
+        re: /\bborderRadius\s*:\s*(["'`])\s*(?<num>-?\d+(?:\.\d+)?)(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
+        kind: "borderRadius",
+      },
       // Longhand border radii in React style objects (string => px).
       {
-        re: /\bborder(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*:\s*(["'`])\s*(\d+(?:\.\d+)?)px\b/gi,
+        re: /\bborder(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*:\s*(["'`])\s*(?<num>-?\d+(?:\.\d+)?)(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
         kind: "border*Radius",
       },
       // DOM style assignment (e.g. `el.style.borderRadius = 4`)
-      { re: /\.style\.borderRadius\s*=\s*(\d+(?:\.\d+)?)\b/gi, kind: "style.borderRadius-number" },
+      { re: /\.style\.borderRadius\s*=\s*(?<num>-?\d+(?:\.\d+)?)\b/gi, kind: "style.borderRadius-number" },
       // DOM style assignment for longhand border radii (numeric => px).
       {
-        re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*=\s*(\d+(?:\.\d+)?)\b/gi,
+        re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*=\s*(?<num>-?\d+(?:\.\d+)?)\b/gi,
         kind: "style.border*Radius-number",
       },
       // DOM style assignment (e.g. `el.style.borderRadius = "4px"`)
-      { re: /\.style\.borderRadius\s*=\s*(["'`])\s*(\d+(?:\.\d+)?)px\b/gi, kind: "style.borderRadius" },
+      {
+        re: /\.style\.borderRadius\s*=\s*(["'`])\s*(?<num>-?\d+(?:\.\d+)?)(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
+        kind: "style.borderRadius",
+      },
       // DOM style assignment for longhand border radii (string => px).
       {
-        re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*=\s*(["'`])\s*(\d+(?:\.\d+)?)px\b/gi,
+        re: /\.style\.border(?:TopLeft|TopRight|BottomLeft|BottomRight|StartStart|StartEnd|EndStart|EndEnd)Radius\s*=\s*(["'`])\s*(?<num>-?\d+(?:\.\d+)?)(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
         kind: "style.border*Radius",
       },
       // setProperty("border-radius", 4)
-      { re: /\.style\.setProperty\(\s*(["'])border-radius\1\s*,\s*(\d+(?:\.\d+)?)\b/gi, kind: "setProperty-number" },
+      {
+        re: /\.style\.setProperty\(\s*(["'])border-radius\1\s*,\s*(?<num>-?\d+(?:\.\d+)?)\b/gi,
+        kind: "setProperty-number",
+      },
       // setProperty("border-top-left-radius", 4)
       {
-        re: /\.style\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(\d+(?:\.\d+)?)\b/gi,
+        re: /\.style\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(?<num>-?\d+(?:\.\d+)?)\b/gi,
         kind: "setProperty-border-*-radius-number",
       },
       // setProperty("border-radius", "4px")
-      { re: /\.style\.setProperty\(\s*(["'])border-radius\1\s*,\s*(["'`])\s*(\d+(?:\.\d+)?)px\b/gi, kind: "setProperty" },
+      {
+        re: /\.style\.setProperty\(\s*(["'])border-radius\1\s*,\s*(["'`])\s*(?<num>-?\d+(?:\.\d+)?)(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
+        kind: "setProperty",
+      },
       // setProperty("border-top-left-radius", "4px")
       {
-        re: /\.style\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(\d+(?:\.\d+)?)px\b/gi,
+        re: /\.style\.setProperty\(\s*(["'])border-(?:top|bottom|start|end)-(?:left|right|start|end)-radius\1\s*,\s*(["'`])\s*(?<num>-?\d+(?:\.\d+)?)(?<unit>px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi,
         kind: "setProperty-border-*-radius",
       },
     ];
@@ -192,17 +207,19 @@ test("desktop UI scripts should not hardcode border-radius pixel values in inlin
     for (const { re } of patterns) {
       let match;
       while ((match = re.exec(stripped))) {
-        // First captured numeric group is either match[1] or match[2]/match[3] depending on the pattern.
-        const numeric = match[3] ?? match[2] ?? match[1];
+        const numeric = match.groups?.num;
+        if (!numeric) continue;
+        const unit = match.groups?.unit;
         const px = Number(numeric);
         if (px === 0) continue;
 
         // Find the absolute index of the numeric capture for stable line numbers.
-        const needle = match[0].includes(`${numeric}px`) ? `${numeric}px` : String(numeric);
+        const needle = unit ? `${numeric}${unit}` : String(numeric);
         const relative = match[0].indexOf(needle);
         const absIndex = match.index + (relative >= 0 ? relative : 0);
         const line = getLineNumber(stripped, absIndex);
-        violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${numeric}px`);
+        const display = unit ? `${numeric}${unit}` : `${numeric}px`;
+        violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${display}`);
       }
     }
   }
@@ -210,7 +227,7 @@ test("desktop UI scripts should not hardcode border-radius pixel values in inlin
   assert.deepEqual(
     violations,
     [],
-    `Found hardcoded border-radius pixel values in desktop UI scripts. Use radius tokens (var(--radius*)), except for 0:\n${violations
+    `Found hardcoded border-radius values in desktop UI scripts. Use radius tokens (var(--radius*)), except for 0:\n${violations
       .map((v) => `- ${v}`)
       .join("\n")}`,
   );

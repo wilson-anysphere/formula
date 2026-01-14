@@ -32,7 +32,7 @@ function getLineNumber(text, index) {
   return text.slice(0, Math.max(0, index)).split("\n").length;
 }
 
-test("desktop UI should not hardcode border-radius pixel values (use radius tokens)", () => {
+test("desktop UI should not hardcode border-radius values (use radius tokens)", () => {
   const files = walkCssFiles(srcRoot).filter((file) => {
     const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
     // Demo/sandbox assets are not part of the shipped UI bundle.
@@ -56,16 +56,20 @@ test("desktop UI should not hardcode border-radius pixel values (use radius toke
       // `declMatch[0]` ends with the captured group, so this points at the first character of the value.
       const valueStart = declMatch.index + declMatch[0].length - value.length;
 
-      const pxRegex = /(\d+(?:\.\d+)?)px\b/g;
-      let pxMatch;
-      while ((pxMatch = pxRegex.exec(value))) {
-        const px = Number(pxMatch[1]);
-        if (px === 0) continue;
+      const unitRegex =
+        /(-?\d+(?:\.\d+)?)(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;
+      let unitMatch;
+      while ((unitMatch = unitRegex.exec(value))) {
+        const numeric = unitMatch[1];
+        const unit = unitMatch[2] ?? "";
+        const n = Number(numeric);
+        if (!Number.isFinite(n)) continue;
+        if (n === 0) continue;
 
-        const absIndex = valueStart + pxMatch.index;
+        const absIndex = valueStart + unitMatch.index;
         const line = getLineNumber(stripped, absIndex);
         violations.push(
-          `${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${pxMatch[1]}px`,
+          `${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${numeric}${unit}`,
         );
       }
     }
@@ -74,7 +78,7 @@ test("desktop UI should not hardcode border-radius pixel values (use radius toke
   assert.deepEqual(
     violations,
     [],
-    `Found hardcoded border-radius pixel values in desktop UI styles. Use radius tokens (var(--radius*)), except for 0:\n${violations
+    `Found hardcoded border-radius values in desktop UI styles. Use radius tokens (var(--radius*)), except for 0:\n${violations
       .map((violation) => `- ${violation}`)
       .join("\n")}`,
   );
