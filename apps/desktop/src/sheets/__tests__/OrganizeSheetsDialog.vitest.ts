@@ -524,6 +524,84 @@ describe("OrganizeSheetsDialog", () => {
     expect(focusGrid).toHaveBeenCalledTimes(1);
   });
 
+  it("closes on Escape when no inline state is active", () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
+    let activeSheetId = "s1";
+    const focusGrid = vi.fn();
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid,
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const body = dialog!.querySelector<HTMLElement>('[data-testid="organize-sheets-dialog-body"]');
+    expect(body).toBeInstanceOf(HTMLElement);
+
+    act(() => {
+      body!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+
+    expect(focusGrid).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('dialog[data-testid="organize-sheets-dialog"]')).toBeNull();
+  });
+
+  it("Escape cancels inline rename before closing the dialog", () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+    ]);
+    let activeSheetId = "s1";
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const renameBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-rename-s1"]');
+    expect(renameBtn).toBeInstanceOf(HTMLButtonElement);
+    act(() => {
+      renameBtn!.click();
+    });
+
+    expect(dialog!.querySelector('[data-testid="organize-sheet-rename-input-s1"]')).toBeInstanceOf(HTMLInputElement);
+
+    const body = dialog!.querySelector<HTMLElement>('[data-testid="organize-sheets-dialog-body"]');
+    expect(body).toBeInstanceOf(HTMLElement);
+    act(() => {
+      body!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+
+    // Dialog remains open, but rename UI should be cancelled.
+    expect(document.querySelector('dialog[data-testid="organize-sheets-dialog"]')).toBeInstanceOf(HTMLDialogElement);
+    expect(dialog!.querySelector('[data-testid="organize-sheet-rename-input-s1"]')).toBeNull();
+  });
+
   it("re-binds to the latest sheet store when the host replaces it (collab-style)", async () => {
     const doc = new DocumentController();
     const store1 = new WorkbookSheetStore([{ id: "s1", name: "Sheet1", visibility: "visible" }]);

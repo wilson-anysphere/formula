@@ -167,6 +167,11 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
     setError(null);
   }, []);
 
+  const cancelDeleteConfirm = React.useCallback(() => {
+    setDeleteConfirmSheetId(null);
+    setError(null);
+  }, []);
+
   const activate = React.useCallback(
     (sheetId: string) => {
       if (isSpreadsheetEditing) return;
@@ -292,7 +297,30 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
   );
 
   return (
-    <div className="organize-sheets-dialog__body" data-testid="organize-sheets-dialog-body">
+    <div
+      className="organize-sheets-dialog__body"
+      data-testid="organize-sheets-dialog-body"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        // When an inline modal state is active (rename/delete confirm), Escape should dismiss that
+        // state first (Excel-like) rather than closing the entire dialog.
+        if (renameSheetId) {
+          e.preventDefault();
+          e.stopPropagation();
+          cancelRename();
+          return;
+        }
+        if (deleteConfirmSheetId) {
+          e.preventDefault();
+          e.stopPropagation();
+          cancelDeleteConfirm();
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }}
+    >
       <header className="organize-sheets-dialog__header">
         <h2 className="organize-sheets-dialog__title">Organize Sheets</h2>
         <button
@@ -452,7 +480,7 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setDeleteConfirmSheetId(null)}
+                      onClick={cancelDeleteConfirm}
                       disabled={actionDisabled}
                       data-testid={`organize-sheet-delete-cancel-${sheet.id}`}
                     >
@@ -639,8 +667,10 @@ export function openOrganizeSheetsDialog(host: OrganizeSheetsDialogHost): void {
   );
 
   dialog.addEventListener("cancel", (e) => {
+    // Prevent the dialog from auto-closing on Escape so the React UI can decide what to do:
+    // - when renaming / confirming delete, Escape should dismiss that inline state
+    // - otherwise Escape should close the dialog (handled by the React keydown handler)
     e.preventDefault();
-    closeDialog(dialog);
   });
 
   trapDialogTabFocus(dialog);
