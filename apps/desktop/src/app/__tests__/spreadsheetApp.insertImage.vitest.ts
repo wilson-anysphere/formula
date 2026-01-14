@@ -482,4 +482,37 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("does not steal focus when the file picker is dismissed after switching sheets", async () => {
+    vi.useFakeTimers();
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const focusSpy = vi.spyOn(app, "focus");
+    const doc: any = app.getDocument();
+
+    // Ensure Sheet2 exists so we can switch away before the focus-based cancel handler runs.
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+    app.insertImageFromLocalFile();
+    app.activateSheet("Sheet2");
+    expect(app.getCurrentSheetId()).toBe("Sheet2");
+
+    focusSpy.mockClear();
+
+    // Simulate closing the picker without selecting a file.
+    window.dispatchEvent(new Event("focus"));
+    vi.runOnlyPendingTimers();
+
+    expect(focusSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
 });

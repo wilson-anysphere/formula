@@ -11723,6 +11723,7 @@ export class SpreadsheetApp {
       return;
     }
 
+    const startSheetId = this.sheetId;
     const input = this.ensureInsertImageInput();
     // Allow selecting the same file repeatedly.
     input.value = "";
@@ -11739,9 +11740,10 @@ export class SpreadsheetApp {
       if (settled) return;
       settled = true;
       cleanup();
-      const startSheetId = this.sheetId;
       if (!file) {
-        this.focus();
+        if (this.sheetId === startSheetId) {
+          this.focus();
+        }
         return;
       }
       void this.insertImageFromPickedFile(file)
