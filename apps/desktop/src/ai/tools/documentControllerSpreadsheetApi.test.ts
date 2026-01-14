@@ -858,6 +858,30 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(withValues.data?.formulas).toEqual([["=B1+1"]]);
   });
 
+  it("clone() uses a local formula evaluator for computed values (and avoids computing them in listNonEmptyCells)", () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "B1", 1);
+    controller.setCellFormula("Sheet1", "A1", "B1+1");
+
+    // Provide a dummy live provider so clone() will enable local evaluation. The clone should NOT use this.
+    const api = new DocumentControllerSpreadsheetApi(controller, {
+      getCellComputedValueForSheet: () => 999,
+    });
+    const cloned = api.clone() as any as DocumentControllerSpreadsheetApi;
+
+    // Local evaluator should compute based on the cloned DocumentController state.
+    expect(cloned.getCell({ sheet: "Sheet1", row: 1, col: 1 })).toMatchObject({ value: 2, formula: "=B1+1" });
+
+    // PreviewEngine diffs rely on listNonEmptyCells; clones intentionally do not compute formula values there.
+    const a1Entry = cloned.listNonEmptyCells("Sheet1").find((e) => e.address.row === 1 && e.address.col === 1);
+    expect(a1Entry?.cell.formula).toBe("=B1+1");
+    expect(a1Entry?.cell.value).toBeNull();
+
+    // Updating a dependency cell should invalidate any cached computed values.
+    cloned.setCell({ sheet: "Sheet1", row: 1, col: 2 }, { value: 10 });
+    expect(cloned.getCell({ sheet: "Sheet1", row: 1, col: 1 })).toMatchObject({ value: 11, formula: "=B1+1" });
+  });
+
   it("read_range returns primitive values + formulas without per-cell controller.getCell calls", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 123);

@@ -8,6 +8,7 @@ import { formatA1Range, type CellAddress, type RangeAddress } from "../../../../
 import type { CellEntry, SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.ts";
 import { isCellEmpty, type CellData, type CellFormat } from "../../../../../packages/ai-tools/src/spreadsheet/types.ts";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
+import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula";
 
 type DocumentControllerStyle = Record<string, any>;
 
@@ -336,6 +337,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   readonly getCellComputedValueForSheet:
     | ((sheetId: string, cell: { row: number; col: number }) => unknown)
     | null;
+  readonly includeComputedValuesInListNonEmptyCells: boolean;
 
   constructor(
     controller: DocumentController,
@@ -350,12 +352,33 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
        * results on demand, so AI integrations can opt in to passing a provider here.
        */
       getCellComputedValueForSheet?: (sheetId: string, cell: { row: number; col: number }) => unknown;
+      /**
+       * When true (default), `listNonEmptyCells()` will call `getCellComputedValueForSheet` to populate
+       * `cell.value` for formula cells when the underlying workbook stores `value:null`.
+       *
+       * This is useful for RAG indexing (which is built on `listNonEmptyCells`). For PreviewEngine
+       * diffs, this can be expensive (it would compute values for *every* formula cell), so
+       * `clone()` disables it even when formula values are enabled.
+       */
+      includeComputedValuesInListNonEmptyCells?: boolean;
     } = {}
   ) {
     this.controller = controller;
     this.createChart = options.createChart;
     this.sheetNameResolver = options.sheetNameResolver ?? null;
     this.getCellComputedValueForSheet = options.getCellComputedValueForSheet ?? null;
+    this.includeComputedValuesInListNonEmptyCells = options.includeComputedValuesInListNonEmptyCells ?? true;
+  }
+
+  private invalidateComputedValues(): void {
+    const provider = this.getCellComputedValueForSheet as any;
+    if (provider && typeof provider.invalidate === "function") {
+      try {
+        provider.invalidate();
+      } catch {
+        // ignore
+      }
+    }
   }
 
   private maybeGetComputedValueForCell(params: {
@@ -373,6 +396,132 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     } catch {
       return undefined;
     }
+  }
+
+  private resolveSheetIdOrNull(sheet: string): string | null {
+    const name = String(sheet ?? "").trim();
+    if (!name) return null;
+    if (this.sheetNameResolver) {
+      try {
+        const resolved = this.sheetNameResolver.getSheetIdByName(name);
+        if (resolved) return resolved;
+      } catch {
+        // ignore
+      }
+    }
+
+    // Allow stable sheet ids to pass through.
+    const knownSheetIds = this.controller.getSheetIds();
+    const candidates = knownSheetIds.length > 0 ? knownSheetIds : ["Sheet1"];
+    const match = candidates.find((id) => id.toLowerCase() === name.toLowerCase());
+    return match ?? null;
+  }
+
+  private createLocalComputedValueProvider(controller: DocumentController): ((sheetId: string, cell: { row: number; col: number }) => SpreadsheetValue) & {
+    invalidate?: () => void;
+  } {
+    // Match Excel column count for a collision-free numeric key (for Excel-sized sheets).
+    const COORD_COL_STRIDE = 16_384;
+    const memoBySheet = new Map<string, Map<number, SpreadsheetValue>>();
+    const stackBySheet = new Map<string, Set<number>>();
+
+    const coerceScalar = (raw: unknown): SpreadsheetValue => {
+      if (raw == null) return null;
+      if (typeof raw === "string") return raw;
+      if (typeof raw === "boolean") return raw;
+      if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+      if (typeof raw === "bigint") return raw.toString();
+      if (typeof raw === "object") {
+        const maybeText = (raw as any)?.text;
+        if (typeof maybeText === "string") return maybeText;
+        try {
+          return JSON.stringify(raw);
+        } catch {
+          return String(raw);
+        }
+      }
+      try {
+        return String(raw);
+      } catch {
+        return null;
+      }
+    };
+
+    const computeCellValue = (sheetId: string, coord: { row: number; col: number }): SpreadsheetValue => {
+      const key = coord.row * COORD_COL_STRIDE + coord.col;
+      const memo = memoBySheet.get(sheetId) ?? (() => {
+        const next = new Map<number, SpreadsheetValue>();
+        memoBySheet.set(sheetId, next);
+        return next;
+      })();
+      if (memo.has(key)) return memo.get(key)!;
+
+      const stack = stackBySheet.get(sheetId) ?? (() => {
+        const next = new Set<number>();
+        stackBySheet.set(sheetId, next);
+        return next;
+      })();
+      if (stack.has(key)) return "#VALUE!";
+      stack.add(key);
+      try {
+        const cellState = controller.getCell(sheetId, coord) as any;
+        const formulaText = typeof cellState?.formula === "string" ? cellState.formula : null;
+        let result: SpreadsheetValue;
+        if (formulaText) {
+          const getCellValue = (address: string): SpreadsheetValue => {
+            // EvaluateFormula passes sheet-qualified refs as `Sheet!A1` (sheet name is unquoted).
+            // Treat unqualified refs as being on the same (stable-id) sheet.
+            try {
+              const bang = address.lastIndexOf("!");
+              const rawSheet = bang === -1 ? sheetId : address.slice(0, bang).trim();
+              const cellRef = bang === -1 ? address : address.slice(bang + 1);
+              const resolvedSheetId = bang === -1 ? sheetId : this.resolveSheetIdOrNull(rawSheet);
+              if (!resolvedSheetId) return "#REF!";
+              // A1 refs are 1-based; convert to 0-based coords.
+              const match = /^\$?([A-Za-z]{1,3})\$?([1-9]\d*)$/.exec(String(cellRef).trim());
+              if (!match) return "#REF!";
+              // Minimal A1 -> (row0,col0) conversion (avoid importing UI a1 helpers into the adapter).
+              const letters = match[1]!.toUpperCase();
+              let col = 0;
+              for (let i = 0; i < letters.length; i += 1) {
+                col = col * 26 + (letters.charCodeAt(i) - 64);
+              }
+              const row = Number(match[2]);
+              if (!Number.isInteger(row) || row <= 0 || col <= 0) return "#REF!";
+              return computeCellValue(resolvedSheetId, { row: row - 1, col: col - 1 });
+            } catch {
+              return "#REF!";
+            }
+          };
+          try {
+            result = evaluateFormula(formulaText, getCellValue);
+          } catch {
+            result = "#VALUE!";
+          }
+        } else {
+          result = coerceScalar(cellState?.value);
+        }
+        memo.set(key, result);
+        return result;
+      } finally {
+        stack.delete(key);
+      }
+    };
+
+    const provider = ((sheetId: string, cell: { row: number; col: number }): SpreadsheetValue => {
+      try {
+        return computeCellValue(sheetId, cell);
+      } catch {
+        return "#VALUE!";
+      }
+    }) as any;
+
+    provider.invalidate = () => {
+      memoBySheet.clear();
+      stackBySheet.clear();
+    };
+
+    return provider;
   }
 
   listSheets(): string[] {
@@ -397,7 +546,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         const formula = cellState.formula ?? null;
         if (value == null && formula == null) continue;
         const { row, col } = parseControllerCellKey(key);
-        if (value == null && formula != null) {
+        if (value == null && formula != null && this.includeComputedValuesInListNonEmptyCells) {
           const computed = this.maybeGetComputedValueForCell({ sheetId, coord: { row, col }, cellState });
           if (computed !== undefined) value = computed;
         }
@@ -453,6 +602,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
       }
     } finally {
       this.controller.endBatch();
+      this.invalidateComputedValues();
     }
   }
 
@@ -787,6 +937,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
       this.controller.setRangeValues(sheetId, toControllerRange(range), inputs, { label: "AI set_range" });
     } finally {
       this.controller.endBatch();
+      this.invalidateComputedValues();
     }
   }
 
@@ -835,9 +986,19 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
           return () => ({ chart_id: `preview_chart_${++counter}` });
         })()
       : undefined;
-    // Do not copy `getCellComputedValueForSheet` into clones (PreviewEngine simulation) because
-    // computed values should reflect the cloned DocumentController state, not the live UI workbook.
-    return new DocumentControllerSpreadsheetApi(cloned, { createChart, sheetNameResolver: this.sheetNameResolver });
+    // Use a lightweight local formula evaluator in clones (PreviewEngine simulation) so tool previews
+    // that depend on computed values (e.g. sorting/filtering on formula results) behave reasonably.
+    //
+    // NOTE: PreviewEngine diffs are intentionally based on formulas/raw values rather than computed
+    // results (which would require evaluating *every* formula cell). To keep diffs fast, clones
+    // disable computed values in `listNonEmptyCells()`.
+    const computedProvider = this.getCellComputedValueForSheet ? this.createLocalComputedValueProvider(cloned) : undefined;
+    return new DocumentControllerSpreadsheetApi(cloned, {
+      createChart,
+      sheetNameResolver: this.sheetNameResolver,
+      getCellComputedValueForSheet: computedProvider,
+      includeComputedValuesInListNonEmptyCells: false,
+    });
   }
 
   private getSheetNameById(sheetId: string): string {
