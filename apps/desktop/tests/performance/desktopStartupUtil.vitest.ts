@@ -218,6 +218,17 @@ describe('desktopStartupUtil resolveDesktopStartupRunEnv', () => {
     expect(resolveDesktopStartupRunEnv({ env: {} })).toEqual({ runs: 20, timeoutMs: 15_000, binPath: null });
   });
 
+  it('falls back to defaults when runs/timeout are invalid', () => {
+    expect(
+      resolveDesktopStartupRunEnv({
+        env: {
+          FORMULA_DESKTOP_STARTUP_RUNS: '0',
+          FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: 'wat',
+        },
+      }),
+    ).toEqual({ runs: 20, timeoutMs: 15_000, binPath: null });
+  });
+
   it('parses overrides and resolves FORMULA_DESKTOP_BIN relative to the repo root', () => {
     expect(
       resolveDesktopStartupRunEnv({
@@ -238,6 +249,14 @@ describe('desktopStartupUtil resolveDesktopStartupRunEnv', () => {
 describe('desktopStartupUtil resolveDesktopStartupRssEnv', () => {
   it('uses defaults when env is empty', () => {
     expect(resolveDesktopStartupRssEnv({ env: {} })).toEqual({ idleDelayMs: 1000, targetMb: 100 });
+  });
+
+  it('parses a positive RSS target', () => {
+    expect(
+      resolveDesktopStartupRssEnv({
+        env: { FORMULA_DESKTOP_RSS_TARGET_MB: '250' },
+      }),
+    ).toEqual({ idleDelayMs: 1000, targetMb: 250 });
   });
 
   it('clamps idle delay to >= 0 and ignores invalid target values', () => {
