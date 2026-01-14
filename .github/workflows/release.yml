@@ -2035,6 +2035,19 @@ jobs:
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
         run: python scripts/desktop_bundle_size_report.py --json desktop-bundle-size-report.json
 
+      - name: Restore CI-only Tauri config patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `scripts/ci/prepare-tauri-signing-config.mjs` may patch `tauri.conf.json` in-place for
+          # fork-friendly unsigned builds / per-run timestamp URL overrides. Reset it so subsequent
+          # reproducibility guards only fail on unexpected tracked file changes.
+          git restore --source=HEAD -- apps/desktop/src-tauri/tauri.conf.json
+
+      - name: Fail if the build modified tracked files
+        shell: bash
+        run: git diff --exit-code
+
       - name: Upload desktop installer artifact size report (JSON)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
