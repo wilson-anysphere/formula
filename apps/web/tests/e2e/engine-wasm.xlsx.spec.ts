@@ -158,8 +158,8 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
   expect(afterClear.sheets.Sheet1.cells).not.toHaveProperty("A1");
   expect(afterClear.sheets.Sheet1.cells).toHaveProperty("A2", "=A1*2");
 
-  expect(result.goalSeekResult.success).toBe(true);
-  expect(Math.abs(result.goalSeekResult.solution - 5)).toBeLessThan(1e-6);
+  expect(result.goalSeekResult.result.status).toBe("Converged");
+  expect(Math.abs(result.goalSeekResult.result.solution - 5)).toBeLessThan(1e-6);
   expect(Math.abs(result.goalSeekA1.value - 5)).toBeLessThan(1e-6);
   expect(Math.abs(result.goalSeekB1.value - 25)).toBeLessThan(1e-6);
 });
