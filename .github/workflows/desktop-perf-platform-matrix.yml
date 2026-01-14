@@ -749,7 +749,9 @@ jobs:
 
   publish:
     name: Publish desktop perf platform matrix history (gh-pages)
-    needs: [desktop-perf, merge]
+    # Only the merged artifact is required. Keeping this job independent of the full matrix result
+    # lets scheduled runs publish partial data (e.g. if a single OS runner flakes).
+    needs: merge
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:

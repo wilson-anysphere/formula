@@ -393,12 +393,15 @@ jobs:
     permissions:
       actions: read
       contents: write
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Publish whenever we have benchmark results for a push-to-main, even if the benchmark job failed,
+    # so regressions (or flaky runs) still land in the gh-pages history for debugging.
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Download benchmark results artifact
+        continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: perf-benchmark-results
