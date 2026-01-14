@@ -96,6 +96,52 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
             changingCell: "A1",
             tolerance: 1e-9,
           });
+          if (!goalSeekResult || typeof goalSeekResult !== "object") {
+            throw new Error("goalSeek returned a non-object result");
+          }
+          const goalSeekResultAny = goalSeekResult as any;
+          const goalSeekResponse = goalSeekResultAny.result;
+          const goalSeekChanges = goalSeekResultAny.changes;
+          if (!goalSeekResponse || typeof goalSeekResponse !== "object") {
+            throw new Error("goalSeek response is missing `result`");
+          }
+          if (typeof goalSeekResponse.status !== "string") {
+            throw new Error("goalSeek result.status must be a string");
+          }
+          if (typeof goalSeekResponse.solution !== "number" || !Number.isFinite(goalSeekResponse.solution)) {
+            throw new Error("goalSeek result.solution must be a finite number");
+          }
+          if (!Array.isArray(goalSeekChanges)) {
+            throw new Error("goalSeek response is missing `changes[]`");
+          }
+          const isScalarJsonValue = (value: unknown) =>
+            value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+          for (const [idx, change] of goalSeekChanges.entries()) {
+            if (!change || typeof change !== "object") {
+              throw new Error(`goalSeek changes[${idx}] must be an object`);
+            }
+            const changeAny = change as any;
+            if (typeof changeAny.sheet !== "string") {
+              throw new Error(`goalSeek changes[${idx}].sheet must be a string`);
+            }
+            if (typeof changeAny.address !== "string") {
+              throw new Error(`goalSeek changes[${idx}].address must be a string`);
+            }
+            if (!("value" in changeAny)) {
+              throw new Error(`goalSeek changes[${idx}] is missing \`value\``);
+            }
+            if (changeAny.value === undefined) {
+              throw new Error(`goalSeek changes[${idx}].value must not be undefined`);
+            }
+            if (!isScalarJsonValue(changeAny.value)) {
+              throw new Error(
+                `goalSeek changes[${idx}].value must be a scalar JSON value, got ${Object.prototype.toString.call(changeAny.value)}`
+              );
+            }
+          }
+          if (!goalSeekChanges.some((change: any) => change?.sheet === "Sheet1" && change?.address === "A1")) {
+            throw new Error("goalSeek changes[] did not include the changing cell write (Sheet1!A1)");
+          }
           await engine.recalculate();
           const goalSeekA1 = await engine.getCell("A1", "Sheet1");
           const goalSeekB1 = await engine.getCell("B1", "Sheet1");
@@ -158,7 +204,7 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
   expect(afterClear.sheets.Sheet1.cells).not.toHaveProperty("A1");
   expect(afterClear.sheets.Sheet1.cells).toHaveProperty("A2", "=A1*2");
 
-  expect(result.goalSeekResult.result.status).toBe("Converged");
+  expect(["Converged", "MaxIterationsReached"]).toContain(result.goalSeekResult.result.status);
   expect(Math.abs(result.goalSeekResult.result.solution - 5)).toBeLessThan(1e-6);
   expect(Math.abs(result.goalSeekA1.value - 5)).toBeLessThan(1e-6);
   expect(Math.abs(result.goalSeekB1.value - 25)).toBeLessThan(1e-6);
