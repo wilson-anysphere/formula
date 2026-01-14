@@ -5,9 +5,6 @@ import { fileURLToPath } from "node:url";
 
 import { CommandRegistry } from "../../extensions/commandRegistry.js";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands.js";
-import { registerDataQueriesCommands } from "../../commands/registerDataQueriesCommands.js";
-import { registerFormatPainterCommand } from "../../commands/formatPainterCommand.js";
-import { registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands.js";
 import { createDefaultLayout } from "../../layout/layoutState.js";
 
 import type { RibbonSchema } from "../ribbonSchema";
@@ -846,6 +843,22 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
     commandRegistry,
     app: {} as any,
     layoutController,
+    formatPainter: { isArmed: () => false, arm: () => {}, disarm: () => {} },
+    ribbonMacroHandlers: {
+      openPanel: () => {},
+      focusScriptEditorPanel: () => {},
+      focusVbaMigratePanel: () => {},
+      setPendingMacrosPanelFocus: () => {},
+      startMacroRecorder: () => {},
+      stopMacroRecorder: () => {},
+      isTauri: () => false,
+    },
+    dataQueriesHandlers: {
+      getPowerQueryService: () => null,
+      showToast: () => {},
+      notify: async () => {},
+      focusAfterExecute: () => {},
+    },
     themeController: { setThemePreference: () => {} } as any,
     refreshRibbonUiState: () => {},
     applyFormattingToSelection: () => {},
@@ -874,36 +887,6 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
       quit: () => {},
     },
     openCommandPalette: () => {},
-  });
-
-  registerRibbonMacroCommands({
-    commandRegistry,
-    handlers: {
-      openPanel: () => {},
-      focusScriptEditorPanel: () => {},
-      focusVbaMigratePanel: () => {},
-      setPendingMacrosPanelFocus: () => {},
-      startMacroRecorder: () => {},
-      stopMacroRecorder: () => {},
-      isTauri: () => false,
-    },
-  });
-
-  registerFormatPainterCommand({
-    commandRegistry,
-    isArmed: () => false,
-    arm: () => {},
-    disarm: () => {},
-  });
-
-  registerDataQueriesCommands({
-    commandRegistry,
-    layoutController,
-    getPowerQueryService: () => null,
-    showToast: () => {},
-    notify: async () => {},
-    refreshRibbonUiState: () => {},
-    focusAfterExecute: () => {},
   });
 
   const implemented = new Set<string>();

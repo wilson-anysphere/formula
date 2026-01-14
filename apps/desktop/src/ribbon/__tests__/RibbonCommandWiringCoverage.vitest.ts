@@ -7,9 +7,6 @@ import { CommandRegistry } from "../../extensions/commandRegistry";
 import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState";
 import { panelRegistry } from "../../panels/panelRegistry";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands";
-import { registerFormatPainterCommand } from "../../commands/formatPainterCommand";
-import { registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands";
-import { registerDataQueriesCommands } from "../../commands/registerDataQueriesCommands";
 
 import { computeRibbonDisabledByIdFromCommandRegistry } from "../ribbonCommandRegistryDisabling";
 import { defaultRibbonSchema, type RibbonSchema } from "../ribbonSchema";
@@ -168,6 +165,26 @@ function registerCommandsForRibbonDisablingTest(commandRegistry: CommandRegistry
     commandRegistry,
     app: {} as any,
     layoutController,
+    formatPainter: {
+      isArmed: () => false,
+      arm: () => {},
+      disarm: () => {},
+    },
+    ribbonMacroHandlers: {
+      openPanel: () => {},
+      focusScriptEditorPanel: () => {},
+      focusVbaMigratePanel: () => {},
+      setPendingMacrosPanelFocus: () => {},
+      startMacroRecorder: () => {},
+      stopMacroRecorder: () => {},
+      isTauri: () => false,
+    },
+    dataQueriesHandlers: {
+      getPowerQueryService: () => null,
+      showToast: () => {},
+      notify: async () => {},
+      focusAfterExecute: () => {},
+    },
     themeController: { setThemePreference: () => {} } as any,
     refreshRibbonUiState: () => {},
     applyFormattingToSelection: () => {},
@@ -196,40 +213,6 @@ function registerCommandsForRibbonDisablingTest(commandRegistry: CommandRegistry
       quit: () => {},
     },
     openCommandPalette: () => {},
-  });
-
-  // View/Developer macro commands are registered separately from `registerDesktopCommands`
-  // because they require panel focus wiring + macro-recorder integration in the desktop shell.
-  registerRibbonMacroCommands({
-    commandRegistry,
-    handlers: {
-      openPanel: () => {},
-      focusScriptEditorPanel: () => {},
-      focusVbaMigratePanel: () => {},
-      setPendingMacrosPanelFocus: () => {},
-      startMacroRecorder: () => {},
-      stopMacroRecorder: () => {},
-      isTauri: () => false,
-    },
-  });
-
-  // Power Query / Data → Queries & Connections ribbon commands are registered outside of
-  // `registerDesktopCommands` because they depend on PowerQueryService wiring.
-  registerDataQueriesCommands({
-    commandRegistry,
-    layoutController,
-    getPowerQueryService: () => null,
-    showToast: () => {},
-    notify: async () => {},
-    refreshRibbonUiState: () => {},
-    focusAfterExecute: () => {},
-  });
-
-  registerFormatPainterCommand({
-    commandRegistry,
-    isArmed: () => false,
-    arm: () => {},
-    disarm: () => {},
   });
 }
 
