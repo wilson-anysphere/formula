@@ -71,3 +71,11 @@ fn cell_format_code_ignores_commas_in_literals_escapes_and_brackets() {
     // Commas inside bracket tokens should be ignored for grouping detection.
     assert_eq!(cell_format_code(Some("[foo,bar]0.00")), "F2");
 }
+
+#[test]
+fn cell_format_code_ignores_commas_in_layout_tokens() {
+    // `_X` / `*X` layout tokens consume their operand, which is not rendered literally. A comma used
+    // as a layout operand is not a thousands separator.
+    assert_eq!(cell_format_code(Some("0_,0")), "F0");
+    assert_eq!(cell_format_code(Some("0*,0")), "F0");
+}

@@ -438,11 +438,15 @@ fn pattern_has_thousands_separator(pattern: &str) -> bool {
     // Excel uses `,` to indicate grouping in number formats. This helper is intentionally simple:
     // treat any comma outside quoted literals, escapes, and bracket tokens as a thousands
     // separator. (Scaling commas are also counted for now.)
+    //
+    // Note: `_X` and `*X` are layout tokens whose operands are not rendered literally. A comma used
+    // only as a layout operand (e.g. `0_,0` or `0*,0`) should not be treated as grouping.
     let mut in_quotes = false;
     let mut escape = false;
     let mut in_brackets = false;
+    let mut chars = pattern.chars();
 
-    for ch in pattern.chars() {
+    while let Some(ch) = chars.next() {
         if escape {
             escape = false;
             continue;
@@ -466,6 +470,11 @@ fn pattern_has_thousands_separator(pattern: &str) -> bool {
             '"' => in_quotes = true,
             '\\' => escape = true,
             '[' => in_brackets = true,
+            // Layout tokens consume their operand as a literal character. Skip it so commas used as
+            // layout operands do not trigger thousands-separator classification.
+            '_' | '*' => {
+                let _ = chars.next();
+            }
             ',' => return true,
             _ => {}
         }
