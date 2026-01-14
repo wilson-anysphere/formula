@@ -39,7 +39,7 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     });
   });
 
-  it("uses sheet display names (sheet meta) as engine sheet ids when they differ from stable ids", () => {
+  it("exports stable sheet ids even when they differ from display names", () => {
     const doc = new DocumentController();
     doc.setCellValue("Sheet1", "A1", 1);
 
@@ -50,7 +50,7 @@ describe("DocumentController → engine workbook JSON exporter", () => {
       sheetOrder: ["Sheet1", "Budget"],
       sheets: {
         Sheet1: { cells: { A1: 1 } },
-        Budget: { cells: { A1: 2 } },
+        sheet_2: { cells: { A1: 2 } },
       },
     });
   });
@@ -121,6 +121,21 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     const serialized = engine.loadWorkbookFromJson.mock.calls[0]?.[0];
     const parsed = JSON.parse(String(serialized));
     expect(parsed.localeId).toBe("de-DE");
+  });
+
+  it("hydrates sheet display names when the engine supports setSheetDisplayName", async () => {
+    const doc = new DocumentController();
+    doc.addSheet({ sheetId: "sheet_2", name: "Budget" });
+
+    const engine = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => []),
+      setSheetDisplayName: vi.fn(async () => {}),
+    };
+
+    await engineHydrateFromDocument(engine, doc);
+    expect(engine.setSheetDisplayName).toHaveBeenCalledWith("sheet_2", "Budget");
   });
 
   it("applies incremental deltas without emitting format-only updates when style sync hooks are absent", async () => {
@@ -208,6 +223,7 @@ describe("engine sync helpers", () => {
   class FakeEngine implements EngineSyncTarget {
     readonly loadedJson: string[] = [];
     readonly setCalls: Array<{ address: string; value: unknown; sheet?: string }> = [];
+    readonly sheetDisplayNameCalls: Array<{ sheetId: string; name: string }> = [];
     readonly internStyleCalls: unknown[] = [];
     readonly setStyleCalls: Array<{ address: string; styleId: number; sheet?: string }> = [];
     readonly sheetDefaultStyleCalls: Array<{ sheet: string; styleId: number | null }> = [];
@@ -229,6 +245,10 @@ describe("engine sync helpers", () => {
 
     async setCell(address: string, value: any, sheet?: string): Promise<void> {
       this.setCalls.push({ address, value, sheet });
+    }
+
+    async setSheetDisplayName(sheetId: string, name: string): Promise<void> {
+      this.sheetDisplayNameCalls.push({ sheetId, name });
     }
 
     async internStyle(style: unknown): Promise<number> {
@@ -345,11 +365,11 @@ describe("engine sync helpers", () => {
     const engine = new FakeEngine([]);
     await engineHydrateFromDocument(engine, doc);
 
-    // Uses the display name as the engine sheet id, and interns the shared style once.
+    // Engine is addressed by stable sheet ids, and interns the shared style once.
     expect(engine.internStyleCalls).toEqual([doc.styleTable.get(rowDocStyleId!)]);
-    expect(engine.sheetDefaultStyleCalls).toEqual([{ sheet: "Budget", styleId: 1 }]);
-    expect(engine.rowStyleCalls).toEqual([{ sheet: "Budget", row: 0, styleId: 1 }]);
-    expect(engine.colStyleCalls).toEqual([{ sheet: "Budget", col: 1, styleId: 1 }]);
+    expect(engine.sheetDefaultStyleCalls).toEqual([{ sheet: "sheet_2", styleId: 1 }]);
+    expect(engine.rowStyleCalls).toEqual([{ sheet: "sheet_2", row: 0, styleId: 1 }]);
+    expect(engine.colStyleCalls).toEqual([{ sheet: "sheet_2", col: 1, styleId: 1 }]);
   });
 
   it("engineHydrateFromDocument syncs compressed range-run formatting when the engine supports it", async () => {
@@ -760,6 +780,7 @@ describe("engine sync helpers", () => {
     const engine = new FakeEngine([]);
     await engineApplyDocumentChange(engine, payload);
 
+    expect(engine.sheetDisplayNameCalls).toEqual([{ sheetId: "Sheet1", name: "Renamed" }]);
     expect(engine.recalcCalls).toEqual([undefined]);
   });
 

@@ -997,6 +997,11 @@ export class EngineWorker {
     await this.invoke("setSheetOrigin", { sheet, origin }, options);
   }
 
+  async setSheetDisplayName(sheetId: string, name: string, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setSheetDisplayName", { sheetId, name }, options);
+  }
+
   /**
    * Set (or clear) a per-column width override.
    *

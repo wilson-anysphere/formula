@@ -249,6 +249,7 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
     setCells: (updates) => engine.setCells(updates),
     renameSheet: (oldName, newName) => engine.renameSheet(oldName, newName),
     recalculate: (sheet) => engine.recalculate(sheet),
+    setSheetDisplayName: (sheetId, name) => engine.setSheetDisplayName(sheetId, name),
     setWorkbookFileMetadata: (directory, filename) => engine.setWorkbookFileMetadata(directory, filename),
     internStyle: (styleObj) => engine.internStyle(styleObj as any),
     setCellStyleId: (sheet, address, styleId) => engine.setCellStyleId(address, styleId, sheet),
@@ -7833,10 +7834,8 @@ export class SpreadsheetApp {
               if (!delta) return false;
               // Sheet add/delete.
               if (delta.before == null || delta.after == null) return true;
-              // Sheet rename.
-              const beforeName = typeof delta.before?.name === "string" ? delta.before.name : null;
-              const afterName = typeof delta.after?.name === "string" ? delta.after.name : null;
-              return beforeName !== afterName;
+              // Sheet renames are applied incrementally by updating the engine sheet display name.
+              return false;
             });
 
             if (sheetMetaRequiresHydrate || sheetOrderDelta) {
@@ -7879,24 +7878,9 @@ export class SpreadsheetApp {
               return;
             }
 
-            const sheetNameCache = new Map<string, string>();
-            const sheetIdToSheet = (sheetId: string): string => {
-              const key = String(sheetId ?? "").trim();
-              if (!key) return "Sheet1";
-              const cached = sheetNameCache.get(key);
-              if (cached) return cached;
-
-              const meta = (this.document as any)?.getSheetMeta?.(key) ?? null;
-              const metaName = typeof meta?.name === "string" ? meta.name.trim() : "";
-              const resolved = metaName || key;
-              sheetNameCache.set(key, resolved);
-              return resolved;
-            };
-
             void this.enqueueWasmSync(async (worker) => {
               const changes = await engineApplyDocumentChange(engineClientAsSyncTarget(worker), payload, {
                 getStyleById: (styleId) => (this.document as any)?.styleTable?.get?.(styleId),
-                sheetIdToSheet,
               });
               this.applyComputedChanges(changes);
             });

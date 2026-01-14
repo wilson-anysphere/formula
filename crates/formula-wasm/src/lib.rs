@@ -2040,6 +2040,17 @@ impl WorkbookState {
             .ok_or_else(|| js_err(format!("missing sheet: {name}")))
     }
 
+    fn set_sheet_display_name_internal(
+        &mut self,
+        sheet_key: &str,
+        display_name: &str,
+    ) -> Result<(), JsValue> {
+        // Avoid holding an immutable borrow of `sheet_lookup` across the mutable engine call.
+        let sheet = self.require_sheet(sheet_key)?.to_string();
+        self.engine.set_sheet_display_name(&sheet, display_name);
+        Ok(())
+    }
+
     fn resolve_sheet(&self, name: &str) -> Option<&str> {
         let key = normalize_sheet_key(name);
         self.sheet_lookup.get(&key).map(String::as_str)
@@ -4503,6 +4514,16 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "renameSheet")]
     pub fn rename_sheet(&mut self, old_name: String, new_name: String) -> bool {
         self.inner.rename_sheet_internal(&old_name, &new_name)
+    }
+
+    #[wasm_bindgen(js_name = "setSheetDisplayName")]
+    pub fn set_sheet_display_name(
+        &mut self,
+        sheet_key: String,
+        display_name: String,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .set_sheet_display_name_internal(&sheet_key, &display_name)
     }
     /// Set (or clear) a per-column width override for a sheet.
     ///

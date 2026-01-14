@@ -46,15 +46,19 @@ export type EngineWorkbookJson = {
    * semantics (notably 3D references like `Sheet1:Sheet3!A1` and worksheet functions like
    * `SHEET()`) match the UI's sheet ordering.
    *
-   * The identifiers in this list must match the keys in `sheets` (i.e. the engine-facing sheet id,
-   * which for the desktop app is the **sheet display name**, not the DocumentController stable id).
-   */
+    * The identifiers in this list must match the keys in `sheets` (i.e. the engine-facing sheet id).
+    *
+    * In the desktop app, this is the DocumentController stable `sheetId`.
+    */
   sheetOrder?: string[];
   /**
    * Worksheet map keyed by sheet identifier.
    *
-   * In the desktop app, this should match the user-facing sheet display name
-   * (what appears in formulas like `Sheet2!A1`), not an internal stable id.
+   * In the desktop app, this should use the DocumentController stable sheet id (`sheetId`).
+   *
+   * User-facing sheet tab names are synchronized separately via `EngineSyncTarget.setSheetDisplayName`,
+   * allowing sheet rename events to update worksheet-info functions (e.g. `CELL("filename")`)
+   * without rebuilding the entire engine workbook.
    */
   sheets: Record<string, EngineSheetJson>;
 };
@@ -73,6 +77,20 @@ export type DocumentCellDelta = {
   after: DocumentCellState;
 };
 
+export type DocumentSheetMetaState = {
+  name: string;
+  // Preserve additional metadata for forward compatibility; engine sync currently only cares
+  // about `name`.
+  visibility?: unknown;
+  tabColor?: unknown;
+};
+
+export type DocumentSheetMetaDelta = {
+  sheetId: string;
+  before: DocumentSheetMetaState | null;
+  after: DocumentSheetMetaState | null;
+};
+
 export interface EngineSyncTarget {
   loadWorkbookFromJson: (json: string) => Promise<void> | void;
   setCell: (address: string, value: EngineCellScalar, sheet?: string) => Promise<void> | void;
@@ -86,6 +104,13 @@ export interface EngineSyncTarget {
    */
   renameSheet?: (oldName: string, newName: string) => Promise<boolean> | boolean;
   recalculate: (sheet?: string) => Promise<CellChange[]> | CellChange[];
+  /**
+   * Update a sheet's user-visible display (tab) name without changing its stable id/key.
+   *
+   * When provided, this is used to keep the engine's sheet-name-emitting functions (e.g.
+   * `CELL("address")`) in sync with DocumentController sheet renames.
+   */
+  setSheetDisplayName?: (sheetId: string, name: string) => Promise<void> | void;
   /**
    * Update workbook-level file metadata used by Excel-compatible functions like `CELL("filename")`
    * and `INFO("directory")`.
@@ -154,9 +179,9 @@ export type EngineApplyDocumentChangeOptions = {
   /**
    * Optional sheet-id resolver.
    *
-   * DocumentController uses stable sheet ids internally, but formulas (and the WASM engine)
-   * refer to sheets by their user-facing display names. When provided, this function maps a
-   * DocumentController `sheetId` to the sheet identifier used by the engine.
+   * DocumentController uses stable sheet ids internally. Some engine implementations may instead
+   * address sheets by their user-facing display names. When provided, this function maps a
+   * DocumentController `sheetId` to the sheet identifier used by the engine API surface.
    */
   sheetIdToSheet?: (sheetId: string) => string | null | undefined;
 };
@@ -207,6 +232,15 @@ function getDocumentSheetIds(doc: any): string[] {
 }
 
 function resolveEngineSheetNameForDocumentSheetId(doc: any, sheetId: string): string {
+  const rawId = typeof sheetId === "string" ? sheetId.trim() : "";
+  if (!rawId) return "Sheet1";
+  // The WASM engine workbook is addressed by stable DocumentController sheet ids. Keep this as an
+  // identity mapping so sheet rename events can be applied incrementally by updating display-name
+  // metadata (see `setSheetDisplayName`).
+  return rawId;
+}
+
+function resolveDocumentSheetDisplayName(doc: any, sheetId: string): string {
   const rawId = typeof sheetId === "string" ? sheetId.trim() : "";
   if (!rawId) return "Sheet1";
 
@@ -415,6 +449,20 @@ export async function engineHydrateFromDocument(
 ): Promise<CellChange[]> {
   const workbookJson = exportDocumentToEngineWorkbookJsonWithOptions(doc, { localeId: options.localeId });
   await engine.loadWorkbookFromJson(JSON.stringify(workbookJson));
+
+  // Hydrate sheet display (tab) names separately from stable sheet ids.
+  //
+  // DocumentController uses stable sheet ids for addressing/persistence, but users see (and Excel
+  // functions emit) the display name. Keep the engine informed so `CELL("filename")`,
+  // `CELL("address")`, and runtime name resolution match Excel semantics even after renames.
+  if (typeof engine.setSheetDisplayName === "function") {
+    const ids = getDocumentSheetIds(doc);
+    for (const sheetId of ids) {
+      const sheetKey = resolveEngineSheetNameForDocumentSheetId(doc, sheetId);
+      const displayName = resolveDocumentSheetDisplayName(doc, sheetId);
+      await engine.setSheetDisplayName(sheetKey, displayName);
+    }
+  }
 
   // Sync sheet view column widths (DocumentController stores base px; engine uses Excel char units).
   //
@@ -648,8 +696,8 @@ export async function engineApplyDocumentChange(
     return [];
   }
 
-  const sheetMetaDeltas: Array<{ sheetId: string; before: any; after: any }> = Array.isArray(payload?.sheetMetaDeltas)
-    ? payload.sheetMetaDeltas
+  const sheetMetaDeltas: readonly DocumentSheetMetaDelta[] = Array.isArray(payload?.sheetMetaDeltas)
+    ? (payload.sheetMetaDeltas as DocumentSheetMetaDelta[])
     : [];
   const deltas: readonly DocumentCellDelta[] = Array.isArray(payload?.deltas) ? payload.deltas : [];
   const formatDeltas: unknown[] = Array.isArray(payload?.formatDeltas) ? payload.formatDeltas : [];
@@ -705,6 +753,7 @@ export async function engineApplyDocumentChange(
   // Apply sheet metadata renames before any other deltas so `sheetIdToSheet` resolution stays
   // coherent for the remainder of the payload (cell edits, view metadata, etc).
   let didRenameAnySheets = false;
+  let didApplyAnySheetDisplayNames = false;
   if (sheetMetaDeltas.length > 0) {
     for (const delta of sheetMetaDeltas) {
       if (!delta) continue;
@@ -719,9 +768,16 @@ export async function engineApplyDocumentChange(
       const newName = afterNameRaw.trim() || sheetId;
       if (!oldName || !newName || oldName === newName) continue;
 
+      // Prefer the stable-id display name API when available (new engine behavior).
+      if (typeof engine.setSheetDisplayName === "function") {
+        await engine.setSheetDisplayName(sheetId, newName);
+        didApplyAnySheetDisplayNames = true;
+        continue;
+      }
+
       if (typeof engine.renameSheet !== "function") {
         throw new Error(
-          `engineApplyDocumentChange: sheet rename detected (${JSON.stringify(oldName)} -> ${JSON.stringify(newName)}) but engine.renameSheet is not available; rehydrate the engine`,
+          `engineApplyDocumentChange: sheet rename detected (${JSON.stringify(oldName)} -> ${JSON.stringify(newName)}) but neither engine.setSheetDisplayName nor engine.renameSheet is available; rehydrate the engine`,
         );
       }
 
@@ -908,8 +964,7 @@ export async function engineApplyDocumentChange(
   // ignore formatting/view metadata entirely (backwards compatibility).
   const didApplyAnyFormattingMetadata =
     didApplyCellStyles || didApplyAnyLayerStyles || didApplyAnyRangeRuns || didApplyAnyColWidths;
-  const hasSheetMeta = sheetMetaDeltas.length > 0;
-  const didApplyAnyMetadataDeltas = didApplyAnyFormattingMetadata || hasSheetMeta;
+  const didApplyAnyMetadataDeltas = didApplyAnyFormattingMetadata || didApplyAnySheetDisplayNames;
 
   if (didApplyAnyMetadataDeltas && options.recalculate !== false) {
     shouldRecalculate = true;

@@ -70,6 +70,7 @@ type WasmWorkbookInstance = {
   internStyle?: (style: unknown) => number;
   setSheetOrigin?: (sheet: string, origin: string | null) => void;
   setColWidthChars?: (sheet: string, col: number, widthChars: number | null) => void;
+  setSheetDisplayName?: (sheetId: string, name: string) => void;
   toJson(): string;
 };
 
@@ -722,6 +723,13 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
                 (wb as any).setColWidthChars(sheet, params.col, params.widthChars);
               }
+              result = null;
+              break;
+            case "setSheetDisplayName":
+              if (typeof (wb as any).setSheetDisplayName !== "function") {
+                throw new Error("setSheetDisplayName: not available in this WASM build");
+              }
+              (wb as any).setSheetDisplayName(params.sheetId, params.name);
               result = null;
               break;
             case "setCells":

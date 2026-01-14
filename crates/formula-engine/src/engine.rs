@@ -360,15 +360,24 @@ impl Default for Sheet {
 #[derive(Debug, Default, Clone)]
 struct Workbook {
     sheets: Vec<Sheet>,
-    /// Display name for each sheet id.
+    /// Stable sheet keys for each sheet id.
     ///
-    /// Indices are stable for the lifetime of a sheet. Deleted sheets are represented by `None`
-    /// so ids are never reused.
-    sheet_names: Vec<Option<String>>,
-    sheet_name_to_id: HashMap<String, SheetId>,
+    /// These are used for public Engine APIs (e.g. `set_cell_value`) and persistence. Indices are
+    /// stable for the lifetime of a sheet; deleted sheets are represented by `None` so ids are
+    /// never reused.
+    sheet_keys: Vec<Option<String>>,
+    /// Case-insensitive mapping (Excel semantics) from stable sheet key -> internal sheet id.
+    sheet_key_to_id: HashMap<String, SheetId>,
+    /// User-visible sheet tab names (display names) for each sheet id.
+    ///
+    /// These are used for functions that emit sheet names (e.g. `CELL("address")`) and for
+    /// resolving user-visible sheet names in formulas/runtime (e.g. `INDIRECT`).
+    sheet_display_names: Vec<Option<String>>,
+    /// Case-insensitive mapping (Excel semantics) from sheet display name -> internal sheet id.
+    sheet_display_name_to_id: HashMap<String, SheetId>,
     /// Current sheet tab order expressed as stable sheet ids.
     ///
-    /// This is intentionally separate from `sheets`/`sheet_names` so sheet ids remain stable when
+    /// This is intentionally separate from `sheets`/`sheet_keys` so sheet ids remain stable when
     /// users reorder worksheet tabs.
     sheet_order: Vec<SheetId>,
     names: HashMap<String, DefinedName>,
@@ -403,20 +412,28 @@ impl Workbook {
         name.nfkc().flat_map(|c| c.to_uppercase()).collect()
     }
 
-    fn ensure_sheet(&mut self, name: &str) -> SheetId {
-        let key = Self::sheet_key(name);
-        if let Some(id) = self.sheet_name_to_id.get(&key).copied() {
+    fn ensure_sheet(&mut self, sheet_key: &str) -> SheetId {
+        // When adding sheets, treat the provided string as a stable key, but re-use existing sheets
+        // when it matches either an existing stable key or display name. This preserves backwards
+        // compatibility with call sites that address sheets by user-visible tab name.
+        if let Some(id) = self.resolve_sheet_name(sheet_key) {
             return id;
         }
         let id = self.sheets.len();
         self.sheets.push(Sheet::default());
-        self.sheet_names.push(Some(name.to_string()));
-        self.sheet_name_to_id.insert(key, id);
+        self.sheet_keys.push(Some(sheet_key.to_string()));
+        // Default display name to the stable key until overridden by the host.
+        self.sheet_display_names.push(Some(sheet_key.to_string()));
+        let key = Self::sheet_key(sheet_key);
+        self.sheet_key_to_id.insert(key.clone(), id);
+        // Ensure new sheets are resolvable by their initial display name (which defaults to the
+        // key).
+        self.sheet_display_name_to_id.insert(key, id);
         self.sheet_order.push(id);
         id
     }
     fn tab_index_by_sheet_id(&self) -> Vec<usize> {
-        let mut tab_index = vec![usize::MAX; self.sheet_names.len()];
+        let mut tab_index = vec![usize::MAX; self.sheet_keys.len()];
         for (idx, sheet_id) in self.sheet_order.iter().copied().enumerate() {
             if let Some(slot) = tab_index.get_mut(sheet_id) {
                 *slot = idx;
@@ -425,9 +442,69 @@ impl Workbook {
         tab_index
     }
 
+    fn sheet_id_by_key(&self, sheet_key: &str) -> Option<SheetId> {
+        let key = Self::sheet_key(sheet_key);
+        self.sheet_key_to_id.get(&key).copied()
+    }
+
     fn sheet_id(&self, name: &str) -> Option<SheetId> {
+        self.resolve_sheet_name(name)
+    }
+
+    fn resolve_sheet_name(&self, name: &str) -> Option<SheetId> {
+        // Excel formulas reference the user-visible tab name. Resolve by display name
+        // case-insensitively, but fall back to the stable key so existing call sites / persisted
+        // workbooks that reference `sheet_key` keep working.
         let key = Self::sheet_key(name);
-        self.sheet_name_to_id.get(&key).copied()
+        self.sheet_display_name_to_id
+            .get(&key)
+            .copied()
+            .or_else(|| self.sheet_key_to_id.get(&key).copied())
+    }
+
+    /// Update the user-visible display name for `sheet_id`.
+    ///
+    /// Returns `true` when the display name changed.
+    fn set_sheet_display_name(&mut self, sheet_id: SheetId, display_name: &str) -> bool {
+        if !self.sheet_exists(sheet_id) {
+            return false;
+        }
+        let Some(current) = self
+            .sheet_display_names
+            .get(sheet_id)
+            .and_then(|name| name.as_ref())
+        else {
+            return false;
+        };
+        if current == display_name {
+            return false;
+        }
+        if display_name.is_empty() {
+            return false;
+        }
+
+        // Avoid creating ambiguous mappings when callers attempt to set a duplicate display name.
+        let new_key = Self::sheet_key(display_name);
+        if let Some(existing) = self.sheet_display_name_to_id.get(&new_key).copied() {
+            if existing != sheet_id {
+                return false;
+            }
+        }
+        // Ensure display names do not shadow another sheet's stable key; stable keys must remain
+        // resolvable for hosts that address worksheets by `sheet_key`.
+        if let Some(existing) = self.sheet_key_to_id.get(&new_key).copied() {
+            if existing != sheet_id {
+                return false;
+            }
+        }
+
+        let old_key = Self::sheet_key(current);
+        if self.sheet_display_name_to_id.get(&old_key) == Some(&sheet_id) {
+            self.sheet_display_name_to_id.remove(&old_key);
+        }
+        self.sheet_display_names[sheet_id] = Some(display_name.to_string());
+        self.sheet_display_name_to_id.insert(new_key, sheet_id);
+        true
     }
 
     #[cfg(test)]
@@ -441,38 +518,55 @@ impl Workbook {
         }
 
         let new_key = Self::sheet_key(new_name);
-        if let Some(existing) = self.sheet_name_to_id.get(&new_key).copied() {
+        // Enforce uniqueness across both stable keys and display names (Excel semantics).
+        if let Some(existing) = self.resolve_sheet_name(new_name) {
             if existing != sheet_id {
                 return Err(WorkbookRenameSheetError::DuplicateName);
             }
         }
 
-        let old_name = self
-            .sheet_names
+        let old_key_name = self
+            .sheet_keys
             .get(sheet_id)
             .and_then(|name| name.as_ref())
             .ok_or(WorkbookRenameSheetError::SheetNotFound)?
             .clone();
-        let old_key = Self::sheet_key(&old_name);
+        let old_key = Self::sheet_key(&old_key_name);
+        let old_display_name = self
+            .sheet_display_names
+            .get(sheet_id)
+            .and_then(|name| name.as_ref())
+            .ok_or(WorkbookRenameSheetError::SheetNotFound)?
+            .clone();
+        let old_display_key = Self::sheet_key(&old_display_name);
 
-        self.sheet_names[sheet_id] = Some(new_name.to_string());
+        self.sheet_keys[sheet_id] = Some(new_name.to_string());
+        self.sheet_display_names[sheet_id] = Some(new_name.to_string());
 
         // Remove the old lookup key (if it still points at this sheet) and install the new one.
         // This keeps lookups consistent even when names are renormalized (e.g. `Å` -> `Å`).
-        if self.sheet_name_to_id.get(&old_key) == Some(&sheet_id) {
-            self.sheet_name_to_id.remove(&old_key);
+        if self.sheet_key_to_id.get(&old_key) == Some(&sheet_id) {
+            self.sheet_key_to_id.remove(&old_key);
         }
-        self.sheet_name_to_id.insert(new_key, sheet_id);
+        if self.sheet_display_name_to_id.get(&old_display_key) == Some(&sheet_id) {
+            self.sheet_display_name_to_id.remove(&old_display_key);
+        }
+        self.sheet_key_to_id.insert(new_key.clone(), sheet_id);
+        self.sheet_display_name_to_id.insert(new_key, sheet_id);
 
         Ok(())
     }
 
     fn sheet_exists(&self, sheet: SheetId) -> bool {
-        matches!(self.sheet_names.get(sheet), Some(Some(_)))
+        matches!(self.sheet_keys.get(sheet), Some(Some(_)))
     }
 
     fn sheet_name(&self, sheet: SheetId) -> Option<&str> {
-        self.sheet_names.get(sheet)?.as_deref()
+        self.sheet_display_names.get(sheet)?.as_deref()
+    }
+
+    fn sheet_key_name(&self, sheet: SheetId) -> Option<&str> {
+        self.sheet_keys.get(sheet)?.as_deref()
     }
 
     fn sheet_ids_in_order(&self) -> &[SheetId] {
@@ -742,8 +836,10 @@ impl RecalcValueChangeCollector {
             if *before == after {
                 continue;
             }
+            // Recalc change events are addressed using the stable sheet key (not the user-visible
+            // display name) so hosts can map the change back onto their own sheet identifiers.
             let sheet = workbook
-                .sheet_name(key.sheet)
+                .sheet_key_name(key.sheet)
                 .unwrap_or_default()
                 .to_string();
             out.push(RecalcValueChange {
@@ -939,9 +1035,8 @@ impl Engine {
         }
 
         formula_model::validate_sheet_name(new_name)?;
-
-        let new_key = Workbook::sheet_key(new_name);
-        if let Some(existing) = self.workbook.sheet_name_to_id.get(&new_key).copied() {
+        // Enforce uniqueness across both stable keys and display names (Excel semantics).
+        if let Some(existing) = self.workbook.resolve_sheet_name(new_name) {
             if existing != id {
                 return Err(SheetLifecycleError::InvalidName(
                     formula_model::SheetNameError::DuplicateName,
@@ -1020,37 +1115,11 @@ impl Engine {
                 }
             }
         }
-
-        let old_sheet_key = Workbook::sheet_key(&old_name);
-        let new_sheet_name = new_name.to_string();
-
-        // Pivot definitions store sheet names as raw strings. Keep them in sync with worksheet
-        // renames so pivot refreshes cannot resurrect a stale sheet name via `ensure_sheet`.
-        for def in self.workbook.pivots.values_mut() {
-            if Workbook::sheet_key(&def.destination.sheet) == old_sheet_key {
-                def.destination.sheet = new_sheet_name.clone();
-            }
-            if let PivotSource::Range { sheet, .. } = &mut def.source {
-                if Workbook::sheet_key(sheet) == old_sheet_key {
-                    *sheet = new_sheet_name.clone();
-                }
-            }
-        }
-
-        let Some(slot) = self.workbook.sheet_names.get_mut(id) else {
+        if !self.workbook.set_sheet_display_name(id, new_name) {
             return Err(SheetLifecycleError::Internal(format!(
-                "sheet id {id} missing from workbook sheet_names"
+                "failed to rename sheet id {id}"
             )));
-        };
-        *slot = Some(new_name.to_string());
-
-        self.workbook.sheet_name_to_id = self
-            .workbook
-            .sheet_names
-            .iter()
-            .enumerate()
-            .filter_map(|(id, name)| name.as_ref().map(|name| (Workbook::sheet_key(name), id)))
-            .collect();
+        }
 
         // Keep stored pivot definitions aligned with sheet renames. Pivot definitions store sheet
         // names (not stable ids) and pivot refresh uses `set_cell_value`, which would otherwise
@@ -1450,6 +1519,27 @@ impl Engine {
         }
     }
 
+    /// Update the user-visible display (tab) name for a sheet, without changing its stable key.
+    ///
+    /// The engine uses stable sheet keys for persistence and public APIs (e.g. `set_cell_value`),
+    /// but Excel formulas and worksheet-info functions emit/resolve the display name.
+    ///
+    /// This is a metadata-only update: it does not rewrite stored formulas. Instead, it marks all
+    /// compiled formulas dirty so a subsequent recalculation can observe the updated display name
+    /// via functions like `CELL("address")` and runtime sheet-name resolution (e.g. `INDIRECT`).
+    pub fn set_sheet_display_name(&mut self, sheet_key: &str, display_name: &str) {
+        let Some(sheet_id) = self.workbook.sheet_id_by_key(sheet_key) else {
+            return;
+        };
+        if !self.workbook.set_sheet_display_name(sheet_id, display_name) {
+            return;
+        }
+        self.mark_all_compiled_cells_dirty();
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
+    }
+
     /// Delete a worksheet from the workbook and rewrite any remaining formulas/defined names that
     /// referenced it.
     ///
@@ -1465,13 +1555,20 @@ impl Engine {
         if self.workbook.sheet_order.len() <= 1 {
             return Err(EngineError::CannotDeleteLastSheet);
         }
-        let deleted_sheet_name = self
+
+        let deleted_sheet_key = self
+            .workbook
+            .sheet_key_name(deleted_sheet_id)
+            .unwrap_or(sheet)
+            .to_string();
+        let deleted_sheet_display_name = self
             .workbook
             .sheet_name(deleted_sheet_id)
             .unwrap_or(sheet)
             .to_string();
 
-        let deleted_sheet_key = Workbook::sheet_key(&deleted_sheet_name);
+        let deleted_sheet_key_norm = Workbook::sheet_key(&deleted_sheet_key);
+        let deleted_sheet_display_key_norm = Workbook::sheet_key(&deleted_sheet_display_name);
 
         // Pivot definitions store sheet names as strings. If we leave stale references behind,
         // refreshing a pivot can silently resurrect the deleted sheet via `ensure_sheet`.
@@ -1484,9 +1581,14 @@ impl Engine {
             .map(|sheet_state| sheet_state.tables.iter().map(|t| t.id).collect())
             .unwrap_or_default();
         self.workbook.pivots.retain(|_, def| {
-            let destination_matches = Workbook::sheet_key(&def.destination.sheet) == deleted_sheet_key;
+            let dest_key = Workbook::sheet_key(&def.destination.sheet);
+            let destination_matches =
+                dest_key == deleted_sheet_key_norm || dest_key == deleted_sheet_display_key_norm;
             let source_matches = match &def.source {
-                PivotSource::Range { sheet, .. } => Workbook::sheet_key(sheet) == deleted_sheet_key,
+                PivotSource::Range { sheet, .. } => {
+                    let key = Workbook::sheet_key(sheet);
+                    key == deleted_sheet_key_norm || key == deleted_sheet_display_key_norm
+                }
                 PivotSource::Table { table_id } => deleted_table_ids.contains(table_id),
             };
             !(destination_matches || source_matches)
@@ -1499,23 +1601,25 @@ impl Engine {
         self.info.origin_by_sheet.remove(&deleted_sheet_id);
         // Keep the pre-delete sheet tab order so 3D span boundary shift logic can resolve adjacent
         // sheets (Excel shifts a deleted 3D boundary one sheet inward).
-        let sheet_order_names: Vec<String> = self
+        let sheet_order_keys: Vec<String> = self
             .workbook
             .sheet_ids_in_order()
             .iter()
-            .filter_map(|&id| self.workbook.sheet_name(id).map(|name| name.to_string()))
+            .filter_map(|&id| self.workbook.sheet_key_name(id).map(|name| name.to_string()))
             .collect();
 
         // Mark the sheet as deleted while keeping its id stable.
+        self.workbook.sheet_key_to_id.remove(&deleted_sheet_key_norm);
         self.workbook
-            .sheet_name_to_id
-            .remove(&Workbook::sheet_key(&deleted_sheet_name));
-        if let Some(name) = self.workbook.sheet_names.get_mut(deleted_sheet_id) {
+            .sheet_display_name_to_id
+            .remove(&deleted_sheet_display_key_norm);
+        if let Some(name) = self.workbook.sheet_keys.get_mut(deleted_sheet_id) {
             *name = None;
         }
-        self.workbook
-            .sheet_order
-            .retain(|&id| id != deleted_sheet_id);
+        if let Some(name) = self.workbook.sheet_display_names.get_mut(deleted_sheet_id) {
+            *name = None;
+        }
+        self.workbook.sheet_order.retain(|&id| id != deleted_sheet_id);
 
         // Drop any sheet-scoped state for the deleted worksheet.
         if let Some(sheet_state) = self.workbook.sheets.get_mut(deleted_sheet_id) {
@@ -1541,8 +1645,8 @@ impl Engine {
                 let (rewritten, changed) = rewrite_formula_for_sheet_delete(
                     &formula,
                     origin,
-                    &deleted_sheet_name,
-                    &sheet_order_names,
+                    &deleted_sheet_key,
+                    &sheet_order_keys,
                 );
                 if changed {
                     cell.formula = Some(rewritten);
@@ -1555,16 +1659,16 @@ impl Engine {
                     if let Some(formula) = column.formula.as_mut() {
                         let rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
                             formula,
-                            &deleted_sheet_name,
-                            &sheet_order_names,
+                            &deleted_sheet_key,
+                            &sheet_order_keys,
                         );
                         *formula = rewritten;
                     }
                     if let Some(formula) = column.totals_formula.as_mut() {
                         let rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
                             formula,
-                            &deleted_sheet_name,
-                            &sheet_order_names,
+                            &deleted_sheet_key,
+                            &sheet_order_keys,
                         );
                         *formula = rewritten;
                     }
@@ -1582,8 +1686,8 @@ impl Engine {
             let (rewritten, changed) = rewrite_formula_for_sheet_delete(
                 formula,
                 origin,
-                &deleted_sheet_name,
-                &sheet_order_names,
+                &deleted_sheet_key,
+                &sheet_order_keys,
             );
             if changed {
                 *formula = rewritten;
@@ -1606,8 +1710,8 @@ impl Engine {
                 let (rewritten, changed) = rewrite_formula_for_sheet_delete(
                     formula,
                     origin,
-                    &deleted_sheet_name,
-                    &sheet_order_names,
+                    &deleted_sheet_key,
+                    &sheet_order_keys,
                 );
                 if changed {
                     *formula = rewritten;
@@ -1650,7 +1754,12 @@ impl Engine {
             return Err(SheetLifecycleError::SheetNotFound);
         }
 
-        let name = self.workbook.sheet_name(id).expect("sheet exists").to_string();
+        let name = self
+            .workbook
+            .sheet_key_name(id)
+            .or_else(|| self.workbook.sheet_name(id))
+            .expect("sheet exists")
+            .to_string();
         self.delete_sheet(&name)
             .map_err(|e| match e {
                 EngineError::CannotDeleteLastSheet => SheetLifecycleError::CannotDeleteLastSheet,
@@ -4264,9 +4373,9 @@ impl Engine {
         }
 
         if let Some(provider) = &self.external_value_provider {
-            // Use the workbook's canonical display name to keep provider lookups stable even when
-            // callers pass a different sheet-name casing.
-            if let Some(sheet_name) = self.workbook.sheet_name(sheet_id) {
+            // Use the workbook's canonical stable sheet key to keep provider lookups stable even
+            // when callers pass a different casing or a user-visible display name.
+            if let Some(sheet_name) = self.workbook.sheet_key_name(sheet_id) {
                 if let Some(v) = provider.get(sheet_name, addr) {
                     return v;
                 }
@@ -4343,7 +4452,7 @@ impl Engine {
         // When an external provider is configured, missing cells can contain non-blank values; we
         // must query it for each missing coordinate, so fall back to per-cell lookup.
         if let Some(provider) = self.external_value_provider.as_deref() {
-            let provider_sheet_name = self.workbook.sheet_name(sheet_id);
+            let provider_sheet_name = self.workbook.sheet_key_name(sheet_id);
             for row_off in 0..in_bounds_rows {
                 let row = range.start.row + row_off as u32;
                 for col_off in 0..in_bounds_cols {
@@ -6101,7 +6210,7 @@ impl Engine {
                         return Some(key);
                     }
                 } else if let Some(provider) = &self.external_value_provider {
-                    if let Some(sheet_name) = self.workbook.sheet_name(origin.sheet) {
+                    if let Some(sheet_name) = self.workbook.sheet_key_name(origin.sheet) {
                         if let Some(v) = provider.get(sheet_name, addr) {
                             if v != Value::Blank {
                                 return Some(key);
@@ -7956,7 +8065,7 @@ impl PivotRefreshContext for Engine {
             if let Some(table) = sheet.tables.iter().find(|t| t.id == table_id) {
                 let name = self
                     .workbook
-                    .sheet_name(sheet_id)
+                    .sheet_key_name(sheet_id)
                     .map(|n| n.to_string())
                     .unwrap_or_else(|| format!("Sheet{sheet_id}"));
                 return Some((name, table.range));
@@ -7980,10 +8089,10 @@ impl PivotRefreshContext for Engine {
 
 fn sheet_names_by_id(workbook: &Workbook) -> HashMap<SheetId, String> {
     workbook
-        .sheet_names
+        .sheet_keys
         .iter()
         .enumerate()
-        .filter_map(|(id, name)| name.clone().map(|name| (id, name)))
+        .filter_map(|(id, name)| name.as_ref().map(|name| (id, name.clone())))
         .collect()
 }
 
@@ -8613,7 +8722,7 @@ fn build_sheet_order_indices(workbook: &Workbook) -> HashMap<String, usize> {
     // can translate sheet spans consistently.
     let mut out: HashMap<String, usize> = HashMap::with_capacity(workbook.sheet_order.len());
     for (order_index, &sheet_id) in workbook.sheet_order.iter().enumerate() {
-        let Some(name) = workbook.sheet_name(sheet_id) else {
+        let Some(name) = workbook.sheet_key_name(sheet_id) else {
             continue;
         };
         out.insert(Workbook::sheet_key(name), order_index);
@@ -9863,7 +9972,10 @@ fn rewrite_structured_refs_for_bytecode(
 
 struct Snapshot {
     sheets: HashSet<SheetId>,
-    sheet_names_by_id: Vec<Option<String>>,
+    sheet_keys_by_id: Vec<Option<String>>,
+    sheet_display_names_by_id: Vec<Option<String>>,
+    sheet_key_to_id: HashMap<String, SheetId>,
+    sheet_display_name_to_id: HashMap<String, SheetId>,
     sheet_order: Vec<SheetId>,
     /// Mapping from stable sheet id to its current tab-order index.
     ///
@@ -9914,7 +10026,10 @@ impl Snapshot {
     ) -> Self {
         let sheet_order = workbook.sheet_ids_in_order().to_vec();
         let sheets: HashSet<SheetId> = sheet_order.iter().copied().collect();
-        let sheet_names_by_id = workbook.sheet_names.clone();
+        let sheet_keys_by_id = workbook.sheet_keys.clone();
+        let sheet_display_names_by_id = workbook.sheet_display_names.clone();
+        let sheet_key_to_id = workbook.sheet_key_to_id.clone();
+        let sheet_display_name_to_id = workbook.sheet_display_name_to_id.clone();
         let tab_index_by_sheet_id = workbook.tab_index_by_sheet_id();
         let workbook_directory = workbook.workbook_directory.clone();
         let workbook_filename = workbook.workbook_filename.clone();
@@ -10093,7 +10208,10 @@ impl Snapshot {
 
         Self {
             sheets,
-            sheet_names_by_id,
+            sheet_keys_by_id,
+            sheet_display_names_by_id,
+            sheet_key_to_id,
+            sheet_display_name_to_id,
             sheet_order,
             tab_index_by_sheet_id,
             workbook_directory,
@@ -10207,7 +10325,7 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn sheet_name(&self, sheet_id: usize) -> Option<&str> {
-        self.sheet_names_by_id.get(sheet_id)?.as_deref()
+        self.sheet_display_names_by_id.get(sheet_id)?.as_deref()
     }
 
     fn sheet_dimensions(&self, sheet_id: usize) -> (u32, u32) {
@@ -10329,12 +10447,12 @@ impl crate::eval::ValueResolver for Snapshot {
         }
 
         if let Some(provider) = &self.external_value_provider {
-            if let Some(sheet_name) = self
-                .sheet_names_by_id
+            if let Some(sheet_key) = self
+                .sheet_keys_by_id
                 .get(sheet_id)
                 .and_then(|s| s.as_deref())
             {
-                if let Some(v) = provider.get(sheet_name, addr) {
+                if let Some(v) = provider.get(sheet_key, addr) {
                     return v;
                 }
             }
@@ -10424,20 +10542,13 @@ impl crate::eval::ValueResolver for Snapshot {
         // normalization (NFKC). This ensures runtime lookups (e.g. INDIRECT, SHEET("name"))
         // agree with compile-time reference rewriting / workbook sheet-key semantics.
         //
-        // NOTE: `sheet_names_by_id` may eventually contain tombstoned/deleted entries once the
-        // stable-id model lands; skip any ids that `sheet_exists` reports as missing.
-        for (sheet_id, candidate) in self.sheet_names_by_id.iter().enumerate() {
-            if !self.sheet_exists(sheet_id) {
-                continue;
-            }
-            let Some(candidate) = candidate.as_deref() else {
-                continue;
-            };
-            if formula_model::sheet_name_eq_case_insensitive(candidate, name) {
-                return Some(sheet_id);
-            }
-        }
-        None
+        // Resolve by display name first (Excel tab name), with a stable-key fallback so existing
+        // call sites that still pass `sheet_key` keep working.
+        let key = Workbook::sheet_key(name);
+        self.sheet_display_name_to_id
+            .get(&key)
+            .copied()
+            .or_else(|| self.sheet_key_to_id.get(&key).copied())
     }
 
     fn iter_sheet_cells(&self, sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
@@ -11590,7 +11701,7 @@ impl BytecodeColumnCache {
                     Vec::with_capacity(segments.len());
 
                 let sheet_name = snapshot
-                    .sheet_names_by_id
+                    .sheet_keys_by_id
                     .get(sheet_id)
                     .and_then(|s| s.as_deref());
                 let provider = snapshot.external_value_provider.as_ref();
@@ -11791,7 +11902,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
                     .or_else(|| {
                         let provider = self.snapshot.external_value_provider.as_ref()?;
                         let sheet_name =
-                            self.snapshot.sheet_names_by_id.get(sheet_id)?.as_deref()?;
+                            self.snapshot.sheet_keys_by_id.get(sheet_id)?.as_deref()?;
                         provider
                             .get(sheet_name, addr)
                             .as_ref()
@@ -12062,22 +12173,13 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         // Excel resolves sheet names case-insensitively across Unicode using compatibility
         // normalization (NFKC). Ensure bytecode runtime sheet-name lookups (e.g. INDIRECT, SHEET)
         // match the engine's canonical sheet-key semantics.
-        let local =
-            self.snapshot
-                .sheet_names_by_id
-                .iter()
-                .enumerate()
-                .find_map(|(sheet_id, candidate)| {
-                    if !self.snapshot.sheets.contains(&sheet_id) {
-                        return None;
-                    }
-                    let candidate = candidate.as_deref()?;
-                    if formula_model::sheet_name_eq_case_insensitive(candidate, name) {
-                        Some(sheet_id)
-                    } else {
-                        None
-                    }
-                });
+        let key = Workbook::sheet_key(name);
+        let local = self
+            .snapshot
+            .sheet_display_name_to_id
+            .get(&key)
+            .copied()
+            .or_else(|| self.snapshot.sheet_key_to_id.get(&key).copied());
         if local.is_some() {
             return local;
         }

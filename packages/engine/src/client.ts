@@ -235,6 +235,14 @@ export interface EngineClient {
   setSheetOrigin(sheet: string, origin: string | null, options?: RpcOptions): Promise<void>;
 
   /**
+   * Update a sheet's user-visible display (tab) name without changing its stable id/key.
+   *
+   * This influences functions like `CELL("address")` and runtime sheet-name resolution in
+   * functions like `INDIRECT`.
+   */
+  setSheetDisplayName?(sheetId: string, name: string, options?: RpcOptions): Promise<void>;
+
+  /**
    * Rename a worksheet and rewrite formulas that reference it (Excel-like).
    *
    * Returns `false` when `oldName` does not exist or `newName` conflicts with another sheet.
@@ -594,6 +602,8 @@ export function createEngineClient(options?: {
       await withEngine((connected) => connected.renameSheet(oldName, newName, rpcOptions)),
     setSheetOrigin: async (sheet, origin, rpcOptions) =>
       await withEngine((connected) => connected.setSheetOrigin(sheet, origin, rpcOptions)),
+    setSheetDisplayName: async (sheetId, name, rpcOptions) =>
+      await withEngine((connected) => connected.setSheetDisplayName(sheetId, name, rpcOptions)),
     setColWidthChars: async (sheet, col, widthChars, rpcOptions) =>
       await withEngine((connected) => connected.setColWidthChars(sheet, col, widthChars, rpcOptions)),
     applyOperation: async (op, rpcOptions) => await withEngine((connected) => connected.applyOperation(op, rpcOptions)),
