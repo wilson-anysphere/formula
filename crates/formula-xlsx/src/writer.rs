@@ -694,29 +694,6 @@ fn render_cols(sheet: &Worksheet, outline: &Outline, style_to_xf: &HashMap<u32, 
     out
 }
 
-fn render_sheet_format_pr(sheet: &Worksheet) -> String {
-    if sheet.default_col_width.is_none()
-        && sheet.default_row_height.is_none()
-        && sheet.base_col_width.is_none()
-    {
-        return String::new();
-    }
-
-    let mut out = String::new();
-    out.push_str(r#"<sheetFormatPr"#);
-    if let Some(base) = sheet.base_col_width {
-        out.push_str(&format!(r#" baseColWidth="{base}""#));
-    }
-    if let Some(width) = sheet.default_col_width {
-        out.push_str(&format!(r#" defaultColWidth="{width}""#));
-    }
-    if let Some(height) = sheet.default_row_height {
-        out.push_str(&format!(r#" defaultRowHeight="{height}""#));
-    }
-    out.push_str("/>");
-    out
-}
-
 fn render_col_range(start_col_1: u32, end_col_1: u32, props: &ColXmlProps) -> String {
     let mut s = String::new();
     s.push_str(&format!(r#"<col min="{start_col_1}" max="{end_col_1}""#));
@@ -897,7 +874,7 @@ fn sheet_xml(
     } else {
         String::new()
     };
-    let sheet_format_pr_xml = render_sheet_format_pr(sheet);
+    let sheet_format_pr_xml = sheet_format_pr_xml(sheet);
     let cols_xml = render_cols(sheet, &outline, style_to_xf);
 
     struct ColumnarInfo<'a> {
