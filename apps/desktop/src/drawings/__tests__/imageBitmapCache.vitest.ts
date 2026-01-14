@@ -351,6 +351,24 @@ describe("ImageBitmapCache", () => {
     expect(createImageBitmapMock).not.toHaveBeenCalled();
   });
 
+  it("rethrows InvalidStateError when the DOM fallback is unavailable (node env)", async () => {
+    // Ensure this test actually runs in a non-DOM environment. (The ImageBitmapCache fallback path
+    // is DOM-only and should be a no-op under Node.)
+    expect(typeof document).toBe("undefined");
+
+    const err = new Error("decode failed");
+    (err as any).name = "InvalidStateError";
+    const createImageBitmapMock = vi.fn(() => Promise.reject(err));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const entry = createEntry("img_invalid_state");
+
+    await expect(cache.get(entry)).rejects.toMatchObject({ name: "InvalidStateError" });
+    // The DOM fallback should be skipped (document is missing), so we only attempt the blob decode once.
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+  });
+
   it("negativeCacheMs prevents tight retry loops after decode failures", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
