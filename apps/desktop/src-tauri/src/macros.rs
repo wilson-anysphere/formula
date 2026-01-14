@@ -1,4 +1,5 @@
 use crate::file_io::Workbook;
+use crate::resource_limits::{MAX_MACRO_OUTPUT_BYTES, MAX_MACRO_OUTPUT_LINES, MAX_MACRO_UPDATES};
 use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{AppState, CellScalar, CellUpdateData};
 use formula_vba_runtime::Spreadsheet;
@@ -500,6 +501,8 @@ struct AppStateSpreadsheet<'a> {
     active_sheet: usize,
     active_cell: (u32, u32),
     output: Vec<String>,
+    output_bytes: usize,
+    output_truncated: bool,
     updates: Vec<CellUpdateData>,
 }
 
@@ -521,6 +524,8 @@ impl<'a> AppStateSpreadsheet<'a> {
             active_sheet,
             active_cell: ctx.active_cell,
             output: Vec::new(),
+            output_bytes: 0,
+            output_truncated: false,
             updates: Vec::new(),
         })
     }
@@ -584,11 +589,32 @@ impl<'a> AppStateSpreadsheet<'a> {
     }
 
     fn take_output(&mut self) -> Vec<String> {
+        self.output_bytes = 0;
+        self.output_truncated = false;
         std::mem::take(&mut self.output)
     }
 
     fn take_updates(&mut self) -> Vec<CellUpdateData> {
         std::mem::take(&mut self.updates)
+    }
+
+    fn push_updates(
+        &mut self,
+        updates: Vec<CellUpdateData>,
+    ) -> Result<(), formula_vba_runtime::VbaError> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        let remaining = MAX_MACRO_UPDATES.saturating_sub(self.updates.len());
+        if updates.len() > remaining {
+            return Err(formula_vba_runtime::VbaError::Runtime(format!(
+                "macro produced too many cell updates (limit {MAX_MACRO_UPDATES})"
+            )));
+        }
+
+        self.updates.extend(updates);
+        Ok(())
     }
 }
 
@@ -689,7 +715,7 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
                 formula,
             )
             .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
-        self.updates.extend(updates);
+        self.push_updates(updates)?;
         Ok(())
     }
 
@@ -736,7 +762,7 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
                 Some(formula),
             )
             .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
-        self.updates.extend(updates);
+        self.push_updates(updates)?;
         Ok(())
     }
 
@@ -763,12 +789,85 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
                 None,
             )
             .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
-        self.updates.extend(updates);
+        self.push_updates(updates)?;
         Ok(())
     }
 
     fn log(&mut self, message: String) {
-        self.output.push(message);
+        const TRUNCATED_MARKER: &str = "[truncated]";
+        const MESSAGE_TRUNCATED_SUFFIX: &str = "...[truncated]";
+        const MAX_LINE_BYTES_HARD: usize = 8 * 1024;
+
+        if self.output_truncated {
+            return;
+        }
+
+        let max_line_bytes = MAX_LINE_BYTES_HARD.min(MAX_MACRO_OUTPUT_BYTES);
+        let mut message = message;
+        if message.len() > max_line_bytes {
+            let suffix_len = MESSAGE_TRUNCATED_SUFFIX.len();
+            let prefix_budget = max_line_bytes.saturating_sub(suffix_len);
+            let mut end = prefix_budget.min(message.len());
+            while end > 0 && !message.is_char_boundary(end) {
+                end -= 1;
+            }
+            message.truncate(end);
+            if message.len() + suffix_len <= max_line_bytes {
+                message.push_str(MESSAGE_TRUNCATED_SUFFIX);
+            }
+        }
+
+        let would_exceed_lines = self.output.len() >= MAX_MACRO_OUTPUT_LINES;
+        let would_exceed_bytes =
+            self.output_bytes.saturating_add(message.len()) > MAX_MACRO_OUTPUT_BYTES;
+
+        if !would_exceed_lines && !would_exceed_bytes {
+            self.output_bytes = self.output_bytes.saturating_add(message.len());
+            self.output.push(message);
+            return;
+        }
+
+        // Once we hit a limit, stop capturing further output and append a single marker (or replace
+        // the last line if we're already at the line limit) so truncation is deterministic.
+        self.output_truncated = true;
+
+        if self.output.last().is_some_and(|line| line == TRUNCATED_MARKER) {
+            return;
+        }
+
+        let marker_len = TRUNCATED_MARKER.len();
+        let can_push_marker = self.output.len() < MAX_MACRO_OUTPUT_LINES
+            && self.output_bytes.saturating_add(marker_len) <= MAX_MACRO_OUTPUT_BYTES;
+
+        if can_push_marker {
+            self.output_bytes = self.output_bytes.saturating_add(marker_len);
+            self.output.push(TRUNCATED_MARKER.to_string());
+            return;
+        }
+
+        // Fall back to replacing the last line with the marker to stay within limits.
+        if let Some(last) = self.output.last_mut() {
+            let last_len = last.len();
+            let base_bytes = if self.output_bytes >= last_len {
+                self.output_bytes - last_len
+            } else {
+                0
+            };
+
+            let allowed_marker_bytes = MAX_MACRO_OUTPUT_BYTES.saturating_sub(base_bytes);
+            let marker_bytes = marker_len.min(allowed_marker_bytes);
+
+            let mut marker = TRUNCATED_MARKER.to_string();
+            if marker.len() > marker_bytes {
+                marker.truncate(marker_bytes);
+            }
+
+            self.output_bytes = base_bytes.saturating_add(marker.len());
+            *last = marker;
+        } else if marker_len <= MAX_MACRO_OUTPUT_BYTES && MAX_MACRO_OUTPUT_LINES > 0 {
+            self.output_bytes = marker_len;
+            self.output.push(TRUNCATED_MARKER.to_string());
+        }
     }
 
     fn last_used_row_in_column(&self, sheet: usize, col: u32, start_row: u32) -> Option<u32> {
@@ -955,5 +1054,116 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
         }
 
         Some(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resource_limits::{MAX_MACRO_OUTPUT_BYTES, MAX_MACRO_OUTPUT_LINES, MAX_MACRO_UPDATES};
+    use crate::state::Cell;
+
+    fn empty_state_with_sheet() -> AppState {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        state
+    }
+
+    #[test]
+    fn macro_output_is_capped_by_lines_and_bytes() {
+        let mut state = empty_state_with_sheet();
+
+        // Use a large literal string so the macro quickly exceeds the byte limit and exercises the
+        // single-line truncation logic.
+        let payload = "x".repeat(16 * 1024);
+        let source = format!(
+            r#"
+Sub SpamOutput()
+    Dim i As Integer
+    For i = 1 To 500
+        Debug.Print "{payload}"
+    Next i
+End Sub
+"#
+        );
+
+        let program = formula_vba_runtime::parse_program(&source).expect("parse program");
+        let (outcome, _ctx) = execute_invocation(
+            &mut state,
+            program,
+            MacroRuntimeContext::default(),
+            None,
+            MacroInvocation::Procedure {
+                macro_id: "SpamOutput".to_string(),
+            },
+            MacroExecutionOptions::default(),
+        )
+        .expect("execute macro");
+
+        assert!(outcome.ok, "expected macro to succeed: {outcome:?}");
+
+        let total_bytes: usize = outcome.output.iter().map(|s| s.len()).sum();
+        assert!(
+            outcome.output.len() <= MAX_MACRO_OUTPUT_LINES,
+            "expected output lines <= {MAX_MACRO_OUTPUT_LINES}, got {}",
+            outcome.output.len()
+        );
+        assert!(
+            total_bytes <= MAX_MACRO_OUTPUT_BYTES,
+            "expected output bytes <= {MAX_MACRO_OUTPUT_BYTES}, got {total_bytes}"
+        );
+
+        assert!(
+            outcome.output.last().is_some_and(|s| s == "[truncated]"),
+            "expected a single truncation marker at the end, got: {:?}",
+            outcome.output.last()
+        );
+    }
+
+    #[test]
+    fn macro_aborts_when_update_limit_is_exceeded() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        // Seed many formulas that depend on A1 so a single write triggers a large fanout.
+        {
+            let sheet = workbook.sheets.get_mut(0).expect("Sheet1");
+            sheet.cells.reserve(MAX_MACRO_UPDATES + 1);
+            for row in 0..=MAX_MACRO_UPDATES {
+                sheet
+                    .cells
+                    .insert((row, 1), Cell::from_formula("=A1".to_string()));
+            }
+        }
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let source = r#"
+Sub TouchA1()
+    Range("A1").Value = 1
+End Sub
+"#;
+        let program = formula_vba_runtime::parse_program(source).expect("parse program");
+        let (outcome, _ctx) = execute_invocation(
+            &mut state,
+            program,
+            MacroRuntimeContext::default(),
+            None,
+            MacroInvocation::Procedure {
+                macro_id: "TouchA1".to_string(),
+            },
+            MacroExecutionOptions::default(),
+        )
+        .expect("execute macro");
+
+        assert!(!outcome.ok, "expected macro to fail due to update limit");
+        let err = outcome.error.expect("expected error message");
+        assert!(
+            err.contains(&format!("limit {MAX_MACRO_UPDATES}")),
+            "expected error to mention the limit {MAX_MACRO_UPDATES}, got: {err}"
+        );
     }
 }

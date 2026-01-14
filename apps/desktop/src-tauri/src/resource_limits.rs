@@ -85,3 +85,25 @@ pub fn max_origin_xlsx_bytes() -> usize {
         value.min(default)
     }
 }
+
+/// Maximum number of log lines captured from a single VBA macro execution.
+///
+/// VBA code can emit host output via `Debug.Print`/`MsgBox`. The desktop backend forwards this
+/// output to the WebView over IPC. This limit ensures a compromised workbook or WebView cannot
+/// force the backend to accumulate an unbounded `Vec<String>`.
+pub const MAX_MACRO_OUTPUT_LINES: usize = 1_000;
+
+/// Maximum total UTF-8 byte size of log output captured from a single VBA macro execution.
+///
+/// This is a coarse limit over the sum of bytes of all captured log lines (before IPC framing).
+/// Together with `MAX_MACRO_OUTPUT_LINES` it bounds both memory usage and the size of the IPC
+/// response payload.
+pub const MAX_MACRO_OUTPUT_BYTES: usize = 1 * 1024 * 1024; // 1 MiB
+
+/// Maximum number of cell updates a single VBA macro execution is allowed to generate.
+///
+/// Macros can write to many cells and trigger large recalculation fanout (dependent formulas),
+/// producing large `Vec<CellUpdateData>` payloads. This limit bounds memory usage and prevents
+/// sending extremely large IPC responses. When exceeded, macro execution is aborted with an
+/// explicit runtime error (no truncation) so callers can handle the failure deterministically.
+pub const MAX_MACRO_UPDATES: usize = 10_000;
