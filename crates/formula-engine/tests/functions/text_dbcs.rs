@@ -238,3 +238,18 @@ fn phonetic_fallback_coerces_numbers_using_value_locale() {
     sheet.set("A1", 1.5);
     assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("1,5".to_string()));
 }
+
+#[test]
+fn changing_text_codepage_marks_formulas_dirty() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", r#"=DBCS("ABC 123")"#);
+    sheet.recalc();
+    assert_eq!(sheet.get("A1"), Value::Text("ABC 123".to_string()));
+
+    sheet.set_text_codepage(932);
+    sheet.recalc();
+    assert_eq!(
+        sheet.get("A1"),
+        Value::Text("ＡＢＣ　１２３".to_string())
+    );
+}
