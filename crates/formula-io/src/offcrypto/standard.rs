@@ -1205,6 +1205,67 @@ mod tests {
     }
 
     #[test]
+    fn verify_password_standard_rc4_keysize_zero_is_40bit() {
+        // MS-OFFCRYPTO specifies that for Standard/CryptoAPI RC4, `EncryptionHeader.keySize == 0`
+        // MUST be interpreted as 40-bit.
+        let password = "hunter2";
+        let wrong_password = "hunter3";
+        let salt: [u8; 16] = [
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F,
+        ];
+
+        let header = EncryptionHeader {
+            flags: EncryptionHeaderFlags::from_raw(EncryptionHeaderFlags::F_CRYPTOAPI),
+            size_extra: 0,
+            alg_id: CALG_RC4,
+            alg_id_hash: CALG_SHA1,
+            key_size: 0, // special-cased to 40-bit for RC4
+            provider_type: 0,
+            reserved1: 0,
+            reserved2: 0,
+            csp_name: "Microsoft Base Cryptographic Provider".to_string(),
+        };
+
+        let verifier: [u8; 16] = [
+            0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89, 0x10, 0x32, 0x54, 0x76, 0x98,
+            0xBA, 0xDC, 0xFE,
+        ];
+        let verifier_hash = hash(CALG_SHA1, &[&verifier]).expect("sha1 hash");
+
+        // Encrypt verifier || verifier_hash using RC4 (symmetric).
+        let password_utf16le = utf16le_bytes(password);
+        let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_SHA1).unwrap();
+        let block = 0u32.to_le_bytes();
+        let h_final = hash(CALG_SHA1, &[&h, &block]).unwrap();
+        let key_40bit = h_final[..5].to_vec();
+
+        let mut plaintext = Vec::new();
+        plaintext.extend_from_slice(&verifier);
+        plaintext.extend_from_slice(&verifier_hash);
+
+        let mut ciphertext = plaintext.clone();
+        rc4_apply_keystream(&key_40bit, &mut ciphertext).unwrap();
+
+        let encrypted_verifier: [u8; 16] = ciphertext[0..16].try_into().unwrap();
+        let encrypted_verifier_hash = ciphertext[16..].to_vec();
+
+        let verifier_struct = EncryptionVerifier {
+            salt: salt.to_vec(),
+            encrypted_verifier,
+            verifier_hash_size: verifier_hash.len() as u32,
+            encrypted_verifier_hash,
+        };
+
+        let bytes = build_standard_encryption_info_bytes(&header, &verifier_struct);
+        let parsed = parse_encryption_info_standard(&bytes).expect("parse");
+        assert_eq!(parsed.header.key_size, 40);
+
+        assert!(verify_password_standard(&parsed, password).unwrap());
+        assert!(!verify_password_standard(&parsed, wrong_password).unwrap());
+    }
+
+    #[test]
     fn parse_encryption_info_standard_accepts_version_major_2_and_4() {
         let header = EncryptionHeader {
             flags: EncryptionHeaderFlags::from_raw(
