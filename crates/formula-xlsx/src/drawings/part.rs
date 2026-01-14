@@ -197,7 +197,7 @@ impl DrawingPart {
             if let Ok(doc) = Document::parse(xml) {
                 let root = doc.root_element();
                 part.root_xmlns = extract_root_xmlns(root);
-                part.root_attrs = extract_root_attrs(root, &part.root_xmlns);
+                part.root_attrs = extract_root_attrs(xml);
             }
         }
         Ok(part)
@@ -229,7 +229,7 @@ impl DrawingPart {
         let doc = Document::parse(drawing_xml)?;
         let root = doc.root_element();
         let root_xmlns = extract_root_xmlns(root);
-        let root_attrs = extract_root_attrs(root, &root_xmlns);
+        let root_attrs = extract_root_attrs(drawing_xml);
         let mut objects = Vec::new();
 
         for (z, anchor_node) in crate::drawingml::anchor::wsdr_anchor_nodes(root)
@@ -470,7 +470,7 @@ impl DrawingPart {
         let doc = Document::parse(drawing_xml)?;
         let root = doc.root_element();
         let root_xmlns = extract_root_xmlns(root);
-        let root_attrs = extract_root_attrs(root, &root_xmlns);
+        let root_attrs = extract_root_attrs(drawing_xml);
         let mut objects = Vec::new();
 
         for (z, anchor_node) in crate::drawingml::anchor::wsdr_anchor_nodes(root)
@@ -802,39 +802,34 @@ fn extract_root_xmlns(root: Node<'_, '_>) -> BTreeMap<String, String> {
     out
 }
 
-fn extract_root_attrs(
-    root: Node<'_, '_>,
-    root_xmlns: &BTreeMap<String, String>,
-) -> BTreeMap<String, String> {
-    const XMLNS_NS: &str = "http://www.w3.org/2000/xmlns/";
-    const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
-
+fn extract_root_attrs(doc_xml: &str) -> BTreeMap<String, String> {
+    // Preserve the root `<xdr:wsDr>` attribute names **exactly** as they appear in the source XML
+    // (including prefixes). This matches anchor attribute preservation and avoids lossy
+    // reconstruction when multiple prefixes map to the same namespace URI.
+    //
+    // We intentionally skip `xmlns` attributes here; namespace declarations are captured separately
+    // via `root.namespaces()` and re-emitted in [`build_wsdr_root_start_tag`].
     let mut out = BTreeMap::new();
-    for attr in root.attributes() {
-        // Namespace declarations are handled separately via `root.namespaces()`.
-        if attr.name() == "xmlns" || attr.namespace().is_some_and(|ns| ns == XMLNS_NS) {
-            continue;
-        }
-
-        // Preserve the attribute name with its prefix (when applicable) so we can re-emit it on
-        // `<xdr:wsDr>`. roxmltree exposes the attribute namespace URI but not always the original
-        // prefix, so we re-map it via the preserved root namespace declarations.
-        let mut name = attr.name().to_string();
-
-        if !name.contains(':') {
-            if let Some(ns) = attr.namespace() {
-                if ns == XML_NS {
-                    name = format!("xml:{name}");
-                } else if let Some((prefix, _)) = root_xmlns
-                    .iter()
-                    .find(|(p, uri)| !p.is_empty() && uri.as_str() == ns)
-                {
-                    name = format!("{prefix}:{name}");
+    let mut reader = XmlReader::from_reader(doc_xml.as_bytes());
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) | Ok(XmlEvent::Empty(e)) => {
+                for attr in e.attributes().flatten() {
+                    let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
+                    if key == "xmlns" || key.starts_with("xmlns:") {
+                        continue;
+                    }
+                    let value = attr.unescape_value().unwrap_or_default().into_owned();
+                    out.insert(key.to_string(), value);
                 }
+                break;
             }
+            Ok(XmlEvent::Eof) | Err(_) => break,
+            _ => {}
         }
-
-        out.insert(name, attr.value().to_string());
+        buf.clear();
     }
     out
 }

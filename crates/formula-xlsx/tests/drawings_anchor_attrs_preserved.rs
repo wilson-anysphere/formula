@@ -9,6 +9,9 @@ fn drawings_roundtrip_preserves_anchor_and_client_data_attributes() {
  <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+           xmlns:dup1="urn:example"
+           xmlns:dup2="urn:example"
+           dup2:rootAttr="abc"
            xmlns:xdr14="http://schemas.microsoft.com/office/drawing/2010/spreadsheetDrawing">
    <xdr:twoCellAnchor editAs="oneCell" xdr14:anchorId="123">
      <xdr:from>
