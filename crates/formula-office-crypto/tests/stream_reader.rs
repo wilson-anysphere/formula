@@ -73,3 +73,42 @@ fn stream_reader_decrypts_standard_fixture() {
     reader.read_exact(&mut header).expect("read header");
     assert_eq!(&header, b"PK");
 }
+
+#[test]
+fn stream_reader_decrypts_standard_rc4_fixture() {
+    let path = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/encrypted/ooxml/standard-rc4.xlsx"
+    ));
+    if !path.exists() {
+        // Allow this test to land before fixtures are present in all environments.
+        return;
+    }
+
+    let ole = std::fs::read(path).expect("read standard rc4 fixture");
+
+    // Sanity: the Vec<u8> decrypt path should succeed for the real-world fixture.
+    let decrypted =
+        decrypt_encrypted_package_ole(&ole, "password").expect("decrypt standard rc4 bytes");
+    assert!(decrypted.starts_with(b"PK"), "expected decrypted bytes to be a ZIP");
+
+    let mut reader = decrypt_encrypted_package_ole_to_reader(&ole, "password")
+        .expect("decrypt standard rc4 reader");
+
+    let mut header = [0u8; 2];
+    reader.read_exact(&mut header).expect("read header");
+    assert_eq!(&header, b"PK");
+
+    // Seek/read should match the Vec-based decryptor.
+    let offset = 123u64.min(decrypted.len().saturating_sub(32) as u64);
+    reader.seek(SeekFrom::Start(offset)).expect("seek");
+    let mut buf = [0u8; 32];
+    reader.read_exact(&mut buf).expect("read span");
+    assert_eq!(&buf, &decrypted[offset as usize..offset as usize + 32]);
+
+    // Full read matches Vec-based decryptor.
+    reader.seek(SeekFrom::Start(0)).expect("rewind");
+    let mut all = Vec::new();
+    reader.read_to_end(&mut all).expect("read_to_end");
+    assert_eq!(all, decrypted);
+}

@@ -27,6 +27,16 @@ const STANDARD_RC4_ENCRYPTED_PACKAGE_BLOCK_SIZE: usize = 0x200;
 const STANDARD_RC4_BLOCKS_PER_SEGMENT: u32 =
     (ENCRYPTED_PACKAGE_SEGMENT_LEN as u32) / (STANDARD_RC4_ENCRYPTED_PACKAGE_BLOCK_SIZE as u32);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rc4KeyStyle {
+    /// Use the derived RC4 key bytes as-is (key length = `keyBits/8`).
+    Raw,
+    /// For 40-bit RC4 (keyLen=5), use a 16-byte key where the remaining bytes are zero.
+    ///
+    /// This matches the compatibility fallback in `standard.rs`.
+    Padded40Bit,
+}
+
 #[inline]
 fn padded_aes_len(len: usize) -> usize {
     let rem = len % AES_BLOCK_LEN;
@@ -54,7 +64,7 @@ enum PackageDecryptor {
     StandardRc4 {
         /// Key-derivation helper for per-0x200-block RC4 keys.
         deriver: StandardKeyDeriver,
-        key_bits: u32,
+        key_style: Rc4KeyStyle,
     },
 }
 
@@ -178,7 +188,12 @@ impl<R: Read + Seek + Send + Sync> EncryptedPackageReader<R> {
                             StandardKeyDerivation::Rc4,
                         );
                         let key0 = deriver.derive_key_for_block(0)?;
-                        verify_standard_password_with_key(&info.header, &info.verifier, hash_alg, &key0)?;
+                        let key_style = verify_standard_rc4_key_style(
+                            &info.header,
+                            &info.verifier,
+                            hash_alg,
+                            &key0,
+                        )?;
 
                         if decrypted_len >= 2 {
                             let ct = read_encrypted_package_exact(
@@ -187,19 +202,7 @@ impl<R: Read + Seek + Send + Sync> EncryptedPackageReader<R> {
                                 2,
                             )?;
                             let mut pt = ct;
-                            if info.header.key_bits == 40 {
-                                if key0.len() != 5 {
-                                    return Err(OfficeCryptoError::InvalidFormat(format!(
-                                        "derived RC4 key for keySize=40 must be 5 bytes (got {})",
-                                        key0.len()
-                                    )));
-                                }
-                                let mut padded = [0u8; 16];
-                                padded[..5].copy_from_slice(&key0[..5]);
-                                rc4_xor_in_place(&padded, &mut pt)?;
-                            } else {
-                                rc4_xor_in_place(&key0, &mut pt)?;
-                            }
+                            rc4_xor_in_place_key_style(&key0, key_style, &mut pt)?;
                             if pt != b"PK" {
                                 return Err(OfficeCryptoError::InvalidFormat(
                                     "decrypted package does not look like a ZIP (missing PK signature)"
@@ -210,7 +213,7 @@ impl<R: Read + Seek + Send + Sync> EncryptedPackageReader<R> {
 
                         PackageDecryptor::StandardRc4 {
                             deriver,
-                            key_bits: info.header.key_bits,
+                            key_style,
                         }
                     }
                     CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
@@ -319,7 +322,7 @@ impl<R: Read + Seek + Send + Sync> EncryptedPackageReader<R> {
                 aes_ecb_decrypt_in_place(key0.as_slice(), &mut ciphertext)?;
                 Ok(ciphertext[..plain_len].to_vec())
             }
-            PackageDecryptor::StandardRc4 { deriver, key_bits } => {
+            PackageDecryptor::StandardRc4 { deriver, key_style } => {
                 let mut out = read_encrypted_package_exact(&mut self.ole, cipher_offset, plain_len)?;
 
                 let block_base = segment_index
@@ -333,19 +336,7 @@ impl<R: Read + Seek + Send + Sync> EncryptedPackageReader<R> {
                         OfficeCryptoError::InvalidFormat("RC4 block index overflow".to_string())
                     })?;
                     let key = deriver.derive_key_for_block(block_index)?;
-                    if *key_bits == 40 {
-                        if key.len() != 5 {
-                            return Err(OfficeCryptoError::InvalidFormat(format!(
-                                "derived RC4 key for keySize=40 must be 5 bytes (got {})",
-                                key.len()
-                            )));
-                        }
-                        let mut padded = [0u8; 16];
-                        padded[..5].copy_from_slice(&key[..5]);
-                        rc4_xor_in_place(&padded, chunk)?;
-                    } else {
-                        rc4_xor_in_place(&key, chunk)?;
-                    }
+                    rc4_xor_in_place_key_style(&key, *key_style, chunk)?;
                     block = block.checked_add(1).ok_or_else(|| {
                         OfficeCryptoError::InvalidFormat("RC4 block index overflow".to_string())
                     })?;
@@ -445,6 +436,52 @@ impl<R: Read + Seek + Send + Sync> Seek for EncryptedPackageReader<R> {
     }
 }
 
+fn rc4_xor_in_place_key_style(
+    key: &[u8],
+    style: Rc4KeyStyle,
+    data: &mut [u8],
+) -> Result<(), OfficeCryptoError> {
+    match style {
+        Rc4KeyStyle::Raw => rc4_xor_in_place(key, data),
+        Rc4KeyStyle::Padded40Bit => {
+            if key.len() != 5 {
+                return Err(OfficeCryptoError::InvalidFormat(format!(
+                    "derived RC4 key for keySize=40 must be 5 bytes (got {})",
+                    key.len()
+                )));
+            }
+            let mut padded = [0u8; 16];
+            padded[..5].copy_from_slice(key);
+            rc4_xor_in_place(&padded, data)
+        }
+    }
+}
+
+fn verify_standard_rc4_key_style(
+    header: &EncryptionHeader,
+    verifier: &EncryptionVerifier,
+    hash_alg: HashAlgorithm,
+    key0: &[u8],
+) -> Result<Rc4KeyStyle, OfficeCryptoError> {
+    match verify_standard_password_with_key(header, verifier, hash_alg, key0) {
+        Ok(()) => Ok(Rc4KeyStyle::Raw),
+        Err(OfficeCryptoError::InvalidPassword) => {
+            // Compatibility fallback: some producers encrypt RC4 verifier fields using a 16-byte
+            // key where the derived 40-bit key bytes are followed by zeros. Mirror the behavior of
+            // `standard.rs` so the streaming reader can decrypt these files.
+            if header.key_bits == 40 && key0.len() == 5 {
+                let mut padded = [0u8; 16];
+                padded[..5].copy_from_slice(key0);
+                verify_standard_password_with_key(header, verifier, hash_alg, &padded)?;
+                Ok(Rc4KeyStyle::Padded40Bit)
+            } else {
+                Err(OfficeCryptoError::InvalidPassword)
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
 fn verify_standard_password_with_key(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
@@ -471,19 +508,7 @@ fn verify_standard_password_with_key(
             buf.extend_from_slice(&verifier.encrypted_verifier);
             buf.extend_from_slice(&verifier.encrypted_verifier_hash);
 
-            if header.key_bits == 40 {
-                if key0.len() != 5 {
-                    return Err(OfficeCryptoError::InvalidFormat(format!(
-                        "derived RC4 key for keySize=40 must be 5 bytes (got {})",
-                        key0.len()
-                    )));
-                }
-                let mut padded = [0u8; 16];
-                padded[..5].copy_from_slice(&key0[..5]);
-                rc4_xor_in_place(&padded, &mut buf)?;
-            } else {
-                rc4_xor_in_place(key0, &mut buf)?;
-            }
+            rc4_xor_in_place(key0, &mut buf)?;
 
             let verifier_plain = buf.get(..16).ok_or_else(|| {
                 OfficeCryptoError::InvalidFormat("RC4 verifier out of range".to_string())
