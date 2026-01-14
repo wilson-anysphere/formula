@@ -348,6 +348,24 @@ def main() -> int:
         help="Optional path to write the scorecard as JSON (default: disabled)",
     )
     parser.add_argument(
+        "--target-read",
+        type=float,
+        default=1.0,
+        help="Target pass rate for L1 Read (0-1). Default: 1.0",
+    )
+    parser.add_argument(
+        "--target-calc",
+        type=float,
+        default=0.999,
+        help="Target pass rate for L2 Calculate (0-1). Default: 0.999 (99.9%%)",
+    )
+    parser.add_argument(
+        "--target-round-trip",
+        type=float,
+        default=0.97,
+        help="Target pass rate for L4 Round-trip (0-1). Default: 0.97 (97%%)",
+    )
+    parser.add_argument(
         "--allow-missing-inputs",
         action="store_true",
         help=(
@@ -356,6 +374,11 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+
+    for key in ("target_read", "target_calc", "target_round_trip"):
+        value = getattr(args, key)
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not (0.0 <= value <= 1.0):
+            raise SystemExit(f"--{key.replace('_', '-')} must be a float in [0, 1]. Got: {value!r}")
 
     repo_root = Path(__file__).resolve().parents[1]
 
@@ -405,10 +428,10 @@ def main() -> int:
     if oracle_path.is_file():
         oracle = _parse_oracle_report(oracle_path, _load_json(oracle_path))
 
-    # Targets (project goals).
-    target_read = 1.0
-    target_calc = 0.999  # 99.9% calc fidelity target.
-    target_round_trip = 0.97
+    # Targets (project goals). Defaults match the repo's published targets, but can be overridden.
+    target_read = float(args.target_read)
+    target_calc = float(args.target_calc)  # 99.9% calc fidelity target.
+    target_round_trip = float(args.target_round_trip)
 
     read_total = corpus.total_workbooks if corpus else None
     read_pass = corpus.open_ok if corpus else None
