@@ -90,6 +90,57 @@ extract_workflow_env_pnpm_version() {
   printf '%s' "$value"
 }
 
+workflow_has_pnpm_action_setup() {
+  local file="$1"
+  awk '
+    function indent(s) {
+      match(s, /^[ ]*/);
+      return RLENGTH;
+    }
+
+    BEGIN {
+      in_block = 0;
+      block_indent = 0;
+      block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
+      found = 0;
+    }
+
+    {
+      raw = $0;
+      sub(/\r$/, "", raw);
+      ind = indent(raw);
+
+      if (in_block) {
+        if (raw ~ /^[[:space:]]*$/) next;
+        if (ind > block_indent) next;
+        in_block = 0;
+      }
+
+      trimmed = raw;
+      sub(/^[[:space:]]*/, "", trimmed);
+      if (trimmed ~ /^#/) next;
+
+      line = raw;
+      sub(/#.*/, "", line);
+      is_block = (line ~ block_re);
+
+      if (line ~ /^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*pnpm\/action-setup@/) {
+        found = 1;
+        exit;
+      }
+
+      if (is_block) {
+        in_block = 1;
+        block_indent = ind;
+      }
+    }
+
+    END {
+      exit found ? 0 : 1;
+    }
+  ' "$file"
+}
+
 check_workflow_pnpm_pins() {
   local file="$1"
   local env_pnpm_version=""
@@ -100,7 +151,14 @@ check_workflow_pnpm_pins() {
   local validated_any=0
 
   while IFS= read -r line; do
-    if [[ "$line" =~ uses:[[:space:]]*pnpm/action-setup@ ]]; then
+    # Ignore YAML comment lines.
+    local trimmed="$line"
+    trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+    case "$trimmed" in
+      \#*) continue ;;
+    esac
+
+    if [[ "$line" =~ ^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*pnpm/action-setup@ ]]; then
       in_action=1
       action_line="$line"
       found_any=1
@@ -158,7 +216,42 @@ check_workflow_pnpm_pins() {
         in_action=0
       fi
     fi
-  done <"$file"
+  done < <(
+    # Skip YAML block scalar bodies (e.g. `run: |` scripts) so non-semantic text can't satisfy or fail these checks.
+    awk '
+      function indent(s) {
+        match(s, /^[ ]*/);
+        return RLENGTH;
+      }
+
+      BEGIN {
+        in_block = 0;
+        block_indent = 0;
+        block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
+      }
+
+      {
+        raw = $0;
+        sub(/\r$/, "", raw);
+        ind = indent(raw);
+
+        if (in_block) {
+          if (raw ~ /^[[:space:]]*$/) next;
+          if (ind > block_indent) next;
+          in_block = 0;
+        }
+
+        line = raw;
+        sub(/#.*/, "", line);
+        if (line ~ block_re) {
+          in_block = 1;
+          block_indent = ind;
+        }
+
+        print raw;
+      }
+    ' "$file"
+  )
 
   if [ "$in_action" -eq 1 ]; then
     echo "pnpm/action-setup in ${file} is missing a 'version:' pin." >&2
@@ -258,7 +351,7 @@ fi
 
 matched=0
 for workflow in "${workflow_files[@]}"; do
-  if grep -q -E '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*pnpm/action-setup@' "$workflow"; then
+  if workflow_has_pnpm_action_setup "$workflow"; then
     matched=1
     check_workflow_pnpm_pins "$workflow"
   fi

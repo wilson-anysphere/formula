@@ -55,7 +55,7 @@ test("passes when pnpm pins match package.json (action + corepack)", { skip: !ca
   "name": "formula",
   "private": true,
   "packageManager": "pnpm@9.0.0"
-}`,
+ }`,
     ".github/workflows/ci.yml": `
 name: CI
 jobs:
@@ -77,6 +77,98 @@ jobs:
   });
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /pnpm version pins match package\.json/i);
+});
+
+test("ignores commented-out pnpm/action-setup steps", { skip: !canRun }, () => {
+  const proc = run({
+    "package.json": `{
+  "name": "formula",
+  "private": true,
+  "packageManager": "pnpm@9.0.0"
+ }`,
+    ".github/workflows/ci.yml": `
+name: CI
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+      # - uses: pnpm/action-setup@v4
+      #   with:
+      #     version: 8.0.0
+`,
+    ".github/workflows/security.yml": `
+name: Security
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: corepack prepare pnpm@9.0.0 --activate
+`,
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("ignores pnpm/action-setup strings inside YAML block scalars", { skip: !canRun }, () => {
+  const proc = run({
+    "package.json": `{
+  "name": "formula",
+  "private": true,
+  "packageManager": "pnpm@9.0.0"
+ }`,
+    ".github/workflows/ci.yml": `
+name: CI
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+      - name: Run script mentions action-setup YAML
+        run: |
+          # Script content; should not count as workflow YAML.
+          - uses: pnpm/action-setup@v4
+          echo ok
+`,
+    ".github/workflows/security.yml": `
+name: Security
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: corepack prepare pnpm@9.0.0 --activate
+`,
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("ignores pnpm/action-setup strings inside inline run steps", { skip: !canRun }, () => {
+  const proc = run({
+    "package.json": `{
+  "name": "formula",
+  "private": true,
+  "packageManager": "pnpm@9.0.0"
+ }`,
+    ".github/workflows/ci.yml": `
+name: CI
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+      - name: Inline run echoes a YAML-ish string
+        run: echo "uses: pnpm/action-setup@v4"
+`,
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
 });
 
 test("fails when pnpm/action-setup pin mismatches package.json", { skip: !canRun }, () => {
