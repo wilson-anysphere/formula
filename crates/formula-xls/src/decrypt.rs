@@ -975,6 +975,7 @@ mod filepass_tests {
         const RECORD_EOF: u16 = 0x000A;
 
         let password = "password";
+        let wrong_password = "wrong password";
         let hash_alg = CryptoApiHashAlg::Md5;
         let key_size_bits: u32 = 128;
         let salt: [u8; 16] = [
@@ -1067,6 +1068,12 @@ mod filepass_tests {
             payload_cipher.apply_keystream(&mut encrypted_stream[data_start..data_end]);
             offset = data_end;
         }
+
+        // Wrong password should be reported as such.
+        let mut wrong_stream = encrypted_stream.clone();
+        let err = decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut wrong_stream, wrong_password)
+            .expect_err("expected wrong password error");
+        assert_eq!(err, DecryptError::WrongPassword);
 
         // Decrypt using the implementation under test (in place).
         decrypt_biff8_workbook_stream_rc4_cryptoapi(&mut encrypted_stream, password)
@@ -1450,12 +1457,18 @@ fn verify_password_legacy(
     info: &CryptoApiEncryptionInfo,
     password: &str,
 ) -> Result<(CryptoApiHashAlg, Zeroizing<Vec<u8>>), DecryptError> {
-    let hash_alg = CryptoApiHashAlg::from_alg_id_hash(info.header.alg_id_hash).ok_or_else(|| {
-        DecryptError::UnsupportedEncryption(format!(
-            "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
-            info.header.alg_id, info.header.alg_id_hash
-        ))
-    })?;
+    // Some legacy CryptoAPI FILEPASS headers omit/zero AlgIDHash; Excel still behaves like SHA1.
+    // Default to SHA1 for AlgIDHash=0 to preserve historical behaviour, but honor MD5 when set.
+    let hash_alg = match CryptoApiHashAlg::from_alg_id_hash(info.header.alg_id_hash) {
+        Some(hash_alg) => hash_alg,
+        None if info.header.alg_id_hash == 0 => CryptoApiHashAlg::Sha1,
+        None => {
+            return Err(DecryptError::UnsupportedEncryption(format!(
+                "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
+                info.header.alg_id, info.header.alg_id_hash
+            )))
+        }
+    };
     if info.header.alg_id != CALG_RC4 {
         return Err(DecryptError::UnsupportedEncryption(format!(
             "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
