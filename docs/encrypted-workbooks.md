@@ -132,9 +132,6 @@ Note: encrypted `.xlsb` files also decrypt to a ZIP/OPC package, but the payload
 - If you are working directly with bytes, you can also open them via
   `formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(...)`.
 
-If you already have the input bytes in memory, you can open encrypted `.xlsb` directly via
-`formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(...)`.
-
 ### Desktop app UX flow
 
 The expected UX is:

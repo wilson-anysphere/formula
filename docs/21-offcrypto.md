@@ -141,7 +141,8 @@ Current state in this repo (important nuance):
       - For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world producers omit
         it.
     - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
-      is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` depending on the decrypted payload).
+      is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` depending on the decrypted payload;
+      Standard AES may return `Workbook::Model` via the streaming decrypt path).
   - `open_workbook_model_with_options` can also decrypt encrypted OOXML wrappers when
     `formula-io/encrypted-workbooks` is enabled (and surfaces `PasswordRequired` when
     `OpenOptions.password` is `None`). Without that feature, encrypted OOXML containers surface
@@ -245,7 +246,7 @@ Behavior notes:
   - The legacy `_with_password` variants can open Agile (4.4) and Standard/CryptoAPI (minor=2)
     encrypted `.xlsx`/`.xlsm`/`.xlsb`.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
-    is provided.
+    is provided (and may return `Workbook::Model` for Standard AES).
   - `open_workbook_model_with_options` can also decrypt encrypted OOXML wrappers when `password` is
     provided (or surface `PasswordRequired` when missing). `open_workbook_model_with_password` is the
     convenience wrapper.
