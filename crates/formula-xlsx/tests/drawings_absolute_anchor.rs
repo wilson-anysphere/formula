@@ -99,6 +99,7 @@ fn parse_absolute_anchor_picture_drawing_part() {
                 Target="../media/image1.png"/>
 </Relationships>"#;
 
+    let image_bytes = b"fake png".to_vec();
     let parts: BTreeMap<String, Vec<u8>> = [
         ("xl/drawings/drawing1.xml".to_string(), drawing_xml.as_bytes().to_vec()),
         (
@@ -106,7 +107,7 @@ fn parse_absolute_anchor_picture_drawing_part() {
             rels_xml.as_bytes().to_vec(),
         ),
         // The XLSX reader does not validate image bytes; any payload is sufficient.
-        ("xl/media/image1.png".to_string(), b"fake png".to_vec()),
+        ("xl/media/image1.png".to_string(), image_bytes.clone()),
     ]
     .into_iter()
     .collect();
@@ -129,11 +130,14 @@ fn parse_absolute_anchor_picture_drawing_part() {
         }
     );
 
+    let image_id = ImageId::new("image1.png");
     assert!(matches!(
         &drawing.objects[0].kind,
-        DrawingObjectKind::Image { image_id } if image_id == &ImageId::new("image1.png")
+        DrawingObjectKind::Image { image_id: id } if id == &image_id
     ));
-    assert!(workbook.images.get(&ImageId::new("image1.png")).is_some());
+    let image = workbook.images.get(&image_id).expect("image loaded");
+    assert_eq!(image.bytes, image_bytes);
+    assert_eq!(image.content_type.as_deref(), Some("image/png"));
 }
 
 #[test]
@@ -226,6 +230,7 @@ fn parse_absolute_anchor_picture_drawing_part_from_archive() {
                 Target="../media/image1.png"/>
 </Relationships>"#;
 
+    let image_bytes = b"fake png bytes".to_vec();
     let options =
         FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
     let cursor = Cursor::new(Vec::new());
@@ -239,7 +244,7 @@ fn parse_absolute_anchor_picture_drawing_part_from_archive() {
     zip.write_all(rels_xml.as_bytes()).expect("write rels xml");
     zip.start_file("xl/media/image1.png", options)
         .expect("start image");
-    zip.write_all(b"fake png bytes").expect("write image");
+    zip.write_all(&image_bytes).expect("write image");
     let bytes = zip.finish().expect("finish zip").into_inner();
 
     let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("open zip");
@@ -264,7 +269,10 @@ fn parse_absolute_anchor_picture_drawing_part_from_archive() {
         &drawing.objects[0].kind,
         DrawingObjectKind::Image { image_id } if image_id == &ImageId::new("image1.png")
     ));
-    assert!(workbook.images.get(&ImageId::new("image1.png")).is_some());
+    let image_id = ImageId::new("image1.png");
+    let image = workbook.images.get(&image_id).expect("image loaded");
+    assert_eq!(image.bytes, image_bytes);
+    assert_eq!(image.content_type.as_deref(), Some("image/png"));
 }
 
 #[test]
