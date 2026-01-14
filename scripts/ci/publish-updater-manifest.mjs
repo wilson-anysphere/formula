@@ -17,7 +17,7 @@
  *   - GITHUB_REPOSITORY
  *   - GITHUB_TOKEN (or GH_TOKEN)
  *   - TAURI_PRIVATE_KEY
- *   - TAURI_KEY_PASSWORD (required if TAURI_PRIVATE_KEY is encrypted)
+ *   - TAURI_KEY_PASSWORD (only used for encrypted PKCS#8 keys; encrypted minisign keys are not supported)
  */
 import fs from "node:fs";
 import path from "node:path";
