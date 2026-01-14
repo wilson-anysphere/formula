@@ -348,3 +348,52 @@ fn parses_chart_frame_wrapped_in_mc_alternate_content_fallback_branch() {
         "expected DrawingPart to materialize a chart placeholder from the Fallback branch"
     );
 }
+
+#[test]
+fn drawing_part_prefers_xdr_cnvpr_over_non_canonical_a_cnvpr() {
+    // Some producers place a non-canonical `<a:cNvPr>` inside `a:graphicData` ahead of the
+    // canonical `xdr:nvGraphicFramePr/xdr:cNvPr` block. DrawingPart parsing should prefer the
+    // `xdr:*` node so object IDs remain stable and match chart extraction.
+    let frame_xml = r#"<xdr:graphicFrame>
+  <!-- non-canonical `a:cNvPr` before `nvGraphicFramePr` -->
+  <a:graphic>
+    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+      <a:cNvPr id="999" name="Wrong"/>
+      <c:chart r:id="rId1"/>
+    </a:graphicData>
+  </a:graphic>
+  <xdr:nvGraphicFramePr>
+    <xdr:cNvPr id="7" name="Chart 7"/>
+    <xdr:cNvGraphicFramePr/>
+  </xdr:nvGraphicFramePr>
+  <xdr:xfrm/>
+</xdr:graphicFrame>"#;
+
+    let anchor_xml = format!(
+        r#"<xdr:twoCellAnchor>
+  <xdr:from><xdr:col>1</xdr:col><xdr:row>2</xdr:row></xdr:from>
+  <xdr:to><xdr:col>3</xdr:col><xdr:row>4</xdr:row></xdr:to>
+  {frame_xml}
+  <xdr:clientData/>
+</xdr:twoCellAnchor>"#
+    );
+    let drawing_xml = wrap_wsdr(&anchor_xml);
+
+    let expected = Anchor::TwoCell {
+        from: AnchorPoint::new(CellRef::new(2, 1), CellOffset::new(0, 0)),
+        to: AnchorPoint::new(CellRef::new(4, 3), CellOffset::new(0, 0)),
+    };
+
+    let drawing_part = assert_anchor_parses_consistently(&drawing_xml, expected);
+    assert_eq!(
+        drawing_part.objects[0].id.0, 7,
+        "DrawingPart should prefer the canonical xdr:cNvPr id"
+    );
+    assert!(
+        matches!(
+            &drawing_part.objects[0].kind,
+            DrawingObjectKind::ChartPlaceholder { rel_id, .. } if rel_id == "rId1"
+        ),
+        "expected a chart placeholder object"
+    );
+}

@@ -1051,9 +1051,17 @@ fn parse_named_node(
     doc_xml: &str,
     name_tag: &str,
 ) -> Result<(DrawingObjectId, String)> {
+    // Prefer the `xdr:*` non-visual properties block (`xdr:cNvPr`) over any other `*:cNvPr`
+    // elements that might appear in the subtree (some producers emit a stray `a:cNvPr` inside
+    // `a:graphicData`, etc.).
     let nv_id = node
         .descendants()
-        .find(|n| n.is_element() && n.tag_name().name() == name_tag)
+        .find(|n| {
+            n.is_element()
+                && n.tag_name().name() == name_tag
+                && n.tag_name().namespace() == Some(XDR_NS)
+        })
+        .or_else(|| node.descendants().find(|n| n.is_element() && n.tag_name().name() == name_tag))
         .and_then(|n| n.attribute("id"))
         .unwrap_or("0");
     let id = nv_id
