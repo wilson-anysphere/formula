@@ -412,7 +412,8 @@ try {
 
   Write-Host "Wrote $($orderedTranslations.Count) translations to: $outFilePath"
   if ($skipped.Count -gt 0) {
-    Write-Warning ("Skipped {0} functions rejected by Excel: {1}" -f $skipped.Count, ($skipped -join ", "))
+    $skippedSorted = @($skipped | Sort-Object)
+    Write-Warning ("Skipped {0} functions rejected by Excel: {1}" -f $skipped.Count, ($skippedSorted -join ", "))
   }
 } finally {
   if ($null -ne $workbook) {
