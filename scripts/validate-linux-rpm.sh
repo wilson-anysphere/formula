@@ -279,6 +279,7 @@ validate_static() {
   local rpm_path="$1"
 
   [[ -f "${rpm_path}" ]] || die "RPM not found: ${rpm_path}"
+  [[ -s "${rpm_path}" ]] || die "RPM is empty: ${rpm_path}"
 
   note "Static validation: ${rpm_path}"
 

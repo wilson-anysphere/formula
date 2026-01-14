@@ -7,11 +7,10 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const tauriConfig = JSON.parse(
-  readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"),
-);
-const expectedVersion = String(tauriConfig?.version ?? "").trim();
-const expectedRpmName = String(tauriConfig?.mainBinaryName ?? "").trim();
+
+const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
+const expectedVersion = String(tauriConf?.version ?? "").trim();
+const expectedRpmName = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
 
 const hasBash = (() => {
   if (process.platform === "win32") return false;
@@ -88,7 +87,7 @@ esac
   chmodSync(rpmPath, 0o755);
 }
 
-function runValidator({ cwd, rpmArg, fakeListFile, fakeMode }) {
+function runValidator({ cwd, rpmArg, fakeListFile, fakeMode, fakeVersion, fakeName }) {
   const proc = spawnSync(
     "bash",
     [join(repoRoot, "scripts", "validate-linux-rpm.sh"), "--no-container", "--rpm", rpmArg],
@@ -100,8 +99,8 @@ function runValidator({ cwd, rpmArg, fakeListFile, fakeMode }) {
         PATH: `${join(cwd, "bin")}:${process.env.PATH}`,
         FAKE_RPM_LIST_FILE: fakeListFile,
         FAKE_RPM_MODE: fakeMode ?? "ok",
-        FAKE_RPM_VERSION: expectedVersion,
-        FAKE_RPM_NAME: expectedRpmName,
+        FAKE_RPM_VERSION: fakeVersion ?? expectedVersion,
+        FAKE_RPM_NAME: fakeName ?? expectedRpmName,
       },
     },
   );
@@ -144,70 +143,55 @@ test(
   },
 );
 
-test(
-  "validate-linux-rpm accepts --rpm pointing at a directory of RPMs",
-  { skip: !hasBash },
-  () => {
-    const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
-    const binDir = join(tmp, "bin");
-    mkdirSync(binDir, { recursive: true });
-    writeFakeRpmTool(binDir);
+test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
 
-    writeFileSync(join(tmp, "Formula-1.rpm"), "not-a-real-rpm", { encoding: "utf8" });
-    writeFileSync(join(tmp, "Formula-2.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+  writeFileSync(join(tmp, "Formula-1.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+  writeFileSync(join(tmp, "Formula-2.rpm"), "not-a-real-rpm", { encoding: "utf8" });
 
-    const listFile = join(tmp, "rpm-list.txt");
-    writeFileSync(
-      listFile,
-      ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop", "/usr/share/doc/formula/README"].join(
-        "\n",
-      ),
-      { encoding: "utf8" },
-    );
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(
+    listFile,
+    ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop", "/usr/share/doc/formula/README"].join("\n"),
+    { encoding: "utf8" },
+  );
 
-    // Run from tmp dir and pass a relative directory to ensure --rpm resolves against the invocation cwd.
-    const proc = runValidator({ cwd: tmp, rpmArg: ".", fakeListFile: listFile, fakeMode: "ok" });
-    assert.equal(proc.status, 0, proc.stderr);
-  },
-);
+  const proc = runValidator({ cwd: tmp, rpmArg: ".", fakeListFile: listFile });
+  assert.equal(proc.status, 0, proc.stderr);
+});
 
-test(
-  "validate-linux-rpm fails when /usr/bin/formula-desktop is missing",
-  { skip: !hasBash },
-  () => {
-    const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
-    const binDir = join(tmp, "bin");
-    mkdirSync(binDir, { recursive: true });
-    writeFakeRpmTool(binDir);
-    writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+test("validate-linux-rpm fails when /usr/bin/formula-desktop is missing", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
 
-    const listFile = join(tmp, "rpm-list.txt");
-    writeFileSync(listFile, ["/usr/share/applications/formula.desktop"].join("\n"), { encoding: "utf8" });
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(listFile, ["/usr/share/applications/formula.desktop"].join("\n"), { encoding: "utf8" });
 
-    const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile });
-    assert.notEqual(proc.status, 0, "expected non-zero exit status");
-    assert.match(proc.stderr, /missing expected desktop binary path/i);
-  },
-);
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /missing expected desktop binary path/i);
+});
 
-test(
-  "validate-linux-rpm fails when no .desktop file exists under /usr/share/applications/",
-  { skip: !hasBash },
-  () => {
-    const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
-    const binDir = join(tmp, "bin");
-    mkdirSync(binDir, { recursive: true });
-    writeFakeRpmTool(binDir);
-    writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+test("validate-linux-rpm fails when no .desktop file exists under /usr/share/applications/", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
 
-    const listFile = join(tmp, "rpm-list.txt");
-    writeFileSync(listFile, ["/usr/bin/formula-desktop"].join("\n"), { encoding: "utf8" });
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(listFile, ["/usr/bin/formula-desktop"].join("\n"), { encoding: "utf8" });
 
-    const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile });
-    assert.notEqual(proc.status, 0, "expected non-zero exit status");
-    assert.match(proc.stderr, /missing expected \.desktop file/i);
-  },
-);
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /missing expected \.desktop file/i);
+});
 
 test("validate-linux-rpm fails when rpm --info query fails", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
@@ -247,24 +231,12 @@ test("validate-linux-rpm fails when RPM version does not match tauri.conf.json",
     { encoding: "utf8" },
   );
 
-  const proc = spawnSync(
-    "bash",
-    [join(repoRoot, "scripts", "validate-linux-rpm.sh"), "--no-container", "--rpm", "Formula.rpm"],
-    {
-      cwd: tmp,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
-        FAKE_RPM_LIST_FILE: listFile,
-        FAKE_RPM_MODE: "ok",
-        FAKE_RPM_VERSION: "0.0.0",
-        FAKE_RPM_NAME: expectedRpmName,
-      },
-    },
-  );
-  if (proc.error) throw proc.error;
-
+  const proc = runValidator({
+    cwd: tmp,
+    rpmArg: "Formula.rpm",
+    fakeListFile: listFile,
+    fakeVersion: "0.0.0",
+  });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /RPM version mismatch/i);
 });
@@ -283,24 +255,13 @@ test("validate-linux-rpm fails when RPM name does not match tauri.conf.json", { 
     { encoding: "utf8" },
   );
 
-  const proc = spawnSync(
-    "bash",
-    [join(repoRoot, "scripts", "validate-linux-rpm.sh"), "--no-container", "--rpm", "Formula.rpm"],
-    {
-      cwd: tmp,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
-        FAKE_RPM_LIST_FILE: listFile,
-        FAKE_RPM_MODE: "ok",
-        FAKE_RPM_VERSION: expectedVersion,
-        FAKE_RPM_NAME: "some-other-name",
-      },
-    },
-  );
-  if (proc.error) throw proc.error;
-
+  const proc = runValidator({
+    cwd: tmp,
+    rpmArg: "Formula.rpm",
+    fakeListFile: listFile,
+    fakeName: "some-other-name",
+  });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /RPM name mismatch/i);
 });
+
