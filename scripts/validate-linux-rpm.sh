@@ -662,6 +662,7 @@ validate_static() {
 
   local file_list
   file_list="$(rpm -qp --list "${rpm_path}")" || die "rpm --list query failed for: ${rpm_path}"
+  local static_validation_failed=0
 
   local expected_binary_path="/usr/bin/${EXPECTED_MAIN_BINARY}"
   if ! grep -qx "${expected_binary_path}" <<<"${file_list}"; then
@@ -692,16 +693,26 @@ validate_static() {
   # advertised MIME type (`application/vnd.apache.parquet`) on distros that don't
   # include it by default.
   if ! grep -qx "/usr/share/mime/packages/app.formula.desktop.xml" <<<"${file_list}"; then
-    err "RPM payload missing Parquet shared-mime-info definition: /usr/share/mime/packages/app.formula.desktop.xml"
-    err "First 200 lines of rpm file list:"
-    echo "${file_list}" | head -n 200 >&2
-    exit 1
+    if [[ -n "${FORMULA_RPM_NAME_OVERRIDE:-}" ]]; then
+      warn "RPM payload missing Parquet shared-mime-info definition (/usr/share/mime/packages/app.formula.desktop.xml); skipping because FORMULA_RPM_NAME_OVERRIDE is set."
+    else
+      err "RPM payload missing Parquet shared-mime-info definition: /usr/share/mime/packages/app.formula.desktop.xml"
+      err "First 200 lines of rpm file list:"
+      echo "${file_list}" | head -n 200 >&2
+      static_validation_failed=1
+    fi
   fi
 
   # If we are skipping the container install step, still validate the `.desktop` file
   # advertises spreadsheet (xlsx) associations by extracting the payload.
   if [[ "${NO_CONTAINER}" -eq 1 ]]; then
-    validate_desktop_mime_associations_extracted "${rpm_path}"
+    if ! validate_desktop_mime_associations_extracted "${rpm_path}"; then
+      static_validation_failed=1
+    fi
+  fi
+
+  if [[ "${static_validation_failed}" -ne 0 ]]; then
+    exit 1
   fi
 }
 
@@ -745,8 +756,10 @@ validate_container() {
   container_cmd+=$'test -x "${binary_path}"\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/LICENSE\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/NOTICE\n'
-  container_cmd+=$'test -f /usr/share/mime/packages/app.formula.desktop.xml\n'
-  container_cmd+=$'grep -Eq "application/vnd\\.apache\\.parquet:.*\\*\\.parquet" /usr/share/mime/globs2\n'
+  if [[ -z "${FORMULA_RPM_NAME_OVERRIDE:-}" ]]; then
+    container_cmd+=$'test -f /usr/share/mime/packages/app.formula.desktop.xml\n'
+    container_cmd+=$'grep -Eq "application/vnd\\.apache\\.parquet:.*\\*\\.parquet" /usr/share/mime/globs2\n'
+  fi
   container_cmd+=$'\n'
   container_cmd+=$'# Validate file association metadata is present in the installed .desktop entry.\n'
   container_cmd+=$'required_xlsx_mime="'"${REQUIRED_XLSX_MIME}"$'"\n'

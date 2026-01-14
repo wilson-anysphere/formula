@@ -7694,6 +7694,37 @@ registerDesktopCommands({
   openGoalSeekDialog: () => showGoalSeekDialogModal(),
 });
 
+// Page Layout → Arrange → Selection Pane should be a real CommandRegistry command so it stays
+// enabled in the ribbon and can be invoked via other UI surfaces (command palette, keybindings).
+commandRegistry.registerBuiltinCommand(
+  "pageLayout.arrange.selectionPane",
+  getPanelTitle(PanelIds.SELECTION_PANE),
+  () => {
+    // Excel-style: "Selection Pane" should be idempotent. If the panel is already open,
+    // activate/focus it instead of toggling it closed.
+    openRibbonPanel(PanelIds.SELECTION_PANE);
+    // The panel is a React mount; wait a frame so DOM nodes exist before focusing.
+    if (typeof document !== "undefined" && typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const el = document.querySelector<HTMLElement>("[data-testid=\"selection-pane\"]");
+          try {
+            el?.focus();
+          } catch {
+            // Best-effort.
+          }
+        }),
+      );
+    }
+  },
+  {
+    category: "Page Layout",
+    icon: null,
+    description: "Open the Selection Pane (drawings/images)",
+    keywords: ["selection pane", "drawing", "image", "shape", "arrange"],
+  },
+);
+
 function getTauriInvokeForPrint(): TauriInvoke | null {
   const invoke =
     queuedInvoke ?? ((globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined) ?? null;
