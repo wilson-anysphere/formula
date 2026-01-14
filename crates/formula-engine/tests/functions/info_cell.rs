@@ -1043,6 +1043,118 @@ fn cell_protect_and_format_respect_range_run_layer() {
 }
 
 #[test]
+fn cell_protect_respects_range_run_precedence() {
+    use formula_engine::metadata::FormatRun;
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"protect\",A1)")
+        .unwrap();
+
+    let locked = engine.intern_style(Style {
+        protection: Some(Protection {
+            locked: true,
+            hidden: false,
+        }),
+        ..Style::default()
+    });
+    let unlocked = engine.intern_style(Style {
+        protection: Some(Protection {
+            locked: false,
+            hidden: false,
+        }),
+        ..Style::default()
+    });
+
+    // Range-run style has precedence over row/col style (sheet < col < row < range-run < cell).
+    engine.set_row_style_id("Sheet1", 0, Some(locked));
+    engine.set_col_style_id("Sheet1", 0, Some(locked));
+    engine
+        .set_format_runs_by_col(
+            "Sheet1",
+            0, // col A
+            vec![FormatRun {
+                start_row: 0,
+                end_row_exclusive: 10,
+                style_id: unlocked,
+            }],
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 0.0);
+
+    // Explicit cell style overrides range-run formatting.
+    engine.set_cell_style_id("Sheet1", "A1", locked).unwrap();
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 1.0);
+}
+
+#[test]
+fn cell_format_flags_respect_range_run_precedence() {
+    use formula_engine::metadata::FormatRun;
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"color\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"parentheses\",A1)")
+        .unwrap();
+
+    let row_style = engine.intern_style(Style {
+        number_format: Some("0.00".into()),
+        ..Style::default()
+    });
+    let run_style = engine.intern_style(Style {
+        number_format: Some("0.000;[Red](0.000)".into()),
+        ..Style::default()
+    });
+    let cell_style = engine.intern_style(Style {
+        number_format: Some("0.0".into()),
+        ..Style::default()
+    });
+
+    // Range-run should override row formatting for number-format-derived CELL keys.
+    engine.set_row_style_id("Sheet1", 0, Some(row_style));
+    engine
+        .set_format_runs_by_col(
+            "Sheet1",
+            0, // col A
+            vec![FormatRun {
+                start_row: 0,
+                end_row_exclusive: 10,
+                style_id: run_style,
+            }],
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F3".to_string())
+    );
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B3"), 1.0);
+
+    // Explicit cell style overrides the range run.
+    engine.set_cell_style_id("Sheet1", "A1", cell_style).unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F1".to_string())
+    );
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 0.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B3"), 0.0);
+}
+
+#[test]
 fn info_recalc_defaults_to_manual_and_unknown_keys() {
     let mut sheet = TestSheet::new();
 
