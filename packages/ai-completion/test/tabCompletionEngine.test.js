@@ -4330,6 +4330,38 @@ test("LOG base suggests 10 and 2 (no 0/1)", async () => {
   }
 });
 
+test("BASE/DECIMAL radix suggests common values (no 0/1)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const cases = [
+    { fn: "BASE", currentInput: "=BASE(255, " },
+    { fn: "DECIMAL", currentInput: '=DECIMAL("FF", ' },
+  ];
+
+  for (const { fn, currentInput } of cases) {
+    const suggestions = await engine.getSuggestions({
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    });
+
+    for (const radix of ["10", "2", "16"]) {
+      assert.ok(
+        suggestions.some((s) => s.text === `${currentInput}${radix}`),
+        `Expected ${fn} to suggest radix=${radix}, got: ${suggestions.map((s) => s.text).join(", ")}`
+      );
+    }
+
+    for (const radix of ["0", "1"]) {
+      assert.ok(
+        !suggestions.some((s) => s.text === `${currentInput}${radix}`),
+        `Did not expect ${fn} to suggest radix=${radix}, got: ${suggestions.map((s) => s.text).join(", ")}`
+      );
+    }
+  }
+});
+
 test("NORM.DIST cumulative suggests TRUE/FALSE", async () => {
   const engine = new TabCompletionEngine();
 

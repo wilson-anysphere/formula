@@ -1386,6 +1386,13 @@ const LOG_BASE_ENUM_10_2 = [
   { replacement: "2", displayText: "2 (log base 2)", confidence: 0.65 },
 ];
 
+const RADIX_ENUM_10_2_16_8 = [
+  { replacement: "10", displayText: "10 (decimal)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (binary)", confidence: 0.65 },
+  { replacement: "16", displayText: "16 (hex)", confidence: 0.64 },
+  { replacement: "8", displayText: "8 (octal)", confidence: 0.63 },
+];
+
 const VLOOKUP_COL_INDEX_NUM_ENUM_1_2_3 = [
   { replacement: "2", displayText: "2 (2nd column)", confidence: 0.66 },
   { replacement: "1", displayText: "1 (1st column)", confidence: 0.65 },
@@ -1779,6 +1786,14 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   LOG: {
     // base
     1: LOG_BASE_ENUM_10_2,
+  },
+  BASE: {
+    // radix
+    1: RADIX_ENUM_10_2_16_8,
+  },
+  DECIMAL: {
+    // radix
+    1: RADIX_ENUM_10_2_16_8,
   },
   "T.TEST": {
     // tails
