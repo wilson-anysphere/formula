@@ -164,7 +164,11 @@ if (runnableTestFiles.length !== filteredTestFiles.length) {
 
 if (runnableTestFiles.length === 0) {
   if (fileFilters.length > 0) {
-    console.log(`No node:test files matched: ${fileFilters.join(", ")}`);
+    if (filteredTestFiles.length === 0) {
+      console.log(`No node:test files matched: ${fileFilters.join(", ")}`);
+    } else {
+      console.log("All node:test files matched by filters were skipped.");
+    }
   } else {
     console.log("No node:test files found.");
   }
