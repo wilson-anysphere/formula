@@ -58,6 +58,12 @@ fn standard_encryption_info_bytes() -> Vec<u8> {
     bytes
 }
 
+fn standard_encryption_info_bytes_with_major(major: u16) -> Vec<u8> {
+    let mut bytes = standard_encryption_info_bytes();
+    bytes[..2].copy_from_slice(&major.to_le_bytes());
+    bytes
+}
+
 fn agile_encryption_info_bytes() -> Vec<u8> {
     // Copied from `formula-offcrypto` unit tests (`minimal_agile_xml`).
     //
@@ -109,6 +115,52 @@ fn inspect_ooxml_encryption_parses_standard_encryption_info() {
     let path = tmp.path().join("standard.xlsx");
 
     let bytes = ole_encrypted_ooxml_container(&standard_encryption_info_bytes());
+    std::fs::write(&path, bytes).expect("write ole bytes");
+
+    let summary = inspect_ooxml_encryption(&path)
+        .expect("inspect")
+        .expect("expected encrypted OOXML container");
+
+    assert_eq!(summary.encryption_type, EncryptionType::Standard);
+    assert!(summary.agile.is_none());
+    assert_eq!(
+        summary.standard,
+        Some(StandardEncryptionInfoSummary {
+            alg_id: StandardAlgId::Aes256,
+            key_size: 256,
+        })
+    );
+}
+
+#[test]
+fn inspect_ooxml_encryption_parses_standard_encryption_info_major_2() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("standard.xlsx");
+
+    let bytes = ole_encrypted_ooxml_container(&standard_encryption_info_bytes_with_major(2));
+    std::fs::write(&path, bytes).expect("write ole bytes");
+
+    let summary = inspect_ooxml_encryption(&path)
+        .expect("inspect")
+        .expect("expected encrypted OOXML container");
+
+    assert_eq!(summary.encryption_type, EncryptionType::Standard);
+    assert!(summary.agile.is_none());
+    assert_eq!(
+        summary.standard,
+        Some(StandardEncryptionInfoSummary {
+            alg_id: StandardAlgId::Aes256,
+            key_size: 256,
+        })
+    );
+}
+
+#[test]
+fn inspect_ooxml_encryption_parses_standard_encryption_info_major_4() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("standard.xlsx");
+
+    let bytes = ole_encrypted_ooxml_container(&standard_encryption_info_bytes_with_major(4));
     std::fs::write(&path, bytes).expect("write ole bytes");
 
     let summary = inspect_ooxml_encryption(&path)
