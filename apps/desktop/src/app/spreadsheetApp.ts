@@ -185,6 +185,7 @@ import {
   createEncryptionPolicyFromDoc,
   type EncryptedRangeManager
 } from "@formula/collab-encrypted-ranges";
+import { isEncryptedCellPayload } from "@formula/collab-encryption";
 import { loadCollabConnectionForWorkbook, saveCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
 import { reservedRootGuardUiMessage, subscribeToReservedRootGuardDisconnect } from "../panels/collabReservedRootGuard.js";
 import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
@@ -2096,7 +2097,40 @@ export class SpreadsheetApp {
           ({
             shouldEncryptCell: (cell) => encryptionPolicy?.shouldEncryptCell(cell) ?? false,
             keyForCell: (cell) => {
-              const keyId = encryptionPolicy?.keyIdForCell(cell);
+              // Prefer reading the key id from an existing encrypted payload when available so
+              // clients can still decrypt/mutate encrypted cells even if the shared encryption
+              // policy metadata is missing/unsupported (or out of sync with ciphertext).
+              let keyId: string | null = null;
+              try {
+                const session = this.collabSession as any;
+                const cells = session?.cells;
+                if (cells && typeof cells.get === "function") {
+                  const sheetId = String((cell as any)?.sheetId ?? "");
+                  const row = (cell as any)?.row;
+                  const col = (cell as any)?.col;
+                  const keys = [makeCellKey(cell as any), `${sheetId}:${row},${col}`];
+                  const defaultSheetId = String(session?.defaultSheetId ?? "");
+                  if (defaultSheetId && sheetId === defaultSheetId) {
+                    keys.push(`r${row}c${col}`);
+                  }
+                  for (const key of keys) {
+                    const cellData = cells.get(key);
+                    if (!cellData) continue;
+                    const encRaw =
+                      typeof (cellData as any)?.get === "function" ? (cellData as any).get("enc") : (cellData as any)?.enc;
+                    if (encRaw === undefined) continue;
+                    if (!isEncryptedCellPayload(encRaw)) continue;
+                    keyId = encRaw.keyId;
+                    break;
+                  }
+                }
+              } catch {
+                // ignore (best-effort key-id discovery)
+              }
+
+              if (!keyId) {
+                keyId = encryptionPolicy?.keyIdForCell(cell) ?? null;
+              }
               if (!keyId) return null;
               return encryptionKeyStore.getCachedKey(collab.docId, keyId);
             },
