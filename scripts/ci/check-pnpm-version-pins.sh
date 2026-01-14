@@ -146,6 +146,74 @@ check_workflow_pnpm_pins() {
   fi
 }
 
+check_workflow_corepack_pnpm_pins() {
+  local file="$1"
+  local env_pnpm_version=""
+  env_pnpm_version="$(extract_workflow_env_pnpm_version "$file")"
+
+  local found_any=0
+
+  while IFS= read -r match; do
+    [ -z "$match" ] && continue
+    found_any=1
+
+    # match format: "<line_no>:<content>"
+    local line_no="${match%%:*}"
+    local content="${match#*:}"
+
+    # Ignore commented lines.
+    local trimmed="$content"
+    trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+    case "$trimmed" in
+      \#*) continue ;;
+    esac
+
+    # Supported forms:
+    # - corepack prepare pnpm@9.0.0 --activate
+    # - corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+    if [[ "$trimmed" =~ pnpm@([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+      local version="${BASH_REMATCH[1]}"
+      if [ "$version" != "$expected_pnpm_version" ]; then
+        echo "pnpm version pin mismatch in ${file}:${line_no} (corepack prepare):" >&2
+        echo "  Expected pnpm version: ${expected_pnpm_version} (from ${package_json} packageManager)" >&2
+        echo "  Found: pnpm@${version}" >&2
+        echo "  Line: ${content}" >&2
+        exit 1
+      fi
+      continue
+    fi
+
+    if [[ "$trimmed" =~ pnpm@\$\{\{[[:space:]]*env\.PNPM_VERSION[[:space:]]*\}\} ]]; then
+      if [ -z "$env_pnpm_version" ]; then
+        echo "pnpm version pin mismatch in ${file}:${line_no} (corepack prepare):" >&2
+        echo "  Found: pnpm@\${{ env.PNPM_VERSION }} (but PNPM_VERSION is not set in the workflow env)" >&2
+        echo "  Expected pnpm version: ${expected_pnpm_version} (from ${package_json} packageManager)" >&2
+        echo "  Line: ${content}" >&2
+        exit 1
+      fi
+      if [ "$env_pnpm_version" != "$expected_pnpm_version" ]; then
+        echo "pnpm version pin mismatch in ${file}:${line_no} (corepack prepare):" >&2
+        echo "  Expected pnpm version: ${expected_pnpm_version} (from ${package_json} packageManager)" >&2
+        echo "  Found workflow PNPM_VERSION: ${env_pnpm_version}" >&2
+        echo "  Line: ${content}" >&2
+        exit 1
+      fi
+      continue
+    fi
+
+    echo "pnpm version pin mismatch in ${file}:${line_no} (corepack prepare):" >&2
+    echo "  Expected pnpm version: ${expected_pnpm_version} (from ${package_json} packageManager)" >&2
+    echo "  Found an unrecognized pnpm ref in: ${content}" >&2
+    echo "  Fix: use corepack prepare pnpm@${expected_pnpm_version} --activate (or pnpm@\\\${{ env.PNPM_VERSION }} with PNPM_VERSION pinned)." >&2
+    exit 1
+  done < <(grep -n -E 'corepack[[:space:]]+prepare[[:space:]]+pnpm@' "$file" || true)
+
+  if [ "$found_any" -eq 0 ]; then
+    echo "No corepack prepare pnpm@... steps found in ${file} (expected at least one match when checking corepack pins)." >&2
+    exit 1
+  fi
+}
+
 workflow_files=()
 while IFS= read -r file; do
   [ -z "$file" ] && continue
@@ -170,5 +238,13 @@ if [ "$matched" -eq 0 ]; then
   echo "If pnpm is not used in CI, delete this guard script and remove it from CI." >&2
   exit 1
 fi
+
+corepack_matched=0
+for workflow in "${workflow_files[@]}"; do
+  if grep -q -E 'corepack[[:space:]]+prepare[[:space:]]+pnpm@' "$workflow"; then
+    corepack_matched=1
+    check_workflow_corepack_pnpm_pins "$workflow"
+  fi
+done
 
 echo "pnpm version pins match package.json (pnpm@${expected_pnpm_version})."
