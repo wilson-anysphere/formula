@@ -14,8 +14,8 @@ export interface PickLocalImageFilesOptions {
 /**
  * Pick local image files for insertion.
  *
- * - Desktop/Tauri: uses the native file dialog (`__TAURI__.dialog.open`) and reads bytes via
- *   hardened backend invoke commands.
+ * - Desktop/Tauri: uses the native file dialog (via `getTauriDialogOpenOrNull()` from `tauri/api`)
+ *   and reads bytes via hardened backend invoke commands.
  * - Web: falls back to a hidden `<input type="file">`.
  *
  * - Non-blocking: returns a Promise and does not block the main thread.
