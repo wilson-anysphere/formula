@@ -106,6 +106,8 @@ pub enum EngineError {
     AstParse(#[from] crate::ParseError),
     #[error(transparent)]
     AstSerialize(#[from] crate::SerializeError),
+    #[error("cannot delete last sheet")]
+    CannotDeleteLastSheet,
     #[error(
         "range values dimensions mismatch: expected {expected_rows}x{expected_cols}, got {actual_rows}x{actual_cols}"
     )]
@@ -1420,6 +1422,9 @@ impl Engine {
         let Some(deleted_sheet_id) = self.workbook.sheet_id(sheet) else {
             return Ok(());
         };
+        if self.workbook.sheet_order.len() <= 1 {
+            return Err(EngineError::CannotDeleteLastSheet);
+        }
         let deleted_sheet_name = self
             .workbook
             .sheet_name(deleted_sheet_id)
