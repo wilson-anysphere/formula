@@ -3565,6 +3565,25 @@ function classifyStructuredForDlp(value, options = {}) {
     if (v instanceof ArrayBuffer || ArrayBuffer.isView(v)) return;
     if (depth >= maxDepth) return;
 
+    // Some hosts represent cells/attachment values as class instances or other non-plain objects
+    // whose visible text is only available via a custom `.toString()`. If DLP redaction is enabled
+    // with a no-op redactor, we must still detect heuristic-sensitive strings from those objects.
+    //
+    // Note: avoid doing this for arrays/maps/sets (we traverse them structurally below) and for
+    // plain objects where the default stringification is just "[object Object]".
+    if (!Array.isArray(v) && !(v instanceof Map) && !(v instanceof Set)) {
+      let textified = "";
+      try {
+        textified = String(v);
+      } catch {
+        textified = "";
+      }
+      if (textified && textified !== "[object Object]") {
+        considerText(textified);
+        if (found) return;
+      }
+    }
+
     if (v instanceof Map) {
       for (const [k, val] of v.entries()) {
         if (found) break;
@@ -3779,7 +3798,13 @@ function redactStructuredValue(value, redactor, options = {}) {
 
   const proto = Object.getPrototypeOf(value);
   const entries = Object.entries(value);
-  if (entries.length === 0) return value;
+  if (entries.length === 0) {
+    // Empty plain objects are a common sparse-cell representation (treated as blank), and are safe
+    // to preserve. Other "opaque" objects (including instances with custom `toString()` or
+    // non-enumerable secrets) should be treated as prompt-unsafe under DLP redaction.
+    if (proto === Object.prototype && Object.getOwnPropertyNames(value).length === 0) return value;
+    return /** @type {T} */ ("[REDACTED]");
+  }
   // For class instances and other non-plain objects, fall back to a shallow key/value
   // projection matching how JSON/stableJsonStringify will serialize them.
   if (proto !== Object.prototype && proto !== null && entries.length > 200) {

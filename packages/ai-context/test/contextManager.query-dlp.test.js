@@ -96,6 +96,47 @@ test("buildContext: heuristic DLP detects rich object cell values and prevents t
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildContext: heuristic DLP detects class instance cell values via toString and prevents them from leaking (no-op redactor)", async () => {
+  const embedder = new CapturingEmbedder();
+  const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, ragIndex, redactor: (text) => text });
+
+  class SecretValue {
+    toString() {
+      return "alice@example.com";
+    }
+  }
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [[new SecretValue(), "Hello"]],
+    },
+    query: "anything",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Internal",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      },
+      classificationRecords: [],
+    },
+  });
+
+  assert.doesNotMatch(embedder.seen.join("\n"), /alice@example\.com/);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildContext: structured DLP also redacts non-heuristic sheet-name tokens in queries before embedding (no-op redactor)", async () => {
   const embedder = new CapturingEmbedder();
   const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
