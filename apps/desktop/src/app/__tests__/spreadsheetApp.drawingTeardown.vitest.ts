@@ -184,6 +184,7 @@ describe("SpreadsheetApp drawings teardown", () => {
     const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
     expect(selectionCanvas).toBeTruthy();
     const interactionTarget = selectionCanvas!;
+    interactionTarget.getBoundingClientRect = root.getBoundingClientRect;
 
     // Drag the object slightly: should call `setObjects`.
     dispatchPointerEvent(interactionTarget, "pointerdown", { clientX: 60, clientY: 40, pointerId: 1, button: 0 });
@@ -211,7 +212,6 @@ describe("SpreadsheetApp drawings teardown", () => {
     setObjectsSpy.mockClear();
 
     // Pointer events on the old root should not invoke drawing callbacks once disposed.
-    setObjectsSpy.mockClear();
     dispatchPointerEvent(interactionTarget, "pointerdown", { clientX: 60, clientY: 40, pointerId: 2, button: 0 });
     dispatchPointerEvent(interactionTarget, "pointermove", { clientX: 100, clientY: 70, pointerId: 2 });
     expect(setObjectsSpy).not.toHaveBeenCalled();
