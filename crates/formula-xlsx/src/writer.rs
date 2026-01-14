@@ -674,6 +674,19 @@ mod sheet_format_pr_tests {
         assert_eq!(node.attribute("defaultColWidth"), Some("8.5"));
         assert_eq!(node.attribute("defaultRowHeight"), Some("15"));
     }
+
+    #[test]
+    fn renders_non_binary_friendly_widths_without_float_noise() {
+        // 8.43 is Excel's default column width and is not exactly representable as an f32.
+        // Ensure we still serialize a human-friendly value (not a long binary rounding artifact).
+        let mut sheet = Worksheet::new(1, "Sheet1");
+        sheet.default_col_width = Some(8.43);
+
+        let xml = sheet_format_pr_xml(&sheet);
+        let doc = roxmltree::Document::parse(&xml).expect("parse sheetFormatPr XML");
+        let node = doc.root_element();
+        assert_eq!(node.attribute("defaultColWidth"), Some("8.43"));
+    }
 }
 fn render_cols(sheet: &Worksheet, outline: &Outline, style_to_xf: &HashMap<u32, u32>) -> String {
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
