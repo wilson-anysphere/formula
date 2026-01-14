@@ -107,7 +107,7 @@ describe("DrawingOverlay images", () => {
       await flushMicrotasks();
 
       // Allow Node a turn to emit any unhandled rejection events.
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(requestRender).toHaveBeenCalledTimes(1);
       expect(unhandled).toHaveLength(0);
@@ -160,7 +160,7 @@ describe("DrawingOverlay images", () => {
       resolveBitmap({ close: () => {} } as unknown as ImageBitmap);
       await flushMicrotasks();
       // Allow Node a turn to emit any unhandled rejection events.
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(asyncRender).toHaveBeenCalledTimes(1);
       expect(unhandled).toHaveLength(0);

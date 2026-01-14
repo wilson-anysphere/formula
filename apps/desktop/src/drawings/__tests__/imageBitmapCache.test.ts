@@ -181,9 +181,7 @@ describe("ImageBitmapCache", () => {
       resolveDecode({ close: vi.fn() } as unknown as ImageBitmap);
 
       // Allow the cache's internal `.then` handlers + callback dispatch to run.
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(onReady).toHaveBeenCalledTimes(1);
       expect(unhandled).toHaveLength(0);
