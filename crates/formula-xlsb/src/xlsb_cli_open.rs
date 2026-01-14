@@ -19,6 +19,7 @@ const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN: usize = 8;
 const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
 const AES_BLOCK_LEN: usize = 16;
+const MAX_DIGEST_LEN: usize = 64; // SHA-512
 
 // MS-OFFCRYPTO Agile: block keys used when decrypting password key-encryptor fields.
 const VERIFIER_HASH_INPUT_BLOCK: [u8; 8] = [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B, 0x9E, 0x79];
@@ -338,9 +339,34 @@ fn derive_segment_iv(
     segment_index: u32,
     hash_alg: HashAlgorithm,
 ) -> Result<[u8; AES_BLOCK_LEN], EncryptedPackageError> {
-    let digest = hash_two(salt, &segment_index.to_le_bytes(), hash_alg)?;
+    let idx = segment_index.to_le_bytes();
     let mut iv = [0u8; AES_BLOCK_LEN];
-    iv.copy_from_slice(&digest[..AES_BLOCK_LEN]);
+    match hash_alg {
+        HashAlgorithm::Sha1 => {
+            let mut h = Sha1::new();
+            h.update(salt);
+            h.update(&idx);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_LEN]);
+        }
+        HashAlgorithm::Sha256 => {
+            let mut h = Sha256::new();
+            h.update(salt);
+            h.update(&idx);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_LEN]);
+        }
+        HashAlgorithm::Sha384 => {
+            let mut h = Sha384::new();
+            h.update(salt);
+            h.update(&idx);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_LEN]);
+        }
+        HashAlgorithm::Sha512 => {
+            let mut h = Sha512::new();
+            h.update(salt);
+            h.update(&idx);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_LEN]);
+        }
+    }
     Ok(iv)
 }
 
@@ -441,11 +467,69 @@ fn hash_password_agile(
 ) -> Result<Vec<u8>, EncryptedPackageError> {
     let pw = password_to_utf16le_bytes(password);
 
-    let mut h = hash_two(salt, &pw, hash_alg)?;
-    for i in 0..spin {
-        h = hash_two(&i.to_le_bytes(), &h, hash_alg)?;
+    let digest_len = hash_digest_len(hash_alg)?;
+    debug_assert!(digest_len <= MAX_DIGEST_LEN);
+
+    // Avoid per-iteration allocations (spinCount is often 100k):
+    // keep the current digest in a fixed buffer and overwrite it each round.
+    let mut h_buf = [0u8; MAX_DIGEST_LEN];
+
+    match hash_alg {
+        HashAlgorithm::Sha1 => {
+            let mut hasher = Sha1::new();
+            hasher.update(salt);
+            hasher.update(&pw);
+            h_buf[..20].copy_from_slice(&hasher.finalize());
+
+            for i in 0..spin {
+                let mut hasher = Sha1::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..20]);
+                h_buf[..20].copy_from_slice(&hasher.finalize());
+            }
+        }
+        HashAlgorithm::Sha256 => {
+            let mut hasher = Sha256::new();
+            hasher.update(salt);
+            hasher.update(&pw);
+            h_buf[..32].copy_from_slice(&hasher.finalize());
+
+            for i in 0..spin {
+                let mut hasher = Sha256::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..32]);
+                h_buf[..32].copy_from_slice(&hasher.finalize());
+            }
+        }
+        HashAlgorithm::Sha384 => {
+            let mut hasher = Sha384::new();
+            hasher.update(salt);
+            hasher.update(&pw);
+            h_buf[..48].copy_from_slice(&hasher.finalize());
+
+            for i in 0..spin {
+                let mut hasher = Sha384::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..48]);
+                h_buf[..48].copy_from_slice(&hasher.finalize());
+            }
+        }
+        HashAlgorithm::Sha512 => {
+            let mut hasher = Sha512::new();
+            hasher.update(salt);
+            hasher.update(&pw);
+            h_buf[..64].copy_from_slice(&hasher.finalize());
+
+            for i in 0..spin {
+                let mut hasher = Sha512::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..64]);
+                h_buf[..64].copy_from_slice(&hasher.finalize());
+            }
+        }
     }
-    Ok(h)
+
+    Ok(h_buf[..digest_len].to_vec())
 }
 
 fn derive_key_agile(
@@ -469,9 +553,33 @@ fn derive_iv_agile(
     block_key: &[u8; 8],
     hash_alg: HashAlgorithm,
 ) -> Result<[u8; AES_BLOCK_LEN], EncryptedPackageError> {
-    let digest = hash_two(salt, block_key, hash_alg)?;
     let mut iv = [0u8; AES_BLOCK_LEN];
-    iv.copy_from_slice(&digest[..AES_BLOCK_LEN]);
+    match hash_alg {
+        HashAlgorithm::Sha1 => {
+            let mut h = Sha1::new();
+            h.update(salt);
+            h.update(block_key);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_LEN]);
+        }
+        HashAlgorithm::Sha256 => {
+            let mut h = Sha256::new();
+            h.update(salt);
+            h.update(block_key);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_LEN]);
+        }
+        HashAlgorithm::Sha384 => {
+            let mut h = Sha384::new();
+            h.update(salt);
+            h.update(block_key);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_LEN]);
+        }
+        HashAlgorithm::Sha512 => {
+            let mut h = Sha512::new();
+            h.update(salt);
+            h.update(block_key);
+            iv.copy_from_slice(&h.finalize()[..AES_BLOCK_LEN]);
+        }
+    }
     Ok(iv)
 }
 
