@@ -7356,7 +7356,7 @@ mod tests {
             assert_eq!(before.value, CellScalar::Number(1.0));
 
             // Apply a formatting delta that unlocks A1 (protection.locked = false).
-            let format = serde_json::to_value(Style {
+            let format = serde_json::to_value(formula_model::Style {
                 protection: Some(Protection {
                     locked: false,
                     hidden: false,
