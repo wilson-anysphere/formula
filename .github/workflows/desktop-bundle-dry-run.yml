@@ -769,7 +769,7 @@ jobs:
             throw "windows-bundle: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
           }
 
-          ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir -RequireExe -RequireMsi
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir -RequireExe -RequireMsi
 
       - name: Verify Windows ARM64 binary architecture (AA64)
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
