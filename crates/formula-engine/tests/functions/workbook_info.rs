@@ -58,6 +58,63 @@ fn sheet_reports_current_and_referenced_sheet_numbers() {
 }
 
 #[test]
+fn sheet_reports_tab_order_numbers_after_sheet_reorder() {
+    let mut engine = Engine::new();
+    engine.set_bytecode_enabled(false);
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    engine.set_cell_formula("Sheet1", "B1", "=SHEET()").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=SHEET(\"Sheet1\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=SHEET(Sheet1!A1)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::Number(1.0));
+
+    // Move Sheet1 to the end: Sheet2, Sheet3, Sheet1.
+    assert!(engine.reorder_sheet("Sheet1", 2));
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::Number(3.0));
+}
+
+#[test]
+fn multi_area_reference_order_follows_tab_order_after_reorder() {
+    let mut engine = Engine::new();
+    engine.set_bytecode_enabled(false);
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    // INDEX's area_num selects from a multi-area reference based on workbook tab order.
+    //
+    // A 3D sheet span expands to multiple areas (one per sheet) which INDEX can select between.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=INDEX(Sheet1:Sheet3!A1,1,1,1)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+
+    // Reverse the tab order: Sheet3, Sheet2, Sheet1.
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    assert!(engine.reorder_sheet("Sheet2", 1));
+    engine.recalculate_single_threaded();
+
+    // The first area is now Sheet3!A1.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+}
+
+#[test]
 fn sheets_reports_workbook_sheet_count_and_3d_reference_span() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
