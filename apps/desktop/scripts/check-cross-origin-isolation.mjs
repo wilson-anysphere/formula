@@ -83,8 +83,14 @@ function resolveBinPath(raw) {
   // Prefer resolving relative to the repo root (matches the auto-detection paths), but also
   // accept paths relative to the current working directory for convenience.
   const fromCwd = path.resolve(process.cwd(), raw);
+  if (statIsFile(fromCwd)) return fromCwd;
+
+  const fromRepo = path.resolve(repoRoot, raw);
+  if (statIsFile(fromRepo)) return fromRepo;
+
+  // Fall back to the cwd-relative resolution so error messages match typical CLI expectations.
   if (fs.existsSync(fromCwd)) return fromCwd;
-  return path.resolve(repoRoot, raw);
+  return fromRepo;
 }
 
 function statIsFile(p) {
