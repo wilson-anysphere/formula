@@ -194,7 +194,9 @@ impl WorkbookArchive {
                 continue;
             }
             let name = normalize_opc_part_name(file.name());
-            let mut buf = Vec::with_capacity(file.size() as usize);
+            // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+            // advertise enormous uncompressed sizes (zip-bomb style OOM).
+            let mut buf = Vec::new();
             file.read_to_end(&mut buf)
                 .with_context(|| format!("read part {name}"))?;
             if parts.insert(name.clone(), buf).is_some() {
@@ -1336,7 +1338,9 @@ pub fn roundtrip_zip_copy(original: &Path, out_path: &Path) -> Result<()> {
             continue;
         }
         let name = file.name().to_string();
-        let mut buf = Vec::with_capacity(file.size() as usize);
+        // Do not trust `ZipFile::size()` for allocation; ZIP metadata is untrusted and can
+        // advertise enormous uncompressed sizes (zip-bomb style OOM).
+        let mut buf = Vec::new();
         file.read_to_end(&mut buf)
             .with_context(|| format!("read part {name}"))?;
 
