@@ -177,3 +177,102 @@ fn blank_foreign_keys_in_m2m_flow_to_blank_dimension_member_when_allowed() {
         10.0.into()
     );
 }
+
+#[test]
+fn insert_row_updates_m2m_from_index() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total Amount", "SUM(Fact[Amount])").unwrap();
+
+    let a_filter = FilterContext::empty().with_column_equals("Dim", "Attr", "A".into());
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &a_filter).unwrap(),
+        10.0.into()
+    );
+
+    // Insert a new fact row after the relationship is defined and ensure propagation picks it up.
+    model
+        .insert_row("Fact", vec![2.into(), 1.into(), 5.0.into()])
+        .unwrap();
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &a_filter).unwrap(),
+        15.0.into()
+    );
+}
+
+#[test]
+fn insert_row_can_resolve_unmatched_facts_and_updates_blank_member() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    // Start with one matched and one unmatched fact key.
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();
+    fact.push_row(vec![2.into(), 999.into(), 7.0.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    // Allow unmatched facts so the virtual blank member is materialized.
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model.add_measure("Total Amount", "SUM(Fact[Amount])").unwrap();
+
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        7.0.into()
+    );
+
+    // Insert a Dim row for the previously-unmatched key. This should move the fact row out of the
+    // virtual blank member and under the new Dim row.
+    model
+        .insert_row("Dim", vec![999.into(), "New".into()])
+        .unwrap();
+
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        Value::Blank
+    );
+
+    let new_attr = FilterContext::empty().with_column_equals("Dim", "Attr", "New".into());
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &new_attr).unwrap(),
+        7.0.into()
+    );
+}
