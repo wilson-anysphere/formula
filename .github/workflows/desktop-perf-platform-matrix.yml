@@ -253,6 +253,9 @@ jobs:
               `| startup.cold.firstRender (ms) | ${fmt(s.firstRender?.p50)} | ${fmt(s.firstRender?.p95)} | |`,
             );
             lines.push(
+              `| startup.cold.webviewLoaded (ms) | ${fmt(s.webviewLoaded?.p50)} | ${fmt(s.webviewLoaded?.p95)} | target=${s.webviewLoaded?.targetMs ?? "n/a"} |`,
+            );
+            lines.push(
               `| startup.cold.tti (ms) | ${fmt(s.tti?.p50)} | ${fmt(s.tti?.p95)} | target=${s.tti?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
             );
           } else {
@@ -266,6 +269,9 @@ jobs:
             );
             lines.push(
               `| startup.warm.firstRender (ms) | ${fmt(s.firstRender?.p50)} | ${fmt(s.firstRender?.p95)} | |`,
+            );
+            lines.push(
+              `| startup.warm.webviewLoaded (ms) | ${fmt(s.webviewLoaded?.p50)} | ${fmt(s.webviewLoaded?.p95)} | target=${s.webviewLoaded?.targetMs ?? "n/a"} |`,
             );
             lines.push(
               `| startup.warm.tti (ms) | ${fmt(s.tti?.p50)} | ${fmt(s.tti?.p95)} | target=${s.tti?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
