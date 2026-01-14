@@ -1,7 +1,7 @@
 import type { CommandContribution } from "../extensions/commandRegistry.js";
 import { getFunctionSignature } from "../formula-bar/highlight/functionSignatures.js";
 
-import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
+import FUNCTION_NAMES from "../../../../shared/functionNames.mjs";
 
 import {
   compileFuzzyQuery,
@@ -36,12 +36,10 @@ export type CommandPaletteSection = {
 
 type FunctionSignature = NonNullable<ReturnType<typeof getFunctionSignature>>;
 
-type CatalogFunction = { name?: string | null };
-
 type PreparedFunctionForSearch = { name: string; nameLower: string; nameLowerNormalized: string };
 
-const FUNCTIONS: PreparedFunctionForSearch[] = ((FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? [])
-  .map((fn) => String(fn?.name ?? "").trim())
+const FUNCTIONS: PreparedFunctionForSearch[] = (Array.isArray(FUNCTION_NAMES) ? FUNCTION_NAMES : [])
+  .map((name) => String(name ?? "").trim())
   .filter((name) => name.length > 0)
   .map((name) => {
     const nameLower = name.toLowerCase();
@@ -236,6 +234,8 @@ function scoreFunctionResults(queryLower: string, limit: number): CommandPalette
   const normalizedQuery = trimmed.replace(/[^a-z0-9_]/g, "");
   if (!normalizedQuery) return [];
 
+  const functions = FUNCTIONS;
+
   // Keep only the top-N matches so we don't allocate/sort huge arrays for large
   // function catalogs.
   const top: FunctionMatch[] = [];
@@ -253,7 +253,7 @@ function scoreFunctionResults(queryLower: string, limit: number): CommandPalette
     return worst;
   };
 
-  for (const fn of FUNCTIONS) {
+  for (const fn of functions) {
     const match = fuzzyMatchTokenPrepared(normalizedQuery, fn.name, fn.nameLower);
     if (!match) continue;
 

@@ -1,7 +1,7 @@
 import { FormulaBarModel } from "./FormulaBarModel.js";
 import { type RangeAddress } from "../spreadsheet/a1.js";
 import { searchFunctionResults } from "../command-palette/commandPaletteSearch.js";
-import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
+import FUNCTION_NAMES from "../../../../shared/functionNames.mjs";
 import {
   assignFormulaReferenceColors,
   extractFormulaReferences,
@@ -12,7 +12,12 @@ import {
 } from "@formula/spreadsheet-frontend";
 import type { EngineClient, FormulaParseOptions } from "@formula/engine";
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
-import { getFunctionSignature, signatureParts } from "./highlight/functionSignatures.js";
+import {
+  getFunctionSignature,
+  isFunctionSignatureCatalogReady,
+  preloadFunctionSignatureCatalog,
+  signatureParts,
+} from "./highlight/functionSignatures.js";
 
 type FixFormulaErrorWithAiInfo = {
   address: string;
@@ -160,10 +165,8 @@ type FunctionPickerItem = { name: string; signature?: string; summary?: string }
 
 type FunctionSignature = NonNullable<ReturnType<typeof getFunctionSignature>>;
 
-type CatalogFunction = { name?: string | null };
-
-const ALL_FUNCTION_NAMES_SORTED: string[] = ((FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? [])
-  .map((fn) => String(fn?.name ?? "").trim())
+const ALL_FUNCTION_NAMES_SORTED: string[] = (Array.isArray(FUNCTION_NAMES) ? FUNCTION_NAMES : [])
+  .map((name) => String(name ?? "").trim())
   .filter((name) => name.length > 0)
   .sort((a, b) => a.localeCompare(b));
 
@@ -514,7 +517,11 @@ function signaturePreview(name: string): string {
   const sig = getFunctionSignature(name);
   if (!sig) {
     const fallback = "(…)";
-    SIGNATURE_PREVIEW_CACHE.set(name, fallback);
+    // When the signature catalog is still loading, avoid permanently caching the fallback.
+    // (Once the catalog is ready, a subsequent call can fill the cache with the real signature.)
+    if (isFunctionSignatureCatalogReady()) {
+      SIGNATURE_PREVIEW_CACHE.set(name, fallback);
+    }
     return fallback;
   }
 
@@ -2681,6 +2688,12 @@ export class FormulaBarView {
     this.#isFunctionPickerComposing = false;
     this.#functionPickerInputEl.value = "";
     this.#functionPickerSelectedIndex = 0;
+
+    // Best-effort: load signature metadata in the background so the picker can show richer hints.
+    void preloadFunctionSignatureCatalog().then(() => {
+      if (!this.#functionPickerOpen) return;
+      this.#renderFunctionPickerResults();
+    });
 
     this.#positionFunctionPicker();
     this.#renderFunctionPickerResults();

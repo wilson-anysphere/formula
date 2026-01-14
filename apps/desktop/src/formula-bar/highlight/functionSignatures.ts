@@ -1,4 +1,5 @@
-import FUNCTION_CATALOG from "../../../../../shared/functionCatalog.mjs";
+import { showToast } from "../../extensions/ui.js";
+import { createLazyImport } from "../../startup/lazyImport.js";
 
 // Translation tables from the Rust engine (canonical <-> localized function names).
 // Keep these in sync with `crates/formula-engine/src/locale/data/*.tsv`.
@@ -24,9 +25,52 @@ type CatalogFunction = {
   arg_types?: string[];
 };
 
-const CATALOG_BY_NAME = new Map<string, CatalogFunction>();
-for (const fn of (FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? []) {
-  if (fn?.name) CATALOG_BY_NAME.set(fn.name.toUpperCase(), fn);
+type FunctionCatalogModule = { default: { functions?: CatalogFunction[] } };
+
+const loadFunctionCatalogModule = createLazyImport(() => import("../../../../../shared/functionCatalog.mjs"), {
+  label: "Function catalog",
+  onError: (err) => {
+    console.error("[formula][desktop] Failed to load function catalog:", err);
+    try {
+      showToast("Failed to load function catalog. Please reload the app.", "error");
+    } catch {
+      // ignore
+    }
+  },
+});
+
+let catalogByName: Map<string, CatalogFunction> | null = null;
+let catalogByNameInitPromise: Promise<Map<string, CatalogFunction> | null> | null = null;
+
+async function ensureCatalogByName(): Promise<Map<string, CatalogFunction> | null> {
+  if (catalogByName) return catalogByName;
+  if (!catalogByNameInitPromise) {
+    catalogByNameInitPromise = (async () => {
+      const mod = (await loadFunctionCatalogModule()) as FunctionCatalogModule | null;
+      if (!mod) return null;
+      const map = new Map<string, CatalogFunction>();
+      for (const fn of mod.default?.functions ?? []) {
+        if (fn?.name) map.set(fn.name.toUpperCase(), fn);
+      }
+      catalogByName = map;
+      return catalogByName;
+    })().finally(() => {
+      catalogByNameInitPromise = null;
+    });
+  }
+  return catalogByNameInitPromise;
+}
+
+/**
+ * Best-effort: begin loading the function catalog in the background. Callers that render function
+ * hints can invoke this when the user starts editing a formula.
+ */
+export function preloadFunctionSignatureCatalog(): Promise<void> {
+  return ensureCatalogByName().then(() => {});
+}
+
+export function isFunctionSignatureCatalogReady(): boolean {
+  return Boolean(catalogByName && catalogByName.size > 0);
 }
 
 function casefoldIdent(ident: string): string {
@@ -417,10 +461,17 @@ export function signatureParts(
 }
 
 function signatureFromCatalog(name: string): FunctionSignature | null {
+  if (!catalogByName) {
+    // Kick off lazy-load for next time; the catalog is large and we avoid parsing it on initial render.
+    void preloadFunctionSignatureCatalog();
+    return null;
+  }
+
   if (CATALOG_SIGNATURE_CACHE.has(name)) {
     return CATALOG_SIGNATURE_CACHE.get(name) ?? null;
   }
-  const fn = CATALOG_BY_NAME.get(name);
+
+  const fn = catalogByName.get(name);
   if (!fn) {
     CATALOG_SIGNATURE_CACHE.set(name, null);
     return null;
