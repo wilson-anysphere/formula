@@ -41,8 +41,8 @@ use thiserror::Error;
 
 mod biff;
 mod decrypt;
-mod formula_rewrite;
 pub mod diagnostics;
+mod formula_rewrite;
 
 pub use decrypt::DecryptError;
 
@@ -239,7 +239,9 @@ fn panic_payload_to_string(payload: &(dyn std::any::Any + Send)) -> String {
 fn catch_calamine_panic<T>(f: impl FnOnce() -> T) -> Result<T, ImportError> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(v) => Ok(v),
-        Err(payload) => Err(ImportError::CalaminePanic(panic_payload_to_string(payload.as_ref()))),
+        Err(payload) => Err(ImportError::CalaminePanic(panic_payload_to_string(
+            payload.as_ref(),
+        ))),
     }
 }
 
@@ -437,9 +439,10 @@ fn import_xls_path_with_biff_reader(
     })?;
     // Snapshot defined names up-front because we need mutable access to the workbook while
     // iterating over ranges.
-    let calamine_defined_names = catch_calamine_panic_with_context("reading defined names", || {
-        workbook.defined_names().to_vec()
-    })?;
+    let calamine_defined_names =
+        catch_calamine_panic_with_context("reading defined names", || {
+            workbook.defined_names().to_vec()
+        })?;
 
     let mut out = Workbook::new();
     let mut used_sheet_names: Vec<String> = Vec::new();
@@ -579,7 +582,11 @@ fn import_xls_path_with_biff_reader(
                     continue;
                 }
 
-                match biff::parse_biff_sheet_row_col_properties(workbook_stream, sheet.offset, codepage) {
+                match biff::parse_biff_sheet_row_col_properties(
+                    workbook_stream,
+                    sheet.offset,
+                    codepage,
+                ) {
                     Ok(mut props) => {
                         for warning in props.warnings.drain(..) {
                             push_import_warning(
@@ -1041,18 +1048,11 @@ fn import_xls_path_with_biff_reader(
                 .copied();
 
             let mut sheet_stream_autofilter_range: Option<Range> = None;
-            let mut sheet_stream_filter_mode = false;
-            let mut sheet_row_col_props: Option<&biff::SheetRowColProperties> = None;
-            let mut sheet_stream_filter_columns: Vec<formula_model::autofilter::FilterColumn> =
-                Vec::new();
-            let mut sheet_stream_sort_state: Option<formula_model::autofilter::SortState> = None;
 
             if let Some(props) = row_col_props
                 .as_ref()
                 .and_then(|props_by_sheet| props_by_sheet.get(biff_idx))
             {
-                sheet_stream_filter_mode = props.filter_mode;
-                sheet_row_col_props = Some(props);
                 apply_row_col_properties(sheet, props);
                 apply_outline_properties(sheet, props);
                 apply_row_col_style_ids(
@@ -1065,18 +1065,17 @@ fn import_xls_path_with_biff_reader(
                 );
 
                 sheet_stream_autofilter_range = props.auto_filter_range;
-                sheet_stream_filter_columns = props.auto_filter_columns.clone();
-                sheet_stream_sort_state = props.sort_state.clone();
 
                 if props.filter_mode {
                     // BIFF `FILTERMODE` indicates that some rows are currently hidden by a filter.
-                    // We do not preserve filtered-row visibility as user-hidden rows; the model
-                    // does not have a dedicated "filtered hidden" bit, and preserving them as
-                    // user-hidden would be misleading.
+                    //
+                    // BIFF row metadata does not distinguish between user-hidden and filter-hidden
+                    // rows. We classify hidden rows best-effort after the canonical AutoFilter
+                    // range is finalized.
                     push_import_warning(
                         &mut warnings,
                         format!(
-                            "sheet `{sheet_name}` has FILTERMODE (filtered rows); filtered row visibility is not preserved on import"
+                            "sheet `{sheet_name}` has FILTERMODE (filtered rows); filter criteria and row visibility may not round-trip exactly on import"
                         ),
                         &mut warnings_suppressed,
                     );
@@ -1090,99 +1089,13 @@ fn import_xls_path_with_biff_reader(
                 if let Some(range) = filter_database_range.or(sheet_stream_autofilter_range) {
                     sheet.auto_filter = Some(SheetAutoFilter {
                         range,
-                        filter_columns: sheet_stream_filter_columns.clone(),
-                        sort_state: sheet_stream_sort_state.clone().filter(|sort_state| {
-                            // Best-effort guard: only attach sort state when the key ranges fall
-                            // within the AutoFilter range.
-                            sort_state.conditions.iter().all(|cond| {
-                                cond.range.start.row >= range.start.row
-                                    && cond.range.end.row <= range.end.row
-                                    && cond.range.start.col >= range.start.col
-                                    && cond.range.end.col <= range.end.col
-                            })
-                        }),
+                        // Any filter criteria / sort state from the sheet stream is applied later,
+                        // after the canonical AutoFilter range is finalized via defined-name based
+                        // recovery.
+                        filter_columns: Vec::new(),
+                        sort_state: None,
                         raw_xml: Vec::new(),
                     });
-                }
-            }
-
-            // If we have AutoFilter state from the worksheet stream, attach it to any existing
-            // AutoFilter range (for example, when the range was sourced from `_FilterDatabase` or
-            // from earlier best-effort range inference).
-            if let Some(af) = sheet.auto_filter.as_mut() {
-                if af.filter_columns.is_empty() && !sheet_stream_filter_columns.is_empty() {
-                    af.filter_columns = sheet_stream_filter_columns.clone();
-                }
-
-                if af.sort_state.is_none() {
-                    if let Some(sort_state) = sheet_stream_sort_state.clone() {
-                        if sort_state.conditions.iter().all(|cond| {
-                            cond.range.start.row >= af.range.start.row
-                                && cond.range.end.row <= af.range.end.row
-                                && cond.range.start.col >= af.range.start.col
-                                && cond.range.end.col <= af.range.end.col
-                        }) {
-                            af.sort_state = Some(sort_state);
-                        }
-                    }
-                }
-            }
-
-            // Best-effort: recover AutoFilter sort state from BIFF `SORT` metadata when the sheet
-            // stream scan did not yield a supported `SORT` layout.
-            if let (Some(workbook_stream), Some(sheet_info), Some(af)) = (
-                workbook_stream.as_deref(),
-                biff_sheets.as_ref().and_then(|s| s.get(biff_idx)),
-                sheet.auto_filter.as_mut(),
-            ) {
-                if af.sort_state.is_none() {
-                    if sheet_info.offset >= workbook_stream.len() {
-                        warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` sort state for sheet `{sheet_name}`: out-of-bounds stream offset {}",
-                            sheet_info.offset
-                        )));
-                    } else {
-                        match biff::parse_biff_sheet_sort_state(
-                            workbook_stream,
-                            sheet_info.offset,
-                            af.range,
-                        ) {
-                            Ok(mut parsed) => {
-                                warnings.extend(parsed.warnings.drain(..).map(ImportWarning::new));
-                                if af.sort_state.is_none() {
-                                    af.sort_state = parsed.sort_state;
-                                }
-                            }
-                            Err(err) => warnings.push(ImportWarning::new(format!(
-                                "failed to import `.xls` sort state for sheet `{sheet_name}`: {err}"
-                            ))),
-                        }
-                    }
-                }
-            }
-
-            // Best-effort: when `FILTERMODE` is present, Excel indicates that some rows are hidden by
-            // an active filter. We do not currently import filter criteria or filtered-row
-            // visibility, so clear any BIFF row hidden flags that fall inside the filter range to
-            // avoid preserving "mystery hidden rows" without the corresponding filter state.
-            //
-            // This intentionally only clears user-hidden rows (outline-hidden rows remain hidden).
-            if sheet_stream_filter_mode {
-                if let (Some(props), Some(af)) = (sheet_row_col_props, sheet.auto_filter.as_ref()) {
-                    let start_row = af.range.start.row;
-                    let end_row = af.range.end.row;
-                    if end_row > start_row {
-                        for (&row, row_props) in &props.rows {
-                            if !row_props.hidden {
-                                continue;
-                            }
-                            // Skip the header row: Excel filters apply to data rows below the
-                            // header.
-                            if row > start_row && row <= end_row {
-                                sheet.set_row_hidden(row, false);
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -1673,13 +1586,15 @@ fn import_xls_path_with_biff_reader(
                             defined_names: empty_defined_names,
                         };
 
-                        match biff::parse_biff8_sheet_formulas(workbook_stream, sheet_info.offset, &ctx) {
+                        match biff::parse_biff8_sheet_formulas(
+                            workbook_stream,
+                            sheet_info.offset,
+                            &ctx,
+                        ) {
                             Ok(parsed) => {
                                 for (cell_ref, formula) in parsed.formulas {
                                     let anchor = sheet.merged_regions.resolve_cell(cell_ref);
-                                    if !calamine_formula_failed
-                                        && sheet.formula(anchor).is_some()
-                                    {
+                                    if !calamine_formula_failed && sheet.formula(anchor).is_some() {
                                         // Prefer calamine's string representation when it is
                                         // available, but fill any gaps (or entire sheets) from BIFF.
                                         continue;
@@ -2074,8 +1989,11 @@ fn import_xls_path_with_biff_reader(
         (workbook_stream.as_deref(), biff_version, biff_codepage)
     {
         // Resolve BIFF sheet indices to the sheet names used by our output workbook.
-        let sheet_names_by_biff_idx =
-            build_sheet_names_by_biff_idx(biff_sheets.as_deref(), &sheet_mapping, &final_sheet_names_by_idx);
+        let sheet_names_by_biff_idx = build_sheet_names_by_biff_idx(
+            biff_sheets.as_deref(),
+            &sheet_mapping,
+            &final_sheet_names_by_idx,
+        );
 
         // Resolve BIFF sheet indices to WorksheetIds.
         let mut sheet_ids_by_biff_idx: Vec<Option<formula_model::WorksheetId>> =
@@ -2701,15 +2619,157 @@ fn import_xls_path_with_biff_reader(
         }
     }
 
+    // Post-process AutoFilter-related state that depends on the final canonical filter range.
+    //
+    // The AutoFilter range itself may be corrected later via `_FilterDatabase` defined-name parsing
+    // and workbook-stream recovery. Any downstream state that depends on the range (e.g. SORT key
+    // ranges and FILTERMODE row classification) must therefore happen after the final range is
+    // applied.
+    if let Some(props_by_sheet) = row_col_props.as_ref() {
+        for (calamine_idx, &sheet_id) in sheet_ids_by_calamine_idx.iter().enumerate() {
+            let biff_idx = sheet_mapping.get(calamine_idx).copied().flatten();
+            let Some(biff_idx) = biff_idx else {
+                continue;
+            };
+
+            let Some(props) = props_by_sheet.get(biff_idx) else {
+                continue;
+            };
+
+            let Some(sheet) = out.sheet_mut(sheet_id) else {
+                warnings.push(ImportWarning::new(format!(
+                    "skipping `.xls` AutoFilter post-processing for missing sheet id {sheet_id}"
+                )));
+                continue;
+            };
+            let sheet_name = sheet.name.clone();
+
+            let Some(af_range) = sheet.auto_filter.as_ref().map(|af| af.range) else {
+                continue;
+            };
+
+            // Best-effort: attach AutoFilter filter columns recovered from BIFF8 future records
+            // (AutoFilter12) if we don't already have criteria from legacy AUTOFILTER records.
+            if let Some(af) = sheet.auto_filter.as_mut() {
+                if af.filter_columns.is_empty() && !props.auto_filter_columns.is_empty() {
+                    let max_col_id = af_range.end.col.saturating_sub(af_range.start.col);
+                    let cols: Vec<_> = props
+                        .auto_filter_columns
+                        .iter()
+                        .filter(|col| col.col_id <= max_col_id)
+                        .cloned()
+                        .collect();
+                    if !cols.is_empty() {
+                        af.filter_columns = cols;
+                    }
+                }
+            }
+
+            // Best-effort: attach worksheet SORT state to the AutoFilter if the key ranges fall
+            // within the final AutoFilter range.
+            if sheet
+                .auto_filter
+                .as_ref()
+                .and_then(|af| af.sort_state.as_ref())
+                .is_none()
+            {
+                if let Some(sort_state) = props.sort_state.clone() {
+                    if sort_state.conditions.iter().all(|cond| {
+                        cond.range.start.row >= af_range.start.row
+                            && cond.range.end.row <= af_range.end.row
+                            && cond.range.start.col >= af_range.start.col
+                            && cond.range.end.col <= af_range.end.col
+                    }) {
+                        if let Some(af) = sheet.auto_filter.as_mut() {
+                            af.sort_state = Some(sort_state);
+                        }
+                    }
+                }
+            }
+
+            // Best-effort: recover AutoFilter sort state from BIFF `SORT` metadata when the sheet
+            // stream scan did not yield a supported `SORT` layout.
+            if let (Some(workbook_stream_bytes), Some(af)) =
+                (workbook_stream.as_deref(), sheet.auto_filter.as_mut())
+            {
+                if af.sort_state.is_none() {
+                    if let Some(&offset) = sheet_stream_offsets_by_sheet_id.get(&sheet.id) {
+                        if offset >= workbook_stream_bytes.len() {
+                            warnings.push(ImportWarning::new(format!(
+                                "failed to import `.xls` sort state for sheet `{sheet_name}`: out-of-bounds stream offset {offset}",
+                            )));
+                        } else {
+                            match biff::parse_biff_sheet_sort_state(
+                                workbook_stream_bytes,
+                                offset,
+                                af.range,
+                            ) {
+                                Ok(mut parsed) => {
+                                    warnings.extend(
+                                        parsed.warnings.drain(..).map(ImportWarning::new),
+                                    );
+                                    if af.sort_state.is_none() {
+                                        af.sort_state = parsed.sort_state;
+                                    }
+                                }
+                                Err(err) => warnings.push(ImportWarning::new(format!(
+                                    "failed to import `.xls` sort state for sheet `{sheet_name}`: {err}"
+                                ))),
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !props.filter_mode {
+                continue;
+            }
+
+            // BIFF `FILTERMODE` indicates that some rows are hidden by an active AutoFilter. BIFF
+            // ROW records do not distinguish between user-hidden rows and filter-hidden rows, so
+            // during the initial sheet import we treat hidden ROW records as user-hidden. After
+            // the final AutoFilter range is applied, reclassify hidden data rows within that range
+            // as filter-hidden.
+            let start_row = af_range.start.row;
+            let end_row = af_range.end.row;
+            if end_row <= start_row {
+                continue;
+            }
+
+            // FILTERMODE only applies to rows below the header row.
+            let data_start_1based = start_row.saturating_add(2);
+            let data_end_1based = end_row.saturating_add(1);
+            if data_start_1based <= data_end_1based {
+                sheet.clear_filter_hidden_range(data_start_1based, data_end_1based);
+            }
+
+            for (&row, row_props) in &props.rows {
+                if !row_props.hidden {
+                    continue;
+                }
+                // Skip the header row: Excel filters apply to data rows below the header.
+                if row <= start_row || row > end_row {
+                    continue;
+                }
+                let row_1based = row.saturating_add(1);
+                if sheet.row_outline_entry(row_1based).hidden.outline {
+                    // Outline-hidden rows remain hidden regardless of filter state.
+                    continue;
+                }
+                // Convert BIFF hidden rows within the AutoFilter data range to filter-hidden rows.
+                sheet.set_row_hidden(row, false);
+                sheet.set_filter_hidden_row(row_1based, true);
+            }
+        }
+    }
+
     // Best-effort import of AutoFilter criteria from worksheet AUTOFILTER records.
     //
     // This is intentionally resilient: malformed records are surfaced as warnings but do not fail
     // the overall import.
-    if let (Some(workbook_stream_bytes), Some(biff_version), Some(codepage)) = (
-        workbook_stream.as_deref(),
-        biff_version,
-        biff_codepage,
-    ) {
+    if let (Some(workbook_stream_bytes), Some(biff_version), Some(codepage)) =
+        (workbook_stream.as_deref(), biff_version, biff_codepage)
+    {
         for sheet in out.sheets.iter_mut() {
             let Some(af) = sheet.auto_filter.as_mut() else {
                 continue;
@@ -3688,10 +3748,7 @@ pub fn parse_biff_sheet_merged_cells(
     workbook_stream: &[u8],
     start: usize,
 ) -> Result<Vec<Range>, String> {
-    Ok(
-        biff::parse_biff_sheet_merged_cells(workbook_stream, start)?
-            .ranges,
-    )
+    Ok(biff::parse_biff_sheet_merged_cells(workbook_stream, start)?.ranges)
 }
 
 fn normalize_sheet_name_for_match(name: &str) -> String {
@@ -3876,7 +3933,11 @@ fn import_biff8_shared_formulas(
     let biff::externsheet::ExternSheetTable {
         entries: externsheet_entries,
         warnings: extern_warnings,
-    } = biff::externsheet::parse_biff_externsheet(workbook_stream, biff::BiffVersion::Biff8, codepage);
+    } = biff::externsheet::parse_biff_externsheet(
+        workbook_stream,
+        biff::BiffVersion::Biff8,
+        codepage,
+    );
     for w in extern_warnings {
         push_import_warning(
             warnings,
@@ -3954,7 +4015,8 @@ fn import_biff8_shared_formulas(
             };
 
             // Stop at the next substream BOF; worksheet substream begins at `sheet_info.offset`.
-            if record.offset != sheet_info.offset && biff::records::is_bof_record(record.record_id) {
+            if record.offset != sheet_info.offset && biff::records::is_bof_record(record.record_id)
+            {
                 break;
             }
 
@@ -4608,10 +4670,9 @@ mod tests {
         .expect("expected import to succeed after BIFF reader panic");
 
         assert!(
-            result
-                .warnings
-                .iter()
-                .any(|w| w.message.contains("panic while reading `.xls` workbook stream")),
+            result.warnings.iter().any(|w| w
+                .message
+                .contains("panic while reading `.xls` workbook stream")),
             "expected warning about BIFF workbook stream panic, got: {:?}",
             result.warnings
         );

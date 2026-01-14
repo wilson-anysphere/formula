@@ -2041,8 +2041,10 @@ pub fn build_hyperlink_fixture_xls() -> Vec<u8> {
 /// The importer should truncate the URL at the first NUL for best-effort compatibility.
 pub fn build_url_hyperlink_embedded_nul_fixture_xls() -> Vec<u8> {
     let url = "https://example.com\0ignored";
-    let workbook_stream =
-        build_hyperlink_workbook_stream("UrlNul", hlink_external_url(0, 0, 0, 0, url, "Example", "Tooltip"));
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "UrlNul",
+        hlink_external_url(0, 0, 0, 0, url, "Example", "Tooltip"),
+    );
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -2572,6 +2574,42 @@ fn build_autofilter_filterdatabase_arean_sheet_stream(xf_cell: u16) -> Vec<u8> {
     sheet
 }
 
+fn build_autofilter_filterdatabase_arean_filtermode_hidden_row_sheet_stream(
+    xf_cell: u16,
+) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 10) cols [0, 4) => A1:D10.
+    // This intentionally exceeds the workbook-scoped `_FilterDatabase` range (A1:B3) so the
+    // importer initially infers a larger AutoFilter range from the worksheet stream.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&10u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&4u16.to_le_bytes()); // last col + 1 (A..D)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Mark row 4 (1-based) as hidden via the ROW record. This row falls inside the DIMENSIONS-based
+    // inferred AutoFilter range (A1:D10), but outside the true `_FilterDatabase` range (A1:B3).
+    push_record(&mut sheet, RECORD_ROW, &row_record(3, true, 0, false));
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // AUTOFILTERINFO: 4 columns (A..D). This will cause DIMENSIONS-based inference to yield A1:D10.
+    push_record(&mut sheet, RECORD_AUTOFILTERINFO, &4u16.to_le_bytes());
+    // FILTERMODE indicates an active filter state (filtered rows).
+    push_record(&mut sheet, RECORD_FILTERMODE, &[]);
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
 fn build_autofilter_filtermode_hidden_rows_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -3034,6 +3072,26 @@ pub fn build_autofilter_workbook_scope_unqualified_multisheet_fixture_xls() -> V
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture like [`build_autofilter_workbook_scope_unqualified_multisheet_fixture_xls`],
+/// but with `FILTERMODE` and a user-hidden row in the worksheet stream that falls **outside** the
+/// true `_FilterDatabase` range and therefore must not be reclassified as filter-hidden.
+pub fn build_autofilter_workbook_scope_unqualified_multisheet_filtermode_hidden_row_fixture_xls(
+) -> Vec<u8> {
+    let workbook_stream =
+        build_autofilter_workbook_scope_unqualified_multisheet_filtermode_hidden_row_workbook_stream(
+        );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single sheet named `AutoFilter` with a
 /// workbook-scoped `_FilterDatabase` defined name encoded as a *normal* (non-built-in) NAME string.
 ///
@@ -3149,6 +3207,65 @@ fn build_autofilter_workbook_scope_unqualified_multisheet_workbook_stream() -> V
 
     let sheet1_offset = globals.len();
     let sheet1 = build_autofilter_filterdatabase_arean_sheet_stream(xf_cell);
+    let sheet2_offset = sheet1_offset + sheet1.len();
+    let sheet2 = build_autofilter_sheet_stream_with_dimensions(xf_cell, 1, 1);
+
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals[boundsheet2_offset_pos..boundsheet2_offset_pos + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet1);
+    globals.extend_from_slice(&sheet2);
+    globals
+}
+
+fn build_autofilter_workbook_scope_unqualified_multisheet_filtermode_hidden_row_workbook_stream(
+) -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table. Keep the usual 16 style XFs so BIFF consumers stay happy.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Two worksheets.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet1 = Vec::<u8>::new();
+    boundsheet1.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet1.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet1, "Unqualified");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet1);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    let boundsheet2_start = globals.len();
+    let mut boundsheet2 = Vec::<u8>::new();
+    boundsheet2.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet2.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet2, "Other");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet2);
+    let boundsheet2_offset_pos = boundsheet2_start + 4;
+
+    // Workbook-scoped built-in `_FilterDatabase` name (hidden), but with a 2D PtgArea token that
+    // does not specify a sheet.
+    let filter_db_rgce = ptg_area(0, 2, 0, 1); // $A$1:$B$3
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 0, 0x0D, &filter_db_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet1_offset = globals.len();
+    let sheet1 = build_autofilter_filterdatabase_arean_filtermode_hidden_row_sheet_stream(xf_cell);
     let sheet2_offset = sheet1_offset + sheet1.len();
     let sheet2 = build_autofilter_sheet_stream_with_dimensions(xf_cell, 1, 1);
 
@@ -6961,8 +7078,16 @@ fn build_page_setup_sheet_stream(xf_cell: u16, cfg: PageSetupFixtureSheet) -> Ve
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
 
     // Margins.
-    push_record(&mut sheet, RECORD_LEFTMARGIN, &cfg.left_margin.to_le_bytes());
-    push_record(&mut sheet, RECORD_RIGHTMARGIN, &cfg.right_margin.to_le_bytes());
+    push_record(
+        &mut sheet,
+        RECORD_LEFTMARGIN,
+        &cfg.left_margin.to_le_bytes(),
+    );
+    push_record(
+        &mut sheet,
+        RECORD_RIGHTMARGIN,
+        &cfg.right_margin.to_le_bytes(),
+    );
     push_record(&mut sheet, RECORD_TOPMARGIN, &cfg.top_margin.to_le_bytes());
     push_record(
         &mut sheet,

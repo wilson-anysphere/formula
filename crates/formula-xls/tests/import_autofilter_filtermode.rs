@@ -28,8 +28,7 @@ fn warns_on_filtermode_and_preserves_autofilter_dropdown_range() {
         .expect("expected sheet.auto_filter to be set");
     assert_eq!(af.range, Range::from_a1("A1:B3").expect("valid range"));
 
-    let warning_substr =
-        "sheet `Filtered` has FILTERMODE (filtered rows); filtered row visibility is not preserved on import";
+    let warning_substr = "sheet `Filtered` has FILTERMODE (filtered rows)";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
@@ -44,7 +43,7 @@ fn warns_on_filtermode_and_preserves_autofilter_dropdown_range() {
 }
 
 #[test]
-fn filtermode_does_not_preserve_filtered_row_hidden_flags() {
+fn filtermode_converts_filtered_row_hidden_flags_to_filter_hidden() {
     let bytes = xls_fixture_builder::build_autofilter_filtermode_hidden_rows_fixture_xls();
     let result = import_fixture(&bytes);
 
@@ -59,13 +58,49 @@ fn filtermode_does_not_preserve_filtered_row_hidden_flags() {
         .expect("expected sheet.auto_filter to be set");
     assert_eq!(af.range, Range::from_a1("A1:B3").expect("valid range"));
 
-    // Row 2 (1-based) is hidden in the BIFF row metadata, but when FILTERMODE is present we do not
-    // preserve filtered-row visibility as user-hidden rows.
+    // Row 2 (1-based) is hidden in the BIFF row metadata. When FILTERMODE is present we treat
+    // hidden data rows inside the AutoFilter range as filter-hidden (not user-hidden).
+    let entry = sheet.row_outline_entry(2);
     assert!(
-        !sheet.is_row_hidden_effective(2),
-        "expected row 2 to be visible; row_props={:?}; warnings={:?}",
-        sheet.row_properties(1),
-        result.warnings
+        entry.hidden.filter,
+        "expected row 2 to be filter-hidden; entry={:?}; warnings={:?}",
+        entry, result.warnings
+    );
+    assert!(
+        !entry.hidden.user,
+        "expected row 2 to not be user-hidden; entry={:?}; warnings={:?}",
+        entry, result.warnings
+    );
+}
+
+#[test]
+fn filtermode_does_not_reclassify_user_hidden_rows_outside_final_autofilter_range() {
+    let bytes = xls_fixture_builder::build_autofilter_workbook_scope_unqualified_multisheet_filtermode_hidden_row_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("Unqualified")
+        .expect("Unqualified missing");
+
+    let af = sheet
+        .auto_filter
+        .as_ref()
+        .expect("expected sheet.auto_filter to be set");
+    assert_eq!(af.range, Range::from_a1("A1:B3").expect("valid range"));
+
+    // Row 4 (1-based) is hidden in the BIFF row metadata but lies outside the final AutoFilter
+    // range (A1:B3), so it should remain user-hidden rather than being treated as filter-hidden.
+    let entry = sheet.row_outline_entry(4);
+    assert!(
+        entry.hidden.user,
+        "expected row 4 to remain user-hidden; entry={:?}; warnings={:?}",
+        entry, result.warnings
+    );
+    assert!(
+        !entry.hidden.filter,
+        "expected row 4 to not be filter-hidden; entry={:?}; warnings={:?}",
+        entry, result.warnings
     );
 }
 
@@ -94,8 +129,7 @@ fn warns_on_filtermode_and_sets_autofilter_from_sheet_stream_when_filterdatabase
         result.workbook.defined_names
     );
 
-    let warning_substr =
-        "sheet `FilteredNoDb` has FILTERMODE (filtered rows); filtered row visibility is not preserved on import";
+    let warning_substr = "sheet `FilteredNoDb` has FILTERMODE (filtered rows)";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
@@ -134,8 +168,7 @@ fn warns_on_filtermode_and_sets_autofilter_from_dimensions_when_autofilterinfo_m
         result.workbook.defined_names
     );
 
-    let warning_substr =
-        "sheet `FilterModeOnly` has FILTERMODE (filtered rows); filtered row visibility is not preserved on import";
+    let warning_substr = "sheet `FilterModeOnly` has FILTERMODE (filtered rows)";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
