@@ -169,9 +169,16 @@ fn detects_encrypted_ooxml_container() {
             .expect("write encrypted fixture");
 
         let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
-        assert!(
-            matches!(err, Error::PasswordRequired { .. }),
-            "expected Error::PasswordRequired, got {err:?}"
-        );
+        if cfg!(feature = "encrypted-workbooks") {
+            assert!(
+                matches!(err, Error::PasswordRequired { .. }),
+                "expected Error::PasswordRequired, got {err:?}"
+            );
+        } else {
+            assert!(
+                matches!(err, Error::UnsupportedEncryption { .. }),
+                "expected Error::UnsupportedEncryption, got {err:?}"
+            );
+        }
     }
 }

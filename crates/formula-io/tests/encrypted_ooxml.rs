@@ -78,28 +78,57 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 .expect("expected encrypted workbook to be detected");
             assert_eq!(info.kind, WorkbookEncryptionKind::OoxmlOleEncryptedPackage);
 
-            let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
-            assert!(
-                matches!(err, Error::PasswordRequired { .. }),
-                "expected Error::PasswordRequired, got {err:?}"
-            );
+            let err =
+                detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
+            if cfg!(feature = "encrypted-workbooks") {
+                assert!(
+                    matches!(err, Error::PasswordRequired { .. }),
+                    "expected Error::PasswordRequired, got {err:?}"
+                );
+            } else {
+                assert!(
+                    matches!(err, Error::UnsupportedEncryption { .. }),
+                    "expected Error::UnsupportedEncryption, got {err:?}"
+                );
+            }
 
             let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
-            assert!(
-                matches!(err, Error::PasswordRequired { .. }),
-                "expected Error::PasswordRequired, got {err:?}"
-            );
+            if cfg!(feature = "encrypted-workbooks") {
+                assert!(
+                    matches!(err, Error::PasswordRequired { .. }),
+                    "expected Error::PasswordRequired, got {err:?}"
+                );
+            } else {
+                assert!(
+                    matches!(err, Error::UnsupportedEncryption { .. }),
+                    "expected Error::UnsupportedEncryption, got {err:?}"
+                );
+            }
             let msg = err.to_string().to_lowercase();
-            assert!(
-                msg.contains("password") || msg.contains("encrypt"),
-                "expected error message to mention encryption/password protection, got: {msg}"
-            );
+            if cfg!(feature = "encrypted-workbooks") {
+                assert!(
+                    msg.contains("password") || msg.contains("encrypt"),
+                    "expected error message to mention encryption/password protection, got: {msg}"
+                );
+            } else {
+                assert!(
+                    msg.contains("unsupported") || msg.contains("not supported"),
+                    "expected error message to mention that encryption is unsupported, got: {msg}"
+                );
+            }
 
             let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
-            assert!(
-                matches!(err, Error::PasswordRequired { .. }),
-                "expected Error::PasswordRequired, got {err:?}"
-            );
+            if cfg!(feature = "encrypted-workbooks") {
+                assert!(
+                    matches!(err, Error::PasswordRequired { .. }),
+                    "expected Error::PasswordRequired, got {err:?}"
+                );
+            } else {
+                assert!(
+                    matches!(err, Error::UnsupportedEncryption { .. }),
+                    "expected Error::UnsupportedEncryption, got {err:?}"
+                );
+            }
 
             // Providing a password should either surface a distinct "invalid password" error (when
             // decryption support is not enabled) or a more specific decryption/compatibility error
@@ -121,8 +150,8 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 );
             } else {
                 assert!(
-                    matches!(err, Error::InvalidPassword { .. }),
-                    "expected Error::InvalidPassword, got {err:?}"
+                    matches!(err, Error::UnsupportedEncryption { .. }),
+                    "expected Error::UnsupportedEncryption, got {err:?}"
                 );
             }
 
@@ -142,8 +171,8 @@ fn detects_encrypted_ooxml_xlsx_container() {
                 );
             } else {
                 assert!(
-                    matches!(err, Error::InvalidPassword { .. }),
-                    "expected Error::InvalidPassword, got {err:?}"
+                    matches!(err, Error::UnsupportedEncryption { .. }),
+                    "expected Error::UnsupportedEncryption, got {err:?}"
                 );
             }
         }
@@ -165,11 +194,19 @@ fn detects_encrypted_ooxml_xlsx_container_for_model_loader() {
             let path = tmp.path().join(filename);
             std::fs::write(&path, &bytes).expect("write encrypted fixture");
 
-            let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
-            assert!(
-                matches!(err, Error::PasswordRequired { .. }),
-                "expected Error::PasswordRequired, got {err:?}"
-            );
+            let err =
+                open_workbook_model(&path).expect_err("expected encrypted workbook to error");
+            if cfg!(feature = "encrypted-workbooks") {
+                assert!(
+                    matches!(err, Error::PasswordRequired { .. }),
+                    "expected Error::PasswordRequired, got {err:?}"
+                );
+            } else {
+                assert!(
+                    matches!(err, Error::UnsupportedEncryption { .. }),
+                    "expected Error::UnsupportedEncryption, got {err:?}"
+                );
+            }
         }
     }
 }
@@ -184,16 +221,38 @@ fn encrypted_ooxml_fixtures_require_password() {
         let path = fixture_path(rel);
 
         let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
+        if cfg!(feature = "encrypted-workbooks") {
+            assert!(
+                matches!(err, Error::PasswordRequired { .. }),
+                "expected Error::PasswordRequired, got {err:?}"
+            );
+        } else {
+            assert!(
+                matches!(err, Error::UnsupportedEncryption { .. }),
+                "expected Error::UnsupportedEncryption, got {err:?}"
+            );
+        }
         let msg = err.to_string().to_lowercase();
         assert!(
-            msg.contains("password") || msg.contains("encrypt"),
+            msg.contains("encrypt") || msg.contains("password") || msg.contains("unsupported"),
             "expected error message to mention encryption/password protection, got: {msg}"
         );
 
         let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
+        if cfg!(feature = "encrypted-workbooks") {
+            assert!(
+                matches!(err, Error::PasswordRequired { .. }),
+                "expected Error::PasswordRequired, got {err:?}"
+            );
+        } else {
+            assert!(
+                matches!(err, Error::UnsupportedEncryption { .. }),
+                "expected Error::UnsupportedEncryption, got {err:?}"
+            );
+        }
         let msg = err.to_string().to_lowercase();
         assert!(
-            msg.contains("password") || msg.contains("encrypt"),
+            msg.contains("encrypt") || msg.contains("password") || msg.contains("unsupported"),
             "expected error message to mention encryption/password protection, got: {msg}"
         );
     }

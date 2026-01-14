@@ -55,8 +55,8 @@ fn password_open_path_routes_encrypted_biff_xls_to_xls_importer() {
             "expected password-capable open path to reach `.xls` importer (not fail early with Error::EncryptedWorkbook), got {err:?}"
         );
         assert!(
-            matches!(err, Error::OpenXls { .. }),
-            "expected `.xls` importer error, got {err:?}"
+            matches!(err, Error::OpenXls { .. } | Error::UnsupportedEncryption { .. }),
+            "expected `.xls` importer/decryption error, got {err:?}"
         );
 
         let err = open_workbook_model_with_password(&path, Some("password"))
@@ -66,8 +66,8 @@ fn password_open_path_routes_encrypted_biff_xls_to_xls_importer() {
             "expected password-capable open path to reach `.xls` importer (not fail early with Error::EncryptedWorkbook), got {err:?}"
         );
         assert!(
-            matches!(err, Error::OpenXls { .. }),
-            "expected `.xls` importer error, got {err:?}"
+            matches!(err, Error::OpenXls { .. } | Error::UnsupportedEncryption { .. }),
+            "expected `.xls` importer/decryption error, got {err:?}"
         );
     }
 }

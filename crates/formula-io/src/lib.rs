@@ -53,8 +53,8 @@ pub enum Error {
         version_major: u16,
         version_minor: u16,
     },
-    #[error("unsupported encryption for workbook `{path}`")]
-    UnsupportedEncryption { path: PathBuf },
+    #[error("unsupported encryption for workbook `{path}`: {kind}")]
+    UnsupportedEncryption { path: PathBuf, kind: String },
     #[error(
         "unsupported encrypted workbook `{path}`: decrypted workbook kind `{kind}` is not supported"
     )]
@@ -877,8 +877,10 @@ pub fn open_workbook_model_with_options(
     use std::io::BufReader;
 
     let path = path.as_ref();
-    // Preserve existing OOXML encrypted-container semantics: when a password is provided we surface
-    // `InvalidPassword` (we don't yet decrypt OOXML here), otherwise `PasswordRequired`.
+    // Reject Office-encrypted OOXML workbooks stored in an OLE container (`EncryptionInfo` +
+    // `EncryptedPackage`) early so we don't accidentally route them through the legacy `.xls`
+    // importer. Without the `encrypted-workbooks` feature we treat these as unsupported
+    // encryption; with it we preserve the existing password-required/invalid-password semantics.
     if let Some(err) = encrypted_ooxml_error_from_path(path, opts.password.as_deref()) {
         return Err(err);
     }
@@ -917,16 +919,22 @@ pub fn open_workbook_model_with_options(
             if let Some(password) = opts.password.as_deref() {
                 match xls::import_xls_path_with_password(path, password) {
                     Ok(result) => Ok(result.workbook),
-                    Err(xls::ImportError::Decrypt(xls::DecryptError::WrongPassword)) => {
-                        Err(Error::InvalidPassword {
+                    Err(xls::ImportError::Decrypt(err)) => match err {
+                        xls::DecryptError::WrongPassword => Err(Error::InvalidPassword {
                             path: path.to_path_buf(),
-                        })
-                    }
-                    Err(xls::ImportError::Decrypt(xls::DecryptError::UnsupportedEncryption)) => {
-                        Err(Error::UnsupportedEncryption {
+                        }),
+                        xls::DecryptError::UnsupportedEncryption => Err(Error::UnsupportedEncryption {
                             path: path.to_path_buf(),
-                        })
-                    }
+                            kind: "legacy `.xls` FILEPASS encryption scheme not supported"
+                                .to_string(),
+                        }),
+                        xls::DecryptError::InvalidFormat(message) => Err(Error::UnsupportedEncryption {
+                            path: path.to_path_buf(),
+                            kind: format!(
+                                "legacy `.xls` FILEPASS encryption metadata is invalid: {message}"
+                            ),
+                        }),
+                    },
                     Err(xls::ImportError::EncryptedWorkbook) => Err(Error::PasswordRequired {
                         path: path.to_path_buf(),
                     }),
@@ -1141,9 +1149,11 @@ fn open_workbook_model_from_decrypted_ooxml_zip_bytes(
 /// - For password-protected legacy `.xls` workbooks (BIFF `FILEPASS`), this will attempt to decrypt
 ///   the workbook stream using `formula-xls` when `password` is provided.
 /// - For Office-encrypted OOXML workbooks stored in an OLE container (`EncryptionInfo` +
-///   `EncryptedPackage`), this returns:
-///   - [`Error::PasswordRequired`] when `password` is `None`, and
-///   - [`Error::InvalidPassword`] when a password is provided but decryption fails.
+///   `EncryptedPackage`):
+///   - when the `formula-io/encrypted-workbooks` feature is enabled, this will attempt to decrypt
+///     the workbook in-memory (and may return [`Error::PasswordRequired`] / [`Error::InvalidPassword`]
+///     on failure).
+///   - otherwise, this returns [`Error::UnsupportedEncryption`].
 ///
 /// With the `formula-io/encrypted-workbooks` feature enabled, this function will attempt to decrypt
 /// and open supported encrypted OOXML workbooks in memory (without persisting plaintext to disk).
@@ -1200,9 +1210,11 @@ pub fn open_workbook_model_with_password(
 /// - For password-protected legacy `.xls` workbooks (BIFF `FILEPASS`), this will attempt to decrypt
 ///   the workbook stream using `formula-xls` when `password` is provided.
 /// - For Office-encrypted OOXML workbooks stored in an OLE container (`EncryptionInfo` +
-///   `EncryptedPackage`), this returns:
-///   - [`Error::PasswordRequired`] when `password` is `None`, and
-///   - [`Error::InvalidPassword`] when a password is provided but decryption fails.
+///   `EncryptedPackage`):
+///   - when the `formula-io/encrypted-workbooks` feature is enabled, this will attempt to decrypt
+///     the workbook in-memory (and may return [`Error::PasswordRequired`] / [`Error::InvalidPassword`]
+///     on failure).
+///   - otherwise, this returns [`Error::UnsupportedEncryption`].
 ///
 /// With the `formula-io/encrypted-workbooks` feature enabled, this function will attempt to decrypt
 /// and open supported encrypted OOXML workbooks in memory (without persisting plaintext to disk).
@@ -1624,6 +1636,13 @@ fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> 
     None
 }
 
+fn unsupported_office_ooxml_encryption(path: &Path) -> Error {
+    Error::UnsupportedEncryption {
+        path: path.to_path_buf(),
+        kind: "Office-encrypted OOXML workbook (OLE EncryptionInfo + EncryptedPackage) is not supported; save a decrypted copy in Excel and try again".to_string(),
+    }
+}
+
 fn maybe_read_plaintext_ooxml_package_from_encrypted_ole(
     path: &Path,
     password: Option<&str>,
@@ -1664,9 +1683,16 @@ fn maybe_read_plaintext_ooxml_package_from_encrypted_ole(
     }
 
     if password.is_none() {
-        return Err(Error::PasswordRequired {
-            path: path.to_path_buf(),
-        });
+        #[cfg(feature = "encrypted-workbooks")]
+        {
+            return Err(Error::PasswordRequired {
+                path: path.to_path_buf(),
+            });
+        }
+        #[cfg(not(feature = "encrypted-workbooks"))]
+        {
+            return Err(unsupported_office_ooxml_encryption(path));
+        }
     }
 
     // Read the required streams. Some producers/library combinations require a leading slash in the
@@ -1787,21 +1813,30 @@ fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
         });
     }
 
-    if password.is_none() {
-        return Some(Error::PasswordRequired {
-            path: path.to_path_buf(),
-        });
+    #[cfg(not(feature = "encrypted-workbooks"))]
+    {
+        return Some(unsupported_office_ooxml_encryption(path));
     }
 
-    // We don't attempt to decrypt in this helper; it exists to provide UX-friendly error
-    // classification for encrypted OOXML wrappers (`EncryptionInfo` + `EncryptedPackage` streams).
-    //
-    // When the `encrypted-workbooks` feature is enabled, the password-aware open paths attempt
-    // in-memory decryption earlier and only fall back to this classification logic when decryption
-    // is not in play.
-    Some(Error::InvalidPassword {
-        path: path.to_path_buf(),
-    })
+    #[cfg(feature = "encrypted-workbooks")]
+    {
+        if password.is_none() {
+            return Some(Error::PasswordRequired {
+                path: path.to_path_buf(),
+            });
+        }
+
+        // We don't attempt to decrypt in this helper; it exists to provide UX-friendly error
+        // classification for encrypted OOXML wrappers (`EncryptionInfo` + `EncryptedPackage`
+        // streams).
+        //
+        // When the `encrypted-workbooks` feature is enabled, the password-aware open paths attempt
+        // in-memory decryption earlier and only fall back to this classification logic when
+        // decryption is not in play.
+        Some(Error::InvalidPassword {
+            path: path.to_path_buf(),
+        })
+    }
 }
 
 /// Return `Some(true)` when the OLE `Workbook`/`Book` stream starts with a BIFF `BOF` record.
@@ -2011,7 +2046,7 @@ pub fn open_workbook_with_options(
     // (`EncryptionInfo` + `EncryptedPackage` streams).
     //
     // When the `encrypted-workbooks` feature is enabled, attempt in-memory decryption. Otherwise,
-    // fall back to UX-friendly error classification (password required / invalid password).
+    // surface an "unsupported encryption" error so callers don't assume a password will work.
     #[cfg(feature = "encrypted-workbooks")]
     {
         if let Some(bytes) =
@@ -2091,16 +2126,22 @@ pub fn open_workbook_with_options(
             if let Some(password) = opts.password.as_deref() {
                 match xls::import_xls_path_with_password(path, password) {
                     Ok(result) => Ok(Workbook::Xls(result)),
-                    Err(xls::ImportError::Decrypt(xls::DecryptError::WrongPassword)) => {
-                        Err(Error::InvalidPassword {
+                    Err(xls::ImportError::Decrypt(err)) => match err {
+                        xls::DecryptError::WrongPassword => Err(Error::InvalidPassword {
                             path: path.to_path_buf(),
-                        })
-                    }
-                    Err(xls::ImportError::Decrypt(xls::DecryptError::UnsupportedEncryption)) => {
-                        Err(Error::UnsupportedEncryption {
+                        }),
+                        xls::DecryptError::UnsupportedEncryption => Err(Error::UnsupportedEncryption {
                             path: path.to_path_buf(),
-                        })
-                    }
+                            kind: "legacy `.xls` FILEPASS encryption scheme not supported"
+                                .to_string(),
+                        }),
+                        xls::DecryptError::InvalidFormat(message) => Err(Error::UnsupportedEncryption {
+                            path: path.to_path_buf(),
+                            kind: format!(
+                                "legacy `.xls` FILEPASS encryption metadata is invalid: {message}"
+                            ),
+                        }),
+                    },
                     Err(xls::ImportError::EncryptedWorkbook) => Err(Error::PasswordRequired {
                         path: path.to_path_buf(),
                     }),
