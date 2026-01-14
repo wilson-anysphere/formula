@@ -167,3 +167,39 @@ test("applyState accepts formula-model style image + drawings payloads", () => {
   assert.ok(drawings[0].anchor);
   assert.ok(drawings[0].kind);
 });
+
+test("applyExternalImageDeltas updates image store without creating undo history", () => {
+  const doc = new DocumentController();
+  let lastChange = null;
+  doc.on("change", (payload) => {
+    lastChange = payload;
+  });
+
+  assert.equal(doc.canUndo, false);
+  assert.equal(doc.isDirty, false);
+
+  doc.applyExternalImageDeltas(
+    [
+      {
+        imageId: "img_external",
+        before: null,
+        after: { bytes: new Uint8Array([7, 8, 9]), mimeType: "image/png" },
+      },
+    ],
+    { source: "collab" },
+  );
+
+  assert.equal(doc.canUndo, false);
+  assert.equal(doc.isDirty, true);
+
+  const image = doc.getImage("img_external");
+  assert.ok(image);
+  assert.equal(image?.mimeType, "image/png");
+  assert.deepEqual(Array.from(image?.bytes ?? []), [7, 8, 9]);
+
+  assert.ok(lastChange);
+  assert.equal(lastChange.source, "collab");
+  assert.deepEqual(lastChange.imageDeltas, [
+    { imageId: "img_external", before: null, after: { mimeType: "image/png", byteLength: 3 } },
+  ]);
+});
