@@ -1030,6 +1030,105 @@ test("buildWorkbookContext: structured DLP REDACT does not leak non-heuristic sh
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: structured DLP REDACT does not send disallowed sheet-name metadata to embedder for allowed chunks (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-structured-sheetname-embedder",
+    sheets: [
+      {
+        name: "TopSecret",
+        cells: [[{ v: "SecretA" }, { v: "SecretB" }, null, { v: "Hello" }, { v: "World" }]],
+      },
+    ],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  await cm.buildWorkbookContext({
+    workbook,
+    query: "ignore",
+    topK: 0, // skip retrieval; we only care about what was sent to the embedder during indexing
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "TopSecret",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  const joined = embedder.seen.join("\n");
+  assert.doesNotMatch(joined, /TopSecret/);
+});
+
+test("buildWorkbookContext: structured DLP REDACT also redacts non-heuristic table names when a disallowed range exists elsewhere on the sheet (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-structured-table-name-allowed",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [
+          // A1:B1 is classified as Restricted.
+          [{ v: "SecretA" }, { v: "SecretB" }, null, { v: "Key" }, { v: "Value" }],
+          [null, null, null, { v: "Hello" }, { v: "World" }],
+        ],
+      },
+    ],
+    // Table range is allowed (D1:E2), but the table name is a non-heuristic sensitive token.
+    tables: [{ name: "TopSecretTable", sheetName: "Sheet1", rect: { r0: 0, c0: 3, r1: 1, c1: 4 } }],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1600,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "ignore",
+    topK: 0,
+    attachments: [{ type: "table", reference: "TopSecretTable" }],
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  const joined = embedder.seen.join("\n");
+  assert.doesNotMatch(joined, /TopSecretTable/);
+  assert.doesNotMatch(out.promptContext, /TopSecretTable/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: structured DLP REDACT also redacts non-heuristic sheet names in allowed range attachment references (no-op redactor)", async () => {
   const workbook = {
     id: "wb-dlp-structured-attachment-allowed-range",

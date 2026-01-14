@@ -1623,8 +1623,18 @@ export class ContextManager {
       const meta = metadata && typeof metadata === "object" ? metadata : {};
       const kind = String(meta.kind ?? "chunk").toUpperCase();
       const shouldRedactTokens = options.redactTokens === true;
-      const title = shouldRedactTokens ? "[REDACTED]" : redactChunkToken(meta.title ?? "");
-      const sheetName = shouldRedactTokens ? "[REDACTED]" : redactChunkToken(meta.sheetName ?? "");
+      const title =
+        shouldRedactTokens
+          ? "[REDACTED]"
+          : Object.prototype.hasOwnProperty.call(options, "titleForOutput")
+            ? String(options.titleForOutput ?? "")
+            : redactChunkToken(meta.title ?? "");
+      const sheetName =
+        shouldRedactTokens
+          ? "[REDACTED]"
+          : Object.prototype.hasOwnProperty.call(options, "sheetNameForOutput")
+            ? String(options.sheetNameForOutput ?? "")
+            : redactChunkToken(meta.sheetName ?? "");
       const rectA1 = rectToA1WithoutSheet(meta.rect);
       const sheetPart = `sheet="${sheetName}"`;
       const rangePart = rectA1 ? `, range="${rectA1}"` : "";
@@ -1714,6 +1724,25 @@ export class ContextManager {
                       );
                     }
                   }
+                }
+
+                // Structured DLP classifications can require redaction for a sheet even when this
+                // particular chunk range is allowed (e.g. a Restricted range elsewhere on the same
+                // sheet). In those cases, treat user-controlled metadata tokens (sheet name, and
+                // table/namedRange titles) as disallowed for embedding/persistence so a no-op
+                // redactor cannot leak non-heuristic secrets like "TopSecret" to a cloud embedder.
+                const sheetNameTokenDisallowed = sheetNameDisallowed(sheetName);
+                const kind = String(record.metadata?.kind ?? "");
+                const titleTokenDisallowed =
+                  sheetNameTokenDisallowed && (kind === "table" || kind === "namedRange");
+                if (sheetNameTokenDisallowed && recordDecision.decision === DLP_DECISION.ALLOW) {
+                  const safeFirstLine = safeChunkFirstLineFromMetadata(record.metadata, {
+                    sheetNameForOutput: "[REDACTED]",
+                    ...(titleTokenDisallowed ? { titleForOutput: "[REDACTED]" } : {}),
+                  });
+                  const nl = safeText.indexOf("\n");
+                  const rest = nl === -1 ? "" : safeText.slice(nl);
+                  safeText = `${safeFirstLine}${rest}`;
                 }
 
                 // Defense-in-depth: if the configured redactor is a no-op (or incomplete),
@@ -1958,8 +1987,10 @@ export class ContextManager {
       const rangeDisallowed = Boolean(dlp) && recordDecision && recordDecision.decision !== DLP_DECISION.ALLOW;
       const rawSheetName = String(meta.sheetName ?? "");
       const sheetNameTokenDisallowed = Boolean(dlp) && sheetNameDisallowed(rawSheetName);
+      const titleTokenDisallowed =
+        sheetNameTokenDisallowed && (kind === "table" || kind === "namedRange");
       const shouldRedactSheetNameToken = Boolean(dlp) && (rangeDisallowed || sheetNameTokenDisallowed);
-      const shouldRedactTitleToken = Boolean(dlp) && rangeDisallowed;
+      const shouldRedactTitleToken = Boolean(dlp) && (rangeDisallowed || titleTokenDisallowed);
       const shouldRedactChunkId = shouldRedactSheetNameToken || shouldRedactTitleToken;
 
       const safeSheetName = shouldRedactSheetNameToken
@@ -1974,18 +2005,22 @@ export class ContextManager {
           : String(title ?? "");
       const header = `#${idx + 1} score=${hit.score.toFixed(3)} kind=${kind} sheet=${safeSheetName} title="${safeTitle}"`;
       const rawText = typeof meta.text === "string" ? meta.text : "";
-      const text = shouldRedactSheetNameToken
-        ? (() => {
-            // The stored chunk text (from `chunkToText`) repeats the sheet name in its first line.
-            // If the sheet-name token is disallowed under structured DLP, rewrite it deterministically
-            // so non-heuristic sensitive strings cannot leak even with a no-op redactor.
-            const idxNl = rawText.indexOf("\n");
-            const firstLine = idxNl === -1 ? rawText : rawText.slice(0, idxNl);
-            const rest = idxNl === -1 ? "" : rawText.slice(idxNl);
-            const replaced = firstLine.replace(/sheet="[^"]*"/, `sheet="${safeSheetName}"`);
-            return `${replaced}${rest}`;
-          })()
-        : rawText;
+      const text =
+        (shouldRedactSheetNameToken || shouldRedactTitleToken) && rawText.includes("\n")
+          ? (() => {
+              // The stored chunk text (from `chunkToText`) repeats user-controlled metadata
+              // tokens (title + sheet name) in its first line. If those tokens are disallowed
+              // under structured DLP, rewrite the first line deterministically so non-heuristic
+              // sensitive strings cannot leak even with a no-op redactor.
+              const idxNl = rawText.indexOf("\n");
+              const rest = idxNl === -1 ? "" : rawText.slice(idxNl);
+              const safeFirstLine = safeChunkFirstLineFromMetadata(meta, {
+                sheetNameForOutput: safeSheetName,
+                titleForOutput: safeTitle,
+              });
+              return `${safeFirstLine}${rest}`;
+            })()
+          : rawText;
       const raw = `${header}\n${text}`;
 
       let outText = this.redactor(raw);
@@ -2105,6 +2140,9 @@ export class ContextManager {
               if (!t || typeof t !== "object") continue;
               if (t.name !== target) continue;
               const sheetName = String(t.sheetName ?? "");
+              if (sheetNameDisallowed(sheetName)) {
+                return { ...item, reference: "[REDACTED]" };
+              }
               const rect = t.rect;
               const range = rectToRange(rect);
               const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
@@ -2293,8 +2331,8 @@ export class ContextManager {
         throwIfAborted(signal);
         const table = schema.tables[i];
         const name = table?.name ?? "";
-        const safeName = redactSchemaToken(name);
         const sheetName = table?.sheetName ?? "";
+        const safeName = sheetNameDisallowed(sheetName) ? "[REDACTED]" : redactSchemaToken(name);
         const rect = table?.rect;
         const rangeA1 = redactRangeA1(table?.rangeA1 ?? "");
         if (!name || !sheetName || !rect || typeof rect !== "object") continue;
@@ -2344,7 +2382,7 @@ export class ContextManager {
         throwIfAborted(signal);
         const nr = schema.namedRanges[i];
         const name = nr?.name ?? "";
-        const safeName = redactSchemaToken(name);
+        const safeName = sheetNameDisallowed(nr?.sheetName ?? "") ? "[REDACTED]" : redactSchemaToken(name);
         const rangeA1 = redactRangeA1(nr?.rangeA1 ?? "");
         if (!name) continue;
         if (dlp) {
@@ -2426,9 +2464,12 @@ export class ContextManager {
             throwIfAborted(signal);
             const kind = String(meta.kind ?? "");
             const title = String(meta.title ?? "");
-            const safeTitle = title ? redactSchemaToken(title) : "";
             const sheetName = String(meta.sheetName ?? "");
-            const safeSheetName = sheetNameDisallowed(sheetName) ? "[REDACTED]" : sheetName ? redactSchemaToken(sheetName) : "";
+            const sheetNameTokenDisallowed = sheetNameDisallowed(sheetName);
+            const titleTokenDisallowed =
+              sheetNameTokenDisallowed && (kind === "table" || kind === "namedRange");
+            const safeTitle = titleTokenDisallowed ? "[REDACTED]" : title ? redactSchemaToken(title) : "";
+            const safeSheetName = sheetNameTokenDisallowed ? "[REDACTED]" : sheetName ? redactSchemaToken(sheetName) : "";
             const rect = meta.rect ?? {};
             const r0 = rect.r0;
             const c0 = rect.c0;
@@ -2639,7 +2680,10 @@ export class ContextManager {
                     ? "[REDACTED]"
                     : redactSchemaToken(sheetName, "workbook_summary");
                   const disallowed = rectDisallowed(sheetName, t?.rect);
-                  const safeName = disallowed ? "[REDACTED]" : redactSchemaToken(t?.name, "workbook_summary");
+                  const safeName =
+                    disallowed || sheetNameDisallowed(sheetName)
+                      ? "[REDACTED]"
+                      : redactSchemaToken(t?.name, "workbook_summary");
                   return {
                     ...t,
                     name: safeName,
@@ -2652,7 +2696,10 @@ export class ContextManager {
                     ? "[REDACTED]"
                     : redactSchemaToken(sheetName, "workbook_summary");
                   const disallowed = rectDisallowed(sheetName, r?.rect);
-                  const safeName = disallowed ? "[REDACTED]" : redactSchemaToken(r?.name, "workbook_summary");
+                  const safeName =
+                    disallowed || sheetNameDisallowed(sheetName)
+                      ? "[REDACTED]"
+                      : redactSchemaToken(r?.name, "workbook_summary");
                   return {
                     ...r,
                     name: safeName,
