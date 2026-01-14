@@ -113,6 +113,11 @@ impl Relationships {
         self.by_id.get(id).and_then(|idx| self.rels.get(*idx))
     }
 
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut Relationship> {
+        let idx = *self.by_id.get(id)?;
+        self.rels.get_mut(idx)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Relationship> {
         self.rels.iter()
     }

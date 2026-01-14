@@ -118,13 +118,23 @@ impl DrawingPart {
                 continue;
             };
 
-            if relationships.get(&embed_rel_id).is_none() {
-                relationships.push(Relationship {
-                    id: embed_rel_id.clone(),
-                    type_: REL_TYPE_IMAGE.to_string(),
-                    target: format!("../media/{}", image_id.as_str()),
-                    target_mode: None,
-                });
+            let desired_target = format!("../media/{}", image_id.as_str());
+            match relationships.get_mut(&embed_rel_id) {
+                Some(rel) => {
+                    // Explicitly ensure the image relationship has the correct type/target even
+                    // when the source `.rels` omits `Type` or points at stale media.
+                    rel.type_ = REL_TYPE_IMAGE.to_string();
+                    rel.target = desired_target;
+                    rel.target_mode = None;
+                }
+                None => {
+                    relationships.push(Relationship {
+                        id: embed_rel_id.clone(),
+                        type_: REL_TYPE_IMAGE.to_string(),
+                        target: desired_target,
+                        target_mode: None,
+                    });
+                }
             }
 
             // If we have an embed relationship id but no preserved pic XML (e.g. objects created
@@ -154,13 +164,19 @@ impl DrawingPart {
                     id
                 });
 
-            if relationships.get(&embed_rel_id).is_none() {
-                relationships.push(Relationship {
+            let desired_target = format!("../media/{}", image_id.as_str());
+            match relationships.get_mut(&embed_rel_id) {
+                Some(rel) => {
+                    rel.type_ = REL_TYPE_IMAGE.to_string();
+                    rel.target = desired_target;
+                    rel.target_mode = None;
+                }
+                None => relationships.push(Relationship {
                     id: embed_rel_id.clone(),
                     type_: REL_TYPE_IMAGE.to_string(),
-                    target: format!("../media/{}", image_id.as_str()),
+                    target: desired_target,
                     target_mode: None,
-                });
+                }),
             }
 
             object
