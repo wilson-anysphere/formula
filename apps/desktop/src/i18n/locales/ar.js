@@ -118,6 +118,7 @@ export const ar = {
   "versionHistory.hint.unlockToDelete": "يجب إلغاء قفل نقاط الحفظ المقفلة قبل الحذف.",
   "commandCategory.navigation": "تنقّل",
   "commandCategory.data": "بيانات",
+  "commandCategory.pageLayout": "تخطيط الصفحة",
   "commandCategory.view": "عرض",
   "commandCategory.macros": "وحدات الماكرو",
   "commandCategory.editing": "تحرير",

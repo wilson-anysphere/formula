@@ -118,6 +118,7 @@ export const deDE = {
   "versionHistory.hint.unlockToDelete": "Gesperrte Kontrollpunkte müssen vor dem Löschen entsperrt werden.",
   "commandCategory.navigation": "Navigation",
   "commandCategory.data": "Daten",
+  "commandCategory.pageLayout": "Seitenlayout",
   "commandCategory.view": "Ansicht",
   "commandCategory.macros": "Makros",
   "commandCategory.editing": "Bearbeiten",

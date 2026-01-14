@@ -210,6 +210,7 @@ export const enUS = {
   "layout.workspace.default": "Default",
   "commandCategory.navigation": "Navigation",
   "commandCategory.data": "Data",
+  "commandCategory.pageLayout": "Page Layout",
   "commandCategory.view": "View",
   "commandCategory.macros": "Macros",
   "commandCategory.audit": "Audit",

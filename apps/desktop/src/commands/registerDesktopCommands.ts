@@ -820,7 +820,7 @@ export function registerDesktopCommands(params: {
   // Page Layout → Arrange drawing order commands. These are desktop-only (drawing overlay)
   // but still registered in CommandRegistry so the ribbon does not auto-disable them and
   // so other UI surfaces (command palette/keybindings) can invoke them consistently.
-  const commandCategoryPageLayout = "Page Layout";
+  const commandCategoryPageLayout = t("commandCategory.pageLayout");
   commandRegistry.registerBuiltinCommand(
     "pageLayout.arrange.bringForward",
     "Bring Forward",

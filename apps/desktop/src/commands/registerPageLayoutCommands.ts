@@ -1,5 +1,6 @@
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import type { PageSetup } from "../print/index.js";
+import { t } from "../i18n/index.js";
 
 export const PAGE_LAYOUT_COMMANDS = {
   pageSetupDialog: "pageLayout.pageSetup.pageSetupDialog",
@@ -40,7 +41,7 @@ export type PageLayoutCommandHandlers = {
 export function registerPageLayoutCommands(params: { commandRegistry: CommandRegistry; handlers: PageLayoutCommandHandlers }): void {
   const { commandRegistry, handlers } = params;
 
-  const category = "Page Layout";
+  const category = t("commandCategory.pageLayout");
 
   commandRegistry.registerBuiltinCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog, "Page Setup…", () => handlers.openPageSetupDialog(), {
     category,

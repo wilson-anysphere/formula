@@ -76,7 +76,7 @@ export function registerBuiltinCommands(params: {
 
   const commandCategoryFormat = t("commandCategory.format");
   const commandCategoryData = t("commandCategory.data");
-  const commandCategoryPageLayout = "Page Layout";
+  const commandCategoryPageLayout = t("commandCategory.pageLayout");
 
   const toggleDockPanel = (panelId: string) => {
     const placement = getPanelPlacement(layoutController.layout, panelId);
