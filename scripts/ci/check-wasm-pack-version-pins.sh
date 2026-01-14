@@ -12,18 +12,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-workflows=(
-  ".github/workflows/ci.yml"
-  ".github/workflows/release.yml"
-  ".github/workflows/desktop-bundle-dry-run.yml"
-  ".github/workflows/desktop-bundle-size.yml"
-  ".github/workflows/desktop-perf-platform-matrix.yml"
-  ".github/workflows/desktop-perf-platform-matrix-pr.yml"
-  ".github/workflows/desktop-memory-perf.yml"
-  ".github/workflows/perf.yml"
-  ".github/workflows/windows-arm64-smoke.yml"
-)
-
 extract_version() {
   local file="$1"
   local line=""
@@ -47,16 +35,24 @@ extract_version() {
 }
 
 baseline=""
-for wf in "${workflows[@]}"; do
-  if [ ! -f "$wf" ]; then
-    echo "Missing workflow file: ${wf}" >&2
-    exit 1
-  fi
+workflow_files=()
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  workflow_files+=("$file")
+done < <(git ls-files .github/workflows | grep -E '\.(yml|yaml)$' || true)
+
+if [ "${#workflow_files[@]}" -eq 0 ]; then
+  echo "No workflow files found under .github/workflows" >&2
+  exit 2
+fi
+
+matched=0
+for wf in "${workflow_files[@]}"; do
   v="$(extract_version "$wf")"
   if [ -z "$v" ]; then
-    echo "Failed to find WASM_PACK_VERSION in ${wf}" >&2
-    exit 1
+    continue
   fi
+  matched=1
   if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "Expected WASM_PACK_VERSION in ${wf} to be a pinned patch version (e.g. 0.13.1); got ${v}" >&2
     exit 1
@@ -66,13 +62,22 @@ for wf in "${workflows[@]}"; do
   elif [ "$v" != "$baseline" ]; then
     echo "wasm-pack version pin mismatch across workflows:" >&2
     echo "  Expected: ${baseline}" >&2
-    for wf2 in "${workflows[@]}"; do
-      echo "  - ${wf2}: $(extract_version "$wf2")" >&2
+    for wf2 in "${workflow_files[@]}"; do
+      wf2_v="$(extract_version "$wf2")"
+      if [ -n "$wf2_v" ]; then
+        echo "  - ${wf2}: ${wf2_v}" >&2
+      fi
     done
     echo "" >&2
     echo "Fix: update WASM_PACK_VERSION in the workflows above so they match exactly." >&2
     exit 1
   fi
 done
+
+if [ "$matched" -eq 0 ]; then
+  echo "No WASM_PACK_VERSION pins found in any workflow under .github/workflows." >&2
+  echo "If wasm-pack is not used in CI, delete this guard script and remove it from CI." >&2
+  exit 1
+fi
 
 echo "wasm-pack version pins match (${baseline})."

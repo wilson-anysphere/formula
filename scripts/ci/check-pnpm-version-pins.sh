@@ -13,16 +13,6 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 package_json="package.json"
-ci_workflow=".github/workflows/ci.yml"
-release_workflow=".github/workflows/release.yml"
-windows_arm64_smoke_workflow=".github/workflows/windows-arm64-smoke.yml"
-bundle_size_workflow=".github/workflows/desktop-bundle-size.yml"
-dry_run_workflow=".github/workflows/desktop-bundle-dry-run.yml"
-desktop_perf_platform_matrix_workflow=".github/workflows/desktop-perf-platform-matrix.yml"
-desktop_perf_platform_matrix_pr_workflow=".github/workflows/desktop-perf-platform-matrix-pr.yml"
-desktop_memory_perf_workflow=".github/workflows/desktop-memory-perf.yml"
-perf_workflow=".github/workflows/perf.yml"
-collab_perf_workflow=".github/workflows/collab-perf.yml"
 
 extract_package_manager_pnpm_version() {
   local file="$1"
@@ -156,15 +146,29 @@ check_workflow_pnpm_pins() {
   fi
 }
 
-check_workflow_pnpm_pins "$ci_workflow"
-check_workflow_pnpm_pins "$release_workflow"
-check_workflow_pnpm_pins "$windows_arm64_smoke_workflow"
-check_workflow_pnpm_pins "$bundle_size_workflow"
-check_workflow_pnpm_pins "$dry_run_workflow"
-check_workflow_pnpm_pins "$desktop_perf_platform_matrix_workflow"
-check_workflow_pnpm_pins "$desktop_perf_platform_matrix_pr_workflow"
-check_workflow_pnpm_pins "$desktop_memory_perf_workflow"
-check_workflow_pnpm_pins "$perf_workflow"
-check_workflow_pnpm_pins "$collab_perf_workflow"
+workflow_files=()
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  workflow_files+=("$file")
+done < <(git ls-files .github/workflows | grep -E '\.(yml|yaml)$' || true)
+
+if [ "${#workflow_files[@]}" -eq 0 ]; then
+  echo "No workflow files found under .github/workflows" >&2
+  exit 2
+fi
+
+matched=0
+for workflow in "${workflow_files[@]}"; do
+  if grep -q -E '^[[:space:]]*uses:[[:space:]]*pnpm/action-setup@' "$workflow"; then
+    matched=1
+    check_workflow_pnpm_pins "$workflow"
+  fi
+done
+
+if [ "$matched" -eq 0 ]; then
+  echo "No pnpm/action-setup steps found in any workflow under .github/workflows." >&2
+  echo "If pnpm is not used in CI, delete this guard script and remove it from CI." >&2
+  exit 1
+fi
 
 echo "pnpm version pins match package.json (pnpm@${expected_pnpm_version})."
