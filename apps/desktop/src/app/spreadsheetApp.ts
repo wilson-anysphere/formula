@@ -6457,10 +6457,18 @@ export class SpreadsheetApp {
 
     const MAX_CONCURRENT_DECODES = 4;
 
+    const existingObjects = (() => {
+      try {
+        return this.listDrawingObjectsForSheet(sheetId);
+      } catch {
+        return [];
+      }
+    })();
+
     // Allocate drawing ids ahead-of-time so we guarantee uniqueness within this insertion batch.
     const usedDrawingIds = new Set<number>();
     let maxDrawingId = 0;
-    for (const obj of this.listDrawingObjectsForSheet(sheetId)) {
+    for (const obj of existingObjects) {
       usedDrawingIds.add(obj.id);
       if (obj.id > maxDrawingId) maxDrawingId = obj.id;
     }
