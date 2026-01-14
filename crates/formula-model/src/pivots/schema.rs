@@ -58,7 +58,6 @@ impl PivotFieldRef {
         }
     }
 
-
     /// Backward-compatible alias for [`Self::as_cache_field_name`].
     pub fn cache_field_name(&self) -> Option<&str> {
         self.as_cache_field_name()
@@ -894,10 +893,7 @@ mod tests {
                 PivotFieldRef::DataModelMeasure("Total Sales".to_string()),
             ),
             // Escaped `]` inside measure identifiers.
-            (
-                "[A]]B]",
-                PivotFieldRef::DataModelMeasure("A]B".to_string()),
-            ),
+            ("[A]]B]", PivotFieldRef::DataModelMeasure("A]B".to_string())),
         ] {
             assert_eq!(PivotFieldRef::from_unstructured(raw), expected);
             assert_eq!(
