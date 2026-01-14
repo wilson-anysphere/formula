@@ -2064,6 +2064,74 @@ mod tests {
     }
 
     #[test]
+    fn decryptor_rejects_cryptoapi_encryptionverifier_salt_size_exceeds_max() {
+        // EncryptionVerifier declares a salt size far larger than any reasonable `.xls` CryptoAPI
+        // RC4 salt and should be rejected before attempting to slice/allocate.
+        let mut enc_info = Vec::new();
+        enc_info.extend_from_slice(&4u16.to_le_bytes()); // major
+        enc_info.extend_from_slice(&2u16.to_le_bytes()); // minor
+        enc_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_info.extend_from_slice(&32u32.to_le_bytes()); // headerSize
+        enc_info.extend_from_slice(&[0u8; 32]); // EncryptionHeader (contents don't matter)
+
+        // EncryptionVerifier: SaltSize = u32::MAX (implausibly large).
+        enc_info.extend_from_slice(&u32::MAX.to_le_bytes());
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+        payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+        payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&enc_info);
+
+        let stream = [
+            record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
+            record(RECORD_FILEPASS, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut stream = stream;
+        let res = decrypt_biff_workbook_stream(&mut stream, "pw");
+        assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
+    }
+
+    #[test]
+    fn decryptor_rejects_cryptoapi_encryptionverifier_hash_size_exceeds_max() {
+        // EncryptionVerifier declares an implausibly large verifier hash size. Reject it before
+        // attempting to slice/allocate.
+        let mut enc_info = Vec::new();
+        enc_info.extend_from_slice(&4u16.to_le_bytes()); // major
+        enc_info.extend_from_slice(&2u16.to_le_bytes()); // minor
+        enc_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_info.extend_from_slice(&32u32.to_le_bytes()); // headerSize
+        enc_info.extend_from_slice(&[0u8; 32]); // EncryptionHeader (contents don't matter)
+
+        // EncryptionVerifier:
+        //   saltSize=16, salt=16, encryptedVerifier=16, verifierHashSize=u32::MAX
+        enc_info.extend_from_slice(&16u32.to_le_bytes());
+        enc_info.extend_from_slice(&[0u8; 16]);
+        enc_info.extend_from_slice(&[0u8; 16]);
+        enc_info.extend_from_slice(&u32::MAX.to_le_bytes());
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+        payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+        payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&enc_info);
+
+        let stream = [
+            record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
+            record(RECORD_FILEPASS, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut stream = stream;
+        let res = decrypt_biff_workbook_stream(&mut stream, "pw");
+        assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
+    }
+
+    #[test]
     fn decryptor_rejects_legacy_cryptoapi_filepass_payload_too_short() {
         // Legacy FILEPASS layout uses wEncryptionInfo==0x0004 and requires at least 14 bytes before
         // the EncryptionHeader bytes begin. Ensure we return a structured error (not a panic) when
