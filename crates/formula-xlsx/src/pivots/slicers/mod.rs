@@ -2199,7 +2199,6 @@ fn parse_timeline_cache_xml(xml: &[u8]) -> Result<ParsedTimelineCacheXml, XlsxEr
 mod engine_filter_field_tests {
     use super::*;
     use crate::pivots::PivotCacheField;
-    use formula_engine::pivot::PivotFieldRef;
     use std::collections::HashSet;
     use std::io::{Cursor, Write};
 
