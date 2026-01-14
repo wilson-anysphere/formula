@@ -285,4 +285,58 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
     root.remove();
     formulaBar.remove();
   });
+
+  it("does not intercept drawing hits while the formula bar is in formula range selection mode (shared grid)", () => {
+    process.env.DESKTOP_GRID_MODE = "shared";
+
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+    expect(app.getGridMode()).toBe("shared");
+
+    const objects: DrawingObject[] = [
+      {
+        id: 7,
+        kind: { type: "shape", label: "rect" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(50), cy: pxToEmu(50) },
+        },
+        zOrder: 0,
+      },
+    ];
+    app.setDrawingObjects(objects);
+
+    // Put the formula bar into formula editing mode (draft starts with "=").
+    app.setFormulaBarDraft("=A1");
+    expect(app.isFormulaBarFormulaEditing()).toBe(true);
+
+    const bubbled = vi.fn();
+    root.addEventListener("pointerdown", bubbled);
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    const cellRect = app.getCellRectA1("A1");
+    expect(cellRect).not.toBeNull();
+    const hitX = cellRect!.x + 10;
+    const hitY = cellRect!.y + 10;
+    dispatchPointerEvent(selectionCanvas, "pointerdown", { x: hitX, y: hitY }, { pointerId: 2, pointerType: "mouse", button: 0 });
+    dispatchPointerEvent(selectionCanvas, "pointerup", { x: hitX, y: hitY }, { pointerId: 2, pointerType: "mouse", button: 0 });
+
+    // The drawings layer should not select the drawing or stop propagation during formula range selection.
+    expect(bubbled).toHaveBeenCalledTimes(1);
+    expect(app.getSelectedDrawingId()).toBe(null);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
 });
