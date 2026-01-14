@@ -731,6 +731,42 @@ fn sheet_and_sheets_over_external_3d_span_use_provider_tab_order() {
 }
 
 #[test]
+fn index_over_external_3d_span_uses_provider_tab_order_when_lexicographic_order_differs() {
+    // When sorting a multi-area reference union produced from an external workbook 3D span, we
+    // must preserve the provider's sheet tab order (not lexicographic sheet name order).
+    //
+    // This matters for INDEX(..., area_num) semantics.
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec!["Sheet2".to_string(), "Sheet10".to_string()],
+    );
+    provider.set("[Book.xlsx]Sheet2", CellAddr { row: 0, col: 0 }, 2.0);
+    provider.set("[Book.xlsx]Sheet10", CellAddr { row: 0, col: 0 }, 10.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=INDEX([Book.xlsx]Sheet2:Sheet10!A1,1,1,1)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=INDEX([Book.xlsx]Sheet2:Sheet10!A1,1,1,2)",
+        )
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(10.0));
+}
+
+#[test]
 fn external_3d_sheet_span_matches_endpoints_nfkc_case_insensitively() {
     let provider = Arc::new(TestExternalProvider::default());
 

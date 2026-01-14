@@ -505,7 +505,37 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             }
             (FnSheetId::Local(_), FnSheetId::External(_)) => Ordering::Less,
             (FnSheetId::External(_), FnSheetId::Local(_)) => Ordering::Greater,
-            (FnSheetId::External(a_key), FnSheetId::External(b_key)) => a_key.cmp(b_key),
+            (FnSheetId::External(a_key), FnSheetId::External(b_key)) => {
+                // External references are keyed by the canonical sheet key (`"[Book.xlsx]Sheet1"`).
+                // When the ValueResolver provides external workbook tab order, preserve that order
+                // when sorting reference unions. This matters for Excel semantics like:
+                // - INDEX(..., area_num)
+                // - error precedence across multi-area unions
+                //
+                // Fall back to lexicographic ordering when workbook order is unavailable.
+                match (split_external_sheet_key(a_key), split_external_sheet_key(b_key)) {
+                    (Some((a_wb, a_sheet)), Some((b_wb, b_sheet))) if a_wb == b_wb => {
+                        match self.resolver.external_sheet_order(a_wb) {
+                            Some(order) => {
+                                let a_idx = order.iter().position(|s| {
+                                    formula_model::sheet_name_eq_case_insensitive(s, a_sheet)
+                                });
+                                let b_idx = order.iter().position(|s| {
+                                    formula_model::sheet_name_eq_case_insensitive(s, b_sheet)
+                                });
+                                match (a_idx, b_idx) {
+                                    (Some(a_idx), Some(b_idx)) => a_idx
+                                        .cmp(&b_idx)
+                                        .then_with(|| a_key.cmp(b_key)),
+                                    _ => a_key.cmp(b_key),
+                                }
+                            }
+                            None => a_key.cmp(b_key),
+                        }
+                    }
+                    _ => a_key.cmp(b_key),
+                }
+            }
         }
     }
 
