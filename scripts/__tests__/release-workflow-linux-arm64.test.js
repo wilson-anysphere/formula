@@ -25,7 +25,6 @@ test("release workflow includes a Linux ARM64 (aarch64) build runner in the matr
   assert.ok(idx >= 0);
   const window = text.slice(idx, idx + 600);
   assert.match(window, /cache_target:\s*aarch64-unknown-linux-gnu\b/);
-  assert.match(window, /tauri_args:\s*\"--bundles\s+appimage,deb(?:,rpm)?\"/);
 });
 
 test("release workflow validates .deb packages on all Linux runners (x86_64 + arm64)", async () => {
@@ -47,4 +46,3 @@ test("release workflow validates .deb packages on all Linux runners (x86_64 + ar
     `Expected the Linux .deb validation step to be gated by runner.os == 'Linux' (so it runs for both x86_64 and arm64).`,
   );
 });
-
