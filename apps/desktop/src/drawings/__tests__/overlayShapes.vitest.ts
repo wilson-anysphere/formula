@@ -140,7 +140,7 @@ describe("DrawingOverlay shapes", () => {
     `;
 
     const overlay = new DrawingOverlay(canvas, images, geom);
-    overlay.render([createShapeObject(xml, { widthPx: 200, heightPx: 40 })], viewport);
+    overlay.render([createShapeObject(xml, { width: 200, height: 40 })], viewport);
 
     expect(calls.some((call) => call.method === "fillText" && call.args[0] === "  Indented")).toBe(true);
   });
