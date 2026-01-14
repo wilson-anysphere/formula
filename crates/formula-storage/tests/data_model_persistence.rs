@@ -5,6 +5,7 @@ use formula_dax::{
     pivot, Cardinality, CrossFilterDirection, DataModel, FilterContext, GroupByColumn,
     PivotMeasure, Relationship, Table,
 };
+use formula_storage::data_model::DataModelChunkKind;
 use formula_storage::Storage;
 use rusqlite::{params, Connection};
 use std::sync::Arc;
@@ -425,6 +426,51 @@ fn data_model_round_trip_columnar_calculated_columns() {
                 && c.name == "Category From Dim"
                 && c.expression == "RELATED(DimProduct[Category])"),
         "expected schema-only load to include Category From Dim definition"
+    );
+
+    // Ensure the chunk streaming API can read calculated columns (used by incremental / lazy loads).
+    let mut streamed_double = Vec::new();
+    storage2
+        .stream_data_model_column_chunks(workbook.id, "FactSales", "Double Amount", |chunk| {
+            streamed_double.push((chunk.chunk_index, chunk.kind, chunk.data.len()));
+            Ok(())
+        })
+        .expect("stream Double Amount chunks");
+    assert_eq!(streamed_double.len(), 2);
+    assert_eq!(
+        streamed_double
+            .iter()
+            .map(|(idx, _, _)| *idx)
+            .collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+    assert!(
+        streamed_double
+            .iter()
+            .all(|(_, kind, size)| *kind == DataModelChunkKind::Float && *size > 0),
+        "expected Double Amount chunks to be non-empty float chunks"
+    );
+
+    let mut streamed_category = Vec::new();
+    storage2
+        .stream_data_model_column_chunks(workbook.id, "FactSales", "Category From Dim", |chunk| {
+            streamed_category.push((chunk.chunk_index, chunk.kind, chunk.data.len()));
+            Ok(())
+        })
+        .expect("stream Category From Dim chunks");
+    assert_eq!(streamed_category.len(), 2);
+    assert_eq!(
+        streamed_category
+            .iter()
+            .map(|(idx, _, _)| *idx)
+            .collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+    assert!(
+        streamed_category
+            .iter()
+            .all(|(_, kind, size)| *kind == DataModelChunkKind::Dict && *size > 0),
+        "expected Category From Dim chunks to be non-empty dict chunks"
     );
 
     let loaded = storage2

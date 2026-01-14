@@ -5,6 +5,7 @@ use formula_dax::{
     pivot, Cardinality, CrossFilterDirection, DataModel, FilterContext, GroupByColumn, PivotMeasure,
     Relationship, Table,
 };
+use formula_storage::data_model::DataModelChunkKind;
 use formula_storage::{InMemoryKeyProvider, Storage};
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -298,6 +299,51 @@ fn encrypted_data_model_round_trip_columnar_calculated_columns() {
             .iter()
             .any(|c| c.name == "Category From Dim" && c.column_type == ColumnType::String),
         "expected schema-only load to include Category From Dim as a typed table column"
+    );
+
+    // Ensure the chunk streaming API can read calculated columns in encrypted-at-rest mode too.
+    let mut streamed_double = Vec::new();
+    storage2
+        .stream_data_model_column_chunks(workbook.id, "FactSales", "Double Amount", |chunk| {
+            streamed_double.push((chunk.chunk_index, chunk.kind, chunk.data.len()));
+            Ok(())
+        })
+        .expect("stream Double Amount chunks");
+    assert_eq!(streamed_double.len(), 2);
+    assert_eq!(
+        streamed_double
+            .iter()
+            .map(|(idx, _, _)| *idx)
+            .collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+    assert!(
+        streamed_double
+            .iter()
+            .all(|(_, kind, size)| *kind == DataModelChunkKind::Float && *size > 0),
+        "expected Double Amount chunks to be non-empty float chunks"
+    );
+
+    let mut streamed_category = Vec::new();
+    storage2
+        .stream_data_model_column_chunks(workbook.id, "FactSales", "Category From Dim", |chunk| {
+            streamed_category.push((chunk.chunk_index, chunk.kind, chunk.data.len()));
+            Ok(())
+        })
+        .expect("stream Category From Dim chunks");
+    assert_eq!(streamed_category.len(), 2);
+    assert_eq!(
+        streamed_category
+            .iter()
+            .map(|(idx, _, _)| *idx)
+            .collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+    assert!(
+        streamed_category
+            .iter()
+            .all(|(_, kind, size)| *kind == DataModelChunkKind::Dict && *size > 0),
+        "expected Category From Dim chunks to be non-empty dict chunks"
     );
     assert!(
         schema
