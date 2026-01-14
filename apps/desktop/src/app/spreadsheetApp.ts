@@ -3113,6 +3113,7 @@ export class SpreadsheetApp {
     // Ensure overlay caches (ImageBitmaps, parsed XML) are released promptly.
     this.drawingOverlay?.destroy?.();
     this.chartSelectionOverlay?.destroy?.();
+    this.chartRenderer.destroy();
     this.activeSheetBackgroundAbort?.abort();
     this.activeSheetBackgroundAbort = null;
     this.workbookImageBitmaps.clear();

@@ -212,6 +212,7 @@ export interface Viewport {
 
 export interface ChartRenderer {
   renderToCanvas(ctx: CanvasRenderingContext2D, chartId: string, rect: Rect): void;
+  destroy?(): void;
 }
 
 export function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom: number = 1): Rect {
@@ -808,6 +809,7 @@ export class DrawingOverlay {
     this.renderAbort?.abort();
     this.renderAbort = null;
     this.renderSeq += 1;
+    this.chartRenderer?.destroy?.();
     this.themeObserver?.disconnect();
     this.themeObserver = null;
     this.bitmapCache.clear();

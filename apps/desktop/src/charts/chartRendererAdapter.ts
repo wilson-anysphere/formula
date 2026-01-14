@@ -160,6 +160,11 @@ export class ChartRendererAdapter implements ChartRenderer {
     ctx.drawImage(surface.canvas as any, rect.x, rect.y, rect.width, rect.height);
   }
 
+  destroy(): void {
+    // Drop references to offscreen surfaces so their backing buffers can be GC'd.
+    this.surfaces.clear();
+  }
+
   private getSurface(chartId: string, width: number, height: number): Surface {
     const existing = this.surfaces.get(chartId);
     if (existing) {
@@ -178,4 +183,3 @@ export class ChartRendererAdapter implements ChartRenderer {
     return surface;
   }
 }
-
