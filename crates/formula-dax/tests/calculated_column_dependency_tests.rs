@@ -101,6 +101,27 @@ fn insert_row_maps_values_around_calculated_columns() {
 }
 
 #[test]
+fn insert_row_rolls_back_on_calculated_column_error() {
+    let mut model = DataModel::new();
+
+    let mut t = Table::new("T", vec!["a", "A"]);
+    t.push_row(vec![1.into(), Value::Blank]).unwrap();
+    model.add_table(t).unwrap();
+
+    // Register a calculated column definition that will fail at evaluation time.
+    model
+        .add_calculated_column_definition("T", "A", "BOGUS()")
+        .unwrap();
+
+    let err = model.insert_row("T", vec![10.into()]).unwrap_err();
+    assert!(matches!(err, DaxError::Eval(_)));
+
+    // Ensure the failed insert didn't leave a partially-inserted row behind.
+    let t = model.table("T").unwrap();
+    assert_eq!(t.row_count(), 1);
+}
+
+#[test]
 fn calculated_column_dependencies_traverse_var_bindings_and_body() {
     let mut model = DataModel::new();
 
