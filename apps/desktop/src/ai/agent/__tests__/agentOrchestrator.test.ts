@@ -74,6 +74,56 @@ describe("runAgentTask (agent mode orchestrator)", () => {
     expect(stats.blockCellCountByKind.sheet_sample).toBeGreaterThan(0);
   });
 
+  it("can surface computed formula values in tool reads when include_formula_values is enabled", async () => {
+    const documentController = new DocumentController();
+    // Simulate an imported workbook cell that contains both a formula and a cached/computed value.
+    documentController.model.setCell("Sheet1", 0, 0, { value: 2, formula: "=1+1", styleId: 0 });
+
+    let callCount = 0;
+    const llmClient = {
+      chat: vi.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "read_range", arguments: { range: "Sheet1!A1:A1" } }],
+            },
+            usage: { promptTokens: 1, completionTokens: 1 },
+          };
+        }
+        return {
+          message: { role: "assistant", content: "done" },
+          usage: { promptTokens: 1, completionTokens: 1 },
+        };
+      }),
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+    const events: any[] = [];
+    const result = await runAgentTask({
+      goal: "Read A1",
+      workbookId: "wb_agent_formula_values",
+      documentController,
+      llmClient: llmClient as any,
+      auditStore,
+      onProgress: (event) => events.push(event),
+      maxIterations: 4,
+      maxDurationMs: 10_000,
+      model: "unit-test-model",
+      toolExecutorOptions: { include_formula_values: true },
+    });
+
+    expect(result.status).toBe("complete");
+
+    const toolResultEvent = events.find((e) => e.type === "tool_result");
+    expect(toolResultEvent).toBeTruthy();
+    expect(toolResultEvent.call?.name).toBe("read_range");
+    expect(toolResultEvent.result?.ok).toBe(true);
+    expect(toolResultEvent.result?.data?.values).toEqual([[2]]);
+  });
+
   it("does not re-index workbook RAG when workbook has not changed", async () => {
     const documentController = new DocumentController();
     documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "seed");

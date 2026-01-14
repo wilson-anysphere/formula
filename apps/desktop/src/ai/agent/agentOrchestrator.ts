@@ -6,7 +6,7 @@ import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js
 import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import { PreviewEngine } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import { runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
-import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
+import { SpreadsheetLLMToolExecutor, type SpreadsheetLLMToolExecutorOptions } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 import type { TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
@@ -152,6 +152,13 @@ export interface RunAgentTaskParams {
    * NOTE: By default, build stats are only logged in dev builds.
    */
   onWorkbookContextBuildStats?: (stats: WorkbookContextBuildStats) => void;
+
+  /**
+   * Optional tool execution configuration (e.g. `include_formula_values`, external data permissions).
+   *
+   * `default_sheet` and `require_approval_for_mutations` are supplied internally by the agent.
+   */
+  toolExecutorOptions?: Omit<SpreadsheetLLMToolExecutorOptions, "default_sheet" | "require_approval_for_mutations">;
 }
 
 class AgentCancelledError extends Error {
@@ -295,7 +302,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       createChart: params.createChart,
       sheetNameResolver: params.sheetNameResolver ?? null
     });
-    const toolPolicy = getDesktopToolPolicy({ mode: "agent" });
+    const toolPolicy = params.toolExecutorOptions?.toolPolicy ?? getDesktopToolPolicy({ mode: "agent" });
 
     let dlp =
       maybeGetAiCloudDlpOptions({
@@ -336,8 +343,9 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     }
 
     let toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
+      ...(params.toolExecutorOptions ?? {}),
       default_sheet: defaultSheetId,
-      sheet_name_resolver: params.sheetNameResolver ?? null,
+      sheet_name_resolver: params.toolExecutorOptions?.sheet_name_resolver ?? params.sheetNameResolver ?? null,
       require_approval_for_mutations: true,
       dlp,
       toolPolicy
@@ -382,6 +390,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       ragService,
       schemaProvider: params.schemaProvider ?? null,
       sheetNameResolver: params.sheetNameResolver ?? null,
+      includeFormulaValues: Boolean(params.toolExecutorOptions?.include_formula_values),
       mode: "agent",
       model: modelName,
       contextWindowTokens,
@@ -395,8 +404,9 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       refreshDlpIfNeeded();
       if (toolExecutorDlpKey !== dlpKey) {
         toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
+          ...(params.toolExecutorOptions ?? {}),
           default_sheet: defaultSheetId,
-          sheet_name_resolver: params.sheetNameResolver ?? null,
+          sheet_name_resolver: params.toolExecutorOptions?.sheet_name_resolver ?? params.sheetNameResolver ?? null,
           require_approval_for_mutations: true,
           dlp,
           toolPolicy
@@ -498,8 +508,9 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
         refreshDlpIfNeeded();
         if (toolExecutorDlpKey !== dlpKey) {
           toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
+            ...(params.toolExecutorOptions ?? {}),
             default_sheet: defaultSheetId,
-            sheet_name_resolver: params.sheetNameResolver ?? null,
+            sheet_name_resolver: params.toolExecutorOptions?.sheet_name_resolver ?? params.sheetNameResolver ?? null,
             require_approval_for_mutations: true,
             dlp,
             toolPolicy
@@ -515,7 +526,8 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       const preview = await guard(
         previewEngine.generatePreview([{ name: call.name, parameters: call.arguments }], spreadsheet, {
           default_sheet: defaultSheetId,
-          sheet_name_resolver: params.sheetNameResolver ?? null
+          sheet_name_resolver: params.toolExecutorOptions?.sheet_name_resolver ?? params.sheetNameResolver ?? null,
+          include_formula_values: params.toolExecutorOptions?.include_formula_values ?? false
         })
       );
       if (!preview.requires_approval) return true;
