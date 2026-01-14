@@ -324,6 +324,48 @@ test("fails when Windows runtime updater asset name is missing an arch token (no
   assert.doesNotMatch(proc.stderr, /api\\.github\\.com/i);
 });
 
+test("fails when Linux runtime updater asset name is missing an arch token (non-dry-run)", () => {
+  const tmp = makeTempDir();
+  const manifestsDir = path.join(tmp, "manifests");
+  mkdirSync(manifestsDir, { recursive: true });
+
+  writeFileSync(
+    path.join(manifestsDir, "bad-linux.json"),
+    JSON.stringify(
+      {
+        version: "0.1.0",
+        platforms: {
+          "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+          "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+          "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+          "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+          // Missing x86_64 token in filename should be rejected by the stricter validator.
+          "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
+          "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  const proc = run({
+    cwd: tmp,
+    args: ["v0.1.0", manifestsDir],
+    env: {
+      // Provide placeholders so the script gets past required env checks if it reaches them.
+      GITHUB_REPOSITORY: "owner/repo",
+      GITHUB_TOKEN: "dummy",
+    },
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /Invalid Linux updater asset naming/i);
+  assert.match(proc.stderr, /arch token/i);
+  // If this ever appears, the script got past manifest validation and attempted a network call.
+  assert.doesNotMatch(proc.stderr, /api\\.github\\.com/i);
+});
+
 test("fails when required runtime targets collide on the same updater URL (non-dry-run)", () => {
   const tmp = makeTempDir();
   const manifestsDir = path.join(tmp, "manifests");
@@ -363,6 +405,48 @@ test("fails when required runtime targets collide on the same updater URL (non-d
 
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /Duplicate updater URLs across required targets/i);
+  // If this ever appears, the script got past manifest validation and attempted a network call.
+  assert.doesNotMatch(proc.stderr, /api\\.github\\.com/i);
+});
+
+test("fails when required runtime targets reference the same asset name via different URLs (querystring collision)", () => {
+  const tmp = makeTempDir();
+  const manifestsDir = path.join(tmp, "manifests");
+  mkdirSync(manifestsDir, { recursive: true });
+
+  writeFileSync(
+    path.join(manifestsDir, "collision.json"),
+    JSON.stringify(
+      {
+        version: "0.1.0",
+        platforms: {
+          "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+          "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+          // Same asset name, different URLs (querystring). This should still be treated as a collision
+          // across required targets.
+          "windows-x86_64": { url: "https://example.com/Formula_x64.msi?token=abc", signature: "sig" },
+          "windows-aarch64": { url: "https://example.com/Formula_x64.msi?token=def", signature: "sig" },
+          "linux-x86_64": { url: "https://example.com/Formula_x86_64.AppImage", signature: "sig" },
+          "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  const proc = run({
+    cwd: tmp,
+    args: ["v0.1.0", manifestsDir],
+    env: {
+      // Provide placeholders so the script gets past required env checks if it reaches them.
+      GITHUB_REPOSITORY: "owner/repo",
+      GITHUB_TOKEN: "dummy",
+    },
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /Duplicate updater assets across required targets/i);
   // If this ever appears, the script got past manifest validation and attempted a network call.
   assert.doesNotMatch(proc.stderr, /api\\.github\\.com/i);
 });
