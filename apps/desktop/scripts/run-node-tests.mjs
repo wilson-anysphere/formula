@@ -85,7 +85,11 @@ if (runnableFiles.length !== files.length) {
 }
 
 if (runnableFiles.length === 0) {
-  console.log("No node:test files found.");
+  if (files.length === 0) {
+    console.log("No node:test files found.");
+  } else {
+    console.log("All node:test files were skipped.");
+  }
   process.exit(0);
 }
 

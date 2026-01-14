@@ -170,7 +170,11 @@ if (runnableTestFiles.length === 0) {
       console.log("All node:test files matched by filters were skipped.");
     }
   } else {
-    console.log("No node:test files found.");
+    if (filteredTestFiles.length === 0) {
+      console.log("No node:test files found.");
+    } else {
+      console.log("All node:test files were skipped.");
+    }
   }
   process.exit(0);
 }
