@@ -3,41 +3,56 @@ use formula_office_crypto::{
     HashAlgorithm, OfficeCryptoError,
 };
 use std::io::{Cursor, Read, Write};
+use std::sync::OnceLock;
 
-fn basic_xlsx_fixture_bytes() -> Vec<u8> {
-    let path = std::path::Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/xlsx/basic/basic.xlsx"
-    ));
-    std::fs::read(path).expect("read basic.xlsx fixture")
+const AGILE_PASSWORD: &str = "correct horse battery staple";
+const FAST_TEST_SPIN_COUNT: u32 = 10_000;
+
+fn basic_xlsx_fixture_bytes() -> &'static [u8] {
+    static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
+    BYTES
+        .get_or_init(|| {
+            let path = std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../fixtures/xlsx/basic/basic.xlsx"
+            ));
+            std::fs::read(path).expect("read basic.xlsx fixture")
+        })
+        .as_slice()
+}
+
+fn agile_ole_fixture() -> &'static [u8] {
+    static OLE: OnceLock<Vec<u8>> = OnceLock::new();
+    OLE.get_or_init(|| {
+        encrypt_package_to_ole(
+            basic_xlsx_fixture_bytes(),
+            AGILE_PASSWORD,
+            EncryptOptions {
+                spin_count: FAST_TEST_SPIN_COUNT,
+                ..Default::default()
+            },
+        )
+        .expect("encrypt")
+    })
+    .as_slice()
 }
 
 #[test]
 fn agile_encrypt_decrypt_round_trip() {
     let zip = basic_xlsx_fixture_bytes();
-    let password = "correct horse battery staple";
-
-    let ole = encrypt_package_to_ole(
-        &zip,
-        password,
-        EncryptOptions {
-            spin_count: 10_000,
-            ..Default::default()
-        },
-    )
-    .expect("encrypt");
-    let decrypted = decrypt_encrypted_package_ole(&ole, password).expect("decrypt");
-    assert_eq!(decrypted, zip);
+    let ole = agile_ole_fixture();
+    let decrypted = decrypt_encrypted_package_ole(ole, AGILE_PASSWORD).expect("decrypt");
+    assert_eq!(decrypted.as_slice(), zip);
 }
 
 #[test]
 fn wrong_password_fails() {
     let zip = basic_xlsx_fixture_bytes();
     let ole = encrypt_package_to_ole(
-        &zip,
+        zip,
         "password",
         EncryptOptions {
-            spin_count: 10_000,
+            spin_count: FAST_TEST_SPIN_COUNT,
             ..Default::default()
         },
     )
@@ -61,7 +76,7 @@ fn standard_encrypt_decrypt_round_trip() {
     // length (AES-192/256).
     for key_bits in [128usize, 192, 256] {
         let ole = encrypt_package_to_ole(
-            &zip,
+            zip,
             password,
             EncryptOptions {
                 scheme: EncryptionScheme::Standard,
@@ -74,28 +89,18 @@ fn standard_encrypt_decrypt_round_trip() {
         )
         .expect("encrypt");
         let decrypted = decrypt_encrypted_package_ole(&ole, password).expect("decrypt");
-        assert_eq!(decrypted, zip, "key_bits={key_bits}");
+        assert_eq!(decrypted.as_slice(), zip, "key_bits={key_bits}");
     }
 }
 
 #[test]
 fn tampered_ciphertext_fails_integrity_check() {
-    let zip = basic_xlsx_fixture_bytes();
-    let password = "correct horse battery staple";
-
-    let ole = encrypt_package_to_ole(
-        &zip,
-        password,
-        EncryptOptions {
-            spin_count: 10_000,
-            ..Default::default()
-        },
-    )
-    .expect("encrypt");
+    let password = AGILE_PASSWORD;
+    let ole = agile_ole_fixture();
 
     // Extract the streams, flip a byte in the EncryptedPackage ciphertext, and re-wrap into a new
     // OLE container.
-    let cursor = Cursor::new(&ole);
+    let cursor = Cursor::new(ole);
     let mut ole_in = cfb::CompoundFile::open(cursor).expect("open cfb");
 
     let mut encryption_info = Vec::new();
@@ -142,23 +147,13 @@ fn tampered_ciphertext_fails_integrity_check() {
 
 #[test]
 fn tampered_size_prefix_fails_integrity_check() {
-    let zip = basic_xlsx_fixture_bytes();
-    let password = "correct horse battery staple";
-
-    let ole = encrypt_package_to_ole(
-        &zip,
-        password,
-        EncryptOptions {
-            spin_count: 10_000,
-            ..Default::default()
-        },
-    )
-    .expect("encrypt");
+    let password = AGILE_PASSWORD;
+    let ole = agile_ole_fixture();
 
     // Extract the streams, mutate only the EncryptedPackage 8-byte size prefix, and re-wrap into a
     // new OLE container. Per MS-OFFCRYPTO, the dataIntegrity HMAC covers the entire EncryptedPackage
     // stream (including the size prefix), so this should fail with an integrity error.
-    let cursor = Cursor::new(&ole);
+    let cursor = Cursor::new(ole);
     let mut ole_in = cfb::CompoundFile::open(cursor).expect("open cfb");
 
     let mut encryption_info = Vec::new();
@@ -209,23 +204,13 @@ fn tampered_size_prefix_fails_integrity_check() {
 
 #[test]
 fn tampered_size_prefix_high_dword_fails_integrity_check() {
-    let zip = basic_xlsx_fixture_bytes();
-    let password = "correct horse battery staple";
-
-    let ole = encrypt_package_to_ole(
-        &zip,
-        password,
-        EncryptOptions {
-            spin_count: 10_000,
-            ..Default::default()
-        },
-    )
-    .expect("encrypt");
+    let password = AGILE_PASSWORD;
+    let ole = agile_ole_fixture();
 
     // Some producers treat the 8-byte EncryptedPackage size prefix as `(u32 size, u32 reserved)`.
     // Mutate only the high DWORD without recomputing dataIntegrity; the decryptor should still
     // parse the size using the low DWORD, but the HMAC should fail because the stream bytes changed.
-    let cursor = Cursor::new(&ole);
+    let cursor = Cursor::new(ole);
     let mut ole_in = cfb::CompoundFile::open(cursor).expect("open cfb");
 
     let mut encryption_info = Vec::new();
@@ -273,22 +258,12 @@ fn tampered_size_prefix_high_dword_fails_integrity_check() {
 
 #[test]
 fn tampered_encrypted_hmac_value_fails_integrity_check() {
-    let zip = basic_xlsx_fixture_bytes();
-    let password = "correct horse battery staple";
-
-    let ole = encrypt_package_to_ole(
-        &zip,
-        password,
-        EncryptOptions {
-            spin_count: 10_000,
-            ..Default::default()
-        },
-    )
-    .expect("encrypt");
+    let password = AGILE_PASSWORD;
+    let ole = agile_ole_fixture();
 
     // Extract the streams and mutate `dataIntegrity/encryptedHmacValue` inside EncryptionInfo,
     // leaving the EncryptedPackage stream unchanged. This should be detected as an integrity error.
-    let cursor = Cursor::new(&ole);
+    let cursor = Cursor::new(ole);
     let mut ole_in = cfb::CompoundFile::open(cursor).expect("open cfb");
 
     let mut encryption_info = Vec::new();
@@ -384,23 +359,13 @@ fn tampered_encrypted_hmac_value_fails_integrity_check() {
 
 #[test]
 fn appended_trailing_bytes_fail_integrity_check() {
-    let zip = basic_xlsx_fixture_bytes();
-    let password = "correct horse battery staple";
-
-    let ole = encrypt_package_to_ole(
-        &zip,
-        password,
-        EncryptOptions {
-            spin_count: 10_000,
-            ..Default::default()
-        },
-    )
-    .expect("encrypt");
+    let password = AGILE_PASSWORD;
+    let ole = agile_ole_fixture();
 
     // Append trailing bytes to the EncryptedPackage stream. The decrypter may ignore them for
     // plaintext recovery, but MS-OFFCRYPTO dataIntegrity HMAC covers the EncryptedPackage stream
     // bytes, so this must be detected as tampering.
-    let cursor = Cursor::new(&ole);
+    let cursor = Cursor::new(ole);
     let mut ole_in = cfb::CompoundFile::open(cursor).expect("open cfb");
 
     let mut encryption_info = Vec::new();
@@ -443,22 +408,12 @@ fn appended_trailing_bytes_fail_integrity_check() {
 
 #[test]
 fn tampered_encrypted_hmac_key_fails_integrity_check() {
-    let zip = basic_xlsx_fixture_bytes();
-    let password = "correct horse battery staple";
-
-    let ole = encrypt_package_to_ole(
-        &zip,
-        password,
-        EncryptOptions {
-            spin_count: 10_000,
-            ..Default::default()
-        },
-    )
-    .expect("encrypt");
+    let password = AGILE_PASSWORD;
+    let ole = agile_ole_fixture();
 
     // Extract the streams and mutate `dataIntegrity/encryptedHmacKey` inside EncryptionInfo,
     // leaving the EncryptedPackage stream unchanged. This should be detected as an integrity error.
-    let cursor = Cursor::new(&ole);
+    let cursor = Cursor::new(ole);
     let mut ole_in = cfb::CompoundFile::open(cursor).expect("open cfb");
 
     let mut encryption_info = Vec::new();
