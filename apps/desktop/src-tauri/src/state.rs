@@ -105,13 +105,11 @@ impl CellScalar {
     pub fn display(&self) -> String {
         match self {
             CellScalar::Empty => String::new(),
-            CellScalar::Number(n) => {
-                if (n.fract() - 0.0).abs() < f64::EPSILON {
-                    format!("{:.0}", n)
-                } else {
-                    n.to_string()
-                }
-            }
+            CellScalar::Number(_) => format_scalar_for_display_with_date_system(
+                self,
+                None,
+                formula_format::DateSystem::Excel1900,
+            ),
             CellScalar::Text(s) => s.clone(),
             CellScalar::Bool(true) => "TRUE".to_string(),
             CellScalar::Bool(false) => "FALSE".to_string(),
@@ -4266,16 +4264,16 @@ fn format_scalar_for_display_with_date_system(
     number_format: Option<&str>,
     date_system: formula_format::DateSystem,
 ) -> String {
-    match (value, number_format) {
-        (CellScalar::Number(n), Some(fmt)) => {
+    match value {
+        CellScalar::Number(n) => {
             let options = FormatOptions {
                 date_system,
                 ..FormatOptions::default()
             };
-            let formatted = format_value(FormatValue::Number(*n), Some(fmt), &options);
+            let formatted = format_value(FormatValue::Number(*n), number_format, &options);
             formatted.text
         }
-        (other, _) => other.display(),
+        other => other.display(),
     }
 }
 
@@ -6707,6 +6705,57 @@ mod tests {
         let sheet = workbook.sheet(&sheet_id).expect("sheet");
         let a1_cell = sheet.get_cell(0, 0);
         assert_eq!(a1_cell.number_format.as_deref(), Some("0.00"));
+    }
+
+    #[test]
+    fn display_value_uses_general_number_formatting_when_no_explicit_format_is_present() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+        let date_system = workbook_date_system(&workbook);
+
+        let n = 123_456_789_012.0;
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(n))),
+        );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let cell = state.get_cell(&sheet_id, 0, 0).expect("get cell");
+        assert_eq!(cell.value, CellScalar::Number(n));
+
+        let expected = format_value(
+            FormatValue::Number(n),
+            None,
+            &FormatOptions {
+                date_system,
+                ..FormatOptions::default()
+            },
+        )
+        .text;
+        assert_eq!(cell.display_value, expected);
+    }
+
+    #[test]
+    fn display_value_normalizes_negative_zero_for_general_formatting() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(-0.0))),
+        );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let cell = state.get_cell(&sheet_id, 0, 0).expect("get cell");
+        assert_eq!(cell.display_value, "0");
     }
 
     #[test]
