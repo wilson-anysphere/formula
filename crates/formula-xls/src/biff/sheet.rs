@@ -219,6 +219,17 @@ const WARNINGS_SUPPRESSED_MESSAGE: &str = "additional warnings suppressed";
 const MAX_WARNINGS_PER_SHEET_METADATA: usize = MAX_WARNINGS_PER_SHEET;
 const SHEET_METADATA_WARNINGS_SUPPRESSED: &str = "additional sheet metadata warnings suppressed";
 
+/// Hard cap on the number of BIFF records scanned during sheet metadata passes.
+///
+/// View-state/protection scans are best-effort and should not traverse arbitrarily large worksheets
+/// (which may contain millions of cell records). Without a cap, a crafted file can force excessive
+/// work by making the importer scan huge substreams multiple times.
+#[cfg(not(test))]
+const MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN: usize = 500_000;
+// Keep unit tests fast by using a smaller cap.
+#[cfg(test)]
+const MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN: usize = 1_000;
+
 fn push_sheet_metadata_warning(warnings: &mut Vec<String>, warning: impl Into<String>) {
     if warnings.len() < MAX_WARNINGS_PER_SHEET_METADATA {
         warnings.push(warning.into());
@@ -384,6 +395,7 @@ pub(crate) fn parse_biff_sheet_protection(
     let iter =
         records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
 
+    let mut scanned = 0usize;
     for record in iter {
         let record = match record {
             Ok(r) => r,
@@ -397,6 +409,17 @@ pub(crate) fn parse_biff_sheet_protection(
         };
 
         if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        scanned = scanned.saturating_add(1);
+        if scanned > MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN {
+            push_sheet_metadata_warning(
+                &mut out.warnings,
+                format!(
+                    "too many BIFF records while scanning sheet protection (cap={MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN}); stopping early"
+                ),
+            );
             break;
         }
 
@@ -717,6 +740,7 @@ pub(crate) fn parse_biff_sheet_view_state(
     let mut active_pane: Option<u16> = None;
     let mut selections: Vec<(u16, SheetSelection)> = Vec::new();
     let mut warned_selection_records_capped = false;
+    let mut scanned = 0usize;
 
     while let Some(next) = iter.next() {
         let record = match next {
@@ -731,6 +755,17 @@ pub(crate) fn parse_biff_sheet_view_state(
         };
 
         if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        scanned = scanned.saturating_add(1);
+        if scanned > MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN {
+            push_sheet_metadata_warning(
+                &mut out.warnings,
+                format!(
+                    "too many BIFF records while scanning sheet view state (cap={MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN}); stopping early"
+                ),
+            );
             break;
         }
 
@@ -4540,6 +4575,32 @@ mod tests {
     }
 
     #[test]
+    fn sheet_view_state_scan_stops_after_record_cap() {
+        let cap = MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN;
+        assert!(cap >= 10, "test requires cap >= 10");
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+        for _ in 0..(cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        // This record should be ignored because the scan stops at the cap.
+        stream.extend_from_slice(&record(RECORD_WINDOW2, &WINDOW2_FLAG_DSP_GRID.to_le_bytes()));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_view_state(&stream, 0).expect("parse");
+        assert_eq!(parsed.show_grid_lines, None);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("view state")),
+            "expected record-cap warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
     fn sheet_view_state_selection_ranges_are_capped() {
         let cap = MAX_SELECTION_RANGES_PER_RECORD;
         assert!(cap >= 2, "test requires cap >= 2");
@@ -4597,6 +4658,32 @@ mod tests {
                 .iter()
                 .any(|w| w.contains("SELECTION record") && w.contains("cap=")),
             "expected selection cap warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_protection_scan_stops_after_record_cap() {
+        let cap = MAX_RECORDS_SCANNED_PER_SHEET_METADATA_SCAN;
+        assert!(cap >= 10, "test requires cap >= 10");
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+        for _ in 0..(cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        // This record should be ignored because the scan stops at the cap.
+        stream.extend_from_slice(&record(RECORD_PROTECT, &1u16.to_le_bytes()));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_protection(&stream, 0).expect("parse");
+        assert_eq!(parsed.protection.enabled, false);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("sheet protection")),
+            "expected record-cap warning, got {:?}",
             parsed.warnings
         );
     }
