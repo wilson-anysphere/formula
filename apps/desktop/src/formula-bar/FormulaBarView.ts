@@ -1564,10 +1564,10 @@ export class FormulaBarView {
     this.#render({ preserveTextareaValue: false });
     try {
       this.#callbacks.onCancel?.();
-    } catch {
-      // Avoid leaving the formula bar in a broken state if an embedding callback throws.
+    } finally {
+      // Even if the embedding callback throws, ensure we still clear hover/range overlays.
+      this.#emitOverlays();
     }
-    this.#emitOverlays();
   }
 
   #commit(commit: FormulaBarCommit): void {
@@ -1584,10 +1584,10 @@ export class FormulaBarView {
     this.#render({ preserveTextareaValue: false });
     try {
       this.#callbacks.onCommit(committed, commit);
-    } catch {
-      // Avoid leaving the formula bar in a broken state if an embedding callback throws.
+    } finally {
+      // Even if the embedding callback throws, ensure we still clear hover/range overlays.
+      this.#emitOverlays();
     }
-    this.#emitOverlays();
   }
 
   #focusFx(): void {
