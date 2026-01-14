@@ -3696,7 +3696,6 @@ fn stream_cells_into_model_sheet(
 
         let cell = formula_model::Cell {
             value: snapshot.value,
-            phonetic: None,
             formula,
             phonetic: None,
             style_id,
