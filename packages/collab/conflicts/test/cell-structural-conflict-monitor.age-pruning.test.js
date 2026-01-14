@@ -211,3 +211,104 @@ test("CellStructuralConflictMonitor prunes old local op records by age when enab
   monitor.dispose();
   doc.destroy();
 });
+
+test("CellStructuralConflictMonitor detects conflicts for late-arriving old records before pruning", () => {
+  const cellKey = "Sheet1:0:0";
+  const now = Date.now();
+
+  // Seed a shared starting state.
+  const docA = new Y.Doc();
+  const cellsA = docA.getMap("cells");
+  docA.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "seed");
+    cell.set("formula", null);
+    cellsA.set(cellKey, cell);
+  });
+
+  const docB = new Y.Doc();
+  const cellsB = docB.getMap("cells");
+  Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+
+  const originA = { type: "local-a" };
+  const originB = { type: "local-b" };
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const monitorA = new CellStructuralConflictMonitor({
+    doc: docA,
+    cells: cellsA,
+    localUserId: "user-a",
+    origin: originA,
+    localOrigins: new Set([originA]),
+    onConflict: (c) => conflictsA.push(c),
+    // Tiny age window so the remote record we inject is immediately eligible for pruning by age.
+    maxOpRecordAgeMs: 1_000,
+  });
+
+  const monitorB = new CellStructuralConflictMonitor({
+    doc: docB,
+    cells: cellsB,
+    localUserId: "user-b",
+    origin: originB,
+    localOrigins: new Set([originB]),
+    onConflict: () => {},
+    maxOpRecordAgeMs: 1_000,
+  });
+
+  // Make concurrent changes:
+  // - user A deletes A1
+  // - user B edits A1
+  docA.transact(() => {
+    cellsA.delete(cellKey);
+  }, originA);
+
+  docB.transact(() => {
+    const cell = cellsB.get(cellKey);
+    assert.ok(cell instanceof Y.Map);
+    cell.set("value", "edited");
+    cell.set("formula", null);
+  }, originB);
+
+  // Age the op record created by user B so it is past the age cutoff when it arrives at A.
+  const opsB = docB.getMap("cellStructuralOps");
+  /** @type {string[]} */
+  const bOpIds = [];
+  opsB.forEach((_, id) => bOpIds.push(String(id)));
+  assert.ok(bOpIds.length > 0);
+  const agedOpId = bOpIds[0];
+  const agedCreatedAt = now - 60_000;
+  docB.transact(() => {
+    for (const id of bOpIds) {
+      const record = opsB.get(id);
+      if (!record || typeof record !== "object") continue;
+      opsB.set(id, { ...record, createdAt: agedCreatedAt });
+    }
+  });
+
+  // Merge the concurrent edits.
+  const updateA = Y.encodeStateAsUpdate(docA);
+  const updateB = Y.encodeStateAsUpdate(docB);
+  Y.applyUpdate(docA, updateB);
+  Y.applyUpdate(docB, updateA);
+
+  // Even though the remote record is "old" by createdAt, it should not be pruned
+  // in the same transaction it was added, so conflict detection still works.
+  assert.equal(
+    conflictsA.some((c) => c.reason === "delete-vs-edit" && c.cellKey === cellKey),
+    true,
+  );
+
+  const opsA = docA.getMap("cellStructuralOps");
+  assert.equal(opsA.has(agedOpId), true);
+
+  // A later prune cycle can remove it.
+  monitorA._pruneOpLogByAge({ force: true });
+  assert.equal(opsA.has(agedOpId), false);
+
+  monitorA.dispose();
+  monitorB.dispose();
+  docA.destroy();
+  docB.destroy();
+});
