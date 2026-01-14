@@ -1,16 +1,62 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <!--
-    Ensure Linux desktop environments can map `*.parquet` to a stable MIME type.
+    Ensure Linux desktop environments can map Formula-supported file extensions to
+    the MIME types we advertise in the generated `.desktop` file.
 
-    Many distros' shared-mime-info database does not include a Parquet glob by
-    default, which means a `.desktop` file advertising `MimeType=...parquet`
-    would never match when the file manager resolves the file type.
+    Most Office spreadsheet formats are included in shared-mime-info on common
+    distros, but this is not guaranteed across all environments (and Parquet is
+    often missing by default). Shipping our own globs makes "double click to open"
+    work reliably after install (via `update-mime-database` triggers for DEB/RPM,
+    and for AppImage integrators like AppImageLauncher/appimaged).
 
     By shipping this definition inside our .deb/.rpm (and AppImage), package
     install triggers (`update-mime-database`) will register the mapping and make
-    Parquet double-click open work reliably.
+    file associations work reliably.
   -->
+
+  <mime-type type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+    <comment>Microsoft Excel Spreadsheet</comment>
+    <glob pattern="*.xlsx" />
+  </mime-type>
+
+  <mime-type type="application/vnd.ms-excel">
+    <comment>Microsoft Excel Spreadsheet (Legacy)</comment>
+    <glob pattern="*.xls" />
+    <glob pattern="*.xlt" />
+    <glob pattern="*.xla" />
+  </mime-type>
+
+  <mime-type type="application/vnd.ms-excel.sheet.macroEnabled.12">
+    <comment>Microsoft Excel Macro-Enabled Spreadsheet</comment>
+    <glob pattern="*.xlsm" />
+  </mime-type>
+
+  <mime-type type="application/vnd.openxmlformats-officedocument.spreadsheetml.template">
+    <comment>Microsoft Excel Template</comment>
+    <glob pattern="*.xltx" />
+  </mime-type>
+
+  <mime-type type="application/vnd.ms-excel.template.macroEnabled.12">
+    <comment>Microsoft Excel Macro-Enabled Template</comment>
+    <glob pattern="*.xltm" />
+  </mime-type>
+
+  <mime-type type="application/vnd.ms-excel.addin.macroEnabled.12">
+    <comment>Microsoft Excel Add-In</comment>
+    <glob pattern="*.xlam" />
+  </mime-type>
+
+  <mime-type type="application/vnd.ms-excel.sheet.binary.macroEnabled.12">
+    <comment>Microsoft Excel Binary Spreadsheet</comment>
+    <glob pattern="*.xlsb" />
+  </mime-type>
+
+  <mime-type type="text/csv">
+    <comment>Comma-Separated Values</comment>
+    <glob pattern="*.csv" />
+  </mime-type>
+
   <mime-type type="application/vnd.apache.parquet">
     <comment>Apache Parquet file</comment>
     <glob pattern="*.parquet" />
