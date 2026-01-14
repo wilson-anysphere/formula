@@ -44,6 +44,27 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+function bestEffortKeyIdFromEncPayload(enc: unknown): string | null {
+  if (!enc || typeof enc !== "object") return null;
+  const direct = (enc as any).keyId;
+  if (typeof direct === "string") {
+    const trimmed = String(direct).trim();
+    return trimmed ? trimmed : null;
+  }
+  const getter = (enc as any).get;
+  if (typeof getter === "function") {
+    try {
+      const raw = getter.call(enc, "keyId");
+      const trimmed = raw == null ? "" : String(raw).trim();
+      if (/^\[object .*]$/.test(trimmed)) return null;
+      return trimmed ? trimmed : null;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+}
+
 function keyIdFromEncryptedCellPayload(session: any, cell: { sheetId: string; row: number; col: number }): string | null {
   try {
     const cells = session?.cells;
@@ -68,12 +89,7 @@ function keyIdFromEncryptedCellPayload(session: any, cell: { sheetId: string; ro
       // the payload schema is unknown/unsupported by this client. This avoids key-id
       // conflicts (encryptSelectedRange) and allows export flows to still identify which key
       // id is needed (even if the client cannot decrypt/edit the cell).
-      const keyId =
-        typeof enc === "object" && enc && typeof (enc as any).keyId === "string"
-          ? String((enc as any).keyId ?? "").trim()
-          : isEncryptedCellPayload(enc)
-            ? String((enc as any).keyId ?? "").trim()
-            : "";
+      const keyId = bestEffortKeyIdFromEncPayload(enc) ?? (isEncryptedCellPayload(enc) ? String((enc as any).keyId ?? "").trim() : null);
       if (keyId) return keyId;
     }
   } catch {

@@ -26710,7 +26710,26 @@ export class SpreadsheetApp {
       }
 
       if (encRaw !== undefined) {
-        const keyId = typeof encRaw === "object" && encRaw && typeof encRaw.keyId === "string" ? String(encRaw.keyId).trim() : "";
+        const keyId = (() => {
+          if (!encRaw || typeof encRaw !== "object") return "";
+          const direct = (encRaw as any).keyId;
+          if (typeof direct === "string") return String(direct).trim();
+          const getter = (encRaw as any).get;
+          if (typeof getter === "function") {
+            try {
+              const raw = getter.call(encRaw, "keyId");
+              if (typeof raw === "string") return raw.trim();
+              if (raw != null) {
+                const trimmed = String(raw).trim();
+                if (/^\[object .*]$/.test(trimmed)) return "";
+                return trimmed;
+              }
+            } catch {
+              // ignore
+            }
+          }
+          return "";
+        })();
         if (!isEncryptedCellPayload(encRaw)) {
           return {
             rejectionReason: "encryption",

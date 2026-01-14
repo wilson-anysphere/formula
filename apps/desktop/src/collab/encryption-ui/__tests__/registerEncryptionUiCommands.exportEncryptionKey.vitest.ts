@@ -272,4 +272,49 @@ describe("registerEncryptionUiCommands", () => {
     expect(keyStore.getCachedKey).toHaveBeenCalledWith(docId, "k1");
     expect(showToast).not.toHaveBeenCalledWith(expect.stringMatching(/unsupported format/i), "error");
   });
+
+  it("exportEncryptionKey can still identify the key id when enc is stored as a nested Y.Map (unsupported payload schema)", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const docId = "doc-1";
+    const doc = new Y.Doc({ guid: docId });
+
+    const metadata = doc.getMap("metadata");
+    metadata.set("encryptedRanges", { foo: "bar" } as any);
+
+    const cells = doc.getMap("cells");
+    const cellMap = new Y.Map<any>();
+    const encMap = new Y.Map<any>();
+    encMap.set("v", 2);
+    encMap.set("alg", "AES-256-GCM");
+    encMap.set("keyId", "k1");
+    encMap.set("ivBase64", "AA==");
+    encMap.set("tagBase64", "AA==");
+    encMap.set("ciphertextBase64", "AA==");
+    cellMap.set("enc", encMap);
+    cells.set("Sheet1:0:0", cellMap);
+
+    const keyBytes = new Uint8Array(32).fill(7);
+    const keyStore = {
+      getCachedKey: vi.fn((_docId: string, keyId: string) => (keyId === "k1" ? { keyId, keyBytes } : null)),
+      get: vi.fn(async () => null),
+    };
+
+    const app: any = {
+      getCollabSession: () => ({ doc, cells }),
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getCurrentSheetId: () => "Sheet1",
+      getCurrentSheetDisplayName: () => "Sheet1",
+      getCollabEncryptionKeyStore: () => keyStore,
+    };
+
+    registerEncryptionUiCommands({ commandRegistry, app });
+
+    vi.mocked(showInputBox).mockResolvedValue("done");
+
+    await commandRegistry.executeCommand("collab.exportEncryptionKey");
+
+    expect(keyStore.getCachedKey).toHaveBeenCalledWith(docId, "k1");
+    expect(showToast).not.toHaveBeenCalledWith(expect.stringMatching(/cannot determine the key id/i), "error");
+  });
 });

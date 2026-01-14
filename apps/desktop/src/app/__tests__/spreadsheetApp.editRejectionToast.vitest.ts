@@ -321,6 +321,51 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     root.remove();
   });
 
+  it("includes the encrypted payload key id when enc is stored as a nested Y.Map (unsupported schema)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    (app as any).document.canEditCell = () => false;
+
+    const ydoc = new Y.Doc();
+    const cells = ydoc.getMap("cells");
+    const cellMap = new Y.Map<any>();
+    const encMap = new Y.Map<any>();
+    encMap.set("v", 2);
+    encMap.set("alg", "AES-256-GCM");
+    encMap.set("keyId", "k-range-1");
+    encMap.set("ivBase64", "AA==");
+    encMap.set("tagBase64", "AA==");
+    encMap.set("ciphertextBase64", "AA==");
+    cellMap.set("enc", encMap);
+    cells.set("Sheet1:0:0", cellMap);
+
+    (app as any).collabSession = {
+      cells,
+      defaultSheetId: "Sheet1",
+      getEncryptionConfig: () => ({
+        keyForCell: () => null,
+        shouldEncryptCell: () => true,
+      }),
+    };
+
+    (app as any).applyEdit("Sheet1", { row: 0, col: 0 }, "hello");
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("unsupported format");
+    expect(content).toContain("Update Formula");
+    expect(content).toContain("k-range-1");
+
+    app.destroy();
+    root.remove();
+  });
+
   it("shows a read-only toast when the collab session role is viewer/commenter (isReadOnly)", () => {
     const root = createRoot();
     const status = {
