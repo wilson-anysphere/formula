@@ -99,5 +99,42 @@ describe("SecondaryGridView no-resurrection", () => {
     gridView.destroy();
     container.remove();
   });
-});
 
+  it("does not resurrect deleted sheets when reading cell input text", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 0 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 0 });
+    document.body.appendChild(container);
+
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "one");
+    doc.setCellValue("Sheet2", "A1", "two");
+    expect(doc.getSheetIds()).toEqual(["Sheet1", "Sheet2"]);
+
+    doc.deleteSheet("Sheet2");
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+
+    let activeSheetId = "Sheet1";
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => activeSheetId,
+      rowCount: 100,
+      colCount: 50,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images
+    });
+
+    activeSheetId = "Sheet2";
+    // Directly invoke the legacy read helper (private) so we cover sheet-materializing `getCell` paths
+    // without needing to simulate a full editor gesture in jsdom.
+    expect((gridView as any).getCellInputText({ row: 0, col: 0 })).toBe("");
+
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+
+    gridView.destroy();
+    container.remove();
+  });
+});

@@ -134,6 +134,41 @@ export class SecondaryGridView {
   // a side-effect of scroll/resize events). Keep a tiny re-entrancy/queue guard so we can
   // coalesce those into a single pass.
 
+  /**
+   * DocumentController lazily materializes sheets: calling `getCell()` / `getSheetView()` with a
+   * missing sheet id will create a new empty sheet model.
+   *
+   * The split-view secondary pane can briefly hold a stale sheet id during sheet deletion/undo
+   * transitions. Avoid resurrecting deleted sheets by treating a sheet as "known missing" when
+   * the workbook already has *some* sheets, but the requested id exists in neither
+   * `document.model.sheets` nor `document.sheetMeta`.
+   */
+  private isSheetKnownMissing(sheetId: string): boolean {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return true;
+
+    const docAny: any = this.document as any;
+    const sheets: any = docAny?.model?.sheets;
+    const sheetMeta: any = docAny?.sheetMeta;
+
+    if (
+      sheets &&
+      typeof sheets.has === "function" &&
+      typeof sheets.size === "number" &&
+      sheetMeta &&
+      typeof sheetMeta.has === "function" &&
+      typeof sheetMeta.size === "number"
+    ) {
+      const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+      if (!workbookHasAnySheets) return false;
+      return !sheets.has(id) && !sheetMeta.has(id);
+    }
+
+    // If we can't introspect the document internals (e.g. unit tests with a fake document),
+    // conservatively assume the sheet exists so we preserve previous behavior.
+    return false;
+  }
+
   constructor(options: {
     container: HTMLElement;
     /**
@@ -631,6 +666,7 @@ export class SecondaryGridView {
     if (!rect) return;
 
     const sheetId = this.getSheetId();
+    if (this.isSheetKnownMissing(sheetId)) return;
     const cell = { row: request.row - this.headerRows, col: request.col - this.headerCols };
     // In collab read-only roles (viewer/commenter) and other permission-restricted scenarios,
     // DocumentController silently filters cell edits via `canEditCell`. Guard here so the
@@ -664,7 +700,13 @@ export class SecondaryGridView {
   }
 
   private getCellInputText(cell: { row: number; col: number }): string {
-    const state = this.document.getCell(this.getSheetId(), cell) as { value: unknown; formula: string | null };
+    const sheetId = this.getSheetId();
+    if (this.isSheetKnownMissing(sheetId)) return "";
+    const docAny: any = this.document as any;
+    const state =
+      typeof docAny.peekCell === "function"
+        ? (docAny.peekCell(sheetId, cell) as { value: unknown; formula: string | null })
+        : (this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null });
     if (state?.formula != null) return state.formula;
     if (isRichTextValue(state?.value)) return state.value.text;
     if (parseImageCellPayload(state?.value)) return "";
@@ -674,6 +716,7 @@ export class SecondaryGridView {
 
   private applyEdit(cell: { row: number; col: number }, rawValue: string): void {
     const sheetId = this.getSheetId();
+    if (this.isSheetKnownMissing(sheetId)) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const canEditCell = (this.document as any).canEditCell as
       | ((cell: { sheetId: string; row: number; col: number }) => boolean)
@@ -693,7 +736,11 @@ export class SecondaryGridView {
         return;
       }
     }
-    const original = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
+    const docAny: any = this.document as any;
+    const original =
+      typeof docAny.peekCell === "function"
+        ? (docAny.peekCell(sheetId, cell) as { value: unknown; formula: string | null })
+        : (this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null });
 
     const originalInput = (() => {
       if (!original) return "";
