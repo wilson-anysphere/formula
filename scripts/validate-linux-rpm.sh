@@ -33,14 +33,17 @@ Usage:
 Options:
   --rpm <path>        Validate a specific .rpm (or a directory containing .rpm files).
                       If omitted, the script searches common Tauri output locations:
-                        - \$CARGO_TARGET_DIR/**/release/bundle/rpm/*.rpm (if set)
-                        - apps/desktop/src-tauri/target/**/release/bundle/rpm/*.rpm
-                        - apps/desktop/target/**/release/bundle/rpm/*.rpm
-                        - target/**/release/bundle/rpm/*.rpm
+                         - \$CARGO_TARGET_DIR/**/release/bundle/rpm/*.rpm (if set)
+                         - apps/desktop/src-tauri/target/**/release/bundle/rpm/*.rpm
+                         - apps/desktop/target/**/release/bundle/rpm/*.rpm
+                         - target/**/release/bundle/rpm/*.rpm
   --no-container      Skip the Fedora container installability check.
                       Note: we still extract the RPM payload to validate desktop integration
                       metadata (MimeType= in *.desktop). This requires rpm2cpio + cpio on the host.
   --image <image>     Fedora image to use for the container step (default: fedora:40).
+
+Environment variables:
+  DOCKER_PLATFORM     Optional docker --platform override (default: host architecture).
   -h, --help          Show this help text.
 EOF
 }
