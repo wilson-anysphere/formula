@@ -21769,8 +21769,9 @@ fn sst_record_single_string_with_phonetic(base_text: &str, phonetic_text: &str) 
 // These helpers are intentionally minimal and only cover the subset needed to generate encrypted
 // fixtures for integration tests. They are *not* a general `.xls` encryption implementation.
 //
-// The `.xls` FILEPASS decryptor lives in `crates/formula-xls/src/biff/encryption.rs`
-// (wrapper: `crates/formula-xls/src/decrypt.rs`).
+// The `.xls` FILEPASS decryptor lives in `crates/formula-xls/src/biff/encryption.rs`.
+// Wrapper: `crates/formula-xls/src/decrypt.rs`.
+// CryptoAPI RC4 implementation: `crates/formula-xls/src/biff/encryption/cryptoapi.rs`.
 const ENCRYPTION_TYPE_RC4: u16 = 0x0001;
 const ENCRYPTION_SUBTYPE_CRYPTOAPI: u16 = 0x0002;
 
@@ -21796,7 +21797,7 @@ fn sha1_bytes(chunks: &[&[u8]]) -> [u8; 20] {
 }
 
 fn derive_key_material(password: &str, salt: &[u8]) -> [u8; 20] {
-    // Match `crates/formula-xls/src/biff/encryption/cryptoapi.rs` (CryptoAPI RC4):
+    // Match `crates/formula-xls/src/biff/encryption/cryptoapi.rs` (CryptoAPI RC4 password KDF, SHA-1):
     //   H0 = SHA1(salt || UTF16LE(password))
     //   for i in 0..49999: H0 = SHA1(i_le32 || H0)
     let pw_bytes = utf16le_bytes(password);

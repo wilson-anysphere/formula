@@ -367,7 +367,7 @@ fn build_filepass_rc4_standard_payload(password: &str) -> (Vec<u8>, [u8; 16]) {
 }
 
 fn derive_cryptoapi_key_material(password: &str, salt: &[u8; 16]) -> [u8; 20] {
-    // Matches `crates/formula-xls/src/biff/encryption/cryptoapi.rs` (CryptoAPI RC4, SHA-1).
+    // Matches `crates/formula-xls/src/biff/encryption/cryptoapi.rs` (CryptoAPI RC4 password KDF, SHA-1).
     const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
 
     let pw_bytes = utf16le_bytes(password);
@@ -382,7 +382,7 @@ fn derive_cryptoapi_key_material(password: &str, salt: &[u8; 16]) -> [u8; 20] {
 }
 
 fn derive_cryptoapi_key_material_md5(password: &str, salt: &[u8; 16]) -> [u8; 16] {
-    // Matches `crates/formula-xls/src/biff/encryption/cryptoapi.rs` (CryptoAPI RC4, MD5).
+    // Matches `crates/formula-xls/src/biff/encryption/cryptoapi.rs` (CryptoAPI RC4 password KDF, MD5).
     const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
 
     let pw_bytes = utf16le_bytes(password);

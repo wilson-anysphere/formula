@@ -15,7 +15,7 @@ pub(crate) const RECORD_EOF: u16 = 0x000A;
 ///   no password is provided, and
 /// - decrypt supported `FILEPASS` schemes when a password is provided (see
 ///   [`crate::import_xls_path_with_password`], `crates/formula-xls/src/decrypt.rs`, and
-///   `crates/formula-xls/src/biff/encryption.rs`).
+///   `crates/formula-xls/src/biff/encryption.rs` (incl. `biff/encryption/cryptoapi.rs`)).
 ///
 /// Decrypted streams must also mask the `FILEPASS` record id so downstream parsers don't treat the
 /// workbook as still-encrypted (see [`mask_workbook_globals_filepass_record_id_in_place`]).
