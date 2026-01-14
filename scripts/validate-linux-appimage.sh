@@ -44,6 +44,14 @@ locations:
   - target/**/release/bundle/appimage/*.AppImage
 
 If CARGO_TARGET_DIR is set, it is searched first.
+
+Environment:
+  FORMULA_APPIMAGE_MAIN_BINARY
+    Override the expected main binary name inside the AppImage AppDir (defaults to
+    tauri.conf.json mainBinaryName when available).
+  FORMULA_VALIDATE_ALL_APPIMAGES=1
+    When auto-discovering, validate all matching AppImages instead of selecting
+    the most recently modified one.
 EOF
 }
 
