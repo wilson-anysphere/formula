@@ -104,6 +104,7 @@ for workflow in "${workflow_files[@]}"; do
       if (s ~ /pnpm[[:space:]]+build:desktop([[:space:]]|$)/) return 1
       if (s ~ /pnpm[[:space:]]+build:wasm([[:space:]]|$)/) return 1
       if (s ~ /pnpm[[:space:]]+-w[[:space:]]+build:wasm([[:space:]]|$)/) return 1
+      if (s ~ /pnpm[[:space:]]+benchmark([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])cargo([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])wasm-pack([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustup([[:space:]]|$)/) return 1

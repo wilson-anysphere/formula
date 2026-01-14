@@ -469,6 +469,45 @@ jobs:
   assert.match(proc.stdout, /Rust toolchain pins match/i);
 });
 
+test("fails when workflow runs pnpm benchmark without installing pinned toolchain", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  perf:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: pnpm benchmark
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /before installing the pinned toolchain/i);
+});
+
+test("passes when workflow installs toolchain before running pnpm benchmark", { skip: !canRun }, () => {
+  const proc = run({
+    "rust-toolchain.toml": `
+[toolchain]
+channel = "1.92.0"
+`,
+    ".github/workflows/ci.yml": `
+jobs:
+  perf:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.92.0
+      - run: pnpm benchmark
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Rust toolchain pins match/i);
+});
+
 test("fails when workflow runs build-formula-wasm-node.mjs without installing pinned toolchain", { skip: !canRun }, () => {
   const proc = run({
     "rust-toolchain.toml": `
