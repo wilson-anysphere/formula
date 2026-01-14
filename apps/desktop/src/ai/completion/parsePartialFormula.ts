@@ -766,7 +766,13 @@ export function createLocaleAwarePartialFormulaParser(options: {
           const trimmed = message.trim();
           const prefix = "unknown localeId:";
           if (trimmed.startsWith(prefix)) {
-            const unknown = trimmed.slice(prefix.length).trim();
+            let unknown = trimmed.slice(prefix.length).trim();
+            // The WASM engine includes extra context in these errors:
+            //   "unknown localeId: xx-XX. Supported locale ids: en-US, ..."
+            // Extract just the locale id token.
+            const dot = unknown.indexOf(".");
+            if (dot >= 0) unknown = unknown.slice(0, dot).trim();
+            unknown = unknown.replace(/^["'`]+/, "").replace(/["'`]+$/, "").trim();
             // Only cache when the engine is rejecting the exact locale id we passed. This keeps the
             // defensive "unsupported locale" fast-path from triggering on unrelated errors that
             // happen to share the same prefix.

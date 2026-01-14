@@ -220,7 +220,7 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     const engine = {
       parseFormulaPartial: async () => {
         calls += 1;
-        throw new Error("unknown localeId: de-DE");
+        throw new Error("unknown localeId: de-DE. Supported locale ids: en-US, de-DE");
       },
     };
 
