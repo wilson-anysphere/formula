@@ -248,6 +248,20 @@ pub enum FilterValue {
     String(Arc<str>),
 }
 
+impl FilterValue {
+    pub fn string(value: impl Into<Arc<str>>) -> Self {
+        Self::String(value.into())
+    }
+
+    pub fn number(value: f64) -> Self {
+        Self::Number(value)
+    }
+
+    pub fn boolean(value: bool) -> Self {
+        Self::Boolean(value)
+    }
+}
+
 /// A small predicate AST that can be evaluated column-wise against a [`ColumnarTable`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum FilterExpr {
@@ -275,6 +289,40 @@ pub enum FilterExpr {
     IsNotNull {
         col: usize,
     },
+}
+
+impl FilterExpr {
+    pub fn and(self, rhs: FilterExpr) -> Self {
+        Self::And(Box::new(self), Box::new(rhs))
+    }
+
+    pub fn or(self, rhs: FilterExpr) -> Self {
+        Self::Or(Box::new(self), Box::new(rhs))
+    }
+
+    pub fn not(self) -> Self {
+        Self::Not(Box::new(self))
+    }
+
+    pub fn cmp(col: usize, op: CmpOp, value: FilterValue) -> Self {
+        Self::Cmp { col, op, value }
+    }
+
+    pub fn cmp_string_ci(col: usize, op: CmpOp, value: impl Into<Arc<str>>) -> Self {
+        Self::CmpStringCI {
+            col,
+            op,
+            value: value.into(),
+        }
+    }
+
+    pub fn is_null(col: usize) -> Self {
+        Self::IsNull { col }
+    }
+
+    pub fn is_not_null(col: usize) -> Self {
+        Self::IsNotNull { col }
+    }
 }
 
 /// Evaluate a filter expression and return a [`BitVec`] mask of matching rows.
