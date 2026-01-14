@@ -304,22 +304,22 @@ export class FormulaBarModel {
     if (this.#highlightedSpansCache && this.#highlightedSpansCacheDraft === this.#draft) {
       return this.#highlightedSpansCache;
     }
-    const tokens = this.#tokensForDraft();
-    const spans = tokens.map((token) => ({
-      kind: token.type,
-      text: token.text,
-      start: token.start,
-      end: token.end,
-    }));
-    this.#highlightedSpansCache = spans;
+    const tokens = this.#tokensForDraft() as unknown as HighlightSpan[];
+    this.#highlightedSpansCache = tokens;
     this.#highlightedSpansCacheDraft = this.#draft;
-    return spans;
+    return tokens;
   }
 
   #tokensForDraft(): FormulaToken[] {
     const cache = this.#tokenCache;
     if (cache && cache.draft === this.#draft) return cache.tokens;
     const tokens = tokenizeFormula(this.#draft);
+    // `tokenizeFormula` returns `FormulaToken` objects keyed by `type`. For highlight rendering we
+    // also want a `kind` field (matching engine tooling spans) without allocating a parallel span
+    // object per token. Add a lightweight alias property in-place and reuse the same objects.
+    for (const token of tokens) {
+      (token as unknown as { kind?: FormulaTokenType }).kind = token.type;
+    }
     this.#tokenCache = { draft: this.#draft, tokens };
     return tokens;
   }
