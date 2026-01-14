@@ -4,10 +4,6 @@ use std::fmt;
 
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
 
-const fn default_true() -> bool {
-    true
-}
-
 /// Canonical reference to a field used by a pivot configuration.
 ///
 /// Pivot tables can be sourced from either:
@@ -51,6 +47,7 @@ impl PivotFieldRef {
 impl fmt::Display for PivotFieldRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            // Keep cache field refs backward compatible: display the field name itself.
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
             PivotFieldRef::DataModelColumn { table, column } => {
                 // Prefer a DAX-like display shape to make debugging/logging consistent with Excel.
