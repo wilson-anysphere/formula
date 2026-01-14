@@ -465,6 +465,9 @@ This workflow downloads the two summary artifacts (by matching `head_sha`), runs
 `python tools/compat_scorecard.py --allow-missing-inputs`, uploads a `compat-scorecard` artifact, and appends the
 markdown to the job summary.
 
+You can also run the workflow manually via `workflow_dispatch` and optionally provide a target commit SHA to
+backfill/debug scorecards for older runs.
+
 Corpus summary artifacts:
 
 - `corpus-public-summary` → `tools/corpus/out/public/summary.json` + `tools/corpus/out/public/summary.md`

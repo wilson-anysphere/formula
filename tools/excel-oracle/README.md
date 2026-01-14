@@ -27,6 +27,8 @@ python tools/compat_scorecard.py --out-md compat_scorecard.md
 In CI, the repo also includes a workflow-run aggregator (`.github/workflows/compat-scorecard.yml`) that downloads the
 corpus + oracle artifacts and uploads a unified `compat-scorecard` report.
 
+The aggregator supports manual dispatch (`workflow_dispatch`) with an optional SHA input for backfills/debugging.
+
 ## Prerequisites (local generation)
 
 To generate oracle data locally you must have:

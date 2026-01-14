@@ -37,6 +37,9 @@ By default it looks for:
 CI also ships a workflow-run aggregator (`.github/workflows/compat-scorecard.yml`) that downloads the two
 artifacts and uploads a unified `compat-scorecard` report.
 
+Tip: the aggregator workflow supports manual dispatch (`workflow_dispatch`) with an optional SHA input for
+backfills/debugging.
+
 To see what the gate would run (resolved dataset paths + commands) without executing `cargo`, use:
 
 ```bash
