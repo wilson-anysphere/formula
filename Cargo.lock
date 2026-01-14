@@ -1965,20 +1965,17 @@ dependencies = [
 name = "formula-corpus-triage"
 version = "0.1.0"
 dependencies = [
- "aes",
  "anyhow",
  "base64 0.22.1",
- "cfb 0.10.0",
  "clap",
  "formula-engine",
  "formula-model",
+ "formula-office-crypto",
  "formula-xlsb",
  "formula-xlsx",
  "globset",
- "roxmltree",
  "serde",
  "serde_json",
- "sha1",
  "sha2",
  "tempfile",
  "xlsx-diff",

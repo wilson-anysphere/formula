@@ -499,11 +499,11 @@ pub fn pivot_table_to_engine_config_with_styles(
             let show_as = map_show_data_as(df.show_data_as.as_deref());
 
             // `dataField@baseField` is an index into the cache fields list.
-            let base_field = df.base_field.and_then(|base_field_idx| {
+            let base_field: Option<PivotFieldRef> = df.base_field.and_then(|base_field_idx| {
                 cache_def
                     .cache_fields
                     .get(base_field_idx as usize)
-                    .map(|f| f.name.clone())
+                    .map(|f| f.name.clone().into())
             });
 
             // `dataField@baseItem` refers to an item within `baseField`'s shared-items table.
@@ -529,7 +529,7 @@ pub fn pivot_table_to_engine_config_with_styles(
                 aggregation,
                 number_format: df.num_fmt_id.and_then(|id| resolve_pivot_num_fmt_id(id, styles)),
                 show_as,
-                base_field: base_field.map(PivotFieldRef::CacheFieldName),
+                base_field,
                 base_item,
             })
         })
@@ -747,6 +747,10 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::collections::HashSet;
 
+    fn cache_field(name: &str) -> PivotFieldRef {
+        PivotFieldRef::CacheFieldName(name.to_string())
+    }
+
     #[test]
     fn map_show_data_as_handles_known_strings_case_insensitively() {
         let cases = [
@@ -832,10 +836,7 @@ mod tests {
  
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
-        assert_eq!(
-            cfg.value_fields[0].base_field,
-            Some(PivotFieldRef::CacheFieldName("Region".to_string()))
-        );
+        assert_eq!(cfg.value_fields[0].base_field, Some(cache_field("Region")));
     }
 
     #[test]
@@ -869,10 +870,7 @@ mod tests {
  
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
-        assert_eq!(
-            cfg.value_fields[0].base_field,
-            Some(PivotFieldRef::CacheFieldName("Region".to_string()))
-        );
+        assert_eq!(cfg.value_fields[0].base_field, Some(cache_field("Region")));
         assert_eq!(cfg.value_fields[0].base_item.as_deref(), Some("East"));
     }
 
@@ -988,11 +986,11 @@ mod tests {
             cfg.filter_fields,
             vec![
                 FilterField {
-                    source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
+                    source_field: cache_field("Region"),
                     allowed: None
                 },
                 FilterField {
-                    source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+                    source_field: cache_field("Sales"),
                     allowed: None
                 }
             ]
@@ -1031,7 +1029,7 @@ mod tests {
         assert_eq!(
             cfg.filter_fields,
             vec![FilterField {
-                source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
+                source_field: cache_field("Region"),
                 allowed: Some(allowed),
             }]
         );
@@ -1062,7 +1060,7 @@ mod tests {
         assert_eq!(
             cfg.filter_fields,
             vec![FilterField {
-                source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
+                source_field: cache_field("Region"),
                 allowed: None,
             }]
         );
@@ -1093,7 +1091,7 @@ mod tests {
         assert_eq!(
             cfg.filter_fields,
             vec![FilterField {
-                source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
+                source_field: cache_field("Region"),
                 allowed: None,
             }]
         );

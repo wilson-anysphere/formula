@@ -14,8 +14,6 @@ use globset::Glob;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-mod ooxml_encryption;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum RoundTripFailOn {
@@ -322,57 +320,63 @@ fn run(args: &Args) -> TriageOutput {
         }
     };
 
-    let format = args.format.resolve(&args.input, &input_bytes);
+    // Decrypt Office-encrypted workbooks when possible. If no password was provided, treat them
+    // as `skipped` to avoid polluting corpus stats with generic open failures.
+    let decrypt_start = Instant::now();
+    let (workbook_bytes, skipped_reason, encrypted) = match prepare_workbook_bytes(&input_bytes, args)
+    {
+        Ok(res) => res,
+        Err(err) => {
+            output.steps.insert(
+                "load".to_string(),
+                StepResult::failed(decrypt_start, err),
+            );
+            output.result.open_ok = false;
+            output
+                .steps
+                .insert("recalc".to_string(), StepResult::skipped("open_failed"));
+            output
+                .steps
+                .insert("render".to_string(), StepResult::skipped("open_failed"));
+            output
+                .steps
+                .insert("round_trip".to_string(), StepResult::skipped("open_failed"));
+            output
+                .steps
+                .insert("diff".to_string(), StepResult::skipped("open_failed"));
+            return output;
+        }
+    };
+
+    if let Some(reason) = skipped_reason {
+        output
+            .steps
+            .insert("load".to_string(), StepResult::skipped(reason));
+        output.result.open_ok = false;
+        output
+            .steps
+            .insert("recalc".to_string(), StepResult::skipped("open_skipped"));
+        output
+            .steps
+            .insert("render".to_string(), StepResult::skipped("open_skipped"));
+        output
+            .steps
+            .insert("round_trip".to_string(), StepResult::skipped("open_skipped"));
+        output
+            .steps
+            .insert("diff".to_string(), StepResult::skipped("open_skipped"));
+        return output;
+    }
+
+    let mut format = args.format.resolve(&args.input, &input_bytes);
+    if encrypted {
+        // Encrypted workbooks wrap a ZIP-based OOXML payload in an OLE container. Once decrypted we
+        // only support triaging XLSX/XLSM payloads (and skip other kinds like encrypted XLSB).
+        format = WorkbookFormat::Xlsx;
+    }
+
     match format {
         WorkbookFormat::Xlsx => {
-            // Decrypt Office-encrypted workbooks when possible. If no password was provided, treat
-            // them as `skipped` to avoid polluting corpus stats with generic open failures.
-            let decrypt_start = Instant::now();
-            let (workbook_bytes, skipped_reason) = match prepare_workbook_bytes(&input_bytes, args)
-            {
-                Ok(res) => res,
-                Err(err) => {
-                    output.steps.insert(
-                        "load".to_string(),
-                        StepResult::failed(decrypt_start, err),
-                    );
-                    output.result.open_ok = false;
-                    output
-                        .steps
-                        .insert("recalc".to_string(), StepResult::skipped("open_failed"));
-                    output
-                        .steps
-                        .insert("render".to_string(), StepResult::skipped("open_failed"));
-                    output
-                        .steps
-                        .insert("round_trip".to_string(), StepResult::skipped("open_failed"));
-                    output
-                        .steps
-                        .insert("diff".to_string(), StepResult::skipped("open_failed"));
-                    return output;
-                }
-            };
-
-            if let Some(reason) = skipped_reason {
-                output
-                    .steps
-                    .insert("load".to_string(), StepResult::skipped(reason));
-                output.result.open_ok = false;
-                output
-                    .steps
-                    .insert("recalc".to_string(), StepResult::skipped("open_skipped"));
-                output
-                    .steps
-                    .insert("render".to_string(), StepResult::skipped("open_skipped"));
-                output
-                    .steps
-                    .insert("round_trip".to_string(), StepResult::skipped("open_skipped"));
-                output
-                    .steps
-                    .insert("diff".to_string(), StepResult::skipped("open_skipped"));
-                return output;
-            }
-
             // Step: load (formula-xlsx)
             let start = Instant::now();
             let doc = match formula_xlsx::load_from_bytes(workbook_bytes.as_ref()) {
@@ -678,28 +682,53 @@ fn run(args: &Args) -> TriageOutput {
 fn prepare_workbook_bytes<'a>(
     input_bytes: &'a [u8],
     args: &Args,
-) -> Result<(Cow<'a, [u8]>, Option<String>)> {
-    if !ooxml_encryption::is_encrypted_ooxml_ole(input_bytes) {
-        return Ok((Cow::Borrowed(input_bytes), None));
+) -> Result<(Cow<'a, [u8]>, Option<String>, bool)> {
+    if !formula_office_crypto::is_encrypted_ooxml_ole(input_bytes) {
+        return Ok((Cow::Borrowed(input_bytes), None, false));
     }
 
     let Some(password) = args.password.as_deref() else {
         return Ok((
             Cow::Borrowed(input_bytes),
             Some("encrypted workbook".to_string()),
+            true,
         ));
     };
 
-    let decrypted = ooxml_encryption::decrypt_encrypted_ooxml_ole(input_bytes, password)
+    let decrypted = formula_office_crypto::decrypt_encrypted_package(input_bytes, password)
         .context("decrypt encrypted workbook")?;
-    if !ooxml_encryption::looks_like_xlsx(&decrypted) {
+    if !looks_like_xlsx(&decrypted) {
         return Ok((
             Cow::Borrowed(input_bytes),
             Some("encrypted workbook (decrypted payload is not xlsx/xlsm)".to_string()),
+            true,
         ));
     }
 
-    Ok((Cow::Owned(decrypted), None))
+    Ok((Cow::Owned(decrypted), None, true))
+}
+
+fn looks_like_xlsx(bytes: &[u8]) -> bool {
+    if bytes.len() < 2 || &bytes[..2] != b"PK" {
+        return false;
+    }
+    let cursor = Cursor::new(bytes);
+    let Ok(mut archive) = zip::ZipArchive::new(cursor) else {
+        return false;
+    };
+    for i in 0..archive.len() {
+        let Ok(file) = archive.by_index(i) else {
+            continue;
+        };
+        if file.is_dir() {
+            continue;
+        }
+        let name = file.name().trim_start_matches('/').replace('\\', "/");
+        if name.eq_ignore_ascii_case("xl/workbook.xml") {
+            return true;
+        }
+    }
+    false
 }
 fn print_json(output: &TriageOutput) -> Result<()> {
     let json = serde_json::to_string(output).context("serialize triage output")?;
@@ -1518,199 +1547,24 @@ mod tests {
             .expect("decode base64 xlsx fixture")
     }
 
-    fn password_utf16le(password: &str) -> Vec<u8> {
-        let mut out = Vec::with_capacity(password.len() * 2);
-        for unit in password.encode_utf16() {
-            out.extend_from_slice(&unit.to_le_bytes());
-        }
-        out
+    fn plain_xlsb_bytes() -> Vec<u8> {
+        let b64_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tools/corpus/public/simple.xlsb.b64");
+        let b64 = std::fs::read_to_string(&b64_path)
+            .unwrap_or_else(|e| panic!("read {b64_path:?}: {e}"));
+        base64::engine::general_purpose::STANDARD
+            .decode(b64.trim())
+            .expect("decode base64 xlsb fixture")
     }
 
-    fn sha512(bytes: &[u8]) -> [u8; 64] {
-        use sha2::Digest as _;
-        let mut h = sha2::Sha512::new();
-        h.update(bytes);
-        h.finalize().into()
-    }
-
-    fn aes256_cbc_encrypt(plaintext: &[u8], key: &[u8; 32], iv: &[u8; 16]) -> Vec<u8> {
-        use aes::cipher::generic_array::GenericArray;
-        use aes::cipher::{BlockEncrypt, KeyInit};
-
-        let mut buf = plaintext.to_vec();
-        if buf.len() % 16 != 0 {
-            let padded = ((buf.len() + 15) / 16) * 16;
-            buf.resize(padded, 0);
-        }
-
-        let cipher = aes::Aes256::new(GenericArray::from_slice(key));
-        let mut prev = *iv;
-        let mut out = Vec::with_capacity(buf.len());
-
-        for block in buf.chunks_exact_mut(16) {
-            for i in 0..16 {
-                block[i] ^= prev[i];
-            }
-            let ga = GenericArray::from_mut_slice(block);
-            cipher.encrypt_block(ga);
-            prev.copy_from_slice(block);
-            out.extend_from_slice(block);
-        }
-
-        out
-    }
-
-    fn encrypt_ooxml_agile(plaintext_xlsx: &[u8], password: &str) -> Vec<u8> {
-        use base64::Engine as _;
-        use std::io::{Cursor, Write};
-
-        // Fixed, deterministic parameters for the test fixture.
-        const SPIN_COUNT: u32 = 10_000;
-        const SALT_SIZE: usize = 16;
-        const BLOCK_SIZE: usize = 16;
-        const KEY_BITS: usize = 256;
-        const HASH_SIZE: usize = 64; // SHA512
-
-        // MS-OFFCRYPTO (Agile) password key derivation block keys.
-        const BK_VERIFIER_INPUT: [u8; 8] =
-            [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B, 0x9E, 0x79];
-        const BK_VERIFIER_HASH: [u8; 8] = [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x34, 0x4E];
-        const BK_KEY_VALUE: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
-
-        let key_data_salt: [u8; 16] = [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
-            0x0D, 0x0E, 0x0F,
-        ];
-        let encrypted_key_salt: [u8; 16] = [
-            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
-            0x1D, 0x1E, 0x1F,
-        ];
-        let verifier_hash_input: [u8; 16] = [
-            0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C,
-            0x2D, 0x2E, 0x2F,
-        ];
-        let key_value: [u8; 32] = [
-            0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C,
-            0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49,
-            0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
-        ];
-
-        // --- Password key derivation ---
-        let password_bytes = password_utf16le(password);
-        let mut h = {
-            let mut buf = Vec::with_capacity(encrypted_key_salt.len() + password_bytes.len());
-            buf.extend_from_slice(&encrypted_key_salt);
-            buf.extend_from_slice(&password_bytes);
-            sha512(&buf).to_vec()
+    fn encrypt_ooxml_agile(plaintext_zip: &[u8], password: &str) -> Vec<u8> {
+        let opts = formula_office_crypto::EncryptOptions {
+            // Keep the fixture cheap: 1000 iterations is plenty to exercise the decrypt path.
+            spin_count: 1_000,
+            ..Default::default()
         };
-        let mut spin_buf = Vec::with_capacity(4 + h.len());
-        for i in 0..SPIN_COUNT {
-            spin_buf.clear();
-            spin_buf.extend_from_slice(&i.to_le_bytes());
-            spin_buf.extend_from_slice(&h);
-            h = sha512(&spin_buf).to_vec();
-        }
-
-        let derive_key = |block_key: &[u8; 8]| -> [u8; 32] {
-            let mut buf = Vec::with_capacity(h.len() + block_key.len());
-            buf.extend_from_slice(&h);
-            buf.extend_from_slice(block_key);
-            let digest = sha512(&buf);
-            digest[..32].try_into().unwrap()
-        };
-
-        let derive_iv = |block_key: &[u8; 8]| -> [u8; 16] {
-            let mut buf = Vec::with_capacity(encrypted_key_salt.len() + block_key.len());
-            buf.extend_from_slice(&encrypted_key_salt);
-            buf.extend_from_slice(block_key);
-            let digest = sha512(&buf);
-            digest[..16].try_into().unwrap()
-        };
-
-        let verifier_hash_value_full = sha512(&verifier_hash_input);
-        let verifier_hash_value: [u8; 64] = verifier_hash_value_full;
-
-        let encrypted_verifier_hash_input = aes256_cbc_encrypt(
-            &verifier_hash_input,
-            &derive_key(&BK_VERIFIER_INPUT),
-            &derive_iv(&BK_VERIFIER_INPUT),
-        );
-        let encrypted_verifier_hash_value = aes256_cbc_encrypt(
-            &verifier_hash_value,
-            &derive_key(&BK_VERIFIER_HASH),
-            &derive_iv(&BK_VERIFIER_HASH),
-        );
-        let encrypted_key_value = aes256_cbc_encrypt(
-            &key_value,
-            &derive_key(&BK_KEY_VALUE),
-            &derive_iv(&BK_KEY_VALUE),
-        );
-
-        // --- Encrypt the workbook payload ---
-        let mut encrypted_package = Vec::new();
-        encrypted_package.extend_from_slice(&(plaintext_xlsx.len() as u64).to_le_bytes());
-
-        for (chunk_index, chunk) in plaintext_xlsx.chunks(4096).enumerate() {
-            let mut iv_src = Vec::with_capacity(key_data_salt.len() + 4);
-            iv_src.extend_from_slice(&key_data_salt);
-            iv_src.extend_from_slice(&(chunk_index as u32).to_le_bytes());
-            let iv_hash = sha512(&iv_src);
-            let iv: [u8; 16] = iv_hash[..16].try_into().unwrap();
-
-            let ciphertext = aes256_cbc_encrypt(chunk, &key_value, &iv);
-            encrypted_package.extend_from_slice(&ciphertext);
-        }
-
-        // --- Build the EncryptionInfo XML ---
-        let key_data_salt_b64 = base64::engine::general_purpose::STANDARD.encode(key_data_salt);
-        let encrypted_key_salt_b64 =
-            base64::engine::general_purpose::STANDARD.encode(encrypted_key_salt);
-        let encrypted_verifier_hash_input_b64 =
-            base64::engine::general_purpose::STANDARD.encode(encrypted_verifier_hash_input);
-        let encrypted_verifier_hash_value_b64 =
-            base64::engine::general_purpose::STANDARD.encode(encrypted_verifier_hash_value);
-        let encrypted_key_value_b64 =
-            base64::engine::general_purpose::STANDARD.encode(encrypted_key_value);
-
-        let xml = format!(
-            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
-    xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-  <keyData saltSize="{SALT_SIZE}" blockSize="{BLOCK_SIZE}" keyBits="{KEY_BITS}" hashSize="{HASH_SIZE}"
-      cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA512"
-      saltValue="{key_data_salt_b64}"/>
-  <keyEncryptors>
-    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-      <p:encryptedKey spinCount="{SPIN_COUNT}" saltSize="{SALT_SIZE}" blockSize="{BLOCK_SIZE}" keyBits="{KEY_BITS}" hashSize="{HASH_SIZE}"
-          cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA512"
-          saltValue="{encrypted_key_salt_b64}"
-          encryptedVerifierHashInput="{encrypted_verifier_hash_input_b64}"
-          encryptedVerifierHashValue="{encrypted_verifier_hash_value_b64}"
-          encryptedKeyValue="{encrypted_key_value_b64}"/>
-    </keyEncryptor>
-  </keyEncryptors>
-</encryption>
-"#
-        );
-
-        let mut encryption_info = Vec::new();
-        encryption_info.extend_from_slice(&4u16.to_le_bytes()); // major
-        encryption_info.extend_from_slice(&4u16.to_le_bytes()); // minor
-        encryption_info.extend_from_slice(&0x40u32.to_le_bytes()); // flags (agile)
-        encryption_info.extend_from_slice(xml.as_bytes());
-
-        // --- Wrap as an OLE compound file ---
-        let cursor = Cursor::new(Vec::new());
-        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
-        ole.create_stream("EncryptionInfo")
-            .expect("create EncryptionInfo stream")
-            .write_all(&encryption_info)
-            .expect("write EncryptionInfo stream");
-        ole.create_stream("EncryptedPackage")
-            .expect("create EncryptedPackage stream")
-            .write_all(&encrypted_package)
-            .expect("write EncryptedPackage stream");
-        ole.into_inner().into_inner()
+        formula_office_crypto::encrypt_package_to_ole(plaintext_zip, password, opts)
+            .expect("encrypt workbook")
     }
 
     #[test]
@@ -2145,5 +1999,61 @@ mod tests {
         let load = out.steps.get("load").expect("load step missing");
         assert_eq!(load.status, "ok");
         assert!(out.result.open_ok, "expected open_ok with correct password");
+    }
+
+    #[test]
+    fn skips_encrypted_xlsb_payload_even_when_format_is_xlsb() {
+        let password = "secret";
+        let encrypted_bytes = encrypt_ooxml_agile(&plain_xlsb_bytes(), password);
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("encrypted.xlsb");
+        std::fs::write(&path, encrypted_bytes).expect("write encrypted workbook");
+
+        // Without password -> skipped (avoid polluting open failure stats).
+        let args = Args::try_parse_from([
+            "triage",
+            "--input",
+            path.to_str().unwrap(),
+            "--format",
+            "xlsb",
+        ])
+        .expect("parse args");
+        let out = run(&args);
+        let load = out.steps.get("load").expect("load step missing");
+        assert_eq!(load.status, "skipped");
+        assert_eq!(
+            load.details
+                .as_ref()
+                .and_then(|v| v.get("reason"))
+                .and_then(|v| v.as_str()),
+            Some("encrypted workbook")
+        );
+        assert!(load.error.is_none(), "skipped load should not include error digest");
+        assert!(!out.result.open_ok);
+
+        // With password -> decrypts, but we only triage XLSX/XLSM today.
+        let args = Args::try_parse_from([
+            "triage",
+            "--input",
+            path.to_str().unwrap(),
+            "--format",
+            "xlsb",
+            "--password",
+            password,
+        ])
+        .expect("parse args");
+        let out = run(&args);
+        let load = out.steps.get("load").expect("load step missing");
+        assert_eq!(load.status, "skipped");
+        assert_eq!(
+            load.details
+                .as_ref()
+                .and_then(|v| v.get("reason"))
+                .and_then(|v| v.as_str()),
+            Some("encrypted workbook (decrypted payload is not xlsx/xlsm)")
+        );
+        assert!(load.error.is_none(), "skipped load should not include error digest");
+        assert!(!out.result.open_ok);
     }
 }
