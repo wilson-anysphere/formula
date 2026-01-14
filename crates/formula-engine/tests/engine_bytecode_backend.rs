@@ -1523,8 +1523,8 @@ fn bytecode_backend_inlines_dynamic_defined_name_formulas() {
         .set_cell_formula("Sheet1", "B1", "=SUM(MyDyn)")
         .unwrap();
 
-    // Defined-name formulas are inlined for bytecode compilation (bytecode does not resolve workbook
-    // names at runtime). Ensure INDIRECT-based definitions can still compile and evaluate.
+    // Defined-name formulas are inlined for bytecode compilation (the VM cannot resolve names at
+    // runtime), including formulas that use dynamic-dependency functions like `INDIRECT`.
     assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
@@ -7637,7 +7637,7 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
 }
 
 #[test]
-fn bytecode_compile_diagnostics_accepts_indirect() {
+fn bytecode_compile_diagnostics_compiles_indirect() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
     engine
@@ -7655,7 +7655,7 @@ fn bytecode_compile_diagnostics_accepts_indirect() {
 }
 
 #[test]
-fn bytecode_compile_diagnostics_accepts_offset() {
+fn bytecode_compile_diagnostics_compiles_offset() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
     engine

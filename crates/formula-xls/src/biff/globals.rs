@@ -520,10 +520,11 @@ impl BiffWorkbookGlobals {
             base.border = self.resolve_border(xf.border);
         }
 
-        // Some BIFF writers appear to leave the "apply alignment" bit unset even when the
-        // alignment fields are meaningful. Treat any non-default alignment as applied to avoid
-        // dropping formatting (for example, vertical alignment in some encrypted fixtures).
-        if apply(xf.apply.alignment) || self.alignment_is_non_default(xf.alignment) {
+        // Some BIFF writers appear to leave the "apply alignment" bit unset even when alignment
+        // fields are meaningful. Similar to the number-format fallback above, treat non-default
+        // alignment fields as applied even when the corresponding "apply" bit is missing.
+        let alignment_non_default = self.alignment_is_non_default(xf.alignment);
+        if apply(xf.apply.alignment) || alignment_non_default {
             base.alignment = self.resolve_alignment(xf.alignment);
         }
 
@@ -589,8 +590,13 @@ impl BiffWorkbookGlobals {
             base.border = self.border_is_non_default(xf.border);
         }
 
-        if apply(xf.apply.alignment) || self.alignment_is_non_default(xf.alignment) {
-            base.alignment = self.alignment_is_non_default(xf.alignment);
+        // Like style resolution, treat non-default alignment fields as applied even when the
+        // "apply" bit is missing. This ensures we don't incorrectly classify a cell's XF record as
+        // uninteresting (and therefore skip per-cell XF indices) when it only differs by
+        // alignment.
+        let alignment_non_default = self.alignment_is_non_default(xf.alignment);
+        if apply(xf.apply.alignment) || alignment_non_default {
+            base.alignment = alignment_non_default;
         }
 
         if apply(xf.apply.protection) {

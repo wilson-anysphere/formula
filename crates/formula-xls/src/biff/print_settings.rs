@@ -207,9 +207,9 @@ pub(crate) fn parse_biff_sheet_print_settings(
     // signal that print settings exist so downstream import paths can preserve FitTo mode.
     if saw_any_record || fit_to_page {
         if fit_to_page {
-            page_setup.scaling = match (setup_fit_width, setup_fit_height) {
-                (Some(width), Some(height)) => Scaling::FitTo { width, height },
-                _ => Scaling::FitTo { width: 0, height: 0 },
+            page_setup.scaling = Scaling::FitTo {
+                width: setup_fit_width.unwrap_or(0),
+                height: setup_fit_height.unwrap_or(0),
             };
         } else {
             let scale = setup_scale.unwrap_or(100);

@@ -1041,7 +1041,9 @@ fn build_page_setup_fixture_sheet_stream(xf_cell: u16, mode: PageSetupScalingMod
         PageSetupScalingMode::Percent => push_record(
             &mut sheet,
             RECORD_SETUP,
-            &setup_record(9, 85, 0, 0, true, 0.9, 1.0),
+            // Note: keep non-zero iFitWidth/iFitHeight even in percent mode so the importer must
+            // consult WSBOOL.fFitToPage to decide which scaling fields apply.
+            &setup_record(9, 85, 2, 3, true, 0.9, 1.0),
         ),
         PageSetupScalingMode::FitTo => push_record(
             &mut sheet,

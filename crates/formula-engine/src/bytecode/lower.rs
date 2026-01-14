@@ -17,6 +17,35 @@ const EXCEL_MAX_ROW_IDX: i32 = (EXCEL_MAX_ROWS as i32) - 1;
 /// Excel's maximum column index (0-indexed) used by the bytecode backend.
 const EXCEL_MAX_COL_IDX: i32 = (EXCEL_MAX_COLS as i32) - 1;
 
+fn expr_has_workbook_prefix(expr: &crate::Expr) -> bool {
+    match expr {
+        crate::Expr::NameRef(r) => r.workbook.is_some(),
+        crate::Expr::CellRef(r) => r.workbook.is_some(),
+        crate::Expr::ColRef(r) => r.workbook.is_some(),
+        crate::Expr::RowRef(r) => r.workbook.is_some(),
+        crate::Expr::StructuredRef(r) => r.workbook.is_some(),
+        crate::Expr::FieldAccess(access) => expr_has_workbook_prefix(&access.base),
+        crate::Expr::Array(arr) => arr
+            .rows
+            .iter()
+            .any(|row| row.iter().any(expr_has_workbook_prefix)),
+        crate::Expr::FunctionCall(call) => call.args.iter().any(expr_has_workbook_prefix),
+        crate::Expr::Call(call) => {
+            expr_has_workbook_prefix(&call.callee) || call.args.iter().any(expr_has_workbook_prefix)
+        }
+        crate::Expr::Unary(u) => expr_has_workbook_prefix(&u.expr),
+        crate::Expr::Postfix(p) => expr_has_workbook_prefix(&p.expr),
+        crate::Expr::Binary(b) => {
+            expr_has_workbook_prefix(&b.left) || expr_has_workbook_prefix(&b.right)
+        }
+        crate::Expr::Number(_)
+        | crate::Expr::String(_)
+        | crate::Expr::Boolean(_)
+        | crate::Expr::Error(_)
+        | crate::Expr::Missing => false,
+    }
+}
+
 fn indirect_string_refers_to_external_workbook(text: &str) -> bool {
     let ref_text = text.trim();
     if ref_text.is_empty() {
@@ -29,6 +58,14 @@ fn indirect_string_refers_to_external_workbook(text: &str) -> bool {
     //
     // Detect the common case where `INDIRECT`'s text argument is a string literal containing an
     // external workbook reference like `"[Book.xlsx]Sheet1!A1"`.
+    //
+    // Fast path: external workbook references always include a workbook prefix, which is denoted
+    // by `[...]` in Excel formulas. Avoid invoking the parser in the common case where the string
+    // is a local reference (e.g. `"A1"` / `"R1C1"`).
+    if !ref_text.contains('[') {
+        return false;
+    }
+
     for reference_style in [crate::ReferenceStyle::A1, crate::ReferenceStyle::R1C1] {
         let parsed = crate::parse_formula(
             ref_text,
@@ -41,19 +78,9 @@ fn indirect_string_refers_to_external_workbook(text: &str) -> bool {
         let Ok(parsed) = parsed else {
             continue;
         };
-        let lowered = crate::eval::lower_ast(&parsed, None);
-        match lowered {
-            crate::eval::Expr::CellRef(r)
-                if matches!(r.sheet, crate::eval::SheetReference::External(_)) =>
-            {
-                return true;
-            }
-            crate::eval::Expr::RangeRef(r)
-                if matches!(r.sheet, crate::eval::SheetReference::External(_)) =>
-            {
-                return true;
-            }
-            _ => {}
+
+        if expr_has_workbook_prefix(&parsed.expr) {
+            return true;
         }
     }
 
@@ -949,7 +976,6 @@ fn lower_canonical_expr_inner(
                                 }
                             }
                         }
-
                         let args = call
                             .args
                             .iter()
