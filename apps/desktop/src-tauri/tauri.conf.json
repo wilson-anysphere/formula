@@ -45,77 +45,66 @@
         "ext": ["xlsx"],
         "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "name": "Excel Spreadsheet",
-        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "role": "Editor"
       },
       {
         "ext": ["xls"],
         "mimeType": "application/vnd.ms-excel",
         "name": "Excel 97-2003 Spreadsheet",
-        "mimeType": "application/vnd.ms-excel",
         "role": "Editor"
       },
       {
         "ext": ["xlt"],
         "mimeType": "application/vnd.ms-excel",
         "name": "Excel 97-2003 Template",
-        "mimeType": "application/vnd.ms-excel",
         "role": "Editor"
       },
       {
         "ext": ["xla"],
         "mimeType": "application/vnd.ms-excel",
         "name": "Excel 97-2003 Add-In",
-        "mimeType": "application/vnd.ms-excel",
         "role": "Editor"
       },
       {
         "ext": ["xlsm"],
         "mimeType": "application/vnd.ms-excel.sheet.macroEnabled.12",
         "name": "Excel Macro-Enabled Spreadsheet",
-        "mimeType": "application/vnd.ms-excel.sheet.macroEnabled.12",
         "role": "Editor"
       },
       {
         "ext": ["xltx"],
         "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
         "name": "Excel Template",
-        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
         "role": "Editor"
       },
       {
         "ext": ["xltm"],
         "mimeType": "application/vnd.ms-excel.template.macroEnabled.12",
         "name": "Excel Macro-Enabled Template",
-        "mimeType": "application/vnd.ms-excel.template.macroEnabled.12",
         "role": "Editor"
       },
       {
         "ext": ["xlam"],
         "mimeType": "application/vnd.ms-excel.addin.macroEnabled.12",
         "name": "Excel Add-In",
-        "mimeType": "application/vnd.ms-excel.addin.macroEnabled.12",
         "role": "Editor"
       },
       {
         "ext": ["xlsb"],
         "mimeType": "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
         "name": "Excel Binary Spreadsheet",
-        "mimeType": "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
         "role": "Editor"
       },
       {
         "ext": ["csv"],
         "mimeType": "text/csv",
         "name": "CSV File",
-        "mimeType": "text/csv",
         "role": "Editor"
       },
       {
         "ext": ["parquet"],
         "mimeType": "application/vnd.apache.parquet",
         "name": "Parquet File",
-        "mimeType": "application/vnd.apache.parquet",
         "role": "Editor"
       }
     ],
