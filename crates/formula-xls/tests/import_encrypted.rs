@@ -134,11 +134,11 @@ fn import_with_password_surfaces_decrypt_error_for_malformed_filepass() {
         .expect_err("expected decrypt failure");
 
     assert!(
-        matches!(err, formula_xls::ImportError::Decrypt(_)),
+        matches!(&err, formula_xls::ImportError::Decrypt(_)),
         "expected ImportError::Decrypt(..), got {err:?}"
     );
     assert!(
-        !matches!(err, formula_xls::ImportError::Xls(_)),
+        !matches!(&err, formula_xls::ImportError::Xls(_)),
         "decrypt failures should not be surfaced as ImportError::Xls: {err:?}"
     );
 }
