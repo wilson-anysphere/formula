@@ -58,7 +58,8 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
   }
 
   // Match SpreadsheetApp guards: never mutate while editing.
-  if (app.isEditing()) return true;
+  const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+  if (app.isEditing() || globalEditing === true) return true;
   if (typeof app.isReadOnly === "function" && app.isReadOnly()) {
     const message = (() => {
       switch (id) {

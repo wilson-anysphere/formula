@@ -192,6 +192,7 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
 
       case "home.cells.insert.insertCells":
       case "home.cells.delete.deleteCells":
+        if (deps.isSpreadsheetEditing()) return;
         void handleHomeCellsInsertDeleteCommand({
           app: deps.app,
           commandId,
@@ -204,6 +205,7 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
       case "home.cells.insert.insertSheetColumns":
       case "home.cells.delete.deleteSheetRows":
       case "home.cells.delete.deleteSheetColumns":
+        if (deps.isSpreadsheetEditing()) return;
         executeCellsStructuralRibbonCommand(deps.app, commandId);
         return;
 

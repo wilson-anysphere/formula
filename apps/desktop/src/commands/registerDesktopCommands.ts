@@ -589,9 +589,11 @@ export function registerDesktopCommands(params: {
     "home.cells.insert.insertCells",
     "Insert Cells…",
     async () => {
-      // `handleHomeCellsInsertDeleteCommand` checks `app.isEditing()`, but the desktop shell may
-      // provide a custom `isEditing` predicate (e.g. split view secondary editor state). Respect
-      // that here so we don't attempt structural edits while any editor is active.
+      // `handleHomeCellsInsertDeleteCommand` blocks while `app.isEditing()` is true and also
+      // consults the desktop-shell-owned `__formulaSpreadsheetIsEditing` flag when present.
+      // Still respect the caller-provided `isEditing` predicate (e.g. split view secondary editor
+      // state) so we don't attempt structural edits while any editor is active (even if the global
+      // flag is stale/unavailable).
       if (isEditingFn()) return;
       await handleHomeCellsInsertDeleteCommand({
         app,
@@ -637,8 +639,11 @@ export function registerDesktopCommands(params: {
       commandId,
       title,
       () => {
-        // `executeCellsStructuralRibbonCommand` only checks `app.isEditing()`. Respect the
-        // caller-provided `isEditing` override (e.g. split view secondary editor state) here.
+        // `executeCellsStructuralRibbonCommand` blocks while `app.isEditing()` is true and also
+        // consults the desktop-shell-owned `__formulaSpreadsheetIsEditing` flag when present.
+        // Still respect the caller-provided `isEditing` override (e.g. split view secondary editor
+        // state) here so we don't attempt structural edits while any editor is active (even if the
+        // global flag is stale/unavailable).
         if (isEditingFn()) return;
         executeCellsStructuralRibbonCommand(app, commandId);
       },

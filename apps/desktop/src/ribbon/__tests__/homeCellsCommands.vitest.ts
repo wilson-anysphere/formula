@@ -3,6 +3,34 @@ import { describe, expect, it, vi } from "vitest";
 import { handleHomeCellsInsertDeleteCommand } from "../homeCellsCommands.js";
 
 describe("Home → Cells dropdown commands", () => {
+  it("no-ops while the spreadsheet is editing (split-view secondary editor via global flag)", async () => {
+    const showQuickPick = vi.fn(async () => "shiftRight" as const);
+    const showToast = vi.fn();
+    const focus = vi.fn();
+
+    const app = {
+      isEditing: () => false,
+      focus,
+    } as any;
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    try {
+      const handled = await handleHomeCellsInsertDeleteCommand({
+        app,
+        commandId: "home.cells.insert.insertCells",
+        showQuickPick,
+        showToast,
+      });
+
+      expect(handled).toBe(true);
+      expect(showQuickPick).not.toHaveBeenCalled();
+      expect(showToast).not.toHaveBeenCalled();
+      expect(focus).not.toHaveBeenCalled();
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+    }
+  });
+
   it("prompts for Insert Cells direction and calls app.insertCells", async () => {
     const showQuickPick = vi.fn(async () => "shiftRight" as const);
     const showToast = vi.fn();

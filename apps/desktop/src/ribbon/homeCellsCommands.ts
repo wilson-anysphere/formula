@@ -31,7 +31,8 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
     return false;
   }
 
-  if (app.isEditing()) return true;
+  const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+  if (app.isEditing() || globalEditing === true) return true;
 
   // Always restore focus to the grid after the command completes/cancels (ribbon commands
   // otherwise leave focus on the trigger button).
