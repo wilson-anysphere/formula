@@ -2854,6 +2854,9 @@ export class SpreadsheetApp {
                 this.selectedDrawingIndex = null;
                 this.drawingInteractionController?.setSelectedId(null);
                 this.dispatchDrawingSelectionChanged();
+                // In legacy grid mode, drawing selection chrome is rendered on the selection canvas.
+                // Ensure it clears immediately when switching the active selection to a chart.
+                this.renderSelection();
               }
 
               this.selectedChartId = nextChartId;
@@ -4249,6 +4252,8 @@ export class SpreadsheetApp {
       this.drawingsRenderScheduled = false;
       if (this.disposed) return;
       if (!this.uiReady) return;
+      const needsSelectionRefresh =
+        !this.sharedGrid && this.drawingInteractionController == null && this.selectedDrawingId != null;
       // In shared-grid mode, axis size changes (and related scroll clamping/alignment) can update the
       // renderer's internal scroll offsets even when the user didn't actively scroll. Keep our legacy
       // scroll state in sync before computing drawing viewport geometry so overlays remain pixel-aligned.
@@ -4258,6 +4263,12 @@ export class SpreadsheetApp {
         this.scrollY = scroll.y;
       }
       this.renderDrawings();
+      // In legacy grid mode, drawing selection chrome is rendered on the selection canvas layer.
+      // If we re-render drawings due to external updates (document deltas, image hydration, etc),
+      // keep the selection layer aligned with the latest drawing geometry.
+      if (!this.sharedGrid && this.drawingInteractionController == null && (needsSelectionRefresh || this.selectedDrawingId != null)) {
+        this.renderSelection();
+      }
     });
   }
 
@@ -5615,6 +5626,7 @@ export class SpreadsheetApp {
     // Hit test indices cache sheet-space bounds too; clear so hover/interaction logic stays aligned.
     this.invalidateDrawingHitTestIndexCaches();
     this.drawingsInteraction?.invalidateHitTestIndex();
+    this.chartDrawingInteraction?.invalidateHitTestIndex();
     this.drawingInteractionController?.invalidateHitTestIndex();
   }
 
@@ -8291,6 +8303,9 @@ export class SpreadsheetApp {
     this.canvasChartCombinedDrawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    // In legacy mode, drawing selection chrome is rendered on the selection canvas; ensure it is
+    // cleared when deleting the selected drawing.
+    this.renderSelection();
     // Deleting an object changes both the drawings list and the active selection.
     // Emit explicit notifications so panels like Selection Pane update immediately even
     // if DocumentController emits change events asynchronously.
@@ -9223,6 +9238,7 @@ export class SpreadsheetApp {
     // but depends on live CanvasGridRenderer axis sizes.
     this.invalidateDrawingHitTestIndexCaches();
     this.drawingsInteraction?.invalidateHitTestIndex();
+    this.chartDrawingInteraction?.invalidateHitTestIndex();
     this.drawingInteractionController?.invalidateHitTestIndex();
 
     // Do not allow row/col resize/auto-fit to mutate the sheet while the user is actively editing
@@ -9887,6 +9903,11 @@ export class SpreadsheetApp {
     const bounds = this.drawingHitTestScratchRect;
     const index = this.getDrawingHitTestIndex(objects);
 
+    // Rotation handles are only rendered by DrawingOverlay. In legacy mode without the dedicated
+    // interaction controller, drawing selection chrome is rendered on the selection canvas layer
+    // (which does not include the rotation handle), so avoid returning a rotation cursor there.
+    const rotationHandleEnabled = this.gridMode === "shared" || this.drawingInteractionController != null;
+
     const selectedId = this.selectedDrawingId;
     if (selectedId != null) {
       const selectedIndex = index.byId.get(selectedId);
@@ -9900,7 +9921,9 @@ export class SpreadsheetApp {
         bounds.y = sheetRect.y - scroll.scrollY + headerOffsetY;
         bounds.width = sheetRect.width;
         bounds.height = sheetRect.height;
-        if (hitTestRotationHandle(bounds, x, y, selected.transform)) return cursorForRotationHandle(false);
+        if (rotationHandleEnabled && hitTestRotationHandle(bounds, x, y, selected.transform)) {
+          return cursorForRotationHandle(false);
+        }
         // When selected, handles can extend slightly outside the untransformed bounds. Check the selected
         // object explicitly so hover feedback works even when the cursor lies just beyond the anchor rect.
         const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
@@ -11742,7 +11765,14 @@ export class SpreadsheetApp {
     // double-render and split-view panes can mirror a single "active object" selection.
     if (next != null && this.selectedDrawingId != null) {
       this.selectedDrawingId = null;
+      this.selectedDrawingIndex = null;
+      this.drawingsInteraction?.setSelectedId(null);
+      this.drawingInteractionController?.setSelectedId(null);
+      this.drawingOverlay.setSelectedId(null);
       this.renderDrawings();
+      // Legacy grid mode renders drawing selection handles on the selection canvas layer, so
+      // ensure we repaint it when chart selection clears a drawing selection.
+      this.renderSelection();
     }
     if (next !== this.selectedChartId) {
       this.selectedChartId = next;
@@ -12140,13 +12170,9 @@ export class SpreadsheetApp {
     e.preventDefault();
     e.stopPropagation();
 
-    // Chart interactions take precedence over drawing selection. Since we stop propagation
-    // here, any previously-selected drawing would otherwise remain selected indefinitely.
-    if (this.selectedDrawingId != null) {
-      this.selectedDrawingId = null;
-      this.drawingOverlay.setSelectedId(null);
-      this.renderDrawings();
-    }
+    // Chart interactions take precedence over drawing selection. Since we stop propagation here,
+    // route selection changes through `setSelectedChartId` so it can clear any drawing selection
+    // (and repaint the appropriate selection layer) without relying on downstream handlers.
 
     const wasSelected = this.selectedChartId === hit.chart.id;
     this.setSelectedChartId(hit.chart.id);
@@ -13576,7 +13602,10 @@ export class SpreadsheetApp {
       }
     }
 
-    if (this.selectedDrawingId != null) {
+    // In legacy-grid mode, drawing selection chrome is rendered on the selection canvas when we
+    // are *not* using the dedicated DrawingInteractionController. When the controller is enabled,
+    // selection chrome is rendered by the DrawingOverlay instead.
+    if (this.selectedDrawingId != null && this.drawingInteractionController == null) {
       const objects = this.listDrawingObjectsForSheet();
       const selected = objects.find((obj) => obj.id === this.selectedDrawingId) ?? null;
       if (selected) {
