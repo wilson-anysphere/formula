@@ -528,12 +528,14 @@ def main() -> int:
             },
             "metrics": {
                 "l1Read": {
+                    "status": _rate_status(read_rate, target=target_read),
                     "passRate": read_rate,
                     "passes": read_pass,
                     "total": read_total,
                     "targetPassRate": target_read,
                 },
                 "l2Calculate": {
+                    "status": _rate_status(calc_pass_rate, target=target_calc),
                     "passRate": calc_pass_rate,
                     "mismatchRate": calc_mismatch_rate_output,
                     "maxMismatchRate": oracle.max_mismatch_rate if oracle else None,
@@ -543,6 +545,7 @@ def main() -> int:
                     "targetPassRate": target_calc,
                 },
                 "l4RoundTrip": {
+                    "status": _rate_status(rt_rate, target=target_round_trip),
                     "passRate": rt_rate,
                     "passes": rt_pass,
                     "total": rt_total,

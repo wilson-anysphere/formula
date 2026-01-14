@@ -89,6 +89,9 @@ class CompatScorecardTests(unittest.TestCase):
 
             payload = json.loads(out_json.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("schemaVersion"), 1)
+            self.assertEqual(payload["metrics"]["l1Read"]["status"], "PASS")
+            self.assertEqual(payload["metrics"]["l2Calculate"]["status"], "PASS")
+            self.assertEqual(payload["metrics"]["l4RoundTrip"]["status"], "FAIL")
             self.assertAlmostEqual(payload["metrics"]["l2Calculate"]["passRate"], 0.999)
             self.assertAlmostEqual(payload["metrics"]["l2Calculate"]["mismatchRate"], 0.001)
             self.assertAlmostEqual(payload["metrics"]["l2Calculate"]["maxMismatchRate"], 0.01)
@@ -237,6 +240,9 @@ class CompatScorecardTests(unittest.TestCase):
             payload = json.loads(out_json.read_text(encoding="utf-8"))
             self.assertIsNone(payload["metrics"]["l2Calculate"]["mismatchRate"])
             self.assertIsNone(payload["metrics"]["l2Calculate"]["passRate"])
+            self.assertEqual(payload["metrics"]["l1Read"]["status"], "MISSING")
+            self.assertEqual(payload["metrics"]["l2Calculate"]["status"], "MISSING")
+            self.assertEqual(payload["metrics"]["l4RoundTrip"]["status"], "MISSING")
 
     def test_missing_inputs_exits_nonzero(self) -> None:
         scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
