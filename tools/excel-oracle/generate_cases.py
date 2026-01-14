@@ -131,7 +131,7 @@ def _extract_function_names(formula: str | None) -> list[str]:
     return out
 
 
-def _validate_against_function_catalog(payload: dict[str, Any]) -> None:
+def _validate_against_function_catalog(payload: dict[str, Any], *, allow_volatile: bool = False) -> None:
     """
     Keep the oracle corpus aligned with `shared/functionCatalog.json`.
 
@@ -190,14 +190,14 @@ def _validate_against_function_catalog(payload: dict[str, Any]) -> None:
 
     used_any = used_case_formulas | used_input_formulas
     present_volatile = sorted(catalog_volatile.intersection(used_any))
-    if present_volatile:
+    if present_volatile and not allow_volatile:
         raise SystemExit(
             "Oracle corpus must not include volatile functions (non-deterministic). "
             f"Found: {', '.join(present_volatile)}"
         )
 
 
-def generate_cases() -> dict[str, Any]:
+def generate_cases(*, include_volatile: bool = False) -> dict[str, Any]:
     cases: list[dict[str, Any]] = []
 
     # NOTE: Module invocation order is part of output stability; keep it deterministic.
@@ -314,7 +314,7 @@ def generate_cases() -> dict[str, Any]:
     database.generate(cases, add_case=_add_case, CellInput=CellInput)
     financial.generate(cases, add_case=_add_case, CellInput=CellInput, excel_serial_1900=_excel_serial_1900)
     spill.generate(cases, add_case=_add_case, CellInput=CellInput)
-    info.generate(cases, add_case=_add_case, CellInput=CellInput)
+    info.generate(cases, add_case=_add_case, CellInput=CellInput, include_volatile=include_volatile)
     lambda_cases.generate(cases, add_case=_add_case, CellInput=CellInput)
     errors.generate(cases, add_case=_add_case, CellInput=CellInput)
     financial_eom.generate(cases, add_case=_add_case, CellInput=CellInput)
@@ -330,10 +330,18 @@ def generate_cases() -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", required=True, help="Output path for cases.json")
+    parser.add_argument(
+        "--include-volatile",
+        action="store_true",
+        help=(
+            "Include volatile function cases (e.g. CELL/INFO) for local debugging only. "
+            "This output is non-deterministic and must not be committed/pinned."
+        ),
+    )
     args = parser.parse_args()
 
-    payload = generate_cases()
-    _validate_against_function_catalog(payload)
+    payload = generate_cases(include_volatile=args.include_volatile)
+    _validate_against_function_catalog(payload, allow_volatile=args.include_volatile)
 
     # Keep the corpus bounded so it remains runnable in real Excel (COM automation) and in CI.
     max_cases = 2000
