@@ -251,15 +251,12 @@ async function main(): Promise<void> {
         : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1 or pass --enforce to fail on regression)\n"),
   );
 
-  const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: "1" };
-
   const results: StartupMetrics[] = await runDesktopStartupIterations({
     mode,
     runs,
     timeoutMs,
     binPath,
     argv,
-    envOverrides,
     profileRoot,
     onProgress: ({ phase, mode: runMode, iteration, total, profileDir }) => {
       const profileLabel = relative(repoRoot, profileDir) || profileDir;

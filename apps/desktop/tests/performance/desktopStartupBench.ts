@@ -224,7 +224,6 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
     );
   }
 
-  const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1' };
   const argv = resolveDesktopStartupArgv(benchKind);
 
   // Allow explicitly setting `FORMULA_DESKTOP_RSS_IDLE_DELAY_MS=0` to sample immediately (useful
@@ -248,7 +247,6 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
       timeoutMs,
       binPath,
       argv,
-      envOverrides,
       profileRoot,
       afterCapture: async (child, _metrics, signal) => {
         if (!child.pid) return;
