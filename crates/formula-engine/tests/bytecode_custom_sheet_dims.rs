@@ -177,6 +177,73 @@ fn bytecode_custom_sheet_dims_column_spill_uses_referenced_sheet_dimensions() {
 }
 
 #[test]
+fn bytecode_custom_sheet_dims_column_sheet_prefixed_whole_column_does_not_trigger_range_cell_limit() {
+    // Regression test: `COLUMN(Sheet2!A:A)` produces a single value even if Sheet2 has a very large
+    // row count, so the bytecode compiler should not reject it based on the referenced range's
+    // cell count.
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 10, 5)
+        .expect("set Sheet1 dimensions");
+    engine
+        .set_sheet_dimensions("Sheet2", 6_000_000, 10)
+        .expect("set Sheet2 dimensions");
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COLUMN(Sheet2!A:A)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formula to compile to bytecode; got report: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+}
+
+#[test]
+fn bytecode_custom_sheet_dims_row_sheet_prefixed_full_row_range_does_not_trigger_range_cell_limit() {
+    // Regression test: `ROW(Sheet2!1:1000)` spans an entire *row range* (all columns), but the
+    // output is a 1000x1 vector (one element per row), not a dense 1000xN grid. The bytecode
+    // compiler should therefore apply the same 1-D cell-count limit logic used for unprefixed
+    // whole-row references.
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 2_000, 10)
+        .expect("set Sheet1 dimensions");
+    // Configure Sheet2 to be wide enough that the referenced row range would exceed the global
+    // materialization cap if treated as a dense rectangle.
+    engine
+        .set_sheet_dimensions("Sheet2", 1_000, 6_000)
+        .expect("set Sheet2 dimensions");
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ROW(Sheet2!1:1000)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formula to compile to bytecode; got report: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+
+    // The output should be a 1000x1 spill containing {1;2;...;1000}.
+    let (start, end) = engine.spill_range("Sheet1", "B1").expect("spill range");
+    assert_eq!(start.row, 0);
+    assert_eq!(start.col, 1);
+    assert_eq!(end.row, 999);
+    assert_eq!(end.col, 1);
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B500"), Value::Number(500.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1000"), Value::Number(1000.0));
+}
+
+#[test]
 fn bytecode_custom_sheet_dims_use_referenced_sheet_for_sheet_prefixed_whole_row_col_refs() {
     let mut engine = Engine::new();
     engine

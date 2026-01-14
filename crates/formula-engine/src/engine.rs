@@ -6738,7 +6738,20 @@ impl Engine {
                 )
             })
             .unwrap_or((0, 0));
-        bytecode_expr_within_grid_limits(&expr, origin, (sheet_rows, sheet_cols))?;
+        let mut sheet_bounds = |sheet: &bytecode::SheetId| match sheet {
+            bytecode::SheetId::Local(sheet_id) => {
+                let (rows, cols) = workbook
+                    .sheets
+                    .get(*sheet_id)
+                    .map(|sheet| (sheet.row_count, sheet.col_count))
+                    .unwrap_or((0, 0));
+                let rows = i32::try_from(rows).unwrap_or(i32::MAX);
+                let cols = i32::try_from(cols).unwrap_or(i32::MAX);
+                (rows, cols)
+            }
+            bytecode::SheetId::External(_) => (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32),
+        };
+        bytecode_expr_within_grid_limits(&expr, origin, (sheet_rows, sheet_cols), &mut sheet_bounds)?;
         Ok(self.bytecode_cache.get_or_compile(&expr))
     }
 
@@ -12785,11 +12798,13 @@ fn bytecode_expr_within_grid_limits(
     expr: &bytecode::Expr,
     origin: bytecode::CellCoord,
     origin_sheet_bounds: (i32, i32),
+    sheet_bounds: &mut impl FnMut(&bytecode::SheetId) -> (i32, i32),
 ) -> Result<(), BytecodeCompileReason> {
     bytecode_expr_within_grid_limits_inner(
         expr,
         origin,
         origin_sheet_bounds,
+        sheet_bounds,
         BYTECODE_MAX_RANGE_CELLS,
     )
 }
@@ -12798,6 +12813,7 @@ fn bytecode_expr_within_grid_limits_inner(
     expr: &bytecode::Expr,
     origin: bytecode::CellCoord,
     origin_sheet_bounds: (i32, i32),
+    sheet_bounds: &mut impl FnMut(&bytecode::SheetId) -> (i32, i32),
     max_range_cells: i64,
 ) -> Result<(), BytecodeCompileReason> {
     // Bytecode coordinate math uses signed 32-bit indices. For now we enforce the engine's
@@ -12860,7 +12876,13 @@ fn bytecode_expr_within_grid_limits_inner(
             Ok(())
         }
         bytecode::Expr::SpillRange(inner) => {
-            bytecode_expr_within_grid_limits_inner(inner, origin, origin_sheet_bounds, max_range_cells)
+            bytecode_expr_within_grid_limits_inner(
+                inner,
+                origin,
+                origin_sheet_bounds,
+                sheet_bounds,
+                max_range_cells,
+            )
         }
         bytecode::Expr::NameRef(_) => Ok(()),
         bytecode::Expr::Unary { op, expr } => match op {
@@ -12869,6 +12891,7 @@ fn bytecode_expr_within_grid_limits_inner(
                     expr,
                     origin,
                     origin_sheet_bounds,
+                    sheet_bounds,
                     max_range_cells,
                 )
             }
@@ -12905,13 +12928,26 @@ fn bytecode_expr_within_grid_limits_inner(
                     expr,
                     origin,
                     origin_sheet_bounds,
+                    sheet_bounds,
                     max_range_cells,
                 ),
             },
         },
         bytecode::Expr::Binary { left, right, .. } => {
-            bytecode_expr_within_grid_limits_inner(left, origin, origin_sheet_bounds, max_range_cells)?;
-            bytecode_expr_within_grid_limits_inner(right, origin, origin_sheet_bounds, max_range_cells)?;
+            bytecode_expr_within_grid_limits_inner(
+                left,
+                origin,
+                origin_sheet_bounds,
+                sheet_bounds,
+                max_range_cells,
+            )?;
+            bytecode_expr_within_grid_limits_inner(
+                right,
+                origin,
+                origin_sheet_bounds,
+                sheet_bounds,
+                max_range_cells,
+            )?;
             Ok(())
         }
         bytecode::Expr::FuncCall { func, args } => {
@@ -12922,35 +12958,107 @@ fn bytecode_expr_within_grid_limits_inner(
                 Function::Row | Function::Column => {
                     for (idx, arg) in args.iter().enumerate() {
                         if idx == 0 {
-                            if let bytecode::Expr::RangeRef(r) = arg {
-                                let resolved = r.resolve(origin);
-                                if resolved.row_start < 0
-                                    || resolved.col_start < 0
-                                    || resolved.row_end >= max_rows
-                                    || resolved.col_end >= max_cols
-                                {
-                                    return Err(BytecodeCompileReason::ExceedsGridLimits);
-                                }
-
-                                let (sheet_rows, sheet_cols) = origin_sheet_bounds;
-                                let spans_all_cols = resolved.col_start == 0
-                                    && resolved.col_end == sheet_cols.saturating_sub(1);
-                                let spans_all_rows = resolved.row_start == 0
-                                    && resolved.row_end == sheet_rows.saturating_sub(1);
-
-                                let cells = if spans_all_cols || spans_all_rows {
-                                    match func {
-                                        Function::Row => i64::from(resolved.rows()),
-                                        Function::Column => i64::from(resolved.cols()),
-                                        _ => unreachable!("matched above"),
+                            match arg {
+                                bytecode::Expr::RangeRef(r) => {
+                                    let resolved = r.resolve(origin);
+                                    if resolved.row_start < 0
+                                        || resolved.col_start < 0
+                                        || resolved.row_end >= max_rows
+                                        || resolved.col_end >= max_cols
+                                    {
+                                        return Err(BytecodeCompileReason::ExceedsGridLimits);
                                     }
-                                } else {
-                                    (i64::from(resolved.rows())) * (i64::from(resolved.cols()))
-                                };
-                                if cells > BYTECODE_MAX_RANGE_CELLS {
-                                    return Err(BytecodeCompileReason::ExceedsRangeCellLimit);
+
+                                    let (sheet_rows, sheet_cols) = origin_sheet_bounds;
+                                    let spans_all_cols = resolved.col_start == 0
+                                        && resolved.col_end == sheet_cols.saturating_sub(1);
+                                    let spans_all_rows = resolved.row_start == 0
+                                        && resolved.row_end == sheet_rows.saturating_sub(1);
+
+                                    let cells = if spans_all_cols || spans_all_rows {
+                                        match func {
+                                            Function::Row => i64::from(resolved.rows()),
+                                            Function::Column => i64::from(resolved.cols()),
+                                            _ => unreachable!("matched above"),
+                                        }
+                                    } else {
+                                        (i64::from(resolved.rows())) * (i64::from(resolved.cols()))
+                                    };
+                                    if cells > BYTECODE_MAX_RANGE_CELLS {
+                                        return Err(BytecodeCompileReason::ExceedsRangeCellLimit);
+                                    }
+                                    continue;
                                 }
-                                continue;
+                                bytecode::Expr::MultiRangeRef(r) => {
+                                    match r.areas.as_ref() {
+                                        // `ROW()`/`COLUMN()` treat empty unions as `#REF!`; the VM
+                                        // will short-circuit without allocating.
+                                        [] => continue,
+                                        [only] => {
+                                            let resolved = only.range.resolve(origin);
+                                            if resolved.row_start < 0
+                                                || resolved.col_start < 0
+                                                || resolved.row_end >= max_rows
+                                                || resolved.col_end >= max_cols
+                                            {
+                                                return Err(BytecodeCompileReason::ExceedsGridLimits);
+                                            }
+
+                                            let (sheet_rows, sheet_cols) = sheet_bounds(&only.sheet);
+                                            // If the range is out-of-bounds for the referenced
+                                            // sheet, evaluation returns `#REF!` without attempting
+                                            // to allocate. Do not reject these formulas due to
+                                            // cell-count limits.
+                                            if resolved.row_end >= sheet_rows
+                                                || resolved.col_end >= sheet_cols
+                                                || sheet_rows <= 0
+                                                || sheet_cols <= 0
+                                            {
+                                                continue;
+                                            }
+
+                                            let spans_all_cols = resolved.col_start == 0
+                                                && resolved.col_end
+                                                    == sheet_cols.saturating_sub(1);
+                                            let spans_all_rows = resolved.row_start == 0
+                                                && resolved.row_end
+                                                    == sheet_rows.saturating_sub(1);
+
+                                            let cells = if spans_all_cols || spans_all_rows {
+                                                match func {
+                                                    Function::Row => i64::from(resolved.rows()),
+                                                    Function::Column => i64::from(resolved.cols()),
+                                                    _ => unreachable!("matched above"),
+                                                }
+                                            } else {
+                                                (i64::from(resolved.rows()))
+                                                    * (i64::from(resolved.cols()))
+                                            };
+                                            if cells > BYTECODE_MAX_RANGE_CELLS {
+                                                return Err(BytecodeCompileReason::ExceedsRangeCellLimit);
+                                            }
+                                            continue;
+                                        }
+                                        // Multi-area references return `#VALUE!` for ROW/COLUMN,
+                                        // so they cannot allocate a large output array. Still
+                                        // validate that each component range lies within the VM's
+                                        // representable grid.
+                                        areas => {
+                                            for area in areas {
+                                                let resolved = area.range.resolve(origin);
+                                                if resolved.row_start < 0
+                                                    || resolved.col_start < 0
+                                                    || resolved.row_end >= max_rows
+                                                    || resolved.col_end >= max_cols
+                                                {
+                                                    return Err(BytecodeCompileReason::ExceedsGridLimits);
+                                                }
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                }
+                                _ => {}
                             }
                         }
 
@@ -12958,6 +13066,7 @@ fn bytecode_expr_within_grid_limits_inner(
                             arg,
                             origin,
                             origin_sheet_bounds,
+                            sheet_bounds,
                             max_range_cells,
                         )?;
                     }
@@ -12995,6 +13104,7 @@ fn bytecode_expr_within_grid_limits_inner(
                                     arg,
                                     origin,
                                     origin_sheet_bounds,
+                                    sheet_bounds,
                                     max_range_cells,
                                 )?;
                             }
@@ -13048,6 +13158,7 @@ fn bytecode_expr_within_grid_limits_inner(
                             arg,
                             origin,
                             origin_sheet_bounds,
+                            sheet_bounds,
                             arg_limit,
                         )?;
                     }
@@ -13059,6 +13170,7 @@ fn bytecode_expr_within_grid_limits_inner(
             body,
             origin,
             origin_sheet_bounds,
+            sheet_bounds,
             max_range_cells,
         ),
         bytecode::Expr::Call { callee, args } => {
@@ -13066,6 +13178,7 @@ fn bytecode_expr_within_grid_limits_inner(
                 callee,
                 origin,
                 origin_sheet_bounds,
+                sheet_bounds,
                 max_range_cells,
             )?;
             for arg in args {
@@ -13073,6 +13186,7 @@ fn bytecode_expr_within_grid_limits_inner(
                     arg,
                     origin,
                     origin_sheet_bounds,
+                    sheet_bounds,
                     max_range_cells,
                 )?;
             }
