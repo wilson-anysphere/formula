@@ -645,6 +645,10 @@ mod tests {
             parse_dax_column_ref("'O''Reilly'[Name]"),
             Some(("O'Reilly".to_string(), "Name".to_string()))
         );
+        assert_eq!(
+            parse_dax_column_ref("T[Col]]Name]"),
+            Some(("T".to_string(), "Col]Name".to_string()))
+        );
         assert_eq!(parse_dax_column_ref("''[Column]"), None);
         assert_eq!(parse_dax_column_ref("'O'Reilly'[Name]"), None);
         assert_eq!(parse_dax_column_ref("'Table'X[Column]"), None);
@@ -662,6 +666,7 @@ mod tests {
             parse_dax_measure_ref(" [ Total Sales ] "),
             Some("Total Sales".to_string())
         );
+        assert_eq!(parse_dax_measure_ref("[A]]B]"), Some("A]B".to_string()));
         assert_eq!(parse_dax_measure_ref("[]"), None);
         assert_eq!(parse_dax_measure_ref("Table[Column]"), None);
     }
@@ -715,6 +720,14 @@ mod tests {
             }
             .to_string(),
             "T[Col]]Name]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "VAR".to_string(),
+                column: "X".to_string(),
+            }
+            .to_string(),
+            "'VAR'[X]"
         );
         assert_eq!(
             PivotFieldRef::DataModelMeasure("Total Sales".to_string()).to_string(),
