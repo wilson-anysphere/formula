@@ -21,15 +21,6 @@ function rectsOverlap(a: Rect, b: Rect): boolean {
   );
 }
 
-function unionRect(a: Rect, b: Rect): Rect {
-  const x1 = Math.min(a.x, b.x);
-  const y1 = Math.min(a.y, b.y);
-  const x2 = Math.max(a.x + a.width, b.x + b.width);
-  const y2 = Math.max(a.y + a.height, b.y + b.height);
-
-  return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
-}
-
 export class DirtyRegionTracker {
   private dirty: Rect[] = [];
 
@@ -37,12 +28,22 @@ export class DirtyRegionTracker {
     const normalized = normalizeRect(rect);
     if (!normalized) return;
 
-    let merged = normalized;
+    let merged: Rect = normalized;
     for (let i = 0; i < this.dirty.length; ) {
       const existing = this.dirty[i];
       if (rectsOverlap(existing, merged)) {
-        merged = unionRect(existing, merged);
+        const x1 = Math.min(existing.x, merged.x);
+        const y1 = Math.min(existing.y, merged.y);
+        const x2 = Math.max(existing.x + existing.width, merged.x + merged.width);
+        const y2 = Math.max(existing.y + existing.height, merged.y + merged.height);
+
+        existing.x = x1;
+        existing.y = y1;
+        existing.width = x2 - x1;
+        existing.height = y2 - y1;
+
         this.dirty.splice(i, 1);
+        merged = existing;
         continue;
       }
       i++;
@@ -58,6 +59,6 @@ export class DirtyRegionTracker {
   }
 
   clear(): void {
-    this.dirty = [];
+    this.dirty.length = 0;
   }
 }

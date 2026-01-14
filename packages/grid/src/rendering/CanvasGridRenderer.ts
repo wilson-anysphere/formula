@@ -163,6 +163,10 @@ function isSameCellRange(a: CellRange | null, b: CellRange | null): boolean {
   return a.startRow === b.startRow && a.endRow === b.endRow && a.startCol === b.startCol && a.endCol === b.endCol;
 }
 
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
 function intersectRect(a: Rect, b: Rect): Rect | null {
   const x1 = Math.max(a.x, b.x);
   const y1 = Math.max(a.y, b.y);
@@ -553,6 +557,7 @@ export class CanvasGridRenderer {
     content: new DirtyRegionTracker(),
     selection: new DirtyRegionTracker()
   };
+  private readonly selectionDirtyRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
 
   private scheduled = false;
   private renderRafId: number | null = null;
@@ -3015,16 +3020,27 @@ export class CanvasGridRenderer {
 
       const x = scrollCols ? x1 - viewport.scrollX : x1;
       const y = scrollRows ? y1 - viewport.scrollY : y1;
+      const width = x2 - x1;
+      const height = y2 - y1;
+      const xEnd = x + width;
+      const yEnd = y + height;
 
-      const quadrantRect: Rect = {
-        x: scrollCols ? frozenWidth : 0,
-        y: scrollRows ? frozenHeight : 0,
-        width: scrollCols ? Math.max(0, viewport.width - frozenWidth) : frozenWidth,
-        height: scrollRows ? Math.max(0, viewport.height - frozenHeight) : frozenHeight
-      };
+      const quadrantX = scrollCols ? frozenWidth : 0;
+      const quadrantY = scrollRows ? frozenHeight : 0;
+      const quadrantWidth = scrollCols ? Math.max(0, viewport.width - frozenWidth) : frozenWidth;
+      const quadrantHeight = scrollRows ? Math.max(0, viewport.height - frozenHeight) : frozenHeight;
+      const quadrantXEnd = quadrantX + quadrantWidth;
+      const quadrantYEnd = quadrantY + quadrantHeight;
 
-      const rect = intersectRect({ x, y, width: x2 - x1, height: y2 - y1 }, quadrantRect);
-      if (rect) rects.push(rect);
+      const ix1 = Math.max(x, quadrantX);
+      const iy1 = Math.max(y, quadrantY);
+      const ix2 = Math.min(xEnd, quadrantXEnd);
+      const iy2 = Math.min(yEnd, quadrantYEnd);
+      const iWidth = ix2 - ix1;
+      const iHeight = iy2 - iy1;
+      if (iWidth <= 0 || iHeight <= 0) return;
+
+      rects.push({ x: ix1, y: iy1, width: iWidth, height: iHeight });
     };
 
     addRect(rowsFrozenStart, rowsFrozenEnd, colsFrozenStart, colsFrozenEnd, false, false);
@@ -3100,7 +3116,11 @@ export class CanvasGridRenderer {
           const y1 = Math.min(existing.y, merged.y);
           const x2 = Math.max(existing.x + existing.width, merged.x + merged.width);
           const y2 = Math.max(existing.y + existing.height, merged.y + merged.height);
-          merged = { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+          existing.x = x1;
+          existing.y = y1;
+          existing.width = x2 - x1;
+          existing.height = y2 - y1;
+          merged = existing;
           primary.splice(i, 1);
           continue;
         }
@@ -5874,10 +5894,19 @@ export class CanvasGridRenderer {
     for (const [fill, rects] of fills) {
       ctx.fillStyle = fill;
       ctx.beginPath();
+      const clipX1 = intersection.x;
+      const clipY1 = intersection.y;
+      const clipX2 = intersection.x + intersection.width;
+      const clipY2 = intersection.y + intersection.height;
       for (const rect of rects) {
-        const clipped = intersectRect(rect, intersection);
-        if (!clipped) continue;
-        ctx.rect(clipped.x, clipped.y, clipped.width, clipped.height);
+        const x1 = Math.max(rect.x, clipX1);
+        const y1 = Math.max(rect.y, clipY1);
+        const x2 = Math.min(rect.x + rect.width, clipX2);
+        const y2 = Math.min(rect.y + rect.height, clipY2);
+        const width = x2 - x1;
+        const height = y2 - y1;
+        if (width <= 0 || height <= 0) continue;
+        ctx.rect(x1, y1, width, height);
       }
       ctx.fill();
     }
@@ -6135,21 +6164,31 @@ export class CanvasGridRenderer {
     const ctx = this.selectionCtx;
     if (!ctx) return;
 
+    const clipX1 = intersection.x;
+    const clipY1 = intersection.y;
+    const clipX2 = intersection.x + intersection.width;
+    const clipY2 = intersection.y + intersection.height;
+
     const transientRange = this.rangeSelection;
     if (transientRange) {
       const rects = this.rangeToViewportRects(transientRange, viewport);
 
       ctx.fillStyle = this.theme.selectionFill;
       for (const rect of rects) {
-        const clipped = intersectRect(rect, intersection);
-        if (!clipped) continue;
-        ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
+        const x1 = Math.max(rect.x, clipX1);
+        const y1 = Math.max(rect.y, clipY1);
+        const x2 = Math.min(rect.x + rect.width, clipX2);
+        const y2 = Math.min(rect.y + rect.height, clipY2);
+        const width = x2 - x1;
+        const height = y2 - y1;
+        if (width <= 0 || height <= 0) continue;
+        ctx.fillRect(x1, y1, width, height);
       }
 
       ctx.strokeStyle = this.theme.selectionBorder;
       ctx.lineWidth = 2;
       for (const rect of rects) {
-        if (!intersectRect(rect, intersection)) continue;
+        if (!rectsOverlap(rect, intersection)) continue;
         if (rect.width <= 2 || rect.height <= 2) continue;
         ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
       }
@@ -6165,9 +6204,14 @@ export class CanvasGridRenderer {
         ctx.fillStyle = this.theme.selectionFill;
         ctx.globalAlpha = 0.6;
         for (const rect of rects) {
-          const clipped = intersectRect(rect, intersection);
-          if (!clipped) continue;
-          ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
+          const x1 = Math.max(rect.x, clipX1);
+          const y1 = Math.max(rect.y, clipY1);
+          const x2 = Math.min(rect.x + rect.width, clipX2);
+          const y2 = Math.min(rect.y + rect.height, clipY2);
+          const width = x2 - x1;
+          const height = y2 - y1;
+          if (width <= 0 || height <= 0) continue;
+          ctx.fillRect(x1, y1, width, height);
         }
 
         ctx.strokeStyle = this.theme.selectionBorder;
@@ -6175,7 +6219,7 @@ export class CanvasGridRenderer {
         ctx.lineWidth = 2;
         ctx.setLineDash([5, 4]);
         for (const rect of rects) {
-          if (!intersectRect(rect, intersection)) continue;
+          if (!rectsOverlap(rect, intersection)) continue;
           if (rect.width <= 2 || rect.height <= 2) continue;
           ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
         }
@@ -6201,9 +6245,14 @@ export class CanvasGridRenderer {
         ctx.fillStyle = this.theme.selectionFill;
         ctx.globalAlpha = options.fillAlpha;
         for (const rect of rects) {
-          const clipped = intersectRect(rect, intersection);
-          if (!clipped) continue;
-          ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
+          const x1 = Math.max(rect.x, clipX1);
+          const y1 = Math.max(rect.y, clipY1);
+          const x2 = Math.min(rect.x + rect.width, clipX2);
+          const y2 = Math.min(rect.y + rect.height, clipY2);
+          const width = x2 - x1;
+          const height = y2 - y1;
+          if (width <= 0 || height <= 0) continue;
+          ctx.fillRect(x1, y1, width, height);
         }
 
         ctx.strokeStyle = this.theme.selectionBorder;
@@ -6211,7 +6260,7 @@ export class CanvasGridRenderer {
         ctx.lineWidth = options.strokeWidth;
         const inset = options.strokeWidth / 2;
         for (const rect of rects) {
-          if (!intersectRect(rect, intersection)) continue;
+          if (!rectsOverlap(rect, intersection)) continue;
           if (rect.width <= options.strokeWidth || rect.height <= options.strokeWidth) continue;
           ctx.strokeRect(rect.x + inset, rect.y + inset, rect.width - options.strokeWidth, rect.height - options.strokeWidth);
         }
@@ -6258,7 +6307,7 @@ export class CanvasGridRenderer {
           ctx.strokeStyle = this.theme.selectionBorder;
           ctx.lineWidth = 2;
           for (const rect of activeRects) {
-            if (!intersectRect(rect, intersection)) continue;
+            if (!rectsOverlap(rect, intersection)) continue;
             if (rect.width <= 2 || rect.height <= 2) continue;
             ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
           }
@@ -6272,7 +6321,7 @@ export class CanvasGridRenderer {
       const strokeRects = (rects: Rect[], lineWidth: number) => {
         const inset = lineWidth / 2;
         for (const rect of rects) {
-          if (!intersectRect(rect, intersection)) continue;
+          if (!rectsOverlap(rect, intersection)) continue;
           if (rect.width <= lineWidth || rect.height <= lineWidth) continue;
           ctx.strokeRect(rect.x + inset, rect.y + inset, rect.width - lineWidth, rect.height - lineWidth);
         }
@@ -6502,7 +6551,12 @@ export class CanvasGridRenderer {
 
   private markSelectionDirty(): void {
     const viewport = this.scroll.getViewportState();
-    this.dirty.selection.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+    const rect = this.selectionDirtyRectScratch;
+    rect.x = 0;
+    rect.y = 0;
+    rect.width = viewport.width;
+    rect.height = viewport.height;
+    this.dirty.selection.markDirty(rect);
     this.requestRender();
   }
 
