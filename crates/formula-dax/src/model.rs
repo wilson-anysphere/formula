@@ -11,7 +11,14 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub(crate) fn normalize_ident(s: &str) -> String {
-    s.trim().to_ascii_lowercase()
+    let s = s.trim();
+    if s.is_ascii() {
+        s.to_ascii_uppercase()
+    } else {
+        // Use Unicode-aware uppercasing to approximate Excel/Tabular-style case-insensitive
+        // identifier matching for non-ASCII names (e.g. ß -> SS).
+        s.chars().flat_map(|c| c.to_uppercase()).collect()
+    }
 }
 
 /// Relationship cardinality between two tables.

@@ -108,6 +108,24 @@ fn identifiers_are_case_insensitive_for_measures_columns_filters_and_relationshi
 }
 
 #[test]
+fn identifiers_are_case_insensitive_for_unicode_names() {
+    // Use a German sharp S (ß) to ensure we handle Unicode-aware case folding for identifiers.
+    //
+    // In particular, `ß` uppercases to `SS`, so `'Straße'` should be addressable as `'STRASSE'`.
+    let mut model = DataModel::new();
+    let mut table = Table::new("Straße", vec!["Maß"]);
+    table.push_row(vec![1.0.into()]).unwrap();
+    table.push_row(vec![2.0.into()]).unwrap();
+    model.add_table(table).unwrap();
+
+    model.add_measure("Total", "SUM('STRASSE'[MASS])").unwrap();
+    let total = model
+        .evaluate_measure("[TOTAL]", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(total, Value::from(3.0));
+}
+
+#[test]
 fn add_table_rejects_duplicate_column_names_case_insensitively() {
     let mut model = DataModel::new();
     let table = Table::new("T", vec!["Col", "col"]);
