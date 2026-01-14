@@ -1060,21 +1060,12 @@ function highlightFromEngineTokens(formula: string, tokens: EngineFormulaToken[]
   }
   if (!sorted) filtered.sort((a, b) => a.span.start - b.span.start);
 
-  // Best-effort: treat an identifier immediately followed by "(" (ignoring whitespace) as a function name.
-  const functionIdentStarts = new Set<number>();
-  let prevNonWs: EngineFormulaToken | null = null;
-  for (const token of filtered) {
-    if (token.kind === "Whitespace") continue;
-    if (token.kind === "LParen") {
-      if (prevNonWs?.kind === "Ident" || prevNonWs?.kind === "QuotedIdent") {
-        functionIdentStarts.add(prevNonWs.span.start);
-      }
-    }
-    prevNonWs = token;
-  }
-
   const spans: HighlightSpan[] = [];
   let pos = 0;
+  // Best-effort: treat an identifier immediately followed by "(" (ignoring whitespace) as a function name.
+  // Instead of building a separate index (Set) with a second pass, mutate the already-emitted identifier
+  // span when we later observe the "(" token.
+  let lastNonWhitespaceSpanIndex: number | null = null;
   for (const token of filtered) {
     const start = Math.max(0, Math.min(token.span.start, formula.length));
     const end = Math.max(0, Math.min(token.span.end, formula.length));
@@ -1094,16 +1085,30 @@ function highlightFromEngineTokens(formula: string, tokens: EngineFormulaToken[]
           end: gapEnd,
           text: formula.slice(gapStart, gapEnd),
         });
+        if (gapSpan.kind !== "whitespace") {
+          lastNonWhitespaceSpanIndex = spans.length - 1;
+        }
+      }
+    }
+
+    if (token.kind === "LParen" && lastNonWhitespaceSpanIndex != null) {
+      const prev = spans[lastNonWhitespaceSpanIndex];
+      if (prev?.kind === "identifier") {
+        prev.kind = "function";
       }
     }
 
     if (end > start) {
       spans.push({
-        kind: engineTokenKindToHighlightKind(token, functionIdentStarts.has(token.span.start)),
+        kind: engineTokenKindToHighlightKind(token),
         start,
         end,
         text: formula.slice(start, end),
       });
+      const spanKind = spans[spans.length - 1]!.kind;
+      if (spanKind !== "whitespace") {
+        lastNonWhitespaceSpanIndex = spans.length - 1;
+      }
     }
     pos = Math.max(pos, end);
   }
@@ -1126,7 +1131,7 @@ function highlightFromEngineTokens(formula: string, tokens: EngineFormulaToken[]
   return spans;
 }
 
-function engineTokenKindToHighlightKind(token: EngineFormulaToken, isFunctionIdent: boolean): HighlightSpan["kind"] {
+function engineTokenKindToHighlightKind(token: EngineFormulaToken): HighlightSpan["kind"] {
   switch (token.kind) {
     case "Whitespace":
       return "whitespace";
@@ -1145,7 +1150,7 @@ function engineTokenKindToHighlightKind(token: EngineFormulaToken, isFunctionIde
       return "reference";
     case "Ident":
     case "QuotedIdent":
-      return isFunctionIdent ? "function" : "identifier";
+      return "identifier";
     case "Plus":
     case "Minus":
     case "Star":
