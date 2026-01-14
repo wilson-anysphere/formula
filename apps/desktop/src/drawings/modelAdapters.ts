@@ -71,6 +71,18 @@ function unwrapPossiblyTaggedEnum(
     return { tag: tagVal, value: input };
   }
 
+  // Support externally-tagged enums with metadata keys alongside the variant payload, e.g.:
+  // `{ sheetId: "...", Absolute: {...} }` or `{ label: "Foo", Shape: {...} }`.
+  //
+  // Heuristic: pick the single non-tag/non-content key whose value is an object.
+  const recordKeys = keys.filter(
+    (key) => !tagKeys.includes(key) && !contentKeys.includes(key) && isRecord((input as JsonRecord)[key]),
+  );
+  if (recordKeys.length === 1) {
+    const tag = recordKeys[0]!;
+    return { tag, value: (input as JsonRecord)[tag] };
+  }
+
   throw new Error(`${context} must be an externally-tagged or internally-tagged enum object`);
 }
 
