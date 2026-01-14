@@ -13856,6 +13856,48 @@ export class SpreadsheetApp {
           if (len > colCount) colCount = len;
         }
       }
+
+      // Some clipboard backends provide `text/plain=""` alongside image data. Treat a purely-empty
+      // parsed grid as "no usable tabular text" so image-only clipboard payloads paste as floating
+      // pictures (Excel-like) rather than clearing a single cell.
+      if (mode === "all" && !internalCells && externalGrid) {
+        const anyContent = content as any;
+        const hasImage =
+          (anyContent?.imagePng instanceof Uint8Array && anyContent.imagePng.byteLength > 0) ||
+          (typeof anyContent?.pngBase64 === "string" && anyContent.pngBase64.trim() !== "");
+        if (hasImage) {
+          let hasMeaningfulCell = false;
+          for (const row of externalGrid) {
+            if (!Array.isArray(row) || row.length === 0) continue;
+            for (const cell of row) {
+              if (!cell || typeof cell !== "object") continue;
+              const anyCell = cell as any;
+              const formula = anyCell.formula;
+              if (typeof formula === "string" && formula.trim() !== "") {
+                hasMeaningfulCell = true;
+                break;
+              }
+              const value = anyCell.value;
+              if (value != null) {
+                if (typeof value !== "string" || value.trim() !== "") {
+                  hasMeaningfulCell = true;
+                  break;
+                }
+              }
+              const format = anyCell.format;
+              if (format && typeof format === "object" && Object.keys(format).length > 0) {
+                hasMeaningfulCell = true;
+                break;
+              }
+            }
+            if (hasMeaningfulCell) break;
+          }
+          if (!hasMeaningfulCell) {
+            const handled = await this.pasteClipboardImageAsDrawing(content);
+            if (handled) return;
+          }
+        }
+      }
       if (rowCount === 0 || colCount === 0) {
         // Excel-style behavior: if the clipboard only contains an image (and no
         // tabular text/HTML), paste it as a floating picture anchored at the

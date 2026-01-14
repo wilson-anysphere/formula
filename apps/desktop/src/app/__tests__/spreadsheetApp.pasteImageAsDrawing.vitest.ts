@@ -159,4 +159,47 @@ describe("SpreadsheetApp paste image clipboard", () => {
     app.destroy();
     root.remove();
   });
+
+  it("pastes image clipboard payloads even when text/plain is an empty string", async () => {
+    // 1x1 transparent PNG.
+    const pngBytes = new Uint8Array(
+      // eslint-disable-next-line no-undef
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+FeAAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
+
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: vi.fn(async () => ({ width: 64, height: 32 })),
+    });
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    const provider = {
+      // Some platforms include `text/plain=""` alongside the image bytes.
+      read: vi.fn(async () => ({ imagePng: pngBytes, text: "" })),
+      write: vi.fn(async () => {}),
+    };
+    (app as any).clipboardProviderPromise = Promise.resolve(provider);
+
+    await app.pasteClipboardToSelection();
+
+    const sheetId = app.getCurrentSheetId();
+    const docAny = app.getDocument() as any;
+    const drawings = docAny.getSheetDrawings?.(sheetId) ?? [];
+    expect(drawings).toHaveLength(1);
+    expect(drawings[0]?.kind?.type).toBe("image");
+
+    app.destroy();
+    root.remove();
+  });
 });
