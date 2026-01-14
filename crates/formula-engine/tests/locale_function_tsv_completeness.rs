@@ -11,6 +11,7 @@ struct ParsedLocaleTsv {
 struct ParsedErrorTsv {
     canonical_keys: BTreeSet<String>,
     localized_keys: BTreeSet<String>,
+    entries: BTreeMap<String, String>,
 }
 
 fn inventory_function_names() -> BTreeSet<String> {
@@ -109,9 +110,10 @@ fn casefold_unicode(s: &str) -> String {
     s.chars().flat_map(|c| c.to_uppercase()).collect()
 }
 
-fn parse_error_tsv(locale_id: &str, raw_tsv: &str) -> ParsedErrorTsv {
+fn parse_error_tsv(locale_id: &str, raw_tsv: &str, require_sorted: bool) -> ParsedErrorTsv {
     let mut canonical_keys = BTreeSet::new();
     let mut localized_keys = BTreeSet::new();
+    let mut entries: BTreeMap<String, String> = BTreeMap::new();
 
     let mut canon_first_seen: BTreeMap<String, usize> = BTreeMap::new();
     let mut localized_first_seen: BTreeMap<String, (String, usize)> = BTreeMap::new();
@@ -150,14 +152,16 @@ fn parse_error_tsv(locale_id: &str, raw_tsv: &str) -> ParsedErrorTsv {
             );
         }
 
-        if let Some(prev) = prev_canon.as_ref() {
-            if canon < prev.as_str() {
-                panic!(
-                    "error TSV for {locale_id} is not sorted by canonical key: line {line_no}: {canon:?} comes after {prev:?}"
-                );
+        if require_sorted {
+            if let Some(prev) = prev_canon.as_ref() {
+                if canon < prev.as_str() {
+                    panic!(
+                        "error TSV for {locale_id} is not sorted by canonical key: line {line_no}: {canon:?} comes after {prev:?}"
+                    );
+                }
             }
+            prev_canon = Some(canon.to_string());
         }
-        prev_canon = Some(canon.to_string());
 
         let canon_key = casefold_unicode(canon);
         let loc_key = casefold_unicode(loc);
@@ -178,6 +182,7 @@ fn parse_error_tsv(locale_id: &str, raw_tsv: &str) -> ParsedErrorTsv {
 
         canonical_keys.insert(canon.to_string());
         localized_keys.insert(loc.to_string());
+        entries.insert(canon.to_string(), loc.to_string());
     }
 
     if !duplicate_canon.is_empty() || !duplicate_localized.is_empty() {
@@ -204,6 +209,7 @@ fn parse_error_tsv(locale_id: &str, raw_tsv: &str) -> ParsedErrorTsv {
     ParsedErrorTsv {
         canonical_keys,
         localized_keys,
+        entries,
     }
 }
 
@@ -299,20 +305,48 @@ fn locale_error_tsvs_are_complete_and_unique() {
     .collect();
 
     let locale_tables = [
-        ("de-DE", include_str!("../src/locale/data/de-DE.errors.tsv")),
-        ("fr-FR", include_str!("../src/locale/data/fr-FR.errors.tsv")),
-        ("es-ES", include_str!("../src/locale/data/es-ES.errors.tsv")),
+        (
+            "de-DE",
+            include_str!("../src/locale/data/de-DE.errors.tsv"),
+            include_str!("../src/locale/data/upstream/errors/de-DE.tsv"),
+        ),
+        (
+            "fr-FR",
+            include_str!("../src/locale/data/fr-FR.errors.tsv"),
+            include_str!("../src/locale/data/upstream/errors/fr-FR.tsv"),
+        ),
+        (
+            "es-ES",
+            include_str!("../src/locale/data/es-ES.errors.tsv"),
+            include_str!("../src/locale/data/upstream/errors/es-ES.tsv"),
+        ),
     ];
 
     let mut failures = String::new();
 
-    for (locale_id, tsv) in locale_tables {
-        let parsed = parse_error_tsv(locale_id, tsv);
+    for (locale_id, tsv, upstream_tsv) in locale_tables {
+        let parsed = parse_error_tsv(locale_id, tsv, /*require_sorted*/ true);
+        let upstream = parse_error_tsv(locale_id, upstream_tsv, /*require_sorted*/ false);
 
         let missing: Vec<String> = expected.difference(&parsed.canonical_keys).cloned().collect();
         let extra: Vec<String> = parsed.canonical_keys.difference(&expected).cloned().collect();
 
-        if missing.is_empty() && extra.is_empty() {
+        let upstream_missing: Vec<String> =
+            expected.difference(&upstream.canonical_keys).cloned().collect();
+        let upstream_extra: Vec<String> = upstream
+            .canonical_keys
+            .difference(&expected)
+            .cloned()
+            .collect();
+
+        let mapping_matches_upstream = parsed.entries == upstream.entries;
+
+        if missing.is_empty()
+            && extra.is_empty()
+            && upstream_missing.is_empty()
+            && upstream_extra.is_empty()
+            && mapping_matches_upstream
+        {
             continue;
         }
 
@@ -335,6 +369,30 @@ fn locale_error_tsvs_are_complete_and_unique() {
             for code in &extra {
                 failures.push_str(&format!("    - {code}\n"));
             }
+        }
+
+        if !upstream_missing.is_empty() || !upstream_extra.is_empty() {
+            failures.push_str(&format!(
+                "\n  Upstream mapping is out of sync (crates/formula-engine/src/locale/data/upstream/errors/{locale_id}.tsv):\n"
+            ));
+            if !upstream_missing.is_empty() {
+                failures.push_str("    Missing canonical error keys:\n");
+                for code in &upstream_missing {
+                    failures.push_str(&format!("      - {code}\n"));
+                }
+            }
+            if !upstream_extra.is_empty() {
+                failures.push_str("    Extra canonical error keys:\n");
+                for code in &upstream_extra {
+                    failures.push_str(&format!("      - {code}\n"));
+                }
+            }
+        }
+
+        if !mapping_matches_upstream {
+            failures.push_str(
+                "\n  Error TSV does not match upstream mapping source. Regenerate it.\n",
+            );
         }
 
         failures.push_str(&format!(
