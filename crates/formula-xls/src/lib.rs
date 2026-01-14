@@ -2722,47 +2722,16 @@ fn import_xls_with_biff_reader(
                 // Calamine's `.xls` defined-name API does not expose sheet scope. When a workbook-
                 // scoped `_xlnm._FilterDatabase` is encountered, attempt to infer its sheet from an
                 // explicit `Sheet!` prefix in the definition formula.
-                let warnings_before_infer = warnings.len();
-                let sheet_name = infer_sheet_name_from_workbook_scoped_defined_name(
-                    &out,
-                    &name.name,
-                    &name.refers_to,
-                    &mut warnings,
-                    &mut warnings_suppressed,
-                )
-                .or_else(|| (out.sheets.len() == 1).then(|| out.sheets[0].name.clone()))
-                .or_else(|| {
-                    // Some `.xls` files store a workbook-scoped `_FilterDatabase` name whose
-                    // `refers_to` is an unqualified 2D range (e.g. `=$A$1:$B$3`), even when the
-                    // workbook contains multiple sheets. In this case, we have no explicit sheet
-                    // scope to apply.
-                    //
-                    // Best-effort: if exactly one sheet already has AutoFilter metadata inferred
-                    // from the worksheet substream (AUTOFILTERINFO / FILTERMODE + DIMENSIONS),
-                    // assume this FilterDatabase range belongs to that sheet.
-                    //
-                    // Do not guess when multiple sheets have AutoFilter metadata.
-                    if warnings.len() != warnings_before_infer {
-                        return None;
-                    }
-
-                    let refers_to = name.refers_to.trim();
-                    let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).trim();
-                    let refers_to = refers_to.strip_prefix('@').unwrap_or(refers_to).trim();
-                    if refers_to.contains('!') {
-                        return None;
-                    }
-
-                    let mut sheets_with_autofilter =
-                        out.sheets.iter().filter(|s| s.auto_filter.is_some());
-                    let only = sheets_with_autofilter.next()?;
-                    sheets_with_autofilter
-                        .next()
-                        .is_none()
-                        .then(|| only.name.clone())
-                });
+                let (sheet_name, inference_failed) =
+                    infer_autofilter_sheet_name_from_workbook_scoped_defined_name(
+                        &out,
+                        &name.name,
+                        &name.refers_to,
+                        &mut warnings,
+                        &mut warnings_suppressed,
+                    );
                 let Some(sheet_name) = sheet_name else {
-                    if warnings.len() == warnings_before_infer {
+                    if !inference_failed {
                         push_import_warning(
                             &mut warnings,
                             format!(
@@ -3004,44 +2973,31 @@ fn import_xls_with_biff_reader(
                                 // Attempt to infer the sheet target of workbook-scoped AutoFilter
                                 // names. Some `.xls` files store `_FilterDatabase` as workbook-scope
                                 // but use an unqualified 2D range formula.
-                                let warnings_before_infer = warnings.len();
-                                let inferred = infer_sheet_name_from_workbook_scoped_defined_name(
-                                    &out,
-                                    &name.name,
-                                    &name.refers_to,
-                                    &mut warnings,
-                                    &mut warnings_suppressed,
-                                )
-                                .and_then(|sheet_name| out.sheet_by_name(&sheet_name).map(|s| s.id))
-                                .or_else(|| (out.sheets.len() == 1).then(|| out.sheets[0].id))
-                                .or_else(|| {
-                                    // Best-effort: if exactly one sheet already has AutoFilter
-                                    // metadata, assume this FilterDatabase range belongs to it.
-                                    //
-                                    // Do not guess when multiple sheets have AutoFilter metadata.
-                                    if warnings.len() != warnings_before_infer {
-                                        return None;
-                                    }
-                                    if name.refers_to.contains('!') {
-                                        return None;
-                                    }
-                                    let mut sheets_with_autofilter =
-                                        out.sheets.iter().filter(|s| s.auto_filter.is_some());
-                                    let only = sheets_with_autofilter.next()?;
-                                    sheets_with_autofilter.next().is_none().then_some(only.id)
-                                })
-                                .or_else(|| {
-                                    // Best-effort: infer sheet from the worksheet substream's
-                                    // AutoFilter metadata (AUTOFILTERINFO / FILTERMODE).
-                                    if warnings.len() != warnings_before_infer {
-                                        return None;
-                                    }
-                                    let biff_sheet_idx =
-                                        biff_sheet_idx_with_sheet_stream_autofilter?;
-                                    resolve_sheet_id_for_biff_idx(biff_sheet_idx)
-                                });
+                                let (sheet_name, inference_failed) =
+                                    infer_autofilter_sheet_name_from_workbook_scoped_defined_name(
+                                        &out,
+                                        &name.name,
+                                        &name.refers_to,
+                                        &mut warnings,
+                                        &mut warnings_suppressed,
+                                    );
 
-                                if inferred.is_none() && warnings.len() == warnings_before_infer {
+                                let inferred = sheet_name
+                                    .and_then(|sheet_name| {
+                                        out.sheet_by_name(&sheet_name).map(|s| s.id)
+                                    })
+                                    .or_else(|| {
+                                        // Best-effort: infer sheet from the worksheet substream's
+                                        // AutoFilter metadata (AUTOFILTERINFO / FILTERMODE).
+                                        if inference_failed {
+                                            return None;
+                                        }
+                                        let biff_sheet_idx =
+                                            biff_sheet_idx_with_sheet_stream_autofilter?;
+                                        resolve_sheet_id_for_biff_idx(biff_sheet_idx)
+                                    });
+
+                                if inferred.is_none() && !inference_failed {
                                     push_import_warning(
                                         &mut warnings,
                                         format!(
@@ -3632,13 +3588,29 @@ fn is_filter_database_defined_name(name: &str) -> bool {
         || name.eq_ignore_ascii_case("_FilterDatabas")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WorkbookScopedDefinedNameSheetInference {
+    /// The defined name's `refers_to` formula does not contain an explicit `Sheet!` prefix, or the
+    /// inferred sheet does not exist in the workbook.
+    ///
+    /// This outcome is not warning-worthy; callers may choose best-effort heuristics.
+    NotApplicable,
+    /// The defined name's `refers_to` formula was malformed or ambiguous in a way that should be
+    /// surfaced to the user as an import warning.
+    ///
+    /// Callers must not run heuristic fallbacks based on warning suppression state.
+    Failure,
+    /// The sheet scope was inferred from an explicit `Sheet!` prefix.
+    Inferred(String),
+}
+
 fn infer_sheet_name_from_workbook_scoped_defined_name(
     workbook: &Workbook,
     name: &str,
     refers_to: &str,
     warnings: &mut Vec<ImportWarning>,
     suppressed: &mut bool,
-) -> Option<String> {
+) -> WorkbookScopedDefinedNameSheetInference {
     // `Workbook::create_defined_name` strips leading `=` but not `@`. Strip both defensively so we
     // can infer sheet scope from dynamic-array era implicit intersection prefixes as well.
     let refers_to = refers_to.trim();
@@ -3647,7 +3619,7 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
     let refers_to = refers_to.strip_prefix('@').unwrap_or(refers_to).trim();
     let refers_to = strip_wrapping_parentheses(refers_to);
     if refers_to.is_empty() {
-        return None;
+        return WorkbookScopedDefinedNameSheetInference::NotApplicable;
     }
 
     let areas = match split_print_name_areas(refers_to) {
@@ -3658,7 +3630,7 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
                 format!("failed to infer sheet scope for workbook-scoped `{name}`: {err}"),
                 suppressed,
             );
-            return None;
+            return WorkbookScopedDefinedNameSheetInference::Failure;
         }
     };
 
@@ -3674,13 +3646,13 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
                     ),
                     suppressed,
                 );
-                return None;
+                return WorkbookScopedDefinedNameSheetInference::Failure;
             }
         };
 
         let Some(sheet_name) = sheet_name else {
             // We only infer sheet scope from explicit `Sheet!` prefixes.
-            return None;
+            return WorkbookScopedDefinedNameSheetInference::NotApplicable;
         };
         let sheet_name = strip_workbook_prefix_from_sheet_ref(&sheet_name).to_string();
 
@@ -3695,14 +3667,70 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
                         ),
                         suppressed,
                     );
-                    return None;
+                    return WorkbookScopedDefinedNameSheetInference::Failure;
                 }
             }
         }
     }
 
-    let inferred = inferred?;
-    workbook.sheet_by_name(&inferred).map(|s| s.name.clone())
+    let Some(inferred) = inferred else {
+        return WorkbookScopedDefinedNameSheetInference::NotApplicable;
+    };
+    match workbook.sheet_by_name(&inferred) {
+        Some(s) => WorkbookScopedDefinedNameSheetInference::Inferred(s.name.clone()),
+        None => WorkbookScopedDefinedNameSheetInference::NotApplicable,
+    }
+}
+
+fn infer_autofilter_sheet_name_from_workbook_scoped_defined_name(
+    workbook: &Workbook,
+    name: &str,
+    refers_to: &str,
+    warnings: &mut Vec<ImportWarning>,
+    suppressed: &mut bool,
+) -> (Option<String>, bool) {
+    let inferred = infer_sheet_name_from_workbook_scoped_defined_name(
+        workbook, name, refers_to, warnings, suppressed,
+    );
+    let inference_failed = matches!(inferred, WorkbookScopedDefinedNameSheetInference::Failure);
+
+    let sheet_name = match inferred {
+        WorkbookScopedDefinedNameSheetInference::Inferred(name) => Some(name),
+        WorkbookScopedDefinedNameSheetInference::NotApplicable
+        | WorkbookScopedDefinedNameSheetInference::Failure => None,
+    }
+    .or_else(|| (workbook.sheets.len() == 1).then(|| workbook.sheets[0].name.clone()))
+    .or_else(|| {
+        // Some `.xls` files store a workbook-scoped `_FilterDatabase` name whose `refers_to` is an
+        // unqualified 2D range (e.g. `=$A$1:$B$3`), even when the workbook contains multiple
+        // sheets. In this case, we have no explicit sheet scope to apply.
+        //
+        // Best-effort: if exactly one sheet already has AutoFilter metadata inferred from the
+        // worksheet substream (AUTOFILTERINFO / FILTERMODE + DIMENSIONS), assume this FilterDatabase
+        // range belongs to that sheet.
+        //
+        // Do not guess when multiple sheets have AutoFilter metadata, or when sheet inference
+        // failed in a warning-worthy way.
+        if inference_failed {
+            return None;
+        }
+
+        let refers_to = refers_to.trim();
+        let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).trim();
+        let refers_to = refers_to.strip_prefix('@').unwrap_or(refers_to).trim();
+        if refers_to.contains('!') {
+            return None;
+        }
+
+        let mut sheets_with_autofilter = workbook.sheets.iter().filter(|s| s.auto_filter.is_some());
+        let only = sheets_with_autofilter.next()?;
+        sheets_with_autofilter
+            .next()
+            .is_none()
+            .then(|| only.name.clone())
+    });
+
+    (sheet_name, inference_failed)
 }
 
 fn populate_print_settings_from_defined_names(
@@ -3732,9 +3760,15 @@ fn populate_print_settings_from_defined_names(
                     workbook.sheet(*sheet_id).map(|s| s.name.clone())
                 }
                 (1, DefinedNameScope::Workbook) => {
-                    infer_sheet_name_from_workbook_scoped_defined_name(
+                    match infer_sheet_name_from_workbook_scoped_defined_name(
                         workbook, name, refers_to, warnings, suppressed,
-                    )
+                    ) {
+                        WorkbookScopedDefinedNameSheetInference::Inferred(sheet_name) => {
+                            Some(sheet_name)
+                        }
+                        WorkbookScopedDefinedNameSheetInference::NotApplicable
+                        | WorkbookScopedDefinedNameSheetInference::Failure => None,
+                    }
                 }
                 _ => None,
             };
@@ -6201,8 +6235,73 @@ mod tests {
             &mut warnings,
             &mut suppressed,
         );
-        assert_eq!(sheet.as_deref(), Some("Sheet1"));
+        assert!(matches!(
+            sheet,
+            WorkbookScopedDefinedNameSheetInference::Inferred(ref sheet_name)
+                if sheet_name == "Sheet1"
+        ));
         assert!(warnings.is_empty(), "warnings={warnings:?}");
+    }
+
+    #[test]
+    fn infer_sheet_scope_reports_failure_even_when_warnings_are_suppressed() {
+        let mut workbook = Workbook::new();
+        workbook.add_sheet("Sheet1").unwrap();
+        workbook.add_sheet("Sheet2").unwrap();
+
+        let mut warnings = Vec::new();
+        let mut suppressed = true;
+        let sheet = infer_sheet_name_from_workbook_scoped_defined_name(
+            &workbook,
+            XLNM_FILTER_DATABASE,
+            "='Sheet1$A$1:$B$3",
+            &mut warnings,
+            &mut suppressed,
+        );
+
+        assert_eq!(sheet, WorkbookScopedDefinedNameSheetInference::Failure);
+        assert!(
+            warnings.is_empty(),
+            "expected warnings to be suppressed, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn autofilter_workbook_scoped_sheet_inference_does_not_guess_when_inference_failed_even_if_suppressed(
+    ) {
+        let mut workbook = Workbook::new();
+        workbook.add_sheet("Sheet1").unwrap();
+        workbook.add_sheet("Sheet2").unwrap();
+
+        // Pre-seed AutoFilter metadata on exactly one sheet, matching the importer's best-effort
+        // workbook-scoped `_FilterDatabase` heuristic.
+        let sheet2_id = workbook
+            .sheet_by_name("Sheet2")
+            .map(|s| s.id)
+            .expect("Sheet2");
+        let sheet2 = workbook.sheet_mut(sheet2_id).expect("Sheet2 mut");
+        sheet2.auto_filter = Some(SheetAutoFilter {
+            range: Range::from_a1("A1:B3").unwrap(),
+            filter_columns: Vec::new(),
+            sort_state: None,
+            raw_xml: Vec::new(),
+        });
+
+        let mut warnings = Vec::new();
+        let mut suppressed = true;
+        let (sheet_name, inference_failed) = infer_autofilter_sheet_name_from_workbook_scoped_defined_name(
+            &workbook,
+            XLNM_FILTER_DATABASE,
+            "='Sheet1$A$1:$B$3",
+            &mut warnings,
+            &mut suppressed,
+        );
+
+        assert!(inference_failed, "expected inference to fail");
+        assert!(
+            sheet_name.is_none(),
+            "expected no heuristic sheet guessing on inference failure, got: {sheet_name:?}"
+        );
     }
 
     #[test]
