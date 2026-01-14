@@ -18790,6 +18790,7 @@ mod tests {
         let addr = parse_a1("A1").unwrap();
         let snapshot = Snapshot::from_workbook(
             &engine.workbook,
+            engine.style_table.clone(),
             &engine.spills,
             None,
             None,
@@ -22253,6 +22254,7 @@ mod tests {
 
         let snapshot = Snapshot::from_workbook(
             &engine.workbook,
+            engine.style_table.clone(),
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
