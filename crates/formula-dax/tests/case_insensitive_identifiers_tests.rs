@@ -270,6 +270,71 @@ fn unicode_relationships_are_case_insensitive_for_filters_and_pivots() {
 }
 
 #[test]
+fn userelationship_resolves_unicode_relationship_case_insensitively() {
+    let mut model = DataModel::new();
+
+    let mut streets = Table::new("Straße", vec!["StraßenId", "Region"]);
+    streets.push_row(vec![1.into(), "East".into()]).unwrap();
+    streets.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(streets).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "StraßenId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 1.into(), 20.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![102.into(), 2.into(), 5.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    // Start with an inactive relationship so USERELATIONSHIP is required for propagation.
+    model
+        .add_relationship(Relationship {
+            name: "Orders->Straße (inactive)".into(),
+            from_table: "orders".into(),
+            from_column: "straßenid".into(),
+            to_table: "STRASSE".into(),
+            to_column: "STRASSENID".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Orders Total", "SUM(orders[amount])").unwrap();
+    model
+        .add_measure(
+            "Orders East (inactive)",
+            "CALCULATE([Orders Total], STRASSE[REGION] = \"East\")",
+        )
+        .unwrap();
+    model
+        .add_measure(
+            "Orders East (userelationship)",
+            "CALCULATE([Orders Total], USERELATIONSHIP(orders[straßenid], STRASSE[STRASSENID]), STRASSE[REGION] = \"East\")",
+        )
+        .unwrap();
+
+    let inactive = model
+        .evaluate_measure("orders east (inactive)", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(
+        inactive,
+        Value::from(35.0),
+        "inactive relationship should not propagate the STRASSE[Region] filter"
+    );
+
+    let with_userelationship = model
+        .evaluate_measure("[ORDERS EAST (USERELATIONSHIP)]", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(with_userelationship, Value::from(30.0));
+}
+
+#[test]
 fn add_table_rejects_duplicate_table_names_case_insensitively_for_unicode() {
     // `ß` uppercases to `SS`, so these two table names collide under case-insensitive matching.
     let mut model = DataModel::new();
