@@ -121,6 +121,7 @@ export const deDE = {
   "commandCategory.pageLayout": "Seitenlayout",
   "commandCategory.view": "Ansicht",
   "commandCategory.macros": "Makros",
+  "commandCategory.audit": "Audit",
   "commandCategory.editing": "Bearbeiten",
   "commandCategory.format": "Format",
   "commandCategory.comments": "Kommentare",

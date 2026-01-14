@@ -121,6 +121,7 @@ export const ar = {
   "commandCategory.pageLayout": "تخطيط الصفحة",
   "commandCategory.view": "عرض",
   "commandCategory.macros": "وحدات الماكرو",
+  "commandCategory.audit": "تدقيق",
   "commandCategory.editing": "تحرير",
   "commandCategory.format": "تنسيق",
   "commandCategory.comments": "تعليقات",
