@@ -139,14 +139,16 @@ Current state in this repo (important nuance):
       `.xlsx`/`.xlsm` workbooks in memory.
       - For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world producers omit
         it.
-    - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
-      is provided (typically returns `Workbook::Xlsx`; Standard AES may return `Workbook::Model`).
-      - Encrypted `.xlsb` currently surfaces `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
-        - Workaround: if you specifically need encrypted `.xlsb` support today, use
-          `formula_io::xlsb::XlsbWorkbook::open_with_password(..)` (path) or
-          `XlsbWorkbook::open_from_bytes_with_password(..)` (in-memory bytes).
-  - `open_workbook_model_with_options` intentionally does not decrypt encrypted OOXML wrappers; use
-    `open_workbook_model_with_password` for encrypted OOXML → `formula_model::Workbook`.
+      - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
+        is provided (typically returns `Workbook::Xlsx`; Standard AES may return `Workbook::Model`).
+        - Encrypted `.xlsb` currently surfaces `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
+          - Workaround: if you specifically need encrypted `.xlsb` support today, use
+            `formula_io::xlsb::XlsbWorkbook::open_with_password(..)` (path) or
+            `XlsbWorkbook::open_from_bytes_with_password(..)` (in-memory bytes).
+  - `open_workbook_model_with_options` can also decrypt encrypted OOXML wrappers when
+    `formula-io/encrypted-workbooks` is enabled (and surfaces `PasswordRequired` when
+    `OpenOptions.password` is `None`). Without that feature, encrypted OOXML containers surface
+    `UnsupportedEncryption`. `open_workbook_model_with_password` is a convenience wrapper around it.
   - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
     `crates/formula-io/src/encrypted_package_reader.rs`.
     - This is used by `open_workbook_with_options` to open Standard/CryptoAPI AES workbooks into a
@@ -246,8 +248,9 @@ Behavior notes:
     - Encrypted `.xlsb` currently surfaces `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
     is provided.
-  - `open_workbook_model_with_options` intentionally does not decrypt encrypted OOXML wrappers; use
-    `open_workbook_model_with_password` for encrypted OOXML → `formula_model::Workbook`.
+  - `open_workbook_model_with_options` can also decrypt encrypted OOXML wrappers when `password` is
+    provided (or surface `PasswordRequired` when missing). `open_workbook_model_with_password` is the
+    convenience wrapper.
   - Decryption happens in memory; do not write decrypted bytes to disk. See
     [`docs/21-encrypted-workbooks.md#security-notes-handling-decrypted-bytes-safely`](./21-encrypted-workbooks.md#security-notes-handling-decrypted-bytes-safely).
 - Without `formula-io/encrypted-workbooks`, encrypted OOXML containers surface

@@ -47,8 +47,10 @@ callers can decide whether to prompt for a password vs report “unsupported enc
     - Encrypted `.xlsb` currently surfaces `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
     is provided (typically returns `Workbook::Xlsx`; Standard AES may return `Workbook::Model`).
-  - `open_workbook_model_with_options` intentionally does not decrypt encrypted OOXML wrappers; use
-    `open_workbook_model_with_password` if you need a `formula_model::Workbook` from an encrypted file.
+  - `open_workbook_model_with_options` can also decrypt encrypted OOXML wrappers when
+    `formula-io/encrypted-workbooks` is enabled (and surfaces `PasswordRequired` when
+    `OpenOptions.password` is `None`). Without that feature, encrypted OOXML containers surface
+    `UnsupportedEncryption`. `open_workbook_model_with_password` is a convenience wrapper.
 - For legacy `.xls` BIFF `FILEPASS`:
   - `open_workbook(..)` / `open_workbook_model(..)` surface `Error::EncryptedWorkbook`
   - `open_workbook_with_password(..)` / `open_workbook_model_with_password(..)` surface

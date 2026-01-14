@@ -369,18 +369,18 @@ Today, the `formula-io` crate:
     - `open_workbook(..)` / `open_workbook_model(..)` return `Error::PasswordRequired` when no
       password is provided (or `Error::UnsupportedOoxmlEncryption` when the `EncryptionInfo` version
       is unknown).
-    - To supply a password:
-      - Use `open_workbook_with_options(path, OpenOptions { password: Some(...) })` (preferred) or the
-        convenience wrapper `open_workbook_with_password(path, Some(password))` to decrypt and open
-        encrypted `.xlsx`/`.xlsm` workbooks into a `Workbook`.
-        - Encrypted `.xlsb` workbooks are detected but currently surface
-          `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
+      - To supply a password:
+        - Use `open_workbook_with_options(path, OpenOptions { password: Some(...) })` (preferred) or the
+          convenience wrapper `open_workbook_with_password(path, Some(password))` to decrypt and open
+          encrypted `.xlsx`/`.xlsm` workbooks into a `Workbook`.
+          - Encrypted `.xlsb` workbooks are detected but currently surface
+            `Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`.
           - Workaround: open encrypted `.xlsb` directly via
             `formula_io::xlsb::XlsbWorkbook::open_with_password(..)` or
             `formula_io::xlsb::XlsbWorkbook::open_from_bytes_with_password(..)`.
-      - Use `open_workbook_model_with_password(path, Some(password))` to decrypt and open directly
-        into a `formula_model::Workbook` (note: `open_workbook_model_with_options` does **not** decrypt
-        encrypted OOXML wrappers).
+      - To open directly into a `formula_model::Workbook`, use:
+        - `open_workbook_model_with_options(path, OpenOptions { password: Some(...) })`, or
+        - the convenience wrapper `open_workbook_model_with_password(path, Some(password))`.
     - Supported schemes:
       - **Agile (4.4)** and **Standard/CryptoAPI** (`versionMinor == 2`; commonly `3.2`/`4.2`)
       - For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world producers omit it.
