@@ -78,6 +78,7 @@ pub use agile::{
     decrypt_agile_encrypted_package_stream as decrypt_agile_encrypted_package_bytes,
     decrypt_agile_encrypted_package_stream_with_key, decrypt_agile_keys,
     parse_agile_encryption_info_stream, parse_agile_encryption_info_stream_with_options,
+    parse_agile_encryption_info_stream_with_options_and_decrypt_options,
     parse_agile_encrypted_key, AgileDataIntegrity, AgileDecryptedKeys, AgileEncryptedKey,
     AgileEncryptionInfo, AgileEncryptionInfoWarning, AgileKeyData, AgilePasswordKeyEncryptor,
     DecryptOptions, DEFAULT_MAX_SPIN_COUNT,

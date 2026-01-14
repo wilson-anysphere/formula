@@ -19,8 +19,9 @@ use formula_xlsx::{
     OffCryptoWarning,
 };
 use formula_xlsx::offcrypto::{
-    derive_iv, derive_key, hash_password, HashAlgorithm, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK,
-    KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
+    decrypt_agile_encrypted_package_with_options, derive_iv, derive_key, hash_password, DecryptOptions,
+    HashAlgorithm, DEFAULT_MAX_SPIN_COUNT, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK,
+    VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
 };
 
 fn fixture_path(rel: &str) -> PathBuf {
@@ -206,6 +207,99 @@ fn agile_decrypt_errors_on_non_block_aligned_verifier_ciphertext() {
     encryption_info.extend_from_slice(xml.as_bytes());
 
     let err = decrypt_agile_encrypted_package(&encryption_info, &[], "pw")
+        .expect_err("expected CiphertextNotBlockAligned");
+    assert!(
+        matches!(
+            err,
+            OffCryptoError::CiphertextNotBlockAligned {
+                field: "encryptedVerifierHashInput",
+                len: 15
+            }
+        ),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+fn agile_decrypt_rejects_spin_count_above_default_max() {
+    let invalid = BASE64.encode([0u8; 15]); // 15 % 16 != 0
+    let valid = BASE64.encode([0u8; 16]);
+    let spin_count = DEFAULT_MAX_SPIN_COUNT.saturating_add(1);
+
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltValue="{valid}" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+           blockSize="16" keyBits="128" hashSize="20" saltSize="16" />
+  <dataIntegrity encryptedHmacKey="{valid}" encryptedHmacValue="{valid}" />
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey saltValue="{valid}" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                      spinCount="{spin_count}" blockSize="16" keyBits="128" hashSize="20" saltSize="16"
+                      encryptedVerifierHashInput="{invalid}"
+                      encryptedVerifierHashValue="{valid}"
+                      encryptedKeyValue="{valid}" />
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#
+    );
+
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&4u16.to_le_bytes());
+    encryption_info.extend_from_slice(&4u16.to_le_bytes());
+    encryption_info.extend_from_slice(&0u32.to_le_bytes());
+    encryption_info.extend_from_slice(xml.as_bytes());
+
+    let err = decrypt_agile_encrypted_package(&encryption_info, &[], "pw")
+        .expect_err("expected SpinCountTooLarge");
+    assert!(
+        matches!(
+            err,
+            OffCryptoError::SpinCountTooLarge {
+                spin_count: s,
+                max
+            } if s == spin_count && max == DEFAULT_MAX_SPIN_COUNT
+        ),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+fn agile_decrypt_allows_overriding_max_spin_count() {
+    let invalid = BASE64.encode([0u8; 15]); // 15 % 16 != 0
+    let valid = BASE64.encode([0u8; 16]);
+    let spin_count = DEFAULT_MAX_SPIN_COUNT.saturating_add(1);
+
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltValue="{valid}" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+           blockSize="16" keyBits="128" hashSize="20" saltSize="16" />
+  <dataIntegrity encryptedHmacKey="{valid}" encryptedHmacValue="{valid}" />
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey saltValue="{valid}" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                      spinCount="{spin_count}" blockSize="16" keyBits="128" hashSize="20" saltSize="16"
+                      encryptedVerifierHashInput="{invalid}"
+                      encryptedVerifierHashValue="{valid}"
+                      encryptedKeyValue="{valid}" />
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#
+    );
+
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&4u16.to_le_bytes());
+    encryption_info.extend_from_slice(&4u16.to_le_bytes());
+    encryption_info.extend_from_slice(&0u32.to_le_bytes());
+    encryption_info.extend_from_slice(xml.as_bytes());
+
+    let opts = DecryptOptions {
+        max_spin_count: spin_count,
+    };
+    let err = decrypt_agile_encrypted_package_with_options(&encryption_info, &[], "pw", &opts)
         .expect_err("expected CiphertextNotBlockAligned");
     assert!(
         matches!(

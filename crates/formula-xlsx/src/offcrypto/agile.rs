@@ -262,6 +262,24 @@ pub fn parse_agile_encryption_info_stream_with_options(
     encryption_info_stream: &[u8],
     opts: &ParseOptions,
 ) -> Result<AgileEncryptionInfo> {
+    let decrypt_opts = DecryptOptions::default();
+    parse_agile_encryption_info_stream_with_options_and_decrypt_options(
+        encryption_info_stream,
+        opts,
+        &decrypt_opts,
+    )
+}
+
+/// Parse an Agile Encryption `EncryptionInfo` stream with explicit parsing limits and decryption
+/// limits.
+///
+/// This variant enforces [`DecryptOptions::max_spin_count`] to prevent CPU DoS via attacker-controlled
+/// `spinCount` values.
+pub fn parse_agile_encryption_info_stream_with_options_and_decrypt_options(
+    encryption_info_stream: &[u8],
+    parse_opts: &ParseOptions,
+    decrypt_opts: &DecryptOptions,
+) -> Result<AgileEncryptionInfo> {
     if encryption_info_stream.len() < 8 {
         return Err(OffCryptoError::MissingRequiredElement {
             element: "EncryptionInfoHeader".to_string(),
@@ -274,7 +292,7 @@ pub fn parse_agile_encryption_info_stream_with_options(
         return Err(OffCryptoError::UnsupportedEncryptionVersion { major, minor });
     }
 
-    let xml_bytes = extract_encryption_info_xml(encryption_info_stream, opts)?;
+    let xml_bytes = extract_encryption_info_xml(encryption_info_stream, parse_opts)?;
     let xml = decode_encryption_info_xml_text(xml_bytes)?;
     let doc = roxmltree::Document::parse(xml.as_ref())?;
 
@@ -307,7 +325,7 @@ pub fn parse_agile_encryption_info_stream_with_options(
             reason: "saltSize must be non-zero".to_string(),
         });
     }
-    let key_data_salt_value = decode_b64_attr("keyData", key_data_node, "saltValue", opts)?;
+    let key_data_salt_value = decode_b64_attr("keyData", key_data_node, "saltValue", parse_opts)?;
     if key_data_salt_value.len() > key_data_salt_size as usize {
         return Err(OffCryptoError::InvalidAttribute {
             element: "keyData".to_string(),
@@ -339,13 +357,13 @@ pub fn parse_agile_encryption_info_stream_with_options(
                     "dataIntegrity",
                     node,
                     "encryptedHmacKey",
-                    opts,
+                    parse_opts,
                 )?,
                 encrypted_hmac_value: decode_b64_attr(
                     "dataIntegrity",
                     node,
                     "encryptedHmacValue",
-                    opts,
+                    parse_opts,
                 )?,
             })
         })
@@ -444,8 +462,12 @@ pub fn parse_agile_encryption_info_stream_with_options(
             reason: "saltSize must be non-zero".to_string(),
         });
     }
-    let key_encryptor_salt_value =
-        decode_b64_attr("encryptedKey", encrypted_key_node, "saltValue", opts)?;
+    let key_encryptor_salt_value = decode_b64_attr(
+        "encryptedKey",
+        encrypted_key_node,
+        "saltValue",
+        parse_opts,
+    )?;
     if key_encryptor_salt_value.len() > key_encryptor_salt_size as usize {
         return Err(OffCryptoError::InvalidAttribute {
             element: "encryptedKey".to_string(),
@@ -459,10 +481,10 @@ pub fn parse_agile_encryption_info_stream_with_options(
     }
 
     let spin_count = parse_u32_attr("encryptedKey", encrypted_key_node, "spinCount")?;
-    if spin_count > DEFAULT_MAX_SPIN_COUNT {
+    if spin_count > decrypt_opts.max_spin_count {
         return Err(OffCryptoError::SpinCountTooLarge {
             spin_count,
-            max: DEFAULT_MAX_SPIN_COUNT,
+            max: decrypt_opts.max_spin_count,
         });
     }
 
@@ -483,19 +505,19 @@ pub fn parse_agile_encryption_info_stream_with_options(
             "encryptedKey",
             encrypted_key_node,
             "encryptedVerifierHashInput",
-            opts,
+            parse_opts,
         )?,
         encrypted_verifier_hash_value: decode_b64_attr(
             "encryptedKey",
             encrypted_key_node,
             "encryptedVerifierHashValue",
-            opts,
+            parse_opts,
         )?,
         encrypted_key_value: decode_b64_attr(
             "encryptedKey",
             encrypted_key_node,
             "encryptedKeyValue",
-            opts,
+            parse_opts,
         )?,
     };
 
@@ -2072,6 +2094,49 @@ mod tests {
         assert_eq!(
             info.warnings,
             vec![AgileEncryptionInfoWarning::MultiplePasswordKeyEncryptors { count: 2 }]
+        );
+    }
+
+    #[test]
+    fn parse_agile_encryption_info_stream_respects_max_spin_count_option() {
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                       saltValue="AAECAwQFBgcICQoLDA0ODw=="/>
+              <keyEncryptors>
+                <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
+                  <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
+                                  spinCount="99" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  hashAlgorithm="SHA1" saltValue="AAECAwQFBgcICQoLDA0ODw=="
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
+                 </keyEncryptor>
+               </keyEncryptors>
+              </encryption>"#
+        );
+
+        let stream = build_encryption_info_stream(&xml);
+        let parse_opts = ParseOptions::default();
+        let decrypt_opts = DecryptOptions { max_spin_count: 10 };
+        let err = parse_agile_encryption_info_stream_with_options_and_decrypt_options(
+            &stream,
+            &parse_opts,
+            &decrypt_opts,
+        )
+        .expect_err("expected spin count error");
+
+        assert!(
+            matches!(
+                err,
+                OffCryptoError::SpinCountTooLarge {
+                    spin_count: 99,
+                    max: 10
+                }
+            ),
+            "unexpected error: {err:?}"
         );
     }
 
