@@ -109,10 +109,13 @@ Current state in this repo (important nuance):
 - Decryption primitives exist in multiple crates:
   - Higher-level decrypt helpers (OLE wrapper → decrypted ZIP bytes) and an Agile encryption writer:
     `crates/formula-office-crypto`
-    - Note: `formula-office-crypto`'s Agile (4.4) decrypt path is intentionally strict and expects a
-      `<dataIntegrity>` element. Some real-world producers omit `<dataIntegrity>`; for those files,
-      prefer the high-level `formula-io` open APIs or `crates/formula-xlsx::offcrypto` (which can
-      decrypt without integrity verification when `<dataIntegrity>` is absent).
+    - Note: `formula-office-crypto`'s Agile (4.4) decrypt path currently **requires** a
+      `<dataIntegrity>` element (it errors if missing). Some real-world producers omit
+      `<dataIntegrity>`; for those files, prefer the high-level `formula-io` open APIs or
+      `crates/formula-xlsx::offcrypto` (which can decrypt without integrity verification when
+      `<dataIntegrity>` is absent).
+      - When `<dataIntegrity>` *is* present, `formula-office-crypto` is permissive about which bytes
+        are authenticated by the HMAC for compatibility; see [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
   - MS-OFFCRYPTO parsing + decrypt helpers (Standard + Agile):
     `crates/formula-offcrypto`
     - Note: Agile `dataIntegrity` verification is optional there (`DecryptOptions.verify_integrity`).
@@ -295,6 +298,8 @@ If the decrypted bytes do **not** start with `PK`, treat that as either:
 Note: `formula-office-crypto` currently rejects Agile files that omit `<dataIntegrity>` (it returns an
 `InvalidFormat` error). Some real-world producers omit `<dataIntegrity>`; in that case, prefer the
 high-level `formula-io` open APIs or `crates/formula-xlsx::offcrypto`.
+When `<dataIntegrity>` is present, `formula-office-crypto` is permissive about HMAC target bytes for
+compatibility; see [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
 ### Inspecting Agile `EncryptionInfo` XML (debug-only)
 
