@@ -5,7 +5,7 @@ use formula_model::charts::{
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::cache::{parse_num_cache, parse_num_ref, parse_str_cache, parse_str_ref};
 use super::REL_NS;
