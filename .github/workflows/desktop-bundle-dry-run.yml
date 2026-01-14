@@ -110,6 +110,13 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
 
+      - name: Cache Rust (cargo registry + git) (preflight)
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          cache-targets: "false"
+          cache-bin: "false"
+          cache-on-failure: "true"
+
       - name: Check Cargo.lock is up-to-date (no implicit lockfile updates)
         shell: bash
         run: bash scripts/ci/check-cargo-lock-reproducible.sh
