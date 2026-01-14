@@ -1571,6 +1571,12 @@ const SMALL_K_ENUM_1_2_3 = [
   { replacement: "3", displayText: "3 (3rd smallest)", confidence: 0.64 },
 ];
 
+const BESSEL_ORDER_ENUM_0_1_2 = [
+  { replacement: "0", displayText: "0 (order 0)", confidence: 0.66 },
+  { replacement: "1", displayText: "1 (order 1)", confidence: 0.65 },
+  { replacement: "2", displayText: "2 (order 2)", confidence: 0.64 },
+];
+
 const ROW_COUNT_ENUM_1_2_3 = [
   { replacement: "1", displayText: "1 (1 row)", confidence: 0.66 },
   { replacement: "2", displayText: "2 (2 rows)", confidence: 0.65 },
@@ -2061,6 +2067,22 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "0", displayText: "0 (descending)", confidence: 0.66 },
       { replacement: "1", displayText: "1 (ascending)", confidence: 0.65 },
     ],
+  },
+  BESSELI: {
+    // n (order)
+    1: BESSEL_ORDER_ENUM_0_1_2,
+  },
+  BESSELJ: {
+    // n (order)
+    1: BESSEL_ORDER_ENUM_0_1_2,
+  },
+  BESSELK: {
+    // n (order)
+    1: BESSEL_ORDER_ENUM_0_1_2,
+  },
+  BESSELY: {
+    // n (order)
+    1: BESSEL_ORDER_ENUM_0_1_2,
   },
   RANK: {
     // order

@@ -4989,6 +4989,25 @@ test("BESSELI x suggests a left-cell reference (value-like)", async () => {
   );
 });
 
+test("BESSELI n suggests common small integer orders", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=BESSELI(A1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["0", "1", "2"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected BESSELI to suggest n=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("FORECAST.LINEAR x suggests a left-cell reference (value-like)", async () => {
   const engine = new TabCompletionEngine();
 
