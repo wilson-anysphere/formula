@@ -92,6 +92,17 @@ function createRoot(): HTMLElement {
   return root;
 }
 
+function createApp(root: HTMLElement, status: any): SpreadsheetApp {
+  const app = new SpreadsheetApp(root, status);
+  // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. With canvas charts enabled by
+  // default, that chart would appear in `getDrawingObjects()` and break tests that assert on the
+  // number of pasted drawings. Remove it so these tests can focus on pasted images.
+  for (const chart of app.listCharts()) {
+    (app as any).chartStore.deleteChart(chart.id);
+  }
+  return app;
+}
+
 describe("SpreadsheetApp paste image clipboard", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -148,7 +159,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
 
     const provider = {
       read: vi.fn(async () => ({ imagePng: pngBytes })),
@@ -197,7 +208,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
 
     const provider = {
       // Some platforms include `text/plain=""` alongside the image bytes.
@@ -232,7 +243,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
 
     const provider = {
       read: vi.fn(async () => ({ pngBase64: `data:image/png;base64,${base64}` })),
@@ -260,7 +271,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
 
     const content: any = {};
     Object.defineProperty(content, "skippedOversizedImagePng", { value: true });
@@ -290,7 +301,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
 
     const pngBytes = createPngHeaderBytes(10_001, 1);
     const provider = {
@@ -330,7 +341,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
     const docAny = app.getDocument() as any;
     docAny.insertDrawing = vi.fn(() => {
       throw new Error("insertDrawing failed");
@@ -375,7 +386,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
     const docAny = app.getDocument() as any;
     // Simulate an older DocumentController surface without insertDrawing.
     docAny.insertDrawing = undefined;
@@ -418,7 +429,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = createApp(root, status);
     const focusSpy = vi.spyOn(app, "focus");
     const doc: any = app.getDocument();
     const sheet1 = app.getCurrentSheetId();

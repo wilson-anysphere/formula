@@ -125,6 +125,12 @@ describe("SpreadsheetApp picture clipboard DLP", () => {
     };
 
     const app = new SpreadsheetApp(root, status, { workbookId });
+    // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. With canvas charts enabled by
+    // default, that chart appears in `getDrawingObjects()`. Remove it so this test can focus on the
+    // image drawing inserted below.
+    for (const chart of app.listCharts()) {
+      (app as any).chartStore.deleteChart(chart.id);
+    }
 
     const write = vi.fn().mockResolvedValue(undefined);
     (app as any).clipboardProviderPromise = Promise.resolve({ write, read: vi.fn() });
@@ -186,6 +192,9 @@ describe("SpreadsheetApp picture clipboard DLP", () => {
     };
 
     const app = new SpreadsheetApp(root, status, { workbookId });
+    for (const chart of app.listCharts()) {
+      (app as any).chartStore.deleteChart(chart.id);
+    }
 
     const write = vi.fn().mockResolvedValue(undefined);
     (app as any).clipboardProviderPromise = Promise.resolve({ write, read: vi.fn() });

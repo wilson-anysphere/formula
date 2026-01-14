@@ -300,8 +300,8 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
     [actionsDisabled, app, items, scrollItemIntoView, selectedId],
   );
 
-  // In `?canvasCharts=1` mode, ChartStore charts render as drawing objects with a high z-order base.
-  // They therefore form a separate z-stack above workbook drawing objects.
+  // When canvas charts are enabled (default), ChartStore charts render as drawing objects with a
+  // high z-order base. They therefore form a separate z-stack above workbook drawing objects.
   const canvasChartCount = (() => {
     let count = 0;
     for (const { obj } of items) {

@@ -2541,7 +2541,7 @@ export class SpreadsheetApp {
 
             if (this.useCanvasCharts) {
               this.renderDrawings();
-              // In `?canvasCharts=1` mode ChartStore charts are rendered as drawing objects, so
+              // When canvas charts are enabled (default) ChartStore charts are rendered as drawing objects, so
               // consumers like Selection Pane + split view need a drawings-changed signal when
               // charts are created or deleted (but *not* for per-tick anchor updates).
               if (countChanged) this.dispatchDrawingsChanged();
@@ -7586,7 +7586,7 @@ export class SpreadsheetApp {
 
     const canvasChartId = this.getCanvasChartIdForDrawingId(selectedId, sheetId);
     if (canvasChartId) {
-      // In `?canvasCharts=1` mode, ChartStore charts render as drawing objects with negative ids.
+      // When canvas charts are enabled (default), ChartStore charts render as drawing objects with negative ids.
       // They are not part of the DocumentController sheet drawings list, so z-order operations must
       // be applied via ChartStore ordering instead.
       const changed = this.chartStore.arrangeChart(canvasChartId, direction);
@@ -8789,8 +8789,8 @@ export class SpreadsheetApp {
   listDrawingsForSheet(sheetId?: string): DrawingObject[] {
     const resolvedSheetId = sheetId ? String(sheetId) : this.sheetId;
     if (!resolvedSheetId) return [];
-    // Include any drawing-layer objects that are rendered via the drawings overlay. In
-    // `?canvasCharts=1` mode this includes ChartStore charts rendered as drawing objects.
+    // Include any drawing-layer objects that are rendered via the drawings overlay. When canvas charts are
+    // enabled (default) this includes ChartStore charts rendered as drawing objects.
     const objects = this.getDrawingObjects(resolvedSheetId);
     if (objects.length === 0) return [];
     // `getDrawingObjects` returns objects sorted for rendering (back-to-front, ascending).
@@ -9005,7 +9005,7 @@ export class SpreadsheetApp {
   /**
    * Chart renderer used by the drawings overlay for imported DrawingML charts.
    *
-   * In `?canvasCharts=1` mode this also supports ChartStore charts rendered as drawing objects.
+   * When canvas charts are enabled (default) this also supports ChartStore charts rendered as drawing objects.
    */
   getDrawingChartRenderer(): ChartRendererAdapter {
     return this.drawingChartRenderer;
@@ -10538,7 +10538,7 @@ export class SpreadsheetApp {
     // Prefer the cached list (kept up to date by `renderDrawings`), but fall back to a fresh
     // list if the cache hasn't been populated yet.
     const baseObjects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
-    // In `?canvasCharts=1` mode, ChartStore charts are rendered as drawing objects on the drawings
+    // When canvas charts are enabled (default), ChartStore charts are rendered as drawing objects on the drawings
     // overlay canvas. Include them in hit testing so right-click menus and other selection helpers
     // behave consistently.
     const objects = this.listDrawingOverlayObjectsForSheet(this.sheetId, baseObjects);
@@ -16400,9 +16400,9 @@ export class SpreadsheetApp {
     // (notably canvas charts rendered as drawing objects), the event is tagged so downstream
     // handlers can ignore it without stopping propagation.
     //
-    // In that case, do not compete by selecting an underlying workbook drawing: charts render
-    // above drawings in `?canvasCharts=1` mode, so the object hit by the chart controller should
-    // remain selected.
+    // In that case, do not compete by selecting an underlying workbook drawing: when canvas charts
+    // are enabled (default), charts render above workbook drawings, so the object hit by the chart
+    // controller should remain selected.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (isContextClick && (e as any).__formulaDrawingContextClick) return;
     const target = e.target as HTMLElement | null | undefined;
@@ -18281,7 +18281,7 @@ export class SpreadsheetApp {
 
     const arrange = (direction: "forward" | "backward" | "front" | "back") => {
       if (this.useCanvasCharts) {
-        // In `?canvasCharts=1` mode charts are treated as drawing objects, so reuse the drawing
+        // When canvas charts are enabled (default) charts are treated as drawing objects, so reuse the drawing
         // arrange implementation to ensure Selection Pane + split view update.
         this.arrangeSelectedDrawing(direction);
         return;

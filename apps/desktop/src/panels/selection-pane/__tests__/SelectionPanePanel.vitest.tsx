@@ -82,7 +82,7 @@ describe("Selection Pane panel", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
 
-    // Avoid leaking URL params (e.g. `?canvasCharts=1`) between tests.
+    // Avoid leaking URL params (e.g. `?canvasCharts=0`) between tests.
     try {
       const url = new URL(window.location.href);
       url.search = "";
@@ -137,6 +137,12 @@ describe("Selection Pane panel", () => {
       selectionRange: document.createElement("div"),
       activeValue: document.createElement("div"),
     });
+    // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. Since canvas charts are now
+    // the default, that chart appears in the Selection Pane list. Remove it here so this test can
+    // focus on workbook drawing objects (images) without being sensitive to the demo chart fixture.
+    for (const chart of app.listCharts()) {
+      (app as any).chartStore.deleteChart(chart.id);
+    }
 
     const drawings: DrawingObject[] = [
       {
@@ -271,6 +277,9 @@ describe("Selection Pane panel", () => {
       selectionRange: document.createElement("div"),
       activeValue: document.createElement("div"),
     });
+    for (const chart of app.listCharts()) {
+      (app as any).chartStore.deleteChart(chart.id);
+    }
 
     const drawings: DrawingObject[] = [
       {
@@ -479,6 +488,9 @@ describe("Selection Pane panel", () => {
       selectionRange: document.createElement("div"),
       activeValue: document.createElement("div"),
     });
+    for (const chart of app.listCharts()) {
+      (app as any).chartStore.deleteChart(chart.id);
+    }
 
     const drawings: DrawingObject[] = [
       {
@@ -553,7 +565,7 @@ describe("Selection Pane panel", () => {
     sheetRoot.remove();
   });
 
-  it("lists ChartStore charts in ?canvasCharts=1 mode; clicking selects and delete removes them", async () => {
+  it("lists ChartStore charts when canvas charts are enabled; clicking selects and delete removes them", async () => {
     const [{ createPanelBodyRenderer }, { PanelIds }, { mountRibbon }] = await Promise.all([
       import("../../panelBodyRenderer.js"),
       import("../../panelRegistry.js"),
@@ -647,7 +659,7 @@ describe("Selection Pane panel", () => {
     }
   });
 
-  it("reorders ChartStore charts via bring forward / send backward in ?canvasCharts=1 mode", async () => {
+  it("reorders ChartStore charts via bring forward / send backward when canvas charts are enabled", async () => {
     const url = new URL(window.location.href);
     url.searchParams.set("canvasCharts", "1");
     window.history.replaceState(null, "", url.toString());
@@ -682,7 +694,7 @@ describe("Selection Pane panel", () => {
     sheetRoot.remove();
   });
 
-  it("deletes selected ChartStore charts via Delete key in ?canvasCharts=1 mode", async () => {
+  it("deletes selected ChartStore charts via Delete key when canvas charts are enabled", async () => {
     const url = new URL(window.location.href);
     url.searchParams.set("canvasCharts", "1");
     window.history.replaceState(null, "", url.toString());

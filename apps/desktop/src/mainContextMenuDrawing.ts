@@ -44,10 +44,10 @@ export function buildDrawingContextMenuItems(params: {
   const cutEnabled = canModify && app.isSelectedDrawingImage();
 
   const { canBringForward, canSendBackward } = (() => {
-    // In `?canvasCharts=1` mode, ChartStore charts render as drawing objects with negative ids and
-    // form a separate z-stack above workbook drawings. Arrange operations should therefore be
-    // enabled/disabled based on the selection's position *within its stack* (chart stack vs
-    // workbook drawings stack).
+    // When canvas charts are enabled (default), ChartStore charts render as drawing objects with
+    // negative ids and form a separate z-stack above workbook drawings. Arrange operations should
+    // therefore be enabled/disabled based on the selection's position *within its stack*
+    // (chart stack vs workbook drawings stack).
     if (!canModify || selectedId == null) return { canBringForward: false, canSendBackward: false };
     // `listDrawingsForSheet` returns topmost-first ordering.
     const drawings = app.listDrawingsForSheet();
