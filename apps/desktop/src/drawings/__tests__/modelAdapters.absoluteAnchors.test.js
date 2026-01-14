@@ -61,6 +61,26 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects reads absolute anchor size 
   assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 123, yEmu: 456 }, size: { cx: 789, cy: 321 } });
 });
 
+test("convertDocumentSheetDrawingsToUiDrawingObjects falls back to ext when size is present but invalid", () => {
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 123, yEmu: 456 },
+        size: {},
+        ext: { cx: 789, cy: 321 },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 123, yEmu: 456 }, size: { cx: 789, cy: 321 } });
+});
+
 test("convertDocumentSheetDrawingsToUiDrawingObjects reads absolute anchor size from root cx/cy keys", () => {
   const drawings = [
     {

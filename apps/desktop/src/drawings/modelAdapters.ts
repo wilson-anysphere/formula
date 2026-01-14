@@ -713,7 +713,11 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
     size ??
     // Some snapshots (or mixed back-compat encodings) store the EMU size under `ext` (formula-model
     // field name) instead of `size`. Accept both so UI-like anchors can still round-trip.
-    convertDocumentDrawingSizeToEmu(pick(anchorJson, ["size", "ext"])) ??
+    //
+    // Important: try both keys rather than `pick(["size","ext"])` so a present-but-invalid `size`
+    // payload does not mask a valid `ext`.
+    convertDocumentDrawingSizeToEmu(pick(anchorJson, ["size"])) ??
+    convertDocumentDrawingSizeToEmu(pick(anchorJson, ["ext"])) ??
     // Some older/alternate encodings store size fields directly on the anchor object itself
     // (e.g. `{ type: "absolute", xEmu, yEmu, cx, cy }`). Accept those as a last resort.
     convertDocumentDrawingSizeToEmu(anchorJson) ??
