@@ -150,10 +150,13 @@ Implementation notes:
   - decrypts `EncryptedPackage` to the plaintext OOXML ZIP bytes (and also includes an Agile writer).
 - `crates/formula-offcrypto` provides MS-OFFCRYPTO parsing helpers and standalone decrypt primitives
   (useful for inspection tooling, and for some Standard/CryptoAPI helper APIs).
-- Standard/CryptoAPI AES `EncryptedPackage` decryption (ECMA-376 baseline) uses **AES-ECB** (no IV),
-  with plaintext truncated to the 8-byte plaintext size prefix. In this repo, see
-  `crates/formula-offcrypto` (`decrypt_standard_ooxml_from_bytes` / `decrypt_encrypted_package_ecb`)
-  and `docs/offcrypto-standard-encryptedpackage.md`.
+- Standard/CryptoAPI `EncryptedPackage` decryption differs by cipher:
+  - **AES** (ECMA-376 baseline) uses **AES-ECB** (no IV), with plaintext truncated to the 8-byte
+    plaintext size prefix.
+    - See `crates/formula-offcrypto` (`decrypt_standard_ooxml_from_bytes` /
+      `decrypt_encrypted_package_ecb`) and `docs/offcrypto-standard-encryptedpackage.md`.
+  - **RC4** (`CALG_RC4`) uses 0x200-byte blocks with per-block keys; see
+    `docs/offcrypto-standard-cryptoapi-rc4.md`.
 - For Agile (4.4) decryption details (HMAC target bytes + IV/salt usage gotchas), see
   [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
@@ -178,7 +181,7 @@ Everything else should fail with a specific “unsupported encryption scheme” 
 For both Standard and Agile encryption, the OLE stream `EncryptedPackage` begins with:
 
 - **8 bytes**: `original_package_size` (8-byte plaintext size prefix; see note below)
-- remaining bytes: encrypted OPC package data (ciphertext + padding)
+- remaining bytes: encrypted OPC package data (ciphertext + padding for block ciphers)
 
 Compatibility note: while the spec describes this prefix as a `u64le`, some producers/libraries treat
 it as `u32 totalSize` + `u32 reserved` (often 0). For compatibility, parse it as two little-endian
@@ -190,13 +193,16 @@ archive containing `xl/workbook.bin` for `.xlsb`).
 
 The encryption *mode* differs by scheme:
 
-- **Standard (CryptoAPI; `versionMinor == 2`):** decrypt the ciphertext bytes (after the 8-byte size
-  prefix) with **AES-ECB** (no IV). The ciphertext is block-aligned (`len % 16 == 0`); after
-  decrypting, **truncate the plaintext to `original_package_size`** (see
-  `docs/offcrypto-standard-encryptedpackage.md`). Excel-default Standard AES has **no per-segment
-  IV** (ECB). Some third-party producers use a non-standard segmented **AES-CBC** variant with a
-  per-segment IV derived from the verifier salt; our decryptors may attempt that as a fallback (see
-  `docs/offcrypto-standard-encryptedpackage.md`).
+- **Standard (CryptoAPI; `versionMinor == 2`):** the cipher is specified by `EncryptionHeader.algId`:
+  - **AES** (`CALG_AES_128`/`CALG_AES_192`/`CALG_AES_256`): decrypt the ciphertext bytes (after the
+    8-byte size prefix) with **AES-ECB** (no IV). The ciphertext is block-aligned (`len % 16 == 0`);
+    after decrypting, **truncate the plaintext to `original_package_size`** (see
+    `docs/offcrypto-standard-encryptedpackage.md`). Excel-default Standard AES has **no per-segment
+    IV** (ECB). Some third-party producers use non-standard **AES-CBC** variants; our decryptors may
+    attempt those as a fallback (see `docs/offcrypto-standard-encryptedpackage.md`).
+  - **RC4** (`CALG_RC4`): decrypt the ciphertext as an RC4 stream in **0x200-byte blocks** with
+    per-block keys derived from the password hash (no padding/block alignment). See
+    `docs/offcrypto-standard-cryptoapi-rc4.md`.
 - **Agile (4.4):** encrypted in **4096-byte plaintext segments** with a per-segment IV derived from
   `keyData/@saltValue` and the segment index, and cipher/chaining parameters specified by the XML
   descriptor.

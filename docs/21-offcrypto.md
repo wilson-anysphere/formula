@@ -48,7 +48,7 @@ Inside the CFB container, Excel stores:
 Notes:
 
 - `EncryptedPackage` begins with an **8-byte little-endian length prefix** (the plaintext package
-  size), followed by block-aligned ciphertext.
+  size), followed by ciphertext (block-aligned for AES-based schemes).
 - After decrypting `EncryptedPackage`, the plaintext is a normal OOXML ZIP/OPC package:
   - `.xlsx` / `.xlsm` → ZIP containing `xl/workbook.xml`
   - `.xlsb` → ZIP containing `xl/workbook.bin`
