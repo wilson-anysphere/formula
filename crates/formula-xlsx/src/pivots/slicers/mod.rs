@@ -18,8 +18,6 @@ use quick_xml::Writer;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Cursor;
 
-use super::cache_records::pivot_cache_datetime_to_naive_date;
-
 /// Best-effort slicer selection state extracted from `xl/slicerCaches/slicerCache*.xml`.
 ///
 /// When Excel does not persist explicit selection state, slicers behave as "All selected".
