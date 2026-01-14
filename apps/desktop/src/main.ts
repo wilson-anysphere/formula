@@ -1430,12 +1430,21 @@ function selectionRangesForFormatting(): CellRange[] {
 function applyFormattingToSelection(
   label: string,
   fn: (doc: DocumentController, sheetId: string, ranges: CellRange[]) => void | boolean,
-  options: { forceBatch?: boolean } = {},
+  options: { forceBatch?: boolean; allowReadOnlyBandSelection?: boolean } = {},
 ): void {
   // Match SpreadsheetApp guards: formatting commands should never mutate the sheet while the user
   // is actively editing (cell editor / formula bar / inline edit).
   if (app.isEditing()) return;
-  if (app.isReadOnly?.() === true) return;
+  const isReadOnly = app.isReadOnly?.() === true;
+  // By default, read-only collab roles (viewer/commenter) are allowed to apply formatting *only*
+  // when the selection is a full row/column/sheet band (i.e. "formatting defaults"). These
+  // mutations must remain local-only; collaboration binders are responsible for preventing
+  // them from being persisted into shared Yjs state.
+  //
+  // Some commands routed through this helper (e.g. "Clear Contents") mutate cell values and must
+  // remain blocked in read-only even for band selections. Callers can opt out via
+  // `allowReadOnlyBandSelection: false`.
+  const allowReadOnlyBandSelection = options.allowReadOnlyBandSelection !== false;
 
   const doc = app.getDocument();
   const sheetId = app.getCurrentSheetId();
@@ -1443,8 +1452,20 @@ function applyFormattingToSelection(
   const limits = getGridLimitsForFormatting();
   const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
 
+  if (isReadOnly) {
+    if (!allowReadOnlyBandSelection) {
+      showToast("Read-only: you don't have permission to edit cell contents.", "warning");
+      return;
+    }
+  }
+
   if (!decision.allowed) {
     showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
+    return;
+  }
+
+  if (isReadOnly && !decision.allRangesBand) {
+    showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
     return;
   }
 
@@ -2134,6 +2155,26 @@ let ribbonShortcutById: Record<string, string> = Object.create(null);
 let ribbonAriaKeyShortcutsById: Record<string, string> = Object.create(null);
 let ribbonCommandRegistryDisabledById: Record<string, boolean> = Object.create(null);
 
+const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
+  // Start from the "disabled while editing" set, which includes sheet structure edits and other
+  // commands that should also remain disabled for read-only collab roles (viewer/commenter).
+  const out: Record<string, true> = { ...RIBBON_DISABLED_BY_ID_WHILE_EDITING };
+
+  // View-only mutations (axis sizing) should remain enabled in read-only.
+  delete out["home.cells.format"];
+  delete out["home.cells.format.rowHeight"];
+  delete out["home.cells.format.columnWidth"];
+
+  // Formatting defaults (row/col/sheet band selections) should be allowed in read-only, so
+  // keep these formatting commands conditionally enabled based on the current selection.
+  delete out["home.font.subscript"];
+  delete out["home.font.superscript"];
+  delete out["home.number.moreFormats.custom"];
+  delete out["format.clearFormats"];
+
+  return out;
+})();
+
 function scheduleRibbonSelectionFormatStateUpdate(): void {
   ribbonFormatStateUpdateRequested = true;
   if (ribbonFormatStateUpdateScheduled) return;
@@ -2149,6 +2190,14 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const formatState = computeSelectionFormatState(app.getDocument(), sheetId, ranges);
     const isEditing = isSpreadsheetEditing();
     const isReadOnly = app.isReadOnly?.() === true;
+    const formattingLimits = getGridLimitsForFormatting();
+    const formattingDecision = evaluateFormattingSelectionSize(ranges, formattingLimits, {
+      maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT,
+    });
+    // In read-only collab roles (viewer/commenter), allow formatting only when the selection
+    // represents "formatting defaults" (entire rows/columns/sheet). These should remain
+    // local-only; collab binders prevent persisting them into shared Yjs state.
+    const allowReadOnlyFormattingDefaults = isReadOnly && formattingDecision.allRangesBand;
     const perfStats = app.getGridPerfStats() as any;
     const perfStatsSupported = perfStats != null;
     const perfStatsEnabled = Boolean(perfStats?.enabled);
@@ -2259,11 +2308,16 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const zoomDisabled = !app.supportsZoom();
     const outlineDisabled = app.getGridMode() === "shared";
     const canComment = app.getCollabSession()?.canComment() ?? true;
+    const shouldDisableFormattingCommands = isEditing || (isReadOnly && !allowReadOnlyFormattingDefaults);
+
     const dynamicDisabledById = {
-      ...(isEditing || isReadOnly
+      ...(shouldDisableFormattingCommands
         ? {
-            // Formatting commands are disabled while editing (Excel-style behavior), and in
-            // read-only collab sessions (viewer/commenter) to avoid local-only mutations.
+            // Formatting commands are disabled while editing (Excel-style behavior).
+            //
+            // In read-only collab sessions (viewer/commenter), we only enable formatting commands
+            // when the selection is an entire row/column/sheet (formatting defaults), since those
+            // mutations remain local-only.
             "format.toggleBold": true,
             "format.toggleItalic": true,
             "format.toggleUnderline": true,
@@ -2297,7 +2351,22 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "format.numberFormat.increaseDecimal": true,
             "format.numberFormat.decreaseDecimal": true,
             "format.openFormatCells": true,
-            ...RIBBON_DISABLED_BY_ID_WHILE_EDITING,
+            "home.number.moreFormats.custom": true,
+            "format.clearFormats": true,
+          }
+        : null),
+      ...(isEditing ? RIBBON_DISABLED_BY_ID_WHILE_EDITING : null),
+      ...(isReadOnly
+        ? {
+            ...RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY,
+            // Keep Format Painter disabled in read-only (it can apply local-only formatting to
+            // arbitrary ranges; we only allow formatting defaults).
+            [FORMAT_PAINTER_COMMAND_ID]: true,
+            // Organize Sheets is a structural edit surface and must remain disabled in read-only.
+            "home.cells.format.organizeSheets": true,
+            // Workbook mutations should remain disabled in read-only mode even if formatting defaults are enabled.
+            "format.clearContents": true,
+            "format.clearAll": true,
           }
         : null),
       ...(isEditing || !canComment ? { "comments.addComment": true } : null),
@@ -8224,7 +8293,7 @@ const ribbonCommandHandlersCtx = {
     });
   },
   promptCustomNumberFormat: () => {
-    if (isSpreadsheetEditing() || app.isReadOnly()) return;
+    if (isSpreadsheetEditing()) return;
     // Guard before prompting so users don't enter a format code only to hit selection size caps on apply.
     // (Matches `applyFormattingToSelection` behavior.)
     {
@@ -8236,9 +8305,14 @@ const ribbonCommandHandlersCtx = {
         app.focus();
         return;
       }
+      if (app.isReadOnly?.() === true && !decision.allRangesBand) {
+        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+        app.focus();
+        return;
+      }
     }
     void promptAndApplyCustomNumberFormat({
-      isEditing: () => isSpreadsheetEditing() || app.isReadOnly(),
+      isEditing: () => isSpreadsheetEditing(),
       showInputBox,
       getActiveCellNumberFormat: activeCellNumberFormat,
       applyFormattingToSelection,

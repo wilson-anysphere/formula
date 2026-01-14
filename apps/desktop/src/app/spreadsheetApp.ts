@@ -15628,12 +15628,6 @@ export class SpreadsheetApp {
 
     if (!action) return false;
 
-    if (this.isReadOnly()) {
-      e.preventDefault();
-      showCollabEditRejectedToast([{ sheetId: this.sheetId, rejectionKind: "format", rejectionReason: "permission" }]);
-      return true;
-    }
-
     e.preventDefault();
 
     const selectionRanges = this.selection.ranges.length
@@ -15683,6 +15677,11 @@ export class SpreadsheetApp {
       } catch {
         // `showToast` requires a #toast-root; unit tests don't always include it.
       }
+      return true;
+    }
+
+    if (this.isReadOnly() && !decision.allRangesBand) {
+      showCollabEditRejectedToast([{ sheetId: this.sheetId, rejectionKind: "format", rejectionReason: "permission" }]);
       return true;
     }
 

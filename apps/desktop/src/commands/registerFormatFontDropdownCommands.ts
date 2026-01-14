@@ -10,7 +10,7 @@ type ApplyFormattingToSelection = (
   label: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   fn: (doc: any, sheetId: string, ranges: CellRange[]) => void | boolean,
-  options?: { forceBatch?: boolean },
+  options?: { forceBatch?: boolean; allowReadOnlyBandSelection?: boolean },
 ) => void;
 
 export function registerFormatFontDropdownCommands(params: {
@@ -39,11 +39,16 @@ export function registerFormatFontDropdownCommands(params: {
     "format.clearContents",
     "Clear Contents",
     () =>
-      applyFormattingToSelection("Clear contents", (doc, sheetId, ranges) => {
-        for (const range of ranges) {
-          doc.clearRange(sheetId, range, { label: "Clear contents" });
-        }
-      }),
+      applyFormattingToSelection(
+        "Clear contents",
+        (doc, sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.clearRange(sheetId, range, { label: "Clear contents" });
+          }
+        },
+        // Clearing cell contents is a workbook mutation and must remain blocked for read-only collab roles.
+        { allowReadOnlyBandSelection: false },
+      ),
     { category },
   );
 
@@ -62,7 +67,8 @@ export function registerFormatFontDropdownCommands(params: {
           }
           return applied;
         },
-        { forceBatch: true },
+        // Clearing contents is a workbook mutation and must remain blocked for read-only collab roles.
+        { forceBatch: true, allowReadOnlyBandSelection: false },
       ),
     { category },
   );

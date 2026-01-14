@@ -363,4 +363,63 @@ describe("SpreadsheetApp formatting keyboard shortcuts", () => {
     app.destroy();
     root.remove();
   });
+
+  it("allows formatting shortcuts in read-only mode when the selection is a full row/column band (formatting defaults)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    // Use legacy-like limits so a 10k-row selection counts as a full-column band.
+    const app = new SpreadsheetApp(root, status, {
+      limits: { ...DEFAULT_GRID_LIMITS, maxRows: 10_000, maxCols: 200 },
+    });
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    const doc = app.getDocument();
+    const setRangeFormatSpy = vi.spyOn(doc, "setRangeFormat").mockReturnValue(true);
+
+    // Full column A within the current grid limits.
+    app.selectRange({ range: { startRow: 0, endRow: 9_999, startCol: 0, endCol: 0 } });
+
+    const event = new KeyboardEvent("keydown", { key: "b", ctrlKey: true, cancelable: true });
+    root.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(setRangeFormatSpy).toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("blocks formatting shortcuts in read-only mode for non-band selections", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    const doc = app.getDocument();
+    const spy = vi.spyOn(doc, "setRangeFormat");
+
+    // Single cell (not a full row/col band).
+    app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } });
+
+    const event = new KeyboardEvent("keydown", { key: "b", ctrlKey: true, cancelable: true });
+    root.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+
+    // Cleanup toast to avoid leaving timers running.
+    (document.querySelector<HTMLElement>('[data-testid="toast"]') as any)?.click?.();
+
+    app.destroy();
+    root.remove();
+  });
 });
