@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use thiserror::Error;
 
+use crate::value::text_eq_case_insensitive;
 use crate::{CellRef, Range};
 use serde::{Deserialize, Serialize};
 
@@ -347,7 +348,7 @@ impl Table {
     pub fn column_index(&self, name: &str) -> Option<u32> {
         self.columns
             .iter()
-            .position(|c| c.name.eq_ignore_ascii_case(name))
+            .position(|c| text_eq_case_insensitive(&c.name, name))
             .map(|idx| idx as u32)
     }
 

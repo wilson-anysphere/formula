@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::table::TableIdentifier;
+use crate::value::text_eq_case_insensitive;
 use crate::{CellRef, DefinedNameId, Range, WorksheetId};
 
 use super::{PivotConfig, PivotTableId};
@@ -120,7 +121,7 @@ impl PivotSource {
             PivotSource::NamedRange {
                 name: DefinedNameIdentifier::Name(name),
             } => {
-                if name.eq_ignore_ascii_case(old_name) {
+                if text_eq_case_insensitive(name, old_name) {
                     *name = new_name.to_string();
                     true
                 } else {

@@ -6,7 +6,7 @@ use crate::{CellRef, ErrorValue};
 use std::collections::BTreeMap;
 use std::fmt;
 
-fn eq_case_insensitive(a: &str, b: &str) -> bool {
+pub(crate) fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
     if a.is_ascii() && b.is_ascii() {
         return a.eq_ignore_ascii_case(b);
     }
@@ -20,7 +20,7 @@ fn map_get_case_insensitive<'a, V>(map: &'a BTreeMap<String, V>, key: &str) -> O
         return Some(value);
     }
     map.iter()
-        .find(|(k, _)| eq_case_insensitive(k, key))
+        .find(|(k, _)| text_eq_case_insensitive(k, key))
         .map(|(_, v)| v)
 }
 

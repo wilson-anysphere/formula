@@ -105,6 +105,39 @@ fn rename_table_rewrites_structured_refs_in_formulas() {
 }
 
 #[test]
+fn table_column_index_is_case_insensitive_for_unicode_text() {
+    let table = Table {
+        id: 1,
+        name: "Table1".to_string(),
+        display_name: "Table1".to_string(),
+        range: Range::from_a1("A1:B3").unwrap(),
+        header_row_count: 1,
+        totals_row_count: 0,
+        columns: vec![
+            TableColumn {
+                id: 1,
+                name: "Maß".to_string(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 2,
+                name: "Other".to_string(),
+                formula: None,
+                totals_formula: None,
+            },
+        ],
+        style: None,
+        auto_filter: None,
+        relationship_id: None,
+        part_path: None,
+    };
+
+    // Uses Unicode-aware uppercasing: ß -> SS.
+    assert_eq!(table.column_index("MASS"), Some(0));
+}
+
+#[test]
 fn table_set_range_resizes_columns() {
     let mut table = table_fixture(1, "Table1");
 

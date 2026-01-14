@@ -15,6 +15,7 @@ use crate::pivots::{
 };
 use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::table::{validate_table_name, TableError, TableIdentifier};
+use crate::value::text_eq_case_insensitive;
 use crate::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
     rewrite_table_names_in_formula, CalcSettings, DateSystem, ManualPageBreaks, PageSetup,
@@ -1214,7 +1215,7 @@ impl Workbook {
         if self
             .defined_names
             .iter()
-            .any(|n| n.scope == scope && n.name.eq_ignore_ascii_case(&name))
+            .any(|n| n.scope == scope && text_eq_case_insensitive(&n.name, &name))
         {
             return Err(DefinedNameError::DuplicateName);
         }
@@ -1262,7 +1263,7 @@ impl Workbook {
         if self
             .defined_names
             .iter()
-            .any(|n| n.id != id && n.scope == scope && n.name.eq_ignore_ascii_case(&new_name))
+            .any(|n| n.id != id && n.scope == scope && text_eq_case_insensitive(&n.name, &new_name))
         {
             return Err(DefinedNameError::DuplicateName);
         }
@@ -1287,7 +1288,7 @@ impl Workbook {
     pub fn get_defined_name(&self, scope: DefinedNameScope, name: &str) -> Option<&DefinedName> {
         self.defined_names
             .iter()
-            .find(|n| n.scope == scope && n.name.eq_ignore_ascii_case(name))
+            .find(|n| n.scope == scope && text_eq_case_insensitive(&n.name, name))
     }
 
     /// List defined names, optionally filtered by scope.

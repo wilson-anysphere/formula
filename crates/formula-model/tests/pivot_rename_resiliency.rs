@@ -145,6 +145,45 @@ fn rename_defined_name_rewrites_pivot_named_range_sources() {
 }
 
 #[test]
+fn rename_defined_name_rewrites_pivot_named_range_sources_for_unicode_text() {
+    let mut wb = Workbook::new();
+    let sheet_id = wb.add_sheet("Sheet1").unwrap();
+    let id = wb
+        .create_defined_name(
+            DefinedNameScope::Workbook,
+            "Straße",
+            "Sheet1!A1:B2",
+            None,
+            false,
+            None,
+        )
+        .unwrap();
+
+    wb.pivot_tables.push(PivotTableModel {
+        id: Uuid::from_u128(1),
+        name: "Pivot1".to_string(),
+        source: PivotSource::NamedRange {
+            name: DefinedNameIdentifier::Name("STRASSE".to_string()),
+        },
+        destination: PivotDestination::Cell {
+            sheet_id,
+            cell: CellRef::new(0, 0),
+        },
+        config: Default::default(),
+        cache_id: None,
+    });
+
+    wb.rename_defined_name(id, "RenamedRange").unwrap();
+
+    assert_eq!(
+        wb.pivot_tables[0].source,
+        PivotSource::NamedRange {
+            name: DefinedNameIdentifier::Name("RenamedRange".to_string())
+        }
+    );
+}
+
+#[test]
 fn rename_sheet_rewrites_string_based_sheet_refs_in_pivots() {
     let mut wb = Workbook::new();
     let sheet_id = wb.add_sheet("Data").unwrap();

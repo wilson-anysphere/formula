@@ -102,6 +102,39 @@ fn defined_name_uniqueness_is_case_insensitive_and_scoped() {
 }
 
 #[test]
+fn defined_name_uniqueness_is_case_insensitive_for_unicode_text() {
+    let mut wb = Workbook::new();
+    wb.add_sheet("Sheet1").unwrap();
+
+    wb.create_defined_name(
+        DefinedNameScope::Workbook,
+        "Straße",
+        "Sheet1!A1",
+        None,
+        false,
+        None,
+    )
+    .unwrap();
+
+    // Uses Unicode-aware uppercasing: ß -> SS.
+    assert_eq!(
+        wb.create_defined_name(
+            DefinedNameScope::Workbook,
+            "STRASSE",
+            "Sheet1!B2",
+            None,
+            false,
+            None,
+        ),
+        Err(DefinedNameError::DuplicateName)
+    );
+
+    assert!(wb
+        .get_defined_name(DefinedNameScope::Workbook, "STRASSE")
+        .is_some());
+}
+
+#[test]
 fn rename_sheet_rewrites_defined_name_refers_to() {
     let mut wb = Workbook::new();
     let sheet_id = wb.add_sheet("Sheet1").unwrap();
