@@ -32,6 +32,8 @@ describe("desktop quit wiring", () => {
     const quitAppQuitIdx = findIndex(quitAppBody, /\binvoke\s*\(\s*["']quit_app["']/, 0);
     expect(quitAppFlushIdx).toBeGreaterThanOrEqual(0);
     expect(quitAppBinderIdleIdx).toBeGreaterThanOrEqual(0);
+    expect(quitAppBinderIdleIdx).toBeGreaterThan(quitAppFlushIdx);
+    expect(quitAppQuitIdx).toBeGreaterThan(quitAppBinderIdleIdx);
     expect(quitAppQuitIdx).toBeGreaterThan(quitAppFlushIdx);
 
     const restartMarker = "// OAuth PKCE redirect capture:";
@@ -44,6 +46,8 @@ describe("desktop quit wiring", () => {
     const restartInvokeIdx = findIndex(restartAppBody, /\binvoke\s*\(\s*["']restart_app["']/, 0);
     expect(restartFlushIdx).toBeGreaterThanOrEqual(0);
     expect(restartBinderIdleIdx).toBeGreaterThanOrEqual(0);
+    expect(restartBinderIdleIdx).toBeGreaterThan(restartFlushIdx);
+    expect(restartInvokeIdx).toBeGreaterThan(restartBinderIdleIdx);
     expect(restartInvokeIdx).toBeGreaterThan(restartFlushIdx);
 
     // Ensure the ribbon/native close flow (`handleCloseRequest({ quit: true })`) flushes too.
@@ -58,6 +62,8 @@ describe("desktop quit wiring", () => {
     const handleQuitIdx = findIndex(handleCloseBody, /\binvoke\s*\(\s*["']quit_app["']/, 0);
     expect(handleFlushIdx).toBeGreaterThanOrEqual(0);
     expect(handleBinderIdleIdx).toBeGreaterThanOrEqual(0);
+    expect(handleBinderIdleIdx).toBeGreaterThan(handleFlushIdx);
+    expect(handleQuitIdx).toBeGreaterThan(handleBinderIdleIdx);
     expect(handleQuitIdx).toBeGreaterThan(handleFlushIdx);
   });
 });
