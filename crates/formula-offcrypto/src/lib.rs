@@ -4975,7 +4975,13 @@ mod tests {
                 encrypted_verifier_hash_value: vec![0u8; 16],
             };
 
-            let err = verify_agile_integrity(&info, &data_integrity, &secret_key, encrypted_package)
+            let err = verify_agile_integrity(
+                &info,
+                &data_integrity,
+                &secret_key,
+                encrypted_package,
+                None,
+            )
                 .expect_err("expected integrity mismatch");
             assert!(
                 matches!(err, OffcryptoError::IntegrityCheckFailed),
