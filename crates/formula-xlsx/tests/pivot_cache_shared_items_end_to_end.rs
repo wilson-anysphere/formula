@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 
-use formula_engine::pivot::{AggregationType, PivotTable, PivotValue};
+use formula_engine::pivot::{AggregationType, PivotFieldRef, PivotTable, PivotValue};
 use formula_xlsx::pivots::engine_bridge::{pivot_cache_to_engine_source, pivot_table_to_engine_config};
 use formula_xlsx::{PivotCacheValue, XlsxPackage};
 

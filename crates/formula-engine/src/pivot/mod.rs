@@ -3424,12 +3424,12 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::sync::Arc;
 
-    fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
-        values.to_vec()
-    }
-
     fn cache_field(name: &str) -> PivotFieldRef {
         PivotFieldRef::CacheFieldName(name.to_string())
+    }
+
+    fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
+        values.to_vec()
     }
 
     #[test]
