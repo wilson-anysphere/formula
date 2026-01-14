@@ -1,5 +1,8 @@
 name: Desktop installer artifact sizes
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
   push:
