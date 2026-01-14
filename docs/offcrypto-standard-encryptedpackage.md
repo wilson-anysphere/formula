@@ -76,6 +76,14 @@ Instead:
 1. Decrypt all ciphertext blocks.
 2. **Truncate the plaintext to `orig_size`**.
 
+Example (real fixture in this repo):
+
+* `fixtures/encrypted/ooxml/standard.xlsx` decrypts to a 3179-byte ZIP (`orig_size = 3179`), but the
+  `EncryptedPackage` ciphertext bytes are padded to **4096 bytes** (plus the 8-byte size prefix) to
+  accommodate OLE/producer quirks.
+* Correct decryption therefore requires: decrypt all 4096 ciphertext bytes, then truncate the
+  plaintext to 3179 bytes.
+
 Rationale:
 
 * MS-OFFCRYPTO §2.3.4.4 defines `StreamSize`/`orig_size` as authoritative for the unencrypted size,
