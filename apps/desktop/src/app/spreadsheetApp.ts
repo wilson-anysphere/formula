@@ -5974,6 +5974,16 @@ export class SpreadsheetApp {
 
     const MAX_CONCURRENT_DECODES = 4;
 
+    // Allocate drawing ids ahead-of-time so we guarantee uniqueness within this insertion batch.
+    const usedDrawingIds = new Set<number>();
+    for (const obj of existingObjects) usedDrawingIds.add(obj.id);
+    const drawingIds = accepted.map(() => {
+      let id = createDrawingObjectId();
+      while (usedDrawingIds.has(id)) id = createDrawingObjectId();
+      usedDrawingIds.add(id);
+      return id;
+    });
+
     const prepared = await mapWithConcurrencyLimit(accepted, MAX_CONCURRENT_DECODES, async (file, i) => {
       const bytes = await readFileBytes(file);
       if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
@@ -6032,7 +6042,7 @@ export class SpreadsheetApp {
         size: { cx: pxToEmu(targetBaseW), cy: pxToEmu(targetBaseH) },
       };
 
-      const drawingId = createDrawingObjectId();
+      const drawingId = drawingIds[i] ?? createDrawingObjectId();
       const drawing: DrawingObject = {
         id: drawingId,
         kind: { type: "image", imageId },
@@ -18537,7 +18547,10 @@ export class SpreadsheetApp {
     const startCol = base.col;
 
     const imageId = `image_${uuid()}.png`;
-    const drawingId = createDrawingObjectId();
+    const usedDrawingIds = new Set<number>();
+    for (const obj of this.listDrawingObjectsForSheet(this.sheetId)) usedDrawingIds.add(obj.id);
+    let drawingId = createDrawingObjectId();
+    while (usedDrawingIds.has(drawingId)) drawingId = createDrawingObjectId();
     const drawing = {
       // Store as a string to keep drawing ids JSON-friendly and stable across JS↔Rust↔Yjs hops.
       // The UI adapters normalize ids back to numbers for rendering/interaction.

@@ -44,8 +44,14 @@ export async function insertImageFromFile(
     return max + 1;
   })();
 
+  // Random ids are collision-resistant across collaborators, but still ensure we don't collide
+  // with existing objects within this sheet.
+  const usedIds = new Set(opts.objects.map((o) => o.id));
+  let objectId = createDrawingObjectId();
+  while (usedIds.has(objectId)) objectId = createDrawingObjectId();
+
   const object: DrawingObject = {
-    id: createDrawingObjectId(),
+    id: objectId,
     kind: { type: "image", imageId: image.id },
     anchor: opts.anchor,
     zOrder: nextZOrder,
@@ -83,8 +89,12 @@ export function insertImageFromBytes(
     return max + 1;
   })();
 
+  const usedIds = new Set(opts.objects.map((o) => o.id));
+  let objectId = createDrawingObjectId();
+  while (usedIds.has(objectId)) objectId = createDrawingObjectId();
+
   const object: DrawingObject = {
-    id: createDrawingObjectId(),
+    id: objectId,
     kind: { type: "image", imageId: image.id },
     anchor: opts.anchor,
     zOrder: nextZOrder,
