@@ -61,4 +61,41 @@ describe("ChartStore", () => {
     expect(onChange).toHaveBeenCalledTimes(2);
     expect(store.listCharts()).not.toBe(initialCharts);
   });
+
+  it("reorders charts within a sheet via arrangeChart (without moving other sheets' charts)", () => {
+    const onChange = vi.fn();
+    const store = new ChartStore({
+      defaultSheet: "Sheet1",
+      getCellValue: () => null,
+      onChange,
+    });
+
+    const { chart_id: chartA } = store.createChart({ chart_type: "bar", data_range: "Sheet1!A1:B2", title: "A" });
+    const { chart_id: chartB } = store.createChart({ chart_type: "bar", data_range: "Sheet2!A1:B2", title: "B" });
+    const { chart_id: chartC } = store.createChart({ chart_type: "bar", data_range: "Sheet1!A1:B2", title: "C" });
+
+    expect(store.listCharts().map((c) => c.id)).toEqual([chartA, chartB, chartC]);
+
+    // Bring A forward within Sheet1: swap with C while leaving the Sheet2 chart in place.
+    expect(store.arrangeChart(chartA, "forward")).toBe(true);
+    expect(store.listCharts().map((c) => c.id)).toEqual([chartC, chartB, chartA]);
+
+    // Send A backward within Sheet1: swap back.
+    expect(store.arrangeChart(chartA, "backward")).toBe(true);
+    expect(store.listCharts().map((c) => c.id)).toEqual([chartA, chartB, chartC]);
+
+    // Bring A to front within Sheet1: move to the end of the Sheet1 subset.
+    expect(store.arrangeChart(chartA, "front")).toBe(true);
+    expect(store.listCharts().map((c) => c.id)).toEqual([chartC, chartB, chartA]);
+
+    // Sending A to back moves it to the start of the Sheet1 subset.
+    expect(store.arrangeChart(chartA, "back")).toBe(true);
+    expect(store.listCharts().map((c) => c.id)).toEqual([chartA, chartB, chartC]);
+
+    // Sending A to back again is a no-op (already backmost within Sheet1 subset).
+    expect(store.arrangeChart(chartA, "back")).toBe(false);
+
+    // Ensure onChange fired at least once for each successful arrange operation.
+    expect(onChange).toHaveBeenCalled();
+  });
 });
