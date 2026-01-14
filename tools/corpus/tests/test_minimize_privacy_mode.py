@@ -31,10 +31,24 @@ class MinimizePrivacyModeTests(unittest.TestCase):
         argv = sys.argv
         try:
             triage_mod._build_rust_helper = lambda: Path("noop")  # type: ignore[assignment]
-            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
-                "steps": {"diff": {"details": {"counts": {"critical": 0, "warning": 0, "info": 0, "total": 0}}}},
-                "result": {"open_ok": True, "round_trip_ok": True},
-            }
+            observed: dict[str, str] = {}
+
+            def _fake_run_rust_triage(*_args, **kwargs):  # type: ignore[no-untyped-def]
+                name = kwargs.get("workbook_name")
+                if isinstance(name, str):
+                    observed["workbook_name"] = name
+                return {
+                    "steps": {
+                        "diff": {
+                            "details": {
+                                "counts": {"critical": 0, "warning": 0, "info": 0, "total": 0}
+                            }
+                        }
+                    },
+                    "result": {"open_ok": True, "round_trip_ok": True},
+                }
+
+            triage_mod._run_rust_triage = _fake_run_rust_triage  # type: ignore[assignment]
 
             os.environ["GITHUB_SERVER_URL"] = "https://github.corp.example.com"
             os.environ["GITHUB_REPOSITORY"] = "corp/repo"
@@ -62,6 +76,7 @@ class MinimizePrivacyModeTests(unittest.TestCase):
                 out = json.loads(out_path.read_text(encoding="utf-8"))
                 expected_sha = sha256_hex(input_path.read_bytes())
                 self.assertEqual(out["display_name"], f"workbook-{expected_sha[:16]}.xlsx")
+                self.assertEqual(observed.get("workbook_name"), out["display_name"])
                 self.assertTrue(out["run_url"].startswith("sha256="))
                 self.assertNotIn("github.corp.example.com", out["run_url"])
         finally:

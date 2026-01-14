@@ -795,6 +795,16 @@ def main() -> int:
     fernet_key = os.environ.get(args.fernet_key_env)
 
     workbook = read_workbook_input(args.input, fernet_key=fernet_key)
+    if args.privacy_mode == triage_mod._PRIVACY_PRIVATE:  # noqa: SLF001
+        # Ensure the Rust helper never sees raw local filenames in privacy mode. The helper only
+        # uses the name for extension-based format inference.
+        workbook = WorkbookInput(
+            display_name=triage_mod._anonymized_display_name(  # noqa: SLF001
+                sha256=sha256_hex(workbook.data),
+                original_name=workbook.display_name,
+            ),
+            data=workbook.data,
+        )
 
     rust_exe = triage_mod._build_rust_helper()  # noqa: SLF001 (internal reuse)
     diff_ignore = triage_mod._compute_diff_ignore(  # noqa: SLF001 (internal reuse)
