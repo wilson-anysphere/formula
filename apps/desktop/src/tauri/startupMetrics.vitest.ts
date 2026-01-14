@@ -13,6 +13,7 @@ describe("startupMetrics", () => {
   const originalTimings = (globalThis as any).__FORMULA_STARTUP_TIMINGS__;
   const originalListenersInstalled = (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__;
   const originalFirstRenderReported = (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__;
+  const originalTtiReported = (globalThis as any).__FORMULA_STARTUP_TTI_REPORTED__;
   const originalBootstrapped = (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__;
   const originalWebviewReported = (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__;
 
@@ -27,6 +28,7 @@ describe("startupMetrics", () => {
     (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_TTI_REPORTED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = undefined;
   });
@@ -46,6 +48,7 @@ describe("startupMetrics", () => {
     (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = originalTimings;
     (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = originalListenersInstalled;
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = originalFirstRenderReported;
+    (globalThis as any).__FORMULA_STARTUP_TTI_REPORTED__ = originalTtiReported;
     (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = originalBootstrapped;
     (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = originalWebviewReported;
     vi.restoreAllMocks();
@@ -94,6 +97,40 @@ describe("startupMetrics", () => {
       await vi.runAllTimersAsync();
       await promise;
 
+      expect(invoke).toHaveBeenCalledWith("report_startup_tti");
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRaf;
+      vi.useRealTimers();
+    }
+  });
+
+  it("can report TTI on a later call if invoke appears after the first retry window", async () => {
+    vi.useFakeTimers();
+    const originalRaf = (globalThis as any).requestAnimationFrame;
+    try {
+      const invoke = vi.fn().mockResolvedValue(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+      (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = true;
+
+      // Make `nextFrame()` fast so the first call only waits on the invoke retry window.
+      (globalThis as any).requestAnimationFrame = undefined;
+
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).__TAURI__;
+      } catch {
+        (globalThis as any).__TAURI__ = undefined;
+      }
+
+      const first = markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
+      // Let the bounded invoke retry window (2s) elapse.
+      await vi.advanceTimersByTimeAsync(2500);
+      await first;
+      expect(invoke).not.toHaveBeenCalled();
+
+      // Inject invoke after the retry window; a subsequent call should still report to the host.
+      (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+      await markStartupTimeToInteractive({ whenIdle: Promise.resolve() });
       expect(invoke).toHaveBeenCalledWith("report_startup_tti");
     } finally {
       (globalThis as any).requestAnimationFrame = originalRaf;

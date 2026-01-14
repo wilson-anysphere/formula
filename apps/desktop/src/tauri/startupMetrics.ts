@@ -35,6 +35,7 @@ const GLOBAL_KEY = "__FORMULA_STARTUP_TIMINGS__";
 const LISTENERS_KEY = "__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__";
 const BOOTSTRAPPED_KEY = "__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__";
 const FIRST_RENDER_REPORTED_KEY = "__FORMULA_STARTUP_FIRST_RENDER_REPORTED__";
+const TTI_REPORTED_KEY = "__FORMULA_STARTUP_TTI_REPORTED__";
 
 function getStore(): StartupTimings {
   const g = globalThis as any;
@@ -251,49 +252,58 @@ export async function markStartupTimeToInteractive(options?: {
   whenIdleTimeoutMs?: number;
 }): Promise<StartupTimings> {
   const store = getStore();
-  if (typeof store.ttiFrontendMs === "number") return { ...store };
+  const g = globalThis as any;
 
-  if (options?.whenIdle) {
+  const shouldMarkFrontend = typeof store.ttiFrontendMs !== "number";
+  if (shouldMarkFrontend) {
+    if (options?.whenIdle) {
+      try {
+        const idle = typeof options.whenIdle === "function" ? options.whenIdle() : options.whenIdle;
+        const timeoutMsRaw = options.whenIdleTimeoutMs;
+        const timeoutMs =
+          typeof timeoutMsRaw === "number" && Number.isFinite(timeoutMsRaw) && timeoutMsRaw >= 0 ? timeoutMsRaw : 10_000;
+        const idlePromise = Promise.resolve(idle).catch(() => {});
+        if (timeoutMs === 0) {
+          // Don't block on idle at all.
+        } else {
+          let timeoutId: ReturnType<typeof setTimeout> | null = null;
+          await Promise.race([
+            idlePromise,
+            new Promise<void>((resolve) => {
+              timeoutId = setTimeout(resolve, timeoutMs);
+            }),
+          ]);
+          if (timeoutId != null) clearTimeout(timeoutId);
+        }
+      } catch {
+        // Still record a mark even if the idle promise fails; this is best-effort
+        // instrumentation and should never crash the app.
+      }
+    }
+
+    // Give the renderer at least one frame to paint after becoming idle.
+    await nextFrame();
+    await nextFrame();
+
+    const ttiFrontendMs = Math.round(nowMs());
+    store.ttiFrontendMs = ttiFrontendMs;
+
     try {
-      const idle = typeof options.whenIdle === "function" ? options.whenIdle() : options.whenIdle;
-      const timeoutMsRaw = options.whenIdleTimeoutMs;
-      const timeoutMs =
-        typeof timeoutMsRaw === "number" && Number.isFinite(timeoutMsRaw) && timeoutMsRaw >= 0 ? timeoutMsRaw : 10_000;
-      const idlePromise = Promise.resolve(idle).catch(() => {});
-      if (timeoutMs === 0) {
-        // Don't block on idle at all.
-      } else {
-        await Promise.race([
-          idlePromise,
-          new Promise<void>((resolve) => {
-            setTimeout(resolve, timeoutMs);
-          }),
-        ]);
+      const perf = (globalThis as any)?.performance;
+      if (perf && typeof perf.mark === "function") {
+        perf.mark("formula:startup:tti");
       }
     } catch {
-      // Still record a mark even if the idle promise fails; this is best-effort
-      // instrumentation and should never crash the app.
+      // Ignore performance API errors.
     }
   }
 
-  // Give the renderer at least one frame to paint after becoming idle.
-  await nextFrame();
-  await nextFrame();
-
-  const ttiFrontendMs = Math.round(nowMs());
-  store.ttiFrontendMs = ttiFrontendMs;
-
-  try {
-    const perf = (globalThis as any)?.performance;
-    if (perf && typeof perf.mark === "function") {
-      perf.mark("formula:startup:tti");
-    }
-  } catch {
-    // Ignore performance API errors.
-  }
+  if (g[TTI_REPORTED_KEY]) return { ...store };
 
   const invoke = getTauriInvoke();
   if (invoke) {
+    if (g[TTI_REPORTED_KEY]) return { ...store };
+    g[TTI_REPORTED_KEY] = true;
     try {
       await invoke("report_startup_tti");
     } catch {
@@ -302,7 +312,6 @@ export async function markStartupTimeToInteractive(options?: {
   } else {
     // If the bootstrap ran but `__TAURI__` is injected late, retry briefly so we don't miss the
     // Rust-side TTI mark (required for the `[startup] ...` line the perf harness parses).
-    const g = globalThis as any;
     const shouldRetry = Boolean(g[BOOTSTRAPPED_KEY]);
     if (shouldRetry) {
       const deadlineMs = Date.now() + 2_000;
@@ -314,6 +323,8 @@ export async function markStartupTimeToInteractive(options?: {
         retriedInvoke = getTauriInvoke();
       }
       if (retriedInvoke) {
+        if (g[TTI_REPORTED_KEY]) return { ...store };
+        g[TTI_REPORTED_KEY] = true;
         try {
           await retriedInvoke("report_startup_tti");
         } catch {
