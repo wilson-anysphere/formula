@@ -91,6 +91,9 @@ Notes:
   - Missing translations still silently fall back to canonical (English) spellings in generated TSVs.
   - For \`es-ES\`, sources should be extracted from a real Excel install via:
       tools/excel-oracle/extract-function-translations.ps1
+  - pnpm script aliases:
+      pnpm normalize:locale-function-sources
+      pnpm check:locale-function-sources
 `);
       process.exit(0);
     }

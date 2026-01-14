@@ -78,6 +78,9 @@ Notes:
   - Missing translations silently fall back to canonical (English) spellings in the generated TSVs.
   - After re-extracting locale sources from Excel, run:
       node scripts/normalize-locale-function-sources.js
+  - pnpm script aliases:
+      pnpm generate:locale-function-tsv
+      pnpm check:locale-function-tsv
 `);
       process.exit(0);
     }
