@@ -345,6 +345,7 @@ Desktop encryption commands (Command Palette):
   - If the entered `keyId` already exists in the local key store, the desktop UI will reuse it (it does not silently overwrite key bytes).
 - `collab.removeEncryptedRange` — remove encrypted range *metadata* overlapping the current selection.
   - Note: removing a range does **not** decrypt cells that already have an `enc` payload.
+  - If multiple ranges overlap, the desktop UI can remove a single chosen range or all overlaps.
 - `collab.exportEncryptionKey` — export the key for the active cell’s encrypted range.
   - Prefers the `keyId` embedded in an existing encrypted cell payload (if present), otherwise falls back to policy metadata.
 - `collab.importEncryptionKey` — import a shared key string into the local key store.
