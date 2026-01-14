@@ -2979,14 +2979,19 @@ export class FormulaBarView {
           return text;
         }
 
+        // If the draft contains any HTML-significant characters, escape only the tokens that
+        // actually include them. This avoids paying the `replace` cost on every token span when
+        // the formula includes a single `&` operator or comparison like "<".
+        const content = needsEscapeDraft && ESCAPE_HTML_TEST_RE.test(text) ? escapeHtml(text) : text;
+
         if (!isFormulaEditing) {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${needsEscapeDraft ? escapeHtml(text) : text}</span>`;
+          return `<span data-kind="${span.kind}"${classAttr}>${content}</span>`;
         }
 
         if (span.kind === "error") {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${needsEscapeDraft ? escapeHtml(text) : text}</span>`;
+          return `<span data-kind="${span.kind}"${classAttr}>${content}</span>`;
         }
 
         // Only `reference` and `identifier` spans can correspond to extracted references
@@ -2994,21 +2999,19 @@ export class FormulaBarView {
         // Avoid the per-token reference containment checks for everything else.
         if (span.kind !== "reference" && span.kind !== "identifier") {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${needsEscapeDraft ? escapeHtml(text) : text}</span>`;
+          return `<span data-kind="${span.kind}"${classAttr}>${content}</span>`;
         }
 
         const containing = findContainingRef(span.start, span.end);
         if (!containing) {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${needsEscapeDraft ? escapeHtml(text) : text}</span>`;
+          return `<span data-kind="${span.kind}"${classAttr}>${content}</span>`;
         }
 
         const isActive = activeReferenceIndex === containing.index;
         const baseClass = isActive ? "formula-bar-reference formula-bar-reference--active" : "formula-bar-reference";
         const classAttr = extraClass ? ` class="${baseClass} ${extraClass}"` : ` class="${baseClass}"`;
-        return `<span data-kind="${span.kind}" data-ref-index="${containing.index}"${classAttr} style="color: ${containing.color};">${
-          needsEscapeDraft ? escapeHtml(text) : text
-        }</span>`;
+        return `<span data-kind="${span.kind}" data-ref-index="${containing.index}"${classAttr} style="color: ${containing.color};">${content}</span>`;
       };
 
       if (!ghost) {
