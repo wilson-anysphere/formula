@@ -373,8 +373,17 @@ H  = SHA1(salt || H0)
 for i in 0..50000:
   H = SHA1(LE32(i) || H)
 
-// per-block RC4 key (keyLen is 5, 7, or 16 bytes depending on KeySizeBits)
-K_block = SHA1(H || LE32(blockIndex))[0..keyLen]
+// Per-block RC4 key (`keyLen` is `KeySizeBits / 8` from the CryptoAPI header, e.g. 16 for 128-bit,
+// 5 for 40-bit). Note the 40-bit CryptoAPI quirk:
+//
+// CryptoAPI/Office represent a “40-bit” RC4 key as a 128-bit (16-byte) RC4 key with the low 40 bits
+// set and the remaining 88 bits zero. Using a raw 5-byte RC4 key changes RC4 KSA and yields the
+// wrong keystream.
+H_block = SHA1(H || LE32(blockIndex))
+if KeySizeBits == 40:
+  K_block = H_block[0..5] || 0x00 * 11   // 16 bytes total
+else:
+  K_block = H_block[0..keyLen]
 ```
 
 ### Payload decryption model (record-payload-only RC4 stream)
