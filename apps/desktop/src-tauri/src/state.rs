@@ -7341,7 +7341,7 @@ mod tests {
                 .set_cell("Sheet1", 0, 1, None, Some("=CELL(\"protect\",A1)".to_string()))
                 .expect("set formula");
             let before = state.get_cell("Sheet1", 0, 1).expect("get B1");
-            assert_eq!(before.value, CellScalar::Number(1.0));
+        assert_eq!(before.value, CellScalar::Number(1.0));
 
             // Apply a formatting delta that unlocks A1 (protection.locked = false).
             let format = serde_json::to_value(formula_model::Style {

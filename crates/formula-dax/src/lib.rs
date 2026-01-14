@@ -37,10 +37,11 @@
 
 mod backend;
 mod engine;
-mod ident;
 mod model;
 mod parser;
 mod pivot;
+#[cfg(feature = "pivot-model")]
+mod ident;
 #[cfg(feature = "pivot-model")]
 mod pivot_adapter;
 #[cfg(feature = "pivot-model")]
