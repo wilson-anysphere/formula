@@ -1223,6 +1223,9 @@ export class FormulaBarView {
   #lastHighlightDraft: string | null = null;
   #lastHighlightIsFormulaEditing = false;
   #lastHighlightHadGhost = false;
+  #lastHighlightCursor: number | null = null;
+  #lastHighlightGhost: string | null = null;
+  #lastHighlightPreviewText: string | null = null;
   #lastActiveReferenceIndex: number | null = null;
   #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
   #lastColoredReferences: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
@@ -3135,6 +3138,18 @@ export class FormulaBarView {
       this.#lastHighlightSpans === highlightedSpans &&
       this.#lastColoredReferences === coloredReferences;
 
+    const canSkipHighlightWithGhost =
+      Boolean(ghost) &&
+      this.#lastHighlightDraft === draft &&
+      this.#lastHighlightIsFormulaEditing === isFormulaEditing &&
+      this.#lastHighlightHadGhost &&
+      this.#lastHighlightCursor === cursor &&
+      this.#lastHighlightGhost === ghost &&
+      this.#lastHighlightPreviewText === previewText &&
+      this.#lastHighlightSpans === highlightedSpans &&
+      this.#lastColoredReferences === coloredReferences &&
+      this.#lastActiveReferenceIndex === activeReferenceIndex;
+
     const canSkipHighlight =
       !ghost &&
       !isFormulaEditing &&
@@ -3143,12 +3158,28 @@ export class FormulaBarView {
       !this.#lastHighlightHadGhost &&
       this.#lastHighlightSpans === highlightedSpans;
 
-    if (canSkipHighlight) {
+    if (canSkipHighlightWithGhost) {
+      // When an AI suggestion is visible, other parts of the formula bar can still re-render
+      // (e.g. engine tooling/hint updates). If the draft/cursor/ghost state is unchanged,
+      // skip rebuilding the highlight HTML string for long formulas.
+      this.#lastHighlightDraft = draft;
+      this.#lastHighlightIsFormulaEditing = isFormulaEditing;
+      this.#lastHighlightHadGhost = true;
+      this.#lastHighlightCursor = cursor;
+      this.#lastHighlightGhost = ghost;
+      this.#lastHighlightPreviewText = previewText;
+      this.#lastActiveReferenceIndex = activeReferenceIndex;
+      this.#lastHighlightSpans = highlightedSpans;
+      this.#lastColoredReferences = coloredReferences;
+    } else if (canSkipHighlight) {
       // No cursor-dependent styling in view/plain-text mode; avoid rebuilding the highlight HTML
       // string when the draft/tokenization state is unchanged (common on cursor moves).
       this.#lastHighlightDraft = draft;
       this.#lastHighlightIsFormulaEditing = false;
       this.#lastHighlightHadGhost = false;
+      this.#lastHighlightCursor = null;
+      this.#lastHighlightGhost = null;
+      this.#lastHighlightPreviewText = null;
       this.#lastActiveReferenceIndex = null;
       this.#lastHighlightSpans = highlightedSpans;
       this.#lastColoredReferences = coloredReferences;
@@ -3170,6 +3201,9 @@ export class FormulaBarView {
       this.#lastHighlightDraft = draft;
       this.#lastHighlightIsFormulaEditing = true;
       this.#lastHighlightHadGhost = false;
+      this.#lastHighlightCursor = null;
+      this.#lastHighlightGhost = null;
+      this.#lastHighlightPreviewText = null;
       this.#lastHighlightSpans = highlightedSpans;
       this.#lastColoredReferences = coloredReferences;
     } else {
@@ -3330,6 +3364,9 @@ export class FormulaBarView {
       this.#lastHighlightDraft = draft;
       this.#lastHighlightIsFormulaEditing = isFormulaEditing;
       this.#lastHighlightHadGhost = Boolean(ghost);
+      this.#lastHighlightCursor = ghost ? cursor : null;
+      this.#lastHighlightGhost = ghost ? ghost : null;
+      this.#lastHighlightPreviewText = ghost ? previewText : null;
       this.#lastActiveReferenceIndex = activeReferenceIndex;
       this.#lastHighlightSpans = highlightedSpans;
       this.#lastColoredReferences = coloredReferences;
