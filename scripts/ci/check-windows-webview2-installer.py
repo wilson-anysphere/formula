@@ -36,6 +36,7 @@ WEBVIEW2_MARKER_STRINGS = [
     # Bootstrapper download URLs (used by downloadBootstrapper mode; the exe may not be embedded).
     # We keep these as substring markers so we match multiple URL variants used by different tools.
     "go.microsoft.com/fwlink",
+    "LinkId=2124703",
     "linkid=2124703",
     # Evergreen standalone/offline installers (less common, much larger).
     "MicrosoftEdgeWebView2RuntimeInstaller",
