@@ -550,9 +550,10 @@ back into a generic “encrypted workbook” error:
 - `formula_io::offcrypto::EncryptedPackageError::*` → **Corrupt file / invalid encrypted wrapper**
   - e.g. `StreamTooShort`, `CiphertextLenNotBlockAligned`, `DecryptedTooShort`
 
-- `formula_xls::DecryptError::WrongPassword` → **Invalid password**
-- `formula_xls::DecryptError::UnsupportedEncryption` → **Unsupported encryption scheme**
-- `formula_xls::DecryptError::InvalidFormat(..)` → **Corrupt encrypted wrapper**
+- `formula_xls::ImportError::EncryptedWorkbook` → **Password required**
+- `formula_xls::ImportError::InvalidPassword` → **Invalid password**
+- `formula_xls::ImportError::UnsupportedEncryption(..)` → **Unsupported encryption scheme**
+- `formula_xls::ImportError::Decrypt(..)` → **Corrupt encrypted wrapper**
 
 ---
 
