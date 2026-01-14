@@ -26,4 +26,8 @@ new TabCompletionEngine({
   },
 });
 
+// Starter function stubs can be customized (static list or getter).
+new TabCompletionEngine({ starterFunctions: ["SUM(", "AVERAGE("] });
+new TabCompletionEngine({ starterFunctions: () => ["SUM(", "AVERAGE("] });
+
 void completion;
