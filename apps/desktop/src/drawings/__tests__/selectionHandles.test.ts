@@ -279,7 +279,7 @@ describe("drawings selection handles", () => {
       const id = i + 2;
       pointerDown!(makePointerEvent(c.x, c.y, id));
       expect(callbacks.onSelectionChange).toHaveBeenCalledTimes(1);
-      expect(canvas.style.cursor).toBe(cursorForResizeHandle(c.handle, transform));
+      expect(canvas.style.cursor).toBe(cursorForResizeHandleWithTransform(c.handle, transform));
       pointerUp!(makePointerEvent(c.x, c.y, id));
     }
   });
