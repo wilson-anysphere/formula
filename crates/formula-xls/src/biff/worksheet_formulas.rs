@@ -737,6 +737,42 @@ pub(crate) enum PtgReferenceResolution {
     Unresolved,
 }
 
+fn resolve_anchor_by_range_containment<T>(
+    records: &HashMap<CellRef, T>,
+    ptgexp_base: CellRef,
+    cell: CellRef,
+    range_of: impl Fn(&T) -> (CellRef, CellRef),
+) -> Option<CellRef> {
+    // Fast path: most producers use the range anchor as the PtgExp/PtgTbl base cell, so the key
+    // lookup succeeds.
+    if records.contains_key(&ptgexp_base) {
+        return Some(ptgexp_base);
+    }
+
+    // Best-effort fallback: some `.xls` producers point PtgExp/PtgTbl at a *non-anchor* cell inside
+    // the backing SHRFMLA/ARRAY/TABLE range. In that case, scan for a definition range that
+    // contains both the current cell and the referenced base cell, and return its anchor.
+    let mut matches: Vec<CellRef> = records
+        .iter()
+        .filter_map(|(anchor, record)| {
+            let range = range_of(record);
+            if range_contains_cell(range, cell) && range_contains_cell(range, ptgexp_base) {
+                Some(*anchor)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if matches.is_empty() {
+        return None;
+    }
+
+    // Deterministic selection: choose the top-most, left-most anchor.
+    matches.sort_by_key(|cell| (cell.row, cell.col));
+    matches.first().copied()
+}
+
 /// Resolve a BIFF8 `FORMULA.rgce` that begins with `PtgExp` or `PtgTbl` into a backing record type.
 ///
 /// This is best-effort and uses [`FormulaGrbit`] flags as a hint to disambiguate whether `PtgExp`
@@ -816,8 +852,10 @@ pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
     for kind in order {
         match kind {
             FormulaMembershipHint::Shared => {
-                if parsed.shrfmla.contains_key(&base) {
-                    return PtgReferenceResolution::Shared { base };
+                if let Some(anchor) =
+                    resolve_anchor_by_range_containment(&parsed.shrfmla, base, cell.cell, |r| r.range)
+                {
+                    return PtgReferenceResolution::Shared { base: anchor };
                 }
                 if hint == Some(FormulaMembershipHint::Shared) {
                     warn(
@@ -831,8 +869,10 @@ pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
                 }
             }
             FormulaMembershipHint::Array => {
-                if parsed.array.contains_key(&base) {
-                    return PtgReferenceResolution::Array { base };
+                if let Some(anchor) =
+                    resolve_anchor_by_range_containment(&parsed.array, base, cell.cell, |r| r.range)
+                {
+                    return PtgReferenceResolution::Array { base: anchor };
                 }
                 if hint == Some(FormulaMembershipHint::Array) {
                     warn(
@@ -846,8 +886,10 @@ pub(crate) fn resolve_ptgexp_or_ptgtbl_best_effort(
                 }
             }
             FormulaMembershipHint::Table => {
-                if parsed.table.contains_key(&base) {
-                    return PtgReferenceResolution::Table { base };
+                if let Some(anchor) =
+                    resolve_anchor_by_range_containment(&parsed.table, base, cell.cell, |r| r.range)
+                {
+                    return PtgReferenceResolution::Table { base: anchor };
                 }
                 if hint == Some(FormulaMembershipHint::Table) {
                     warn(
@@ -2869,6 +2911,39 @@ mod tests {
         assert!(
             warning_text.contains("no TABLE record was found for base A1"),
             "expected missing-TABLE warning, got:\n{warning_text}"
+        );
+    }
+
+    #[test]
+    fn resolves_ptgexp_when_base_cell_is_not_range_anchor() {
+        // Regression: some `.xls` producers point PtgExp at a non-anchor cell inside the shared
+        // range. We should still resolve it by scanning ranges.
+        //
+        // Shared range: B1:B2 (anchor = B1).
+        // Formula cell: B2 has PtgExp(B2) + fShrFmla.
+        let stream = [
+            record(RECORD_SHRFMLA, &shrfmla_payload(0, 1, 1, 1)),
+            record(
+                RECORD_FORMULA,
+                &formula_payload(1, 1, FormulaGrbit::F_SHR_FMLA, &ptgexp(1, 1)),
+            ),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_worksheet_formulas(&stream, 0).expect("parse");
+
+        let mut warnings = Vec::new();
+        let b2 = parsed.formula_cells.get(&CellRef::new(1, 1)).unwrap();
+        assert_eq!(
+            resolve_ptgexp_or_ptgtbl_best_effort(&parsed, b2, &mut warnings),
+            PtgReferenceResolution::Shared {
+                base: CellRef::new(0, 1)
+            }
+        );
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings, got: {warnings:?}"
         );
     }
 
