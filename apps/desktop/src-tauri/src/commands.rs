@@ -2839,14 +2839,39 @@ pub async fn list_imported_embedded_cell_images(
             })
             .unwrap_or_default();
 
+        // Keep individual images and the overall IPC payload bounded. We cap per-image bytes based on
+        // the same limit used for other binary IPC payloads (`read_binary_file_range`), and then cap
+        // the *aggregate* bytes so workbooks containing many small images cannot force an oversized
+        // base64 response.
+        //
+        // Note: base64 expands payloads by ~33%, so the true serialized JSON payload will be larger
+        // than this raw-byte sum.
         let max_image_bytes = crate::ipc_file_limits::MAX_READ_RANGE_BYTES as usize;
+        let max_total_image_bytes = crate::resource_limits::MAX_MARKETPLACE_PACKAGE_BYTES;
+        let mut total_image_bytes: usize = 0;
+
+        // Iterate in a deterministic order so any truncation (due to caps) is stable across runs.
+        let mut images: Vec<_> = images.into_iter().collect();
+        images.sort_by(|((a_part, a_cell), a_img), ((b_part, b_cell), b_img)| {
+            a_part
+                .cmp(b_part)
+                .then_with(|| a_cell.row.cmp(&b_cell.row))
+                .then_with(|| a_cell.col.cmp(&b_cell.col))
+                .then_with(|| a_img.image_part.cmp(&b_img.image_part))
+        });
 
         let mut out = Vec::new();
         for ((worksheet_part, cell_ref), image) in images {
-            if image.image_bytes.len() > max_image_bytes {
+            let image_len = image.image_bytes.len();
+            if image_len > max_image_bytes {
                 // Skip oversized payloads to keep IPC memory usage bounded.
                 continue;
             }
+            if total_image_bytes.saturating_add(image_len) > max_total_image_bytes {
+                // Best-effort: stop once we've hit the aggregate cap.
+                break;
+            }
+            total_image_bytes = total_image_bytes.saturating_add(image_len);
 
             let image_part = image.image_part;
             let image_id = image_part
