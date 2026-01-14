@@ -359,8 +359,11 @@ function parseImageId(value: unknown, context: string): string {
 }
 
 function convertModelEmuSize(model: unknown, context: string): EmuSize {
-  if (!isRecord(model)) throw new Error(`${context} must be an object`);
-  const record = model as JsonRecord;
+  // Some interop layers represent tuple/newtype wrappers as singleton arrays or `{0: ...}` objects.
+  // Unwrap these so EMU sizes can be parsed from mixed-schema snapshots.
+  const unwrapped = unwrapSingletonId(model);
+  if (!isRecord(unwrapped)) throw new Error(`${context} must be an object`);
+  const record = unwrapped as JsonRecord;
 
   const readFirst = (keys: string[], fieldContext: string): number => {
     for (const key of keys) {
@@ -379,8 +382,9 @@ function convertModelEmuSize(model: unknown, context: string): EmuSize {
 function convertModelCellOffset(model: unknown, context: string): CellOffset {
   // Best-effort: older/partial snapshots may omit offsets entirely. Treat missing/invalid offsets
   // as 0 so we can still hydrate drawings rather than dropping them.
-  if (!isRecord(model)) return { xEmu: 0, yEmu: 0 };
-  const record = model as JsonRecord;
+  const unwrapped = unwrapSingletonId(model);
+  if (!isRecord(unwrapped)) return { xEmu: 0, yEmu: 0 };
+  const record = unwrapped as JsonRecord;
 
   const readFirst = (keys: string[]): number | undefined => {
     for (const key of keys) {
@@ -397,17 +401,23 @@ function convertModelCellOffset(model: unknown, context: string): CellOffset {
 }
 
 function convertModelAnchorPoint(model: unknown, context: string): AnchorPoint {
-  if (!isRecord(model)) throw new Error(`${context} must be an object`);
+  const unwrapped = unwrapSingletonId(model);
+  if (!isRecord(unwrapped)) throw new Error(`${context} must be an object`);
 
-  const cell = (model as JsonRecord).cell;
+  const cell = unwrapSingletonId((unwrapped as JsonRecord).cell);
   if (!isRecord(cell)) throw new Error(`${context}.cell must be an object`);
+
+  const row = parseIdNumber((cell as JsonRecord).row);
+  if (row == null) throw new Error(`${context}.cell.row must be a number`);
+  const col = parseIdNumber((cell as JsonRecord).col);
+  if (col == null) throw new Error(`${context}.cell.col must be a number`);
 
   return {
     cell: {
-      row: readNumber((cell as JsonRecord).row, `${context}.cell.row`),
-      col: readNumber((cell as JsonRecord).col, `${context}.cell.col`),
+      row,
+      col,
     },
-    offset: convertModelCellOffset((model as JsonRecord).offset, `${context}.offset`),
+    offset: convertModelCellOffset((unwrapped as JsonRecord).offset, `${context}.offset`),
   };
 }
 

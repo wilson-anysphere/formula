@@ -39,3 +39,21 @@ test("convertModelAnchorToUiAnchor defaults missing absolute pos/ext payloads to
   assert.deepEqual(ui, { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(100), cy: pxToEmu(100) } });
 });
 
+test("convertModelAnchorToUiAnchor accepts singleton-wrapped cell refs (interop)", () => {
+  const anchor = {
+    OneCell: {
+      from: {
+        cell: { 0: { row: { 0: 1 }, col: [2] } },
+        offset: { x_emu: 3, y_emu: 4 },
+      },
+      ext: { cx: 10, cy: 20 },
+    },
+  };
+
+  const ui = convertModelAnchorToUiAnchor(anchor);
+  assert.deepEqual(ui, {
+    type: "oneCell",
+    from: { cell: { row: 1, col: 2 }, offset: { xEmu: 3, yEmu: 4 } },
+    size: { cx: 10, cy: 20 },
+  });
+});
