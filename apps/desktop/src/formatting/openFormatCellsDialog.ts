@@ -148,6 +148,9 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   const syncNumberCustomVisibility = () => {
     const isCustom = numberSelect.value === "__custom__";
     numberCustomRow.style.display = isCustom ? "" : "none";
+    // When the custom row is hidden, ensure we don't leave an extra bottom margin on the only
+    // visible row in the section (since `:last-child` won't match due to the hidden node).
+    numberRow.style.marginBottom = isCustom ? "" : "0";
     if (isCustom) {
       // When switching to Custom, move focus to the code field so users can type immediately.
       try {
