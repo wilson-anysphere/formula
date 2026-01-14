@@ -1107,12 +1107,12 @@ fn apply_print_settings_patches(
                 std::io::ErrorKind::NotFound,
                 format!("missing required xlsx part: {part}"),
             )),
-            crate::print::PrintError::PartTooLarge { part, size, max } => {
-                WriteError::Io(std::io::Error::new(
+            crate::print::PrintError::PartTooLarge { part, size, max } => WriteError::Io(
+                std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!("xlsx part '{part}' is too large ({size} bytes, max {max})"),
-                ))
-            }
+                ),
+            ),
         }
     }
 
