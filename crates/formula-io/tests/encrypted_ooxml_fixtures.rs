@@ -105,6 +105,8 @@ fn detects_encrypted_ooxml_agile_unicode_excel_fixture() {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StandardEncryptionInfoParams {
+    version_major: u16,
+    version_minor: u16,
     version_flags: u32,
     alg_id: u32,
     alg_id_hash: u32,
@@ -207,6 +209,8 @@ fn parse_standard_encryption_info(
     }
 
     Ok(StandardEncryptionInfoParams {
+        version_major: major,
+        version_minor: minor,
         version_flags,
         alg_id,
         alg_id_hash,
@@ -225,6 +229,8 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
     ));
 
     let common_expected = StandardEncryptionInfoParams {
+        version_major: 0, // filled per fixture below
+        version_minor: 2,
         // MS-OFFCRYPTO `EncryptionVersionInfo.flags`: `fCryptoAPI` (0x04) + `fAES` (0x20).
         version_flags: 0x0000_0024,
         alg_id: 0x0000_660E,      // CALG_AES_128
@@ -235,10 +241,13 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
         salt_size: 16,
     };
 
-    for fixture_name in [
-        "standard.xlsx",
-        "standard-basic.xlsm",
-        "standard-large.xlsx",
+    for (fixture_name, version_major) in [
+        ("standard.xlsx", 3),
+        ("standard-basic.xlsm", 3),
+        ("standard-large.xlsx", 3),
+        // Apache POI Standard/CryptoAPI AES fixtures emit `EncryptionInfo` version 4.2.
+        ("standard-4.2.xlsx", 4),
+        ("standard-unicode.xlsx", 4),
     ] {
         let fixture_path = fixture_dir.join(fixture_name);
 
@@ -259,6 +268,7 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
             .unwrap_or_else(|err| panic!("parse {fixture_name} Standard EncryptionInfo: {err}"));
 
         let expected = StandardEncryptionInfoParams {
+            version_major,
             csp_name: Some("Microsoft Enhanced RSA and AES Cryptographic Provider".to_string()),
             ..common_expected.clone()
         };
