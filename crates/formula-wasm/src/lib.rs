@@ -4898,16 +4898,10 @@ impl WasmWorkbook {
                 wb.set_locale_id(locale_id);
             }
         }
-
-        if let Some(codepage) = text_codepage {
-            wb.engine.set_text_codepage(codepage);
-        }
-
         // Import the style table up-front so per-layer style ids can be resolved by the engine.
         for (style_id, patch) in style_table {
             wb.engine.set_style_patch(style_id, patch);
         }
-
         // Create all sheets up-front so cross-sheet formula references resolve correctly.
         //
         // When `sheetOrder` is provided, preserve the tab ordering by creating sheets in that order
@@ -5088,6 +5082,14 @@ impl WasmWorkbook {
             if let Some(locale_id) = locale_id.as_deref() {
                 wb.set_locale_id(locale_id);
             }
+        }
+
+        // Apply any explicit text codepage after the workbook locale is set (regardless of when the
+        // locale is applied). This ensures JSON payloads that intentionally override `textCodepage`
+        // are respected even when `formulaLanguage="canonical"` delays `set_locale_id` until after
+        // formula import.
+        if let Some(codepage) = text_codepage {
+            wb.engine.set_text_codepage(codepage);
         }
 
         if wb.sheets.is_empty() {
@@ -8379,6 +8381,37 @@ mod tests {
         assert_eq!(
             wb2.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
             EngineValue::Number(2.0)
+        );
+    }
+
+    #[test]
+    fn from_json_formula_language_canonical_preserves_explicit_text_codepage() {
+        // `formulaLanguage="canonical"` delays locale application until after formula import so
+        // canonical formulas are not reinterpreted as localized syntax. Ensure this does not cause
+        // `set_locale_id` to clobber an explicit `textCodepage` override.
+        let json = serde_json::json!({
+            "localeId": "ja-JP",
+            "formulaLanguage": "canonical",
+            // UTF-8 is not treated as a DBCS codepage by the engine (only 932/936/949/950), so
+            // `LENB` should behave like `LEN` (character count).
+            "textCodepage": 65001,
+            "sheets": {
+                "Sheet1": {
+                    "cells": {
+                        "A1": "=LENB(\"あ\")"
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let mut wb = WasmWorkbook::from_json(&json).unwrap();
+        assert_eq!(wb.get_text_codepage(), 65001);
+
+        wb.inner.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Number(1.0)
         );
     }
 
