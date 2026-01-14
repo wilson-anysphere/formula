@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DrawingOverlay, pxToEmu, type GridGeometry, type Viewport } from "../overlay";
 import { buildHitTestIndex, hitTestDrawings } from "../hitTest";
+import { RESIZE_HANDLE_SIZE_PX } from "../selectionHandles";
 import type { DrawingObject, ImageStore } from "../types";
 
 function createStubCanvasContext(): {
@@ -219,9 +220,13 @@ describe("DrawingOverlay viewport transforms", () => {
 
     await overlay.render(objects, viewport);
 
+    const halfHandle = RESIZE_HANDLE_SIZE_PX / 2;
     const handleRects = calls
-      .filter((call) => call.method === "rect" && call.args[2] === 8 && call.args[3] === 8)
+      .filter(
+        (call) =>
+          call.method === "rect" && call.args[2] === RESIZE_HANDLE_SIZE_PX && call.args[3] === RESIZE_HANDLE_SIZE_PX,
+      )
       .map((call) => call.args);
-    expect(handleRects[0]).toEqual([-4, -4, 8, 8]);
+    expect(handleRects[0]).toEqual([-halfHandle, -halfHandle, RESIZE_HANDLE_SIZE_PX, RESIZE_HANDLE_SIZE_PX]);
   });
 });

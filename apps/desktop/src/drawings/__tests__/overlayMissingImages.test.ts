@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DrawingOverlay, pxToEmu, type GridGeometry, type Viewport } from "../overlay";
+import { RESIZE_HANDLE_SIZE_PX } from "../selectionHandles";
 import type { DrawingObject, ImageStore } from "../types";
 
 function createStubCanvasContext(): {
@@ -97,8 +98,8 @@ describe("DrawingOverlay missing images", () => {
       (call) =>
         call.method === "rect" &&
         call.args.length >= 4 &&
-        call.args[2] === 8 &&
-        call.args[3] === 8,
+        call.args[2] === RESIZE_HANDLE_SIZE_PX &&
+        call.args[3] === RESIZE_HANDLE_SIZE_PX,
     );
     expect(handleRects).toHaveLength(8);
     // 8 resize handles + 1 rotation handle.
