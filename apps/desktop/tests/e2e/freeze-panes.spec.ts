@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 function colToName(col0: number): string {
   let value = col0 + 1;
   let name = "";
@@ -13,7 +15,7 @@ function colToName(col0: number): string {
 
 test.describe("freeze panes", () => {
   test("Freeze Panes at B3 keeps rows 1-2 and col A frozen while scrolling", async ({ page }) => {
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await gotoDesktop(page, "/");
 
     const grid = page.locator("#grid");
 

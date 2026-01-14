@@ -118,7 +118,7 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
     return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
   };
 
-  const maxAttempts = 3;
+  const maxAttempts = 5;
 
   // Vite may trigger a full reload after dependency optimization (or when it discovers a new
   // dynamic import). When that happens mid-navigation, Chromium surfaces `net::ERR_NETWORK_CHANGED`
@@ -247,7 +247,13 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
         consoleErrors.length = 0;
         pageErrors.length = 0;
         requestFailures.length = 0;
-        await page.waitForLoadState("domcontentloaded");
+        try {
+          await page.waitForLoadState("domcontentloaded");
+        } catch {
+          // ignore
+        }
+        // Give the Vite dev server a moment to stabilize (it may restart once after optimizing deps).
+        await page.waitForTimeout(250 * (attempt + 1));
         continue;
       }
       const diag = await formatStartupDiagnostics();
@@ -267,11 +273,16 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
+  let signalNetworkChanged: (() => void) | null = null;
 
   const onConsole = (msg: any): void => {
     try {
       if (msg?.type?.() !== "error") return;
-      consoleErrors.push(msg.text());
+      const text = msg.text();
+      consoleErrors.push(text);
+      if (text.includes("net::ERR_NETWORK_CHANGED")) {
+        signalNetworkChanged?.();
+      }
     } catch {
       // ignore listener failures
     }
@@ -292,6 +303,9 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
       const failure = typeof req?.failure === "function" ? req.failure() : null;
       const suffix = failure?.errorText ? ` (${failure.errorText})` : "";
       requestFailures.push(`${method} ${url}${suffix}`.trim());
+      if (typeof failure?.errorText === "string" && failure.errorText.includes("net::ERR_NETWORK_CHANGED")) {
+        signalNetworkChanged?.();
+      }
     } catch {
       // ignore listener failures
     }
@@ -344,8 +358,28 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
   };
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    let networkChanged = false;
+    let resolveNetworkChanged: (() => void) | null = null;
+    const networkChangedPromise = new Promise<void>((resolve) => {
+      resolveNetworkChanged = resolve;
+    });
+    signalNetworkChanged = () => {
+      if (networkChanged) return;
+      networkChanged = true;
+      resolveNetworkChanged?.();
+    };
+
     try {
-      await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 60_000 });
+      const appReadyPromise = page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 60_000 });
+      await Promise.race([
+        appReadyPromise,
+        networkChangedPromise.then(async () => {
+          await Promise.race([appReadyPromise, page.waitForTimeout(10_000)]);
+          const ready = await page.evaluate(() => Boolean(window.__formulaApp)).catch(() => false);
+          if (ready) return;
+          throw new Error("net::ERR_NETWORK_CHANGED");
+        }),
+      ]);
       await page.evaluate(async () => {
         const app = window.__formulaApp as any;
         if (app && typeof app.whenIdle === "function") {
@@ -358,14 +392,37 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      const sawNetworkChanged =
+        networkChanged ||
+        consoleErrors.some((text) => text.includes("net::ERR_NETWORK_CHANGED")) ||
+        requestFailures.some((text) => text.includes("net::ERR_NETWORK_CHANGED"));
       if (
         attempt === 0 &&
         (message.includes("Execution context was destroyed") ||
           message.includes("net::ERR_ABORTED") ||
           message.includes("net::ERR_NETWORK_CHANGED") ||
-          message.includes("frame was detached"))
+          message.includes("frame was detached") ||
+          sawNetworkChanged)
       ) {
-        await page.waitForLoadState("domcontentloaded");
+        // Clear captured diagnostics for the retry so a successful second attempt doesn't inherit
+        // errors from the first attempt.
+        consoleErrors.length = 0;
+        pageErrors.length = 0;
+        requestFailures.length = 0;
+        try {
+          // If Vite restarted mid-load we can end up in a state where module requests fail and the
+          // app never boots. Force a reload so the second attempt has a clean slate.
+          await page.reload({ waitUntil: "domcontentloaded" });
+        } catch {
+          // Fall back to waiting for the current navigation to settle.
+          try {
+            await page.waitForLoadState("domcontentloaded");
+          } catch {
+            // ignore
+          }
+        }
+        // Give the Vite dev server a moment to stabilize (it may restart once after optimizing deps).
+        await page.waitForTimeout(250 * (attempt + 1));
         continue;
       }
       const diag = await formatStartupDiagnostics();
@@ -376,6 +433,7 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
     }
   }
 
+  signalNetworkChanged = null;
   page.off("console", onConsole);
   page.off("pageerror", onPageError);
   page.off("requestfailed", onRequestFailed);

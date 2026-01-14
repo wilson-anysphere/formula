@@ -247,6 +247,10 @@ describe("SpreadsheetApp overlay stacking", () => {
   beforeEach(() => {
     document.head.innerHTML = "";
     document.body.innerHTML = "";
+    // Ensure these tests cover the default canvas charts behavior regardless of any
+    // suite-level env defaults (other tests may force legacy charts mode).
+    delete process.env.CANVAS_CHARTS;
+    delete process.env.USE_CANVAS_CHARTS;
 
     const storage = createInMemoryLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });

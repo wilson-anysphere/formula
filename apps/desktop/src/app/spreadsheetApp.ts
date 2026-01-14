@@ -276,7 +276,6 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
     // deltas without materializing per-cell style ids.
     target.setFormatRunsByCol = (sheet, col, runs) => (engine as any).setColFormatRuns(sheet, col, runs);
   }
-
   ENGINE_SYNC_TARGET_BY_CLIENT.set(key, target);
   return target;
 }

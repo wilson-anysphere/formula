@@ -2933,34 +2933,34 @@ app.subscribeSelection((selection) => {
   handleFormatPainterSelectionChange(selection);
 });
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
-app.onEditStateChange(() => {
-  emitSpreadsheetEditingChanged();
-  scheduleRibbonSelectionFormatStateUpdate();
-  // `SpreadsheetApp.onEditStateChange` invokes listeners immediately with the current edit state.
-  // During startup, sheet-tab rendering is wired later in this module; defer to avoid referencing
-  // sheet-tab state before initialization (which can crash the app in e2e).
+
+let sheetTabsRenderScheduled = false;
+function scheduleSheetTabsRender(): void {
+  if (sheetTabsRenderScheduled) return;
+  sheetTabsRenderScheduled = true;
   const schedule = typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
   schedule(() => {
+    sheetTabsRenderScheduled = false;
+    // `SpreadsheetApp.onEditStateChange` invokes listeners immediately with the current edit state.
+    // During startup, sheet-tab rendering is wired later in this module; defer to avoid referencing
+    // sheet-tab state before initialization (which can crash the app in e2e).
     try {
       renderSheetTabs();
     } catch {
       // Best-effort during startup; sheet tabs will render once initialization completes.
     }
   });
+}
+
+app.onEditStateChange(() => {
+  emitSpreadsheetEditingChanged();
+  scheduleRibbonSelectionFormatStateUpdate();
+  scheduleSheetTabsRender();
 });
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:read-only-changed", () => {
   scheduleRibbonSelectionFormatStateUpdate();
-  // See `app.onEditStateChange` above: avoid calling `renderSheetTabs` before the sheet-tab
-  // module state is initialized.
-  const schedule = typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
-  schedule(() => {
-    try {
-      renderSheetTabs();
-    } catch {
-      // Best-effort during startup.
-    }
-  });
+  scheduleSheetTabsRender();
 });
 scheduleRibbonSelectionFormatStateUpdate();
 

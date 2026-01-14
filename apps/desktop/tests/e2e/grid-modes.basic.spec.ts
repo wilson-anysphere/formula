@@ -1,48 +1,42 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-function captureAppErrors(page: import("@playwright/test").Page): string[] {
-  const errors: string[] = [];
+import { gotoDesktop } from "./helpers";
 
-  page.on("console", (msg) => {
-    if (msg.type() !== "error") return;
-    errors.push(msg.text());
-  });
-
-  page.on("pageerror", (err) => {
-    errors.push(err.message ?? String(err));
-  });
-
-  return errors;
-}
-
-async function waitForIdle(page: import("@playwright/test").Page, capturedErrors: string[]): Promise<void> {
+async function whenIdle(page: Page): Promise<void> {
   // Vite may occasionally trigger a one-time full reload after dependency optimization.
   // Retry once if the execution context is destroyed mid-wait.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-      await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+      await page.evaluate(async () => {
+        const app = (window as any).__formulaApp;
+        if (app && typeof app.whenIdle === "function") {
+          await app.whenIdle();
+        }
+      });
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (attempt === 0 && message.includes("Execution context was destroyed")) {
-        await page.waitForLoadState("domcontentloaded");
+      if (
+        attempt === 0 &&
+        (message.includes("Execution context was destroyed") ||
+          message.includes("net::ERR_ABORTED") ||
+          message.includes("net::ERR_NETWORK_CHANGED") ||
+          message.includes("frame was detached"))
+      ) {
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
         continue;
       }
-      const errorText = capturedErrors.length > 0 ? capturedErrors.join("\n") : "(no console errors captured)";
-      throw new Error(`Spreadsheet app failed to initialize.\n\nCaptured browser errors:\n${errorText}\n\nOriginal error:\n${String(err)}`);
+      throw err;
     }
   }
 }
 
 const GRID_MODES = ["legacy", "shared"] as const;
 
-  for (const mode of GRID_MODES) {
-    test.describe(`${mode} grid basics`, () => {
-      test("keyboard navigation, edit, and scroll", async ({ page }) => {
-        const capturedErrors = captureAppErrors(page);
-        await page.goto(`/?grid=${mode}`, { waitUntil: "domcontentloaded" });
-        await waitForIdle(page, capturedErrors);
+for (const mode of GRID_MODES) {
+  test.describe(`${mode} grid basics`, () => {
+    test("keyboard navigation, edit, and scroll", async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
 
       // Focus grid.
       await page.click("#grid", { position: { x: 60, y: 40 } });
@@ -59,7 +53,7 @@ const GRID_MODES = ["legacy", "shared"] as const;
       await expect(editor).toBeVisible();
       await page.keyboard.type("ello");
       await page.keyboard.press("Enter");
-      await waitForIdle(page, capturedErrors);
+      await whenIdle(page);
 
       const c2Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"));
       expect(c2Value).toBe("hello");
@@ -79,9 +73,7 @@ const GRID_MODES = ["legacy", "shared"] as const;
 
 test.describe("shared grid resize", () => {
   test("column resize updates layout", async ({ page }) => {
-    const capturedErrors = captureAppErrors(page);
-    await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
-    await waitForIdle(page, capturedErrors);
+    await gotoDesktop(page, "/?grid=shared");
 
     const gridBox = await page.locator("#grid").boundingBox();
     if (!gridBox) throw new Error("Missing grid bounding box");

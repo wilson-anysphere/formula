@@ -1,3 +1,30 @@
+import { afterEach, beforeEach } from "vitest";
+
+// ---------------------------------------------------------------------------
+// Global env defaults for desktop unit tests
+// ---------------------------------------------------------------------------
+//
+// SpreadsheetApp supports both legacy (DOM/SVG) charts and unified canvas charts
+// (ChartStore charts render through the drawings overlay). Canvas charts can be
+// enabled via URL params (`?canvasCharts=1`) or env vars (`CANVAS_CHARTS=1`).
+//
+// Many unit tests exercise legacy chart/drawing behavior and assume canvas
+// charts are disabled unless explicitly enabled within the test. Keep the
+// default deterministic across the suite, and reset after each test so tests
+// that toggle/delete these env vars cannot leak state across files.
+const DEFAULT_CANVAS_CHARTS = "0";
+const DEFAULT_USE_CANVAS_CHARTS = "0";
+
+beforeEach(() => {
+  if (process.env.CANVAS_CHARTS === undefined) process.env.CANVAS_CHARTS = DEFAULT_CANVAS_CHARTS;
+  if (process.env.USE_CANVAS_CHARTS === undefined) process.env.USE_CANVAS_CHARTS = DEFAULT_USE_CANVAS_CHARTS;
+});
+
+afterEach(() => {
+  process.env.CANVAS_CHARTS = DEFAULT_CANVAS_CHARTS;
+  process.env.USE_CANVAS_CHARTS = DEFAULT_USE_CANVAS_CHARTS;
+});
+
 class MemoryLocalStorage implements Storage {
   private readonly store = new Map<string, string>();
 

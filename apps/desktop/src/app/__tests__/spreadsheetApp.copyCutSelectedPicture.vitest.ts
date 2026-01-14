@@ -396,6 +396,11 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     // are scoped to the `copy()` path.
     createImageBitmapMock.mockClear();
 
+    // Selecting a drawing may trigger an asynchronous render, which can preload images for display.
+    // This test specifically asserts that the *copy* path does not invoke `createImageBitmap` when
+    // the bytes already look like a PNG (even if the stored mimeType is wrong).
+    createImageBitmapMock.mockClear();
+
     app.copy();
     await app.whenIdle();
     expect(write).toHaveBeenCalledWith({ text: "", imagePng: pngBytes });
