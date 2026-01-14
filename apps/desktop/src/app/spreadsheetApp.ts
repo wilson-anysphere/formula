@@ -17116,12 +17116,25 @@ export class SpreadsheetApp {
       const coordScratch = { row: 0, col: 0 };
       const memo = new Map<string, Map<number, SpreadsheetValue>>();
       const stack = new Map<string, Set<number>>();
+      const docAny = this.document as any;
+      const sheetsMap: unknown = docAny?.model?.sheets;
+      const sheetMetaMap: unknown = docAny?.sheetMeta;
       return {
         getRange: (rangeRef: string, flags?: { sawFormula: boolean }) => {
           const parsed = parseA1Range(rangeRef);
           if (!parsed) return [];
-          const sheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : this.sheetId;
-          if (!sheetId) return [];
+          let sheetId = this.sheetId;
+          if (parsed.sheetName) {
+            const resolved = this.resolveSheetIdByName(parsed.sheetName);
+            if (!resolved) return [];
+            // `sheetNameResolver` mappings can become stale (e.g. sheet deleted via applyState/undo/redo).
+            // Avoid resurrecting deleted sheets via lazy `getCell` reads while refreshing chart caches.
+            const exists =
+              (sheetsMap instanceof Map && sheetsMap.has(resolved)) ||
+              (sheetMetaMap instanceof Map && sheetMetaMap.has(resolved));
+            if (!exists) return [];
+            sheetId = resolved;
+          }
 
           const out: unknown[][] = [];
           for (let r = parsed.startRow; r <= parsed.endRow; r += 1) {
@@ -26347,6 +26360,10 @@ export class SpreadsheetApp {
       return `${prefix}${a1}`;
     };
 
+    const docAny = this.document as any;
+    const sheetsMap: unknown = docAny?.model?.sheets;
+    const sheetMetaMap: unknown = docAny?.sheetMeta;
+
     const value = evaluateFormula(state.formula, (ref) => {
       const normalized = ref.trim();
       let targetSheet = sheetId;
@@ -26358,6 +26375,12 @@ export class SpreadsheetApp {
         if (maybeSheet && addr) {
           const resolved = this.resolveSheetIdByName(maybeSheet);
           if (!resolved) return "#REF!";
+          // `sheetNameResolver` mappings can become stale (e.g. sheet deleted via applyState/undo/redo).
+          // Avoid resurrecting deleted sheets by treating refs to unknown sheet ids as #REF! instead of
+          // letting `DocumentController.getCell()` lazily materialize a phantom sheet.
+          const exists =
+            (sheetsMap instanceof Map && sheetsMap.has(resolved)) || (sheetMetaMap instanceof Map && sheetMetaMap.has(resolved));
+          if (!exists) return "#REF!";
           targetSheet = resolved;
           targetAddress = addr.trim();
         }

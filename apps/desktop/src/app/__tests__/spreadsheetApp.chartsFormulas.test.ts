@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
+import { createSheetNameResolverFromIdToNameMap } from "../../sheet/sheetNameResolver";
 
 let priorGridMode: string | undefined;
 
@@ -183,6 +184,58 @@ describe("SpreadsheetApp chart formula evaluation", () => {
     app.refresh();
 
     expect(getChartModel(app, result.chart_id)?.series?.[0]?.values?.cache?.[0]).toBe(14);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("does not recreate a deleted sheet when refreshing legacy chart caches with a stale sheetNameResolver mapping", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const sheetIdToName = new Map<string, string>([
+      ["Sheet1", "Sheet1"],
+      ["Sheet2", "Sheet2"],
+    ]);
+    const sheetNameResolver = createSheetNameResolverFromIdToNameMap(sheetIdToName);
+
+    const app = new SpreadsheetApp(root, status, { sheetNameResolver });
+    const doc = app.getDocument();
+
+    // Materialize Sheet1 and create Sheet2.
+    doc.getCell("Sheet1", { row: 0, col: 0 });
+    doc.addSheet({ sheetId: "Sheet2", name: "Sheet2", insertAfterId: "Sheet1" });
+
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "A");
+    doc.setCellValue("Sheet2", { row: 0, col: 1 }, 1);
+    doc.setCellValue("Sheet2", { row: 1, col: 0 }, "B");
+    doc.setCellValue("Sheet2", { row: 1, col: 1 }, 2);
+
+    const { chart_id: chartId } = app.addChart({
+      chart_type: "bar",
+      data_range: "Sheet2!A1:B2",
+      position: "Sheet1!C1",
+      title: "Stale Resolver Chart",
+    });
+
+    // Force a chart model build so the cache exists pre-delete.
+    (app as any).renderCharts(true);
+
+    doc.deleteSheet("Sheet2");
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+    expect(doc.getSheetMeta("Sheet2")).toBeNull();
+
+    // Force a full chart cache rebuild. The chart still references Sheet2 ranges and the resolver
+    // still maps "Sheet2" -> "Sheet2"; the rebuild must not resurrect the deleted sheet.
+    (app as any).dirtyChartIds.add(chartId);
+    (app as any).renderCharts(true);
+
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+    expect(doc.getSheetMeta("Sheet2")).toBeNull();
 
     app.destroy();
     root.remove();

@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
+import { createSheetNameResolverFromIdToNameMap } from "../../sheet/sheetNameResolver";
 
 let priorGridMode: string | undefined;
 
@@ -143,6 +144,39 @@ describe("SpreadsheetApp fallback evaluator", () => {
     const computed = app.getCellComputedValueForSheet(app.getCurrentSheetId(), { row: 0, col: 1 });
     expect(computed).toBe("#REF!");
     expect(doc.getSheetIds()).not.toContain("MissingSheet");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("returns #REF! for stale sheetNameResolver mappings after a sheet is deleted (without recreating it)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const sheetIdToName = new Map<string, string>([
+      ["Sheet1", "Sheet1"],
+      ["Sheet2", "Sheet2"],
+    ]);
+    const resolver = createSheetNameResolverFromIdToNameMap(sheetIdToName);
+
+    const app = new SpreadsheetApp(root, status, { sheetNameResolver: resolver });
+    const doc = app.getDocument();
+
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, 123);
+    doc.setCellFormula("Sheet1", { row: 0, col: 1 }, "=Sheet2!A1");
+    expect(app.getCellComputedValueForSheet("Sheet1", { row: 0, col: 1 })).toBe(123);
+
+    // Delete the referenced sheet but keep the resolver mapping stale.
+    doc.deleteSheet("Sheet2");
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+
+    // The computed-value evaluator must not resurrect the deleted sheet via lazy reads.
+    expect(app.getCellComputedValueForSheet("Sheet1", { row: 0, col: 1 })).toBe("#REF!");
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
 
     app.destroy();
     root.remove();
