@@ -26,6 +26,8 @@ import { getDesktopLLMClient, getDesktopModel } from "../llm/desktopLLMClient.js
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 
+const INCLUDE_FORMULA_VALUES_STORAGE_KEY = "formula.ai.includeFormulaValues";
+
 export interface InlineEditLLMClient {
   chat: (request: any) => Promise<any>;
 }
@@ -213,6 +215,10 @@ export class InlineEditController {
         sheetNameResolver: this.options.sheetNameResolver ?? null
       });
       const api = createAbortableSpreadsheetApi(baseApi, signal);
+      const includeFormulaValues =
+        typeof this.options.toolExecutorOptions?.include_formula_values === "boolean"
+          ? this.options.toolExecutorOptions.include_formula_values
+          : readIncludeFormulaValuesFromStorage();
 
       this.overlay.setRunning("Building context…");
       throwIfAborted(signal);
@@ -240,7 +246,7 @@ export class InlineEditController {
         ragService: null,
         schemaProvider: this.options.schemaProvider ?? null,
         sheetNameResolver: this.options.sheetNameResolver ?? null,
-        includeFormulaValues: Boolean(this.options.toolExecutorOptions?.include_formula_values),
+        includeFormulaValues,
         dlp,
         mode: "inline_edit",
         model,
@@ -266,6 +272,7 @@ export class InlineEditController {
 
       const toolExecutor = new SpreadsheetLLMToolExecutor(api, {
         ...(this.options.toolExecutorOptions ?? {}),
+        include_formula_values: includeFormulaValues,
         default_sheet: params.sheetId,
         sheet_name_resolver: this.options.toolExecutorOptions?.sheet_name_resolver ?? this.options.sheetNameResolver ?? null,
         require_approval_for_mutations: true,
@@ -337,7 +344,7 @@ export class InlineEditController {
               {
                 default_sheet: params.sheetId,
                 sheet_name_resolver: this.options.toolExecutorOptions?.sheet_name_resolver ?? this.options.sheetNameResolver ?? null,
-                include_formula_values: this.options.toolExecutorOptions?.include_formula_values ?? false
+                include_formula_values: includeFormulaValues
               }
             );
             throwIfAborted(signal);
@@ -503,4 +510,43 @@ function sheetDisplayName(sheetId: string, sheetNameResolver?: SheetNameResolver
   const id = String(sheetId ?? "").trim();
   if (!id) return "";
   return sheetNameResolver?.getSheetNameById(id) ?? id;
+}
+
+function getLocalStorageOrNull(): Storage | null {
+  // Prefer `window.localStorage` when available (jsdom + browser runtimes).
+  if (typeof window !== "undefined") {
+    try {
+      const storage = window.localStorage;
+      if (!storage) return null;
+      if (typeof storage.getItem !== "function") return null;
+      return storage;
+    } catch {
+      // ignore
+    }
+  }
+
+  // Node can expose `globalThis.localStorage` as a throwing accessor (e.g. Node 25 without flags).
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const storage = (globalThis as any)?.localStorage as Storage | undefined;
+    if (!storage) return null;
+    if (typeof storage.getItem !== "function") return null;
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+function readIncludeFormulaValuesFromStorage(): boolean {
+  const storage = getLocalStorageOrNull();
+  if (!storage) return false;
+  try {
+    const raw = storage.getItem(INCLUDE_FORMULA_VALUES_STORAGE_KEY);
+    if (raw == null) return false;
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return raw === "1";
+  } catch {
+    return false;
+  }
 }
