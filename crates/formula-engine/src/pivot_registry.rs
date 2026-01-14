@@ -77,7 +77,7 @@ impl PivotRegistryEntry {
         let mut field_indices: HashMap<String, usize> = HashMap::new();
 
         for (idx, f) in pivot.config.row_fields.iter().enumerate() {
-            let key = crate::value::casefold(&f.source_field.display_string());
+            let key = crate::value::casefold(f.source_field.canonical_name().as_ref());
             let cache_idx = cache_field_indices
                 .get(&key)
                 .copied()
@@ -93,7 +93,7 @@ impl PivotRegistryEntry {
         }
 
         for (idx, f) in pivot.config.column_fields.iter().enumerate() {
-            let key = crate::value::casefold(&f.source_field.display_string());
+            let key = crate::value::casefold(f.source_field.canonical_name().as_ref());
             let cache_idx = cache_field_indices
                 .get(&key)
                 .copied()
@@ -109,7 +109,7 @@ impl PivotRegistryEntry {
         }
 
         for (idx, f) in pivot.config.filter_fields.iter().enumerate() {
-            let key = crate::value::casefold(&f.source_field.display_string());
+            let key = crate::value::casefold(f.source_field.canonical_name().as_ref());
             let cache_idx = cache_field_indices
                 .get(&key)
                 .copied()
@@ -129,7 +129,7 @@ impl PivotRegistryEntry {
             Vec::with_capacity(pivot.config.value_fields.len());
         for (idx, vf) in pivot.config.value_fields.iter().enumerate() {
             value_field_indices.insert(crate::value::casefold(&vf.name), idx);
-            let key = crate::value::casefold(&vf.source_field.display_string());
+            let key = crate::value::casefold(vf.source_field.canonical_name().as_ref());
             let cache_idx = cache_field_indices
                 .get(&key)
                 .copied()

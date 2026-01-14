@@ -1563,7 +1563,7 @@ fn getpivotdata_from_registry(
         .iter()
         .filter_map(|filter| {
             let allowed = filter.allowed.as_ref()?;
-            let key = crate::value::casefold(&filter.source_field.display_string());
+            let key = crate::value::casefold(filter.source_field.canonical_name().as_ref());
             let idx = entry.field_indices.get(&key).copied()?;
             Some((idx, allowed))
         })
