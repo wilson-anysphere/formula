@@ -779,6 +779,8 @@ async fn show_system_notification(
 async fn oauth_loopback_listen(
     window: tauri::WebviewWindow,
     state: State<'_, SharedOauthLoopbackState>,
+    // Guardrail: `redirect_uri` is treated as an IPC URL and must stay capped by
+    // MAX_OAUTH_REDIRECT_URI_BYTES (aka MAX_IPC_URL_BYTES).
     redirect_uri: LimitedString<MAX_OAUTH_REDIRECT_URI_BYTES>,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
