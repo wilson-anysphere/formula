@@ -2,6 +2,32 @@ name: Desktop performance (platform matrix)
 
 on:
   workflow_dispatch:
+    inputs:
+      startupRuns:
+        description: "Number of cold/warm startup iterations (default: 5)"
+        required: false
+        default: "5"
+        type: string
+      startupTimeoutMs:
+        description: "Per-startup-run timeout in milliseconds (default: 20000)"
+        required: false
+        default: "20000"
+        type: string
+      memoryRuns:
+        description: "Number of idle-memory iterations (default: 3)"
+        required: false
+        default: "3"
+        type: string
+      memoryTimeoutMs:
+        description: "Per-memory-run timeout in milliseconds (default: 30000)"
+        required: false
+        default: "30000"
+        type: string
+      memorySettleMs:
+        description: "Idle-memory settle delay after TTI in milliseconds (default: 5000)"
+        required: false
+        default: "5000"
+        type: string
   schedule:
     # Daily (UTC). Adjust as needed; goal is continuous cross-platform visibility.
     - cron: "0 7 * * *"
@@ -23,6 +49,12 @@ env:
   # repo/organization variables set these for other workflows.
   FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH: "0"
   FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH: "0"
+  # Defaults for `workflow_dispatch` inputs. (Scheduled runs will always use these.)
+  DESKTOP_STARTUP_RUNS: 5
+  DESKTOP_STARTUP_TIMEOUT_MS: 20000
+  DESKTOP_MEMORY_RUNS: 3
+  DESKTOP_MEMORY_TIMEOUT_MS: 30000
+  DESKTOP_MEMORY_SETTLE_MS: 5000
 
 jobs:
   desktop-perf:
@@ -102,6 +134,17 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         # Prefer cached pnpm store entries to reduce network flakiness on reruns.
         run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Apply workflow_dispatch perf overrides
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "DESKTOP_STARTUP_RUNS=${{ inputs.startupRuns }}" >> "$GITHUB_ENV"
+          echo "DESKTOP_STARTUP_TIMEOUT_MS=${{ inputs.startupTimeoutMs }}" >> "$GITHUB_ENV"
+          echo "DESKTOP_MEMORY_RUNS=${{ inputs.memoryRuns }}" >> "$GITHUB_ENV"
+          echo "DESKTOP_MEMORY_TIMEOUT_MS=${{ inputs.memoryTimeoutMs }}" >> "$GITHUB_ENV"
+          echo "DESKTOP_MEMORY_SETTLE_MS=${{ inputs.memorySettleMs }}" >> "$GITHUB_ENV"
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
@@ -207,7 +250,7 @@ jobs:
             cargo build -p desktop --bin formula-desktop --features desktop --release --locked
           fi
 
-      - name: Run desktop startup benchmark (cold, 5 runs)
+      - name: Run desktop startup benchmark (cold)
         id: startup-cold
         continue-on-error: true
         shell: bash
@@ -217,12 +260,12 @@ jobs:
           node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts \
             --mode cold \
             --full \
-            --runs 5 \
-            --timeout-ms 20000 \
+            --runs "${DESKTOP_STARTUP_RUNS}" \
+            --timeout-ms "${DESKTOP_STARTUP_TIMEOUT_MS}" \
             --json perf-artifacts/desktop-startup-metrics-cold.json \
             --allow-ci 2>&1 | tee perf-artifacts/desktop-startup-cold.log
 
-      - name: Run desktop startup benchmark (warm, 5 runs)
+      - name: Run desktop startup benchmark (warm)
         id: startup-warm
         continue-on-error: true
         shell: bash
@@ -232,21 +275,21 @@ jobs:
           node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts \
             --mode warm \
             --full \
-            --runs 5 \
-            --timeout-ms 20000 \
+            --runs "${DESKTOP_STARTUP_RUNS}" \
+            --timeout-ms "${DESKTOP_STARTUP_TIMEOUT_MS}" \
             --json perf-artifacts/desktop-startup-metrics-warm.json \
             --allow-ci 2>&1 | tee perf-artifacts/desktop-startup-warm.log
 
-      - name: Run idle memory benchmark (3 runs)
+      - name: Run idle memory benchmark
         id: memory
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p perf-artifacts
           node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-memory-runner.ts \
-            --runs 3 \
-            --timeout-ms 30000 \
-            --settle-ms 5000 \
+            --runs "${DESKTOP_MEMORY_RUNS}" \
+            --timeout-ms "${DESKTOP_MEMORY_TIMEOUT_MS}" \
+            --settle-ms "${DESKTOP_MEMORY_SETTLE_MS}" \
             --json perf-artifacts/desktop-memory-metrics.json \
             --allow-ci 2>&1 | tee perf-artifacts/desktop-memory.log
 
