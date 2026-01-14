@@ -441,6 +441,27 @@ fn dax_measure_ref_parser_handles_basic_and_rejects_nested_brackets() {
 }
 
 #[test]
+fn dax_table_identifier_display_quotes_keywords_and_invalid_identifiers() {
+    let cases = [
+        // DAX keywords used by VAR expressions should be quoted to avoid ambiguity.
+        ("IN", "'IN'[Col]"),
+        ("var", "'var'[Col]"),
+        ("Return", "'Return'[Col]"),
+        // Invalid "C identifier" forms must be quoted.
+        ("123", "'123'[Col]"),
+        ("Sales-2024", "'Sales-2024'[Col]"),
+    ];
+
+    for (table, expected) in cases {
+        let field = PivotFieldRef::DataModelColumn {
+            table: table.to_string(),
+            column: "Col".to_string(),
+        };
+        assert_eq!(field.to_string(), expected);
+    }
+}
+
+#[test]
 fn pivot_field_ref_deserializes_dax_refs_from_strings() {
     assert_eq!(
         serde_json::from_value::<PivotFieldRef>(json!("Table[Column]")).unwrap(),
