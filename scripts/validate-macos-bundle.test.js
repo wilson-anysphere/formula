@@ -917,6 +917,58 @@ test(
 );
 
 test(
+  "validate-macos-bundle fails when embedded entitlements are missing required keys",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-macos-bundle-test-"));
+    const binDir = join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+
+    const mountPoint = join(tmp, "mnt");
+    const devEntry = "/dev/disk99s1";
+    mkdirSync(mountPoint, { recursive: true });
+    writeFakeMacOsTooling(binDir, { mountPoint, devEntry });
+
+    const logPath = join(tmp, "invocations.log");
+    writeFakeTool(
+      binDir,
+      "codesign",
+      `#!/usr/bin/env bash\nset -euo pipefail\necho \"codesign $*\" >> \"${logPath}\"\ncase \"${"$"}*\" in\n  *\"--entitlements\"*)\n    echo \"Executable=${"$"}{4:-/path/to/formula-desktop}\" >&2\n    # Missing allow-jit should fail the guardrail.\n    cat >&2 <<'PLIST'\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n  <dict>\n    <key>com.apple.security.network.client</key>\n    <true/>\n    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>\n    <true/>\n  </dict>\n</plist>\nPLIST\n    ;;\n  *\"-dv\"*)\n    echo \"Runtime Version=13.0.0\" >&2\n    echo \"CodeDirectory v=20500 size=0 flags=0x10000(runtime) hashes=0 location=embedded\" >&2\n    ;;\nesac\nexit 0\n`,
+    );
+    writeFakeTool(
+      binDir,
+      "spctl",
+      `#!/usr/bin/env bash\nset -euo pipefail\necho \"spctl $*\" >> \"${logPath}\"\nexit 0\n`,
+    );
+
+    const appRoot = join(mountPoint, "Formula.app", "Contents");
+    const macosDir = join(appRoot, "MacOS");
+    mkdirSync(macosDir, { recursive: true });
+    writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
+    chmodSync(join(macosDir, "formula-desktop"), 0o755);
+    writeComplianceResources(appRoot);
+
+    writeInfoPlist(join(appRoot, "Info.plist"), {
+      identifier: expectedIdentifier,
+      version: expectedVersion,
+    });
+
+    const dmgPath = join(tmp, "Formula.dmg");
+    writeFileSync(dmgPath, "not-a-real-dmg", { encoding: "utf8" });
+
+    const proc = runValidator({
+      dmgPath,
+      binDir,
+      env: {
+        APPLE_CERTIFICATE: "dummy",
+      },
+    });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /allow-jit/i);
+  },
+);
+
+test(
   "validate-macos-bundle fails when codesign metadata does not advertise hardened runtime",
   { skip: !hasBash },
   () => {
