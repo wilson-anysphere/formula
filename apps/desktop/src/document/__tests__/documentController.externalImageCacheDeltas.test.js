@@ -20,7 +20,7 @@ test("applyExternalImageCacheDeltas updates cache, emits change.imageDeltas, and
       {
         imageId: "img1",
         before: null,
-        after: { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
+        after: { bytes: new Uint8Array([1, 2, 3]), mimeType: " image/png " },
       },
     ],
     { source: "hydration" },

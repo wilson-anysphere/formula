@@ -42,8 +42,7 @@ export function parseImageCellValue(value) {
   if (typeof imageId !== "string" || imageId.trim() === "") return null;
 
   const altTextRaw = payload.altText ?? payload.alt_text ?? payload.alt;
-  const altText = typeof altTextRaw === "string" && altTextRaw.trim() !== "" ? altTextRaw : null;
+  const altText = typeof altTextRaw === "string" ? altTextRaw.trim() : "";
 
-  return { imageId: imageId.trim(), altText };
+  return { imageId: imageId.trim(), altText: altText === "" ? null : altText };
 }
-

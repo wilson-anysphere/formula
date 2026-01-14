@@ -62,7 +62,7 @@ test("clipboard TSV escapes values that would otherwise look like formulas", () 
 
 test("clipboard TSV serializes in-cell image values as alt text / placeholders (not [object Object])", () => {
   const tsvWithAlt = serializeCellGridToTsv([
-    [{ value: { type: "image", value: { imageId: "img1", altText: "Alt" } } }],
+    [{ value: { type: "image", value: { imageId: "img1", altText: " Alt " } } }],
   ]);
   assert.equal(tsvWithAlt, "Alt");
 

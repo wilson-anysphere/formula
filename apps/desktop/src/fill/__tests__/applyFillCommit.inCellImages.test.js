@@ -9,7 +9,7 @@ import {
 
 test("fill commits coerce in-cell image values to alt text (not [object Object])", () => {
   const doc = new DocumentController();
-  doc.setCellValue("Sheet1", "A1", { type: "image", value: { imageId: "img-1", altText: "Logo" } });
+  doc.setCellValue("Sheet1", "A1", { type: "image", value: { imageId: "img-1", altText: " Logo " } });
 
   applyFillCommitToDocumentController({
     document: doc,
@@ -39,7 +39,7 @@ test("fill commits coerce image values without alt text to a stable placeholder"
 
 test("fill (with formula rewrite path) also coerces in-cell images", async () => {
   const doc = new DocumentController();
-  doc.setCellValue("Sheet1", "A1", { type: "image", value: { imageId: "img-1", altText: "Logo" } });
+  doc.setCellValue("Sheet1", "A1", { type: "image", value: { imageId: "img-1", altText: " Logo " } });
 
   await applyFillCommitToDocumentControllerWithFormulaRewrite({
     document: doc,
@@ -54,4 +54,3 @@ test("fill (with formula rewrite path) also coerces in-cell images", async () =>
 
   assert.equal(doc.getCell("Sheet1", "A2").value, "Logo");
 });
-

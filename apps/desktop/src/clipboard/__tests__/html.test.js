@@ -75,7 +75,7 @@ test("clipboard HTML round-trips basic values and formatting", () => {
 
 test("clipboard HTML serializes in-cell image values as alt text / placeholders (not [object Object])", () => {
   const htmlWithAlt = serializeCellGridToHtml([
-    [{ value: { type: "image", value: { imageId: "img1", altText: "Alt" } } }],
+    [{ value: { type: "image", value: { imageId: "img1", altText: " Alt " } } }],
   ]);
   assert.match(htmlWithAlt, /Alt/);
 

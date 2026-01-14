@@ -20,7 +20,7 @@ test("applyExternalImageDeltas updates image store, emits change.imageDeltas, an
       {
         imageId: "img1",
         before: null,
-        after: { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
+        after: { bytes: new Uint8Array([1, 2, 3]), mimeType: " image/png " },
       },
     ],
     { source: "hydration" },
