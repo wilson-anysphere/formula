@@ -67,19 +67,6 @@ function findArgumentEnd(formulaText: string, start: number): number {
       continue;
     }
 
-    if (ch === "(") {
-      parenDepth += 1;
-      continue;
-    }
-    if (ch === ")") {
-      if (parenDepth > 0) {
-        parenDepth -= 1;
-        continue;
-      }
-      if (bracketDepth === 0 && braceDepth === 0) return i;
-      continue;
-    }
-
     if (ch === "[") {
       bracketDepth += 1;
       continue;
@@ -95,6 +82,21 @@ function findArgumentEnd(formulaText: string, start: number): number {
     }
     if (ch === "}") {
       if (braceDepth > 0) braceDepth -= 1;
+      continue;
+    }
+
+    // Treat parentheses inside `[]` / `{}` as plain characters so structured references
+    // like `Table1[Amount)]` don't accidentally break argument parsing.
+    if (ch === "(" && bracketDepth === 0) {
+      parenDepth += 1;
+      continue;
+    }
+    if (ch === ")" && bracketDepth === 0) {
+      if (parenDepth > 0) {
+        parenDepth -= 1;
+        continue;
+      }
+      if (bracketDepth === 0 && braceDepth === 0) return i;
       continue;
     }
 
@@ -143,6 +145,26 @@ export function getActiveArgumentSpan(formulaText: string, cursorIndex: number):
       continue;
     }
 
+    // Bracketed structured references/external refs should be treated as opaque
+    // (except for nested bracket matching). Otherwise column names like
+    // `Table1[Amount(USD)]` could be misread as function calls.
+    if (ch === "[") {
+      stack.push({ kind: "bracket" });
+      i += 1;
+      continue;
+    }
+    if (ch === "]") {
+      popUntilKind(stack, "bracket");
+      i += 1;
+      continue;
+    }
+
+    const inBracket = stack.some((frame) => frame.kind === "bracket");
+    if (inBracket) {
+      i += 1;
+      continue;
+    }
+
     if (isIdentifierStart(ch)) {
       const start = i;
       i += 1;
@@ -167,18 +189,6 @@ export function getActiveArgumentSpan(formulaText: string, cursorIndex: number):
 
     if (ch === ")") {
       popParenFrame(stack);
-      i += 1;
-      continue;
-    }
-
-    if (ch === "[") {
-      stack.push({ kind: "bracket" });
-      i += 1;
-      continue;
-    }
-
-    if (ch === "]") {
-      popUntilKind(stack, "bracket");
       i += 1;
       continue;
     }

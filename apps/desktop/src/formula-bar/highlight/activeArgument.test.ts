@@ -57,6 +57,26 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 
+  it("treats parentheses inside structured references as plain text", () => {
+    const formula = "=SUM(Table1[Amount)], 1)";
+    const insideSecondArg = formula.lastIndexOf("1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "1",
+    });
+  });
+
+  it("does not treat function-like text inside structured references as nested calls", () => {
+    const formula = "=SUM(Table1[Amount(USD)], 1)";
+    const insideSecondArg = formula.lastIndexOf("1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "1",
+    });
+  });
+
   it("ignores commas inside curly braces (array literals)", () => {
     const formula = "=SUM({1,2,3}, 4)";
     const insideSecondArg = formula.indexOf("4") + 1;
