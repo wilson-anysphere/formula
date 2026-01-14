@@ -1,15 +1,21 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use std::collections::HashMap;
+
+use chrono::Datelike;
+
 use crate::editing::rewrite::{
     rewrite_formula_for_range_map, rewrite_formula_for_structural_edit, GridRange, RangeMapEdit,
     StructuralEdit,
 };
 use crate::editing::EditOp;
+use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::CellAddr;
-use formula_model::{CellRef, Range};
+use formula_model::{CellRef, Range, Style};
 
-use super::{PivotCache, PivotConfig, PivotEngine, PivotError, PivotResult, PivotValue};
+use super::source::coerce_pivot_value_with_number_format;
+use super::{PivotApplyOptions, PivotCache, PivotConfig, PivotEngine, PivotError, PivotResult, PivotValue};
 
 /// Stable identifier for a pivot table stored in the engine.
 ///
@@ -502,6 +508,15 @@ pub struct PivotRefreshOutput {
 
 pub(crate) trait PivotRefreshContext {
     fn read_cell(&mut self, sheet: &str, addr: &str) -> crate::value::Value;
+    fn read_cell_number_format(&self, sheet: &str, addr: &str) -> Option<String>;
+    fn date_system(&self) -> ExcelDateSystem;
+    fn intern_style(&mut self, style: Style) -> u32;
+    fn set_cell_style_id(
+        &mut self,
+        sheet: &str,
+        addr: &str,
+        style_id: u32,
+    ) -> Result<(), crate::EngineError>;
     fn write_cell(
         &mut self,
         sheet: &str,
@@ -534,7 +549,13 @@ pub(crate) fn refresh_pivot(
         for col in source_range.start.col..=source_range.end.col {
             let addr = CellRef::new(row, col).to_a1();
             let value = ctx.read_cell(&source_sheet, &addr);
-            out_row.push(engine_value_to_pivot_value(value));
+            let pivot_value = engine_value_to_pivot_value(value);
+            let number_format = ctx.read_cell_number_format(&source_sheet, &addr);
+            out_row.push(coerce_pivot_value_with_number_format(
+                pivot_value,
+                number_format.as_deref(),
+                ctx.date_system(),
+            ));
         }
         data.push(out_row);
     }
@@ -579,21 +600,37 @@ pub(crate) fn refresh_pivot(
         .ok_or(PivotRefreshError::OutputOutOfBounds)?;
     let output_range = Range::new(def.destination.cell, CellRef::new(end_row, end_col));
 
-    for (r, row) in result.data.iter().enumerate() {
-        for (c, value) in row.iter().enumerate() {
-            let addr = CellRef::new(
-                def.destination.cell.row + r as u32,
-                def.destination.cell.col + c as u32,
-            )
-            .to_a1();
-            let v = pivot_value_to_engine_value(value.clone());
-            if matches!(v, crate::value::Value::Blank) {
-                ctx.clear_cell(&def.destination.sheet, &addr).ok();
-            } else {
-                ctx.write_cell(&def.destination.sheet, &addr, v)
-                    .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
-            }
+    let pivot_cell_writes = result.to_cell_writes_with_formats(
+        super::CellRef {
+            row: def.destination.cell.row,
+            col: def.destination.cell.col,
+        },
+        &def.config,
+        &PivotApplyOptions::default(),
+    );
+
+    let mut style_cache: HashMap<String, u32> = HashMap::new();
+    let date_system = ctx.date_system();
+
+    for write in pivot_cell_writes {
+        let addr = CellRef::new(write.row, write.col).to_a1();
+
+        if let Some(fmt) = write.number_format.as_deref() {
+            let style_id = *style_cache.entry(fmt.to_string()).or_insert_with(|| {
+                ctx.intern_style(Style {
+                    number_format: Some(fmt.to_string()),
+                    ..Style::default()
+                })
+            });
+            ctx.set_cell_style_id(&def.destination.sheet, &addr, style_id)
+                .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
         }
+
+        // Write values after styles so "precision as displayed" rounding (when enabled) uses the
+        // final number format.
+        let v = pivot_value_to_engine_value(write.value, date_system);
+        ctx.write_cell(&def.destination.sheet, &addr, v)
+            .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
     }
 
     def.last_output_range = Some(output_range);
@@ -624,12 +661,18 @@ fn engine_value_to_pivot_value(value: crate::value::Value) -> PivotValue {
     }
 }
 
-fn pivot_value_to_engine_value(value: PivotValue) -> crate::value::Value {
+fn pivot_value_to_engine_value(value: PivotValue, date_system: ExcelDateSystem) -> crate::value::Value {
     match value {
         PivotValue::Blank => crate::value::Value::Blank,
         PivotValue::Number(n) => crate::value::Value::Number(n),
         PivotValue::Text(s) => crate::value::Value::Text(s),
         PivotValue::Bool(b) => crate::value::Value::Bool(b),
-        PivotValue::Date(d) => crate::value::Value::Text(d.to_string()),
+        PivotValue::Date(d) => {
+            let excel_date = ExcelDate::new(d.year(), d.month() as u8, d.day() as u8);
+            match ymd_to_serial(excel_date, date_system) {
+                Ok(serial) => crate::value::Value::Number(serial as f64),
+                Err(_) => crate::value::Value::Blank,
+            }
+        }
     }
 }

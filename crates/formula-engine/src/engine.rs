@@ -7499,6 +7499,31 @@ impl PivotRefreshContext for Engine {
         self.get_cell_value(sheet, addr)
     }
 
+    fn read_cell_number_format(&self, sheet: &str, addr: &str) -> Option<String> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let addr = parse_a1(addr).ok()?;
+        let style_id = self.effective_style_id_at(CellKey { sheet: sheet_id, addr });
+        crate::pivot::source::resolve_number_format_from_style_id(&self.workbook.styles, style_id)
+            .map(|s| s.to_string())
+    }
+
+    fn date_system(&self) -> ExcelDateSystem {
+        Engine::date_system(self)
+    }
+
+    fn intern_style(&mut self, style: Style) -> u32 {
+        Engine::intern_style(self, style)
+    }
+
+    fn set_cell_style_id(
+        &mut self,
+        sheet: &str,
+        addr: &str,
+        style_id: u32,
+    ) -> Result<(), EngineError> {
+        Engine::set_cell_style_id(self, sheet, addr, style_id)
+    }
+
     fn write_cell(&mut self, sheet: &str, addr: &str, value: Value) -> Result<(), EngineError> {
         self.set_cell_value(sheet, addr, value)
     }
