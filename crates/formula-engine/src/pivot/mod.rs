@@ -3696,7 +3696,7 @@ mod tests {
             cfg.value_fields[0].source_field,
             PivotFieldRef::DataModelMeasure("Total Sales".to_string())
         );
-        assert_eq!(cfg.value_fields[0].name, "Sum of Total Sales");
+        assert_eq!(cfg.value_fields[0].name, "Sum of [Total Sales]");
         assert_eq!(cfg.filter_fields[0].source_field, cache_field("Region"));
     }
 

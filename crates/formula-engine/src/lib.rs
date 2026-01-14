@@ -83,7 +83,7 @@ pub use editing::{
 pub use engine::{
     BytecodeCompileReason, BytecodeCompileReportEntry, BytecodeCompileStats, Engine, EngineError,
     EngineInfo, ExternalDataProvider, ExternalValueProvider, NameDefinition, NameScope,
-    PrecedentNode, RecalcMode, RecalcValueChange, SheetId, SheetLifecycleError,
+    FormatRun, PrecedentNode, RecalcMode, RecalcValueChange, SheetId, SheetLifecycleError,
 };
 pub use parser::{
     lex, lex_partial, parse_formula_partial, FunctionContext, ParseContext, PartialLex, PartialParse,
