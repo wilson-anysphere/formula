@@ -113,9 +113,11 @@ function createNumericKeyCountingProxy<T extends Record<string, number>>(
   });
 }
 
-function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls: number } {
+function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls: number; mapGetCalls: number; mapHasCalls: number } {
   const originalArray = globalThis.Array;
   const originalMapSet = Map.prototype.set;
+  const originalMapGet = Map.prototype.get;
+  const originalMapHas = Map.prototype.has;
   const originalArrayPush = originalArray.prototype.push;
   const originalArrayBuffer = globalThis.ArrayBuffer;
   const typedArrayNames = [
@@ -138,6 +140,8 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
   const MAX_ARRAY_LENGTH = 200_000;
   const MAX_ARRAY_BUFFER_BYTES = 200_000;
   let mapSetCalls = 0;
+  let mapGetCalls = 0;
+  let mapHasCalls = 0;
   let pushedElements = 0;
 
   const GuardedArray = new Proxy(originalArray, {
@@ -177,6 +181,20 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
     mapSetCalls += 1;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (originalMapSet as any).apply(this, args);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+
+  Map.prototype.get = function (...args) {
+    mapGetCalls += 1;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalMapGet as any).apply(this, args);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+
+  Map.prototype.has = function (...args) {
+    mapHasCalls += 1;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalMapHas as any).apply(this, args);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 
@@ -227,7 +245,7 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
   const start = performance.now();
   try {
     fn();
-    return { elapsedMs: performance.now() - start, mapSetCalls };
+    return { elapsedMs: performance.now() - start, mapSetCalls, mapGetCalls, mapHasCalls };
   } finally {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).Array = originalArray;
@@ -238,6 +256,8 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
       (globalThis as any)[name] = originalTypedArrays[name];
     }
     Map.prototype.set = originalMapSet;
+    Map.prototype.get = originalMapGet;
+    Map.prototype.has = originalMapHas;
     originalArray.prototype.push = originalArrayPush;
   }
 }
@@ -404,6 +424,10 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       // `for (row=0..maxRows)` style loops.
       expect(hideRun.mapSetCalls).toBeLessThan(300_000);
       expect(unhideRun.mapSetCalls).toBeLessThan(300_000);
+      expect(hideRun.mapGetCalls).toBeLessThan(500_000);
+      expect(unhideRun.mapGetCalls).toBeLessThan(500_000);
+      expect(hideRun.mapHasCalls).toBeLessThan(500_000);
+      expect(unhideRun.mapHasCalls).toBeLessThan(500_000);
 
       if (!process.env.CI) {
         expect(hideRun.elapsedMs).toBeLessThan(1_000);
@@ -602,9 +626,13 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
         // (The key regression this catches is per-index invalidation loops.)
         expect(requestRenderSpy.mock.calls.length).toBeLessThanOrEqual(10);
 
-        // Keep work proportional to the number of hidden indices, not sheet maxes.
-        expect(hideRun.mapSetCalls).toBeLessThan(600_000);
-        expect(unhideRun.mapSetCalls).toBeLessThan(600_000);
+         // Keep work proportional to the number of hidden indices, not sheet maxes.
+         expect(hideRun.mapSetCalls).toBeLessThan(600_000);
+         expect(unhideRun.mapSetCalls).toBeLessThan(600_000);
+         expect(hideRun.mapGetCalls).toBeLessThan(900_000);
+         expect(unhideRun.mapGetCalls).toBeLessThan(900_000);
+         expect(hideRun.mapHasCalls).toBeLessThan(900_000);
+         expect(unhideRun.mapHasCalls).toBeLessThan(900_000);
 
         {
           const stats = getProviderCacheStats(provider);
