@@ -196,6 +196,33 @@ fn decode_b64_attr(
     decode_base64_field_limited(element, attr, raw, opts)
 }
 
+fn decode_b64_attr_or_child(
+    element: &'static str,
+    node: roxmltree::Node<'_, '_>,
+    field: &'static str,
+    opts: &ParseOptions,
+) -> Result<Vec<u8>> {
+    // Prefer attribute form when both are present for deterministic behavior.
+    if let Some(raw) = node.attribute(field) {
+        return decode_base64_field_limited(element, field, raw, opts);
+    }
+
+    // Fallback: some producers encode the blobs as child elements with base64 text content.
+    // Match by local name so namespace prefixes don't matter.
+    if let Some(child) = node
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == field)
+    {
+        let raw = child.text().unwrap_or("");
+        return decode_base64_field_limited(element, field, raw, opts);
+    }
+
+    Err(OffCryptoError::MissingRequiredAttribute {
+        element: element.to_string(),
+        attr: field.to_string(),
+    })
+}
+
 fn parse_hash_algorithm_attr(
     element: &str,
     node: roxmltree::Node<'_, '_>,
@@ -531,19 +558,19 @@ pub fn parse_agile_encryption_info_stream_with_options_and_decrypt_options(
         key_bits: key_encryptor_key_bits,
         block_size: key_encryptor_block_size,
         hash_size: parse_u32_attr("encryptedKey", encrypted_key_node, "hashSize")?,
-        encrypted_verifier_hash_input: decode_b64_attr(
+        encrypted_verifier_hash_input: decode_b64_attr_or_child(
             "encryptedKey",
             encrypted_key_node,
             "encryptedVerifierHashInput",
             parse_opts,
         )?,
-        encrypted_verifier_hash_value: decode_b64_attr(
+        encrypted_verifier_hash_value: decode_b64_attr_or_child(
             "encryptedKey",
             encrypted_key_node,
             "encryptedVerifierHashValue",
             parse_opts,
         )?,
-        encrypted_key_value: decode_b64_attr(
+        encrypted_key_value: decode_b64_attr_or_child(
             "encryptedKey",
             encrypted_key_node,
             "encryptedKeyValue",

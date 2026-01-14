@@ -175,10 +175,11 @@ Representative shape (attributes elided):
 </encryption>
 ```
 
-Note: MS-OFFCRYPTO also permits the three ciphertext blobs under `p:encryptedKey` to be encoded as
-**child elements** with base64 text (instead of attributes), e.g.
-`<p:encryptedKeyValue>...</p:encryptedKeyValue>`. `crates/formula-offcrypto` accepts **both** forms
-and prefers attribute values when both are present.
+Compatibility note: while Excel typically encodes the three password key-encryptor ciphertext blobs
+(`encryptedVerifierHashInput`, `encryptedVerifierHashValue`, `encryptedKeyValue`) as **attributes**
+on `<p:encryptedKey>`, MS-OFFCRYPTO also permits them to appear as **child elements** with base64
+text content (e.g. `<p:encryptedKeyValue>...</p:encryptedKeyValue>`). Formula’s Agile parsers
+tolerate either representation and prefer attribute values when both are present.
 
 When debugging decryption bugs, always ask:
 

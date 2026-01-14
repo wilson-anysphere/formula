@@ -192,12 +192,13 @@ fn decrypt_agile_package_key_from_password_with_iv_derivation(
             password_key.hash_algorithm,
         )?;
         let decrypted =
-            decrypt_aes_cbc_no_padding(&k, &verifier_iv, &password_key.encrypted_key_value)
-            .map_err(|e| OffCryptoError::InvalidAttribute {
-                element: "p:encryptedKey".to_string(),
-                attr: "encryptedKeyValue".to_string(),
-                reason: e.to_string(),
-            })?;
+            decrypt_aes_cbc_no_padding(&k, &verifier_iv, &password_key.encrypted_key_value).map_err(
+                |e| OffCryptoError::InvalidAttribute {
+                    element: "p:encryptedKey".to_string(),
+                    attr: "encryptedKeyValue".to_string(),
+                    reason: e.to_string(),
+                },
+            )?;
         decrypted
             .get(..package_key_len)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
@@ -1126,10 +1127,10 @@ fn parse_password_key_encryptor(
     let key_bits = parse_usize_attr(node, "keyBits")?;
     let hash_size = parse_usize_attr(node, "hashSize")?;
     let encrypted_verifier_hash_input =
-        parse_base64_attr(node, "encryptedVerifierHashInput", parse_opts)?;
+        parse_base64_attr_or_child(node, "encryptedVerifierHashInput", parse_opts)?;
     let encrypted_verifier_hash_value =
-        parse_base64_attr(node, "encryptedVerifierHashValue", parse_opts)?;
-    let encrypted_key_value = parse_base64_attr(node, "encryptedKeyValue", parse_opts)?;
+        parse_base64_attr_or_child(node, "encryptedVerifierHashValue", parse_opts)?;
+    let encrypted_key_value = parse_base64_attr_or_child(node, "encryptedKeyValue", parse_opts)?;
 
     let salt_size = parse_usize_attr(node, "saltSize")?;
     if salt_size == 0 {
@@ -1264,6 +1265,9 @@ fn collect_xml_warnings(doc: &roxmltree::Document<'_>, warnings: &mut Vec<OffCry
                 | "keyEncryptors"
                 | "keyEncryptor"
                 | "encryptedKey"
+                | "encryptedVerifierHashInput"
+                | "encryptedVerifierHashValue"
+                | "encryptedKeyValue"
         )
     }
 
@@ -1875,6 +1879,38 @@ fn parse_base64_attr(
 ) -> Result<Vec<u8>> {
     let val = required_attr(node, attr)?;
     decode_base64_field_limited(node.tag_name().name(), attr, val, opts)
+}
+
+fn parse_base64_attr_or_child(
+    node: roxmltree::Node<'_, '_>,
+    field: &'static str,
+    opts: &ParseOptions,
+) -> Result<Vec<u8>> {
+    // Prefer the attribute form for deterministic behavior when both are present.
+    if let Some(raw) = node.attribute(field) {
+        return decode_base64_field_limited(node.tag_name().name(), field, raw, opts);
+    }
+
+    // Some producers encode these blobs as child elements with base64 text content:
+    //   <p:encryptedKey ...>
+    //     <p:encryptedVerifierHashInput>...</p:encryptedVerifierHashInput>
+    //     ...
+    //   </p:encryptedKey>
+    //
+    // Match by local name so namespace prefixes don't matter.
+    if let Some(child) = node
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == field)
+    {
+        let raw = child.text().unwrap_or("");
+        return decode_base64_field_limited(node.tag_name().name(), field, raw, opts);
+    }
+
+    // Preserve the original error semantics for missing ciphertext fields.
+    Err(OffCryptoError::MissingRequiredAttribute {
+        element: node.tag_name().name().to_string(),
+        attr: field.to_string(),
+    })
 }
 
 fn parse_hash_algorithm(node: roxmltree::Node<'_, '_>, attr: &str) -> Result<HashAlgorithm> {
