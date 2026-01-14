@@ -1094,6 +1094,22 @@ fn calculate_supports_compound_boolean_and_filters() {
 }
 
 #[test]
+fn calculate_compound_boolean_and_can_yield_empty_result_set() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Empty Range",
+            "CALCULATE(SUM(Orders[Amount]), Orders[Amount] > 10 && Orders[Amount] < 20)",
+        )
+        .unwrap();
+
+    let value = model
+        .evaluate_measure("Empty Range", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, Value::Blank);
+}
+
+#[test]
 fn calculate_compound_boolean_filters_respect_relationship_propagation() {
     let mut model = build_model();
     model
