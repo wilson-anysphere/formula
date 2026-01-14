@@ -112,7 +112,16 @@ def _find_bundle_dirs(target_dir: Path) -> list[Path]:
     # Cover:
     # - target/release/bundle
     # - target/<triple>/release/bundle
-    bundle_dirs = [p for p in target_dir.glob("**/release/bundle") if p.is_dir()]
+    #
+    # Avoid recursive `**/release/bundle` globs: Cargo target directories can be large, and
+    # recursive globbing can be surprisingly slow in CI. Bundles are always emitted at:
+    # - <target_dir>/release/bundle
+    # - <target_dir>/<triple>/release/bundle
+    bundle_dirs: list[Path] = []
+    for pattern in ("release/bundle", "*/release/bundle"):
+        for p in target_dir.glob(pattern):
+            if p.is_dir():
+                bundle_dirs.append(p)
     # De-dupe
     seen: set[Path] = set()
     uniq: list[Path] = []
