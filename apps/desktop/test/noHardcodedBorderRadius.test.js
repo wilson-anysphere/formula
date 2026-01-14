@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.join(__dirname, "..");
-const stylesRoot = path.join(desktopRoot, "src", "styles");
+const srcRoot = path.join(desktopRoot, "src");
 
 /**
  * @param {string} dirPath
@@ -28,26 +28,52 @@ function walkCssFiles(dirPath) {
   return files;
 }
 
-test("core desktop styles should not hardcode border-radius: 2px (use --radius-xs)", () => {
-  const files = walkCssFiles(stylesRoot);
+function getLineNumber(text, index) {
+  return text.slice(0, Math.max(0, index)).split("\n").length;
+}
+
+test("desktop UI should not hardcode border-radius pixel values (use radius tokens)", () => {
+  const files = walkCssFiles(srcRoot).filter((file) => {
+    const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
+    // Demo/sandbox assets are not part of the shipped UI bundle.
+    if (rel.startsWith("grid/presence-renderer/")) return false;
+    if (rel.includes("/demo/")) return false;
+    if (rel.includes("/__tests__/")) return false;
+    return true;
+  });
   /** @type {string[]} */
   const violations = [];
 
   for (const file of files) {
     const css = fs.readFileSync(file, "utf8");
-    // Avoid false positives in comments.
-    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, " ");
-    if (/\bborder-radius\s*:\s*2px\b/i.test(stripped)) {
-      violations.push(path.relative(desktopRoot, file));
+    // Avoid false positives in comments while keeping line numbers stable for error messages.
+    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
+
+    const declRegex = /\bborder-radius\s*:\s*([^;}]*)/gi;
+    let declMatch;
+    while ((declMatch = declRegex.exec(stripped))) {
+      const value = declMatch[1] ?? "";
+      // `declMatch[0]` ends with the captured group, so this points at the first character of the value.
+      const valueStart = declMatch.index + declMatch[0].length - value.length;
+
+      const pxRegex = /(\d+)px\b/g;
+      let pxMatch;
+      while ((pxMatch = pxRegex.exec(value))) {
+        const px = Number(pxMatch[1]);
+        if (px === 0 || px === 999) continue;
+
+        const absIndex = valueStart + pxMatch.index;
+        const line = getLineNumber(stripped, absIndex);
+        violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: border-radius: ${pxMatch[1]}px`);
+      }
     }
   }
 
   assert.deepEqual(
     violations,
     [],
-    `Found hardcoded border-radius: 2px in desktop core styles. Use var(--radius-xs) instead:\n${violations
-      .map((file) => `- ${file}`)
+    `Found hardcoded border-radius pixel values in desktop UI styles. Use radius tokens (var(--radius*)), except for pills (999px) or 0:\n${violations
+      .map((violation) => `- ${violation}`)
       .join("\n")}`,
   );
 });
-
