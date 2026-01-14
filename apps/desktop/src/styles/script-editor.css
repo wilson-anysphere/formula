@@ -18,14 +18,14 @@
 .script-editor__toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
+  gap: var(--space-4);
+  padding: var(--space-4);
   border-bottom: 1px solid var(--panel-border);
 }
 
 .script-editor__run-button {
   flex: 0 0 auto;
-  padding: 6px 10px;
+  padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
@@ -63,7 +63,7 @@
   resize: none;
   border: none;
   outline: none;
-  padding: 8px;
+  padding: var(--space-4);
   box-sizing: border-box;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -80,7 +80,7 @@
 .script-editor__console {
   height: 140px;
   margin: 0;
-  padding: 8px;
+  padding: var(--space-4);
   overflow: auto;
   border-top: 1px solid var(--panel-border);
   background: var(--bg-primary);
