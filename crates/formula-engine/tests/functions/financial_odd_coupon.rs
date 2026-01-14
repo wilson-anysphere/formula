@@ -136,8 +136,15 @@ fn oddf_price_excel_model(
     );
 
     let eom = is_end_of_month(maturity, system);
-    let n = coupon_dates.len() as i32;
-    let prev_coupon = coupon_date_with_eom(maturity, -(n * months_per_period), eom, system);
+    // Keep in sync with `oddf_equation`:
+    // - basis=4 derives PCD by stepping back from the first coupon date
+    // - other bases derive PCD from the maturity-anchored schedule
+    let prev_coupon = if basis == 4 {
+        coupon_date_with_eom(first_coupon, -months_per_period, eom, system)
+    } else {
+        let n = coupon_dates.len() as i32;
+        coupon_date_with_eom(maturity, -(n * months_per_period), eom, system)
+    };
     let e = coupon_period_e(prev_coupon, first_coupon, basis, frequency, system);
 
     let odd_first_coupon = c * (dfc / e);
@@ -2848,10 +2855,8 @@ fn odd_first_coupon_bond_functions_round_trip_long_stub() {
         let dfc = days_between(issue, first_coupon, basis, system);
         let dsc = days_between(settlement, first_coupon, basis, system);
         let months_per_period = 12 / 2;
-        let coupon_dates = oddf_coupon_schedule(first_coupon, maturity, 2, system);
         let eom = is_end_of_month(maturity, system);
-        let n = coupon_dates.len() as i32;
-        let prev_coupon = coupon_date_with_eom(maturity, -(n * months_per_period), eom, system);
+        let prev_coupon = coupon_date_with_eom(first_coupon, -months_per_period, eom, system);
         let e = coupon_period_e(prev_coupon, first_coupon, basis, 2, system);
         assert!(
             dfc / e > 1.0,
@@ -4204,9 +4209,8 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             let months_per_period = 12 / frequency;
             let eom = is_end_of_month(maturity, system);
             assert!(eom, "expected maturity to be EOM for this scenario");
-            let coupon_dates = oddf_coupon_schedule(first_coupon, maturity, frequency, system);
-            let n = coupon_dates.len() as i32;
-            let prev_coupon = coupon_date_with_eom(maturity, -(n * months_per_period), eom, system);
+            let prev_coupon =
+                coupon_date_with_eom(first_coupon, -months_per_period, eom, system);
             let days360_eu =
                 date_time::days360(prev_coupon, first_coupon, true, system).unwrap() as f64;
             assert_close(days360_eu, 182.0, 0.0);

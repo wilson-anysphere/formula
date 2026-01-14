@@ -32,6 +32,97 @@ fn canonicalize_and_localize_unicode_case_insensitive_function_names_for_de_de()
 }
 
 #[test]
+fn canonicalize_and_localize_more_function_names_for_de_de() {
+    fn assert_roundtrip(canonical: &str, localized: &str) {
+        assert_eq!(
+            locale::canonicalize_formula(localized, &locale::DE_DE).unwrap(),
+            canonical
+        );
+        assert_eq!(
+            locale::localize_formula(canonical, &locale::DE_DE).unwrap(),
+            localized
+        );
+    }
+
+    // Non-ASCII in localized name.
+    assert_roundtrip("=COUNTIF(A1:A3,\">0\")", "=ZÄHLENWENN(A1:A3;\">0\")");
+
+    // Ensure CONCAT (TEXTKETTE) and CONCATENATE (VERKETTEN) remain distinct.
+    assert_roundtrip("=CONCAT(\"a\",\"b\")", "=TEXTKETTE(\"a\";\"b\")");
+    assert_roundtrip(
+        "=CONCATENATE(\"a\",\"b\")",
+        "=VERKETTEN(\"a\";\"b\")",
+    );
+
+    assert_roundtrip(
+        "=TEXTJOIN(\",\",TRUE,\"a\",\"b\")",
+        "=TEXTVERKETTEN(\",\";WAHR;\"a\";\"b\")",
+    );
+    assert_roundtrip(
+        "=VLOOKUP(1,A1:B2,2,FALSE)",
+        "=SVERWEIS(1;A1:B2;2;FALSCH)",
+    );
+    assert_roundtrip(
+        "=HLOOKUP(1,A1:B2,2,FALSE)",
+        "=WVERWEIS(1;A1:B2;2;FALSCH)",
+    );
+    assert_roundtrip("=IFERROR(1/0,42)", "=WENNFEHLER(1/0;42)");
+
+    // Dotted canonical function name; ensure `.` survives translation.
+    assert_roundtrip("=NORM.S.DIST(0,TRUE)", "=NORM.S.VERT(0;WAHR)");
+
+    // Modern `_xlfn.`-prefixed function.
+    assert_roundtrip(
+        "=_xlfn.XLOOKUP(\"a\",A1:A2,B1:B2)",
+        "=_xlfn.XVERWEIS(\"a\";A1:A2;B1:B2)",
+    );
+
+    // TRUE()/FALSE() as functions (not just boolean literals).
+    assert_roundtrip("=TRUE()", "=WAHR()");
+    assert_roundtrip("=FALSE()", "=FALSCH()");
+}
+
+#[test]
+fn de_de_function_translation_table_covers_all_registered_functions() {
+    use formula_engine::functions::FunctionSpec;
+    let tsv = include_str!("../src/locale/data/de-DE.tsv");
+    let mut canon = HashSet::<String>::new();
+    let mut localized_to_canon = HashMap::<String, String>::new();
+    let mut localized_collisions = Vec::<(String, String, String)>::new();
+
+    for line in tsv.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (canon_name, loc_name) = line
+            .split_once('\t')
+            .unwrap_or_else(|| panic!("invalid function translation line (expected TSV): {line:?}"));
+        assert!(
+            canon.insert(canon_name.to_string()),
+            "duplicate canonical function translation entry: {canon_name}"
+        );
+        if let Some(prev) = localized_to_canon.insert(loc_name.to_string(), canon_name.to_string())
+        {
+            localized_collisions.push((loc_name.to_string(), prev, canon_name.to_string()));
+        }
+    }
+
+    for spec in inventory::iter::<FunctionSpec> {
+        let name = spec.name.to_ascii_uppercase();
+        assert!(
+            canon.contains(&name),
+            "missing de-DE translation entry for function: {name}"
+        );
+    }
+
+    assert!(
+        localized_collisions.is_empty(),
+        "de-DE function translations contain localized-name collisions: {localized_collisions:?}"
+    );
+}
+
+#[test]
 fn canonicalize_supports_thousands_and_leading_decimal_in_de_de() {
     let canonical = locale::canonicalize_formula("=SUMME(1.234,56;,5)", &locale::DE_DE).unwrap();
     assert_eq!(canonical, "=SUM(1234.56,.5)");
