@@ -17635,6 +17635,187 @@ fn walk_calc_expr(
         }
     }
 
+    fn walk_calc_expr_metadata_reference(
+        expr: &CompiledExpr,
+        current_cell: CellKey,
+        tables_by_sheet: &[Vec<Table>],
+        workbook: &Workbook,
+        spills: &SpillState,
+        precedents: &mut HashSet<Precedent>,
+        visiting_names: &mut HashSet<(SheetId, String)>,
+        lexical_scopes: &mut Vec<HashSet<String>>,
+        implicit_intersection: bool,
+    ) {
+        let insert_cell = |precedents: &mut HashSet<Precedent>, sheet_id: SheetId, addr: CellAddr| {
+            if sheet_id == current_cell.sheet && addr == current_cell.addr {
+                return;
+            }
+            precedents.insert(Precedent::Cell(CellId::new(
+                sheet_id_for_graph(sheet_id),
+                addr.row,
+                addr.col,
+            )));
+        };
+
+        match expr {
+            Expr::NameRef(nref) => {
+                let Some(sheet) = resolve_single_sheet(&nref.sheet, current_cell.sheet) else {
+                    return;
+                };
+                let name_key = normalize_defined_name(&nref.name);
+                if name_key.is_empty() {
+                    return;
+                }
+                // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
+                // Explicit sheet-qualified names (e.g. `Sheet1!X`) should still resolve as defined
+                // names for dependency analysis and dirty propagation.
+                if matches!(nref.sheet, SheetReference::Current)
+                    && name_is_local(lexical_scopes, &name_key)
+                {
+                    return;
+                }
+                let visit_key = (sheet, name_key.clone());
+                if !visiting_names.insert(visit_key.clone()) {
+                    return;
+                }
+                if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
+                    if let Some(expr) = def.compiled.as_ref() {
+                        walk_calc_expr_metadata_reference(
+                            expr,
+                            CellKey {
+                                sheet,
+                                addr: current_cell.addr,
+                            },
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                            implicit_intersection,
+                        );
+                    }
+                }
+                visiting_names.remove(&visit_key);
+            }
+            Expr::CellRef(r) => {
+                if let Some(sheets) = resolve_sheet_span(&r.sheet, current_cell.sheet, workbook) {
+                    let Some(addr) = r.addr.resolve(current_cell.addr) else {
+                        return;
+                    };
+                    for sheet_id in sheets {
+                        insert_cell(precedents, sheet_id, addr);
+                    }
+                }
+            }
+            Expr::RangeRef(RangeRef { sheet, start, end }) => {
+                let Some(start) = start.resolve(current_cell.addr) else {
+                    return;
+                };
+                let Some(end) = end.resolve(current_cell.addr) else {
+                    return;
+                };
+                let row_start = start.row.min(end.row);
+                let row_end = start.row.max(end.row);
+                let col_start = start.col.min(end.col);
+                let col_end = start.col.max(end.col);
+                let cur = current_cell.addr;
+
+                let selected = if !implicit_intersection {
+                    Some(CellAddr {
+                        row: row_start,
+                        col: col_start,
+                    })
+                } else if row_start == row_end && col_start == col_end {
+                    Some(CellAddr {
+                        row: row_start,
+                        col: col_start,
+                    })
+                } else if col_start == col_end {
+                    (cur.row >= row_start && cur.row <= row_end).then(|| CellAddr {
+                        row: cur.row,
+                        col: col_start,
+                    })
+                } else if row_start == row_end {
+                    (cur.col >= col_start && cur.col <= col_end).then(|| CellAddr {
+                        row: row_start,
+                        col: cur.col,
+                    })
+                } else {
+                    (cur.row >= row_start
+                        && cur.row <= row_end
+                        && cur.col >= col_start
+                        && cur.col <= col_end)
+                        .then(|| cur)
+                };
+
+                if let (Some(selected), Some(sheets)) =
+                    (selected, resolve_sheet_span(sheet, current_cell.sheet, workbook))
+                {
+                    for sheet_id in sheets {
+                        insert_cell(precedents, sheet_id, selected);
+                    }
+                }
+            }
+            Expr::StructuredRef(sref_expr) => {
+                if matches!(&sref_expr.sheet, SheetReference::External(_)) {
+                    return;
+                }
+                if let Ok(ranges) = crate::structured_refs::resolve_structured_ref(
+                    tables_by_sheet,
+                    current_cell.sheet,
+                    current_cell.addr,
+                    &sref_expr.sref,
+                ) {
+                    for (sheet_id, start, end) in ranges {
+                        let addr = CellAddr {
+                            row: start.row.min(end.row),
+                            col: start.col.min(end.col),
+                        };
+                        insert_cell(precedents, sheet_id, addr);
+                    }
+                }
+            }
+            Expr::SpillRange(inner) => {
+                if let Some(target) = spill_range_target_cell(inner, current_cell) {
+                    insert_cell(precedents, target.sheet, target.addr);
+                } else {
+                    walk_calc_expr_reference_context(
+                        inner,
+                        current_cell,
+                        tables_by_sheet,
+                        workbook,
+                        spills,
+                        precedents,
+                        visiting_names,
+                        lexical_scopes,
+                    );
+                }
+            }
+            Expr::ImplicitIntersection(inner) => walk_calc_expr_metadata_reference(
+                inner,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+                true,
+            ),
+            other => walk_calc_expr_reference_context(
+                other,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            ),
+        }
+    }
+
     match expr {
         Expr::CellRef(r) => {
             if let Some(sheets) = resolve_sheet_span(&r.sheet, current_cell.sheet, workbook) {
@@ -17986,6 +18167,19 @@ fn walk_calc_expr(
                                             );
                                         }
                                     }
+                                    Expr::NameRef(_) => {
+                                        walk_calc_expr_metadata_reference(
+                                            &args[1],
+                                            current_cell,
+                                            tables_by_sheet,
+                                            workbook,
+                                            spills,
+                                            precedents,
+                                            visiting_names,
+                                            lexical_scopes,
+                                            false,
+                                        );
+                                    }
                                     Expr::ImplicitIntersection(inner) => match inner.as_ref() {
                                         Expr::CellRef(r) => {
                                             if let Some(sheets) = resolve_sheet_span(
@@ -18098,7 +18292,7 @@ fn walk_calc_expr(
                                             }
                                         }
                                         other => {
-                                            walk_calc_expr_reference_context(
+                                            walk_calc_expr_metadata_reference(
                                                 other,
                                                 current_cell,
                                                 tables_by_sheet,
@@ -18107,6 +18301,7 @@ fn walk_calc_expr(
                                                 precedents,
                                                 visiting_names,
                                                 lexical_scopes,
+                                                true,
                                             );
                                         }
                                     },
@@ -18345,6 +18540,19 @@ fn walk_calc_expr(
                                     );
                                 }
                             }
+                            Expr::NameRef(_) => {
+                                walk_calc_expr_metadata_reference(
+                                    arg0,
+                                    current_cell,
+                                    tables_by_sheet,
+                                    workbook,
+                                    spills,
+                                    precedents,
+                                    visiting_names,
+                                    lexical_scopes,
+                                    false,
+                                );
+                            }
                             Expr::ImplicitIntersection(inner) => match inner.as_ref() {
                                 Expr::CellRef(r) => {
                                     if let Some(sheets) =
@@ -18448,7 +18656,7 @@ fn walk_calc_expr(
                                     }
                                 }
                                 other => {
-                                    walk_calc_expr_reference_context(
+                                    walk_calc_expr_metadata_reference(
                                         other,
                                         current_cell,
                                         tables_by_sheet,
@@ -18457,6 +18665,7 @@ fn walk_calc_expr(
                                         precedents,
                                         visiting_names,
                                         lexical_scopes,
+                                        true,
                                     );
                                 }
                             },
@@ -19908,6 +20117,46 @@ mod tests {
             .expect("formula stored");
         let expected = crate::functions::information::workbook::normalize_formula_text(stored);
         assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text(expected));
+    }
+
+    #[test]
+    fn formulatext_name_ref_tracks_dependencies() {
+        use crate::{NameDefinition, NameScope};
+
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+        engine
+            .define_name(
+                "X",
+                NameScope::Workbook,
+                NameDefinition::Reference("Sheet1!B1".to_string()),
+            )
+            .unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "B1", "=1")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=FORMULATEXT(X)")
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Text("=1".to_string())
+        );
+
+        engine
+            .set_cell_formula("Sheet1", "B1", "=2")
+            .unwrap();
+        assert!(
+            engine.is_dirty("Sheet1", "A1"),
+            "updating the referenced formula should mark FORMULATEXT dependents dirty"
+        );
+        engine.recalculate_single_threaded();
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Text("=2".to_string())
+        );
     }
 
     #[test]
