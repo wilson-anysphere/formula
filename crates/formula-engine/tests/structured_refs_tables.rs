@@ -198,16 +198,10 @@ fn setup_engine_with_table_and_autofilter_and_sort(
     sort_range: &str,
 ) -> Engine {
     let mut engine = setup_engine_with_table_and_autofilter(filter_col_ids);
-    let mut tables: Vec<Table> = engine
-        .get_sheet_tables("Sheet1")
-        .expect("tables")
-        .to_vec();
+    let mut tables: Vec<Table> = engine.get_sheet_tables("Sheet1").expect("tables").to_vec();
     assert_eq!(tables.len(), 1);
 
-    let auto_filter = tables[0]
-        .auto_filter
-        .as_mut()
-        .expect("expected autofilter");
+    let auto_filter = tables[0].auto_filter.as_mut().expect("expected autofilter");
     auto_filter.sort_state = Some(SortState {
         conditions: vec![SortCondition {
             range: Range::from_a1(sort_range).unwrap(),
@@ -913,7 +907,11 @@ fn insert_cols_inside_table_updates_table_autofilter_metadata() {
 
     let auto_filter = table.auto_filter.as_ref().expect("autofilter");
     assert_eq!(auto_filter.range, Range::from_a1("A1:E4").unwrap());
-    let col_ids: Vec<u32> = auto_filter.filter_columns.iter().map(|c| c.col_id).collect();
+    let col_ids: Vec<u32> = auto_filter
+        .filter_columns
+        .iter()
+        .map(|c| c.col_id)
+        .collect();
     assert_eq!(col_ids, vec![0, 3]);
 }
 
@@ -933,7 +931,10 @@ fn insert_cols_inside_table_updates_table_sort_state_ranges() {
     let auto_filter = table.auto_filter.as_ref().expect("autofilter");
     let sort_state = auto_filter.sort_state.as_ref().expect("sortState");
     assert_eq!(sort_state.conditions.len(), 1);
-    assert_eq!(sort_state.conditions[0].range, Range::from_a1("D2:D4").unwrap());
+    assert_eq!(
+        sort_state.conditions[0].range,
+        Range::from_a1("D2:D4").unwrap()
+    );
 }
 
 #[test]
@@ -984,7 +985,10 @@ fn delete_cols_overlapping_table_updates_table_sort_state_ranges() {
     let auto_filter = table.auto_filter.as_ref().expect("autofilter");
     let sort_state = auto_filter.sort_state.as_ref().expect("sortState");
     assert_eq!(sort_state.conditions.len(), 1);
-    assert_eq!(sort_state.conditions[0].range, Range::from_a1("B2:B4").unwrap());
+    assert_eq!(
+        sort_state.conditions[0].range,
+        Range::from_a1("B2:B4").unwrap()
+    );
 
     // If the sorted column is deleted, the sort condition should be dropped.
     engine
@@ -1019,7 +1023,11 @@ fn delete_cols_overlapping_table_updates_table_autofilter_metadata() {
 
     let auto_filter = table.auto_filter.as_ref().expect("autofilter");
     assert_eq!(auto_filter.range, Range::from_a1("A1:C4").unwrap());
-    let col_ids: Vec<u32> = auto_filter.filter_columns.iter().map(|c| c.col_id).collect();
+    let col_ids: Vec<u32> = auto_filter
+        .filter_columns
+        .iter()
+        .map(|c| c.col_id)
+        .collect();
     assert_eq!(col_ids, vec![2]);
 }
 

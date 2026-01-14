@@ -106,4 +106,3 @@ fn deleting_sheet_prunes_table_sourced_pivots() {
     assert!(engine.pivot_table(pivot_id).is_none());
     assert!(engine.sheet_id("Dest").is_some());
 }
-
