@@ -35,6 +35,16 @@ const aiAuditBrowserEntry = resolve(repoRoot, "packages/ai-audit/src/index.ts");
 const aiAuditNodeEntry = resolve(repoRoot, "packages/ai-audit/src/index.node.ts");
 const aiAuditSqliteEntry = resolve(repoRoot, "packages/ai-audit/src/sqlite.node.ts");
 const aiAuditExportEntry = resolve(repoRoot, "packages/ai-audit/src/export.ts");
+const aiCompletionEntry = resolve(repoRoot, "packages/ai-completion/src/index.js");
+const auditCoreEntry = resolve(repoRoot, "packages/audit-core/index.js");
+const extensionApiEntry = resolve(repoRoot, "packages/extension-api/index.mjs");
+const pythonRuntimeEntry = resolve(repoRoot, "packages/python-runtime/src/index-node.js");
+const pythonRuntimeDocumentControllerEntry = resolve(repoRoot, "packages/python-runtime/src/document-controller.js");
+const pythonRuntimeNativeEntry = resolve(repoRoot, "packages/python-runtime/src/native.js");
+const pythonRuntimePyodideEntry = resolve(repoRoot, "packages/python-runtime/src/pyodide.js");
+const pythonRuntimeTestUtilsEntry = resolve(repoRoot, "packages/python-runtime/src/test-utils.js");
+const powerQueryEntry = resolve(repoRoot, "packages/power-query/src/index.js");
+const workbookBackendEntry = resolve(repoRoot, "packages/workbook-backend/src/index.ts");
 const graphemeSplitterShimEntry = resolve(repoRoot, "scripts/vitest-shims/grapheme-splitter.ts");
 const linebreakShimEntry = resolve(repoRoot, "scripts/vitest-shims/linebreak.ts");
 const graphemeSplitterPackageEntry = resolve(repoRoot, "node_modules/grapheme-splitter");
@@ -97,6 +107,16 @@ export default defineConfig({
       { find: /^@formula\/ai-audit\/node$/, replacement: aiAuditNodeEntry },
       { find: /^@formula\/ai-audit\/sqlite$/, replacement: aiAuditSqliteEntry },
       { find: /^@formula\/ai-audit\/export$/, replacement: aiAuditExportEntry },
+      { find: /^@formula\/ai-completion$/, replacement: aiCompletionEntry },
+      { find: /^@formula\/audit-core$/, replacement: auditCoreEntry },
+      { find: /^@formula\/extension-api$/, replacement: extensionApiEntry },
+      { find: /^@formula\/python-runtime$/, replacement: pythonRuntimeEntry },
+      { find: /^@formula\/python-runtime\/document-controller$/, replacement: pythonRuntimeDocumentControllerEntry },
+      { find: /^@formula\/python-runtime\/native$/, replacement: pythonRuntimeNativeEntry },
+      { find: /^@formula\/python-runtime\/pyodide$/, replacement: pythonRuntimePyodideEntry },
+      { find: /^@formula\/python-runtime\/test-utils$/, replacement: pythonRuntimeTestUtilsEntry },
+      { find: /^@formula\/power-query$/, replacement: powerQueryEntry },
+      { find: /^@formula\/workbook-backend$/, replacement: workbookBackendEntry },
       // Some cached/stale `node_modules` environments may be missing transitive dependencies of the
       // aliased workspace packages. Provide lightweight shims for pure-JS deps used by
       // `@formula/text-layout` so desktop tests can still run.
