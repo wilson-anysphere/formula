@@ -940,7 +940,7 @@ export type RecalcMode = "singleThreaded" | "multiThreaded";
 
 /**
  * Current `formula-wasm` API:
- *   `workbook.goalSeek(request)` (see `crates/formula-wasm/src/lib.rs`).
+ *   `workbook.goalSeek(request)` (see [`crates/formula-wasm/src/lib.rs`](../crates/formula-wasm/src/lib.rs)).
  */
 export interface GoalSeekRequest {
   // Defaults to "Sheet1" when omitted/empty.
