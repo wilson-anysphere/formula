@@ -292,7 +292,10 @@ parentPort.postMessage({ type: "__ready__" });
           reject(new Error(`Worker exited unexpectedly (${code})`));
         });
       }),
-      10000,
+      // Under `pnpm test:node`, node:test runs multiple files concurrently (default
+      // `--test-concurrency=2`). This suite spawns nested worker_threads instances and can
+      // occasionally exceed 10s wall time on contended/shared runners.
+      30000,
       "Timed out waiting for extension worker activation"
     );
   } finally {
