@@ -15304,7 +15304,7 @@ export class SpreadsheetApp {
     ctx.clip();
     for (let visualRow = 0; visualRow < frozenRows.length; visualRow++) {
       const rowIndex = frozenRows[visualRow]!;
-      ctx.fillText(String(rowIndex + 1), originX / 2, originY + visualRow * this.cellHeight + this.cellHeight / 2);
+      ctx.fillText(rowToLabel(rowIndex), originX / 2, originY + visualRow * this.cellHeight + this.cellHeight / 2);
     }
     ctx.restore();
 
@@ -15316,7 +15316,7 @@ export class SpreadsheetApp {
     for (let visualRow = 0; visualRow < scrollRows.length; visualRow++) {
       const rowIndex = scrollRows[visualRow]!;
       ctx.fillText(
-        String(rowIndex + 1),
+        rowToLabel(rowIndex),
         originX / 2,
         startYScroll + visualRow * this.cellHeight + this.cellHeight / 2
       );
@@ -26317,6 +26317,22 @@ function colToName(col: number): string {
   const name = colToNameA1(idx);
   COL_NAME_CACHE[idx] = name;
   return name;
+}
+
+// Cache row number -> label strings ("1", "2", ...). Unlike columns, the domain can be large
+// (up to ~1M), so keep the cache bounded and clear it when it grows too large.
+const ROW_LABEL_CACHE_MAX = 10_000;
+const ROW_LABEL_CACHE = new Map<number, string>();
+
+function rowToLabel(row: number): string {
+  if (!Number.isFinite(row) || row < 0) return "";
+  const idx = Math.trunc(row);
+  const cached = ROW_LABEL_CACHE.get(idx);
+  if (cached !== undefined) return cached;
+  const label = String(idx + 1);
+  ROW_LABEL_CACHE.set(idx, label);
+  if (ROW_LABEL_CACHE.size > ROW_LABEL_CACHE_MAX) ROW_LABEL_CACHE.clear();
+  return label;
 }
 
 function parseA1(a1: string): CellCoord {
