@@ -474,10 +474,16 @@ class ComparePrivacyModeTests(unittest.TestCase):
             self.assertIn("SUM", names)
             udf_name = "CORP.ADDIN.FOO"
             self.assertNotIn(udf_name, names)
-            self.assertIn(
-                f"sha256={hashlib.sha256(udf_name.encode('utf-8')).hexdigest()}",
-                names,
-            )
+            udf_hash = hashlib.sha256(udf_name.encode("utf-8")).hexdigest()
+            self.assertIn(f"sha256={udf_hash}", names)
+
+            mismatches = report.get("mismatches")
+            self.assertIsInstance(mismatches, list)
+            by_id = {m.get("caseId"): m for m in mismatches if isinstance(m, dict)}
+            udf_formula = by_id.get("case-udf", {}).get("formula")
+            self.assertIsInstance(udf_formula, str)
+            self.assertNotIn(udf_name, udf_formula)
+            self.assertIn(f"sha256={udf_hash}", udf_formula)
 
 
 class CompareMismatchDetailTests(unittest.TestCase):

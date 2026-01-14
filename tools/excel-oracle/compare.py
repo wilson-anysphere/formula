@@ -156,9 +156,12 @@ def _index_results(
     return out
 
 
-def _pretty_input(cell_input: dict[str, Any]) -> dict[str, Any]:
+def _pretty_input(cell_input: dict[str, Any], *, privacy_mode: str) -> dict[str, Any]:
     if "formula" in cell_input:
-        return {"cell": cell_input.get("cell"), "formula": cell_input.get("formula")}
+        return {
+            "cell": cell_input.get("cell"),
+            "formula": _redact_formula(cell_input.get("formula"), privacy_mode=privacy_mode),
+        }
     return {"cell": cell_input.get("cell"), "value": cell_input.get("value")}
 
 
@@ -185,6 +188,31 @@ def _extract_function_names(formula: str | None) -> list[str]:
             name = name[len("_XLFN.") :]
         out.append(name)
     return out
+
+
+def _redact_formula(formula: str | None, *, privacy_mode: str) -> str | None:
+    """Redact non-standard/UDF function names inside a formula string.
+
+    This is best-effort and intentionally conservative: it only rewrites function-call identifiers
+    matched by `_FUNC_RE` and leaves the rest of the formula intact.
+    """
+
+    if not formula or privacy_mode != _PRIVACY_PRIVATE:
+        return formula
+
+    known = _load_known_function_names()
+
+    def _replace(match: re.Match[str]) -> str:
+        raw_name = match.group(1)
+        suffix = match.group(0)[len(raw_name) :]  # includes any whitespace and the opening "("
+        normalized = raw_name.upper()
+        if normalized.startswith("_XLFN."):
+            normalized = normalized[len("_XLFN.") :]
+        if normalized in known:
+            return raw_name + suffix
+        return f"sha256={_sha256_text(normalized)}{suffix}"
+
+    return _FUNC_RE.sub(_replace, formula)
 
 
 @dataclass(frozen=True)
@@ -499,6 +527,19 @@ def main() -> int:
     reason_counts: dict[str, int] = {}
     tag_totals: dict[str, int] = {}
     tag_fails: dict[str, int] = {}
+    missing_functions: dict[str, int] = {}
+    actual_error_kinds: dict[str, int] = {}
+
+    def _note_actual_error(actual_value: Any, *, formula_raw: str | None) -> None:
+        if not (isinstance(actual_value, dict) and actual_value.get("t") == "e"):
+            return
+        code = actual_value.get("v")
+        if not isinstance(code, str):
+            return
+        actual_error_kinds[code] = actual_error_kinds.get(code, 0) + 1
+        if code == "#NAME?":
+            for fn in _extract_function_names(formula_raw):
+                missing_functions[fn] = missing_functions.get(fn, 0) + 1
 
     include_tags = set(args.include_tag)
     exclude_tags = set(args.exclude_tag)
@@ -550,13 +591,17 @@ def main() -> int:
         act = actual_index.get(case_id)
 
         mismatch_reason: str | None = None
+        formula_raw = case.get("formula")
         if exp is None:
             mismatch_reason = "missing-expected"
             entry: dict[str, Any] = {
                 "caseId": case_id,
                 "reason": mismatch_reason,
-                "formula": case.get("formula"),
-                "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
+                "formula": _redact_formula(case.get("formula"), privacy_mode=args.privacy_mode),
+                "inputs": [
+                    _pretty_input(i, privacy_mode=args.privacy_mode)
+                    for i in case.get("inputs", [])
+                ],
                 "tags": sorted(tag_set),
             }
             output_cell = _maybe_nonempty_str(case.get("outputCell"))
@@ -574,6 +619,7 @@ def main() -> int:
                 actual_value = act.get("result")
                 if actual_value is not None:
                     entry["actual"] = actual_value
+                    _note_actual_error(actual_value, formula_raw=formula_raw)
 
                 actual_address = _maybe_nonempty_str(act.get("address"))
                 if actual_address is not None:
@@ -590,8 +636,11 @@ def main() -> int:
             entry = {
                 "caseId": case_id,
                 "reason": mismatch_reason,
-                "formula": case.get("formula"),
-                "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
+                "formula": _redact_formula(case.get("formula"), privacy_mode=args.privacy_mode),
+                "inputs": [
+                    _pretty_input(i, privacy_mode=args.privacy_mode)
+                    for i in case.get("inputs", [])
+                ],
                 "tags": sorted(tag_set),
                 "expected": exp.get("result"),
             }
@@ -626,8 +675,11 @@ def main() -> int:
                 entry: dict[str, Any] = {
                     "caseId": case_id,
                     "reason": mismatch_reason,
-                    "formula": case.get("formula"),
-                    "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
+                    "formula": _redact_formula(case.get("formula"), privacy_mode=args.privacy_mode),
+                    "inputs": [
+                        _pretty_input(i, privacy_mode=args.privacy_mode)
+                        for i in case.get("inputs", [])
+                    ],
                     "tags": sorted(tag_set),
                     "expected": exp.get("result"),
                     "actual": act.get("result"),
@@ -663,6 +715,7 @@ def main() -> int:
 
                 exp_result = exp.get("result")
                 act_result = act.get("result")
+                _note_actual_error(act_result, formula_raw=formula_raw)
                 if (
                     mismatch_reason == "number-mismatch"
                     and _is_number(exp_result)
@@ -705,19 +758,6 @@ def main() -> int:
             }
         )
     tag_summary.sort(key=lambda x: (-x["mismatches"], -x["total"], x["tag"]))
-
-    # Derived aggregates over mismatches: missing functions and error kinds.
-    missing_functions: dict[str, int] = {}
-    actual_error_kinds: dict[str, int] = {}
-    for m in mismatches:
-        mismatch_actual = m.get("actual")
-        if isinstance(mismatch_actual, dict) and mismatch_actual.get("t") == "e":
-            code = mismatch_actual.get("v")
-            if isinstance(code, str):
-                actual_error_kinds[code] = actual_error_kinds.get(code, 0) + 1
-                if code == "#NAME?":
-                    for fn in _extract_function_names(m.get("formula")):
-                        missing_functions[fn] = missing_functions.get(fn, 0) + 1
 
     if args.privacy_mode == _PRIVACY_PRIVATE and missing_functions:
         redacted_counts: dict[str, int] = {}
