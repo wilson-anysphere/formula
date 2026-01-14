@@ -78,6 +78,27 @@ test("validate-windows-bundles.ps1 prefers validating the stable formula:// sche
   );
 });
 
+test("validate-windows-bundles.ps1 asserts LICENSE/NOTICE are included in MSI installers", () => {
+  assert.match(
+    text,
+    /Assert-MsiContainsComplianceArtifacts/,
+    "Expected validator to include an MSI compliance artifacts assertion (LICENSE/NOTICE).",
+  );
+  assert.match(text, /Compliance artifact check \(MSI\)/);
+  assert.match(text, /\$required\s*=\s*@\(\"LICENSE\",\s*\"NOTICE\"\)/);
+});
+
+test("validate-windows-bundles.ps1 asserts LICENSE/NOTICE are included in NSIS (.exe) installer payloads", () => {
+  assert.match(
+    text,
+    /Assert-ExeContainsComplianceArtifacts/,
+    "Expected validator to include an EXE compliance artifacts assertion (LICENSE/NOTICE).",
+  );
+  // Payload inspection relies on 7-Zip extraction when available.
+  assert.match(text, /7-Zip/i);
+  assert.match(text, /foreach\s*\(\$req\s+in\s+@\(\"LICENSE\",\s*\"NOTICE\"\)\)/);
+});
+
 test("validate-windows-bundles.ps1 validates MSI UpgradeCode against tauri.conf.json (WiX upgrades/downgrades)", () => {
   assert.match(
     text,
