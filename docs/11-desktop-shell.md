@@ -199,6 +199,12 @@ Installer artifact size gating knobs (used by the release workflow; DMG/MSI/AppI
 - `FORMULA_BUNDLE_SIZE_LIMIT_MB` (default: 50MB per artifact)
 - `FORMULA_ENFORCE_BUNDLE_SIZE=1` to fail when any artifact exceeds the limit
 
+Desktop Rust binary size gating knobs (informational by default):
+
+- `FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB=<budget>`
+- `FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1` (or `true`/`yes`/`on`) to fail when the desktop binary exceeds the budget
+  (reported by `scripts/desktop_binary_size_report.py`)
+
 Frontend asset download size gating knobs (compressed JS/CSS/WASM under `dist/assets`):
 
 - `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB` (default: 10MB total)
