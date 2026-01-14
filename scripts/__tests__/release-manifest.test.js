@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -54,6 +53,88 @@ test("normalizeVersion strips refs/tags + leading v", () => {
   // Keep behavior consistent across scripts.
   assert.equal(normalizeVersionForMerge("v0.1.0"), "0.1.0");
   assert.equal(normalizeVersionForMerge("refs/tags/v0.1.0"), "0.1.0");
+});
+
+async function runCheckDesktopVersion({ tag, tauriVersion, cargoVersion }) {
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "formula-desktop-version-"));
+  try {
+    const scriptsDir = path.join(tmpDir, "scripts");
+    const srcTauriDir = path.join(tmpDir, "apps", "desktop", "src-tauri");
+
+    await mkdir(scriptsDir, { recursive: true });
+    await mkdir(srcTauriDir, { recursive: true });
+
+    const scriptText = await readFile(path.join(repoRoot, "scripts", "check-desktop-version.mjs"), "utf8");
+    await writeFile(path.join(scriptsDir, "check-desktop-version.mjs"), scriptText, "utf8");
+
+    await writeFile(
+      path.join(srcTauriDir, "tauri.conf.json"),
+      `${JSON.stringify({ version: tauriVersion }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(srcTauriDir, "Cargo.toml"),
+      [
+        "[package]",
+        'name = "formula-desktop-tauri"',
+        `version = "${cargoVersion}"`,
+        'edition = "2021"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    return spawnSync(
+      process.execPath,
+      [path.join(scriptsDir, "check-desktop-version.mjs"), tag],
+      { cwd: tmpDir, encoding: "utf8" },
+    );
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+}
+
+test("check-desktop-version.mjs passes when tag matches tauri.conf.json and Cargo.toml", async () => {
+  const proc = await runCheckDesktopVersion({
+    tag: "v1.2.3",
+    tauriVersion: "1.2.3",
+    cargoVersion: "1.2.3",
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /passed/i);
+});
+
+test("check-desktop-version.mjs accepts refs/tags/* inputs", async () => {
+  const proc = await runCheckDesktopVersion({
+    tag: "refs/tags/v1.2.3",
+    tauriVersion: "1.2.3",
+    cargoVersion: "1.2.3",
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("check-desktop-version.mjs lists only tauri.conf.json when it is the mismatch", async () => {
+  const proc = await runCheckDesktopVersion({
+    tag: "v1.2.3",
+    tauriVersion: "1.2.2",
+    cargoVersion: "1.2.3",
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /Desktop version mismatch detected/i);
+  assert.match(proc.stderr, /Bump "version" in apps\/desktop\/src-tauri\/tauri\.conf\.json/i);
+  assert.doesNotMatch(proc.stderr, /Bump \[package\]\.version in apps\/desktop\/src-tauri\/Cargo\.toml/i);
+});
+
+test("check-desktop-version.mjs lists only Cargo.toml when it is the mismatch", async () => {
+  const proc = await runCheckDesktopVersion({
+    tag: "v1.2.3",
+    tauriVersion: "1.2.3",
+    cargoVersion: "1.2.2",
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /Desktop version mismatch detected/i);
+  assert.match(proc.stderr, /Bump \[package\]\.version in apps\/desktop\/src-tauri\/Cargo\.toml/i);
+  assert.doesNotMatch(proc.stderr, /Bump "version" in apps\/desktop\/src-tauri\/tauri\.conf\.json/i);
 });
 
 test("verify-desktop-release-assets helpers: filenameFromUrl extracts decoded filenames", () => {
