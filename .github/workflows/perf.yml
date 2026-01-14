@@ -291,7 +291,12 @@ jobs:
         run: node scripts/merge-benchmark-results.mjs benchmark-results.json benchmark-results.tab-completion.json
 
       - name: Publish benchmark results
-        if: always()
+        # Fork PRs get a read-only token; skip publishing/commenting there.
+        if: |
+          always() && (
+            github.event_name == 'push' ||
+            (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+          )
         uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
         with:
           tool: customSmallerIsBetter
