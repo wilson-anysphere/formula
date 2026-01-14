@@ -109,6 +109,7 @@ pub enum DaxError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RelationshipOverride {
     Active(CrossFilterDirection),
+    OneWayReverse,
     Disabled,
 }
 
@@ -2573,17 +2574,6 @@ impl DaxEngine {
             }
         };
         let direction = direction.trim().to_ascii_uppercase();
-        let override_dir = match direction.as_str() {
-            "BOTH" => RelationshipOverride::Active(CrossFilterDirection::Both),
-            // DAX uses `ONEWAY` but we'll accept the more explicit `SINGLE` as well.
-            "ONEWAY" | "SINGLE" => RelationshipOverride::Active(CrossFilterDirection::Single),
-            "NONE" => RelationshipOverride::Disabled,
-            other => {
-                return Err(DaxError::Eval(format!(
-                    "unsupported CROSSFILTER direction {other}"
-                )))
-            }
-        };
 
         let Some(rel_idx) =
             model.find_relationship_index(left_table, left_column, right_table, right_column)
@@ -2591,6 +2581,62 @@ impl DaxEngine {
             return Err(DaxError::Eval(format!(
                 "no relationship found between {left_table}[{left_column}] and {right_table}[{right_column}]"
             )));
+        };
+
+        let rel = model
+            .relationships()
+            .get(rel_idx)
+            .expect("relationship index from find_relationship_index");
+
+        let resolve_one_way = |source_table: &str,
+                               source_column: &str,
+                               target_table: &str,
+                               target_column: &str|
+         -> DaxResult<RelationshipOverride> {
+            if rel.rel.to_table == source_table
+                && rel.rel.to_column == source_column
+                && rel.rel.from_table == target_table
+                && rel.rel.from_column == target_column
+            {
+                // `to_table` filters `from_table` (relationship's default orientation).
+                return Ok(RelationshipOverride::Active(CrossFilterDirection::Single));
+            }
+            if rel.rel.from_table == source_table
+                && rel.rel.from_column == source_column
+                && rel.rel.to_table == target_table
+                && rel.rel.to_column == target_column
+            {
+                // Reverse of the relationship's default orientation.
+                return Ok(RelationshipOverride::OneWayReverse);
+            }
+            Err(DaxError::Eval(format!(
+                "CROSSFILTER direction {direction} does not match relationship {}",
+                rel.rel.name
+            )))
+        };
+
+        let override_dir = match direction.as_str() {
+            "BOTH" => RelationshipOverride::Active(CrossFilterDirection::Both),
+            // DAX uses `ONEWAY` but we'll accept the more explicit `SINGLE` as well.
+            "ONEWAY" | "SINGLE" => RelationshipOverride::Active(CrossFilterDirection::Single),
+            "NONE" => RelationshipOverride::Disabled,
+            "ONEWAY_LEFTFILTERSRIGHT" => resolve_one_way(
+                left_table.as_str(),
+                left_column.as_str(),
+                right_table.as_str(),
+                right_column.as_str(),
+            )?,
+            "ONEWAY_RIGHTFILTERSLEFT" => resolve_one_way(
+                right_table.as_str(),
+                right_column.as_str(),
+                left_table.as_str(),
+                left_column.as_str(),
+            )?,
+            other => {
+                return Err(DaxError::Eval(format!(
+                    "unsupported CROSSFILTER direction {other}"
+                )))
+            }
         };
 
         filter.cross_filter_overrides.insert(rel_idx, override_dir);
@@ -4356,16 +4402,38 @@ fn resolve_row_sets(
                 continue;
             }
 
-            let cross_filter_direction = match override_state {
-                Some(RelationshipOverride::Active(dir)) => dir,
-                None => relationship.rel.cross_filter_direction,
+            match override_state {
+                Some(RelationshipOverride::OneWayReverse) => {
+                    changed |=
+                        propagate_filter(model, &mut sets, relationship, Direction::ToOne, filter)?;
+                }
+                Some(RelationshipOverride::Active(dir)) => {
+                    changed |=
+                        propagate_filter(model, &mut sets, relationship, Direction::ToMany, filter)?;
+                    if dir == CrossFilterDirection::Both {
+                        changed |= propagate_filter(
+                            model,
+                            &mut sets,
+                            relationship,
+                            Direction::ToOne,
+                            filter,
+                        )?;
+                    }
+                }
                 Some(RelationshipOverride::Disabled) => unreachable!("checked above"),
-            };
-
-            changed |= propagate_filter(model, &mut sets, relationship, Direction::ToMany, filter)?;
-            if cross_filter_direction == CrossFilterDirection::Both {
-                changed |=
-                    propagate_filter(model, &mut sets, relationship, Direction::ToOne, filter)?;
+                None => {
+                    changed |=
+                        propagate_filter(model, &mut sets, relationship, Direction::ToMany, filter)?;
+                    if relationship.rel.cross_filter_direction == CrossFilterDirection::Both {
+                        changed |= propagate_filter(
+                            model,
+                            &mut sets,
+                            relationship,
+                            Direction::ToOne,
+                            filter,
+                        )?;
+                    }
+                }
             }
         }
     }

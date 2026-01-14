@@ -88,3 +88,60 @@ fn crossfilter_oneway_can_override_bidirectional_relationship() {
         3.into()
     );
 }
+
+#[test]
+fn crossfilter_oneway_leftfiltersright_propagates_only_from_left_to_right() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    // With the default single-direction relationship (Customers -> Orders), a fact-side filter does
+    // not shrink the Customers table.
+    let fact_filter = FilterContext::empty().with_column_equals("Orders", "Amount", 20.0.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(Customers)",
+                &fact_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    // Force one-way filtering from Orders -> Customers (left filters right). The fact-side filter
+    // now shrinks Customers.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Customers), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], ONEWAY_LEFTFILTERSRIGHT))",
+                &fact_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    // Conversely, a Customers filter should no longer propagate to Orders when the relationship is
+    // set to only filter from left -> right.
+    let customer_filter =
+        FilterContext::empty().with_column_equals("Customers", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(Orders)", &customer_filter, &RowContext::default())
+            .unwrap(),
+        2.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Orders), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], ONEWAY_LEFTFILTERSRIGHT))",
+                &customer_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        4.into()
+    );
+}
