@@ -974,12 +974,25 @@ pub fn open_workbook_model_with_options(
     use std::io::BufReader;
 
     let path = path.as_ref();
-    // Reject Office-encrypted OOXML workbooks stored in an OLE container (`EncryptionInfo` +
-    // `EncryptedPackage`) early so we don't accidentally route them through the legacy `.xls`
-    // importer. Without the `encrypted-workbooks` feature we treat these as unsupported
-    // encryption; with it we preserve the existing password-required/invalid-password semantics.
-    if let Some(err) = encrypted_ooxml_error_from_path(path, opts.password.as_deref()) {
-        return Err(err);
+
+    // First, handle password-protected OOXML workbooks that are stored as OLE compound files
+    // (`EncryptionInfo` + `EncryptedPackage` streams).
+    //
+    // When the `encrypted-workbooks` feature is enabled, attempt in-memory decryption. Otherwise,
+    // surface an "unsupported encryption" error so callers don't assume a password will work.
+    #[cfg(feature = "encrypted-workbooks")]
+    {
+        if let Some(bytes) =
+            try_decrypt_ooxml_encrypted_package_from_path(path, opts.password.as_deref())?
+        {
+            return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
+        }
+    }
+
+    if let Some(package_bytes) =
+        maybe_read_plaintext_ooxml_package_from_encrypted_ole(path, opts.password.as_deref())?
+    {
+        return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, package_bytes);
     }
     let ext = path
         .extension()
@@ -3263,7 +3276,6 @@ fn workbook_format_from_ooxml_zip_bytes(bytes: &[u8]) -> Option<WorkbookFormat> 
 
     Some(WorkbookFormat::Unknown)
 }
-
 /// Return `Some(true)` when the OLE `Workbook`/`Book` stream starts with a BIFF `BOF` record.
 ///
 /// Returns:
