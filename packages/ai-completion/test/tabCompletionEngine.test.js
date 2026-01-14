@@ -3150,6 +3150,46 @@ test("Completion client request is structured and completion inserts at the curs
   );
 });
 
+test("TabCompletionEngine forwards AbortSignal to completionClient and aborts when caller cancels", async () => {
+  let calls = 0;
+  let sawAbort = false;
+
+  const completionClient = {
+    async completeTabCompletion(req) {
+      calls += 1;
+      return await new Promise((resolve) => {
+        const done = () => {
+          sawAbort = true;
+          resolve("");
+        };
+        if (req?.signal?.aborted) return done();
+        req?.signal?.addEventListener("abort", done, { once: true });
+      });
+    },
+  };
+
+  const engine = new TabCompletionEngine({ completionClient, completionTimeoutMs: 200 });
+
+  const currentInput = "=1+";
+  const controller = new AbortController();
+  const promise = engine.getSuggestions(
+    {
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    },
+    { signal: controller.signal },
+  );
+
+  controller.abort();
+
+  const suggestions = await promise;
+  assert.equal(calls, 1);
+  assert.equal(sawAbort, true);
+  assert.ok(Array.isArray(suggestions));
+});
+
 test("previewEvaluator is called and preview metadata is attached", async () => {
   let calls = 0;
   /** @type {any} */

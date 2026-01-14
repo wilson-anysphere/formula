@@ -314,7 +314,8 @@ export class TabCompletionEngine {
           signal: controller.signal,
         }),
         this.completionTimeoutMs,
-        () => controller.abort()
+        () => controller.abort(),
+        controller.signal
       );
 
       const suggestionText = normalizeBackendCompletion(input, cursor, completion);
@@ -1963,30 +1964,56 @@ async function attachPreviews(suggestions, context, previewEvaluator) {
  * @param {Promise<T>} promise
  * @param {number} timeoutMs
  * @param {(() => void) | undefined} onTimeout
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<T>}
  */
-function withTimeout(promise, timeoutMs, onTimeout) {
+function withTimeout(promise, timeoutMs, onTimeout, signal) {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let timeout = null;
+    /** @type {(() => void) | null} */
+    let removeAbortListener = null;
+    let settled = false;
+
+    const cleanup = () => {
+      if (timeout) clearTimeout(timeout);
+      timeout = null;
+      removeAbortListener?.();
+      removeAbortListener = null;
+    };
+
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn(value);
+    };
+
+    if (signal && typeof signal.addEventListener === "function") {
+      const onAbort = () => settle(reject, signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+      removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+    }
+
+    timeout = setTimeout(() => {
       try {
         onTimeout?.();
       } catch {
         // ignore
       }
-      reject(new Error("timeout"));
+      settle(reject, new Error("timeout"));
     }, timeoutMs);
 
     Promise.resolve(promise).then(
-      (value) => {
-        clearTimeout(timeout);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timeout);
-        reject(err);
-      },
+      (value) => settle(resolve, value),
+      (err) => settle(reject, err),
     );
   });
 }
