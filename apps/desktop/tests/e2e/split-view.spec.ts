@@ -1689,7 +1689,7 @@ test.describe("split view / shared grid zoom", () => {
   });
 
   test("secondary pane column resize updates primary pane geometry", async ({ page }) => {
-    await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
+    await gotoDesktop(page, "/?grid=shared");
 
     const secondaryGrid = page.getByTestId("grid-secondary");
 
@@ -1736,8 +1736,7 @@ test.describe("split view / shared grid zoom", () => {
   });
 
   test("fill handle drag works in the secondary pane", async ({ page }) => {
-    await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
-    await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
+    await gotoDesktop(page, "/?grid=shared");
 
     await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
     await page.waitForFunction(() => Boolean((window as any).__formulaSecondaryGrid), undefined, { timeout: 10_000 });
@@ -1796,8 +1795,7 @@ test.describe("split view / shared grid zoom", () => {
   });
 
   test("Escape cancels an in-progress fill handle drag in the secondary pane", async ({ page }) => {
-    await page.goto("/?grid=shared", { waitUntil: "domcontentloaded" });
-    await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
+    await gotoDesktop(page, "/?grid=shared");
 
     await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
     await page.waitForFunction(() => Boolean((window as any).__formulaSecondaryGrid), undefined, { timeout: 10_000 });
