@@ -438,25 +438,6 @@ impl Workbook {
         self.sheet_order.iter().position(|&id| id == sheet)
     }
 
-    fn reorder_sheet(&mut self, sheet: SheetId, new_index: usize) -> bool {
-        if !self.sheet_exists(sheet) {
-            return false;
-        }
-        if new_index >= self.sheet_order.len() {
-            return false;
-        }
-        let Some(current) = self.sheet_order_index(sheet) else {
-            return false;
-        };
-        if current == new_index {
-            return true;
-        }
-
-        let sheet_id = self.sheet_order.remove(current);
-        self.sheet_order.insert(new_index, sheet_id);
-        true
-    }
-
     /// Returns the sheet ids referenced by an Excel-style 3D sheet span (`Sheet1:Sheet3`).
     ///
     /// This respects the current workbook tab order and supports reversed spans.
