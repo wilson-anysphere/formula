@@ -6,6 +6,12 @@ use super::records;
 // Worksheet substream record ids.
 // See [MS-XLS] 2.4.261 (SORT).
 const RECORD_SORT: u16 = 0x0090;
+/// ContinueFrt12 [MS-XLS] 2.4.?? (Future Record Type continuation; BIFF8 only)
+///
+/// Sort12/SortData12 payloads can span multiple BIFF records via one or more `ContinueFrt12`
+/// fragments. The record begins with an `FrtHeader`; bytes after the header should be appended to
+/// the previous FRT record payload.
+const RECORD_CONTINUEFRT12: u16 = 0x087F;
 
 // BIFF8 "future record" variants used by newer Excel versions.
 // See [MS-XLS] 2.4.278 (Sort12) and 2.4.277 (SortData12).
@@ -57,6 +63,8 @@ pub(crate) fn parse_biff_sheet_sort_state(
 ) -> Result<ParsedSheetSortState, String> {
     let mut out = ParsedSheetSortState::default();
 
+    let mut pending_frt_sort: Option<PendingFrtSort> = None;
+
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
 
     while let Some(next) = iter.next() {
@@ -69,7 +77,15 @@ pub(crate) fn parse_biff_sheet_sort_state(
         };
 
         if record.offset != start && records::is_bof_record(record.record_id) {
+            flush_pending_frt_sort(pending_frt_sort.take(), auto_filter_range, &mut out);
             break;
+        }
+
+        // Flush a pending Sort12/SortData12 record before processing any non-continuation record.
+        // This ensures `ContinueFrt12` fragments are associated only with the immediately preceding
+        // FRT record.
+        if record.record_id != RECORD_CONTINUEFRT12 {
+            flush_pending_frt_sort(pending_frt_sort.take(), auto_filter_range, &mut out);
         }
 
         match record.record_id {
@@ -83,30 +99,60 @@ pub(crate) fn parse_biff_sheet_sort_state(
                     out.sort_state = Some(sort_state);
                 }
             }
+            RECORD_CONTINUEFRT12 => {
+                let Some(pending) = pending_frt_sort.as_mut() else {
+                    continue;
+                };
+                let payload = parse_frt_header(record.data)
+                    .map(|(_, p)| p)
+                    .unwrap_or(record.data);
+                if payload.is_empty() {
+                    continue;
+                }
+                if pending.fragments >= records::MAX_LOGICAL_RECORD_FRAGMENTS {
+                    let msg = match pending.rt {
+                        RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12",
+                        _ => "unsupported Sort12",
+                    };
+                    push_warning_once(&mut out.warnings, msg);
+                    pending_frt_sort = None;
+                    continue;
+                }
+                if pending
+                    .payload
+                    .len()
+                    .saturating_add(payload.len())
+                    > records::MAX_LOGICAL_RECORD_BYTES
+                {
+                    let msg = match pending.rt {
+                        RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12",
+                        _ => "unsupported Sort12",
+                    };
+                    push_warning_once(&mut out.warnings, msg);
+                    pending_frt_sort = None;
+                    continue;
+                }
+                pending.payload.extend_from_slice(payload);
+                pending.fragments = pending.fragments.saturating_add(1);
+            }
             id if (RECORD_FRT_MIN..=RECORD_FRT_MAX).contains(&id) => {
                 let (rt, payload) = parse_frt_header(record.data).unwrap_or((id, record.data));
                 match rt {
                     RT_SORT12 | RT_SORT12_ALT => {
-                        if let Some(sort_state) = parse_sort12_like_payload_best_effort(
-                            payload,
-                            record.offset,
-                            auto_filter_range,
-                        ) {
-                            out.sort_state = Some(sort_state);
-                        } else if payload_has_relevant_ref(payload, auto_filter_range) {
-                            push_warning_once(&mut out.warnings, "unsupported Sort12");
-                        }
+                        pending_frt_sort = Some(PendingFrtSort {
+                            rt,
+                            record_offset: record.offset,
+                            payload: payload.to_vec(),
+                            fragments: 1,
+                        });
                     }
                     RT_SORTDATA12 | RT_SORTDATA12_ALT => {
-                        if let Some(sort_state) = parse_sort12_like_payload_best_effort(
-                            payload,
-                            record.offset,
-                            auto_filter_range,
-                        ) {
-                            out.sort_state = Some(sort_state);
-                        } else if payload_has_relevant_ref(payload, auto_filter_range) {
-                            push_warning_once(&mut out.warnings, "unsupported SortData12");
-                        }
+                        pending_frt_sort = Some(PendingFrtSort {
+                            rt,
+                            record_offset: record.offset,
+                            payload: payload.to_vec(),
+                            fragments: 1,
+                        });
                     }
                     _ => {}
                 }
@@ -116,7 +162,47 @@ pub(crate) fn parse_biff_sheet_sort_state(
         }
     }
 
+    flush_pending_frt_sort(pending_frt_sort.take(), auto_filter_range, &mut out);
     Ok(out)
+}
+
+#[derive(Debug)]
+struct PendingFrtSort {
+    rt: u16,
+    record_offset: usize,
+    payload: Vec<u8>,
+    fragments: usize,
+}
+
+fn flush_pending_frt_sort(
+    pending: Option<PendingFrtSort>,
+    auto_filter_range: Range,
+    out: &mut ParsedSheetSortState,
+) {
+    let Some(pending) = pending else {
+        return;
+    };
+
+    if let Some(sort_state) = parse_sort12_like_payload_best_effort(
+        &pending.payload,
+        pending.record_offset,
+        auto_filter_range,
+    ) {
+        out.sort_state = Some(sort_state);
+        return;
+    }
+
+    if !payload_has_relevant_ref(&pending.payload, auto_filter_range) {
+        return;
+    }
+
+    match pending.rt {
+        RT_SORT12 | RT_SORT12_ALT => push_warning_once(&mut out.warnings, "unsupported Sort12"),
+        RT_SORTDATA12 | RT_SORTDATA12_ALT => {
+            push_warning_once(&mut out.warnings, "unsupported SortData12")
+        }
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone)]
