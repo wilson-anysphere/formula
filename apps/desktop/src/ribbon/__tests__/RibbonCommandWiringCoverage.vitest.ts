@@ -3,8 +3,14 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import type { RibbonSchema } from "../ribbonSchema";
-import { defaultRibbonSchema } from "../ribbonSchema";
+import { CommandRegistry } from "../../extensions/commandRegistry";
+import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState";
+import { panelRegistry } from "../../panels/panelRegistry";
+import { registerDesktopCommands } from "../../commands/registerDesktopCommands";
+import { registerFormatPainterCommand } from "../../commands/formatPainterCommand";
+
+import { computeRibbonDisabledByIdFromCommandRegistry } from "../ribbonCommandRegistryDisabling";
+import { defaultRibbonSchema, type RibbonSchema } from "../ribbonSchema";
 
 function collectRibbonCommandIds(schema: RibbonSchema): string[] {
   const ids = new Set<string>();
@@ -44,7 +50,9 @@ describe("Ribbon command wiring coverage (Home → Font dropdowns)", () => {
     const legacyMenuItemIds = ids.filter((id) => legacyMenuItemPrefixes.some((prefix) => id.startsWith(prefix)));
     expect(
       legacyMenuItemIds,
-      `Legacy Home→Font menu item ids should not exist in the ribbon schema:\n${legacyMenuItemIds.map((id) => `- ${id}`).join("\n")}`,
+      `Legacy Home→Font menu item ids should not exist in the ribbon schema:\n${legacyMenuItemIds
+        .map((id) => `- ${id}`)
+        .join("\n")}`,
     ).toEqual([]);
 
     // Representative new ids (the complete set is covered by CommandRegistry + ribbon schema tests).
@@ -65,5 +73,116 @@ describe("Ribbon command wiring coverage (Home → Font dropdowns)", () => {
     expect(source).not.toContain("home.font.fontColor.");
     expect(source).not.toContain("home.font.borders.");
     expect(source).not.toContain("home.font.clearFormatting.");
+  });
+});
+
+const IMPLEMENTED_COMMAND_PREFIXES = [
+  // Handled by `handleRibbonCommand` prefix logic.
+  "view.zoom.zoom.",
+];
+
+function extractImplementedCommandIdsFromMainTs(schemaCommandIds: Set<string>): string[] {
+  const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
+  const source = readFileSync(mainTsPath, "utf8");
+  const ids = new Set<string>();
+
+  const addIfSchema = (id: string) => {
+    if (schemaCommandIds.has(id)) ids.add(id);
+  };
+
+  for (const match of source.matchAll(/case\s+\"([^\"]+)\"/g)) {
+    addIfSchema(match[1]!);
+  }
+
+  for (const match of source.matchAll(/commandId\s*===\s*\"([^\"]+)\"/g)) {
+    addIfSchema(match[1]!);
+  }
+
+  const presentPrefixes = IMPLEMENTED_COMMAND_PREFIXES.filter((prefix) => source.includes(prefix));
+  for (const id of schemaCommandIds) {
+    if (presentPrefixes.some((prefix) => id.startsWith(prefix))) {
+      ids.add(id);
+    }
+  }
+
+  return Array.from(ids).sort();
+}
+
+function registerCommandsForRibbonDisablingTest(commandRegistry: CommandRegistry): void {
+  const layoutController = {
+    layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+    openPanel(panelId: string) {
+      this.layout = openPanel(this.layout, panelId, { panelRegistry });
+    },
+    closePanel(panelId: string) {
+      this.layout = closePanel(this.layout, panelId);
+    },
+  } as any;
+
+  registerDesktopCommands({
+    commandRegistry,
+    app: {} as any,
+    layoutController,
+    themeController: { setThemePreference: () => {} } as any,
+    refreshRibbonUiState: () => {},
+    applyFormattingToSelection: () => {},
+    getActiveCellNumberFormat: () => null,
+    getActiveCellIndentLevel: () => 0,
+    openFormatCells: () => {},
+    showQuickPick: async () => null,
+    pageLayoutHandlers: {
+      openPageSetupDialog: () => {},
+      updatePageSetup: () => {},
+      setPrintArea: () => {},
+      clearPrintArea: () => {},
+      addToPrintArea: () => {},
+      exportPdf: () => {},
+    },
+    findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+    workbenchFileHandlers: {
+      newWorkbook: () => {},
+      openWorkbook: () => {},
+      saveWorkbook: () => {},
+      saveWorkbookAs: () => {},
+      setAutoSaveEnabled: () => {},
+      print: () => {},
+      printPreview: () => {},
+      closeWorkbook: () => {},
+      quit: () => {},
+    },
+    openCommandPalette: () => {},
+  });
+
+  registerFormatPainterCommand({
+    commandRegistry,
+    isArmed: () => false,
+    arm: () => {},
+    disarm: () => {},
+  });
+}
+
+describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
+  it("does not auto-disable ribbon ids that are explicitly wired in main.ts", () => {
+    const schemaCommandIds = collectRibbonCommandIds(defaultRibbonSchema);
+    const schemaIdSet = new Set(schemaCommandIds);
+
+    const implementedIds = extractImplementedCommandIdsFromMainTs(schemaIdSet);
+
+    // Guard against a broken traversal so the test can't pass vacuously.
+    expect(implementedIds).toContain("file.save.save");
+    expect(implementedIds).toContain("home.alignment.mergeCenter.mergeCenter");
+
+    const commandRegistry = new CommandRegistry();
+    registerCommandsForRibbonDisablingTest(commandRegistry);
+
+    const disabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry, { schema: defaultRibbonSchema });
+
+    const disabledImplemented = implementedIds.filter((id) => disabledById[id]);
+    expect(
+      disabledImplemented,
+      `Found ribbon ids that are wired in main.ts but disabled by the CommandRegistry baseline:\n${disabledImplemented
+        .map((id) => `- ${id}`)
+        .join("\n")}`,
+    ).toEqual([]);
   });
 });
