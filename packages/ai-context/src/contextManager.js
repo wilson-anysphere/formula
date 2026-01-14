@@ -1553,8 +1553,9 @@ export class ContextManager {
        * supplies a no-op redactor, heuristic-sensitive strings should not leak under DLP REDACT.
        *
        * @param {unknown} value
+       * @param {string} [blockedReason]
        */
-      const redactSchemaToken = (value) => {
+      const redactSchemaToken = (value, blockedReason = "workbook_schema") => {
         const raw = String(value ?? "");
         if (!dlp) return raw;
         throwIfAborted(signal);
@@ -1571,7 +1572,7 @@ export class ContextManager {
               classification: decision.classification ?? { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
               redactedChunkCount,
               blockedChunkId: null,
-              blockedReason: "workbook_schema",
+              blockedReason,
               chunks: chunkAudits,
             });
             throw new DlpViolationError(decision);
@@ -1826,8 +1827,8 @@ export class ContextManager {
         {
           key: "workbook_summary",
           priority: 3,
-          text: this.redactor(
-            `Workbook summary:\n${stableJsonStringify({
+          text: (() => {
+            const summary = {
               id: params.workbook.id,
               sheets: (params.workbook.sheets ?? []).map((s) => s.name),
               tables: (params.workbook.tables ?? []).map((t) => ({
@@ -1840,8 +1841,27 @@ export class ContextManager {
                 sheetName: r.sheetName,
                 rect: r.rect,
               })),
-            })}`
-          ),
+            };
+
+            const safeSummary = dlp
+              ? {
+                  id: redactSchemaToken(summary.id, "workbook_summary"),
+                  sheets: (summary.sheets ?? []).map((name) => redactSchemaToken(name, "workbook_summary")),
+                  tables: (summary.tables ?? []).map((t) => ({
+                    ...t,
+                    name: redactSchemaToken(t?.name, "workbook_summary"),
+                    sheetName: redactSchemaToken(t?.sheetName, "workbook_summary"),
+                  })),
+                  namedRanges: (summary.namedRanges ?? []).map((r) => ({
+                    ...r,
+                    name: redactSchemaToken(r?.name, "workbook_summary"),
+                    sheetName: redactSchemaToken(r?.sheetName, "workbook_summary"),
+                  })),
+                }
+              : summary;
+
+            return this.redactor(`Workbook summary:\n${stableJsonStringify(safeSummary)}`);
+          })(),
         },
         {
           key: "workbook_schema",

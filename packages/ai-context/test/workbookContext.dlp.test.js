@@ -381,6 +381,46 @@ test("buildWorkbookContext: attachment-only sensitive patterns can trigger DLP R
   assert.equal(auditEvents[0]?.decision?.decision, "redact");
 });
 
+test("buildWorkbookContext: workbook_summary redacts heuristic-sensitive sheet names even with a no-op redactor", async () => {
+  const workbook = {
+    id: "wb-dlp-summary-noop-redactor",
+    sheets: [
+      {
+        // Heuristic-sensitive sheet name.
+        name: "alice@example.com",
+        cells: [[{ v: "Hello" }], [{ v: "World" }]],
+      },
+    ],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    // No-op redactor to ensure we still don't leak heuristic-sensitive strings under DLP.
+    redactor: (t) => t,
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "hello",
+    topK: 0, // force empty retrieval
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+    },
+  });
+
+  const summarySection =
+    out.promptContext.match(/## workbook_summary\n([\s\S]*?)(?:\n\n## [^\n]+\n|$)/i)?.[1] ?? "";
+
+  assert.match(out.promptContext, /## workbook_summary/i);
+  assert.doesNotMatch(summarySection, /alice@example\.com/);
+  assert.match(summarySection, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when blocked", async () => {
   const workbook = makeSensitiveWorkbook();
   const embedder = new CapturingEmbedder({ dimension: 64 });
