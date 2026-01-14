@@ -6,6 +6,7 @@
  *
  * Runs:
  *  - scripts/check-desktop-version.mjs <tag>
+ *  - scripts/check-desktop-url-scheme.mjs
  *  - scripts/check-updater-config.mjs
  *  - scripts/verify-desktop-release-assets.mjs --tag <tag> --repo <repo>
  *
@@ -704,6 +705,12 @@ async function main() {
       title: "Check updater config",
       command: process.execPath,
       args: [path.join(repoRoot, "scripts", "check-updater-config.mjs")],
+    },
+    {
+      id: "desktop-url-scheme",
+      title: "Check desktop URL scheme + file associations",
+      command: process.execPath,
+      args: [path.join(repoRoot, "scripts", "check-desktop-url-scheme.mjs")],
     },
     {
       id: "release-assets",
