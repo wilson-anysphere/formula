@@ -10062,20 +10062,6 @@ export class SpreadsheetApp {
     // Drawings should not interfere with the in-place editor.
     if (this.editor.isOpen()) return;
 
-    const target = e.target as HTMLElement | null;
-    // Only treat pointerdown events originating from the grid surface (canvases/root) as
-    // drawing selection. This avoids interfering with interactive DOM overlays
-    // (scrollbars, outline buttons, comments panel, etc) even when a drawing happens to
-    // extend underneath them.
-    const isGridSurface =
-      target === this.root ||
-      target === this.selectionCanvas ||
-      target === this.gridCanvas ||
-      target === this.referenceCanvas ||
-      target === this.auditingCanvas ||
-      target === this.presenceCanvas;
-    if (!isGridSurface) return;
-
     const objects = this.listDrawingObjectsForSheet();
     const prevSelected = this.selectedDrawingId;
 
