@@ -380,21 +380,6 @@ export class EngineWorker {
     await this.invoke("setCellStyleId", { sheet, address, styleId }, options);
   }
 
-  async setRowStyleId(row: number, styleId: number, sheet?: string, options?: RpcOptions): Promise<void> {
-    await this.flush();
-    await this.invoke("setRowStyleId", { sheet, row, styleId }, options);
-  }
-
-  async setColStyleId(col: number, styleId: number, sheet?: string, options?: RpcOptions): Promise<void> {
-    await this.flush();
-    await this.invoke("setColStyleId", { sheet, col, styleId }, options);
-  }
-
-  async setSheetDefaultStyleId(styleId: number, sheet?: string, options?: RpcOptions): Promise<void> {
-    await this.flush();
-    await this.invoke("setSheetDefaultStyleId", { sheet, styleId }, options);
-  }
-
   /**
    * Set (or clear) a per-column width override.
    *

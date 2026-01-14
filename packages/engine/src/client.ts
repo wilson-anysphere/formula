@@ -102,24 +102,6 @@ export interface EngineClient {
    */
   setCellStyleId(address: string, styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
   /**
-   * Set the default style id for a row (formatting metadata).
-   *
-   * `row` is 0-indexed (engine coordinates). `styleId=0` clears the override.
-   */
-  setRowStyleId?(row: number, styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
-  /**
-   * Set the default style id for a column (formatting metadata).
-   *
-   * `col` is 0-indexed (engine coordinates). `styleId=0` clears the override.
-   */
-  setColStyleId?(col: number, styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
-  /**
-   * Set the default style id for a sheet (formatting metadata).
-   *
-   * `styleId=0` clears the override.
-   */
-  setSheetDefaultStyleId?(styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
-  /**
    * Set (or clear) a column width override.
    *
    * `col` is 0-indexed (engine coordinates). `width=null` clears the override.
@@ -418,12 +400,6 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setWorkbookFileMetadata(directory, filename, rpcOptions)),
     setCellStyleId: async (address, styleId, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setCellStyleId(address, styleId, sheet, rpcOptions)),
-    setRowStyleId: async (row, styleId, sheet, rpcOptions) =>
-      await withEngine((connected) => connected.setRowStyleId(row, styleId, sheet, rpcOptions)),
-    setColStyleId: async (col, styleId, sheet, rpcOptions) =>
-      await withEngine((connected) => connected.setColStyleId(col, styleId, sheet, rpcOptions)),
-    setSheetDefaultStyleId: async (styleId, sheet, rpcOptions) =>
-      await withEngine((connected) => connected.setSheetDefaultStyleId(styleId, sheet, rpcOptions)),
     setColWidth: async (col, width, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setColWidth(col, width, sheet, rpcOptions)),
     setColHidden: async (col, hidden, sheet, rpcOptions) =>

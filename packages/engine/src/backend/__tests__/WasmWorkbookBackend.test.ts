@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineClient } from "../../client.ts";
-import type { CalcSettings } from "../../protocol.ts";
+import type { CalcSettings, CellDataCompact } from "../../protocol.ts";
 import { colToName, fromA1, toA1, toA1Range } from "../a1.ts";
 import { normalizeFormulaText } from "../formula.ts";
 import { WasmWorkbookBackend } from "../WasmWorkbookBackend.ts";
@@ -72,9 +72,16 @@ describe("WasmWorkbookBackend", () => {
       setColHidden: vi.fn(async () => {}),
       internStyle: vi.fn(async () => 0),
       setLocale: vi.fn(async () => true),
+      getCalcSettings: vi.fn(async () => defaultCalcSettings),
+      setCalcSettings: vi.fn(async () => {}),
       recalculate: vi.fn(async () => []),
       setSheetDimensions: vi.fn(async () => {}),
       getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
+      renameSheet: vi.fn(async () => true),
+      setColWidthChars: vi.fn(async () => {}),
+      setRowStyleId: vi.fn(async () => {}),
+      setColStyleId: vi.fn(async () => {}),
+      setSheetDefaultStyleId: vi.fn(async () => {}),
       applyOperation: vi.fn(async () => ({ changedCells: [], movedRanges: [], formulaRewrites: [] })),
       rewriteFormulasForCopyDelta: vi.fn(async () => []),
       lexFormula: vi.fn(async () => []),
@@ -171,7 +178,7 @@ describe("WasmWorkbookBackend", () => {
       ],
     ];
 
-    const compact = [
+    const compact: CellDataCompact[][] = [
       [
         [1, 1],
         ["  =A1*2  ", 2],
@@ -375,6 +382,9 @@ describe("WasmWorkbookBackend", () => {
       getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
       renameSheet: vi.fn(async () => true),
       setColWidthChars: vi.fn(async () => {}),
+      setRowStyleId: vi.fn(async () => {}),
+      setColStyleId: vi.fn(async () => {}),
+      setSheetDefaultStyleId: vi.fn(async () => {}),
       applyOperation: vi.fn(async () => ({ changedCells: [], movedRanges: [], formulaRewrites: [] })),
       rewriteFormulasForCopyDelta: vi.fn(async () => []),
       lexFormula: vi.fn(async () => []),

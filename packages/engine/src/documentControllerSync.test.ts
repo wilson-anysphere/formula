@@ -210,9 +210,9 @@ describe("engine sync helpers", () => {
     readonly setCalls: Array<{ address: string; value: unknown; sheet?: string }> = [];
     readonly internStyleCalls: unknown[] = [];
     readonly setStyleCalls: Array<{ address: string; styleId: number; sheet?: string }> = [];
-    readonly sheetDefaultStyleCalls: Array<{ sheet?: string; styleId: number }> = [];
-    readonly rowStyleCalls: Array<{ sheet?: string; row: number; styleId: number }> = [];
-    readonly colStyleCalls: Array<{ sheet?: string; col: number; styleId: number }> = [];
+    readonly sheetDefaultStyleCalls: Array<{ sheet: string; styleId: number | null }> = [];
+    readonly rowStyleCalls: Array<{ sheet: string; row: number; styleId: number | null }> = [];
+    readonly colStyleCalls: Array<{ sheet: string; col: number; styleId: number | null }> = [];
     readonly formatRunsByColCalls: Array<{
       sheet: string;
       col: number;
@@ -240,15 +240,15 @@ describe("engine sync helpers", () => {
       this.setStyleCalls.push({ address, styleId, sheet });
     }
 
-    async setSheetDefaultStyleId(styleId: number, sheet?: string): Promise<void> {
+    async setSheetDefaultStyleId(sheet: string, styleId: number | null): Promise<void> {
       this.sheetDefaultStyleCalls.push({ sheet, styleId });
     }
 
-    async setRowStyleId(row: number, styleId: number, sheet?: string): Promise<void> {
+    async setRowStyleId(sheet: string, row: number, styleId: number | null): Promise<void> {
       this.rowStyleCalls.push({ sheet, row, styleId });
     }
 
-    async setColStyleId(col: number, styleId: number, sheet?: string): Promise<void> {
+    async setColStyleId(sheet: string, col: number, styleId: number | null): Promise<void> {
       this.colStyleCalls.push({ sheet, col, styleId });
     }
 
@@ -514,9 +514,9 @@ describe("engine sync helpers", () => {
     await Promise.all(pending);
 
     expect(internStyle).toHaveBeenCalledTimes(1);
-    expect(setRowStyleId).toHaveBeenCalledWith(0, 100, "Sheet1");
-    expect(setColStyleId).toHaveBeenCalledWith(0, 100, "Sheet1");
-    expect(setSheetDefaultStyleId).toHaveBeenCalledWith(100, "Sheet1");
+    expect(setRowStyleId).toHaveBeenCalledWith("Sheet1", 0, 100);
+    expect(setColStyleId).toHaveBeenCalledWith("Sheet1", 0, 100);
+    expect(setSheetDefaultStyleId).toHaveBeenCalledWith("Sheet1", 100);
   });
 
   it("forces a recalc for cell styleId-only deltas even when DocumentController emits recalc=false", async () => {
@@ -609,9 +609,9 @@ describe("engine sync helpers", () => {
 
     expect(internStyle).toHaveBeenCalledTimes(1);
     expect(internStyle).toHaveBeenCalledWith(styleObj);
-    expect(setRowStyleId).toHaveBeenCalledWith(0, 100, "Sheet1");
-    expect(setColStyleId).toHaveBeenCalledWith(1, 100, "Sheet1");
-    expect(setSheetDefaultStyleId).toHaveBeenCalledWith(100, "Sheet1");
+    expect(setRowStyleId).toHaveBeenCalledWith("Sheet1", 0, 100);
+    expect(setColStyleId).toHaveBeenCalledWith("Sheet1", 1, 100);
+    expect(setSheetDefaultStyleId).toHaveBeenCalledWith("Sheet1", 100);
 
     expect(recalculate).toHaveBeenCalledTimes(1);
     expect(changes).toEqual(recalcResult);

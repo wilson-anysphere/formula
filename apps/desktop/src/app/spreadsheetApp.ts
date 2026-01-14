@@ -257,13 +257,13 @@ function engineClientAsSyncTarget(engine: EngineClient): EngineSyncTarget {
   // Row/col/sheet style metadata is optional (older WASM builds may not support it). Only expose
   // these hooks when present so `engineApplyDocumentChange` can treat them as best-effort.
   if (typeof engine.setRowStyleId === "function") {
-    target.setRowStyleId = (row, styleId, sheet) => engine.setRowStyleId!(row, styleId, sheet);
+    target.setRowStyleId = (sheet, row, styleId) => engine.setRowStyleId(sheet, row, styleId);
   }
   if (typeof engine.setColStyleId === "function") {
-    target.setColStyleId = (col, styleId, sheet) => engine.setColStyleId!(col, styleId, sheet);
+    target.setColStyleId = (sheet, col, styleId) => engine.setColStyleId(sheet, col, styleId);
   }
   if (typeof engine.setSheetDefaultStyleId === "function") {
-    target.setSheetDefaultStyleId = (styleId, sheet) => engine.setSheetDefaultStyleId!(styleId, sheet);
+    target.setSheetDefaultStyleId = (sheet, styleId) => engine.setSheetDefaultStyleId(sheet, styleId);
   }
 
   ENGINE_SYNC_TARGET_BY_CLIENT.set(key, target);

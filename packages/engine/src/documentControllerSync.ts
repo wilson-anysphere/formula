@@ -114,9 +114,9 @@ export interface EngineSyncTarget {
    */
   internStyle?: (styleObj: unknown) => Promise<number> | number;
   setCellStyleId?: (sheet: string, address: string, styleId: number) => Promise<void> | void;
-  setRowStyleId?: (row: number, styleId: number, sheet?: string) => Promise<void> | void;
-  setColStyleId?: (col: number, styleId: number, sheet?: string) => Promise<void> | void;
-  setSheetDefaultStyleId?: (styleId: number, sheet?: string) => Promise<void> | void;
+  setRowStyleId?: (sheet: string, row: number, styleId: number | null) => Promise<void> | void;
+  setColStyleId?: (sheet: string, col: number, styleId: number | null) => Promise<void> | void;
+  setSheetDefaultStyleId?: (sheet: string, styleId: number | null) => Promise<void> | void;
   /**
    * Update a sheet's compressed range-run formatting layer (`DocumentController`'s `formatRunsByCol`).
    *
@@ -468,7 +468,7 @@ export async function engineHydrateFromDocument(
           const docStyleId = typeof sheet?.defaultStyleId === "number" ? sheet.defaultStyleId : 0;
           if (Number.isInteger(docStyleId) && docStyleId !== 0) {
             const engineStyleId = await resolveEngineStyleIdForDocStyleId(engine, ctx, docStyleId);
-            await engine.setSheetDefaultStyleId(engineStyleId, engineSheetId);
+            await engine.setSheetDefaultStyleId(engineSheetId, engineStyleId);
           }
         }
 
@@ -478,7 +478,7 @@ export async function engineHydrateFromDocument(
             const docStyleId = typeof rawDocStyleId === "number" ? rawDocStyleId : 0;
             if (!Number.isInteger(docStyleId) || docStyleId === 0) continue;
             const engineStyleId = await resolveEngineStyleIdForDocStyleId(engine, ctx, docStyleId);
-            await engine.setRowStyleId(row, engineStyleId, engineSheetId);
+            await engine.setRowStyleId(engineSheetId, row, engineStyleId);
           }
         }
 
@@ -488,7 +488,7 @@ export async function engineHydrateFromDocument(
             const docStyleId = typeof rawDocStyleId === "number" ? rawDocStyleId : 0;
             if (!Number.isInteger(docStyleId) || docStyleId === 0) continue;
             const engineStyleId = await resolveEngineStyleIdForDocStyleId(engine, ctx, docStyleId);
-            await engine.setColStyleId(col, engineStyleId, engineSheetId);
+            await engine.setColStyleId(engineSheetId, col, engineStyleId);
           }
         }
 
@@ -754,10 +754,11 @@ export async function engineApplyDocumentChange(
       if (!Number.isInteger(docStyleId) || docStyleId < 0) continue;
       if (docStyleId !== 0 && !canResolveNonZeroStyles) continue;
 
-      const engineStyleId = docStyleId === 0 ? 0 : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
+      const engineStyleId =
+        docStyleId === 0 ? null : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
       const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(d.sheetId) : null;
       const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : d.sheetId;
-      await engine.setRowStyleId(d.row, engineStyleId, sheet);
+      await engine.setRowStyleId(sheet, d.row, engineStyleId);
       didApplyAnyLayerStyles = true;
     }
   }
@@ -768,10 +769,11 @@ export async function engineApplyDocumentChange(
       if (!Number.isInteger(docStyleId) || docStyleId < 0) continue;
       if (docStyleId !== 0 && !canResolveNonZeroStyles) continue;
 
-      const engineStyleId = docStyleId === 0 ? 0 : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
+      const engineStyleId =
+        docStyleId === 0 ? null : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
       const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(d.sheetId) : null;
       const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : d.sheetId;
-      await engine.setColStyleId(d.col, engineStyleId, sheet);
+      await engine.setColStyleId(sheet, d.col, engineStyleId);
       didApplyAnyLayerStyles = true;
     }
   }
@@ -782,10 +784,11 @@ export async function engineApplyDocumentChange(
       if (!Number.isInteger(docStyleId) || docStyleId < 0) continue;
       if (docStyleId !== 0 && !canResolveNonZeroStyles) continue;
 
-      const engineStyleId = docStyleId === 0 ? 0 : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
+      const engineStyleId =
+        docStyleId === 0 ? null : await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
       const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(d.sheetId) : null;
       const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : d.sheetId;
-      await engine.setSheetDefaultStyleId(engineStyleId, sheet);
+      await engine.setSheetDefaultStyleId(sheet, engineStyleId);
       didApplyAnyLayerStyles = true;
     }
   }
