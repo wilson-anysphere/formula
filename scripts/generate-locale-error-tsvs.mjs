@@ -87,7 +87,8 @@ function extractCanonicalErrorLiterals(rustSource) {
 
 /**
  * Error TSV convention:
- * - `# ` (hash + space) starts a comment line (error literals themselves start with `#`)
+ * - `#` followed by whitespace (or `#` alone) starts a comment line (error literals themselves
+ *   start with `#`)
  * - empty lines ignored
  * - each entry: `Canonical<TAB>Localized`
  * - multiple rows for the same canonical literal are allowed to represent additional localized
@@ -108,12 +109,10 @@ function parseErrorTsv(contents, label) {
     const trimmed = raw.trim();
     // Error TSVs allow data lines that start with `#` (e.g. `#VALUE!`), so we treat
     // comments as `#` followed by whitespace (or `#` alone).
+    //
+    // Use a Unicode-aware whitespace test to match the Rust loader's behavior.
     const isComment =
       trimmed === "#" ||
-      // Error TSVs allow data lines that start with `#` (e.g. `#VALUE!`), so we treat
-      // comments as `#` followed by whitespace (or `#` alone).
-      //
-      // Use a Unicode-aware whitespace test to match the runtime parser's behavior.
       (trimmed.startsWith("#") && /\s/u.test(trimmed[1]));
     if (trimmed.length === 0 || isComment) {
       continue;
