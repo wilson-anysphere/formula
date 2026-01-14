@@ -742,16 +742,32 @@ fn load_sheet_drawings_from_archive<R: Read + Seek>(
         }
 
         let drawing_part = resolve_target(sheet_part, &rel.target);
-        if !seen_drawing_parts.insert(drawing_part.clone()) {
-            continue;
+
+        // Best-effort tolerance for invalid relationship targets:
+        // - Some producers emit `Target="drawings/drawing1.xml"` (relative to `xl/`) instead of the
+        //   more common `Target="../drawings/drawing1.xml"` (relative to `xl/worksheets/`).
+        // - Some producers emit `Target="xl/drawings/drawing1.xml"` without a leading `/`, which
+        //   incorrectly resolves under `xl/worksheets/xl/...`.
+        let mut candidates: Vec<String> = Vec::with_capacity(3);
+        candidates.push(drawing_part.clone());
+        if let Some(rest) = drawing_part.strip_prefix("xl/worksheets/") {
+            if rest.starts_with("drawings/") {
+                candidates.push(format!("xl/{rest}"));
+            } else if rest.starts_with("xl/") {
+                candidates.push(rest.to_string());
+            }
         }
 
-        let parsed =
-            match DrawingPart::parse_from_archive(sheet_index, &drawing_part, archive, workbook) {
-                Ok(part) => part,
-                Err(_) => continue,
-            };
-        objects.extend(parsed.objects);
+        for candidate in candidates {
+            if !seen_drawing_parts.insert(candidate.clone()) {
+                continue;
+            }
+            if let Ok(part) = DrawingPart::parse_from_archive(sheet_index, &candidate, archive, workbook)
+            {
+                objects.extend(part.objects);
+                break;
+            }
+        }
     }
 
     objects
@@ -818,10 +834,26 @@ fn load_sheet_drawings_from_parts(
         }
 
         let drawing_part = resolve_target(sheet_part, &rel.target);
+
         // Relationship targets are URIs and may be percent-encoded differently than the underlying
         // ZIP entry name (e.g. `drawing%201.xml` vs `drawing 1.xml`). Use the tolerant part-name
         // lookup so we can still locate the drawing XML in `parts`.
-        let Some(drawing_part) = part_name_tolerant(parts, &drawing_part) else {
+        let mut resolved = part_name_tolerant(parts, &drawing_part);
+
+        // Best-effort tolerance for invalid relationship targets:
+        // - `Target="drawings/drawing1.xml"` (relative to `xl/`) instead of `../drawings/...`.
+        // - `Target="xl/drawings/drawing1.xml"` without a leading `/`.
+        if resolved.is_none() {
+            if let Some(rest) = drawing_part.strip_prefix("xl/worksheets/") {
+                if rest.starts_with("drawings/") {
+                    resolved = part_name_tolerant(parts, &format!("xl/{rest}"));
+                } else if rest.starts_with("xl/") {
+                    resolved = part_name_tolerant(parts, rest);
+                }
+            }
+        }
+
+        let Some(drawing_part) = resolved else {
             continue;
         };
 
