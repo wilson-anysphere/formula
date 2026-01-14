@@ -431,6 +431,13 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // graph aligned with Excel (e.g. `CELL("width",A1)` is not a circular dependency in
             // A1) and prevents spurious dynamic dependencies when the reference is produced by
             // `INDIRECT`/`OFFSET`.
+            //
+            // Mirror `get_cell_value` bounds behavior: out-of-bounds references should surface
+            // `#REF!` rather than defaulting to a sheet/Excel width fallback.
+            let (rows, cols) = ctx.sheet_dimensions(&reference.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
 
             // Excel returns a number where the integer part is the column width (in characters),
             // rounded down, and the first decimal digit is `0` when the column uses the sheet
@@ -488,6 +495,13 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // `CELL("prefix")` consults alignment/prefix metadata but should avoid recording an
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let cell_ref = record_explicit_cell(ctx);
+
+            // Mirror `get_cell_value` bounds behavior: out-of-bounds references should surface
+            // `#REF!` rather than defaulting to an empty prefix.
+            let (rows, cols) = ctx.sheet_dimensions(&cell_ref.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
 
             let horizontal = resolve_horizontal_alignment(ctx, &cell_ref.sheet_id, addr);
             let prefix = match horizontal {
