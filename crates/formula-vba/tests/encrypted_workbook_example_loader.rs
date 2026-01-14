@@ -35,7 +35,14 @@ fn example_loader_handles_encrypted_ooxml_workbooks() {
     let ole_bytes = formula_office_crypto::encrypt_package_to_ole(
         &zip_bytes,
         password,
-        formula_office_crypto::EncryptOptions::default(),
+        // Keep key derivation cheap: this is an integration smoke test for the example loader, not
+        // a performance/parameter-validation test (those live in `formula-office-crypto`).
+        formula_office_crypto::EncryptOptions {
+            scheme: formula_office_crypto::EncryptionScheme::Agile,
+            key_bits: 128,
+            hash_algorithm: formula_office_crypto::HashAlgorithm::Sha256,
+            spin_count: 1_000,
+        },
     )
     .expect("encrypt to OLE");
 
