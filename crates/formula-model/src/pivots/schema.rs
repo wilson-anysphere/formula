@@ -254,11 +254,15 @@ fn quote_dax_identifier(raw: &str) -> String {
 }
 
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
-    if dax_identifier_requires_quotes(raw) {
-        Cow::Owned(quote_dax_identifier(raw))
-    } else {
-        Cow::Borrowed(raw)
+    let Some(first) = raw.chars().next() else {
+        return Cow::Borrowed("''");
+    };
+    let is_simple = (first.is_ascii_alphabetic() || first == '_')
+        && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if is_simple {
+        return Cow::Borrowed(raw);
     }
+    Cow::Owned(format!("'{}'", raw.replace('\'', "''")))
 }
 
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
