@@ -141,34 +141,38 @@ PY
 APP_NAME="$(get_product_name)"
 EXPECTED_APP_BUNDLE="${APP_NAME}.app"
 
-get_expected_url_scheme() {
+get_expected_url_schemes() {
   # Keep this in sync with apps/desktop/src-tauri/Info.plist, which is merged into the generated
   # app bundle Info.plist during packaging.
   local config_plist="$REPO_ROOT/apps/desktop/src-tauri/Info.plist"
   if [ -f "$config_plist" ]; then
-    local scheme
+    local schemes
     set +e
-    scheme="$(
+    schemes="$(
       python3 - "$config_plist" <<'PY'
 import plistlib
 import sys
 
-with open(sys.argv[1], "rb") as f:
-    data = plistlib.load(f)
+try:
+    with open(sys.argv[1], "rb") as f:
+        data = plistlib.load(f)
+except Exception:
+    raise SystemExit(1)
 
 schemes = []
 for url_type in data.get("CFBundleURLTypes", []) or []:
     for s in url_type.get("CFBundleURLSchemes", []) or []:
-        if isinstance(s, str):
+        if isinstance(s, str) and s:
             schemes.append(s)
 
-print(schemes[0] if schemes else "")
+for s in schemes:
+    print(s)
 PY
     )"
     local status=$?
     set -e
-    if [ "$status" -eq 0 ] && [ -n "$scheme" ]; then
-      echo "$scheme"
+    if [ "$status" -eq 0 ] && [ -n "$schemes" ]; then
+      printf '%s\n' "$schemes"
       return 0
     fi
   fi
@@ -176,43 +180,48 @@ PY
   echo "formula"
 }
 
-EXPECTED_URL_SCHEME="$(get_expected_url_scheme)"
+EXPECTED_URL_SCHEMES=()
+while IFS= read -r scheme; do
+  [ -n "$scheme" ] && EXPECTED_URL_SCHEMES+=("$scheme")
+done < <(get_expected_url_schemes)
+
+if [ "${#EXPECTED_URL_SCHEMES[@]}" -eq 0 ]; then
+  EXPECTED_URL_SCHEMES=("formula")
+fi
 
 validate_plist_url_scheme() {
   local plist_path="$1"
-  local expected_scheme="$2"
+  shift
+  local expected_schemes=("$@")
 
   [ -f "$plist_path" ] || die "missing Info.plist at $plist_path"
+  if [ "${#expected_schemes[@]}" -eq 0 ]; then
+    expected_schemes=("formula")
+  fi
 
   local found
   set +e
   found="$(
-    python3 - "$plist_path" "$expected_scheme" <<'PY'
+    python3 - "$plist_path" <<'PY'
 import plistlib
 import sys
 
 plist_path = sys.argv[1]
-expected = sys.argv[2]
 try:
     with open(plist_path, "rb") as f:
         data = plistlib.load(f)
 except Exception as e:
-    # Exit code 2 is reserved for parse failures; exit code 1 is "valid plist, but missing scheme".
     print(str(e))
     raise SystemExit(2)
 
 schemes = []
 for url_type in data.get("CFBundleURLTypes", []) or []:
-    for scheme in (url_type.get("CFBundleURLSchemes", []) or []):
-        if isinstance(scheme, str):
-            schemes.append(scheme)
+    for s in (url_type.get("CFBundleURLSchemes", []) or []):
+        if isinstance(s, str) and s:
+            schemes.append(s)
 
-if expected in schemes:
-    raise SystemExit(0)
-
-unique = sorted(set(schemes))
-print(", ".join(unique) if unique else "(none)")
-raise SystemExit(1)
+for s in schemes:
+    print(s)
 PY
   )"
   local status=$?
@@ -221,7 +230,26 @@ PY
   if [ "$status" -eq 2 ]; then
     die "failed to parse Info.plist at ${plist_path}: ${found}"
   elif [ "$status" -ne 0 ]; then
-    die "Info.plist does not declare expected URL scheme '${expected_scheme}'. Found: ${found}. (Check apps/desktop/src-tauri/Info.plist)"
+    die "failed to parse Info.plist at ${plist_path}"
+  fi
+
+  local missing=()
+  local expected
+  for expected in "${expected_schemes[@]}"; do
+    if ! printf '%s\n' "$found" | grep -Fxq "$expected"; then
+      missing+=("$expected")
+    fi
+  done
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    local found_one_line
+    found_one_line="$(
+      printf '%s\n' "$found" | sed '/^$/d' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g'
+    )"
+    if [ -z "$found_one_line" ]; then
+      found_one_line="(none)"
+    fi
+    die "Info.plist does not declare expected URL scheme(s): ${missing[*]}. Found: ${found_one_line}. (Check apps/desktop/src-tauri/Info.plist)"
   fi
 }
 
@@ -376,8 +404,8 @@ validate_app_bundle() {
   local plist_path="${app_path}/Contents/Info.plist"
   [ -f "$plist_path" ] || die "missing Contents/Info.plist in app bundle: $app_path"
 
-  validate_plist_url_scheme "$plist_path" "$EXPECTED_URL_SCHEME"
-  echo "bundle: Info.plist OK (URL scheme '${EXPECTED_URL_SCHEME}')"
+  validate_plist_url_scheme "$plist_path" "${EXPECTED_URL_SCHEMES[@]}"
+  echo "bundle: Info.plist OK (URL scheme(s) '${EXPECTED_URL_SCHEMES[*]}')"
 
   validate_plist_file_associations "$plist_path" "xlsx" "xls" "csv"
   echo "bundle: Info.plist OK (file associations include .xlsx)"
@@ -767,7 +795,7 @@ main() {
   fi
 
   echo "bundle: expecting app bundle name: ${EXPECTED_APP_BUNDLE}"
-  echo "bundle: expecting URL scheme: ${EXPECTED_URL_SCHEME}"
+  echo "bundle: expecting URL scheme(s): ${EXPECTED_URL_SCHEMES[*]}"
 
   local dmg
   for dmg in "${dmgs[@]}"; do
