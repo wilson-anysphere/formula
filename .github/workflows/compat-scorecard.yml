@@ -7,6 +7,10 @@ on:
       - Excel Compatibility (Oracle)
     types: [completed]
 
+concurrency:
+  group: compat-scorecard-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   actions: read
