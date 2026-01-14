@@ -279,11 +279,14 @@ For packaged (production) Tauri builds, the same headers are configured via
 
 Additionally, Pyodide assets are self-hosted under the same origin at:
 
-`/pyodide/v0.25.1/full/`
+Packaged desktop builds download Pyodide assets **on-demand** into an app-data
+cache and serve them to the WebView via the `pyodide://` protocol (COOP/COEP
+friendly). This keeps installers small while preserving Python functionality.
 
-Running `pnpm -C apps/desktop dev` (or `pnpm -C apps/desktop build`) will
-download the required Pyodide files into `apps/desktop/public/pyodide/` via
-`scripts/ensure-pyodide-assets.mjs`.
+If you need to bundle Pyodide into `dist/` (for offline development/CI), set
+`FORMULA_BUNDLE_PYODIDE_ASSETS=1` when running `pnpm -C apps/desktop dev` or
+`pnpm -C apps/desktop build` (this runs `scripts/ensure-pyodide-assets.mjs` and
+copies the assets into `dist/`).
 
 ## Content Security Policy (Tauri)
 

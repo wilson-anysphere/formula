@@ -12,8 +12,7 @@
       import { MockWorkbook } from "@formula/python-runtime/test-utils";
 
       globalThis.__formulaPythonRuntime = { PyodideRuntime, MockWorkbook };
-      globalThis.__pyodideIndexURL = "/pyodide/v0.25.1/full/";
+      // Optional: set `globalThis.__pyodideIndexURL` to override where Pyodide loads from.
     </script>
   </body>
 </html>
-

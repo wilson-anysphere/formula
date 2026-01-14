@@ -63,7 +63,7 @@ const runtime = new PyodideRuntime({
   // - mainThread: force main-thread Pyodide (UI will block while scripts run).
   // mode: "auto",
   //
-  // Recommended to self-host Pyodide assets (especially for crossOriginIsolated environments):
+  // Optional: self-host Pyodide assets (useful for some crossOriginIsolated / COEP setups):
   // indexURL: "/pyodide/v0.25.1/full/",
 });
 
@@ -105,9 +105,13 @@ Notes:
 For the `apps/desktop` Vite webview in this repository:
 
 - `apps/desktop/vite.config.ts` sets these headers for dev/preview servers.
-- `apps/desktop/scripts/ensure-pyodide-assets.mjs` downloads Pyodide
-  `v0.25.1/full/*` into `apps/desktop/public/pyodide/v0.25.1/full/` so Pyodide
-  can be loaded from the same origin (required under COEP).
+- Packaged desktop builds download Pyodide assets on-demand into an app-data
+  cache and serve them via the `pyodide://` protocol (so they can be embedded
+  under COEP).
+- To bundle Pyodide into `dist/` for offline development/CI, run desktop builds
+  with `FORMULA_BUNDLE_PYODIDE_ASSETS=1` (this runs
+  `apps/desktop/scripts/ensure-pyodide-assets.mjs` and copies the assets into
+  `dist/`).
 
 ## Host spreadsheet bridge contract
 
