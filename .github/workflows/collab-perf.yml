@@ -1,0 +1,109 @@
+name: Collab perf (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Which perf suite to run"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - binder
+          - session
+          - both
+      scenario:
+        description: "Which scenario to run (affects PERF_SCENARIO)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - yjs-to-dc
+          - dc-to-yjs
+      cell_updates:
+        description: "PERF_CELL_UPDATES"
+        required: true
+        default: "50000"
+      batch_size:
+        description: "PERF_BATCH_SIZE"
+        required: true
+        default: "1000"
+      cols:
+        description: "PERF_COLS"
+        required: true
+        default: "100"
+      key_encoding:
+        description: "PERF_KEY_ENCODING (Yjs->DC scenario)"
+        required: true
+        default: "canonical"
+        type: choice
+        options:
+          - canonical
+          - legacy
+          - rxc
+
+concurrency:
+  group: collab-perf-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: 22
+  # Best-effort memory measurements rely on `global.gc()`.
+  NODE_OPTIONS: --expose-gc
+  PERF_JSON: "1"
+  PERF_SCENARIO: ${{ inputs.scenario }}
+  PERF_CELL_UPDATES: ${{ inputs.cell_updates }}
+  PERF_BATCH_SIZE: ${{ inputs.batch_size }}
+  PERF_COLS: ${{ inputs.cols }}
+  PERF_KEY_ENCODING: ${{ inputs.key_encoding }}
+  # Keep the node:test runner conservative for perf stability.
+  FORMULA_NODE_TEST_CONCURRENCY: "1"
+
+jobs:
+  collab-perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
+        with:
+          version: 9.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run binder perf
+        if: inputs.suite == 'binder' || inputs.suite == 'both'
+        env:
+          FORMULA_RUN_COLLAB_BINDER_PERF: "1"
+        run: |
+          set -euo pipefail
+          pnpm test:node binder-perf | tee binder-perf.log
+
+      - name: Run session+binder perf
+        if: inputs.suite == 'session' || inputs.suite == 'both'
+        env:
+          FORMULA_RUN_COLLAB_SESSION_BINDER_PERF: "1"
+        run: |
+          set -euo pipefail
+          pnpm test:node session-binder-perf | tee session-binder-perf.log
+
+      - name: Upload perf logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: collab-perf-logs
+          path: |
+            binder-perf.log
+            session-binder-perf.log
+
