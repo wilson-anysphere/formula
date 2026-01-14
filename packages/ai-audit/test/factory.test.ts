@@ -149,6 +149,22 @@ describe("createDefaultAIAuditStore", () => {
     expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
   });
 
+  it('prefer: "indexeddb" falls back to LocalStorageAIAuditStore when IndexedDB open is blocked', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+    (globalThis as any).indexedDB = {
+      open() {
+        const request: any = {};
+        // Trigger the `onblocked` callback after the store has attached handlers.
+        Promise.resolve().then(() => request.onblocked?.());
+        return request;
+      }
+    };
+
+    const store = await createDefaultAIAuditStore({ prefer: "indexeddb", bounded: false });
+    expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
+  });
+
   it("falls back to MemoryAIAuditStore when localStorage access throws", async () => {
     const win: any = {};
     Object.defineProperty(win, "localStorage", {
@@ -158,6 +174,22 @@ describe("createDefaultAIAuditStore", () => {
       }
     });
     Object.defineProperty(globalThis, "window", { value: win, configurable: true });
+    // Ensure IndexedDB is unavailable so the factory attempts localStorage next.
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (globalThis as any).indexedDB;
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (globalThis as any).IDBKeyRange;
+
+    const store = await createDefaultAIAuditStore({ bounded: false });
+    expect(store).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
+  it("falls back to MemoryAIAuditStore when localStorage setItem throws", async () => {
+    const storage: any = new MemoryLocalStorage();
+    storage.setItem = () => {
+      throw new Error("quota exceeded");
+    };
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
     // Ensure IndexedDB is unavailable so the factory attempts localStorage next.
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete (globalThis as any).indexedDB;
