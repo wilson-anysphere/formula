@@ -61,7 +61,6 @@ fn timeline_date_range_filters_by_date_values_in_pivot_cache() {
 
     let pivot_all = PivotTable::new("PivotTable1", &source, cfg.clone()).expect("pivot");
     let result_all = pivot_all.calculate().expect("calculate");
-
     let d1 = NaiveDate::from_ymd_opt(2024, 1, 1).expect("valid date");
     let d2 = NaiveDate::from_ymd_opt(2024, 1, 2).expect("valid date");
     let d3 = NaiveDate::from_ymd_opt(2024, 1, 3).expect("valid date");
