@@ -25,8 +25,9 @@ function errBlock(heading, details) {
 /**
  * Best-effort "plist-ish" check: ensure the entitlement exists and is set to `<true/>`.
  *
- * We avoid parsing the XML so the check can run on non-macOS CI runners without
- * depending on `plutil`.
+ * We avoid fully parsing plist XML so the check can run on non-macOS CI runners without
+ * depending on `plutil`. This helper is resilient to duplicate keys: it returns true if
+ * *any* instance of the key is followed by a `<true/>` value.
  *
  * @param {string} xml
  * @param {string} key
@@ -34,16 +35,38 @@ function errBlock(heading, details) {
  */
 function hasTrueEntitlement(xml, key) {
   const marker = `<key>${key}</key>`;
-  const start = xml.indexOf(marker);
-  if (start === -1) return false;
-  const nextKey = xml.indexOf("<key>", start + marker.length);
-  const block = xml.slice(start, nextKey === -1 ? xml.length : nextKey);
-  return /<true\s*\/>/.test(block);
+  let start = xml.indexOf(marker);
+  while (start !== -1) {
+    let i = start + marker.length;
+
+    while (i < xml.length) {
+      // Skip whitespace.
+      if (/\s/.test(xml[i])) {
+        i += 1;
+        continue;
+      }
+
+      // Skip XML comments.
+      if (xml.startsWith("<!--", i)) {
+        const end = xml.indexOf("-->", i + 4);
+        if (end === -1) break;
+        i = end + 3;
+        continue;
+      }
+
+      break;
+    }
+
+    if (/<true\s*\/>/.test(xml.slice(i, i + 10))) return true;
+    start = xml.indexOf(marker, i);
+  }
+
+  return false;
 }
 
 /**
  * @param {string[]} argv
- * @returns {{ repoRoot: string; entitlementsPath: string }}
+ * @returns {{ repoRoot: string; entitlementsPathOverride: string }}
  */
 function parseArgs(argv) {
   let repoRoot = defaultRepoRoot;
@@ -75,7 +98,7 @@ function parseArgs(argv) {
       const value = argv[i + 1];
       if (!value) {
         errBlock("macOS entitlements preflight failed", [`Missing value for --root.`]);
-        return { repoRoot, entitlementsPath: entitlementsPath ?? "" };
+        return { repoRoot, entitlementsPathOverride: entitlementsPathOverride ?? "" };
       }
       repoRoot = path.resolve(value);
       i += 1;
