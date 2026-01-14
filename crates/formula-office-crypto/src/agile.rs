@@ -573,24 +573,24 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                     b"keyEncryptor" => {
                         // The `<keyEncryptor>` element indicates how the package key is protected
                         // (password vs certificate). We only support password-based decryption.
-                        in_password_key_encryptor = is_password_key_encryptor(&e)?;
+                        in_password_key_encryptor = is_password_key_encryptor(&e, &reader)?;
                     }
                     b"keyData" => {
-                        let kd = parse_key_data_attrs(&e)?;
+                        let kd = parse_key_data_attrs(&e, &reader)?;
                         key_data = Some(kd);
                     }
                     b"dataIntegrity" => {
-                        let di = parse_data_integrity_attrs(&e)?;
+                        let di = parse_data_integrity_attrs(&e, &reader)?;
                         data_integrity = Some(di);
                     }
                     b"encryptedKey" if in_password_key_encryptor => {
                         in_encrypted_key = true;
-                        tmp_password_attrs = Some(parse_password_key_encryptor_attrs(&e)?);
+                        tmp_password_attrs = Some(parse_password_key_encryptor_attrs(&e, &reader)?);
 
                         // Some producers (e.g. `ms_offcrypto_writer`) encode the verifier/key
                         // blobs as base64 attributes on the `<encryptedKey/>` element instead of
                         // child elements. Accept either form.
-                        let (vhi, vhv, kv) = parse_encrypted_key_value_attrs(&e)?;
+                        let (vhi, vhv, kv) = parse_encrypted_key_value_attrs(&e, &reader)?;
                         if vhi.is_some() {
                             tmp_encrypted_verifier_hash_input = vhi;
                         }
@@ -618,16 +618,16 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                 let name = local_name(qname.as_ref());
                 match name {
                     b"keyData" => {
-                        let kd = parse_key_data_attrs(&e)?;
+                        let kd = parse_key_data_attrs(&e, &reader)?;
                         key_data = Some(kd);
                     }
                     b"dataIntegrity" => {
-                        let di = parse_data_integrity_attrs(&e)?;
+                        let di = parse_data_integrity_attrs(&e, &reader)?;
                         data_integrity = Some(di);
                     }
                     b"encryptedKey" if in_password_key_encryptor => {
-                        let attrs = parse_password_key_encryptor_attrs(&e)?;
-                        let (vhi, vhv, kv) = parse_encrypted_key_value_attrs(&e)?;
+                        let attrs = parse_password_key_encryptor_attrs(&e, &reader)?;
+                        let (vhi, vhv, kv) = parse_encrypted_key_value_attrs(&e, &reader)?;
                         password_key_encryptor = Some(AgilePasswordKeyEncryptor {
                             salt: attrs.salt,
                             block_size: attrs.block_size,
@@ -773,6 +773,7 @@ fn local_name(name: &[u8]) -> &[u8] {
 
 fn is_password_key_encryptor(
     e: &quick_xml::events::BytesStart<'_>,
+    reader: &Reader<impl std::io::BufRead>,
 ) -> Result<bool, OfficeCryptoError> {
     const PASSWORD_URI: &str = "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
     for attr in e.attributes() {
@@ -782,7 +783,7 @@ fn is_password_key_encryptor(
         if key != b"uri" {
             continue;
         }
-        let value = attr.unescape_value().map_err(|_| {
+        let value = attr.decode_and_unescape_value(reader).map_err(|_| {
             OfficeCryptoError::InvalidFormat("invalid XML attribute encoding".to_string())
         })?;
         return Ok(value.as_ref() == PASSWORD_URI);
@@ -792,6 +793,7 @@ fn is_password_key_encryptor(
 
 fn parse_key_data_attrs(
     e: &quick_xml::events::BytesStart<'_>,
+    reader: &Reader<impl std::io::BufRead>,
 ) -> Result<AgileKeyData, OfficeCryptoError> {
     let mut salt_value: Option<Vec<u8>> = None;
     let mut block_size: Option<usize> = None;
@@ -804,7 +806,7 @@ fn parse_key_data_attrs(
         let attr = attr
             .map_err(|_| OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string()))?;
         let key = local_name(attr.key.as_ref());
-        let value = attr.unescape_value().map_err(|_| {
+        let value = attr.decode_and_unescape_value(reader).map_err(|_| {
             OfficeCryptoError::InvalidFormat("invalid XML attribute encoding".to_string())
         })?;
         match key {
@@ -827,10 +829,10 @@ fn parse_key_data_attrs(
                 hash_algorithm = Some(HashAlgorithm::from_name(value.as_ref())?);
             }
             b"cipherAlgorithm" => {
-                cipher_algorithm = Some(value.to_string());
+                cipher_algorithm = Some(value.as_ref().to_string());
             }
             b"cipherChaining" => {
-                cipher_chaining = Some(value.to_string());
+                cipher_chaining = Some(value.as_ref().to_string());
             }
             _ => {}
         }
@@ -860,6 +862,7 @@ fn parse_key_data_attrs(
 
 fn parse_data_integrity_attrs(
     e: &quick_xml::events::BytesStart<'_>,
+    reader: &Reader<impl std::io::BufRead>,
 ) -> Result<AgileDataIntegrity, OfficeCryptoError> {
     let mut encrypted_hmac_key: Option<Vec<u8>> = None;
     let mut encrypted_hmac_value: Option<Vec<u8>> = None;
@@ -867,7 +870,7 @@ fn parse_data_integrity_attrs(
         let attr = attr
             .map_err(|_| OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string()))?;
         let key = local_name(attr.key.as_ref());
-        let value = attr.unescape_value().map_err(|_| {
+        let value = attr.decode_and_unescape_value(reader).map_err(|_| {
             OfficeCryptoError::InvalidFormat("invalid XML attribute encoding".to_string())
         })?;
         match key {
@@ -900,6 +903,7 @@ fn parse_data_integrity_attrs(
 
 fn parse_encrypted_key_value_attrs(
     e: &quick_xml::events::BytesStart<'_>,
+    reader: &Reader<impl std::io::BufRead>,
 ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>), OfficeCryptoError> {
     let mut encrypted_verifier_hash_input: Option<Vec<u8>> = None;
     let mut encrypted_verifier_hash_value: Option<Vec<u8>> = None;
@@ -909,7 +913,7 @@ fn parse_encrypted_key_value_attrs(
         let attr = attr
             .map_err(|_| OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string()))?;
         let key = local_name(attr.key.as_ref());
-        let value = attr.unescape_value().map_err(|_| {
+        let value = attr.decode_and_unescape_value(reader).map_err(|_| {
             OfficeCryptoError::InvalidFormat("invalid XML attribute encoding".to_string())
         })?;
         match key {
@@ -958,6 +962,7 @@ struct AgilePasswordAttrs {
 
 fn parse_password_key_encryptor_attrs(
     e: &quick_xml::events::BytesStart<'_>,
+    reader: &Reader<impl std::io::BufRead>,
 ) -> Result<AgilePasswordAttrs, OfficeCryptoError> {
     let mut salt_value: Option<Vec<u8>> = None;
     let mut block_size: Option<usize> = None;
@@ -971,7 +976,7 @@ fn parse_password_key_encryptor_attrs(
         let attr = attr
             .map_err(|_| OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string()))?;
         let key = local_name(attr.key.as_ref());
-        let value = attr.unescape_value().map_err(|_| {
+        let value = attr.decode_and_unescape_value(reader).map_err(|_| {
             OfficeCryptoError::InvalidFormat("invalid XML attribute encoding".to_string())
         })?;
         match key {
@@ -999,10 +1004,10 @@ fn parse_password_key_encryptor_attrs(
                 hash_algorithm = Some(HashAlgorithm::from_name(value.as_ref())?);
             }
             b"cipherAlgorithm" => {
-                cipher_algorithm = Some(value.to_string());
+                cipher_algorithm = Some(value.as_ref().to_string());
             }
             b"cipherChaining" => {
-                cipher_chaining = Some(value.to_string());
+                cipher_chaining = Some(value.as_ref().to_string());
             }
             _ => {}
         }
