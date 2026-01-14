@@ -672,7 +672,11 @@ fn xor_array_method1_for_password(password: &str, stored_key: u16, stored_verifi
         }
         let key = create_xor_key_method1(&candidate);
         let verifier = create_password_verifier_method1(&candidate);
-        if key == stored_key && verifier == stored_verifier {
+        let key_bytes = key.to_le_bytes();
+        let stored_key_bytes = stored_key.to_le_bytes();
+        let verifier_bytes = verifier.to_le_bytes();
+        let stored_verifier_bytes = stored_verifier.to_le_bytes();
+        if ct_eq(&key_bytes, &stored_key_bytes) & ct_eq(&verifier_bytes, &stored_verifier_bytes) {
             return Some(create_xor_array_method1(&candidate, key));
         }
     }
