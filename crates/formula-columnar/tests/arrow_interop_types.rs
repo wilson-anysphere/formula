@@ -203,3 +203,31 @@ fn record_batch_to_columnar_accepts_common_numeric_and_dictionary_types(
 
     Ok(())
 }
+
+#[test]
+fn record_batch_to_columnar_treats_null_dictionary_values_as_nulls(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use arrow_array::{DictionaryArray, Int32Array, StringArray};
+
+    // Dictionary values are allowed to contain nulls. We should treat rows that
+    // reference such values as Value::Null.
+    let values: ArrayRef = Arc::new(StringArray::from(vec![Some("A"), None, Some("B")]));
+    let keys = Int32Array::from(vec![Some(0), Some(1), Some(2)]);
+    let dict = Arc::new(DictionaryArray::<arrow_array::types::Int32Type>::try_new(
+        keys, values,
+    )?) as ArrayRef;
+
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "dict",
+        DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
+        true,
+    )]));
+    let batch = RecordBatch::try_new(schema, vec![dict])?;
+
+    let table = record_batch_to_columnar(&batch)?;
+    assert_eq!(table.row_count(), 3);
+    assert_eq!(table.get_cell(0, 0), Value::String(Arc::<str>::from("A")));
+    assert_eq!(table.get_cell(1, 0), Value::Null);
+    assert_eq!(table.get_cell(2, 0), Value::String(Arc::<str>::from("B")));
+    Ok(())
+}
