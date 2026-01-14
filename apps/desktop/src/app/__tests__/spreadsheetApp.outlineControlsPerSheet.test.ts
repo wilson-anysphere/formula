@@ -132,6 +132,11 @@ describe("SpreadsheetApp outline controls", () => {
     expect(toggleSheet1).toBeTruthy();
     expect(toggleSheet1?.textContent).toBe("-");
 
+    // And columns 2-4 with a summary col at 5.
+    const colToggleSheet1 = root.querySelector<HTMLButtonElement>('[data-testid="outline-toggle-col-5"]');
+    expect(colToggleSheet1).toBeTruthy();
+    expect(colToggleSheet1?.textContent).toBe("-");
+
     // Ensure Sheet2 exists, but with no outline groups by default.
     const doc = app.getDocument();
     doc.setCellValue("Sheet2", { row: 0, col: 0 }, "X");
@@ -139,33 +144,43 @@ describe("SpreadsheetApp outline controls", () => {
     // Switching to Sheet2 should remove the outline toggle (no groups on that sheet).
     app.activateSheet("Sheet2");
     expect(root.querySelector('[data-testid="outline-toggle-row-5"]')).toBeNull();
+    expect(root.querySelector('[data-testid="outline-toggle-col-5"]')).toBeNull();
 
     // Add an outline group on Sheet2 and re-render; the toggle should appear again.
     const outline2 = (app as any).getOutlineForSheet("Sheet2") as any;
     outline2.groupRows(2, 4);
+    outline2.groupCols(2, 4);
     app.refresh();
 
     const toggleSheet2 = root.querySelector<HTMLButtonElement>('[data-testid="outline-toggle-row-5"]');
     expect(toggleSheet2).toBeTruthy();
     expect(toggleSheet2?.textContent).toBe("-");
+    const colToggleSheet2 = root.querySelector<HTMLButtonElement>('[data-testid="outline-toggle-col-5"]');
+    expect(colToggleSheet2).toBeTruthy();
+    expect(colToggleSheet2?.textContent).toBe("-");
 
-    // Collapse Sheet2's group via the UI toggle.
+    // Collapse Sheet2's groups via the UI toggles.
     toggleSheet2?.click();
     expect(outline2.rows.entry(5).collapsed).toBe(true);
     expect(root.querySelector<HTMLButtonElement>('[data-testid="outline-toggle-row-5"]')?.textContent).toBe("+");
+    colToggleSheet2?.click();
+    expect(outline2.cols.entry(5).collapsed).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('[data-testid="outline-toggle-col-5"]')?.textContent).toBe("+");
 
     // Switching back to Sheet1 should render Sheet1's toggle (still expanded).
     app.activateSheet(sheet1);
     const outline1 = (app as any).getOutlineForSheet(sheet1) as any;
     expect(outline1.rows.entry(5).collapsed).toBe(false);
     expect(root.querySelector<HTMLButtonElement>('[data-testid="outline-toggle-row-5"]')?.textContent).toBe("-");
+    expect(outline1.cols.entry(5).collapsed).toBe(false);
+    expect(root.querySelector<HTMLButtonElement>('[data-testid="outline-toggle-col-5"]')?.textContent).toBe("-");
 
     // Switching again to Sheet2 should retain Sheet2's collapsed state.
     app.activateSheet("Sheet2");
     expect(root.querySelector<HTMLButtonElement>('[data-testid="outline-toggle-row-5"]')?.textContent).toBe("+");
+    expect(root.querySelector<HTMLButtonElement>('[data-testid="outline-toggle-col-5"]')?.textContent).toBe("+");
 
     app.destroy();
     root.remove();
   });
 });
-
