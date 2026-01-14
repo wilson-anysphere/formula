@@ -362,4 +362,40 @@ mod tests {
             "expected totalsRowFormula to be prefixed, got xml: {xml}"
         );
     }
+
+    #[test]
+    fn write_table_xml_escapes_special_chars_in_column_names_and_formulas() {
+        let table = Table {
+            id: 1,
+            name: "Table1".to_string(),
+            display_name: "Table1".to_string(),
+            range: Range::from_a1("A1:A2").expect("range"),
+            header_row_count: 1,
+            totals_row_count: 0,
+            columns: vec![TableColumn {
+                id: 1,
+                name: "A&B".to_string(),
+                formula: Some("A1<5".to_string()),
+                totals_formula: Some("IF(A1<5,1,0)".to_string()),
+            }],
+            style: None,
+            auto_filter: None,
+            relationship_id: None,
+            part_path: None,
+        };
+
+        let xml = write_table_xml(&table).expect("write table xml");
+        assert!(
+            xml.contains(r#"name="A&amp;B""#),
+            "expected tableColumn/@name to be XML-escaped, got xml: {xml}"
+        );
+        assert!(
+            xml.contains("<calculatedColumnFormula>A1&lt;5</calculatedColumnFormula>"),
+            "expected calculatedColumnFormula to be XML-escaped, got xml: {xml}"
+        );
+        assert!(
+            xml.contains("<totalsRowFormula>IF(A1&lt;5,1,0)</totalsRowFormula>"),
+            "expected totalsRowFormula to be XML-escaped, got xml: {xml}"
+        );
+    }
 }
