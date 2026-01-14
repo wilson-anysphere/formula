@@ -241,4 +241,31 @@ describe("imageBytesBinder", () => {
 
     binder.destroy();
   });
+
+  it("decodes base64url strings (no padding)", () => {
+    const doc = new Y.Doc();
+    const metadata = doc.getMap("metadata");
+
+    const bytes = new Uint8Array([0xfb, 0xff, 0xff]); // base64 includes "+" and "/"
+    const base64 = Buffer.from(bytes).toString("base64");
+    const base64url = base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+
+    metadata.set("drawingImages", {
+      "img-1": {
+        mimeType: "image/png",
+        bytesBase64: base64url,
+      },
+    });
+
+    const store = createMemoryImageStore();
+    const session = { doc, metadata, localOrigins: new Set<any>() } as any;
+
+    const binder = bindImageBytesToCollabSession({ session, images: store });
+
+    const hydrated = store.get("img-1");
+    expect(hydrated).toBeTruthy();
+    expect(Array.from(hydrated?.bytes ?? [])).toEqual(Array.from(bytes));
+
+    binder.destroy();
+  });
 });  

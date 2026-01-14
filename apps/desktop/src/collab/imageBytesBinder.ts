@@ -98,6 +98,17 @@ function normalizeBase64String(raw: string): string | null {
     base64 = base64.replace(/\s+/g, "");
   }
 
+  // Support base64url (common when copied through URL-safe layers). Normalize to standard
+  // base64 and restore optional padding.
+  if (base64.includes("-") || base64.includes("_")) {
+    base64 = base64.replace(/-/g, "+").replace(/_/g, "/");
+  }
+
+  const mod = base64.length % 4;
+  if (mod === 1) return null;
+  if (mod === 2) base64 += "==";
+  else if (mod === 3) base64 += "=";
+
   return base64 || null;
 }
 
