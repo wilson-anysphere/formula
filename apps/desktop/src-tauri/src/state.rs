@@ -2293,6 +2293,11 @@ impl AppState {
     ) -> Result<(), AppStateError> {
         let requested_path = new_path.clone();
         let is_real_save = requested_path.is_some() || new_origin_xlsx_bytes.is_some();
+        let metadata_before = self
+            .workbook
+            .as_ref()
+            .ok_or(AppStateError::NoWorkbookLoaded)
+            .map(workbook_file_metadata)?;
         let (directory, filename) = {
             let workbook = self
                 .workbook
@@ -2371,12 +2376,14 @@ impl AppState {
             workbook_file_metadata(workbook)
         };
 
-        // Update workbook file metadata on the formula engine so worksheet information functions
-        // like `CELL("filename")` and `INFO("directory")` reflect the latest save path.
-        self.engine
-            .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
-        let changes = self.engine.recalculate_with_value_changes_multi_threaded();
-        let _ = self.refresh_computed_values_from_recalc_changes(&changes)?;
+        if metadata_before != (directory.clone(), filename.clone()) {
+            // Update workbook file metadata on the formula engine so worksheet information functions
+            // like `CELL("filename")` and `INFO("directory")` reflect the latest save path.
+            self.engine
+                .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
+            let changes = self.engine.recalculate_with_value_changes_multi_threaded();
+            let _ = self.refresh_computed_values_from_recalc_changes(&changes)?;
+        }
 
         // If the user saved under a new path (Save As), re-key the autosave database to the new file
         // identity so crash recovery uses the correct autosave DB for subsequent opens.
