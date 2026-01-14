@@ -224,6 +224,7 @@ export class FormulaBarView {
   #lastActiveReferenceIndex: number | null = null;
   #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
   #lastColoredReferences: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
+  #referenceElsByIndex: Map<number, HTMLElement[]> | null = null;
   #lastAdjustedHeightDraft: string | null = null;
   #lastAdjustedHeightIsEditing = false;
   #lastAdjustedHeightIsExpanded = false;
@@ -1884,17 +1885,31 @@ export class FormulaBarView {
 
     if (canFastUpdateActiveReference) {
       if (this.#lastActiveReferenceIndex !== activeReferenceIndex) {
+        if (this.#referenceElsByIndex == null && coloredReferences.length > 0) {
+          this.#rebuildReferenceElementsByIndex();
+        }
+        const refEls = this.#referenceElsByIndex;
         const prev = this.#lastActiveReferenceIndex;
         const next = activeReferenceIndex;
         if (prev != null) {
-          this.#highlightEl
-            .querySelectorAll(`[data-ref-index="${prev}"]`)
-            .forEach((el) => el.classList.remove("formula-bar-reference--active"));
+          const prevEls = refEls?.get(prev);
+          if (prevEls) {
+            prevEls.forEach((el) => el.classList.remove("formula-bar-reference--active"));
+          } else {
+            this.#highlightEl
+              .querySelectorAll(`[data-ref-index="${prev}"]`)
+              .forEach((el) => el.classList.remove("formula-bar-reference--active"));
+          }
         }
         if (next != null) {
-          this.#highlightEl
-            .querySelectorAll(`[data-ref-index="${next}"]`)
-            .forEach((el) => el.classList.add("formula-bar-reference--active"));
+          const nextEls = refEls?.get(next);
+          if (nextEls) {
+            nextEls.forEach((el) => el.classList.add("formula-bar-reference--active"));
+          } else {
+            this.#highlightEl
+              .querySelectorAll(`[data-ref-index="${next}"]`)
+              .forEach((el) => el.classList.add("formula-bar-reference--active"));
+          }
         }
         this.#lastActiveReferenceIndex = next;
         // We updated class attributes without rebuilding the HTML string; invalidate the
@@ -2003,8 +2018,16 @@ export class FormulaBarView {
       }
 
       // Avoid forcing a full DOM re-parse/layout if the highlight HTML is unchanged.
-      if (highlightHtml !== this.#lastHighlightHtml) {
+      // Also keep cached reference-span node lists in sync with the current DOM.
+      const highlightChanged = highlightHtml !== this.#lastHighlightHtml;
+      if (highlightChanged) {
         this.#highlightEl.innerHTML = highlightHtml;
+        this.#referenceElsByIndex = null;
+      }
+      if (!isFormulaEditing || coloredReferences.length === 0) {
+        this.#referenceElsByIndex = null;
+      } else if (highlightChanged || this.#referenceElsByIndex == null) {
+        this.#rebuildReferenceElementsByIndex();
       }
 
       this.#lastHighlightHtml = highlightHtml;
@@ -2141,6 +2164,20 @@ export class FormulaBarView {
 
     this.#syncScroll();
     this.#adjustHeight();
+  }
+
+  #rebuildReferenceElementsByIndex(): void {
+    const map = new Map<number, HTMLElement[]>();
+    this.#highlightEl.querySelectorAll<HTMLElement>("[data-ref-index]").forEach((el) => {
+      const raw = el.dataset.refIndex;
+      if (!raw) return;
+      const idx = Number(raw);
+      if (!Number.isFinite(idx)) return;
+      const list = map.get(idx);
+      if (list) list.push(el);
+      else map.set(idx, [el]);
+    });
+    this.#referenceElsByIndex = map;
   }
 
   #clearArgumentPreviewState(): void {
