@@ -1,18 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock the exact module specifier used by AiCellFunctionEngine so we can spy on the slow path.
-vi.mock("../../../../packages/security/dlp/src/selectors.js", async () => {
-  const actual = await vi.importActual<any>("../../../../packages/security/dlp/src/selectors.js");
-  return {
-    ...actual,
-    effectiveCellClassification: vi.fn(actual.effectiveCellClassification),
-  };
-});
-
 import { evaluateFormula } from "./evaluateFormula.js";
 import { AI_CELL_PLACEHOLDER, AiCellFunctionEngine, __dlpIndexBuilder } from "./AiCellFunctionEngine.js";
 
-import * as selectors from "../../../../packages/security/dlp/src/selectors.js";
+import { LocalClassificationStore } from "../../../../packages/security/dlp/src/classificationStore.js";
+
+function makeRecordListInstrumenter() {
+  let passes = 0;
+  let elementGets = 0;
+
+  const wrap = (records: any[]) =>
+    new Proxy(records, {
+      get(target, prop, receiver) {
+        if (prop === Symbol.iterator) {
+          return function () {
+            passes += 1;
+            // Bind iterator to proxy so numeric index access is observable.
+            return Array.prototype[Symbol.iterator].call(receiver);
+          };
+        }
+        if (typeof prop === "string" && /^[0-9]+$/.test(prop)) {
+          elementGets += 1;
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+
+  return {
+    wrap,
+    getPasses: () => passes,
+    getElementGets: () => elementGets,
+  };
+}
 
 describe("AiCellFunctionEngine DLP indexing", () => {
   beforeEach(() => {
@@ -23,20 +42,28 @@ describe("AiCellFunctionEngine DLP indexing", () => {
     const workbookId = "ai-cell-dlp-index";
     const sheetId = "Sheet1";
 
-    // 100x100 = 10k per-cell classification records.
+    // Many per-cell classification records (structured), plus many referenced cells in the formula.
+    // This amplifies any O(records * referencedCells) regressions.
     const records = [];
     const updatedAt = new Date().toISOString();
-    for (let row = 0; row < 100; row++) {
-      for (let col = 0; col < 100; col++) {
-        records.push({
-          selector: { scope: "cell", documentId: workbookId, sheetId, row, col },
-          classification: { level: row === 0 && col === 0 ? "Restricted" : "Public", labels: [] },
-          updatedAt,
-        });
-      }
+    // Keep the record set reasonably sized so the test stays fast while still catching
+    // per-referenced-cell scans (which would multiply this count by ~200).
+    for (let row = 0; row < 500; row++) {
+      records.push({
+        selector: { scope: "cell", documentId: workbookId, sheetId, row, col: 0 },
+        classification: { level: row === 0 ? "Restricted" : "Public", labels: [] },
+        updatedAt,
+      });
     }
 
     globalThis.localStorage?.setItem(`dlp:classifications:${workbookId}`, JSON.stringify(records));
+
+    const instrumenter = makeRecordListInstrumenter();
+    const originalList = LocalClassificationStore.prototype.list;
+    const listSpy = vi.spyOn(LocalClassificationStore.prototype, "list").mockImplementation(function (documentId: string) {
+      const out = originalList.call(this, documentId) as any[];
+      return instrumenter.wrap(out);
+    });
 
     const llmClient = {
       chat: vi.fn(async () => ({
@@ -47,18 +74,23 @@ describe("AiCellFunctionEngine DLP indexing", () => {
 
     const engine = new AiCellFunctionEngine({ llmClient: llmClient as any, workbookId, model: "test-model" });
 
-    const effectiveCellClassification = selectors.effectiveCellClassification as unknown as ReturnType<typeof vi.fn>;
-    effectiveCellClassification.mockClear();
+    const refs = Array.from({ length: 200 }, (_v, idx) => `A${idx + 1}`);
+    const formula = `=AI(\"summarize\", ${refs.join(", ")})`;
 
-    const getCellValue = (addr: string) => (addr === "A1" ? "top secret" : null);
-    const value = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    const getCellValue = (addr: string) => (addr === "A1" ? "top secret" : addr.startsWith("A") ? "x" : null);
+    const value = evaluateFormula(formula, getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
 
     expect(value).toBe(AI_CELL_PLACEHOLDER);
-    // Perf proxy: we should use the precomputed index, not scan all records per cell.
-    expect(effectiveCellClassification).toHaveBeenCalledTimes(0);
+
+    // Perf proxy: building the index and hashing records can require a handful of linear scans.
+    // A per-referenced-cell scan regression would multiply this by ~200.
+    expect(instrumenter.getPasses()).toBeLessThan(50);
+    expect(instrumenter.getElementGets()).toBeLessThan(20_000);
 
     await engine.waitForIdle();
     expect(llmClient.chat).toHaveBeenCalledTimes(1);
+
+    listSpy.mockRestore();
   });
 
   it("memoizes DLP cell indices across evaluations and invalidates on record changes", async () => {

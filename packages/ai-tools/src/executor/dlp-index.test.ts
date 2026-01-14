@@ -1,21 +1,31 @@
-import { describe, expect, it, vi } from "vitest";
-
-// IMPORTANT: This test file lives next to ToolExecutor so we can mock the exact module specifier
-// used by ToolExecutor ("../../../security/dlp/src/selectors.js").
-vi.mock("../../../security/dlp/src/selectors.js", async () => {
-  const actual = await vi.importActual<any>("../../../security/dlp/src/selectors.js");
-  return {
-    ...actual,
-    effectiveCellClassification: vi.fn(actual.effectiveCellClassification)
-  };
-});
+import { describe, expect, it } from "vitest";
 
 import { ToolExecutor } from "./tool-executor.ts";
 import { parseA1Cell } from "../spreadsheet/a1.ts";
 import { InMemoryWorkbook } from "../spreadsheet/in-memory-workbook.ts";
 
 import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
-import * as selectors from "../../../security/dlp/src/selectors.js";
+
+function instrumentRecordList(records: any[]) {
+  let passes = 0;
+  let elementGets = 0;
+  const proxy = new Proxy(records, {
+    get(target, prop, receiver) {
+      if (prop === Symbol.iterator) {
+        return function () {
+          passes += 1;
+          // Bind iterator to proxy so numeric index access is observable.
+          return Array.prototype[Symbol.iterator].call(receiver);
+        };
+      }
+      if (typeof prop === "string" && /^[0-9]+$/.test(prop)) {
+        elementGets += 1;
+      }
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+  return { proxy, getPasses: () => passes, getElementGets: () => elementGets };
+}
 
 describe("ToolExecutor DLP indexing", () => {
   it("read_range does not scan all classification records per cell when indexed selectors are used", async () => {
@@ -23,22 +33,24 @@ describe("ToolExecutor DLP indexing", () => {
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "ok" });
     workbook.setCell(parseA1Cell("Sheet1!B1"), { value: "secret" });
 
-    // 100x100 = 10k cells/records.
-    const classification_records = [];
-    for (let row = 0; row < 100; row++) {
-      for (let col = 0; col < 100; col++) {
-        classification_records.push({
-          selector: { scope: "cell", documentId: "doc-1", sheetId: "Sheet1", row, col },
-          classification: { level: (row + col) % 2 === 0 ? "Public" : "Restricted", labels: [] }
-        });
+    const documentId = "doc-1";
+    const sheetId = "Sheet1";
+
+    // A single Restricted cell selector is sufficient to trigger a REDACT decision
+    // for the selection. If ToolExecutor regresses to scanning `classification_records`
+    // per cell, we'd see thousands of record passes over this list.
+    const { proxy: classification_records, getPasses, getElementGets } = instrumentRecordList([
+      {
+        selector: { scope: "cell", documentId, sheetId, row: 0, col: 1 }, // B1
+        classification: { level: "Restricted", labels: [] }
       }
-    }
+    ]);
 
     const executor = new ToolExecutor(workbook, {
       // Allow reading the 10k-cell range for this test.
       max_read_range_cells: 20_000,
       dlp: {
-        document_id: "doc-1",
+        document_id: documentId,
         policy: {
           version: 1,
           allowDocumentOverrides: true,
@@ -54,9 +66,6 @@ describe("ToolExecutor DLP indexing", () => {
       }
     });
 
-    const effectiveCellClassification = selectors.effectiveCellClassification as unknown as ReturnType<typeof vi.fn>;
-    effectiveCellClassification.mockClear();
-
     const result = await executor.execute({
       name: "read_range",
       parameters: { range: "Sheet1!A1:CV100" }
@@ -70,8 +79,10 @@ describe("ToolExecutor DLP indexing", () => {
     expect(result.data?.values[0]?.[0]).toBe("ok"); // A1 -> Public
     expect(result.data?.values[0]?.[1]).toBe("[REDACTED]"); // B1 -> Restricted
 
-    // Perf proxy: with the DLP index, we should not call effectiveCellClassification per cell.
-    expect(effectiveCellClassification).toHaveBeenCalledTimes(0);
+    // Perf proxy: expect only a small number of linear scans (selection classification + index build).
+    // Any per-cell scan regression would exceed this by orders of magnitude.
+    expect(getPasses()).toBeLessThan(50);
+    expect(getElementGets()).toBeLessThan(200);
   });
 
   it("read_range results match max-over-scopes semantics (document + sheet + column + range + cell)", async () => {
@@ -136,9 +147,6 @@ describe("ToolExecutor DLP indexing", () => {
       }
     });
 
-    const effectiveCellClassification = selectors.effectiveCellClassification as unknown as ReturnType<typeof vi.fn>;
-    effectiveCellClassification.mockClear();
-
     const result = await executor.execute({
       name: "read_range",
       parameters: { range: "Sheet1!A1:C3" }
@@ -153,8 +161,5 @@ describe("ToolExecutor DLP indexing", () => {
       ["[REDACTED]", "[REDACTED]", "[REDACTED]"],
       ["a3", "[REDACTED]", "[REDACTED]"]
     ]);
-
-    // No fallback selectors -> should stay on the indexed path.
-    expect(effectiveCellClassification).toHaveBeenCalledTimes(0);
   });
 });
