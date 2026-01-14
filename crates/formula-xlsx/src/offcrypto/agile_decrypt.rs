@@ -52,6 +52,141 @@ struct AgileEncryptionInfo {
     password_key: PasswordKeyEncryptor,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum PasswordKeyIvDerivation {
+    /// Use the password key encryptor `saltValue` directly as the AES-CBC IV (truncated to
+    /// `blockSize`). This matches the behavior of several implementations and is what we
+    /// historically supported.
+    SaltValue,
+    /// Derive the IV per block key: `IV = Truncate(Hash(saltValue || blockKey), blockSize)`.
+    ///
+    /// Some producers appear to use this scheme for the password-key-encryptor blobs
+    /// (`encryptedVerifierHashInput`, `encryptedVerifierHashValue`, `encryptedKeyValue`).
+    Derived,
+}
+
+fn decrypt_agile_package_key_from_password(
+    info: &AgileEncryptionInfo,
+    password_hash: &[u8],
+    key_encrypt_key_len: usize,
+    package_key_len: usize,
+    iv_derivation: PasswordKeyIvDerivation,
+) -> Result<Vec<u8>> {
+    let password_key = &info.password_key;
+
+    let password_iv_for = |block_key: &[u8]| -> Result<Vec<u8>> {
+        match iv_derivation {
+            PasswordKeyIvDerivation::SaltValue => password_key
+                .salt_value
+                .get(..password_key.block_size)
+                .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                    element: "p:encryptedKey".to_string(),
+                    attr: "saltValue".to_string(),
+                    reason: "saltValue shorter than blockSize".to_string(),
+                })
+                .map(|iv| iv.to_vec()),
+            PasswordKeyIvDerivation::Derived => derive_iv_or_err(
+                &password_key.salt_value,
+                block_key,
+                password_key.block_size,
+                password_key.hash_algorithm,
+            ),
+        }
+    };
+
+    // Decrypt verifierHashInput.
+    let verifier_input = {
+        let k = derive_key_or_err(
+            password_hash,
+            &VERIFIER_HASH_INPUT_BLOCK,
+            key_encrypt_key_len,
+            password_key.hash_algorithm,
+        )?;
+        let iv = password_iv_for(&VERIFIER_HASH_INPUT_BLOCK)?;
+        let decrypted = decrypt_aes_cbc_no_padding(&k, &iv, &password_key.encrypted_verifier_hash_input)
+            .map_err(|e| OffCryptoError::InvalidAttribute {
+                element: "p:encryptedKey".to_string(),
+                attr: "encryptedVerifierHashInput".to_string(),
+                reason: e.to_string(),
+            })?;
+        decrypted
+            .get(..password_key.block_size)
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                element: "p:encryptedKey".to_string(),
+                attr: "encryptedVerifierHashInput".to_string(),
+                reason: "decrypted verifierHashInput shorter than blockSize".to_string(),
+            })?
+            .to_vec()
+    };
+
+    // Decrypt verifierHashValue.
+    let verifier_hash = {
+        let k = derive_key_or_err(
+            password_hash,
+            &VERIFIER_HASH_VALUE_BLOCK,
+            key_encrypt_key_len,
+            password_key.hash_algorithm,
+        )?;
+        let iv = password_iv_for(&VERIFIER_HASH_VALUE_BLOCK)?;
+        let decrypted = decrypt_aes_cbc_no_padding(&k, &iv, &password_key.encrypted_verifier_hash_value)
+            .map_err(|e| OffCryptoError::InvalidAttribute {
+                element: "p:encryptedKey".to_string(),
+                attr: "encryptedVerifierHashValue".to_string(),
+                reason: e.to_string(),
+            })?;
+        decrypted
+            .get(..password_key.hash_size)
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                element: "p:encryptedKey".to_string(),
+                attr: "encryptedVerifierHashValue".to_string(),
+                reason: "decrypted verifierHashValue shorter than hashSize".to_string(),
+            })?
+            .to_vec()
+    };
+
+    // Verify password.
+    let computed_verifier_hash_full = hash_bytes(password_key.hash_algorithm, &verifier_input);
+    let computed_verifier_hash = computed_verifier_hash_full
+        .get(..password_key.hash_size)
+        .ok_or_else(|| OffCryptoError::InvalidAttribute {
+            element: "p:encryptedKey".to_string(),
+            attr: "hashAlgorithm".to_string(),
+            reason: "hash output shorter than hashSize".to_string(),
+        })?;
+    if !ct_eq(computed_verifier_hash, &verifier_hash) {
+        return Err(OffCryptoError::WrongPassword);
+    }
+
+    // Decrypt the package key (encryptedKeyValue).
+    let key_value = {
+        let k = derive_key_or_err(
+            password_hash,
+            &KEY_VALUE_BLOCK,
+            key_encrypt_key_len,
+            password_key.hash_algorithm,
+        )?;
+        let iv = password_iv_for(&KEY_VALUE_BLOCK)?;
+        let decrypted =
+            decrypt_aes_cbc_no_padding(&k, &iv, &password_key.encrypted_key_value).map_err(|e| {
+                OffCryptoError::InvalidAttribute {
+                    element: "p:encryptedKey".to_string(),
+                    attr: "encryptedKeyValue".to_string(),
+                    reason: e.to_string(),
+                }
+            })?;
+        decrypted
+            .get(..package_key_len)
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                element: "p:encryptedKey".to_string(),
+                attr: "encryptedKeyValue".to_string(),
+                reason: "decrypted keyValue shorter than keyData.keyBits".to_string(),
+            })?
+            .to_vec()
+    };
+
+    Ok(key_value)
+}
+
 /// Decrypt an MS-OFFCRYPTO Agile `EncryptedPackage` stream (OOXML password protection).
 ///
 /// Inputs are the raw bytes of the CFB streams:
@@ -103,105 +238,25 @@ pub fn decrypt_agile_encrypted_package(
         key_len_bytes(info.password_key.key_bits, "p:encryptedKey", "keyBits")?;
     let package_key_len = key_len_bytes(info.key_data.key_bits, "keyData", "keyBits")?;
 
-    // The IV for the password key encryptor fields is the saltValue itself (truncated to blockSize).
-    let verifier_iv = info
-        .password_key
-        .salt_value
-        .get(..info.password_key.block_size)
-        .ok_or_else(|| OffCryptoError::InvalidAttribute {
-            element: "p:encryptedKey".to_string(),
-            attr: "saltValue".to_string(),
-            reason: "saltValue shorter than blockSize".to_string(),
-        })?;
-
-    let verifier_input = {
-        let k = derive_key_or_err(
+    // Some producers appear to vary how the AES-CBC IV is derived for the password-key-encryptor
+    // fields. Be conservative and try both strategies, treating the verifier-hash mismatch as a
+    // signal to fall back to the alternative IV derivation.
+    let key_value = match decrypt_agile_package_key_from_password(
+        &info,
+        &password_hash,
+        key_encrypt_key_len,
+        package_key_len,
+        PasswordKeyIvDerivation::SaltValue,
+    ) {
+        Ok(key) => key,
+        Err(OffCryptoError::WrongPassword) => decrypt_agile_package_key_from_password(
+            &info,
             &password_hash,
-            &VERIFIER_HASH_INPUT_BLOCK,
             key_encrypt_key_len,
-            info.password_key.hash_algorithm,
-        )?;
-        let decrypted = decrypt_aes_cbc_no_padding(
-            &k,
-            verifier_iv,
-            &info.password_key.encrypted_verifier_hash_input,
-        )
-        .map_err(|e| OffCryptoError::InvalidAttribute {
-            element: "p:encryptedKey".to_string(),
-            attr: "encryptedVerifierHashInput".to_string(),
-            reason: e.to_string(),
-        })?;
-        decrypted
-            .get(..info.password_key.block_size)
-            .ok_or_else(|| OffCryptoError::InvalidAttribute {
-                element: "p:encryptedKey".to_string(),
-                attr: "encryptedVerifierHashInput".to_string(),
-                reason: "decrypted verifierHashInput shorter than blockSize".to_string(),
-            })?
-            .to_vec()
-    };
-
-    let verifier_hash = {
-        let k = derive_key_or_err(
-            &password_hash,
-            &VERIFIER_HASH_VALUE_BLOCK,
-            key_encrypt_key_len,
-            info.password_key.hash_algorithm,
-        )?;
-        let decrypted = decrypt_aes_cbc_no_padding(
-            &k,
-            verifier_iv,
-            &info.password_key.encrypted_verifier_hash_value,
-        )
-        .map_err(|e| OffCryptoError::InvalidAttribute {
-            element: "p:encryptedKey".to_string(),
-            attr: "encryptedVerifierHashValue".to_string(),
-            reason: e.to_string(),
-        })?;
-        decrypted
-            .get(..info.password_key.hash_size)
-            .ok_or_else(|| OffCryptoError::InvalidAttribute {
-                element: "p:encryptedKey".to_string(),
-                attr: "encryptedVerifierHashValue".to_string(),
-                reason: "decrypted verifierHashValue shorter than hashSize".to_string(),
-            })?
-            .to_vec()
-    };
-
-    let computed_verifier_hash_full = hash_bytes(info.password_key.hash_algorithm, &verifier_input);
-    let computed_verifier_hash = computed_verifier_hash_full
-        .get(..info.password_key.hash_size)
-        .ok_or_else(|| OffCryptoError::InvalidAttribute {
-            element: "p:encryptedKey".to_string(),
-            attr: "hashAlgorithm".to_string(),
-            reason: "hash output shorter than hashSize".to_string(),
-        })?;
-    if !ct_eq(computed_verifier_hash, &verifier_hash) {
-        return Err(OffCryptoError::WrongPassword);
-    }
-
-    let key_value = {
-        let k = derive_key_or_err(
-            &password_hash,
-            &KEY_VALUE_BLOCK,
-            key_encrypt_key_len,
-            info.password_key.hash_algorithm,
-        )?;
-        let decrypted =
-            decrypt_aes_cbc_no_padding(&k, verifier_iv, &info.password_key.encrypted_key_value)
-                .map_err(|e| OffCryptoError::InvalidAttribute {
-                    element: "p:encryptedKey".to_string(),
-                    attr: "encryptedKeyValue".to_string(),
-                    reason: e.to_string(),
-                })?;
-        decrypted
-            .get(..package_key_len)
-            .ok_or_else(|| OffCryptoError::InvalidAttribute {
-                element: "p:encryptedKey".to_string(),
-                attr: "encryptedKeyValue".to_string(),
-                reason: "decrypted keyValue shorter than keyData.keyBits".to_string(),
-            })?
-            .to_vec()
+            package_key_len,
+            PasswordKeyIvDerivation::Derived,
+        )?,
+        Err(other) => return Err(other),
     };
 
     // 2) Decrypt EncryptedPackage stream to plaintext ZIP bytes.
@@ -296,20 +351,33 @@ pub fn decrypt_agile_encrypted_package(
             .to_vec()
     };
 
-    // MS-OFFCRYPTO "dataIntegrity" is computed over the full EncryptedPackage stream bytes
-    // (length prefix + ciphertext). This matches the reference implementation used by Excel and
-    // the `ms-offcrypto-writer` crate.
-    let actual_hmac = compute_hmac(info.key_data.hash_algorithm, &hmac_key, encrypted_package)?;
-    let actual_hmac = actual_hmac.get(..info.key_data.hash_size).ok_or_else(|| {
-        OffCryptoError::InvalidAttribute {
+    // MS-OFFCRYPTO describes `dataIntegrity` as an HMAC over the **EncryptedPackage stream bytes**
+    // (length prefix + ciphertext). This matches Excel and the `ms-offcrypto-writer` crate.
+    //
+    // However, some producers appear to compute the HMAC over the **decrypted package bytes**
+    // (plaintext ZIP bytes) instead. To be compatible with both, accept either hash target.
+    let actual_hmac_ciphertext =
+        compute_hmac(info.key_data.hash_algorithm, &hmac_key, encrypted_package)?;
+    let actual_hmac_ciphertext = actual_hmac_ciphertext
+        .get(..info.key_data.hash_size)
+        .ok_or_else(|| OffCryptoError::InvalidAttribute {
             element: "dataIntegrity".to_string(),
             attr: "hashAlgorithm".to_string(),
             reason: "HMAC output shorter than hashSize".to_string(),
-        }
-    })?;
+        })?;
 
-    if !ct_eq(actual_hmac, &expected_hmac) {
-        return Err(OffCryptoError::IntegrityMismatch);
+    if !ct_eq(actual_hmac_ciphertext, &expected_hmac) {
+        let actual_hmac_plaintext = compute_hmac(info.key_data.hash_algorithm, &hmac_key, &plaintext)?;
+        let actual_hmac_plaintext = actual_hmac_plaintext
+            .get(..info.key_data.hash_size)
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                element: "dataIntegrity".to_string(),
+                attr: "hashAlgorithm".to_string(),
+                reason: "HMAC output shorter than hashSize".to_string(),
+            })?;
+        if !ct_eq(actual_hmac_plaintext, &expected_hmac) {
+            return Err(OffCryptoError::IntegrityMismatch);
+        }
     }
 
     Ok(plaintext)
