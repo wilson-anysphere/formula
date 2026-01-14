@@ -352,8 +352,6 @@ export class DrawingOverlay {
   private destroyed = false;
   private cssVarStyle: CssVarStyle | null | undefined = undefined;
   private colorTokens: OverlayColorTokens | null = null;
-  private orderedObjects: DrawingObject[] = [];
-  private orderedObjectsSource: DrawingObject[] | null = null;
   private chartSurfacePruneSource: DrawingObject[] | null = null;
   private chartSurfacePruneLength = 0;
   private readonly chartSurfaceKeep = new Set<string>();
@@ -484,22 +482,6 @@ export class DrawingOverlay {
     const root = this.cssVarRoot ?? (this.canvas as any)?.ownerDocument?.documentElement ?? (globalThis as any)?.document?.documentElement ?? null;
     this.cssVarStyle = getRootCssStyle(root);
     return this.cssVarStyle;
-  }
-
-  private getOrderedObjects(objects: DrawingObject[]): DrawingObject[] {
-    if (this.orderedObjectsSource === objects) return this.orderedObjects;
-    this.orderedObjectsSource = objects;
-
-    let sorted = true;
-    for (let i = 1; i < objects.length; i += 1) {
-      if (objects[i - 1]!.zOrder > objects[i]!.zOrder) {
-        sorted = false;
-        break;
-      }
-    }
-
-    this.orderedObjects = sorted ? objects : [...objects].sort((a, b) => a.zOrder - b.zOrder);
-    return this.orderedObjects;
   }
 
   setRequestRender(requestRender: (() => void) | null): void {
@@ -1283,8 +1265,6 @@ export class DrawingOverlay {
     this.spatialIndex.dispose();
     this.cssVarStyle = undefined;
     this.colorTokens = null;
-    this.orderedObjects = [];
-    this.orderedObjectsSource = null;
     this.selectedId = null;
     this.lastRenderArgs = null;
     this.pendingImageHydrations.clear();
