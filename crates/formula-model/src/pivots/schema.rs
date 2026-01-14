@@ -699,6 +699,10 @@ mod tests {
                 .unwrap();
         assert_eq!(decoded.grand_totals.rows, false);
         assert_eq!(decoded.grand_totals.columns, true);
+
+        // And if `grandTotals` is entirely missing, it should default to true/true.
+        let decoded: PivotConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(decoded.grand_totals, GrandTotals::default());
     }
 
     #[test]
