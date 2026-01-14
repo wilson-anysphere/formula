@@ -98,4 +98,50 @@ describe("createCommandPalette function results", () => {
     palette.dispose();
     vi.useRealTimers();
   });
+
+  it("selects localized function names when the UI locale uses localized formulas (de-DE SUMME)", () => {
+    vi.useFakeTimers();
+
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "de-DE";
+
+    try {
+      const registry = new CommandRegistry();
+      // Add a similarly named command to ensure functions still win ranking.
+      registry.registerBuiltinCommand("edit.autoSum", "AutoSum", () => {}, {
+        category: "Editing",
+        keywords: ["sum"],
+      });
+
+      const onSelectFunction = vi.fn();
+
+      const palette = createCommandPalette({
+        commandRegistry: registry,
+        contextKeys: new ContextKeyService(),
+        keybindingIndex: new Map(),
+        ensureExtensionsLoaded: async () => {},
+        onCloseFocus: () => {},
+        onSelectFunction,
+        inputDebounceMs: 1,
+        extensionLoadDelayMs: 60_000,
+      });
+
+      palette.open();
+
+      const input = document.querySelector<HTMLInputElement>('[data-testid="command-palette-input"]')!;
+      input.value = "summe";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      vi.advanceTimersByTime(1);
+
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+      expect(onSelectFunction).toHaveBeenCalledTimes(1);
+      expect(onSelectFunction).toHaveBeenCalledWith("SUMME");
+
+      palette.dispose();
+    } finally {
+      document.documentElement.lang = prevLang;
+      vi.useRealTimers();
+    }
+  });
 });
