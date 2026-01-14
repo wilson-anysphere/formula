@@ -331,8 +331,8 @@ These functions must recalculate on every workbook recalculation:
 | `RANDBETWEEN()` | Returns random integer in range |
 | `OFFSET()` | Returns reference offset from base (volatile because range can change) |
 | `INDIRECT()` | Returns reference from string (volatile because target unknown at parse time) |
-| `INFO()` | Returns system information |
-| `CELL()` | Returns cell information |
+| `INFO()` | Returns workbook/system information (see [`docs/21-info-cell-metadata.md`](./21-info-cell-metadata.md) for host-provided metadata requirements) |
+| `CELL()` | Returns cell/workbook information (see [`docs/21-info-cell-metadata.md`](./21-info-cell-metadata.md) for host-provided metadata requirements) |
 
 Volatility propagates: if A1 contains `=NOW()`, any cell depending on A1 is also effectively volatile.
 
