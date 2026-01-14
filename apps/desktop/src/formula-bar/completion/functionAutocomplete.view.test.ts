@@ -564,6 +564,25 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("does not open when read-only (focus for copy should not show suggestions)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "=VLO", value: null });
+    view.setReadOnly(true);
+
+    view.focus({ cursor: "end" });
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown).not.toBeNull();
+    expect(dropdown?.hasAttribute("hidden")).toBe(true);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.root.classList.contains("formula-bar--function-autocomplete-open")).toBe(false);
+
+    host.remove();
+  });
+
   it("closes during IME composition", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
