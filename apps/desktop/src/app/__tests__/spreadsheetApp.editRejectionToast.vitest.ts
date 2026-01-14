@@ -443,6 +443,36 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     root.remove();
   });
 
+  it("shows a drawing toast when deleting a selected drawing in read-only collab mode", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+    const drawing: any = {
+      id: 1,
+      kind: { type: "image", imageId: "img-1" },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+      zOrder: 0,
+    };
+    app.getDocument().setSheetDrawings(sheetId, [drawing]);
+    app.selectDrawing(drawing.id);
+
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    app.deleteSelectedDrawing();
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("edit drawings");
+    expect(app.getDocument().getSheetDrawings(sheetId)).toHaveLength(1);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("shows a read-only toast when opening inline AI edit in read-only collab mode", () => {
     const root = createRoot();
     const status = {

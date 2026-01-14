@@ -11917,7 +11917,7 @@ export class SpreadsheetApp {
     if (drawingId == null) return;
 
     if (this.isReadOnly()) {
-      showCollabEditRejectedToast([{ rejectionKind: "insertPictures", rejectionReason: "permission" }]);
+      showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
@@ -12203,9 +12203,8 @@ export class SpreadsheetApp {
 
   async insertRows(row: number, count: number): Promise<void> {
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
       showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        { rejectionKind: "insertRows", rejectionReason: "permission" },
       ]);
       return;
     }
@@ -12250,9 +12249,8 @@ export class SpreadsheetApp {
 
   async deleteRows(row: number, count: number): Promise<void> {
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
       showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        { rejectionKind: "deleteRows", rejectionReason: "permission" },
       ]);
       return;
     }
@@ -12296,9 +12294,8 @@ export class SpreadsheetApp {
 
   async insertCols(col: number, count: number): Promise<void> {
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
       showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        { rejectionKind: "insertColumns", rejectionReason: "permission" },
       ]);
       return;
     }
@@ -12342,9 +12339,8 @@ export class SpreadsheetApp {
 
   async deleteCols(col: number, count: number): Promise<void> {
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
       showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        { rejectionKind: "deleteColumns", rejectionReason: "permission" },
       ]);
       return;
     }
@@ -12388,9 +12384,8 @@ export class SpreadsheetApp {
 
   async insertCells(range: Range, direction: "right" | "down"): Promise<void> {
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
       showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        { rejectionKind: "editCells", rejectionReason: "permission" },
       ]);
       return;
     }
@@ -12427,9 +12422,8 @@ export class SpreadsheetApp {
 
   async deleteCells(range: Range, direction: "left" | "up"): Promise<void> {
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
       showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        { rejectionKind: "editCells", rejectionReason: "permission" },
       ]);
       return;
     }
