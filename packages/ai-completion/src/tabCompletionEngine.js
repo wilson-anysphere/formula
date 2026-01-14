@@ -1033,6 +1033,12 @@ const TEXT_DELIMITER_ENUM_COMMON = [
   { replacement: '"|"', displayText: '"|" (pipe)', confidence: 0.64 },
 ];
 
+const TEXT_INSTANCE_NUM_ENUM_1_2_NEG1 = [
+  { replacement: "1", displayText: "1 (1st match)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (2nd match)", confidence: 0.65 },
+  { replacement: "-1", displayText: "-1 (last match)", confidence: 0.64 },
+];
+
 /**
  * Function-specific enumerations for commonly misunderstood "flag" arguments.
  * These are curated because the function catalog only carries coarse arg types.
@@ -1165,6 +1171,8 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   TEXTBEFORE: {
     // delimiter
     1: TEXT_DELIMITER_ENUM_COMMON,
+    // instance_num
+    2: TEXT_INSTANCE_NUM_ENUM_1_2_NEG1,
     // match_mode
     3: TEXT_MATCH_MODE_ENUM_0_1,
     // match_end
@@ -1173,6 +1181,8 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   TEXTAFTER: {
     // delimiter
     1: TEXT_DELIMITER_ENUM_COMMON,
+    // instance_num
+    2: TEXT_INSTANCE_NUM_ENUM_1_2_NEG1,
     // match_mode
     3: TEXT_MATCH_MODE_ENUM_0_1,
     // match_end

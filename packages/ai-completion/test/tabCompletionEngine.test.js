@@ -2786,6 +2786,25 @@ test("TEXTAFTER delimiter suggests common delimiters", async () => {
   );
 });
 
+test("TEXTAFTER instance_num suggests 1, 2, -1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=TEXTAFTER("aXbXc", "X", ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["1", "2", "-1"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=TEXTAFTER("aXbXc", "X", ${v}`),
+      `Expected TEXTAFTER to suggest instance_num=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("TEXTAFTER match_mode suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 
