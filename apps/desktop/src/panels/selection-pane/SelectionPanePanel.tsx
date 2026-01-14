@@ -267,7 +267,10 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
   const canvasChartCount = (() => {
     let count = 0;
     for (const { obj } of items) {
-      if (obj.id < 0) count += 1;
+      // Canvas-chart ids live in a separate negative namespace (see `chartIdToDrawingId`). Hashed
+      // workbook drawing ids produced by `parseDrawingObjectId` also use negative ids, but are
+      // offset by 2^33 to stay disjoint; avoid treating those as charts.
+      if (obj.id < 0 && obj.id > -0x200000000) count += 1;
     }
     return count;
   })();
@@ -282,7 +285,7 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
         <ul className="selection-pane__list" role="listbox" aria-label="Selection Pane objects">
           {items.map(({ obj, label }, index) => {
             const selected = obj.id === selectedId;
-            const isCanvasChart = obj.id < 0;
+            const isCanvasChart = obj.id < 0 && obj.id > -0x200000000;
             const groupStart = isCanvasChart ? 0 : canvasChartCount;
             const groupSize = isCanvasChart ? canvasChartCount : Math.max(0, items.length - canvasChartCount);
             const groupIndex = index - groupStart;
