@@ -115,63 +115,68 @@ fn build_shared_structured_ref_sheet(base_rgce: &[u8]) -> Vec<u8> {
 
 #[test]
 fn materializes_shared_formula_containing_structured_ref_payload_layout_b() {
-    // Build `=[@Qty]` as a single PtgExtend/etpg=0x19 token using payload layout B.
     let payload = ptg_list_payload_layout_b(1, 0x0010, 2, 2); // #This Row + Qty
-    let base_rgce: Vec<u8> = {
-        let mut v = Vec::new();
-        v.push(0x18); // PtgExtend (reference class)
-        v.push(0x19); // etpg=PtgList
-        v.extend_from_slice(&payload);
-        v
-    };
 
-    let sheet = build_shared_structured_ref_sheet(&base_rgce);
-    let ctx = ctx_table();
-    let parsed =
-        parse_sheet_bin_with_context(&mut Cursor::new(sheet), &[], &ctx).expect("parse sheet");
+    // Structured references can appear as PtgExtend (0x18), PtgExtendV (0x38), or PtgExtendA
+    // (0x58). Shared formula materialization should preserve the class byte and payload for all
+    // of them.
+    for &ptg in &[0x18u8, 0x38u8, 0x58u8] {
+        let base_rgce: Vec<u8> = {
+            let mut v = Vec::new();
+            v.push(ptg);
+            v.push(0x19); // etpg=PtgList
+            v.extend_from_slice(&payload);
+            v
+        };
 
-    let b2 = parsed
-        .cells
-        .iter()
-        .find(|c| c.row == 1 && c.col == 1)
-        .expect("B2 present");
-    assert_eq!(b2.value, CellValue::Number(0.0));
+        let sheet = build_shared_structured_ref_sheet(&base_rgce);
+        let ctx = ctx_table();
+        let parsed =
+            parse_sheet_bin_with_context(&mut Cursor::new(sheet), &[], &ctx).expect("parse sheet");
 
-    let formula = b2.formula.as_ref().expect("B2 formula");
-    assert_eq!(formula.text.as_deref(), Some("[@Qty]"));
-    // Ensure we stored a materialized rgce (not just PtgExp).
-    assert_eq!(formula.rgce.first().copied(), Some(0x18));
-    assert_eq!(formula.rgce, base_rgce);
+        let b2 = parsed
+            .cells
+            .iter()
+            .find(|c| c.row == 1 && c.col == 1)
+            .expect("B2 present");
+        assert_eq!(b2.value, CellValue::Number(0.0));
+
+        let formula = b2.formula.as_ref().expect("B2 formula");
+        assert_eq!(formula.text.as_deref(), Some("[@Qty]"));
+        // Ensure we stored a materialized rgce (not just PtgExp).
+        assert_eq!(formula.rgce.first().copied(), Some(ptg));
+        assert_eq!(formula.rgce, base_rgce, "ptg=0x{ptg:02X}");
+    }
 }
 
 #[test]
 fn materializes_shared_formula_containing_structured_ref_payload_layout_c() {
-    // Build `=[@Qty]` as a single PtgExtend/etpg=0x19 token using payload layout C.
     let payload = ptg_list_payload_layout_c(1, 0x0010, 2, 2); // #This Row + Qty
-    let base_rgce: Vec<u8> = {
-        let mut v = Vec::new();
-        v.push(0x18); // PtgExtend (reference class)
-        v.push(0x19); // etpg=PtgList
-        v.extend_from_slice(&payload);
-        v
-    };
+    for &ptg in &[0x18u8, 0x38u8, 0x58u8] {
+        let base_rgce: Vec<u8> = {
+            let mut v = Vec::new();
+            v.push(ptg);
+            v.push(0x19); // etpg=PtgList
+            v.extend_from_slice(&payload);
+            v
+        };
 
-    let sheet = build_shared_structured_ref_sheet(&base_rgce);
-    let ctx = ctx_table();
-    let parsed =
-        parse_sheet_bin_with_context(&mut Cursor::new(sheet), &[], &ctx).expect("parse sheet");
+        let sheet = build_shared_structured_ref_sheet(&base_rgce);
+        let ctx = ctx_table();
+        let parsed =
+            parse_sheet_bin_with_context(&mut Cursor::new(sheet), &[], &ctx).expect("parse sheet");
 
-    let b2 = parsed
-        .cells
-        .iter()
-        .find(|c| c.row == 1 && c.col == 1)
-        .expect("B2 present");
-    assert_eq!(b2.value, CellValue::Number(0.0));
+        let b2 = parsed
+            .cells
+            .iter()
+            .find(|c| c.row == 1 && c.col == 1)
+            .expect("B2 present");
+        assert_eq!(b2.value, CellValue::Number(0.0));
 
-    let formula = b2.formula.as_ref().expect("B2 formula");
-    assert_eq!(formula.text.as_deref(), Some("[@Qty]"));
-    // Ensure we stored a materialized rgce (not just PtgExp).
-    assert_eq!(formula.rgce.first().copied(), Some(0x18));
-    assert_eq!(formula.rgce, base_rgce);
+        let formula = b2.formula.as_ref().expect("B2 formula");
+        assert_eq!(formula.text.as_deref(), Some("[@Qty]"));
+        // Ensure we stored a materialized rgce (not just PtgExp).
+        assert_eq!(formula.rgce.first().copied(), Some(ptg));
+        assert_eq!(formula.rgce, base_rgce, "ptg=0x{ptg:02X}");
+    }
 }
-
