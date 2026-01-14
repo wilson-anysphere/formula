@@ -429,9 +429,6 @@ cleanup() {
 
   set +e
 
-  # Ensure any open GitHub Actions log group is closed even on unexpected exits (signals, etc.).
-  end_group
-
   if [ -n "${CURRENT_MOUNT_DEV}" ] || [ -n "${CURRENT_MOUNT_POINT}" ]; then
     local dev="${CURRENT_MOUNT_DEV}"
     local mount_point="${CURRENT_MOUNT_POINT}"
@@ -470,6 +467,9 @@ cleanup() {
     rm -rf "${CURRENT_TMP_DIRS[@]}" >/dev/null 2>&1 || true
     CURRENT_TMP_DIRS=()
   fi
+
+  # Ensure any open GitHub Actions log group is closed even on unexpected exits (signals, etc.).
+  end_group
 
   if [ "$restore_errexit" -eq 1 ]; then
     set -e
