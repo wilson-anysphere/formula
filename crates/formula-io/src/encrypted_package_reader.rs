@@ -3,7 +3,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use formula_xlsx::offcrypto::decrypt_aes_cbc_no_padding_in_place;
-use sha1::{Digest as _, Sha1};
+use sha1::Digest as _;
 
 const AES_BLOCK_SIZE: usize = 16;
 const SEGMENT_SIZE: usize = 0x1000;
@@ -12,7 +12,10 @@ const SEGMENT_SIZE: usize = 0x1000;
 pub(crate) enum EncryptionMethod {
     /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption.
     ///
-    /// The `EncryptedPackage` ciphertext is encrypted using **AES-ECB** (no IV).
+    /// The `EncryptedPackage` ciphertext is encrypted using AES-ECB (no IV, no chaining).
+    ///
+    /// For performance, we still decrypt in 4096-byte segments, but decryption must not depend on
+    /// segment boundaries or indices.
     StandardCryptoApi {
         /// AES key bytes (16/24/32).
         key: Vec<u8>,
@@ -211,8 +214,8 @@ fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> io::Result<()> {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "AES-ECB ciphertext length {} is not a multiple of {AES_BLOCK_SIZE}",
-                buf.len()
+                "ciphertext length {len} is not a multiple of AES block size ({AES_BLOCK_SIZE})",
+                len = buf.len()
             ),
         ));
     }
@@ -225,8 +228,8 @@ fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> io::Result<()> {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "unsupported AES key length {} (expected 16/24/32)",
-                    key.len()
+                    "unsupported AES key length {len} (expected 16/24/32)",
+                    len = key.len()
                 ),
             )
         })?;
@@ -277,7 +280,7 @@ fn derive_agile_segment_iv(
 
 fn hash_bytes(alg: formula_xlsx::offcrypto::HashAlgorithm, data: &[u8]) -> Vec<u8> {
     match alg {
-        formula_xlsx::offcrypto::HashAlgorithm::Sha1 => Sha1::digest(data).to_vec(),
+        formula_xlsx::offcrypto::HashAlgorithm::Sha1 => sha1::Sha1::digest(data).to_vec(),
         formula_xlsx::offcrypto::HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
         formula_xlsx::offcrypto::HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
         formula_xlsx::offcrypto::HashAlgorithm::Sha512 => sha2::Sha512::digest(data).to_vec(),
@@ -398,7 +401,7 @@ mod tests {
 
     #[test]
     fn standard_cryptoapi_read_seek_matches_plaintext() {
-        let plaintext = patterned_bytes(10_000);
+        let plaintext = patterned_bytes(10_123);
         let key = [7u8; 16];
 
         let encrypted_stream = encrypt_standard_cryptoapi_stream(&key, &plaintext);
@@ -447,6 +450,73 @@ mod tests {
         )
         .expect("full decrypt");
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn standard_cryptoapi_fixture_read_seek_decrypts_zip() {
+        use std::io::Read as _;
+
+        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/offcrypto_standard_cryptoapi_password.xlsx");
+        let file = std::fs::File::open(&fixture_path).expect("open fixture");
+        let mut ole = cfb::CompoundFile::open(file).expect("parse OLE");
+
+        let mut encryption_info = Vec::new();
+        ole.open_stream("EncryptionInfo")
+            .expect("open EncryptionInfo")
+            .read_to_end(&mut encryption_info)
+            .expect("read EncryptionInfo");
+
+        let mut encrypted_package = Vec::new();
+        ole.open_stream("EncryptedPackage")
+            .expect("open EncryptedPackage")
+            .read_to_end(&mut encrypted_package)
+            .expect("read EncryptedPackage");
+
+        let info = match formula_offcrypto::parse_encryption_info(&encryption_info)
+            .expect("parse encryption info")
+        {
+            formula_offcrypto::EncryptionInfo::Standard {
+                header, verifier, ..
+            } => formula_offcrypto::StandardEncryptionInfo { header, verifier },
+            other => panic!("expected Standard encryption, got {other:?}"),
+        };
+
+        let password = "password";
+        let key = formula_offcrypto::standard_derive_key(&info, password).expect("derive key");
+        formula_offcrypto::standard_verify_key(&info, &key).expect("verify key");
+
+        let plaintext_len = u64::from_le_bytes(
+            encrypted_package[..8]
+                .try_into()
+                .expect("EncryptedPackage size header"),
+        );
+        let ciphertext = encrypted_package[8..].to_vec();
+
+        let mut reader = DecryptedPackageReader::new(
+            Cursor::new(ciphertext),
+            EncryptionMethod::StandardCryptoApi { key },
+            plaintext_len,
+        );
+
+        // Decrypted ZIP local file header starts with `PK`.
+        let mut sig = [0u8; 2];
+        reader.read_exact(&mut sig).expect("read signature");
+        assert_eq!(&sig, b"PK");
+
+        // Ensure ZipArchive can read the central directory using Seek.
+        reader.seek(SeekFrom::Start(0)).expect("rewind");
+        let mut zip = zip::ZipArchive::new(reader).expect("open decrypted ZIP");
+        let mut part = zip
+            .by_name("[Content_Types].xml")
+            .expect("read [Content_Types].xml");
+        let mut xml = String::new();
+        part.read_to_string(&mut xml).expect("read xml");
+        assert!(
+            xml.contains("<Types"),
+            "expected [Content_Types].xml to contain <Types, got: {xml:?}"
+        );
     }
 
     #[test]
