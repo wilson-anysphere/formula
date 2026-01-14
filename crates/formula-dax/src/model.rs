@@ -922,6 +922,9 @@ impl DataModel {
         }
 
         for (rel_idx, key) in to_index_updates {
+            // Keep a copy for any downstream bookkeeping (e.g. updating cached unmatched fact
+            // rows for columnar relationships).
+            let key_for_updates = key.clone();
             match self.relationships[rel_idx].rel.cardinality {
                 Cardinality::OneToMany | Cardinality::OneToOne => {
                     self.relationships[rel_idx]
@@ -936,6 +939,24 @@ impl DataModel {
                         o.get_mut().push(row_index);
                     }
                 },
+            }
+
+            // If this relationship tracks unmatched fact rows (columnar from-table), inserting a
+            // new dimension key can "resolve" some of those rows. Remove any fact rows whose FK now
+            // matches the inserted key so they no longer belong to the virtual blank member.
+            if !key_for_updates.is_blank() {
+                let from_table = self.relationships[rel_idx].rel.from_table.clone();
+                let from_idx = self.relationships[rel_idx].from_idx;
+                if let Some(unmatched) = self.relationships[rel_idx].unmatched_fact_rows.as_mut() {
+                    if let Some(from_table_ref) = self.tables.get(&from_table) {
+                        unmatched.retain(|&row| {
+                            let v = from_table_ref
+                                .value_by_idx(row, from_idx)
+                                .unwrap_or(Value::Blank);
+                            v.is_blank() || v != key_for_updates
+                        });
+                    }
+                }
             }
         }
 

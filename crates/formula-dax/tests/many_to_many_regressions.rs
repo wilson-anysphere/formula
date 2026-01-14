@@ -1,3 +1,4 @@
+use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
 use formula_dax::{
     Cardinality, CrossFilterDirection, DataModel, FilterContext, Relationship, Table, Value,
 };
@@ -474,4 +475,87 @@ fn insert_row_rolls_back_when_calculated_column_errors_under_m2m() {
 
     // insert_row should be atomic: the row should not be present after the error.
     assert_eq!(model.table("Fact").unwrap().row_count(), 1);
+}
+
+#[test]
+fn insert_row_updates_unmatched_fact_rows_for_columnar_m2m_relationships() {
+    // Regression for incremental updates: when the fact table is columnar, the relationship stores
+    // a cached list of "unmatched" fact rows for blank-member semantics. Inserting a new dimension
+    // key should update that cache so previously-unmatched facts no longer appear under BLANK().
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(7.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model.add_measure("Total Amount", "SUM(Fact[Amount])").unwrap();
+
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        7.0.into()
+    );
+
+    // Insert a new dimension row that resolves the previously-unmatched key.
+    model
+        .insert_row("Dim", vec![999.into(), "New".into()])
+        .unwrap();
+
+    // The fact row should move out of the virtual blank member and under the new Dim row.
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        Value::Blank
+    );
+    let new_attr = FilterContext::empty().with_column_equals("Dim", "Attr", "New".into());
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &new_attr).unwrap(),
+        7.0.into()
+    );
 }
