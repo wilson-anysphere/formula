@@ -2175,10 +2175,17 @@ impl PivotEngine {
                     }
                 }
                 ShowAsType::PercentOf | ShowAsType::PercentDifferenceFrom => {
+                    // Base item semantics:
+                    // - Treat the "base value" as the cell value at the same row key / column key,
+                    //   except the axis corresponding to `base_field` is replaced with `base_item`.
+                    // - If `base_field`/`base_item` is missing or invalid, blank affected cells.
+                    // - If the base value is blank or 0, the output is blank.
                     let Some(base_field) = cfg.value_fields[vf_idx].base_field.as_ref() else {
+                        Self::blank_numeric_cells(data, &cols);
                         continue;
                     };
                     let Some(base_item) = cfg.value_fields[vf_idx].base_item.as_deref() else {
+                        Self::blank_numeric_cells(data, &cols);
                         continue;
                     };
                     let difference = show_as == ShowAsType::PercentDifferenceFrom;
@@ -2198,6 +2205,7 @@ impl PivotEngine {
                                 .filter(|p| p.display_string() == base_item)
                                 .cloned()
                         }) else {
+                            Self::blank_numeric_cells(data, &cols);
                             continue;
                         };
 
@@ -2227,6 +2235,7 @@ impl PivotEngine {
                                 .filter(|p| p.display_string() == base_item)
                                 .cloned()
                         }) else {
+                            Self::blank_numeric_cells(data, &cols);
                             continue;
                         };
 
@@ -2246,9 +2255,23 @@ impl PivotEngine {
                             &base_part,
                             difference,
                         );
+                    } else {
+                        Self::blank_numeric_cells(data, &cols);
                     }
                 }
                 ShowAsType::Normal => {}
+            }
+        }
+    }
+
+    fn blank_numeric_cells(data: &mut [Vec<PivotValue>], cols: &[usize]) {
+        for row in data.iter_mut().skip(1) {
+            for &c in cols {
+                if let Some(v) = row.get_mut(c) {
+                    if matches!(v, PivotValue::Number(_)) {
+                        *v = PivotValue::Blank;
+                    }
+                }
             }
         }
     }
@@ -4906,6 +4929,92 @@ mod tests {
                 ],
                 vec!["East".into(), 0.0.into(), 2.0.into()],
                 vec!["West".into(), 0.0.into(), 1.0.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_percent_of_missing_base_field_blanks_values() {
+        let data = vec![
+            pv_row(&["Year".into(), "Sales".into()]),
+            pv_row(&["2019".into(), 2.into()]),
+            pv_row(&["2020".into(), 6.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Year")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: cache_field("Sales"),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::PercentOf),
+                base_field: None, // invalid (required)
+                base_item: Some("2019".to_string()),
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Year".into(), "Sum of Sales".into()],
+                vec!["2019".into(), PivotValue::Blank],
+                vec!["2020".into(), PivotValue::Blank],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_percent_difference_from_unknown_base_item_blanks_values() {
+        let data = vec![
+            pv_row(&["Year".into(), "Sales".into()]),
+            pv_row(&["2019".into(), 2.into()]),
+            pv_row(&["2020".into(), 6.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Year")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: cache_field("Sales"),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::PercentDifferenceFrom),
+                base_field: Some(cache_field("Year")),
+                base_item: Some("1900".to_string()), // not found
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Year".into(), "Sum of Sales".into()],
+                vec!["2019".into(), PivotValue::Blank],
+                vec!["2020".into(), PivotValue::Blank],
             ]
         );
     }

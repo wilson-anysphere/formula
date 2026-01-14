@@ -1591,22 +1591,22 @@ fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
     let cfg = PivotConfig {
         row_fields: vec![PivotField::new("Region")],
         column_fields: vec![PivotField::new("Product")],
-        value_fields: vec![
-            ValueField {
-                source_field: "Sales".into(),
-                name: "Sum of Sales".to_string(),
-                aggregation: AggregationType::Sum,
-                number_format: None,
-                show_as: None,
+         value_fields: vec![
+             ValueField {
+                 source_field: "Sales".into(),
+                 name: "Sum of Sales".to_string(),
+                 aggregation: AggregationType::Sum,
+                 number_format: None,
+                 show_as: None,
                 base_field: None,
                 base_item: None,
-            },
-            ValueField {
-                source_field: "Units".into(),
-                name: "Sum of Units".to_string(),
-                aggregation: AggregationType::Sum,
-                number_format: None,
-                show_as: None,
+             },
+             ValueField {
+                 source_field: "Units".into(),
+                 name: "Sum of Units".to_string(),
+                 aggregation: AggregationType::Sum,
+                 number_format: None,
+                 show_as: None,
                 base_field: None,
                 base_item: None,
             },
