@@ -1226,6 +1226,45 @@ describe("AiCellFunctionEngine", () => {
     expect(userMessage).not.toContain("user@example.com");
   });
 
+  it("DLP heuristically redacts referenced sensitive patterns for all AI cell function variants", async () => {
+    const workbookId = "dlp-heuristic-variants";
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    const getCellValue = (addr: string) => (addr === "A1" ? "user@example.com" : null);
+
+    const variants = [
+      '=AI("summarize", A1)',
+      '=AI.EXTRACT("email", A1)',
+      '=AI.CLASSIFY("A/B", A1)',
+      '=AI.TRANSLATE("French", A1)',
+    ];
+
+    for (let i = 0; i < variants.length; i += 1) {
+      const pending = evaluateFormula(variants[i]!, getCellValue, { ai: engine, cellAddress: `Sheet1!B${i + 1}` });
+      expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    }
+
+    await engine.waitForIdle();
+    expect(llmClient.chat).toHaveBeenCalledTimes(variants.length);
+
+    for (const call of llmClient.chat.mock.calls) {
+      const userMessage = call?.[0]?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+      expect(userMessage).toContain("[REDACTED]");
+      expect(userMessage).not.toContain("user@example.com");
+    }
+  });
+
   it("DLP redacts only disallowed cells within a mixed-classification range", async () => {
     const workbookId = "dlp-redact-range-workbook";
     const llmClient = {
