@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -72,6 +75,13 @@ test("mergeTauriUpdaterManifests fails on conflicting duplicate platform entries
   assert.throws(() => mergeTauriUpdaterManifests([a, b]), /Conflicting platform entry/);
 });
 
+test("mergeTauriUpdaterManifests fails when versions do not match (after normalization)", async () => {
+  const a = await readJsonFixture("latest.partial.a.json");
+  const b = await readJsonFixture("latest.wrong-version.json");
+
+  assert.throws(() => mergeTauriUpdaterManifests([a, b]), /version mismatch/i);
+});
+
 test("verify-desktop-release-assets: validateLatestJson fails on missing required platforms", async () => {
   const manifest = await readJsonFixture("latest.missing-platforms.json");
   const assetsByName = assetsMapFromManifest(manifest);
@@ -133,6 +143,38 @@ test("tauri-minisign: verifies latest.json.sig with a test Ed25519 keypair", asy
   // Wrong public key should fail.
   const wrongPub = ed25519PublicKeyFromRaw(Buffer.alloc(32));
   assert.equal(crypto.verify(null, manifestBytes, wrongPub, parsedSig.signatureBytes), false);
+});
+
+test("verify-updater-manifest-signature.mjs verifies latest.json.sig against a test tauri.conf.json pubkey", async () => {
+  const keypair = await readJsonFixture("test-keypair.json");
+
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "formula-updater-sigtest-"));
+  const tmpConfigPath = path.join(tmpDir, "tauri.conf.json");
+  await writeFile(
+    tmpConfigPath,
+    `${JSON.stringify({ plugins: { updater: { pubkey: keypair.publicKeyBase64 } } }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const latestJsonPath = path.join(fixtureDir, "latest.multi-platform.json");
+  const latestSigPath = path.join(fixtureDir, "latest.multi-platform.json.sig");
+
+  const child = spawnSync(
+    process.execPath,
+    [path.join(repoRoot, "scripts", "ci", "verify-updater-manifest-signature.mjs"), latestJsonPath, latestSigPath],
+    {
+      cwd: repoRoot,
+      env: { ...process.env, FORMULA_TAURI_CONF_PATH: tmpConfigPath },
+      encoding: "utf8",
+    },
+  );
+
+  assert.equal(
+    child.status,
+    0,
+    `verify-updater-manifest-signature.mjs failed (exit ${child.status})\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+  );
+  assert.match(child.stdout, /signature OK/i);
 });
 
 function assetsMapFromManifest(manifest) {
