@@ -1491,6 +1491,52 @@ export class SpreadsheetApp {
     return outline;
   }
 
+  /**
+   * DocumentController lazily materializes sheets: calling `getCell()` / `getSheetView()` with a
+   * missing sheet id will create a new empty sheet model.
+   *
+   * SpreadsheetApp can briefly hold a stale sheet id during destructive operations (sheet deletion,
+   * undo/redo, applyState). Rendering and background listeners must never resurrect deleted sheets
+   * as a side-effect of read paths.
+   *
+   * We treat a sheet as "known missing" when the workbook already has *some* sheets, but the
+   * requested id is present in neither the underlying `model.sheets` map nor the `sheetMeta` map.
+   * When the workbook is still empty (no materialized sheets yet), we treat the id as "unknown"
+   * and allow the normal lazy materialization behavior.
+   */
+  private isSheetKnownMissing(sheetId: string): boolean {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return true;
+
+    const docAny: any = this.document as any;
+    const sheets: any = docAny?.model?.sheets;
+    const sheetMeta: any = docAny?.sheetMeta;
+
+    if (
+      sheets &&
+      typeof sheets.has === "function" &&
+      typeof sheets.size === "number" &&
+      sheetMeta &&
+      typeof sheetMeta.has === "function" &&
+      typeof sheetMeta.size === "number"
+    ) {
+      const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+      if (!workbookHasAnySheets) return false;
+      return !sheets.has(id) && !sheetMeta.has(id);
+    }
+
+    // If we can't introspect the document internals (e.g. unit tests with a fake document),
+    // conservatively assume the sheet exists so we preserve previous behavior.
+    return false;
+  }
+
+  private getSheetViewForRead(sheetId: string): any | null {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return null;
+    if (this.isSheetKnownMissing(id)) return null;
+    return this.document.getSheetView(id) as any;
+  }
+
   private outlineLayer: HTMLDivElement;
   private readonly outlineButtons = new Map<string, HTMLButtonElement>();
   private readonly outlineButtonsKeepScratch = new Set<string>();
@@ -4205,8 +4251,19 @@ export class SpreadsheetApp {
               Number(d.col) === active.col
           );
 
+        // DocumentController lazily materializes missing sheet ids when `getCell()` is called.
+        // External update streams can fire while SpreadsheetApp is still transitioning between sheets
+        // (e.g. after sheet deletion/undo). Use `peekCell` when available to keep this listener
+        // side-effect free and avoid resurrecting deleted sheets.
+        const docAny: any = this.document as any;
         const activeState =
-          active != null ? (this.document.getCell(this.sheetId, active) as { formula: string | null } | null) : null;
+          active != null
+            ? typeof docAny.peekCell === "function"
+              ? (docAny.peekCell(this.sheetId, active) as { formula: string | null } | null)
+              : this.isSheetKnownMissing(this.sheetId)
+                ? null
+                : (this.document.getCell(this.sheetId, active) as { formula: string | null } | null)
+            : null;
         const activeIsFormula = activeState?.formula != null;
 
         const wantsSelectionStats = Boolean(this.status.selectionSum || this.status.selectionAverage || this.status.selectionCount);
@@ -5517,7 +5574,7 @@ export class SpreadsheetApp {
 
     const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
     // Avoid `getFrozen()` allocations on scroll/refresh paths; compute frozen counts directly.
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const rawFrozenRows = Number(view?.frozenRows);
     const rawFrozenCols = Number(view?.frozenCols);
     const maxRows = this.limits.maxRows;
@@ -6516,7 +6573,7 @@ export class SpreadsheetApp {
         return null;
       }
     }
-    const view = this.document.getSheetView(key) as any;
+    const view = this.getSheetViewForRead(key) as any;
     const idRaw = view?.backgroundImageId ?? view?.background_image_id;
     const id = typeof idRaw === "string" ? idRaw.trim() : "";
     return id ? id : null;
@@ -6954,7 +7011,7 @@ export class SpreadsheetApp {
   }
 
   getFrozen(): { frozenRows: number; frozenCols: number } {
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const normalize = (value: unknown, max: number): number => {
       const num = Number(value);
       if (!Number.isFinite(num)) return 0;
@@ -7108,7 +7165,7 @@ export class SpreadsheetApp {
   private syncSharedGridAxisSizesFromDocument(): void {
     if (!this.sharedGrid) return;
 
-    const view = this.document.getSheetView(this.sheetId) as {
+    const view = this.getSheetViewForRead(this.sheetId) as {
       colWidths?: Record<string, number>;
       rowHeights?: Record<string, number>;
     } | null;
@@ -9672,7 +9729,7 @@ export class SpreadsheetApp {
     const zoom = Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
 
     // Avoid `getFrozen()` allocations on the pointer-move interaction path.
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const rawFrozenRows = Number(view?.frozenRows);
     const rawFrozenCols = Number(view?.frozenCols);
     const maxRows = this.limits.maxRows;
@@ -10304,7 +10361,7 @@ export class SpreadsheetApp {
     const zoomRaw = secondary.grid.renderer.getZoom();
     const zoom = Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
     // Avoid `getFrozen()` allocations on the pointermove hover path.
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const rawFrozenRows = Number(view?.frozenRows);
     const rawFrozenCols = Number(view?.frozenCols);
     const maxRows = this.limits.maxRows;
@@ -11115,7 +11172,7 @@ export class SpreadsheetApp {
       const zoomRaw = secondary.grid.renderer.getZoom();
       const zoom = Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
       // Avoid `getFrozen()` allocations; compute frozen counts directly.
-      const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+      const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
       const rawFrozenRows = Number(view?.frozenRows);
       const rawFrozenCols = Number(view?.frozenCols);
       const maxRows = this.limits.maxRows;
@@ -14473,7 +14530,7 @@ export class SpreadsheetApp {
     if (px < 0 || py < 0) return null;
 
     // Avoid `getFrozen()` allocations on the pointermove hover path.
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const rawFrozenRows = Number(view?.frozenRows);
     const rawFrozenCols = Number(view?.frozenCols);
     const maxRows = this.limits.maxRows;
@@ -14533,7 +14590,13 @@ export class SpreadsheetApp {
   async getCellDisplayTextForRenderA1(a1: string): Promise<string> {
     await this.whenIdle();
     const cell = parseA1(a1);
-    const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+    const docAny: any = this.document as any;
+    const state =
+      typeof docAny.peekCell === "function"
+        ? (docAny.peekCell(this.sheetId, cell) as { value: unknown; formula: string | null })
+        : this.isSheetKnownMissing(this.sheetId)
+          ? null
+          : (this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null });
     if (!state) return "";
 
     if (state.formula != null) {
@@ -15966,6 +16029,11 @@ export class SpreadsheetApp {
     const commentIndicatorStyleScratch = this.legacyGridRenderCommentIndicatorStyleScratch;
     commentIndicatorStyleScratch.color = commentIndicatorColor;
 
+    const sheetId = this.sheetId;
+    const sheetKnownMissing = this.isSheetKnownMissing(sheetId);
+    const docAny: any = this.document as any;
+    const canPeekCell = typeof docAny.peekCell === "function";
+
     const renderCellRegion = (options: {
       clipX: number;
       clipY: number;
@@ -16008,10 +16076,11 @@ export class SpreadsheetApp {
           const col = cols[visualCol]!;
           coordScratch.row = row;
           coordScratch.col = col;
-          const state = this.document.getCell(this.sheetId, coordScratch) as {
-            value: unknown;
-            formula: string | null;
-          };
+          const state = sheetKnownMissing
+            ? null
+            : canPeekCell
+              ? (docAny.peekCell(sheetId, coordScratch) as { value: unknown; formula: string | null })
+              : (this.document.getCell(sheetId, coordScratch) as { value: unknown; formula: string | null });
           if (!state) continue;
 
           let rich: { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> } | null =
@@ -16061,17 +16130,19 @@ export class SpreadsheetApp {
       }
 
       // Comment indicators.
-      for (let visualRow = 0; visualRow < rows.length; visualRow++) {
-        const row = rows[visualRow]!;
-        for (let visualCol = 0; visualCol < cols.length; visualCol++) {
-          const col = cols[visualCol]!;
-          const meta = this.commentMetaByCoord.get(row * COMMENT_COORD_COL_STRIDE + col);
-          if (!meta) continue;
-          const resolved = meta.resolved ?? false;
-          commentIndicatorBoundsScratch.x = startX + visualCol * this.cellWidth;
-          commentIndicatorBoundsScratch.y = startY + visualRow * this.cellHeight;
-          commentIndicatorStyleScratch.color = resolved ? commentIndicatorResolvedColor : commentIndicatorColor;
-          drawCommentIndicator(ctx, commentIndicatorBoundsScratch, commentIndicatorStyleScratch, false);
+      if (!sheetKnownMissing) {
+        for (let visualRow = 0; visualRow < rows.length; visualRow++) {
+          const row = rows[visualRow]!;
+          for (let visualCol = 0; visualCol < cols.length; visualCol++) {
+            const col = cols[visualCol]!;
+            const meta = this.commentMetaByCoord.get(row * COMMENT_COORD_COL_STRIDE + col);
+            if (!meta) continue;
+            const resolved = meta.resolved ?? false;
+            commentIndicatorBoundsScratch.x = startX + visualCol * this.cellWidth;
+            commentIndicatorBoundsScratch.y = startY + visualRow * this.cellHeight;
+            commentIndicatorStyleScratch.color = resolved ? commentIndicatorResolvedColor : commentIndicatorColor;
+            drawCommentIndicator(ctx, commentIndicatorBoundsScratch, commentIndicatorStyleScratch, false);
+          }
         }
       }
 
@@ -16327,7 +16398,7 @@ export class SpreadsheetApp {
 
     if (frozenRows === undefined || frozenCols === undefined) {
       // Avoid `getFrozen()` allocations; compute frozen counts directly.
-      const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+      const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
       const rawFrozenRows = Number(view?.frozenRows);
       const rawFrozenCols = Number(view?.frozenCols);
       const maxRows = this.limits.maxRows;
@@ -16692,7 +16763,7 @@ export class SpreadsheetApp {
     }
 
     // Avoid `getFrozen()` allocations; compute frozen counts directly.
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const rawFrozenRows = Number(view?.frozenRows);
     const rawFrozenCols = Number(view?.frozenCols);
     const maxRows = this.limits.maxRows;
@@ -16775,7 +16846,7 @@ export class SpreadsheetApp {
     const sheetId = this.sheetId;
 
     // Avoid `getFrozen()` allocations; compute frozen counts directly.
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const rawFrozenRows = Number(view?.frozenRows);
     const rawFrozenCols = Number(view?.frozenCols);
     const maxRows = this.limits.maxRows;
@@ -17349,7 +17420,7 @@ export class SpreadsheetApp {
     }
 
     // Avoid `getFrozen()` allocations; compute frozen counts directly.
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const rawFrozenRows = Number(view?.frozenRows);
     const rawFrozenCols = Number(view?.frozenCols);
     const maxRows = this.limits.maxRows;
@@ -17506,7 +17577,7 @@ export class SpreadsheetApp {
     const paneRects = layout.paneRects;
 
     // Avoid `getFrozen()` allocations on scroll/resize driven chart renders.
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const rawFrozenRows = Number(view?.frozenRows);
     const rawFrozenCols = Number(view?.frozenCols);
     const maxRows = this.limits.maxRows;
@@ -17788,7 +17859,7 @@ export class SpreadsheetApp {
     out: DrawingViewportLayout,
   ): DrawingViewportLayout {
     // Avoid `getFrozen()` allocations; compute frozen counts directly.
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const rawFrozenRows = Number(view?.frozenRows);
     const rawFrozenCols = Number(view?.frozenCols);
     const maxRows = this.limits.maxRows;
@@ -18253,6 +18324,18 @@ export class SpreadsheetApp {
   }
 
   private listDrawingObjectsForSheet(sheetId: string = this.sheetId): DrawingObject[] {
+    const id = String(sheetId ?? this.sheetId).trim();
+    if (!id) return EMPTY_DRAWING_OBJECTS;
+    // Avoid resurrecting deleted sheets: `DocumentController.getSheetDrawings()` calls
+    // `getSheetView()` internally which will lazily materialize missing sheet ids.
+    if (this.isSheetKnownMissing(id)) {
+      const cached = this.drawingObjectsCache;
+      if (cached && cached.sheetId === id) {
+        this.drawingObjectsCache = null;
+      }
+      return EMPTY_DRAWING_OBJECTS;
+    }
+
     const doc = this.document as any;
     const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
 
@@ -18262,13 +18345,13 @@ export class SpreadsheetApp {
     // getter function identity in the cache key so we don't permanently cache an empty list
     // from the pre-monkeypatch state.
     let docObjects: DrawingObject[];
-    if (cached && cached.sheetId === sheetId && cached.source === drawingsGetter) {
+    if (cached && cached.sheetId === id && cached.source === drawingsGetter) {
       docObjects = cached.objects;
     } else {
       let raw: unknown = null;
       if (drawingsGetter) {
         try {
-          raw = drawingsGetter.call(doc, sheetId);
+          raw = drawingsGetter.call(doc, id);
         } catch {
           raw = null;
         }
@@ -18286,33 +18369,33 @@ export class SpreadsheetApp {
         );
       };
 
-      const objects: DrawingObject[] = (() => {
-        if (raw == null) return [];
-        // Already normalized UI objects.
-        if (Array.isArray(raw)) {
-          if (raw.length === 0) return [];
-          if (raw.every(isUiDrawingObject)) return raw as DrawingObject[];
-          // DocumentController drawings (or model objects) as a raw array (best-effort).
-          return convertDocumentSheetDrawingsToUiDrawingObjects(raw, { sheetId });
-        }
-
-        if (isUiDrawingObject(raw)) return [raw];
-
-        // Formula-model worksheet JSON blob ({ drawings: [...] }).
-        if (typeof raw === "object") {
-          const maybeWorksheet = raw as any;
-          if (Array.isArray(maybeWorksheet.drawings)) {
-            return convertModelWorksheetDrawingsToUiDrawingObjects(maybeWorksheet);
+        const objects: DrawingObject[] = (() => {
+          if (raw == null) return [];
+          // Already normalized UI objects.
+          if (Array.isArray(raw)) {
+            if (raw.length === 0) return [];
+            if (raw.every(isUiDrawingObject)) return raw as DrawingObject[];
+            // DocumentController drawings (or model objects) as a raw array (best-effort).
+            return convertDocumentSheetDrawingsToUiDrawingObjects(raw, { sheetId: id });
           }
-          if (Array.isArray(maybeWorksheet.objects)) {
-            const list = maybeWorksheet.objects as unknown[];
-            if (list.every(isUiDrawingObject)) return list as DrawingObject[];
-            return convertDocumentSheetDrawingsToUiDrawingObjects(list, { sheetId });
-          }
-        }
 
-        return [];
-      })();
+          if (isUiDrawingObject(raw)) return [raw];
+
+          // Formula-model worksheet JSON blob ({ drawings: [...] }).
+          if (typeof raw === "object") {
+            const maybeWorksheet = raw as any;
+            if (Array.isArray(maybeWorksheet.drawings)) {
+              return convertModelWorksheetDrawingsToUiDrawingObjects(maybeWorksheet);
+            }
+            if (Array.isArray(maybeWorksheet.objects)) {
+              const list = maybeWorksheet.objects as unknown[];
+              if (list.every(isUiDrawingObject)) return list as DrawingObject[];
+              return convertDocumentSheetDrawingsToUiDrawingObjects(list, { sheetId: id });
+            }
+          }
+
+          return [];
+        })();
 
       const ordered = (() => {
         if (objects.length <= 1) return objects;
@@ -18327,7 +18410,7 @@ export class SpreadsheetApp {
         return objects;
       })();
 
-      this.drawingObjectsCache = { sheetId, objects: ordered, source: drawingsGetter };
+      this.drawingObjectsCache = { sheetId: id, objects: ordered, source: drawingsGetter };
       docObjects = ordered;
     }
 
@@ -18348,7 +18431,7 @@ export class SpreadsheetApp {
           ] as DrawingObject[]);
 
     if (finalObjects !== docObjects) {
-      this.drawingObjectsCache = { sheetId, objects: finalObjects, source: drawingsGetter };
+      this.drawingObjectsCache = { sheetId: id, objects: finalObjects, source: drawingsGetter };
     }
     return finalObjects;
   }
@@ -18822,6 +18905,20 @@ export class SpreadsheetApp {
       return rangeToA1(range);
     })();
     this.status.selectionRange.textContent = selectionRangeText;
+
+    // SpreadsheetApp can briefly hold a stale sheet id during destructive operations (sheet deletion,
+    // undo/redo, applyState). Avoid cascading sheet-materializing reads (computed values, stats, auditing)
+    // that could resurrect a deleted sheet.
+    if (this.isSheetKnownMissing(this.sheetId)) {
+      this.status.activeValue.textContent = "";
+      if (this.status.selectionSum) this.status.selectionSum.textContent = "";
+      if (this.status.selectionAverage) this.status.selectionAverage.textContent = "";
+      if (this.status.selectionCount) this.status.selectionCount.textContent = "";
+      if (this.formulaBar && !this.formulaBar.isEditing()) {
+        this.formulaBar.setActiveCell({ address: activeA1, input: "", value: null, nameBox: selectionRangeText });
+      }
+      return;
+    }
 
     // `getCellDisplayValue` internally recomputes the computed value. We need the computed value
     // anyway for the formula bar, so compute once and reuse to avoid duplicate formula evaluation.
@@ -19692,7 +19789,7 @@ export class SpreadsheetApp {
     const totalRows = this.rowIndexByVisual.length;
     const totalCols = this.colIndexByVisual.length;
 
-    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const view = this.getSheetViewForRead(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
     const nextFrozenRows = Number.isFinite(view?.frozenRows) ? Math.max(0, Math.trunc(view?.frozenRows ?? 0)) : 0;
     const nextFrozenCols = Number.isFinite(view?.frozenCols) ? Math.max(0, Math.trunc(view?.frozenCols ?? 0)) : 0;
 
@@ -21476,7 +21573,13 @@ export class SpreadsheetApp {
     // Ctrl/Cmd+click on a URL-like cell value should open it externally instead
     // of being treated as an additive selection gesture.
     if (primary && e.pointerType === "mouse" && e.button === 0) {
-      const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+      const docAny: any = this.document as any;
+      const state =
+        typeof docAny.peekCell === "function"
+          ? (docAny.peekCell(this.sheetId, cell) as { value: unknown; formula: string | null })
+          : this.isSheetKnownMissing(this.sheetId)
+            ? null
+            : (this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null });
       const renderedText = (() => {
         if (!state) return "";
         if (state.formula != null) {
@@ -23752,6 +23855,24 @@ export class SpreadsheetApp {
     // This intentionally interns the resolved style into `document.styleTable`
     // so the internal paste path can keep pasting styleIds (fast) rather than
     // materializing per-cell format objects.
+    const sheetId = this.sheetId;
+    // Clipboard operations can race with sheet deletion/undo/applyState while SpreadsheetApp
+    // is still holding a stale sheet id. Snapshotting should never resurrect a deleted sheet
+    // by calling sheet-materializing DocumentController APIs.
+    if (this.isSheetKnownMissing(sheetId)) {
+      const rows = Math.max(0, range.endRow - range.startRow + 1);
+      const cols = Math.max(0, range.endCol - range.startCol + 1);
+      const cells: Array<Array<{ value: unknown; formula: string | null; styleId: number }>> = [];
+      for (let r = 0; r < rows; r += 1) {
+        const outRow: Array<{ value: unknown; formula: string | null; styleId: number }> = [];
+        for (let c = 0; c < cols; c += 1) {
+          outRow.push({ value: null, formula: null, styleId: 0 });
+        }
+        cells.push(outRow);
+      }
+      return cells;
+    }
+
     const docAny = this.document as any;
     const styleIdByLayerKey = new Map<string, number>();
 
@@ -23760,9 +23881,7 @@ export class SpreadsheetApp {
     // every copied cell.
     const sheetModel = (() => {
       try {
-        // Ensure sheet exists (DocumentController creates sheets lazily).
-        docAny?.model?.getCell?.(this.sheetId, 0, 0);
-        return docAny?.model?.sheets?.get?.(this.sheetId) ?? null;
+        return docAny?.model?.sheets?.get?.(sheetId) ?? null;
       } catch {
         return null;
       }
@@ -23799,7 +23918,7 @@ export class SpreadsheetApp {
         try {
           coordScratch.row = row;
           coordScratch.col = col;
-          const tuple = docAny.getCellFormatStyleIds(this.sheetId, coordScratch);
+          const tuple = docAny.getCellFormatStyleIds(sheetId, coordScratch);
           if (Array.isArray(tuple) && tuple.length >= 4) {
             const normalized =
               tuple.length >= 5
@@ -23846,7 +23965,10 @@ export class SpreadsheetApp {
       for (let col = range.startCol; col <= range.endCol; col += 1) {
         coordScratch.row = row;
         coordScratch.col = col;
-        const cell = this.document.getCell(this.sheetId, coordScratch) as {
+        const cell = (() => {
+          if (typeof docAny.peekCell === "function") return docAny.peekCell(sheetId, coordScratch);
+          return this.document.getCell(sheetId, coordScratch);
+        })() as {
           value: unknown;
           formula: string | null;
           styleId: number;
@@ -23862,9 +23984,9 @@ export class SpreadsheetApp {
             styleId = 0;
           } else {
             const effectiveStyle = (() => {
-              if (typeof docAny.getCellFormat === "function") return docAny.getCellFormat(this.sheetId, coordScratch);
-              if (typeof docAny.getEffectiveCellStyle === "function") return docAny.getEffectiveCellStyle(this.sheetId, coordScratch);
-              if (typeof docAny.getCellStyle === "function") return docAny.getCellStyle(this.sheetId, coordScratch);
+              if (typeof docAny.getCellFormat === "function") return docAny.getCellFormat(sheetId, coordScratch);
+              if (typeof docAny.getEffectiveCellStyle === "function") return docAny.getEffectiveCellStyle(sheetId, coordScratch);
+              if (typeof docAny.getCellStyle === "function") return docAny.getCellStyle(sheetId, coordScratch);
               return this.document.styleTable.get(baseStyleId);
             })();
 
@@ -25124,7 +25246,7 @@ export class SpreadsheetApp {
 
     if (isRichTextValue(value)) return value.text;
 
-    if (typeof value === "number" && Number.isFinite(value)) {
+    if (typeof value === "number" && Number.isFinite(value) && !this.isSheetKnownMissing(this.sheetId)) {
       const docStyle: any = this.document.getCellFormat(this.sheetId, cell);
       const numberFormat = getStyleNumberFormat(docStyle);
       if (numberFormat) return formatValueWithNumberFormat(value, numberFormat);
@@ -25133,7 +25255,13 @@ export class SpreadsheetApp {
   }
 
   private getCellInputText(cell: CellCoord): string {
-    const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+    const docAny: any = this.document as any;
+    const state =
+      typeof docAny.peekCell === "function"
+        ? (docAny.peekCell(this.sheetId, cell) as { value: unknown; formula: string | null })
+        : this.isSheetKnownMissing(this.sheetId)
+          ? null
+          : (this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null });
     if (state?.formula != null) {
       return state.formula;
     }
@@ -25152,6 +25280,11 @@ export class SpreadsheetApp {
   }
 
   private getCellComputedValueForSheetInternal(sheetId: string, cell: CellCoord): SpreadsheetValue {
+    // Defensive: SpreadsheetApp can briefly hold stale sheet ids during sheet deletion/undo/applyState.
+    // Avoid resurrecting deleted sheets by ensuring computed-value reads do not call
+    // `DocumentController.getCell()` for known-missing sheets.
+    if (this.isSheetKnownMissing(sheetId)) return null;
+
     // Today we only use the WASM engine's computed-value cache for single-sheet workbooks.
     // Multi-sheet workbooks continue to use the in-process evaluator for compatibility
     // while the engine integration matures (sheet metadata, cross-sheet refs, etc).
@@ -27382,7 +27515,13 @@ export class SpreadsheetApp {
     return {
       getUsedRange: () => this.computeUsedRange(),
       isCellEmpty: (cell: CellCoord) => {
-        const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+        const docAny: any = this.document as any;
+        const state =
+          typeof docAny.peekCell === "function"
+            ? (docAny.peekCell(this.sheetId, cell) as { value: unknown; formula: string | null })
+            : this.isSheetKnownMissing(this.sheetId)
+              ? null
+              : (this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null });
         return state?.value == null && state?.formula == null;
       },
       // Shared-grid mode supports manual row/col hide/unhide but does not yet render outline-collapsed
