@@ -2340,6 +2340,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "format.numberFormat.fraction": t("command.format.numberFormat.fraction"),
       "format.numberFormat.scientific": t("command.format.numberFormat.scientific"),
       "format.numberFormat.text": t("command.format.numberFormat.text"),
+      // Number format dialog entrypoints.
+      "format.openFormatCells": t("command.format.openFormatCells"),
+      "home.number.moreFormats.custom": t("command.home.number.moreFormats.custom"),
       "view.appearance.theme.system": t("ribbon.theme.system"),
       "view.appearance.theme.light": t("ribbon.theme.light"),
       "view.appearance.theme.dark": t("ribbon.theme.dark"),
