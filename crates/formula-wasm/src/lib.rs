@@ -4716,6 +4716,8 @@ impl WasmWorkbook {
             visibility: Option<SheetVisibilityJson>,
             #[serde(default, rename = "tabColor")]
             tab_color: Option<TabColorJson>,
+            #[serde(default, rename = "cellPhonetics")]
+            cell_phonetics: Option<BTreeMap<String, JsonValue>>,
             cells: BTreeMap<String, JsonValue>,
             #[serde(default)]
             default_style_id: Option<u32>,
@@ -4800,6 +4802,7 @@ impl WasmWorkbook {
                 col_count,
                 visibility,
                 tab_color,
+                cell_phonetics,
                 cells,
                 default_style_id,
                 row_style_ids,
@@ -4918,6 +4921,27 @@ impl WasmWorkbook {
                     continue;
                 }
                 wb.set_cell_internal(&display_name, &address, input)?;
+            }
+
+            // Apply per-cell phonetic guide metadata (furigana) after cell inputs have been set.
+            // Setting cell values/formulas clears phonetic metadata in the engine, so we must apply
+            // it after importing `cells`.
+            if let Some(phonetics) = cell_phonetics {
+                // Best-effort: ignore invalid addresses or other errors so optional metadata
+                // doesn't prevent opening the workbook.
+                let _ = wb.with_manual_calc_mode(|this| {
+                    for (address, value) in phonetics {
+                        let Some(phonetic) = value.as_str() else {
+                            continue;
+                        };
+                        let _ = this.engine.set_cell_phonetic(
+                            &display_name,
+                            &address,
+                            Some(phonetic.to_string()),
+                        );
+                    }
+                    Ok(())
+                });
             }
         }
 
@@ -5595,12 +5619,15 @@ impl WasmWorkbook {
             visibility: Option<&'static str>,
             #[serde(default, skip_serializing_if = "Option::is_none", rename = "tabColor")]
             tab_color: Option<TabColor>,
+            #[serde(default, skip_serializing_if = "BTreeMap::is_empty", rename = "cellPhonetics")]
+            cell_phonetics: BTreeMap<String, String>,
             cells: BTreeMap<String, JsonValue>,
         }
 
         let mut sheets = BTreeMap::new();
         for (sheet_name, cells) in &self.inner.sheets {
             let mut out_cells = BTreeMap::new();
+            let mut cell_phonetics: BTreeMap<String, String> = BTreeMap::new();
             for (address, input) in cells {
                 // Ensure we never serialize explicit `null` cells; empty cells are
                 // omitted from the sparse workbook representation.
@@ -5608,6 +5635,12 @@ impl WasmWorkbook {
                     continue;
                 }
                 out_cells.insert(address.clone(), input.clone());
+
+                if let Some(phonetic) = self.inner.engine.get_cell_phonetic(sheet_name, address) {
+                    // Preserve phonetic guide metadata used by Excel's `PHONETIC()` function.
+                    // Note: the stored metadata may be an empty string (presence without text).
+                    cell_phonetics.insert(address.clone(), phonetic.to_string());
+                }
             }
             let (rows, cols) = self
                 .inner
@@ -5630,6 +5663,7 @@ impl WasmWorkbook {
                     col_count,
                     visibility,
                     tab_color,
+                    cell_phonetics,
                     cells: out_cells,
                 },
             );
@@ -5875,11 +5909,13 @@ impl WasmWorkbook {
         sheet: Option<String>,
     ) -> Result<(), JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
-        let sheet = self.inner.ensure_sheet(sheet);
-        self.inner
-            .engine
-            .set_cell_phonetic(&sheet, &address, phonetic)
-            .map_err(|err| js_err(err.to_string()))
+        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        self.inner.with_manual_calc_mode(|this| {
+            let sheet = this.ensure_sheet(sheet);
+            this.engine
+                .set_cell_phonetic(&sheet, &address, phonetic)
+                .map_err(|err| js_err(err.to_string()))
+        })
     }
 
     #[wasm_bindgen(js_name = "getCellPhonetic")]
@@ -8130,6 +8166,37 @@ mod tests {
         );
         assert_eq!(
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Text("かんじ".to_string())
+        );
+    }
+
+    #[test]
+    fn to_json_and_from_json_roundtrip_cell_phonetic_metadata() {
+        let mut wb = WasmWorkbook::new();
+        wb.inner
+            .set_cell_internal(DEFAULT_SHEET, "A1", JsonValue::String("漢字".to_string()))
+            .unwrap();
+        wb.set_cell_phonetic("A1".to_string(), Some("かんじ".to_string()), None)
+            .unwrap();
+        wb.inner
+            .set_cell_internal(
+                DEFAULT_SHEET,
+                "B1",
+                JsonValue::String("=PHONETIC(A1)".to_string()),
+            )
+            .unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+
+        let json = wb.to_json().unwrap();
+        let mut wb2 = WasmWorkbook::from_json(&json).unwrap();
+        wb2.inner.recalculate_internal(None).unwrap();
+
+        assert_eq!(
+            wb2.inner.engine.get_cell_phonetic(DEFAULT_SHEET, "A1"),
+            Some("かんじ")
+        );
+        assert_eq!(
+            wb2.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
             EngineValue::Text("かんじ".to_string())
         );
     }
