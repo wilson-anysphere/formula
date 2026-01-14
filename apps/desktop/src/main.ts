@@ -140,6 +140,7 @@ import { handleInsertPicturesRibbonCommand } from "./main.insertPicturesRibbonCo
 import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js";
 import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
 import { promptAndApplyCustomNumberFormat } from "./formatting/promptCustomNumberFormat.js";
+import { formatValueWithNumberFormat } from "./formatting/numberFormat.ts";
 import { getStyleNumberFormat } from "./formatting/styleFieldAccess.js";
 import { handleCustomSortCommand } from "./sort-filter/openCustomSortDialog.js";
 import { sortSelection } from "./sort-filter/sortSelection.js";
@@ -8332,18 +8333,31 @@ function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: 
   const doc = app.getDocument();
   const state = doc.getCell(sheetId, cell) as { value?: unknown; formula?: string | null } | null;
 
-  // Prefer computed values for formula cells so filtering matches what users see.
+  const formatValue = (raw: unknown): string => {
+    if (raw == null) return "";
+    if (typeof raw === "boolean") return raw ? "TRUE" : "FALSE";
+
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      const fmt = doc.getCellFormat(sheetId, cell) as any;
+      const rawNumberFormat = fmt?.numberFormat ?? fmt?.number_format;
+      const numberFormat = typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "" ? rawNumberFormat : null;
+      if (numberFormat) return formatValueWithNumberFormat(raw, numberFormat);
+    }
+
+    return String(raw);
+  };
+
+  // Prefer computed values for formula cells so filtering matches what users see in the grid.
   const hasFormula = typeof state?.formula === "string" && state.formula.trim() !== "";
   if (hasFormula) {
     const computed = app.getCellComputedValueForSheet(sheetId, cell);
-    return computed == null ? "" : String(computed);
+    return formatValue(computed);
   }
 
   const value = state?.value ?? null;
-  if (value == null) return "";
   const maybeText = typeof value === "object" && value != null ? (value as any)?.text : null;
   if (typeof maybeText === "string") return maybeText;
-  return String(value);
+  return formatValue(value);
 }
 
 async function showRibbonAutoFilterDialog(args: {
