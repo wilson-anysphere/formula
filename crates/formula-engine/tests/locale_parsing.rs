@@ -866,6 +866,11 @@ fn canonicalize_and_localize_additional_function_translations_for_es_es() {
     assert_roundtrip("=TOMAR(A1:A3;1)", "=TAKE(A1:A3,1)");
     assert_roundtrip("=SECUENCIA(2;3)", "=SEQUENCE(2,3)");
     assert_roundtrip("=BUSCARX(1;A1:A3;B1:B3)", "=XLOOKUP(1,A1:A3,B1:B3)");
+    assert_roundtrip("=APILARV(A1:A2;B1:B2)", "=VSTACK(A1:A2,B1:B2)");
+    assert_roundtrip("=APILARH(A1:A2;B1:B2)", "=HSTACK(A1:A2,B1:B2)");
+    assert_roundtrip("=ELEGIRCOLUMNAS(A1:C1;2)", "=CHOOSECOLS(A1:C1,2)");
+    assert_roundtrip("=ELEGIRFILAS(A1:A10;2)", "=CHOOSEROWS(A1:A10,2)");
+    assert_roundtrip("=DIVIDIRTEXTO(\"a,b\";\",\")", "=TEXTSPLIT(\"a,b\",\",\")");
 
     // TRUE()/FALSE() as zero-argument functions (not just boolean literals).
     assert_roundtrip("=VERDADERO()", "=TRUE()");
