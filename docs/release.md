@@ -145,6 +145,19 @@ APPLE_CERTIFICATE=... APPLE_CERTIFICATE_PASSWORD=... bash scripts/ci/verify-code
 WINDOWS_CERTIFICATE=... WINDOWS_CERTIFICATE_PASSWORD=... bash scripts/ci/verify-codesign-secrets.sh windows
 ```
 
+After building (per-platform), CI also validates that the expected Tauri bundle artifacts exist
+(installers/bundles, and when updater signing is enabled, the corresponding `.sig` files and
+`latest.json` metadata). This catches “missing artifact” failures early (before publishing a
+release):
+
+```bash
+# Run after a local `cargo tauri build` / `tauri-action` build.
+# If you don't have updater signing configured locally, skip signature enforcement:
+FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES=false node scripts/ci/check-desktop-release-artifacts.mjs --os linux
+FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES=false node scripts/ci/check-desktop-release-artifacts.mjs --os windows
+FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES=false node scripts/ci/check-desktop-release-artifacts.mjs --os macos
+```
+
 After all platform builds finish, CI also verifies the **uploaded GitHub Release assets** are
 complete and consistent with the Tauri updater manifest (`latest.json`). This prevents publishing a
 release where `latest.json` points at missing artifacts or missing signature files.
