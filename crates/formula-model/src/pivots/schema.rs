@@ -256,7 +256,7 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     let raw = raw.trim();
     if raw.is_empty() {
         return Cow::Borrowed("''");
-    }
+    };
     if dax_identifier_requires_quotes(raw) {
         return Cow::Owned(quote_dax_identifier(raw));
     }
