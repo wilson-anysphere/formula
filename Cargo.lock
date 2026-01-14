@@ -2303,6 +2303,7 @@ dependencies = [
  "formula-format",
  "formula-model",
  "formula-office-crypto",
+ "formula-xlsb",
  "formula-xlsx",
  "getrandom 0.2.17",
  "js-sys",

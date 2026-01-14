@@ -1,19 +1,36 @@
+// CLI binaries are not supported on `wasm32-unknown-unknown` (no filesystem / process args).
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::env;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{self, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::ops::ControlFlow;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 use formula_model::sheet_name_eq_case_insensitive;
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsb::format::{format_a1, format_hex};
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsb::rgce::{decode_rgce_with_context_and_rgcb_and_base, CellCoord};
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsb::{Formula, SheetMeta};
+#[cfg(not(target_arch = "wasm32"))]
 use serde::Serialize;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "../xlsb_cli_open.rs"]
 mod xlsb_cli_open;
+#[cfg(not(target_arch = "wasm32"))]
 use xlsb_cli_open::open_xlsb_workbook;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 struct Args {
     path: PathBuf,
@@ -22,6 +39,7 @@ struct Args {
     password: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Args {
     fn parse() -> Result<Self, io::Error> {
         let mut path: Option<PathBuf> = None;
@@ -99,6 +117,7 @@ impl Args {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn print_usage() {
     println!(
         "\
@@ -115,6 +134,7 @@ Options:
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Serialize)]
 struct FormulaCellLine {
     sheet: String,
@@ -128,6 +148,7 @@ struct FormulaCellLine {
     offset: Option<usize>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Serialize)]
 struct SummaryLine {
     kind: &'static str,
@@ -137,6 +158,7 @@ struct SummaryLine {
     failures_by_ptg: BTreeMap<String, usize>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     if let Err(err) = run() {
         eprintln!("rgce_coverage: {err}");
@@ -144,6 +166,7 @@ fn main() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse()?;
     let wb = open_xlsb_workbook(&args.path, args.password.as_deref())?;
@@ -260,6 +283,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn resolve_sheets(sheets: &[SheetMeta], selector: Option<&str>) -> Result<Vec<usize>, io::Error> {
     let Some(selector) = selector else {
         return Ok((0..sheets.len()).collect());

@@ -4854,6 +4854,9 @@ impl WasmWorkbook {
 
     #[wasm_bindgen(js_name = "fromEncryptedXlsxBytes")]
     pub fn from_encrypted_xlsx_bytes(bytes: &[u8], password: String) -> Result<WasmWorkbook, JsValue> {
+        // Ensure the function registry is populated before importing any workbook formulas.
+        ensure_rust_constructors_run();
+
         if !formula_office_crypto::is_encrypted_ooxml_ole(bytes) {
             // Not an Office-encrypted OLE container; fall back to the plaintext XLSX loader.
             return Self::from_xlsx_bytes(bytes);
@@ -4866,17 +4869,19 @@ impl WasmWorkbook {
                     if message.contains("ZIP archive") =>
                 {
                     js_err(
-                        "decrypted payload is not an `.xlsx` ZIP package; only encrypted `.xlsx` is supported for now",
+                        "decrypted payload is not an `.xlsx`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsb` is supported for now",
                     )
                 }
                 other => js_err(other.to_string()),
             })?;
 
-        // Office-encrypted containers can wrap arbitrary payloads (e.g. XLS, XLSB, even DOCX). For
-        // now we only support decrypting XLSX (ZIP + `xl/workbook.xml`).
+        // Office-encrypted containers can wrap arbitrary payloads (e.g. XLS, DOCX). We support
+        // encrypted OOXML workbooks stored as ZIP packages:
+        // - `.xlsx`: `xl/workbook.xml`
+        // - `.xlsb`: `xl/workbook.bin`
         if decrypted.len() < 2 || &decrypted[..2] != b"PK" {
             return Err(js_err(
-                "decrypted payload is not an `.xlsx` ZIP package; only encrypted `.xlsx` is supported for now",
+                "decrypted payload is not an `.xlsx`/`.xlsb` ZIP package; only encrypted `.xlsx`/`.xlsb` is supported for now",
             ));
         }
 
@@ -4908,12 +4913,20 @@ impl WasmWorkbook {
             return Self::from_xlsx_bytes(&decrypted);
         }
         if has_workbook_bin {
-            return Err(js_err(
-                "decrypted payload appears to be an `.xlsb` workbook; only encrypted `.xlsx` is supported for now",
-            ));
+            let options = formula_xlsb::OpenOptions {
+                preserve_unknown_parts: false,
+                preserve_parsed_parts: false,
+                preserve_worksheets: false,
+                decode_formulas: true,
+            };
+            let wb = formula_xlsb::XlsbWorkbook::open_from_bytes_with_options(&decrypted, options)
+                .map_err(|err| js_err(err.to_string()))?;
+            let model =
+                xlsb_to_model_workbook(&wb).map_err(|err| js_err(err.to_string()))?;
+            return Self::from_workbook_model(model);
         }
         Err(js_err(
-            "decrypted payload is a ZIP file but does not appear to be an `.xlsx` workbook (missing `xl/workbook.xml`)",
+            "decrypted payload is a ZIP file but does not appear to be an `.xlsx`/`.xlsb` workbook (missing `xl/workbook.xml` and `xl/workbook.bin`)",
         ))
     }
 
@@ -5862,6 +5875,164 @@ impl WasmWorkbook {
     pub fn default_sheet_name() -> String {
         DEFAULT_SHEET.to_string()
     }
+}
+
+fn xlsb_error_code_to_model_error(code: u8) -> formula_model::ErrorValue {
+    use core::str::FromStr as _;
+
+    formula_xlsb::errors::xlsb_error_literal(code)
+        .and_then(|lit| formula_model::ErrorValue::from_str(lit).ok())
+        .unwrap_or(formula_model::ErrorValue::Unknown)
+}
+
+fn xlsb_to_model_workbook(
+    wb: &formula_xlsb::XlsbWorkbook,
+) -> Result<formula_model::Workbook, formula_xlsb::Error> {
+    use formula_model::{
+        normalize_formula_text, CalculationMode as ModelCalculationMode, CellRef,
+        CellValue as ModelCellValue, DateSystem, DefinedNameScope, SheetVisibility as ModelSheetVisibility,
+        Style, Workbook as ModelWorkbook,
+    };
+
+    let mut out = ModelWorkbook::new();
+    out.date_system = if wb.workbook_properties().date_system_1904 {
+        DateSystem::Excel1904
+    } else {
+        DateSystem::Excel1900
+    };
+    if let Some(calc_mode) = wb.workbook_properties().calc_mode {
+        out.calc_settings.calculation_mode = match calc_mode {
+            formula_xlsb::CalcMode::Auto => ModelCalculationMode::Automatic,
+            formula_xlsb::CalcMode::Manual => ModelCalculationMode::Manual,
+            formula_xlsb::CalcMode::AutoExceptTables => ModelCalculationMode::AutomaticNoTable,
+        };
+    }
+    if let Some(full_calc_on_load) = wb.workbook_properties().full_calc_on_load {
+        out.calc_settings.full_calc_on_load = full_calc_on_load;
+    }
+
+    // Best-effort style mapping: XLSB cell records reference an XF index.
+    //
+    // `formula-xlsb` currently only exposes number formats (`numFmtId`/`ifmt`) via `Styles`.
+    // Preserve those for downstream consumers like date inference in pivot tables.
+    let mut xf_to_style_id: Vec<u32> = Vec::with_capacity(wb.styles().len());
+    for xf_idx in 0..wb.styles().len() {
+        let info = wb
+            .styles()
+            .get(xf_idx as u32)
+            .expect("xf index within wb.styles().len()");
+        if info.num_fmt_id == 0 {
+            xf_to_style_id.push(0);
+            continue;
+        }
+        let style_id = info
+            .number_format
+            .as_deref()
+            .filter(|fmt| !fmt.is_empty())
+            .map(|fmt| {
+                out.intern_style(Style {
+                    number_format: Some(fmt.to_string()),
+                    ..Default::default()
+                })
+            })
+            .unwrap_or(0);
+        xf_to_style_id.push(style_id);
+    }
+
+    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> =
+        Vec::with_capacity(wb.sheet_metas().len());
+
+    for (sheet_index, meta) in wb.sheet_metas().iter().enumerate() {
+        let sheet_id = out
+            .add_sheet(meta.name.clone())
+            .map_err(|err| formula_xlsb::Error::InvalidSheetName(format!("{}: {err}", meta.name)))?;
+        worksheet_ids_by_index.push(sheet_id);
+
+        let sheet = out
+            .sheet_mut(sheet_id)
+            .expect("sheet id should exist immediately after add");
+        sheet.visibility = match meta.visibility {
+            formula_xlsb::SheetVisibility::Visible => ModelSheetVisibility::Visible,
+            formula_xlsb::SheetVisibility::Hidden => ModelSheetVisibility::Hidden,
+            formula_xlsb::SheetVisibility::VeryHidden => ModelSheetVisibility::VeryHidden,
+        };
+
+        wb.for_each_cell(sheet_index, |cell| {
+            let cell_ref = CellRef::new(cell.row, cell.col);
+            let style_id = xf_to_style_id
+                .get(cell.style as usize)
+                .copied()
+                .unwrap_or(0);
+
+            match cell.value {
+                formula_xlsb::CellValue::Blank => {}
+                formula_xlsb::CellValue::Number(v) => sheet.set_value(cell_ref, ModelCellValue::Number(v)),
+                formula_xlsb::CellValue::Bool(v) => sheet.set_value(cell_ref, ModelCellValue::Boolean(v)),
+                formula_xlsb::CellValue::Text(s) => sheet.set_value(cell_ref, ModelCellValue::String(s)),
+                formula_xlsb::CellValue::Error(code) => sheet.set_value(
+                    cell_ref,
+                    ModelCellValue::Error(xlsb_error_code_to_model_error(code)),
+                ),
+            };
+
+            // Cells with non-zero style ids must be stored, even if blank, matching Excel's ability
+            // to format empty cells.
+            if style_id != 0 {
+                sheet.set_style_id(cell_ref, style_id);
+            }
+
+            if let Some(formula) = cell.formula.and_then(|f| f.text) {
+                if let Some(normalized) = normalize_formula_text(&formula) {
+                    sheet.set_formula(cell_ref, Some(normalized));
+                }
+            }
+
+            // Best-effort phonetic guide (furigana) extraction.
+            if let Some(phonetic) = cell
+                .preserved_string
+                .as_ref()
+                .and_then(|s| s.phonetic_text())
+            {
+                let mut model_cell = sheet.cell(cell_ref).cloned().unwrap_or_default();
+                model_cell.phonetic = Some(phonetic);
+                sheet.set_cell(cell_ref, model_cell);
+            }
+        })?;
+    }
+
+    // Defined names: parsed from `xl/workbook.bin` `BrtName` records.
+    for name in wb.defined_names() {
+        let Some(formula) = name.formula.as_ref().and_then(|f| f.text.as_deref()) else {
+            continue;
+        };
+        let Some(refers_to) = normalize_formula_text(formula) else {
+            continue;
+        };
+
+        let (scope, local_sheet_id) = match name.scope_sheet.and_then(|idx| {
+            worksheet_ids_by_index
+                .get(idx as usize)
+                .copied()
+                .map(|id| (idx, id))
+        }) {
+            Some((local_sheet_id, sheet_id)) => {
+                (DefinedNameScope::Sheet(sheet_id), Some(local_sheet_id))
+            }
+            None => (DefinedNameScope::Workbook, None),
+        };
+
+        // Best-effort: ignore invalid/duplicate names so we can still import the workbook.
+        let _ = out.create_defined_name(
+            scope,
+            name.name.clone(),
+            refers_to,
+            name.comment.clone(),
+            name.hidden,
+            local_sheet_id,
+        );
+    }
+
+    Ok(out)
 }
 
 // Native-only helpers for integration tests and tooling.
@@ -6914,6 +7085,42 @@ mod tests {
         assert!(
             !settings.full_calc_on_load,
             "fixture does not set fullCalcOnLoad, default should be false"
+        );
+    }
+
+    #[test]
+    fn from_encrypted_xlsx_bytes_supports_xlsb_payloads() {
+        // `fromEncryptedXlsxBytes` historically only supported decrypted `.xlsx` payloads.
+        // Office-encrypted files can also wrap ZIP-based `.xlsb` workbooks, which should now be
+        // supported in the WASM bindings.
+        let xlsb_bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+
+        let password = "secret";
+        let ole_bytes = formula_office_crypto::encrypt_package_to_ole(
+            xlsb_bytes,
+            password,
+            formula_office_crypto::EncryptOptions::default(),
+        )
+        .expect("encrypt xlsb package to OLE");
+
+        let mut wb =
+            WasmWorkbook::from_encrypted_xlsx_bytes(&ole_bytes, password.to_string()).unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Text("Hello".into())
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Number(42.5)
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "C1"),
+            EngineValue::Number(85.0)
         );
     }
 

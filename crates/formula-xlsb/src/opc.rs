@@ -1,32 +1,43 @@
 use crate::biff12_varint;
 use crate::parser::Error as ParseError;
 use crate::parser::{
-    biff12, parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook, Cell, CellValue,
-    DefinedName, SheetData, SheetMeta, WorkbookProperties,
+    biff12, parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook, Cell, DefinedName,
+    SheetData, SheetMeta, WorkbookProperties,
 };
+#[cfg(any(not(target_arch = "wasm32"), feature = "write"))]
+use crate::parser::CellValue;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::patch::{
     patch_sheet_bin, patch_sheet_bin_streaming, value_edit_is_noop_inline_string, CellEdit,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use crate::shared_strings_write::{
     reusable_plain_si_utf16_end, SharedStringsWriter, SharedStringsWriterStreaming,
 };
 use crate::styles::Styles;
 use crate::workbook_context::WorkbookContext;
 use crate::SharedString;
-use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use formula_office_crypto as office_crypto;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::ops::ControlFlow;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+#[cfg(not(target_arch = "wasm32"))]
+use formula_fs::{atomic_write_with_path, AtomicWriteError};
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::File;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::{BTreeMap, BTreeSet};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
 
 const DEFAULT_SHARED_STRINGS_PART: &str = "xl/sharedStrings.bin";
 const DEFAULT_STYLES_PART: &str = "xl/styles.bin";
@@ -161,6 +172,7 @@ impl Default for OpenOptions {
 trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 #[derive(Clone)]
 enum WorkbookSource {
     Path(PathBuf),
@@ -182,6 +194,7 @@ struct ParsedWorkbook {
     workbook_rels_part: String,
     shared_strings: Vec<String>,
     shared_strings_table: Vec<SharedString>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     shared_strings_part: Option<String>,
     workbook_context: WorkbookContext,
     workbook_properties: WorkbookProperties,
@@ -205,6 +218,7 @@ pub struct XlsbWorkbook {
     workbook_rels_part: String,
     shared_strings: Vec<String>,
     shared_strings_table: Vec<SharedString>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     shared_strings_part: Option<String>,
     workbook_context: WorkbookContext,
     workbook_properties: WorkbookProperties,
@@ -231,6 +245,7 @@ pub struct FormulaTextCellEdit {
 }
 
 impl XlsbWorkbook {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ParseError> {
         Self::open_with_options(path, OpenOptions::default())
     }
@@ -239,6 +254,7 @@ impl XlsbWorkbook {
     /// wrappers using the provided `password`.
     ///
     /// If the input is a normal ZIP-based XLSB package, this behaves like [`Self::open`].
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open_with_password(path: impl AsRef<Path>, password: &str) -> Result<Self, ParseError> {
         let path = path.as_ref().to_path_buf();
         let mut file = File::open(&path)?;
@@ -272,6 +288,7 @@ impl XlsbWorkbook {
         Self::open_with_options(path, OpenOptions::default())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open_with_options(
         path: impl AsRef<Path>,
         options: OpenOptions,
@@ -438,15 +455,21 @@ impl XlsbWorkbook {
 
     fn open_zip(&self) -> Result<ZipArchive<Box<dyn ReadSeek>>, ParseError> {
         match &self.source {
+            WorkbookSource::Bytes(bytes) => {
+                let reader: Box<dyn ReadSeek> = Box::new(Cursor::new(bytes.clone()));
+                Ok(ZipArchive::new(reader)?)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             WorkbookSource::Path(path) => {
                 let file = File::open(path)?;
                 let reader: Box<dyn ReadSeek> = Box::new(file);
                 Ok(ZipArchive::new(reader)?)
             }
-            WorkbookSource::Bytes(bytes) => {
-                let reader: Box<dyn ReadSeek> = Box::new(Cursor::new(bytes.clone()));
-                Ok(ZipArchive::new(reader)?)
-            }
+            #[cfg(target_arch = "wasm32")]
+            WorkbookSource::Path(_path) => Err(ParseError::Io(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "cannot open XLSB from a filesystem path on wasm targets; use `open_from_bytes` or `open_from_reader`",
+            ))),
         }
     }
 
@@ -682,6 +705,7 @@ impl XlsbWorkbook {
     ///
     /// If you need to override specific parts (e.g. a patched worksheet stream), use
     /// [`XlsbWorkbook::save_with_part_overrides`].
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_as(&self, dest: impl AsRef<Path>) -> Result<(), ParseError> {
         self.save_with_part_overrides(dest, &HashMap::new())
     }
@@ -705,6 +729,7 @@ impl XlsbWorkbook {
     /// This writes an OLE compound file wrapper containing:
     /// - `EncryptionInfo`
     /// - `EncryptedPackage` (the encrypted XLSB ZIP payload)
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_as_encrypted(
         &self,
         dest: impl AsRef<Path>,
@@ -747,6 +772,7 @@ impl XlsbWorkbook {
     ///
     /// Note: this may insert missing `BrtRow` / cell records inside `BrtSheetData` if the target
     /// cell does not already exist in the worksheet stream.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_with_edits(
         &self,
         dest: impl AsRef<Path>,
@@ -776,6 +802,7 @@ impl XlsbWorkbook {
     ///
     /// This loads `xl/worksheets/sheetN.bin` into memory. For very large worksheets, consider
     /// [`XlsbWorkbook::save_with_cell_edits_streaming`].
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_with_cell_edits(
         &self,
         dest: impl AsRef<Path>,
@@ -807,7 +834,7 @@ impl XlsbWorkbook {
     /// - when encountering forward-compatible / future functions (typically `_xlfn.*`) that map
     ///   to the BIFF UDF sentinel (255), automatically patches `xl/workbook.bin` to intern a
     ///   missing `ExternName` entry so the rgce encoder can emit a valid `PtgNameX` reference.
-    #[cfg(feature = "write")]
+    #[cfg(all(feature = "write", not(target_arch = "wasm32")))]
     pub fn save_with_cell_formula_text_edits(
         &self,
         dest: impl AsRef<Path>,
@@ -1026,6 +1053,7 @@ impl XlsbWorkbook {
 
     /// Save the workbook with a set of edits for a single worksheet, updating the shared strings
     /// part as needed so shared-string (`BrtCellIsst`) cells can stay as shared-string references.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_with_cell_edits_shared_strings(
         &self,
         dest: impl AsRef<Path>,
@@ -1180,6 +1208,7 @@ impl XlsbWorkbook {
     /// This avoids loading `xl/worksheets/sheetN.bin` into memory (important for very large XLSB
     /// worksheets). Unchanged records are copied byte-for-byte, preserving varint header
     /// encodings and minimizing diffs.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_with_cell_edits_streaming(
         &self,
         dest: impl AsRef<Path>,
@@ -1205,6 +1234,7 @@ impl XlsbWorkbook {
     ///
     /// This avoids buffering `xl/worksheets/sheetN.bin` in memory (important for large sheets)
     /// while still preserving shared-string (`BrtCellIsst`) storage for edited text cells.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_with_cell_edits_streaming_shared_strings(
         &self,
         dest: impl AsRef<Path>,
@@ -1432,6 +1462,7 @@ impl XlsbWorkbook {
     ///
     /// This avoids buffering full worksheet `.bin` payloads in memory, making it suitable for
     /// workbooks with very large sheets.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_with_cell_edits_streaming_multi(
         &self,
         dest: impl AsRef<Path>,
@@ -1473,6 +1504,7 @@ impl XlsbWorkbook {
     /// Save the workbook with cell edits across multiple worksheets, streaming each worksheet part
     /// while updating the shared string table (if present) so edited text cells can remain
     /// shared-string (`BrtCellIsst`) references.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_with_cell_edits_streaming_multi_shared_strings(
         &self,
         dest: impl AsRef<Path>,
@@ -1713,6 +1745,7 @@ impl XlsbWorkbook {
     ///   streamed from the source ZIP).
     /// - Each sheet is patched once with all of its edits.
     /// - The workbook is then written with a single call to `save_with_part_overrides`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_with_cell_edits_multi(
         &self,
         dest: impl AsRef<Path>,
@@ -1765,6 +1798,7 @@ impl XlsbWorkbook {
     ///
     /// A stale calcChain can cause Excel to open with incorrect cached results or spend time
     /// rebuilding the chain.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_with_part_overrides(
         &self,
         dest: impl AsRef<Path>,
@@ -1950,6 +1984,7 @@ impl XlsbWorkbook {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn save_with_part_overrides_streaming_multi<F>(
         &self,
         dest: impl AsRef<Path>,
@@ -2235,6 +2270,7 @@ impl XlsbWorkbook {
     /// 1) once writing to an `io::sink()` to determine whether the part would change, which drives
     ///    calcChain invalidation behavior,
     /// 2) once during the actual ZIP write.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_with_part_overrides_streaming<F>(
         &self,
         dest: impl AsRef<Path>,
@@ -4000,12 +4036,14 @@ mod a1_range_tests {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 struct CellRecordInfo {
     id: u32,
     payload: Vec<u8>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn sheet_cell_records(
     sheet_bin: &[u8],
     targets: &HashSet<(u32, u32)>,
@@ -4065,6 +4103,7 @@ fn sheet_cell_records(
     Ok(found)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn sheet_cell_records_streaming<R: Read>(
     sheet_bin: &mut R,
     targets: &HashSet<(u32, u32)>,
@@ -4141,6 +4180,7 @@ fn sheet_cell_records_streaming<R: Read>(
     Ok(found)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn skip_record_payload<R: Read>(r: &mut R, mut len: usize) -> Result<(), ParseError> {
     let mut buf = [0u8; 16 * 1024];
     while len > 0 {
@@ -4151,6 +4191,7 @@ fn skip_record_payload<R: Read>(r: &mut R, mut len: usize) -> Result<(), ParseEr
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_formula_cell_record(id: u32) -> bool {
     matches!(
         id,

@@ -1,17 +1,32 @@
+// CLI binaries are not supported on `wasm32-unknown-unknown` (no filesystem / process args).
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::env;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 use formula_model::sheet_name_eq_case_insensitive;
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsb::errors::xlsb_error_display;
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsb::format::{format_a1, format_hex};
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsb::rgce::decode_rgce_with_rgcb;
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsb::{CellValue, Formula, SheetMeta, XlsbWorkbook};
 
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "../xlsb_cli_open.rs"]
 mod xlsb_cli_open;
+#[cfg(not(target_arch = "wasm32"))]
 use xlsb_cli_open::open_xlsb_workbook;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 struct Args {
     path: PathBuf,
@@ -22,6 +37,7 @@ struct Args {
     password: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Args {
     fn parse() -> Result<Self, io::Error> {
         let mut path: Option<PathBuf> = None;
@@ -105,6 +121,7 @@ impl Args {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn print_usage() {
     println!(
         "\
@@ -123,6 +140,7 @@ Options:
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     if let Err(err) = run() {
         eprintln!("xlsb_dump: {err}");
@@ -130,6 +148,7 @@ fn main() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse()?;
     let wb = open_xlsb_workbook(&args.path, args.password.as_deref())?;
@@ -148,6 +167,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn resolve_sheets(sheets: &[SheetMeta], selector: Option<&str>) -> Result<Vec<usize>, io::Error> {
     let Some(selector) = selector else {
         return Ok((0..sheets.len()).collect());
@@ -177,6 +197,7 @@ fn resolve_sheets(sheets: &[SheetMeta], selector: Option<&str>) -> Result<Vec<us
     ))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dump_sheet(wb: &XlsbWorkbook, sheet_index: usize, args: &Args) -> Result<(), formula_xlsb::Error> {
     let meta = &wb.sheet_metas()[sheet_index];
     println!();
@@ -201,6 +222,7 @@ fn dump_sheet(wb: &XlsbWorkbook, sheet_index: usize, args: &Args) -> Result<(), 
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn print_cell(cell: formula_xlsb::Cell, args: &Args) {
     let addr = format_a1(cell.row, cell.col);
     let value = format_cell_value(&cell.value);
@@ -241,6 +263,7 @@ fn print_cell(cell: formula_xlsb::Cell, args: &Args) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn format_cell_value(value: &CellValue) -> String {
     match value {
         CellValue::Blank => "BLANK".to_string(),

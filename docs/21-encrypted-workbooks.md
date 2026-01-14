@@ -62,12 +62,12 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
     the `.xls` importer (XOR, RC4 “standard”, and RC4 CryptoAPI; see below).
 - The desktop app (with `formula-io/encrypted-workbooks` enabled) surfaces a **password required**
   style error (so the UI can prompt for a password).
-- The web/WASM engine can decrypt and open Office-encrypted OOXML `.xlsx` bytes in-memory:
+- The web/WASM engine can decrypt and open Office-encrypted OOXML `.xlsx`/`.xlsb` bytes in-memory:
   - WASM entrypoint: `crates/formula-wasm::WasmWorkbook::fromEncryptedXlsxBytes(bytes, password)`
   - Worker API: `packages/engine` exposes `EngineClient.loadWorkbookFromEncryptedXlsxBytes(bytes, password)`
-  - Limitation: the WASM loader currently only supports decrypted packages that contain
-    `xl/workbook.xml` (i.e. `.xlsx` / `.xlsm`); decrypted `.xlsb` packages (`xl/workbook.bin`) are
-    rejected with a clear error.
+  - Decrypted packages are routed based on the inner workbook part:
+    - `xl/workbook.xml` → `.xlsx` / `.xlsm`
+    - `xl/workbook.bin` → `.xlsb`
   - Implementation note: this path uses `crates/formula-office-crypto` for decryption. For Agile
     encryption, `formula-office-crypto` validates the `<dataIntegrity>` HMAC when present; when
     `<dataIntegrity>` is missing, decryption still works but the integrity check is skipped.
@@ -475,8 +475,8 @@ With the `formula-io` cargo feature **`encrypted-workbooks`** enabled:
   workbooks in memory. For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world
   producers omit it.
   - Encrypted `.xlsb` workbooks are supported in native `formula-io` (decrypted payload contains
-    `xl/workbook.bin`) and open as `Workbook::Xlsb`.
-    - The WASM loader still rejects decrypted `.xlsb` payloads.
+    `xl/workbook.bin`) and open as `Workbook::Xlsb`. The WASM loader also supports decrypted `.xlsb`
+    payloads via `WasmWorkbook::fromEncryptedXlsxBytes`.
 
 Without that feature, encrypted OOXML containers surface as `UnsupportedEncryption` (the password-aware
 entrypoints do not decrypt them end-to-end).

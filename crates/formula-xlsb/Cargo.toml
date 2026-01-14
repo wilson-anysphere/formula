@@ -10,7 +10,6 @@ write = ["formula-biff/encode", "dep:formula-engine"]
 
 [dependencies]
 formula-format = { path = "../formula-format" }
-formula-fs = { path = "../formula-fs" }
 formula-model = { path = "../formula-model" }
 formula-office-crypto = { path = "../formula-office-crypto" }
 quick-xml = "0.31"
@@ -21,6 +20,9 @@ unicode-normalization = "0.1"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 formula-biff = { path = "../formula-biff", default-features = false }
 formula-engine = { path = "../formula-engine", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+formula-fs = { path = "../formula-fs" }
 
 [dev-dependencies]
 cfb = "0.10"
