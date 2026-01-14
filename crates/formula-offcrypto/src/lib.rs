@@ -226,12 +226,17 @@ pub enum OffcryptoError {
     EncryptedPackageSizeOverflow { total_size: u64 },
     /// Failed to reserve memory for the decrypted output buffer.
     EncryptedPackageAllocationFailed { total_size: u64 },
+    /// `EncryptedPackage` declared plaintext size is not plausible for the available ciphertext.
+    ///
+    /// For AES-based Office encryption, ciphertext is padded to the AES block size (16 bytes), so
+    /// the ciphertext length must be at least `ceil(total_size / 16) * 16`.
+    EncryptedPackageSizeMismatch { total_size: u64, ciphertext_len: usize },
     /// The `EncryptionInfo` version is not supported by the current parser.
     UnsupportedVersion { major: u16, minor: u16 },
     /// The encryption schema is known but not supported by the selected decryption mode.
     ///
-    /// For example: attempting to decrypt an Agile-encrypted OOXML package using a
-    /// Standard-only decryptor.
+    /// For example: attempting to decrypt an Agile-encrypted OOXML package using a Standard-only
+    /// decryptor.
     UnsupportedEncryption { encryption_type: EncryptionType },
     /// Ciphertext length must be a multiple of 16 bytes for AES-ECB.
     InvalidCiphertextLength { len: usize },
@@ -280,6 +285,16 @@ impl PartialEq for OffcryptoError {
                 Self::EncryptedPackageAllocationFailed { total_size: a },
                 Self::EncryptedPackageAllocationFailed { total_size: b },
             ) => a == b,
+            (
+                Self::EncryptedPackageSizeMismatch {
+                    total_size: a_size,
+                    ciphertext_len: a_ct,
+                },
+                Self::EncryptedPackageSizeMismatch {
+                    total_size: b_size,
+                    ciphertext_len: b_ct,
+                },
+            ) => a_size == b_size && a_ct == b_ct,
             (
                 Self::UnsupportedVersion {
                     major: a_major,
@@ -358,6 +373,13 @@ impl fmt::Display for OffcryptoError {
             OffcryptoError::EncryptedPackageAllocationFailed { total_size } => {
                 write!(f, "failed to allocate decrypted package buffer of size {total_size}")
             }
+            OffcryptoError::EncryptedPackageSizeMismatch {
+                total_size,
+                ciphertext_len,
+            } => write!(
+                f,
+                "EncryptedPackage declared original size {total_size} exceeds ciphertext length {ciphertext_len}"
+            ),
             OffcryptoError::UnsupportedVersion { major, minor } => {
                 write!(f, "unsupported EncryptionInfo version {major}.{minor}")
             }

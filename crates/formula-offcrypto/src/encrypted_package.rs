@@ -72,8 +72,9 @@ where
             .ok_or(OffcryptoError::EncryptedPackageSizeOverflow { total_size })?
     };
     if required_ciphertext_len > ciphertext_len as u64 {
-        return Err(OffcryptoError::Truncated {
-            context: "EncryptedPackage.ciphertext_segment",
+        return Err(OffcryptoError::EncryptedPackageSizeMismatch {
+            total_size,
+            ciphertext_len,
         });
     }
 
@@ -224,7 +225,16 @@ mod tests {
 
         let err = decrypt_encrypted_package(bytes.as_slice(), |_idx, _ct, _pt| Ok(()))
             .expect_err("expected truncated ciphertext");
-        assert!(matches!(err, OffcryptoError::Truncated { .. }));
+        assert!(
+            matches!(
+                err,
+                OffcryptoError::EncryptedPackageSizeMismatch {
+                    total_size: got_size,
+                    ciphertext_len: got_ct
+                } if got_size == total_size && got_ct == 16
+            ),
+            "expected EncryptedPackageSizeMismatch({total_size}, 16), got {err:?}"
+        );
 
         let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);
         assert!(
