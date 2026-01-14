@@ -586,6 +586,7 @@ export class CanvasGridRenderer {
   private readonly activeSelectionRangeScratch: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 1 };
   private rangeSelection: CellRange | null = null;
   private fillPreviewRange: CellRange | null = null;
+  private readonly fillPreviewRangeScratch: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 1 };
   private fillHandleEnabled = true;
   private fillHandleRectMemoRange: CellRange | null = null;
   private fillHandleRectMemoViewport: GridViewportState | null = null;
@@ -596,6 +597,8 @@ export class CanvasGridRenderer {
 
   private remotePresences: GridPresence[] = [];
   private remotePresenceDirtyPadding = 1;
+  private readonly remotePresenceRangeScratch: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 1 };
+  private readonly remotePresenceCursorCellRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
 
   private readonly textWidthCache = new LruCache<string, number>(10_000);
   private textLayoutEngine?: TextLayoutEngine;
@@ -702,6 +705,12 @@ export class CanvasGridRenderer {
       scrollBaseX: 0,
       scrollBaseY: 0
     }
+  ];
+  private readonly rangeToViewportRectsScratchRects: [Rect, Rect, Rect, Rect] = [
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 0, y: 0, width: 0, height: 0 }
   ];
   private mergedIndex: MergedCellIndex = EMPTY_MERGED_INDEX;
   private mergedIndexKey: string | null = null;
@@ -1902,23 +1911,47 @@ export class CanvasGridRenderer {
 
   setFillPreviewRange(range: CellRange | null): void {
     const previousRange = this.fillPreviewRange;
-    const normalized = range ? this.normalizeSelectionRange(range) : null;
-    if (isSameCellRange(previousRange, normalized)) return;
-    this.fillPreviewRange = normalized;
-
-    const viewport = this.scroll.getViewportState();
-    const padding = 4;
-    const dirtyRects = [
-      ...this.fillPreviewOverlayRects(previousRange, viewport),
-      ...this.fillPreviewOverlayRects(normalized, viewport)
-    ];
-    if (dirtyRects.length === 0) return;
-
-    for (const rect of dirtyRects) {
-      this.dirty.selection.markDirty(padRect(rect, padding));
+    if (!range) {
+      if (!previousRange) return;
+      this.fillPreviewRange = null;
+      this.markSelectionDirty();
+      return;
     }
 
-    this.requestRender();
+    const rowCount = this.getRowCount();
+    const colCount = this.getColCount();
+
+    let startRow = clampIndex(range.startRow, 0, rowCount);
+    let endRow = clampIndex(range.endRow, 0, rowCount);
+    let startCol = clampIndex(range.startCol, 0, colCount);
+    let endCol = clampIndex(range.endCol, 0, colCount);
+
+    if (startRow > endRow) [startRow, endRow] = [endRow, startRow];
+    if (startCol > endCol) [startCol, endCol] = [endCol, startCol];
+    if (startRow === endRow || startCol === endCol) {
+      if (!previousRange) return;
+      this.fillPreviewRange = null;
+      this.markSelectionDirty();
+      return;
+    }
+
+    if (
+      previousRange &&
+      previousRange.startRow === startRow &&
+      previousRange.endRow === endRow &&
+      previousRange.startCol === startCol &&
+      previousRange.endCol === endCol
+    ) {
+      return;
+    }
+
+    const target = this.fillPreviewRangeScratch;
+    target.startRow = startRow;
+    target.endRow = endRow;
+    target.startCol = startCol;
+    target.endCol = endCol;
+    this.fillPreviewRange = target;
+    this.markSelectionDirty();
   }
 
   setReferenceHighlights(highlights: Array<{ range: CellRange; color: string; active?: boolean }> | null): void {
@@ -3020,7 +3053,7 @@ export class CanvasGridRenderer {
     this.requestRender();
   }
 
-  private rangeToViewportRects(range: CellRange, viewport: GridViewportState): Rect[] {
+  private rangeToViewportRectsScratch(range: CellRange, viewport: GridViewportState): number {
     const rowAxis = this.scroll.rows;
     const colAxis = this.scroll.cols;
 
@@ -3040,7 +3073,8 @@ export class CanvasGridRenderer {
     const colsScrollStart = Math.max(range.startCol, frozenCols);
     const colsScrollEnd = range.endCol;
 
-    const rects: Rect[] = [];
+    const rects = this.rangeToViewportRectsScratchRects;
+    let rectCount = 0;
 
     const addRect = (rowStart: number, rowEnd: number, colStart: number, colEnd: number, scrollRows: boolean, scrollCols: boolean) => {
       if (rowStart >= rowEnd || colStart >= colEnd) return;
@@ -3072,7 +3106,12 @@ export class CanvasGridRenderer {
       const iHeight = iy2 - iy1;
       if (iWidth <= 0 || iHeight <= 0) return;
 
-      rects.push({ x: ix1, y: iy1, width: iWidth, height: iHeight });
+      const rect = rects[rectCount];
+      rect.x = ix1;
+      rect.y = iy1;
+      rect.width = iWidth;
+      rect.height = iHeight;
+      rectCount++;
     };
 
     addRect(rowsFrozenStart, rowsFrozenEnd, colsFrozenStart, colsFrozenEnd, false, false);
@@ -3080,6 +3119,17 @@ export class CanvasGridRenderer {
     addRect(rowsScrollStart, rowsScrollEnd, colsFrozenStart, colsFrozenEnd, true, false);
     addRect(rowsScrollStart, rowsScrollEnd, colsScrollStart, colsScrollEnd, true, true);
 
+    return rectCount;
+  }
+
+  private rangeToViewportRects(range: CellRange, viewport: GridViewportState): Rect[] {
+    const count = this.rangeToViewportRectsScratch(range, viewport);
+    const scratch = this.rangeToViewportRectsScratchRects;
+    const rects: Rect[] = [];
+    for (let i = 0; i < count; i++) {
+      const rect = scratch[i]!;
+      rects.push({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+    }
     return rects;
   }
 
@@ -6200,13 +6250,15 @@ export class CanvasGridRenderer {
     const clipY1 = intersection.y;
     const clipX2 = intersection.x + intersection.width;
     const clipY2 = intersection.y + intersection.height;
+    const rangeRectsScratch = this.rangeToViewportRectsScratchRects;
 
     const transientRange = this.rangeSelection;
     if (transientRange) {
-      const rects = this.rangeToViewportRects(transientRange, viewport);
+      const rectCount = this.rangeToViewportRectsScratch(transientRange, viewport);
 
       ctx.fillStyle = this.theme.selectionFill;
-      for (const rect of rects) {
+      for (let i = 0; i < rectCount; i++) {
+        const rect = rangeRectsScratch[i]!;
         const x1 = Math.max(rect.x, clipX1);
         const y1 = Math.max(rect.y, clipY1);
         const x2 = Math.min(rect.x + rect.width, clipX2);
@@ -6219,7 +6271,8 @@ export class CanvasGridRenderer {
 
       ctx.strokeStyle = this.theme.selectionBorder;
       ctx.lineWidth = 2;
-      for (const rect of rects) {
+      for (let i = 0; i < rectCount; i++) {
+        const rect = rangeRectsScratch[i]!;
         if (!rectsOverlap(rect, intersection)) continue;
         if (rect.width <= 2 || rect.height <= 2) continue;
         ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
@@ -6228,14 +6281,15 @@ export class CanvasGridRenderer {
 
     const fillPreview = this.fillPreviewRange;
     if (fillPreview) {
-      const rects = this.rangeToViewportRects(fillPreview, viewport);
+      const rectCount = this.rangeToViewportRectsScratch(fillPreview, viewport);
 
-      if (rects.length > 0) {
+      if (rectCount > 0) {
         ctx.save();
 
         ctx.fillStyle = this.theme.selectionFill;
         ctx.globalAlpha = 0.6;
-        for (const rect of rects) {
+        for (let i = 0; i < rectCount; i++) {
+          const rect = rangeRectsScratch[i]!;
           const x1 = Math.max(rect.x, clipX1);
           const y1 = Math.max(rect.y, clipY1);
           const x2 = Math.min(rect.x + rect.width, clipX2);
@@ -6250,7 +6304,8 @@ export class CanvasGridRenderer {
         ctx.globalAlpha = 1;
         ctx.lineWidth = 2;
         ctx.setLineDash([5, 4]);
-        for (const rect of rects) {
+        for (let i = 0; i < rectCount; i++) {
+          const rect = rangeRectsScratch[i]!;
           if (!rectsOverlap(rect, intersection)) continue;
           if (rect.width <= 2 || rect.height <= 2) continue;
           ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
@@ -6269,14 +6324,15 @@ export class CanvasGridRenderer {
       const activeRange = selectionRanges[activeIndex];
 
       const drawRange = (range: CellRange, options: { fillAlpha: number; strokeAlpha: number; strokeWidth: number }) => {
-        const rects = this.rangeToViewportRects(range, viewport);
-        if (rects.length === 0) return;
+        const rectCount = this.rangeToViewportRectsScratch(range, viewport);
+        if (rectCount === 0) return;
 
         ctx.save();
 
         ctx.fillStyle = this.theme.selectionFill;
         ctx.globalAlpha = options.fillAlpha;
-        for (const rect of rects) {
+        for (let i = 0; i < rectCount; i++) {
+          const rect = rangeRectsScratch[i]!;
           const x1 = Math.max(rect.x, clipX1);
           const y1 = Math.max(rect.y, clipY1);
           const x2 = Math.min(rect.x + rect.width, clipX2);
@@ -6291,7 +6347,8 @@ export class CanvasGridRenderer {
         ctx.globalAlpha = options.strokeAlpha;
         ctx.lineWidth = options.strokeWidth;
         const inset = options.strokeWidth / 2;
-        for (const rect of rects) {
+        for (let i = 0; i < rectCount; i++) {
+          const rect = rangeRectsScratch[i]!;
           if (!rectsOverlap(rect, intersection)) continue;
           if (rect.width <= options.strokeWidth || rect.height <= options.strokeWidth) continue;
           ctx.strokeRect(rect.x + inset, rect.y + inset, rect.width - options.strokeWidth, rect.height - options.strokeWidth);
@@ -6334,11 +6391,12 @@ export class CanvasGridRenderer {
           endCol: activeCell.col + 1
         };
 
-        const activeRects = this.rangeToViewportRects(activeCellRange, viewport);
-        if (activeRects.length > 0) {
+        const activeRectCount = this.rangeToViewportRectsScratch(activeCellRange, viewport);
+        if (activeRectCount > 0) {
           ctx.strokeStyle = this.theme.selectionBorder;
           ctx.lineWidth = 2;
-          for (const rect of activeRects) {
+          for (let i = 0; i < activeRectCount; i++) {
+            const rect = rangeRectsScratch[i]!;
             if (!rectsOverlap(rect, intersection)) continue;
             if (rect.width <= 2 || rect.height <= 2) continue;
             ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
@@ -6350,9 +6408,10 @@ export class CanvasGridRenderer {
     // Formula reference highlights: render on top of all selection overlays so
     // colored outlines remain visible while editing formulas.
     if (this.referenceHighlights.length > 0) {
-      const strokeRects = (rects: Rect[], lineWidth: number) => {
+      const strokeRects = (rects: Rect[], rectCount: number, lineWidth: number) => {
         const inset = lineWidth / 2;
-        for (const rect of rects) {
+        for (let i = 0; i < rectCount; i++) {
+          const rect = rects[i]!;
           if (!rectsOverlap(rect, intersection)) continue;
           if (rect.width <= lineWidth || rect.height <= lineWidth) continue;
           ctx.strokeRect(rect.x + inset, rect.y + inset, rect.width - lineWidth, rect.height - lineWidth);
@@ -6366,10 +6425,10 @@ export class CanvasGridRenderer {
 
       for (const highlight of this.referenceHighlights) {
         if (highlight.active) continue;
-        const rects = this.rangeToViewportRects(highlight.range, viewport);
-        if (rects.length === 0) continue;
+        const rectCount = this.rangeToViewportRectsScratch(highlight.range, viewport);
+        if (rectCount === 0) continue;
         ctx.strokeStyle = highlight.color;
-        strokeRects(rects, ctx.lineWidth);
+        strokeRects(rangeRectsScratch, rectCount, ctx.lineWidth);
       }
 
       const hasActive = this.referenceHighlights.some((h) => h.active);
@@ -6378,10 +6437,10 @@ export class CanvasGridRenderer {
         ctx.setLineDash([]);
         for (const highlight of this.referenceHighlights) {
           if (!highlight.active) continue;
-          const rects = this.rangeToViewportRects(highlight.range, viewport);
-          if (rects.length === 0) continue;
+          const rectCount = this.rangeToViewportRectsScratch(highlight.range, viewport);
+          if (rectCount === 0) continue;
           ctx.strokeStyle = highlight.color;
-          strokeRects(rects, ctx.lineWidth);
+          strokeRects(rangeRectsScratch, rectCount, ctx.lineWidth);
         }
       }
 
@@ -6413,6 +6472,8 @@ export class CanvasGridRenderer {
     const badgeOffsetY = -18 * zoom;
     const badgeTextHeight = 14 * zoom;
     const cursorInset = cursorStrokeWidth / 2;
+    const rangeRectsScratch = this.rangeToViewportRectsScratchRects;
+    const rangeScratch = this.remotePresenceRangeScratch;
 
     for (const presence of this.remotePresences) {
       const color = presence.color ?? this.theme.remotePresenceDefault;
@@ -6436,25 +6497,22 @@ export class CanvasGridRenderer {
           const clampedStartCol = Math.max(0, startCol);
           const clampedEndCol = Math.min(colCount - 1, endCol);
 
-          const rects = this.rangeToViewportRects(
-            {
-              startRow: clampedStartRow,
-              endRow: Math.min(rowCount, clampedEndRow + 1),
-              startCol: clampedStartCol,
-              endCol: Math.min(colCount, clampedEndCol + 1)
-            },
-            viewport
-          );
-
-          if (rects.length === 0) continue;
+          rangeScratch.startRow = clampedStartRow;
+          rangeScratch.endRow = Math.min(rowCount, clampedEndRow + 1);
+          rangeScratch.startCol = clampedStartCol;
+          rangeScratch.endCol = Math.min(colCount, clampedEndCol + 1);
+          const rectCount = this.rangeToViewportRectsScratch(rangeScratch, viewport);
+          if (rectCount === 0) continue;
 
           ctx.globalAlpha = selectionFillAlpha;
-          for (const rect of rects) {
+          for (let i = 0; i < rectCount; i++) {
+            const rect = rangeRectsScratch[i]!;
             ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
           }
 
           ctx.globalAlpha = selectionStrokeAlpha;
-          for (const rect of rects) {
+          for (let i = 0; i < rectCount; i++) {
+            const rect = rangeRectsScratch[i]!;
             if (rect.width <= cursorStrokeWidth || rect.height <= cursorStrokeWidth) continue;
             ctx.strokeRect(
               rect.x + cursorInset,
@@ -6469,22 +6527,27 @@ export class CanvasGridRenderer {
       }
 
       if (presence.cursor) {
-        const cursorCellRect = this.cellRectInViewport(presence.cursor.row, presence.cursor.col, viewport);
-        if (!cursorCellRect) continue;
+        const cursorCellRect = this.remotePresenceCursorCellRectScratch;
+        if (!this.cellRectInViewportInto(presence.cursor.row, presence.cursor.col, viewport, cursorCellRect)) continue;
 
-        const cursorRange = mergedIndex.rangeAt(presence.cursor) ?? {
-          startRow: presence.cursor.row,
-          endRow: presence.cursor.row + 1,
-          startCol: presence.cursor.col,
-          endCol: presence.cursor.col + 1
-        };
-        const cursorRects = this.rangeToViewportRects(cursorRange, viewport);
-        if (cursorRects.length === 0) continue;
+        const cursorRange = mergedIndex.rangeAt(presence.cursor);
+        let cursorRectCount = 0;
+        if (cursorRange) {
+          cursorRectCount = this.rangeToViewportRectsScratch(cursorRange, viewport);
+        } else {
+          rangeScratch.startRow = presence.cursor.row;
+          rangeScratch.endRow = presence.cursor.row + 1;
+          rangeScratch.startCol = presence.cursor.col;
+          rangeScratch.endCol = presence.cursor.col + 1;
+          cursorRectCount = this.rangeToViewportRectsScratch(rangeScratch, viewport);
+        }
+        if (cursorRectCount === 0) continue;
 
         ctx.globalAlpha = 1;
         ctx.strokeStyle = color;
         ctx.lineWidth = cursorStrokeWidth;
-        for (const rect of cursorRects) {
+        for (let i = 0; i < cursorRectCount; i++) {
+          const rect = rangeRectsScratch[i]!;
           if (rect.width <= cursorStrokeWidth || rect.height <= cursorStrokeWidth) continue;
           ctx.strokeRect(
             rect.x + cursorInset,
@@ -6537,6 +6600,60 @@ export class CanvasGridRenderer {
     }
 
     ctx.stroke();
+  }
+
+  private cellRectInViewportInto(
+    row: number,
+    col: number,
+    viewport: GridViewportState,
+    out: Rect,
+    options?: { clampToViewport?: boolean }
+  ): boolean {
+    const rowCount = this.getRowCount();
+    const colCount = this.getColCount();
+    if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return false;
+
+    const rowAxis = this.scroll.rows;
+    const colAxis = this.scroll.cols;
+
+    const colX = colAxis.positionOf(col);
+    const rowY = rowAxis.positionOf(row);
+    const width = colAxis.getSize(col);
+    const height = rowAxis.getSize(row);
+
+    const scrollCols = col >= viewport.frozenCols;
+    const scrollRows = row >= viewport.frozenRows;
+    const x = scrollCols ? colX - viewport.scrollX : colX;
+    const y = scrollRows ? rowY - viewport.scrollY : rowY;
+
+    if (options?.clampToViewport === false) {
+      out.x = x;
+      out.y = y;
+      out.width = width;
+      out.height = height;
+      return true;
+    }
+
+    const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
+    const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
+    const quadrantX = scrollCols ? frozenWidthClamped : 0;
+    const quadrantY = scrollRows ? frozenHeightClamped : 0;
+    const quadrantWidth = scrollCols ? Math.max(0, viewport.width - frozenWidthClamped) : frozenWidthClamped;
+    const quadrantHeight = scrollRows ? Math.max(0, viewport.height - frozenHeightClamped) : frozenHeightClamped;
+
+    const x1 = Math.max(x, quadrantX);
+    const y1 = Math.max(y, quadrantY);
+    const x2 = Math.min(x + width, quadrantX + quadrantWidth);
+    const y2 = Math.min(y + height, quadrantY + quadrantHeight);
+    const clippedWidth = x2 - x1;
+    const clippedHeight = y2 - y1;
+    if (clippedWidth <= 0 || clippedHeight <= 0) return false;
+
+    out.x = x1;
+    out.y = y1;
+    out.width = clippedWidth;
+    out.height = clippedHeight;
+    return true;
   }
 
   private cellRectInViewport(
