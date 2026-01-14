@@ -57,18 +57,6 @@ pub use apply::{
     PivotApplyOptions,
 };
 
-pub(crate) fn pivot_field_ref_display(field: &PivotFieldRef) -> Cow<'_, str> {
-    match field {
-        PivotFieldRef::CacheFieldName(name) => Cow::Borrowed(name.as_str()),
-        PivotFieldRef::DataModelColumn { table, column } => Cow::Owned(format!("{table}[{column}]")),
-        PivotFieldRef::DataModelMeasure(name) => Cow::Owned(format!("[{name}]")),
-    }
-}
-
-pub(crate) fn pivot_field_ref_casefold(field: &PivotFieldRef) -> String {
-    crate::value::casefold(pivot_field_ref_display(field).as_ref())
-}
-
 #[derive(Debug, Error)]
 pub enum PivotError {
     #[error("worksheet not found: {0}")]
