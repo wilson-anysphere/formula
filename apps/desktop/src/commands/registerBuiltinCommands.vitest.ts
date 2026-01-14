@@ -177,6 +177,77 @@ describe("registerBuiltinCommands: panel toggles", () => {
   });
 });
 
+describe("registerBuiltinCommands: What-If Analysis + Solver ribbon commands", () => {
+  const createHarness = (opts: { openGoalSeekDialog?: () => void } = {}) => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+      setFloatingPanelMinimized(panelId: string, minimized: boolean) {
+        this.layout = setFloatingPanelMinimized(this.layout, panelId, minimized);
+      },
+    } as any;
+
+    registerBuiltinCommands({
+      commandRegistry,
+      app: {} as any,
+      layoutController,
+      openGoalSeekDialog: opts.openGoalSeekDialog ?? null,
+    });
+
+    return { commandRegistry, layoutController };
+  };
+
+  it("opens Scenario Manager / Monte Carlo / Solver panels and dispatches Goal Seek via host callback", async () => {
+    const openGoalSeekDialog = vi.fn();
+    const { commandRegistry, layoutController } = createHarness({ openGoalSeekDialog });
+
+    expect(commandRegistry.getCommand("data.forecast.whatIfAnalysis.scenarioManager")).toBeTruthy();
+    expect(commandRegistry.getCommand("data.forecast.whatIfAnalysis.monteCarlo")).toBeTruthy();
+    expect(commandRegistry.getCommand("data.forecast.whatIfAnalysis.goalSeek")).toBeTruthy();
+    expect(commandRegistry.getCommand("formulas.solutions.solver")).toBeTruthy();
+
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SCENARIO_MANAGER).kind).toBe("closed");
+    await commandRegistry.executeCommand("data.forecast.whatIfAnalysis.scenarioManager");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SCENARIO_MANAGER)).toEqual({ kind: "docked", side: "left" });
+
+    expect(getPanelPlacement(layoutController.layout, PanelIds.MONTE_CARLO).kind).toBe("closed");
+    await commandRegistry.executeCommand("data.forecast.whatIfAnalysis.monteCarlo");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.MONTE_CARLO)).toEqual({ kind: "docked", side: "left" });
+
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SOLVER).kind).toBe("closed");
+    await commandRegistry.executeCommand("formulas.solutions.solver");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SOLVER)).toEqual({ kind: "docked", side: "right" });
+
+    await commandRegistry.executeCommand("data.forecast.whatIfAnalysis.goalSeek");
+    expect(openGoalSeekDialog).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores minimized floating panels when invoking the What-If commands", async () => {
+    const { commandRegistry, layoutController } = createHarness({ openGoalSeekDialog: vi.fn() });
+
+    // Open Scenario Manager once so it has a placement.
+    await commandRegistry.executeCommand("data.forecast.whatIfAnalysis.scenarioManager");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SCENARIO_MANAGER).kind).not.toBe("closed");
+
+    // Force it into floating+minimized state.
+    layoutController.layout = floatPanel(layoutController.layout, PanelIds.SCENARIO_MANAGER, { x: 10, y: 10, width: 300, height: 200 });
+    layoutController.layout = setFloatingPanelMinimized(layoutController.layout, PanelIds.SCENARIO_MANAGER, true);
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SCENARIO_MANAGER).kind).toBe("floating");
+    expect(layoutController.layout.floating?.[PanelIds.SCENARIO_MANAGER]?.minimized).toBe(true);
+
+    // Invoking the command should restore (unminimize) instead of doing nothing.
+    await commandRegistry.executeCommand("data.forecast.whatIfAnalysis.scenarioManager");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SCENARIO_MANAGER).kind).toBe("floating");
+    expect(layoutController.layout.floating?.[PanelIds.SCENARIO_MANAGER]?.minimized).toBe(false);
+  });
+});
+
 describe("registerBuiltinCommands: Home tab core commands", () => {
   it("registers clipboard, formatting, and find/replace/go-to commands", () => {
     const commandRegistry = new CommandRegistry();
