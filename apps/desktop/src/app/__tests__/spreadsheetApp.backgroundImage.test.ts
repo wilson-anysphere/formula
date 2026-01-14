@@ -393,6 +393,11 @@ describe("SpreadsheetApp worksheet background images", () => {
       createPatternSpy.mockClear();
       createdPatterns = [];
       patternFillRects = [];
+      const doc = app.getDocument();
+      // Workbook load flows call `restoreDocumentState()` which resets dirty tracking.
+      // Simulate that here so we can assert hydration does not mark the document dirty.
+      doc.markSaved();
+      expect(doc.isDirty).toBe(false);
 
       const workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
       const bytesBase64 = Buffer.from(imageEntry.bytes).toString("base64");
@@ -418,6 +423,7 @@ describe("SpreadsheetApp worksheet background images", () => {
       await app.whenIdle();
 
       expect(app.getSheetBackgroundImageId(app.getCurrentSheetId())).toBe(imageId);
+      expect(doc.isDirty).toBe(false);
       expect(createPatternSpy).toHaveBeenCalled();
       expect(patternFillRects.filter((rect) => rect.canvasClassName.includes("grid-canvas--base")).length).toBeGreaterThan(0);
 

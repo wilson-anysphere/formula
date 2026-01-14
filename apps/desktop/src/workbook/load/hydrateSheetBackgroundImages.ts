@@ -46,18 +46,16 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
   try {
     imported = (await backend.listImportedSheetBackgroundImages()) ?? [];
   } catch {
+    // Treat backend failures as "no imported backgrounds".
     imported = [];
   }
 
   const docAny = app.getDocument() as any;
-
   const supportsExternalImages = typeof docAny?.applyExternalImageDeltas === "function";
   const supportsExternalViews = typeof docAny?.applyExternalSheetViewDeltas === "function";
 
-  /** @type {Map<string, string>} */
-  const backgroundImageIdBySheetId = new Map();
-  /** @type {Map<string, { bytes: Uint8Array, mimeType?: string }>} */
-  const imagesById = new Map();
+  const backgroundImageIdBySheetId = new Map<string, string>();
+  const imagesById = new Map<string, { bytes: Uint8Array; mimeType?: string }>();
 
   if (Array.isArray(imported)) {
     for (const entry of imported) {
@@ -69,8 +67,7 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
       const imageId = typeof (entry as any)?.image_id === "string" ? String((entry as any).image_id).trim() : "";
       if (!imageId) continue;
 
-      const bytesBase64 =
-        typeof (entry as any)?.bytes_base64 === "string" ? String((entry as any).bytes_base64).trim() : "";
+      const bytesBase64 = typeof (entry as any)?.bytes_base64 === "string" ? String((entry as any).bytes_base64).trim() : "";
       if (!bytesBase64) continue;
 
       const mimeType =
@@ -78,16 +75,18 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
           ? String((entry as any).mime_type).trim()
           : undefined;
 
+      // Prefer the last entry if multiple are returned for the same sheet.
+      backgroundImageIdBySheetId.set(sheetId, imageId);
+
       if (!imagesById.has(imageId)) {
         try {
-          imagesById.set(imageId, { bytes: decodeBase64ToBytes(bytesBase64), ...(mimeType ? { mimeType } : {}) });
+          const bytes = decodeBase64ToBytes(bytesBase64);
+          if (bytes.byteLength === 0) continue;
+          imagesById.set(imageId, { bytes, ...(mimeType ? { mimeType } : {}) });
         } catch {
-          // Skip corrupt/un-decodable image bytes.
-          continue;
+          // ignore invalid base64
         }
       }
-
-      backgroundImageIdBySheetId.set(sheetId, imageId);
     }
   }
 
@@ -98,7 +97,11 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
     const imageDeltas: any[] = [];
     for (const [imageId, entry] of imagesById.entries()) {
       const before = typeof docAny.getImage === "function" ? docAny.getImage(imageId) : null;
-      imageDeltas.push({ imageId, before, after: { bytes: entry.bytes, ...(entry.mimeType ? { mimeType: entry.mimeType } : {}) } });
+      imageDeltas.push({
+        imageId,
+        before,
+        after: { bytes: entry.bytes, ...(entry.mimeType ? { mimeType: entry.mimeType } : {}) },
+      });
     }
     try {
       docAny.applyExternalImageDeltas(imageDeltas, { source: "backend", markDirty: false });
@@ -131,11 +134,14 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
     for (const sheet of sheets) {
       const sheetId = typeof (sheet as any)?.id === "string" ? String((sheet as any).id).trim() : "";
       if (!sheetId) continue;
-      const before = docAny.getSheetView(sheetId);
+      const before = typeof docAny.getSheetView === "function" ? docAny.getSheetView(sheetId) : null;
       const desired = backgroundImageIdBySheetId.get(sheetId) ?? null;
-      const current = typeof before?.backgroundImageId === "string" && before.backgroundImageId.trim() !== "" ? before.backgroundImageId : null;
+      const current =
+        typeof (before as any)?.backgroundImageId === "string" && String((before as any).backgroundImageId).trim() !== ""
+          ? String((before as any).backgroundImageId)
+          : null;
       if (current === desired) continue;
-      const after = { ...(before ?? {}) };
+      const after = { ...(before ?? {}) } as any;
       if (desired) after.backgroundImageId = desired;
       else delete after.backgroundImageId;
       viewDeltas.push({ sheetId, before, after });
@@ -150,9 +156,12 @@ export async function hydrateSheetBackgroundImagesFromBackend(opts: {
     }
   } else {
     // Fallback: best-effort set via the app helper (older builds).
-    for (const [sheetId, imageId] of backgroundImageIdBySheetId.entries()) {
+    for (const sheet of sheets) {
+      const sheetId = typeof (sheet as any)?.id === "string" ? String((sheet as any).id).trim() : "";
+      if (!sheetId) continue;
+      const desired = backgroundImageIdBySheetId.get(sheetId) ?? null;
       try {
-        app.setSheetBackgroundImageId(sheetId, imageId);
+        app.setSheetBackgroundImageId(sheetId, desired);
       } catch {
         // ignore
       }
