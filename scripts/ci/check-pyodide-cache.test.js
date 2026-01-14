@@ -112,6 +112,14 @@ jobs:
   assert.match(proc.stdout, /Pyodide cache guard: OK/i);
 });
 
+test("repo workflows satisfy pyodide cache guardrails", { skip: !canRun }, () => {
+  // Defense-in-depth: ensure our real workflows keep the (gated) Pyodide cache steps in place so
+  // turning on `FORMULA_BUNDLE_PYODIDE_ASSETS=1` doesn't regress into repeated downloads.
+  const proc = spawnSync("python3", ["scripts/ci/check-pyodide-cache.py"], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Pyodide cache guard: OK/i);
+});
+
 test("fails when desktop build job is missing pyodide cache key", { skip: !canRun }, () => {
   const proc = run({
     ensureScript: `const PYODIDE_VERSION = '0.26.4';`,
