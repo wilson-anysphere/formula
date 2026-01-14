@@ -191,7 +191,7 @@ export function validateTauriUpdaterManifest(manifest, opts = {}) {
           errors.push(
             `Linux updater artifact must be an AppImage bundle (.AppImage), not a distro package (.deb/.rpm): ${JSON.stringify(url)}`,
           );
-        } else if (!lower.endsWith(".appimage")) {
+        } else if (!path.endsWith(".AppImage")) {
           errors.push(`Linux updater artifact must end with .AppImage: ${JSON.stringify(url)}`);
         }
       } else if (os === "windows") {
