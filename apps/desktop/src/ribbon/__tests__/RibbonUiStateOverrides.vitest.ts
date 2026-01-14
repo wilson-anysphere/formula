@@ -206,6 +206,13 @@ describe("Ribbon UI state overrides", () => {
 
   it("includes expected editing-mode disabled command ids", () => {
     const expected = [
+      "view.toggleShowFormulas",
+      "audit.togglePrecedents",
+      "audit.toggleDependents",
+      "audit.toggleTransitive",
+      "formulas.formulaAuditing.tracePrecedents",
+      "formulas.formulaAuditing.traceDependents",
+      "formulas.formulaAuditing.removeArrows",
       "home.cells.insert",
       "home.cells.insert.insertCells",
       "home.cells.insert.insertSheetRows",

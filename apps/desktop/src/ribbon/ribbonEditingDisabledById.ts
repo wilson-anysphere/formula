@@ -1,4 +1,15 @@
 export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
+  // --- View / Auditing --------------------------------------------------------
+  // Many view/auditing actions no-op while editing (they depend on a stable selection),
+  // so disable them for Excel-style parity instead of leaving them clickable.
+  "view.toggleShowFormulas": true,
+  "audit.togglePrecedents": true,
+  "audit.toggleDependents": true,
+  "audit.toggleTransitive": true,
+  "formulas.formulaAuditing.tracePrecedents": true,
+  "formulas.formulaAuditing.traceDependents": true,
+  "formulas.formulaAuditing.removeArrows": true,
+
   // --- Formatting ------------------------------------------------------------
   "format.toggleSubscript": true,
   "format.toggleSuperscript": true,
