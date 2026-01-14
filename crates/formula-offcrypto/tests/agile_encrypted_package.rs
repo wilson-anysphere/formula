@@ -98,8 +98,7 @@ fn minimal_agile_info(hash: HashAlgorithm) -> AgileEncryptionInfo {
         key_data_hash_algorithm: hash,
         key_data_block_size: 16,
 
-        encrypted_hmac_key: Vec::new(),
-        encrypted_hmac_value: Vec::new(),
+        data_integrity: None,
 
         spin_count: 1,
         password_salt: Vec::new(),

@@ -421,13 +421,20 @@ impl fmt::Display for HashAlgorithm {
 /// Parsed contents of an Agile (XML) `EncryptionInfo` stream, restricted to the subset required
 /// for password-based decryption.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgileDataIntegrity {
+    pub encrypted_hmac_key: Vec<u8>,
+    pub encrypted_hmac_value: Vec<u8>,
+}
+
+/// Parsed contents of an Agile (XML) `EncryptionInfo` stream, restricted to the subset required
+/// for password-based decryption.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgileEncryptionInfo {
     pub key_data_salt: Vec<u8>,
     pub key_data_hash_algorithm: HashAlgorithm,
     pub key_data_block_size: usize,
 
-    pub encrypted_hmac_key: Vec<u8>,
-    pub encrypted_hmac_value: Vec<u8>,
+    pub data_integrity: Option<AgileDataIntegrity>,
 
     // Password key encryptor fields (`p:encryptedKey`).
     pub spin_count: u32,
@@ -1057,8 +1064,7 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
     let mut key_data_hash_algorithm: Option<HashAlgorithm> = None;
     let mut key_data_block_size: Option<usize> = None;
 
-    let mut encrypted_hmac_key: Option<Vec<u8>> = None;
-    let mut encrypted_hmac_value: Option<Vec<u8>> = None;
+    let mut data_integrity: Option<AgileDataIntegrity> = None;
 
     let mut spin_count: Option<u32> = None;
     let mut password_salt: Option<Vec<u8>> = None;
@@ -1106,8 +1112,7 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
                     &mut key_data_salt,
                     &mut key_data_hash_algorithm,
                     &mut key_data_block_size,
-                    &mut encrypted_hmac_key,
-                    &mut encrypted_hmac_value,
+                    &mut data_integrity,
                     &mut spin_count,
                     &mut password_salt,
                     &mut password_hash_algorithm,
@@ -1137,8 +1142,7 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
                     &mut key_data_salt,
                     &mut key_data_hash_algorithm,
                     &mut key_data_block_size,
-                    &mut encrypted_hmac_key,
-                    &mut encrypted_hmac_value,
+                    &mut data_integrity,
                     &mut spin_count,
                     &mut password_salt,
                     &mut password_hash_algorithm,
@@ -1160,8 +1164,6 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
         if key_data_salt.is_some()
             && key_data_hash_algorithm.is_some()
             && key_data_block_size.is_some()
-            && encrypted_hmac_key.is_some()
-            && encrypted_hmac_value.is_some()
             && spin_count.is_some()
             && password_salt.is_some()
             && password_hash_algorithm.is_some()
@@ -1169,6 +1171,7 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
             && encrypted_key_value.is_some()
             && encrypted_verifier_hash_input.is_some()
             && encrypted_verifier_hash_value.is_some()
+            && data_integrity.is_some()
         {
             break;
         }
@@ -1187,14 +1190,6 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
         context: "missing <keyData> element",
     })?;
 
-    let encrypted_hmac_key = encrypted_hmac_key.ok_or(OffcryptoError::InvalidEncryptionInfo {
-        context: "missing <dataIntegrity> element",
-    })?;
-    let encrypted_hmac_value =
-        encrypted_hmac_value.ok_or(OffcryptoError::InvalidEncryptionInfo {
-            context: "missing <dataIntegrity> element",
-        })?;
-
     // If no password key encryptor is present at all, return a targeted error instead of a generic
     // "missing password <encryptedKey>" message.
     if spin_count.is_none() && !saw_password_key_encryptor {
@@ -1207,8 +1202,7 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
         key_data_salt,
         key_data_hash_algorithm,
         key_data_block_size,
-        encrypted_hmac_key,
-        encrypted_hmac_value,
+        data_integrity,
         spin_count: spin_count.ok_or(OffcryptoError::InvalidEncryptionInfo {
             context: "missing password <encryptedKey> element",
         })?,
@@ -1246,8 +1240,7 @@ fn parse_agile_element<'a>(
     key_data_salt: &mut Option<Vec<u8>>,
     key_data_hash_algorithm: &mut Option<HashAlgorithm>,
     key_data_block_size: &mut Option<usize>,
-    encrypted_hmac_key: &mut Option<Vec<u8>>,
-    encrypted_hmac_value: &mut Option<Vec<u8>>,
+    data_integrity: &mut Option<AgileDataIntegrity>,
     spin_count: &mut Option<u32>,
     password_salt: &mut Option<Vec<u8>>,
     password_hash_algorithm: &mut Option<HashAlgorithm>,
@@ -1265,8 +1258,10 @@ fn parse_agile_element<'a>(
         }
         b"dataIntegrity" => {
             let (key, value) = parse_data_integrity_attrs(e)?;
-            *encrypted_hmac_key = Some(key);
-            *encrypted_hmac_value = Some(value);
+            *data_integrity = Some(AgileDataIntegrity {
+                encrypted_hmac_key: key,
+                encrypted_hmac_value: value,
+            });
         }
         b"encryptedKey" => {
             if in_password_key_encryptor {
@@ -3072,6 +3067,7 @@ fn validate_zip_like(bytes: &[u8]) -> Result<(), OffcryptoError> {
 
 fn verify_agile_integrity(
     info: &AgileEncryptionInfo,
+    data_integrity: &AgileDataIntegrity,
     secret_key: &[u8],
     encrypted_package: &[u8],
 ) -> Result<(), OffcryptoError> {
@@ -3082,14 +3078,16 @@ fn verify_agile_integrity(
         info.key_data_hash_algorithm,
         &BLK_KEY_HMAC_KEY,
     );
-    let hmac_key_raw = aes_cbc_decrypt(&info.encrypted_hmac_key, secret_key, &iv_key)?;
+    let hmac_key_raw =
+        aes_cbc_decrypt(&data_integrity.encrypted_hmac_key, secret_key, &iv_key)?;
 
     let iv_value = derive_iv_from_salt_and_block_key(
         &info.key_data_salt,
         info.key_data_hash_algorithm,
         &BLK_KEY_HMAC_VALUE,
     );
-    let expected_hmac_raw = aes_cbc_decrypt(&info.encrypted_hmac_value, secret_key, &iv_value)?;
+    let expected_hmac_raw =
+        aes_cbc_decrypt(&data_integrity.encrypted_hmac_value, secret_key, &iv_value)?;
 
     // Excel-compatible producers typically use an HMAC key whose length matches the hash output,
     // but HMAC itself accepts any key size. Be tolerant of producers that use a shorter key.
@@ -3226,7 +3224,10 @@ fn decrypt_agile_stream(
     })?;
 
     if options.verify_integrity {
-        verify_agile_integrity(info, secret_key, encrypted_package)?;
+        let data_integrity = info.data_integrity.as_ref().ok_or(OffcryptoError::InvalidEncryptionInfo {
+            context: "missing <dataIntegrity> element",
+        })?;
+        verify_agile_integrity(info, data_integrity, secret_key, encrypted_package)?;
     }
 
     agile_decrypt_package(info, secret_key, encrypted_package)
@@ -3638,9 +3639,16 @@ mod tests {
         assert_eq!(info.key_data_hash_algorithm, HashAlgorithm::Sha256);
         assert_eq!(info.key_data_block_size, 16);
 
-        assert_eq!(info.encrypted_hmac_key, (0x10u8..0x30).collect::<Vec<_>>());
+        let data_integrity = info
+            .data_integrity
+            .as_ref()
+            .expect("expected <dataIntegrity> element");
         assert_eq!(
-            info.encrypted_hmac_value,
+            data_integrity.encrypted_hmac_key,
+            (0x10u8..0x30).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            data_integrity.encrypted_hmac_value,
             (0xA0u8..0xC0).collect::<Vec<_>>()
         );
 
@@ -3826,8 +3834,7 @@ mod tests {
             key_data_salt: Vec::new(),
             key_data_hash_algorithm: HashAlgorithm::Sha512,
             key_data_block_size: 16,
-            encrypted_hmac_key: Vec::new(),
-            encrypted_hmac_value: Vec::new(),
+            data_integrity: None,
             spin_count: 100_000,
             password_salt: vec![
                 0xCB, 0xCA, 0x1C, 0x99, 0x93, 0x43, 0xFB, 0xAD, 0x92, 0x07, 0x56, 0x34, 0x15, 0x00,

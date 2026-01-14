@@ -360,6 +360,12 @@ fn verify_agile_data_integrity(
     secret_key: &[u8],
     encrypted_package_stream: &[u8],
 ) -> Result<(), OffcryptoError> {
+    let data_integrity =
+        info.data_integrity
+            .as_ref()
+            .ok_or(OffcryptoError::InvalidEncryptionInfo {
+                context: "missing <dataIntegrity> element",
+            })?;
     let digest_len = hash_alg_digest_len(info.key_data_hash_algorithm);
 
     if info.key_data_block_size != 16 {
@@ -370,7 +376,8 @@ fn verify_agile_data_integrity(
 
     let hmac_key_iv =
         derive_iv_16(&info.key_data_salt, &HMAC_KEY_BLOCK, info.key_data_hash_algorithm)?;
-    let hmac_key_buf = aes_cbc_decrypt(&info.encrypted_hmac_key, secret_key, &hmac_key_iv)?;
+    let hmac_key_buf =
+        aes_cbc_decrypt(&data_integrity.encrypted_hmac_key, secret_key, &hmac_key_iv)?;
     let hmac_key = hmac_key_buf.get(..digest_len).ok_or(OffcryptoError::InvalidEncryptionInfo {
         context: "Agile decrypted HMAC key is too short",
     })?;
@@ -378,7 +385,7 @@ fn verify_agile_data_integrity(
     let hmac_value_iv =
         derive_iv_16(&info.key_data_salt, &HMAC_VALUE_BLOCK, info.key_data_hash_algorithm)?;
     let hmac_value_buf =
-        aes_cbc_decrypt(&info.encrypted_hmac_value, secret_key, &hmac_value_iv)?;
+        aes_cbc_decrypt(&data_integrity.encrypted_hmac_value, secret_key, &hmac_value_iv)?;
     let expected_hmac =
         hmac_value_buf
             .get(..digest_len)
