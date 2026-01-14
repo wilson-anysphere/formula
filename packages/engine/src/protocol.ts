@@ -675,8 +675,6 @@ export type RpcMethod =
   | "setSheetDisplayName"
   // Workbook metadata
   | "setWorkbookFileMetadata"
-  | "getCalcSettings"
-  | "setCalcSettings"
   | "setCellStyleId"
   | "setRowStyleId"
   | "setColStyleId"
