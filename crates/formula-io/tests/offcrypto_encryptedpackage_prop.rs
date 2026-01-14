@@ -150,6 +150,34 @@ proptest! {
 
 proptest! {
     #![proptest_config(ProptestConfig {
+        cases: 32,
+        max_shrink_iters: 0,
+        .. ProptestConfig::default()
+    })]
+
+    #[test]
+    fn prop_encryptedpackage_roundtrip_ecb_with_salt_prefers_zip_prefix(
+        rest in proptest::collection::vec(any::<u8>(), 0..=19_996),
+        extra_blocks in 0usize..=4,
+    ) {
+        // When `salt` is present, the decryptor may try multiple candidate modes and select the
+        // most plausible output (preferring a ZIP prefix). Real-world EncryptedPackage payloads
+        // are always OOXML ZIP bytes, so ensure we exercise that mode-selection behavior.
+        let mut plaintext = Vec::with_capacity(4 + rest.len());
+        plaintext.extend_from_slice(b"PK\x03\x04");
+        plaintext.extend_from_slice(&rest);
+
+        let mut ciphertext = encrypt_standard_encrypted_package_stream(&plaintext, &KEY);
+        ciphertext.extend(std::iter::repeat(0u8).take(extra_blocks * AES_BLOCK_LEN));
+
+        let decrypted = decrypt_standard_encrypted_package_stream(&ciphertext, &KEY, &SALT)
+            .expect("decrypt(encrypt(pt)) should succeed");
+        prop_assert_eq!(decrypted, plaintext);
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
         cases: 64,
         max_shrink_iters: 0,
         .. ProptestConfig::default()
