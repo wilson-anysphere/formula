@@ -245,6 +245,74 @@ describe("SpreadsheetApp chart selection + drag", () => {
     }
   });
 
+  it("switching sheets mid-drag cancels an in-progress chart drag (legacy charts)", () => {
+    const prior = process.env.CANVAS_CHARTS;
+    delete process.env.CANVAS_CHARTS;
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect((app as any).useCanvasCharts).toBe(false);
+
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Legacy Chart Sheet Switch Drag",
+        position: "A1",
+      });
+
+      const before = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(before).toBeTruthy();
+      const beforeAnchor = { ...(before!.anchor as any) };
+
+      const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
+      expect(rect).not.toBeNull();
+
+      const layout = (app as any).chartOverlayLayout();
+      const originX = layout.originX as number;
+      const originY = layout.originY as number;
+
+      const startX = originX + rect.left + 10;
+      const startY = originY + rect.top + 10;
+      const endX = startX + 100;
+      const endY = startY;
+
+      dispatchPointerEvent(root, "pointerdown", { clientX: startX, clientY: startY, pointerId: 401 });
+      dispatchPointerEvent(window, "pointermove", { clientX: endX, clientY: endY, pointerId: 401 });
+      expect((app as any).chartDragState).not.toBeNull();
+
+      const moved = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(moved).toBeTruthy();
+      expect(moved!.anchor).not.toMatchObject(beforeAnchor);
+
+      // Ensure the target sheet exists before switching.
+      app.getDocument().setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+      // Switch sheets while the pointer is still down. This should cancel the active chart drag
+      // and revert the chart anchor to the initial pointerdown snapshot.
+      app.activateSheet("Sheet2");
+      expect((app as any).chartDragState).toBeNull();
+
+      // Release the pointer after switching sheets (should be a no-op).
+      dispatchPointerEvent(window, "pointerup", { clientX: endX, clientY: endY, pointerId: 401 });
+
+      const after = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(after).toBeTruthy();
+      expect(after!.anchor).toMatchObject(beforeAnchor);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = prior;
+    }
+  });
+
   it("ignores pointerdown events from scrollbars (does not select/deselect charts)", () => {
     const root = createRoot();
     const status = {
