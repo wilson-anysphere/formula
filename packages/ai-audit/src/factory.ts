@@ -30,7 +30,7 @@ export interface CreateDefaultAIAuditStoreOptions {
   /**
    * Retention options forwarded to the underlying store when supported.
    *
-   * Deprecated: prefer specifying `max_entries` / `max_age_ms` at the top level.
+   * @deprecated Prefer specifying `max_entries` / `max_age_ms` at the top level.
    */
   retention?: AIAuditStoreRetentionOptions;
   /**
