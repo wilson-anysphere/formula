@@ -177,7 +177,7 @@ describe("DrawingOverlay charts", () => {
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom, chartRenderer);
-    await overlay.render([createChartObject("chart_1")], { ...viewport, zoom: 2 });
+    overlay.render([createChartObject("chart_1")], { ...viewport, zoom: 2 });
 
     expect(received).toEqual({
       chartId: "chart_1",

@@ -121,8 +121,8 @@ describe("DrawingOverlay perf guards", () => {
     ];
 
     const sortSpy = vi.spyOn(Array.prototype, "sort");
-    await overlay.render(objects as any, viewport, { drawObjects: false });
-    await overlay.render(objects.slice() as any, viewport, { drawObjects: false });
+    overlay.render(objects as any, viewport, { drawObjects: false });
+    overlay.render(objects.slice() as any, viewport, { drawObjects: false });
     expect(sortSpy).toHaveBeenCalledTimes(0);
   });
 });

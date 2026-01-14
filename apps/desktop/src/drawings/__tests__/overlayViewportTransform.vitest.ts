@@ -255,7 +255,7 @@ describe("DrawingOverlay viewport transforms", () => {
     };
 
     const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 511, height: 511, dpr: 1 };
-    await overlay.render([rotated], viewport);
+    overlay.render([rotated], viewport);
 
     // For transformed objects we draw a path (moveTo/lineTo) and call `stroke`, rather than `strokeRect`.
     expect(calls.some((call) => call.method === "stroke")).toBe(true);

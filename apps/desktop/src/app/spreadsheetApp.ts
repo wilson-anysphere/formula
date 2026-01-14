@@ -12501,9 +12501,9 @@ export class SpreadsheetApp {
 
     if (!selected) {
       overlay.setSelectedId(null);
-      // `DrawingOverlay.render` is async, but unit tests may stub it with a sync implementation.
-      // Handle both sync throws and async rejections so failures never surface as unhandled
-      // promise rejections.
+      // `DrawingOverlay.render()` is synchronous, but unit tests sometimes stub it with an async
+      // mock (returning a Promise). Handle both sync throws and async rejections so failures
+      // never surface as unhandled promise rejections.
       try {
         const result = overlay.render([], viewport, { drawObjects: false }) as unknown;
         if (result && typeof (result as any).catch === "function") {
@@ -14010,9 +14010,9 @@ export class SpreadsheetApp {
     const overlaySelectedId =
       this.selectedDrawingId != null ? (drawDrawingSelectionInOverlay ? this.selectedDrawingId : null) : selectedOverlayId;
     overlay.setSelectedId(overlaySelectedId);
-    // `DrawingOverlay.render` is async, but some unit tests stub it with a sync mock (returning
-    // void). Handle both: catch sync throws and attach a rejection handler for promises so we
-    // never surface unhandled rejections during scroll/resize-driven repaint storms.
+    // `DrawingOverlay.render()` is synchronous, but some unit tests stub it with an async mock
+    // (returning a Promise). Handle both: catch sync throws and attach a rejection handler for
+    // promises so we never surface unhandled rejections during scroll/resize-driven repaint storms.
     try {
       const result = overlay.render(objects, viewport) as unknown;
       if (result && typeof (result as any).catch === "function") {

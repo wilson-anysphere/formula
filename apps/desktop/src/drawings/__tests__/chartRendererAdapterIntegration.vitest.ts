@@ -212,13 +212,13 @@ describe("ChartRendererAdapter + DrawingOverlay", () => {
     const chartRenderer = new ChartRendererAdapter(store);
     const overlay = new DrawingOverlay(canvas, images, geom, chartRenderer);
 
-    await overlay.render([createChartObject(chartId)], viewport);
+    overlay.render([createChartObject(chartId)], viewport);
     const surfaces = (chartRenderer as any).surfaces as Map<string, any>;
     expect(surfaces.size).toBe(1);
     const surface = surfaces.get(chartId);
     expect(surface?.canvas?.width ?? 0).toBeGreaterThan(0);
 
-    await overlay.render([], viewport);
+    overlay.render([], viewport);
     expect(surfaces.size).toBe(0);
     // The removed surface is no longer referenced by the adapter, but should also have had its
     // backing store reset so it doesn't retain memory if anything else still holds a reference.

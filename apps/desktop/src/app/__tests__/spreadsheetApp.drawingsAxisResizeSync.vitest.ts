@@ -175,7 +175,8 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       const renderSpy = vi.spyOn(app as any, "renderDrawings");
 
-      // Initial render (drawing overlay rendering is async because it may await image hydration).
+      // Initial render (drawing overlay rendering is synchronous, but missing images may trigger
+      // async hydration + a subsequent repaint).
       (app as any).renderDrawings();
       await flushPromises();
       const firstStroke = calls!.find((call) => call.method === "strokeRect");

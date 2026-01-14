@@ -294,7 +294,7 @@ describe("DrawingOverlay destroy()", () => {
 
     const overlay = new DrawingOverlay(canvas, images, geom);
 
-    await overlay.render([createImageObject("img_hydrate")], viewport);
+    overlay.render([createImageObject("img_hydrate")], viewport);
     // `hydrateImage` calls `getAsync` in a microtask.
     await Promise.resolve();
     expect(getAsync).toHaveBeenCalledTimes(1);
@@ -402,7 +402,7 @@ describe("DrawingOverlay destroy()", () => {
       </xdr:sp>
     `;
 
-    await overlay.render([createShapeObject(123, rawXml)], viewport);
+    overlay.render([createShapeObject(123, rawXml)], viewport);
     expect((overlay as any).spatialIndex.getObject(123)).not.toBeNull();
 
     overlay.destroy();
@@ -443,7 +443,7 @@ describe("DrawingOverlay destroy()", () => {
 
     const overlay = new DrawingOverlay(canvas, images, geom);
 
-    await overlay.render([createShapeObject(42, "<xdr:sp/>")], viewport);
+    overlay.render([createShapeObject(42, "<xdr:sp/>")], viewport);
     expect((overlay as any).spatialIndex.getObject(42)).not.toBeNull();
 
     overlay.destroy();
