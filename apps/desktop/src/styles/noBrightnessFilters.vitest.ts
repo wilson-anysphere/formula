@@ -3,6 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { stripCssNonSemanticText } from "../../test/testUtils/stripCssNonSemanticText.js";
+
 describe("accent hover CSS", () => {
   it("does not use filter: brightness(...) (use tokens instead)", () => {
     const stylesRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -17,7 +19,8 @@ describe("accent hover CSS", () => {
 
     for (const target of targets) {
       const css = fs.readFileSync(target, "utf8");
-      expect(/filter\s*:\s*brightness\(/i.test(css)).toBe(false);
+      const stripped = stripCssNonSemanticText(css);
+      expect(/filter\s*:\s*brightness\(/i.test(stripped)).toBe(false);
     }
   });
 });
