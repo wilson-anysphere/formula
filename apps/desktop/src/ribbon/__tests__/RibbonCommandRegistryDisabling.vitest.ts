@@ -78,6 +78,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     // so they must be exempt from the registry-backed disabling allowlist.
     expect(baselineDisabledById["home.editing.fill.up"]).toBeUndefined();
     expect(baselineDisabledById["home.editing.fill.left"]).toBeUndefined();
+    expect(baselineDisabledById["home.editing.fill.series"]).toBeUndefined();
 
     // Home → Cells structural edit commands are also handled directly in `main.ts`.
     expect(baselineDisabledById["home.cells.insert.insertSheetRows"]).toBeUndefined();
@@ -177,4 +178,3 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     act(() => root.unmount());
   });
 });
-
