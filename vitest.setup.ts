@@ -55,10 +55,18 @@ if (typeof (globalThis as any).PointerEvent === "undefined" && typeof (globalThi
   const Base = (globalThis as any).MouseEvent as typeof MouseEvent;
   class PointerEventShim extends Base {
     pointerId: number;
+    pointerType: string;
 
     constructor(type: string, init?: PointerEventInit) {
-      super(type, init);
-      this.pointerId = typeof init?.pointerId === "number" ? init.pointerId : 1;
+      // Many unit tests construct PointerEvents directly and assume they behave like
+      // real browser pointer events (which bubble). `MouseEvent` defaults `bubbles`
+      // to false unless explicitly provided, so normalize the init to better match
+      // what app code expects from user-driven pointer interactions.
+      const normalizedInit = { bubbles: true, cancelable: true, ...(init ?? {}) } as PointerEventInit;
+      super(type, normalizedInit);
+      this.pointerId = typeof normalizedInit?.pointerId === "number" ? normalizedInit.pointerId : 1;
+      // Match the platform default: pointer events from a mouse have `pointerType="mouse"`.
+      this.pointerType = typeof (normalizedInit as any)?.pointerType === "string" ? String((normalizedInit as any).pointerType) : "mouse";
     }
   }
 

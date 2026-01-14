@@ -2598,7 +2598,13 @@ export class SpreadsheetApp {
     });
     this.syncWorkbookImageRefCountsFromDocument();
 
-    const enableDrawingInteractions = opts.enableDrawingInteractions ?? this.drawingsDemoEnabled;
+    const enableDrawingInteractions =
+      opts.enableDrawingInteractions ??
+      // Shared-grid mode renders drawings onto an overlay canvas that is otherwise not interactable.
+      // Enable the dedicated DrawingInteractionController by default so drawings can be selected,
+      // dragged, and resized. Legacy mode already has built-in drawing hit testing and keeps
+      // interactions opt-in unless explicitly enabled.
+      (this.gridMode === "shared" ? true : this.drawingsDemoEnabled);
     if (enableDrawingInteractions) {
       const callbacks: DrawingInteractionCallbacks = {
         getViewport: () => this.getDrawingInteractionViewport(this.sharedGrid?.renderer.scroll.getViewportState()),
@@ -13546,6 +13552,33 @@ export class SpreadsheetApp {
     return finalObjects;
   }
 
+  /**
+   * Legacy/test-only alias for the active sheet's drawing objects.
+   *
+   * Some unit tests (and older integrations) reach into SpreadsheetApp internals to observe
+   * the live in-memory drawing state during drag/resize/cancel gestures. The new drawings
+   * overlay uses `drawingObjectsCache` + `listDrawingObjectsForSheet()` for this state; keep
+   * a stable `sheetDrawings` accessor as a compatibility shim.
+   */
+  get sheetDrawings(): DrawingObject[] {
+    return this.listDrawingObjectsForSheet();
+  }
+
+  /**
+   * Force drawing caches for the active sheet to refresh from the DocumentController.
+   *
+   * This is primarily used by unit tests that mutate `document.setSheetDrawings(...)`
+   * directly and then need SpreadsheetApp hit testing/rendering to see the latest state.
+   */
+  syncSheetDrawings(): void {
+    if (this.disposed) return;
+    this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
+    this.renderDrawings(sharedViewport);
+  }
+
   private setDrawingObjectsForSheet(objects: DrawingObject[]): void {
     const doc = this.document as any;
     const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
@@ -13991,6 +14024,22 @@ export class SpreadsheetApp {
       // window-level Escape handler while dragging/resizing to cancel the active gesture.
       // If we stop propagation here, Escape would deselect the drawing but fail to cancel
       // the in-progress pointer gesture.
+      //
+      // In legacy-grid mode (no DrawingInteractionController), SpreadsheetApp owns the active
+      // drag/resize gesture (`drawingGesture`). Cancel it here so Escape reliably reverts the
+      // live preview state before the eventual pointerup.
+      if (this.drawingGesture) {
+        const gesture = this.drawingGesture;
+        this.drawingGesture = null;
+        this.drawingObjectsCache = null;
+        this.drawingHitTestIndex = null;
+        this.drawingHitTestIndexObjects = null;
+        try {
+          this.root.releasePointerCapture(gesture.pointerId);
+        } catch {
+          // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+        }
+      }
       this.selectDrawing(null);
       this.focus();
       return true;
@@ -14889,6 +14938,16 @@ export class SpreadsheetApp {
     void this.insertPicturesFromFiles(imageFiles, { placeAt });
   }
 
+  private trySetPointerCapture(pointerId: number, element: HTMLElement = this.root): void {
+    const fn = (element as any)?.setPointerCapture;
+    if (typeof fn !== "function") return;
+    try {
+      fn.call(element, pointerId);
+    } catch {
+      // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+    }
+  }
+
   private onScrollbarThumbPointerDown(e: PointerEvent, axis: "x" | "y"): void {
     e.preventDefault();
     e.stopPropagation();
@@ -14911,11 +14970,7 @@ export class SpreadsheetApp {
 
     this.scrollbarDrag = { axis, pointerId: e.pointerId, grabOffset, thumbTravel, trackStart, maxScroll };
 
-    try {
-      (thumb as any).setPointerCapture?.(e.pointerId);
-    } catch {
-      // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
-    }
+    this.trySetPointerCapture(e.pointerId, thumb);
   }
 
   private onScrollbarTrackPointerDown(e: PointerEvent, axis: "x" | "y"): void {
@@ -15991,11 +16046,7 @@ export class SpreadsheetApp {
       e.preventDefault();
       this.dragState = { pointerId: e.pointerId, mode: "formula" };
       this.dragPointerPos = { x, y };
-      try {
-        (this.root as any).setPointerCapture?.(e.pointerId);
-      } catch {
-        // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
-      }
+      this.trySetPointerCapture(e.pointerId);
       this.selection = setActiveCell(this.selection, cell, this.limits);
       this.renderSelection();
       this.updateStatus();
@@ -16036,11 +16087,7 @@ export class SpreadsheetApp {
         };
         this.dragPointerPos = { x, y };
         this.fillPreviewRange = null;
-        try {
-          (this.root as any).setPointerCapture?.(e.pointerId);
-        } catch {
-          // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
-        }
+        this.trySetPointerCapture(e.pointerId);
         this.focus();
         return;
       }
@@ -16082,11 +16129,7 @@ export class SpreadsheetApp {
 
     this.dragState = { pointerId: e.pointerId, mode: "normal" };
     this.dragPointerPos = { x, y };
-    try {
-      (this.root as any).setPointerCapture?.(e.pointerId);
-    } catch {
-      // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
-    }
+    this.trySetPointerCapture(e.pointerId);
     if (e.shiftKey) {
       this.selection = extendSelectionToCell(this.selection, cell, this.limits);
     } else if (primary) {
@@ -16450,11 +16493,39 @@ export class SpreadsheetApp {
       })();
 
       const objects = this.listDrawingObjectsForSheet();
-      const nextObjects = objects.map((obj) => (obj.id === gesture.objectId ? { ...obj, anchor: nextAnchor } : obj));
-      const doc = this.document as any;
-      const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
-      this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
-      this.renderDrawings();
+      const base = objects.find((obj) => obj.id === gesture.objectId) ?? null;
+      const shouldCommit = e.type === "pointerup";
+
+      const docAny: any = this.document as any;
+      const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
+
+      if (base) {
+        const nextObjects = objects.map((obj) => (obj.id === gesture.objectId ? { ...obj, anchor: nextAnchor } : obj));
+        this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
+        this.renderDrawings();
+
+        if (shouldCommit) {
+          // Persist drawing edits back to the DocumentController so pointer-driven drawing
+          // interactions behave consistently with DrawingInteractionController (and so tests
+          // can observe the committed anchor updates).
+          const canPersist =
+            typeof docAny.updateDrawing === "function" ||
+            (typeof docAny.getSheetDrawings === "function" && typeof docAny.setSheetDrawings === "function");
+          if (canPersist) {
+            const before: DrawingObject = { ...base, anchor: gesture.startAnchor };
+            const after: DrawingObject = { ...base, anchor: nextAnchor };
+            const kind: DrawingInteractionCommit["kind"] = gesture.mode === "resize" ? "resize" : "move";
+            this.commitDrawingInteraction({ kind, id: base.id, before, after });
+          }
+        } else {
+          // Cancel gesture: revert the live preview back to the start anchor.
+          const revertedObjects = objects.map((obj) =>
+            obj.id === gesture.objectId ? { ...obj, anchor: gesture.startAnchor } : obj,
+          );
+          this.drawingObjectsCache = { sheetId: this.sheetId, objects: revertedObjects, source: drawingsGetter };
+          this.renderDrawings();
+        }
+      }
 
       this.drawingGesture = null;
       try {
