@@ -101,9 +101,13 @@ export function createDefaultLayout(options = {}) {
  * @param {string} panelId
  */
 export function getPanelPlacement(layout, panelId) {
-  if (!layout) return { kind: "closed" };
+  // Defensive: some unit tests stub `layoutController` with only a subset of fields
+  // (e.g. only `openPanel`). Treat missing/invalid layout state as "closed" so
+  // commands that open panels remain callable in minimal harnesses.
+  if (!layout || typeof layout !== "object") return { kind: "closed" };
+
   for (const side of DOCK_SIDES) {
-    if (layout.docks?.[side]?.panels?.includes(panelId)) {
+    if (layout.docks?.[side]?.panels?.includes?.(panelId)) {
       return { kind: "docked", side };
     }
   }
