@@ -5013,33 +5013,53 @@ pub fn get_sheet_imported_col_properties(
         )));
     };
 
-    let sheet = match storage
+    let sheet = storage
         .get_sheet_model_worksheet(sheet_uuid)
-        .map_err(|e| e.to_string())?
-    {
-        Some(sheet) => sheet,
-        None => {
-            return Ok(json!({
-                "schemaVersion": 1,
-                "defaultColWidth": null,
-                "colProperties": {}
-            }))
-        }
+        .map_err(|e| e.to_string())?;
+    Ok(sheet_imported_col_properties_payload_for_ipc(sheet.as_ref()))
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn sheet_imported_col_properties_payload_for_ipc(sheet: Option<&formula_model::Worksheet>) -> JsonValue {
+    let Some(sheet) = sheet else {
+        return json!({
+            "schemaVersion": 1,
+            "defaultColWidth": null,
+            "colProperties": {}
+        });
     };
 
     let default_col_width = sheet
         .default_col_width
         .filter(|w| w.is_finite() && *w > 0.0);
 
+    // Outline indices are 1-based (Excel / OOXML).
+    //
+    // Some workbooks persist hidden state as outline/group collapse flags rather than the
+    // user-hidden bit (`col_properties[*].hidden`), so include outline-based hidden state as well.
+    let mut outline_hidden_cols: HashSet<u32> = HashSet::new();
+    for (index, entry) in sheet.outline.cols.iter() {
+        if index == 0 || !entry.hidden.is_hidden() {
+            continue;
+        }
+        let col = index - 1;
+        if col < formula_model::EXCEL_MAX_COLS {
+            outline_hidden_cols.insert(col);
+        }
+    }
+
     let mut props_out = serde_json::Map::new();
     for (col, props) in sheet.col_properties.iter() {
+        if *col >= formula_model::EXCEL_MAX_COLS {
+            continue;
+        }
         let mut entry = serde_json::Map::new();
         if let Some(width) = props.width {
             if width.is_finite() && width > 0.0 {
                 entry.insert("width".to_string(), json!(width));
             }
         }
-        if props.hidden {
+        if props.hidden || outline_hidden_cols.contains(col) {
             entry.insert("hidden".to_string(), json!(true));
         }
         if entry.is_empty() {
@@ -5048,11 +5068,22 @@ pub fn get_sheet_imported_col_properties(
         props_out.insert(col.to_string(), JsonValue::Object(entry));
     }
 
-    Ok(json!({
+    // Add hidden columns that exist only in outline state (no corresponding `col_properties` entry).
+    for col in outline_hidden_cols {
+        let key = col.to_string();
+        if props_out.contains_key(&key) {
+            continue;
+        }
+        let mut entry = serde_json::Map::new();
+        entry.insert("hidden".to_string(), json!(true));
+        props_out.insert(key, JsonValue::Object(entry));
+    }
+
+    json!({
         "schemaVersion": 1,
         "defaultColWidth": default_col_width,
         "colProperties": props_out
-    }))
+    })
 }
 
 #[cfg(any(feature = "desktop", test))]
@@ -10303,6 +10334,65 @@ mod tests {
 
         let clamped = sheet_formatting_payload_for_ipc("Sheet1", Some(&too_big));
         assert_eq!(clamped, default_sheet_formatting_payload());
+    }
+
+    #[test]
+    fn sheet_imported_col_properties_payload_for_ipc_includes_outline_hidden_cols() {
+        let mut sheet = formula_model::Worksheet::new(1, "Sheet1");
+
+        // Mark column C (1-based index 3) as outline-hidden with no corresponding `col_properties`
+        // entry so we exercise the outline-only path.
+        sheet.outline.cols.entry_mut(3).hidden.outline = true;
+
+        // Also set an explicit width on column B with outline-hidden state so we verify that
+        // `hidden: true` is merged into existing entries.
+        sheet.set_col_width(1, Some(25.0));
+        sheet.outline.cols.entry_mut(2).hidden.outline = true;
+
+        let payload = sheet_imported_col_properties_payload_for_ipc(Some(&sheet));
+        let obj = payload.as_object().expect("payload must be object");
+
+        assert_eq!(
+            obj.get("schemaVersion").and_then(|v| v.as_i64()),
+            Some(1),
+            "expected schemaVersion 1"
+        );
+
+        let col_props = obj
+            .get("colProperties")
+            .and_then(|v| v.as_object())
+            .expect("colProperties must be object");
+
+        // Outline-only hidden column C.
+        let c = col_props
+            .get("2")
+            .and_then(|v| v.as_object())
+            .expect("expected outline-hidden col C entry");
+        assert_eq!(
+            c.get("hidden").and_then(|v| v.as_bool()),
+            Some(true),
+            "expected outline-hidden col C to be marked hidden"
+        );
+        assert!(
+            c.get("width").is_none(),
+            "expected outline-only entry to omit width"
+        );
+
+        // Column B should include both width + hidden.
+        let b = col_props
+            .get("1")
+            .and_then(|v| v.as_object())
+            .expect("expected col B entry");
+        assert_eq!(
+            b.get("width").and_then(|v| v.as_f64()),
+            Some(25.0),
+            "expected width to be preserved"
+        );
+        assert_eq!(
+            b.get("hidden").and_then(|v| v.as_bool()),
+            Some(true),
+            "expected outline-hidden col B to be marked hidden"
+        );
     }
 
     #[test]
