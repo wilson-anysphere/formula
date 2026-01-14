@@ -361,6 +361,10 @@ export function registerBuiltinCommands(params: {
   };
 
   const shouldOpenFormattingPrompt = (): boolean => {
+    // These commands are disabled while editing (ribbon state + Excel parity). Guard here so
+    // command palette / keybindings can't open a prompt (color picker, font size picker, etc)
+    // only to no-op later when applying the formatting.
+    if (isEditingFn()) return false;
     const selection = typeof (app as any)?.getSelectionRanges === "function" ? (app as any).getSelectionRanges() : [];
     const limits = getGridLimitsForFormatting();
     const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
