@@ -199,7 +199,6 @@ describe("SpreadsheetApp worksheet background images", () => {
 
     const ctxBase: any = {
       canvas,
-      fillStyle: state.fillStyle,
       set fillStyle(value: any) {
         state.fillStyle = value;
       },
@@ -379,8 +378,7 @@ describe("SpreadsheetApp worksheet background images", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     try {
-      const fixtureUrl = new URL("../../../../../fixtures/xlsx/basic/background-image.xlsx", import.meta.url);
-      const fixtureBytes = readFileSync(fixtureUrl);
+      const fixtureBytes = readFileSync(resolveFixturePath("fixtures/xlsx/basic/background-image.xlsx"));
       const imageEntry = parseSheetBackgroundImageFromXlsx(fixtureBytes);
       const imageId = imageEntry.id.split("/").pop() ?? imageEntry.id;
 
