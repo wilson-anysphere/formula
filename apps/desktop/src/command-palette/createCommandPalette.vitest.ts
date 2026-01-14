@@ -289,4 +289,47 @@ describe("createCommandPalette when clauses", () => {
 
     controller.dispose();
   });
+
+  it("refreshes command visibility when context keys change while open", () => {
+    vi.useFakeTimers();
+    try {
+      const commandRegistry = new CommandRegistry();
+      commandRegistry.registerBuiltinCommand("comments.addComment", "Add Comment", () => {}, {
+        category: "Comments",
+        when: "spreadsheet.canComment == true",
+      });
+      commandRegistry.registerBuiltinCommand("comments.togglePanel", "Toggle Comments", () => {}, { category: "Comments" });
+
+      const contextKeys = new ContextKeyService();
+      contextKeys.set("spreadsheet.canComment", false);
+
+      const controller = createCommandPalette({
+        commandRegistry,
+        contextKeys,
+        keybindingIndex: new Map(),
+        ensureExtensionsLoaded: async () => {},
+        onCloseFocus: () => {},
+        // Keep the extension-load timer from firing in this test.
+        extensionLoadDelayMs: 60_000,
+      });
+
+      controller.open();
+
+      const list = document.querySelector<HTMLElement>('[data-testid="command-palette-list"]');
+      expect(list).toBeTruthy();
+      expect(list!.textContent).toContain("Toggle Comments");
+      expect(list!.textContent).not.toContain("Add Comment");
+
+      // Upgrade permissions while the palette is open.
+      contextKeys.set("spreadsheet.canComment", true);
+      // Allow the palette's debounced re-render to run.
+      vi.advanceTimersByTime(100);
+
+      expect(list!.textContent).toContain("Add Comment");
+
+      controller.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

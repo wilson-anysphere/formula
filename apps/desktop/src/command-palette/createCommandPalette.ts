@@ -1152,6 +1152,20 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     renderResults("async");
   });
 
+  // Commands can be gated by context keys via `command.when` (e.g. permissions).
+  // Keep the cached command list in sync with context changes so the palette
+  // doesn't get stuck showing stale availability until the registry changes.
+  const disposeContextSub = contextKeys.onDidChange(() => {
+    commandsCacheDirty = true;
+    if (!isOpen) return;
+    // If we're currently refining results in the background, abort the stale search
+    // and re-run against the updated command set.
+    abortChunkedSearch();
+    // Debounce so rapid context key changes (focus transitions, etc) don't cause
+    // repeated full rescoring while the palette is open.
+    debouncedRender();
+  });
+
   const disposeRecentsTracker = installCommandPaletteRecentsTracking(commandRegistry, storage);
 
   const onOverlayClick = (e: MouseEvent) => {
@@ -1209,6 +1223,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       extensionLoadTimer = null;
     }
     disposeRegistrySub();
+    disposeContextSub();
     disposeRecentsTracker();
     overlay.removeEventListener("click", onOverlayClick);
     overlay.removeEventListener("keydown", handleOverlayKeyDown);
