@@ -8,28 +8,13 @@ import { createRequire } from "node:module";
 
 import { createCollabSession } from "../packages/collab/session/src/index.ts";
 import { CollabBranchingWorkflow } from "../packages/collab/branching/index.js";
+import { getYMap } from "@formula/collab-yjs-utils";
 import { BranchService, YjsBranchStore } from "../packages/versioning/branches/src/index.js";
 import {
   getAvailablePort,
   startSyncServer,
   waitForCondition,
 } from "../services/sync-server/test/test-helpers.ts";
-
-/**
- * @param {unknown} value
- */
-function getYMap(value) {
-  if (!value || typeof value !== "object") return null;
-  const maybe = value;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  // Require Yjs' deep observer APIs so we don't accidentally treat a plain JS
-  // `Map` as a Y.Map (and tolerate multiple `yjs` module instances / renamed ctors).
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
 
 function readYMapOrObject(value, key) {
   const map = getYMap(value);
