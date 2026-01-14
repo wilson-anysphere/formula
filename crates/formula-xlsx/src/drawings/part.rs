@@ -9,7 +9,6 @@ use roxmltree::{Document, Node};
 
 use crate::path::resolve_target;
 use crate::relationships::{Relationship, Relationships};
-use crate::zip_util::open_zip_part;
 use crate::XlsxError;
 use zip::ZipArchive;
 
@@ -772,18 +771,11 @@ fn read_zip_part_optional<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>> {
-    match open_zip_part(archive, name) {
-        Ok(mut file) => {
-            if file.is_dir() {
-                return Ok(None);
-            }
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)?;
-            Ok(Some(buf))
-        }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
-        Err(err) => Err(err.into()),
-    }
+    crate::zip_util::read_zip_part_optional_with_limit(
+        archive,
+        name,
+        crate::zip_util::DEFAULT_MAX_ZIP_PART_BYTES,
+    )
 }
 
 fn resolve_image_id_from_archive<R: Read + Seek>(

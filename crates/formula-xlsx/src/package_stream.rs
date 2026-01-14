@@ -6,7 +6,8 @@ use zip::ZipArchive;
 
 use crate::patch::WorkbookCellPatches;
 use crate::streaming::PartOverride;
-use crate::{MacroPresence, RecalcPolicy, XlsxError};
+use crate::zip_util::read_zip_file_bytes_with_limit;
+use crate::{MacroPresence, RecalcPolicy, XlsxError, MAX_XLSX_PACKAGE_PART_BYTES};
 
 trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
@@ -206,8 +207,7 @@ impl StreamingXlsxPackage {
         if file.is_dir() {
             return Ok(None);
         }
-        let mut buf = Vec::with_capacity(file.size() as usize);
-        file.read_to_end(&mut buf)?;
+        let buf = read_zip_file_bytes_with_limit(&mut file, &canonical, MAX_XLSX_PACKAGE_PART_BYTES)?;
         Ok(Some(buf))
     }
 

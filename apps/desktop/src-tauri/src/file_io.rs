@@ -40,6 +40,12 @@ trait ReadSeek: Read + std::io::Seek {}
 impl<T: Read + std::io::Seek> ReadSeek for T {}
 
 const FORMULA_POWER_QUERY_PART: &str = "xl/formula/power-query.xml";
+/// Maximum uncompressed size to preserve for optional workbook parts that we round-trip
+/// opportunistically (macros + Power Query).
+///
+/// These parts are not required to open the workbook in Formula, so if they're larger than this
+/// limit we skip preserving them instead of risking backend OOM on crafted ZIP bombs.
+const MAX_OPTIONAL_PRESERVE_PART_BYTES: u64 = 32 * 1024 * 1024; // 32MiB
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const PASSWORD_REQUIRED_PREFIX: &str = "PASSWORD_REQUIRED:";
 const INVALID_PASSWORD_PREFIX: &str = "INVALID_PASSWORD:";
@@ -746,35 +752,29 @@ where
     //
     // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
     let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
-    out.vba_project_bin = open_reader()
-        .ok()
-        .and_then(|r| {
-            formula_xlsx::read_part_from_reader_limited(
-                r,
-                "xl/vbaProject.bin",
-                XLSX_VBA_PROJECT_MAX_BYTES,
-            )
-            .ok()
-            .flatten()
-        });
-    out.vba_project_signature_bin = open_reader().ok().and_then(|r| {
-        formula_xlsx::read_part_from_reader_limited(
-            r,
-            "xl/vbaProjectSignature.bin",
-            XLSX_VBA_SIGNATURE_MAX_BYTES,
-        )
-            .ok()
-            .flatten()
-    });
-    if let Some(power_query_xml) = open_reader().ok().and_then(|r| {
-        formula_xlsx::read_part_from_reader_limited(
-            r,
-            FORMULA_POWER_QUERY_PART,
-            XLSX_POWER_QUERY_XML_MAX_BYTES,
-        )
-            .ok()
-            .flatten()
-    }) {
+    let mut read_optional_part = |part: &str, max_bytes: u64| -> Option<Vec<u8>> {
+        let reader = open_reader().ok()?;
+        match formula_xlsx::read_part_from_reader_limited(reader, part, max_bytes) {
+            Ok(bytes) => bytes,
+            Err(err @ formula_xlsx::XlsxError::PartTooLarge { .. }) => {
+                eprintln!(
+                    "[xlsx] skipping optional part {part} (exceeds size limit): {err}"
+                );
+                None
+            }
+            Err(_) => None,
+        }
+    };
+
+    out.vba_project_bin = read_optional_part("xl/vbaProject.bin", XLSX_VBA_PROJECT_MAX_BYTES);
+    out.vba_project_signature_bin = read_optional_part(
+        "xl/vbaProjectSignature.bin",
+        XLSX_VBA_SIGNATURE_MAX_BYTES,
+    );
+
+    if let Some(power_query_xml) =
+        read_optional_part(FORMULA_POWER_QUERY_PART, XLSX_POWER_QUERY_XML_MAX_BYTES)
+    {
         out.power_query_xml = Some(power_query_xml.clone());
         out.original_power_query_xml = Some(power_query_xml);
     }

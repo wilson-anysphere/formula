@@ -31,7 +31,6 @@ use crate::styles::StylesPart;
 use crate::tables::{parse_table, TABLE_REL_TYPE};
 use crate::theme::convert::to_model_theme_palette;
 use crate::theme::parse_theme_palette;
-use crate::zip_util::open_zip_part;
 use crate::WorkbookKind;
 use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{
@@ -785,18 +784,12 @@ fn read_zip_part_optional<R: Read + std::io::Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>, ReadError> {
-    match open_zip_part(archive, name) {
-        Ok(mut file) => {
-            if file.is_dir() {
-                return Ok(None);
-            }
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)?;
-            Ok(Some(buf))
-        }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
-        Err(err) => Err(err.into()),
-    }
+    crate::zip_util::read_zip_part_optional_with_limit(
+        archive,
+        name,
+        crate::zip_util::DEFAULT_MAX_ZIP_PART_BYTES,
+    )
+    .map_err(ReadError::from)
 }
 
 fn part_bytes_tolerant<'a>(parts: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Option<&'a [u8]> {
@@ -865,6 +858,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let cursor = Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor)?;
 
+    let mut budget = crate::zip_util::ZipInflateBudget::new(crate::zip_util::DEFAULT_MAX_ZIP_TOTAL_BYTES);
     let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
@@ -876,8 +870,12 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         // downstream lookups (which assume `xl/...`) working.
         let name = file.name();
         let name = name.strip_prefix('/').unwrap_or(name).to_string();
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
+        let buf = crate::zip_util::read_zip_file_bytes_with_budget(
+            &mut file,
+            &name,
+            crate::zip_util::DEFAULT_MAX_ZIP_PART_BYTES,
+            &mut budget,
+        )?;
         parts.insert(name, buf);
     }
 

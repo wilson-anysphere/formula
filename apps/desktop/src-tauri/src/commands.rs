@@ -1669,7 +1669,7 @@ impl From<IpcValueField> for formula_engine::pivot::ValueField {
             source_field: value.source_field.into(),
             name: value.name.into_inner(),
             aggregation: value.aggregation,
-            number_format: value.number_format.map(|s| s.into_inner()),
+            number_format: value.number_format.map(|fmt| fmt.into_inner()),
             show_as: value.show_as,
             base_field: value.base_field.map(PivotFieldRef::from),
             base_item: value.base_item.map(|s| s.into_inner()),

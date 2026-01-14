@@ -4,6 +4,20 @@ use zip::read::ZipFile;
 use zip::result::ZipError;
 use zip::ZipArchive;
 
+use crate::XlsxError;
+
+/// Default maximum uncompressed size permitted for any single ZIP part inflated into memory.
+///
+/// This is a defense-in-depth guardrail against ZIP bombs (tiny compressed size, huge uncompressed
+/// size) and forged ZIP metadata (e.g. an incorrect `uncompressed_size` field).
+pub(crate) const DEFAULT_MAX_ZIP_PART_BYTES: u64 = 256 * 1024 * 1024; // 256MiB
+
+/// Default maximum total uncompressed bytes permitted across multi-part ZIP inflation APIs.
+///
+/// This applies to APIs that may read many ZIP parts into memory, such as
+/// [`crate::XlsxPackage::from_bytes`].
+pub(crate) const DEFAULT_MAX_ZIP_TOTAL_BYTES: u64 = 512 * 1024 * 1024; // 512MiB
+
 pub(crate) fn zip_part_names_equivalent(a: &str, b: &str) -> bool {
     fn hex_val(b: u8) -> Option<u8> {
         match b {
@@ -148,5 +162,173 @@ pub(crate) fn open_zip_part<'a, R: Read + Seek>(
     match candidate {
         Some((name, _)) => archive.by_name(&name),
         None => Err(ZipError::FileNotFound),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ZipInflateBudget {
+    max_total_bytes: u64,
+    used_bytes: u64,
+}
+
+impl ZipInflateBudget {
+    pub(crate) fn new(max_total_bytes: u64) -> Self {
+        Self {
+            max_total_bytes,
+            used_bytes: 0,
+        }
+    }
+
+    pub(crate) fn remaining_bytes(&self) -> u64 {
+        self.max_total_bytes.saturating_sub(self.used_bytes)
+    }
+
+    pub(crate) fn used_bytes(&self) -> u64 {
+        self.used_bytes
+    }
+
+    pub(crate) fn max_total_bytes(&self) -> u64 {
+        self.max_total_bytes
+    }
+
+    pub(crate) fn consume(&mut self, _part: &str, bytes: u64) -> Result<(), XlsxError> {
+        self.used_bytes = self.used_bytes.saturating_add(bytes);
+        if self.used_bytes > self.max_total_bytes {
+            return Err(XlsxError::PackageTooLarge {
+                total: self.used_bytes,
+                max: self.max_total_bytes,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Read a ZIP entry into memory with an uncompressed size limit.
+///
+/// This helper does **not** trust ZIP metadata alone. It:
+/// - checks the declared uncompressed size (`ZipFile::size()`) as a fast-path;
+/// - reads via `Read::take(max + 1)` to guard against forged metadata;
+/// - and errors deterministically if more than `max_bytes` are observed.
+pub(crate) fn read_zip_file_bytes_with_limit(
+    file: &mut ZipFile<'_>,
+    part: &str,
+    max_bytes: u64,
+) -> Result<Vec<u8>, XlsxError> {
+    read_zip_file_bytes_with_optional_budget(file, part, max_bytes, None)
+}
+
+pub(crate) fn read_zip_file_bytes_with_budget(
+    file: &mut ZipFile<'_>,
+    part: &str,
+    max_part_bytes: u64,
+    budget: &mut ZipInflateBudget,
+) -> Result<Vec<u8>, XlsxError> {
+    read_zip_file_bytes_with_optional_budget(file, part, max_part_bytes, Some(budget))
+}
+
+fn read_zip_file_bytes_with_optional_budget(
+    file: &mut ZipFile<'_>,
+    part: &str,
+    max_part_bytes: u64,
+    mut budget: Option<&mut ZipInflateBudget>,
+) -> Result<Vec<u8>, XlsxError> {
+    let declared_size = file.size();
+    let used_before = budget.as_ref().map(|b| b.used_bytes()).unwrap_or(0);
+    let remaining_total = budget
+        .as_ref()
+        .map(|b| b.remaining_bytes())
+        .unwrap_or(u64::MAX);
+
+    let effective_max = max_part_bytes.min(remaining_total);
+    let limit_is_total = effective_max < max_part_bytes;
+    if budget.is_some() && effective_max == 0 {
+        let max_total = budget.as_ref().map(|b| b.max_total_bytes()).unwrap_or(0);
+        return Err(XlsxError::PackageTooLarge {
+            total: used_before.saturating_add(1),
+            max: max_total,
+        });
+    }
+
+    // Fast-path: reject based on declared uncompressed size.
+    if declared_size > max_part_bytes {
+        return Err(XlsxError::PartTooLarge {
+            part: part.to_string(),
+            size: declared_size,
+            max: max_part_bytes,
+        });
+    }
+    if limit_is_total && declared_size > effective_max {
+        let max_total = budget.as_ref().map(|b| b.max_total_bytes()).unwrap_or(0);
+        return Err(XlsxError::PackageTooLarge {
+            total: used_before.saturating_add(declared_size),
+            max: max_total,
+        });
+    }
+
+    // Don't trust ZIP metadata alone. Guard against incorrect/forged size fields by limiting reads
+    // to `effective_max + 1` and erroring if we see more than `effective_max` bytes.
+    let mut buf = Vec::new();
+    let mut reader = file.take(effective_max.saturating_add(1));
+    reader.read_to_end(&mut buf)?;
+
+    let observed = buf.len() as u64;
+    if observed > effective_max {
+        if limit_is_total {
+            let max_total = budget.as_ref().map(|b| b.max_total_bytes()).unwrap_or(0);
+            return Err(XlsxError::PackageTooLarge {
+                total: used_before.saturating_add(observed),
+                max: max_total,
+            });
+        }
+        return Err(XlsxError::PartTooLarge {
+            part: part.to_string(),
+            size: observed,
+            max: max_part_bytes,
+        });
+    }
+
+    if let Some(budget) = budget.as_mut() {
+        budget.consume(part, observed)?;
+    }
+
+    Ok(buf)
+}
+
+/// Read a ZIP part by name, returning `Ok(None)` when the entry does not exist.
+pub(crate) fn read_zip_part_optional_with_limit<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+    max_part_bytes: u64,
+) -> Result<Option<Vec<u8>>, XlsxError> {
+    match open_zip_part(archive, name) {
+        Ok(mut file) => {
+            if file.is_dir() {
+                return Ok(None);
+            }
+            let buf = read_zip_file_bytes_with_limit(&mut file, name, max_part_bytes)?;
+            Ok(Some(buf))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// Read a ZIP part by name while also consuming from a shared "total inflated bytes" budget.
+pub(crate) fn read_zip_part_optional_with_budget<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+    max_part_bytes: u64,
+    budget: &mut ZipInflateBudget,
+) -> Result<Option<Vec<u8>>, XlsxError> {
+    match open_zip_part(archive, name) {
+        Ok(mut file) => {
+            if file.is_dir() {
+                return Ok(None);
+            }
+            let buf = read_zip_file_bytes_with_budget(&mut file, name, max_part_bytes, budget)?;
+            Ok(Some(buf))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(err) => Err(err.into()),
     }
 }

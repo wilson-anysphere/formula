@@ -280,7 +280,6 @@ fn detect_chart_kind(doc: &Document<'_>, diagnostics: &mut Vec<ChartDiagnostic>)
 
     "unknown".to_string()
 }
-
 fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
     // This helper only feeds diagnostics when ChartEx kind detection fails.
     // Keep output small + stable (tests depend on ordering), but include enough context to extend

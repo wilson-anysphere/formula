@@ -13,6 +13,7 @@ use crate::preserve::sheet_match::{
 };
 use crate::relationships::parse_relationships;
 use crate::workbook::ChartExtractionError;
+use crate::zip_util::{ZipInflateBudget, DEFAULT_MAX_ZIP_PART_BYTES, DEFAULT_MAX_ZIP_TOTAL_BYTES};
 use crate::XlsxPackage;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -168,10 +169,14 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
         part_names.insert(name.strip_prefix('/').unwrap_or(name).to_string());
     }
 
-    let content_types_xml = read_zip_part_required(&mut archive, "[Content_Types].xml")?;
+    let mut budget = ZipInflateBudget::new(DEFAULT_MAX_ZIP_TOTAL_BYTES);
 
-    let workbook_xml = read_zip_part_required(&mut archive, "xl/workbook.xml")?;
-    let workbook_rels_xml = read_zip_part_optional(&mut archive, "xl/_rels/workbook.xml.rels")?;
+    let content_types_xml =
+        read_zip_part_required(&mut archive, "[Content_Types].xml", &mut budget)?;
+
+    let workbook_xml = read_zip_part_required(&mut archive, "xl/workbook.xml", &mut budget)?;
+    let workbook_rels_xml =
+        read_zip_part_optional(&mut archive, "xl/_rels/workbook.xml.rels", &mut budget)?;
 
     let chart_sheets = extract_workbook_chart_sheets_from_workbook_parts(
         &workbook_xml,
@@ -200,7 +205,7 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
 
         // Best-effort: some producers emit malformed `.rels` parts. For preservation we skip
         // relationship discovery for this sheet rather than erroring.
-        let rels = match read_zip_part_optional(&mut archive, &sheet_rels_part)? {
+        let rels = match read_zip_part_optional(&mut archive, &sheet_rels_part, &mut budget)? {
             Some(xml) => match parse_relationships(&xml, &sheet_rels_part) {
                 Ok(rels) => rels,
                 Err(_) => Vec::new(),
@@ -247,7 +252,9 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
             continue;
         }
 
-        let Some(sheet_xml) = read_zip_part_optional(&mut archive, &sheet.part_name)? else {
+        let Some(sheet_xml) =
+            read_zip_part_optional(&mut archive, &sheet.part_name, &mut budget)?
+        else {
             continue;
         };
 
@@ -491,8 +498,12 @@ pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
         }
     }
 
-    let parts =
-        collect_transitive_related_parts_from_archive(&mut archive, &part_names, root_parts)?;
+    let parts = collect_transitive_related_parts_from_archive(
+        &mut archive,
+        &part_names,
+        root_parts,
+        &mut budget,
+    )?;
 
     Ok(PreservedDrawingParts {
         content_types_xml,
@@ -1094,29 +1105,23 @@ impl XlsxPackage {
 fn read_zip_part_optional<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
+    budget: &mut ZipInflateBudget,
 ) -> Result<Option<Vec<u8>>, ChartExtractionError> {
-    match crate::zip_util::open_zip_part(archive, name) {
-        Ok(mut file) => {
-            if file.is_dir() {
-                return Ok(None);
-            }
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)
-                .map_err(|e| ChartExtractionError::XmlStructure(format!("io error: {e}")))?;
-            Ok(Some(buf))
-        }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
-        Err(err) => Err(ChartExtractionError::XmlStructure(format!(
-            "zip error: {err}"
-        ))),
-    }
+    crate::zip_util::read_zip_part_optional_with_budget(
+        archive,
+        name,
+        DEFAULT_MAX_ZIP_PART_BYTES,
+        budget,
+    )
+    .map_err(|e| ChartExtractionError::XmlStructure(e.to_string()))
 }
 
 fn read_zip_part_required<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
+    budget: &mut ZipInflateBudget,
 ) -> Result<Vec<u8>, ChartExtractionError> {
-    read_zip_part_optional(archive, name)?
+    read_zip_part_optional(archive, name, budget)?
         .ok_or_else(|| ChartExtractionError::MissingPart(name.to_string()))
 }
 
@@ -1124,6 +1129,7 @@ fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     part_names: &HashSet<String>,
     root_parts: impl IntoIterator<Item = String>,
+    budget: &mut ZipInflateBudget,
 ) -> Result<BTreeMap<String, Vec<u8>>, ChartExtractionError> {
     use std::collections::VecDeque;
 
@@ -1146,7 +1152,7 @@ fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
         if !part_names.contains(&part_name) {
             continue;
         }
-        let Some(part_bytes) = read_zip_part_optional(archive, &part_name)? else {
+        let Some(part_bytes) = read_zip_part_optional(archive, &part_name, budget)? else {
             continue;
         };
         out.insert(part_name.clone(), part_bytes);
@@ -1155,7 +1161,7 @@ fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
         if !part_names.contains(&rels_part_name) {
             continue;
         }
-        let Some(rels_bytes) = read_zip_part_optional(archive, &rels_part_name)? else {
+        let Some(rels_bytes) = read_zip_part_optional(archive, &rels_part_name, budget)? else {
             continue;
         };
         out.insert(rels_part_name.clone(), rels_bytes.clone());
@@ -2077,10 +2083,12 @@ mod tests {
             part_names.insert(name.strip_prefix('/').unwrap_or(name).to_string());
         }
 
+        let mut budget = ZipInflateBudget::new(u64::MAX);
         let preserved = collect_transitive_related_parts_from_archive(
             &mut archive,
             &part_names,
             ["xl/charts/chart0.xml".to_string()],
+            &mut budget,
         )
         .expect("traverse");
 
@@ -2116,10 +2124,12 @@ mod tests {
             part_names.insert(name.strip_prefix('/').unwrap_or(name).to_string());
         }
 
+        let mut budget = ZipInflateBudget::new(u64::MAX);
         let preserved = collect_transitive_related_parts_from_archive(
             &mut archive,
             &part_names,
             ["xl/drawings/drawing1.xml".to_string()],
+            &mut budget,
         )
         .expect("traverse");
 

@@ -533,49 +533,10 @@ pub struct XlsxPackage {
 
 /// Read a single ZIP part from an XLSX/XLSM container without inflating the entire package.
 pub fn read_part_from_reader<R: Read + Seek>(
-    mut reader: R,
+    reader: R,
     part_name: &str,
 ) -> Result<Option<Vec<u8>>, XlsxError> {
-    reader.seek(SeekFrom::Start(0))?;
-    let mut zip = zip::ZipArchive::new(reader)?;
-
-    // OPC part names should not include a leading `/` in the ZIP archive, but some producers do.
-    // Be tolerant by trying both forms.
-    let with_slash = if part_name.starts_with('/') {
-        None
-    } else {
-        Some(format!("/{part_name}"))
-    };
-    let candidates: [&str; 2] = if let Some(stripped) = part_name.strip_prefix('/') {
-        [part_name, stripped]
-    } else {
-        [
-            part_name,
-            with_slash
-                .as_deref()
-                .expect("initialized for non-slashed names"),
-        ]
-    };
-
-    for candidate in candidates {
-        // `ZipFile` borrows `ZipArchive`; keep the `Result` in a local so it drops
-        // before `zip` to avoid borrowck issues.
-        let result = zip.by_name(candidate);
-        match result {
-            Ok(mut file) => {
-                if file.is_dir() {
-                    return Ok(None);
-                }
-                let mut buf = Vec::new();
-                file.read_to_end(&mut buf)?;
-                return Ok(Some(buf));
-            }
-            Err(zip::result::ZipError::FileNotFound) => continue,
-            Err(err) => return Err(err.into()),
-        }
-    }
-
-    Ok(None)
+    read_part_from_reader_limited(reader, part_name, MAX_XLSX_PACKAGE_PART_BYTES)
 }
 
 /// Read a single ZIP part from an XLSX/XLSM container, enforcing a maximum uncompressed size.
@@ -702,9 +663,11 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
 
     let workbook_xml = match open_zip_part(&mut zip, "xl/workbook.xml") {
         Ok(mut file) => {
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)?;
-            buf
+            crate::zip_util::read_zip_file_bytes_with_limit(
+                &mut file,
+                "xl/workbook.xml",
+                MAX_XLSX_PACKAGE_PART_BYTES,
+            )?
         }
         Err(zip::result::ZipError::FileNotFound) => {
             return Err(XlsxError::MissingPart("xl/workbook.xml".to_string()))
@@ -716,9 +679,12 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
 
     let rels_bytes = match open_zip_part(&mut zip, "xl/_rels/workbook.xml.rels") {
         Ok(mut file) => {
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)?;
-            Some(buf)
+            crate::zip_util::read_zip_file_bytes_with_limit(
+                &mut file,
+                "xl/_rels/workbook.xml.rels",
+                MAX_XLSX_PACKAGE_PART_BYTES,
+            )
+            .map(Some)?
         }
         Err(zip::result::ZipError::FileNotFound) => None,
         Err(err) => return Err(err.into()),
@@ -930,51 +896,20 @@ impl XlsxPackage {
         let mut zip = zip::ZipArchive::new(reader)?;
 
         let mut parts = BTreeMap::new();
-        let mut total_bytes: u64 = 0;
+        let mut budget = crate::zip_util::ZipInflateBudget::new(limits.max_total_bytes);
         for i in 0..zip.len() {
-            let file = zip.by_index(i)?;
+            let mut file = zip.by_index(i)?;
             if !file.is_file() {
                 continue;
             }
 
             let name = file.name().to_string();
-
-            let declared_size = file.size();
-            if declared_size > limits.max_part_bytes {
-                return Err(XlsxError::PartTooLarge {
-                    part: name,
-                    size: declared_size,
-                    max: limits.max_part_bytes,
-                });
-            }
-
-            let remaining_total = limits.max_total_bytes.saturating_sub(total_bytes);
-            let read_limit = limits.max_part_bytes.min(remaining_total);
-            let take_limit = read_limit.saturating_add(1);
-
-            let mut buf = Vec::with_capacity(
-                usize::try_from(declared_size.min(read_limit)).unwrap_or_default(),
-            );
-            let mut limited_reader = file.take(take_limit);
-            limited_reader.read_to_end(&mut buf)?;
-
-            let actual_size = buf.len() as u64;
-            if actual_size > limits.max_part_bytes {
-                return Err(XlsxError::PartTooLarge {
-                    part: name,
-                    size: actual_size,
-                    max: limits.max_part_bytes,
-                });
-            }
-
-            if actual_size > remaining_total {
-                return Err(XlsxError::PackageTooLarge {
-                    total: total_bytes.saturating_add(actual_size),
-                    max: limits.max_total_bytes,
-                });
-            }
-
-            total_bytes = total_bytes.saturating_add(actual_size);
+            let buf = crate::zip_util::read_zip_file_bytes_with_budget(
+                &mut file,
+                &name,
+                limits.max_part_bytes,
+                &mut budget,
+            )?;
             parts.insert(name, buf);
         }
 

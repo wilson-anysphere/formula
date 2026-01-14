@@ -16,6 +16,7 @@ use crate::preserve::sheet_match::{
 };
 use crate::relationships::parse_relationships;
 use crate::workbook::ChartExtractionError;
+use crate::zip_util::{ZipInflateBudget, DEFAULT_MAX_ZIP_PART_BYTES, DEFAULT_MAX_ZIP_TOTAL_BYTES};
 use crate::XlsxPackage;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -103,7 +104,10 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
         part_names.insert(name.strip_prefix('/').unwrap_or(name).to_string());
     }
 
-    let content_types_xml = read_zip_part_required(&mut archive, "[Content_Types].xml")?;
+    let mut budget = ZipInflateBudget::new(DEFAULT_MAX_ZIP_TOTAL_BYTES);
+
+    let content_types_xml =
+        read_zip_part_required(&mut archive, "[Content_Types].xml", &mut budget)?;
 
     let mut parts = BTreeMap::new();
     for name in &part_names {
@@ -114,14 +118,14 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
             || name.starts_with("xl/timelines/")
             || name.starts_with("xl/timelineCaches/")
         {
-            if let Some(bytes) = read_zip_part_optional(&mut archive, name)? {
+            if let Some(bytes) = read_zip_part_optional(&mut archive, name, &mut budget)? {
                 parts.insert(name.clone(), bytes);
             }
         }
     }
 
     let workbook_part = "xl/workbook.xml";
-    let workbook_xml = read_zip_part_required(&mut archive, workbook_part)?;
+    let workbook_xml = read_zip_part_required(&mut archive, workbook_part, &mut budget)?;
     let workbook_xml_str = std::str::from_utf8(&workbook_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(workbook_part.to_string(), e))?;
     let workbook_doc = Document::parse(workbook_xml_str)
@@ -147,7 +151,8 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
     }
 
     let workbook_rels_part = "xl/_rels/workbook.xml.rels";
-    let workbook_rels_xml = read_zip_part_optional(&mut archive, workbook_rels_part)?;
+    let workbook_rels_xml =
+        read_zip_part_optional(&mut archive, workbook_rels_part, &mut budget)?;
     // Best-effort: some producers emit malformed rels. For pivot preservation we treat this as
     // "no relationships" instead of failing the whole extraction.
     let rel_map: HashMap<String, crate::relationships::Relationship> = match workbook_rels_xml
@@ -222,7 +227,9 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
         worksheet_index += 1;
 
         let sheet_rels_part = rels_for_part(&sheet.part_name);
-        let Some(sheet_rels_xml) = read_zip_part_optional(&mut archive, &sheet_rels_part)? else {
+        let Some(sheet_rels_xml) =
+            read_zip_part_optional(&mut archive, &sheet_rels_part, &mut budget)?
+        else {
             continue;
         };
         let rels = match parse_relationships(&sheet_rels_xml, &sheet_rels_part) {
@@ -236,7 +243,9 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
             continue;
         }
 
-        let Some(sheet_xml) = read_zip_part_optional(&mut archive, &sheet.part_name)? else {
+        let Some(sheet_xml) =
+            read_zip_part_optional(&mut archive, &sheet.part_name, &mut budget)?
+        else {
             continue;
         };
         let sheet_xml_str = std::str::from_utf8(&sheet_xml)
@@ -867,29 +876,23 @@ fn rewrite_pivot_cache_definition_worksheet_source_sheets(
 fn read_zip_part_optional<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
+    budget: &mut ZipInflateBudget,
 ) -> Result<Option<Vec<u8>>, ChartExtractionError> {
-    match crate::zip_util::open_zip_part(archive, name) {
-        Ok(mut file) => {
-            if file.is_dir() {
-                return Ok(None);
-            }
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)
-                .map_err(|e| ChartExtractionError::XmlStructure(format!("io error: {e}")))?;
-            Ok(Some(buf))
-        }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
-        Err(err) => Err(ChartExtractionError::XmlStructure(format!(
-            "zip error: {err}"
-        ))),
-    }
+    crate::zip_util::read_zip_part_optional_with_budget(
+        archive,
+        name,
+        DEFAULT_MAX_ZIP_PART_BYTES,
+        budget,
+    )
+    .map_err(|e| ChartExtractionError::XmlStructure(e.to_string()))
 }
 
 fn read_zip_part_required<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
+    budget: &mut ZipInflateBudget,
 ) -> Result<Vec<u8>, ChartExtractionError> {
-    read_zip_part_optional(archive, name)?
+    read_zip_part_optional(archive, name, budget)?
         .ok_or_else(|| ChartExtractionError::MissingPart(name.to_string()))
 }
 

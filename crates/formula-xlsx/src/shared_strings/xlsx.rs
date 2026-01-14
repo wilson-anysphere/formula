@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 
 use formula_fs::{atomic_write_with_path, AtomicWriteError};
@@ -7,7 +7,8 @@ use thiserror::Error;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use crate::zip_util::open_zip_part;
+use crate::zip_util::{open_zip_part, read_zip_file_bytes_with_limit};
+use crate::{XlsxError, MAX_XLSX_PACKAGE_PART_BYTES};
 
 use super::{parse_shared_strings_xml, write_shared_strings_xml, SharedStrings};
 
@@ -36,9 +37,19 @@ pub fn read_shared_strings_from_xlsx(
         other => SharedStringsXlsxError::Zip(other),
     })?;
 
-    let mut xml = String::new();
-    ss_file.read_to_string(&mut xml)?;
-    Ok(parse_shared_strings_xml(&xml)?)
+    let bytes =
+        read_zip_file_bytes_with_limit(&mut ss_file, "xl/sharedStrings.xml", MAX_XLSX_PACKAGE_PART_BYTES)
+            .map_err(|err| match err {
+                XlsxError::Io(err) => SharedStringsXlsxError::Io(err),
+                other => SharedStringsXlsxError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    other.to_string(),
+                )),
+            })?;
+    let xml = std::str::from_utf8(&bytes).map_err(|err| {
+        SharedStringsXlsxError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, err))
+    })?;
+    Ok(parse_shared_strings_xml(xml)?)
 }
 
 /// Write a new `.xlsx` file, copying all entries from `input_path` and replacing
@@ -66,6 +77,11 @@ pub fn write_shared_strings_to_xlsx(
             let mut file = input_zip.by_index(i)?;
             let name = file.name().strip_prefix('/').unwrap_or(file.name()).to_string();
 
+            if file.is_dir() {
+                output_zip.add_directory(name, FileOptions::<()>::default())?;
+                continue;
+            }
+
             if name == "xl/sharedStrings.xml" {
                 seen_shared_strings = true;
                 let options =
@@ -74,9 +90,6 @@ pub fn write_shared_strings_to_xlsx(
                 output_zip.write_all(shared_strings_xml.as_bytes())?;
                 continue;
             }
-
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)?;
 
             let mut options = FileOptions::<()>::default().compression_method(match file.compression() {
                 CompressionMethod::Stored => CompressionMethod::Stored,
@@ -87,7 +100,7 @@ pub fn write_shared_strings_to_xlsx(
             }
 
             output_zip.start_file(name, options)?;
-            output_zip.write_all(&buf)?;
+            std::io::copy(&mut file, &mut output_zip)?;
         }
 
         if !seen_shared_strings {

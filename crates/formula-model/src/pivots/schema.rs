@@ -58,6 +58,7 @@ impl PivotFieldRef {
     pub fn cache_field_name(&self) -> Option<&str> {
         self.as_cache_field_name()
     }
+
     /// Best-effort, human-friendly string representation of this ref.
     ///
     /// This is intended for diagnostics and UI; it is not a stable serialization format.

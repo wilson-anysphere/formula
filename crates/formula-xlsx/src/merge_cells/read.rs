@@ -5,7 +5,8 @@ use std::io::{Read, Seek};
 use thiserror::Error;
 use zip::ZipArchive;
 
-use crate::zip_util::open_zip_part;
+use crate::zip_util::{open_zip_part, read_zip_file_bytes_with_limit};
+use crate::{XlsxError, MAX_XLSX_PACKAGE_PART_BYTES};
 
 #[derive(Debug, Error)]
 pub enum MergeCellsError {
@@ -57,7 +58,15 @@ pub fn read_merge_cells_from_xlsx<R: Read + Seek>(
     worksheet_path: &str,
 ) -> Result<Vec<Range>, MergeCellsError> {
     let mut file = open_zip_part(archive, worksheet_path)?;
-    let mut xml = String::new();
-    file.read_to_string(&mut xml)?;
-    read_merge_cells_from_worksheet_xml(&xml)
+    let bytes =
+        read_zip_file_bytes_with_limit(&mut file, worksheet_path, MAX_XLSX_PACKAGE_PART_BYTES)
+            .map_err(|err| match err {
+                XlsxError::Io(err) => MergeCellsError::Io(err),
+                other => MergeCellsError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    other.to_string(),
+                )),
+            })?;
+    let xml = std::str::from_utf8(&bytes)?;
+    read_merge_cells_from_worksheet_xml(xml)
 }

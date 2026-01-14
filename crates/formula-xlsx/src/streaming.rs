@@ -16,6 +16,7 @@ use crate::recalc_policy::{
 };
 use crate::shared_strings::preserve::SharedStringsEditor;
 use crate::styles::XlsxStylesEditor;
+use crate::zip_util::{open_zip_part, read_zip_file_bytes_with_limit, DEFAULT_MAX_ZIP_PART_BYTES};
 use crate::RecalcPolicy;
 use crate::WorkbookKind;
 use crate::{parse_workbook_sheets, CellPatch, WorkbookCellPatches};
@@ -1949,11 +1950,10 @@ fn plan_shared_strings<R: Read + Seek>(
         }
     }
 
-    let mut shared_strings_bytes = Vec::new();
-    {
+    let shared_strings_bytes = {
         let mut file = open_zip_part(archive, &shared_strings_part)?;
-        file.read_to_end(&mut shared_strings_bytes)?;
-    }
+        read_zip_file_bytes_with_limit(&mut file, &shared_strings_part, DEFAULT_MAX_ZIP_PART_BYTES)?
+    };
     let existing_shared_indices = scan_existing_shared_string_indices(archive, patches_by_part)?;
     let mut shared_strings = SharedStringsState::from_part(&shared_strings_bytes)?;
     shared_strings.count_delta = count_delta;
@@ -2476,42 +2476,6 @@ fn patch_wants_shared_string(
     }
 }
 
-fn open_zip_part<'a, R: Read + Seek>(
-    archive: &'a mut ZipArchive<R>,
-    name: &str,
-) -> Result<zip::read::ZipFile<'a>, zip::result::ZipError> {
-    // ZIP entry names should not include a leading `/` in valid XLSX/XLSM files, but some producers
-    // emit them. Try both forms so streaming operations (patching, macro stripping, etc) remain
-    // robust.
-    let alt = if let Some(stripped) = name.strip_prefix('/') {
-        stripped.to_string()
-    } else {
-        let mut with_slash = String::with_capacity(name.len() + 1);
-        with_slash.push('/');
-        with_slash.push_str(name);
-        with_slash
-    };
-
-    // We cannot call `by_name` twice while returning the borrowed `ZipFile` because the borrow
-    // would have to live for `'a` in both control-flow paths. Instead, use `file_names()` to pick
-    // the correct entry name up front, then open it once.
-    let mut candidate = None::<String>;
-    for entry in archive.file_names() {
-        if entry == name {
-            candidate = Some(name.to_string());
-            break;
-        }
-        if entry == alt.as_str() {
-            candidate = Some(alt.clone());
-        }
-    }
-
-    match candidate {
-        Some(name) => archive.by_name(&name),
-        None => Err(zip::result::ZipError::FileNotFound),
-    }
-}
-
 fn zip_part_exists<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
@@ -2532,9 +2496,11 @@ fn read_zip_part_optional<R: Read + Seek>(
         Err(zip::result::ZipError::FileNotFound) => return Ok(None),
         Err(err) => return Err(err.into()),
     };
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
-    Ok(Some(buf))
+    Ok(Some(read_zip_file_bytes_with_limit(
+        &mut file,
+        name,
+        DEFAULT_MAX_ZIP_PART_BYTES,
+    )?))
 }
 
 fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
@@ -2864,17 +2830,16 @@ fn maybe_patch_recalc_part(
     }
 }
 
-fn patch_recalc_part_from_file<R: Read>(
+fn patch_recalc_part_from_file(
     name: &str,
-    file: &mut R,
+    file: &mut zip::read::ZipFile<'_>,
     recalc_policy: RecalcPolicy,
 ) -> Result<Option<Vec<u8>>, StreamingPatchError> {
     if !should_patch_recalc_part(name, recalc_policy) {
         return Ok(None);
     }
 
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
+    let buf = read_zip_file_bytes_with_limit(file, name, DEFAULT_MAX_ZIP_PART_BYTES)?;
     Ok(Some(maybe_patch_recalc_part(name, &buf, recalc_policy)?))
 }
 
@@ -2897,8 +2862,7 @@ fn read_zip_part<R: Read + Seek>(
         return Ok(bytes.clone());
     }
     let mut file = open_zip_part(archive, name)?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
+    let buf = read_zip_file_bytes_with_limit(&mut file, name, DEFAULT_MAX_ZIP_PART_BYTES)?;
     cache.insert(name.to_string(), buf.clone());
     Ok(buf)
 }
