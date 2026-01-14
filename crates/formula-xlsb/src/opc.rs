@@ -315,6 +315,13 @@ impl XlsbWorkbook {
         }
         reader.seek(SeekFrom::Start(0))?;
 
+        // Avoid buffering the entire ZIP package into memory only to discover that it contains an
+        // excessive number of entries. This is especially important for attacker-controlled
+        // streams where the ZIP may contain many small entries but still remain within the overall
+        // package byte limit.
+        preflight_zip_entry_count(&mut reader)?;
+        reader.seek(SeekFrom::Start(0))?;
+
         let mut bytes = Vec::new();
         reader.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > max {
@@ -3161,6 +3168,67 @@ mod zip_guardrail_tests {
                     io_err.to_string().contains("XLSB package too large"),
                     "unexpected error message: {io_err}"
                 );
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn rejects_too_many_zip_entries_when_opening_from_reader_without_buffering_whole_package() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _max_entries = EnvVarGuard::set(ENV_MAX_XLSB_ZIP_ENTRIES, "4");
+
+        // Make the package large enough that a full `read_to_end` would exceed our threshold, but
+        // still small enough that `preflight_zip_entry_count` only needs to read the tail.
+        let large_payload = vec![0u8; 200_000];
+        let bytes = build_minimal_xlsb_zip(&[
+            ("xl/large.bin", large_payload.as_slice()),
+            ("xl/extra1.bin", b"1"),
+            ("xl/extra2.bin", b"2"),
+        ]);
+
+        struct PanicAfterReadThreshold {
+            inner: Cursor<Vec<u8>>,
+            bytes_read: usize,
+            max_bytes: usize,
+        }
+
+        impl Read for PanicAfterReadThreshold {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                let n = self.inner.read(buf)?;
+                self.bytes_read = self.bytes_read.saturating_add(n);
+                if self.bytes_read > self.max_bytes {
+                    panic!(
+                        "unexpectedly buffered too much of the package: {} bytes (limit {})",
+                        self.bytes_read, self.max_bytes
+                    );
+                }
+                Ok(n)
+            }
+        }
+
+        impl Seek for PanicAfterReadThreshold {
+            fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+                self.inner.seek(pos)
+            }
+        }
+
+        let reader = PanicAfterReadThreshold {
+            inner: Cursor::new(bytes),
+            bytes_read: 0,
+            // `preflight_zip_entry_count` reads at most ~65KiB from the tail. If `open_from_reader`
+            // were to buffer the whole package before preflighting, it would exceed this limit.
+            max_bytes: 100_000,
+        };
+
+        let err = XlsbWorkbook::open_from_reader_with_options(reader, OpenOptions::default())
+            .err()
+            .expect("expected too many zip entries error");
+
+        match err {
+            ParseError::TooManyZipEntries { count, max } => {
+                assert_eq!(max, 4);
+                assert!(count > max);
             }
             other => panic!("unexpected error: {other}"),
         }
