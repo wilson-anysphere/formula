@@ -1491,7 +1491,7 @@ jobs:
           gh release upload $tag $files --repo "${{ github.repository }}" --clobber
 
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
-        # Run against the already-built Tauri artifacts from the previous step.
+        # Run against the already-built Tauri artifacts produced by the `tauri-apps/tauri-action` build step.
         # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
         if: >-
           (runner.os == 'Linux' || !contains(fromJson('["0","false","False","FALSE"]'), vars.FORMULA_COI_CHECK_ALL_PLATFORMS))
