@@ -8531,7 +8531,9 @@ export class SpreadsheetApp {
             scratchBounds.y = sheetRect.y - scrollY + headerOffsetY;
             scratchBounds.width = sheetRect.width;
             scratchBounds.height = sheetRect.height;
-            const canRotate = rotationHandleEnabled && selectedObject.kind.type !== "chart";
+            // Split-view drawings selection chrome is always rendered by DrawingOverlay (shared grid),
+            // so treat the rotation handle as hittable whenever it is rendered (all non-chart drawings).
+            const canRotate = selectedObject.kind.type !== "chart";
             if (
               (canRotate && hitTestRotationHandle(scratchBounds, sx, sy, selectedObject.transform)) ||
               hitTestResizeHandle(scratchBounds, sx, sy, selectedObject.transform)

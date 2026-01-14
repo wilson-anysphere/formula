@@ -156,6 +156,7 @@ import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { rangeToA1 } from "./selection/a1.js";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
 import { buildDrawingContextMenuItems, tryOpenDrawingContextMenuAtClientPoint } from "./mainContextMenuDrawing.js";
+import { resolveIsMacPlatform, tagDrawingContextClickPointerDown } from "./drawings/tagDrawingContextClick.js";
 import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
 import {
   WorkbookSheetStore,
@@ -6477,6 +6478,22 @@ if (
 
     openGridContextMenuAtPoint(anchorX, anchorY);
   });
+
+  // In split view, the secondary pane is a CanvasGrid instance mounted outside of SpreadsheetApp's
+  // `.grid-root`. SpreadsheetApp's capture-phase drawing hit testing cannot tag pointer events for
+  // the secondary pane, so right-clicking on a drawing would otherwise move the active cell
+  // underneath it (DesktopSharedGrid's default context-click behavior).
+  //
+  // Tag secondary-pane pointer events that hit drawings so DesktopSharedGrid can ignore them
+  // (Excel-like behavior).
+  const isMacPlatform = resolveIsMacPlatform();
+  gridSecondaryEl.addEventListener(
+    "pointerdown",
+    (e) => {
+      tagDrawingContextClickPointerDown(e, app, { isMacPlatform, requireCanvasTarget: true });
+    },
+    { capture: true, passive: true },
+  );
 
   gridSecondaryEl.addEventListener("contextmenu", (e) => {
     // Always prevent the native context menu; we render our own.
