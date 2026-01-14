@@ -4627,7 +4627,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_spanned_formula_supports_path_qualified_external_refs_with_lbracket_in_workbook_name() {
+    fn parse_spanned_formula_supports_path_qualified_external_refs_with_lbracket_in_workbook_name()
+    {
         let expr = parse_spanned_formula(r#"='C:\path\[A1[Name.xlsx]Sheet1'!A1"#)
             .expect("parse should succeed");
 
