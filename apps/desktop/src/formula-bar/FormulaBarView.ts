@@ -1026,6 +1026,7 @@ export class FormulaBarView {
     if (next && this.model.isEditing) {
       this.model.cancel();
       this.#hoverOverride = null;
+      this.#hoverOverrideText = null;
       this.#mouseDownSelectedReferenceIndex = null;
       this.#selectedReferenceIndex = null;
     }
