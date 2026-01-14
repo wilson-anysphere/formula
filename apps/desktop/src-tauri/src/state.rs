@@ -10276,6 +10276,119 @@ mod tests {
     }
 
     #[test]
+    fn pivot_refresh_restores_engine_styles_even_when_output_is_unchanged() {
+        use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Data".to_string());
+        workbook.add_sheet("Pivot".to_string());
+        let data_sheet_id = workbook.sheets[0].id.clone();
+        let pivot_sheet_id = workbook.sheets[1].id.clone();
+        let pivot_sheet_name = workbook.sheets[1].name.clone();
+
+        let date_serial =
+            ymd_to_serial(ExcelDate::new(2024, 1, 15), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+
+        let sheet = workbook.sheet_mut(&data_sheet_id).unwrap();
+        sheet.set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Text("Date".to_string()))),
+        );
+        sheet.set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Text("Amount".to_string()))),
+        );
+
+        let mut date_cell = Cell::from_literal(Some(CellScalar::Number(date_serial)));
+        date_cell.number_format = Some("m/d/yyyy".to_string());
+        sheet.set_cell(1, 0, date_cell);
+        sheet.set_cell(1, 1, Cell::from_literal(Some(CellScalar::Number(10.0))));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Date")],
+            column_fields: Vec::new(),
+            value_fields: vec![ValueField {
+                source_field: "Amount".into(),
+                name: "Sum of Amount".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: Vec::new(),
+            calculated_fields: Vec::new(),
+            calculated_items: Vec::new(),
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let (pivot_id, _) = state
+            .create_pivot_table(
+                "By Date".to_string(),
+                data_sheet_id,
+                CellRect {
+                    start_row: 0,
+                    start_col: 0,
+                    end_row: 1,
+                    end_col: 1,
+                },
+                PivotDestination {
+                    sheet_id: pivot_sheet_id.clone(),
+                    row: 0,
+                    col: 0,
+                },
+                cfg,
+            )
+            .unwrap();
+
+        // A2 is the first row label cell in the pivot output.
+        let style_id_before = state
+            .engine
+            .get_cell_style_id(&pivot_sheet_name, "A2")
+            .unwrap()
+            .unwrap_or(0);
+        assert_ne!(style_id_before, 0);
+
+        // Simulate an older pivot output where the engine had no formatting synced.
+        state
+            .engine
+            .set_cell_style_id(&pivot_sheet_name, "A2", 0)
+            .unwrap();
+        let style_id_cleared = state
+            .engine
+            .get_cell_style_id(&pivot_sheet_name, "A2")
+            .unwrap()
+            .unwrap_or(0);
+        assert_eq!(style_id_cleared, 0);
+
+        // Refresh should restore the engine style even though the workbook output doesn't change.
+        let updates = state.refresh_pivot_table(&pivot_id).unwrap();
+        assert!(
+            updates.is_empty(),
+            "expected no workbook cell updates when pivot output is unchanged"
+        );
+
+        let style_id_after = state
+            .engine
+            .get_cell_style_id(&pivot_sheet_name, "A2")
+            .unwrap()
+            .unwrap_or(0);
+        assert_ne!(style_id_after, 0);
+        let style = state.engine.style_table().get(style_id_after).unwrap();
+        assert_eq!(style.number_format.as_deref(), Some("m/d/yyyy"));
+    }
+
+    #[test]
     fn pivot_date_labels_respect_excel_1904_date_system() {
         use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 
