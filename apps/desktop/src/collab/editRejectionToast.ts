@@ -9,6 +9,7 @@ type RejectionKind = "cell" | "format" | "rangeRun" | "unknown";
 const REJECTION_TOAST_THROTTLE_MS = 1_000;
 let lastToastMessage: string | null = null;
 let lastToastTime = 0;
+let lastToastRoot: HTMLElement | null = null;
 
 function isCellDelta(delta: any): delta is { sheetId?: string; row: number; col: number } {
   return delta != null && typeof delta === "object" && Number.isInteger(delta.row) && Number.isInteger(delta.col);
@@ -90,6 +91,22 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
  */
 export function showCollabEditRejectedToast(rejected: any[]): void {
   if (!Array.isArray(rejected) || rejected.length === 0) return;
+
+  // Tests (and some desktop integration points) recreate `#toast-root` between runs.
+  // Reset throttle state when that happens so we don't accidentally suppress the
+  // first toast in a fresh UI mount.
+  const toastRoot = (() => {
+    try {
+      return document.getElementById("toast-root");
+    } catch {
+      return null;
+    }
+  })();
+  if (toastRoot && toastRoot !== lastToastRoot) {
+    lastToastRoot = toastRoot;
+    lastToastMessage = null;
+    lastToastTime = 0;
+  }
 
   const reason = inferRejectionReason(rejected);
   const kind = inferRejectionKind(rejected);
