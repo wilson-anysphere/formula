@@ -166,7 +166,7 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
         activeValue: document.createElement("div"),
       };
 
-      const app = new SpreadsheetApp(root, status);
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
       const sheetId = app.getCurrentSheetId();
 
       // Put the active cell somewhere else so a missed drawing hit-test would move it.
@@ -330,8 +330,6 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
           },
         },
       ]);
-      // Ensure the selection-canvas interaction controller sees the latest drawings.
-      (app as any).syncSheetDrawings();
       // Ensure listDrawingObjectsForSheet reflects the newly inserted drawings (it caches results).
       (app as any).drawingObjectsCache = null;
 
