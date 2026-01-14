@@ -1470,9 +1470,10 @@ export class ContextManager {
       {
         key: "attachments",
         priority: 2,
-        text: attachmentsForPrompt?.length
-          ? this.redactor(`User-provided attachments:\n${stableJsonStringify(attachmentsForPrompt)}`)
-          : "",
+        text:
+          Array.isArray(attachmentsForPrompt) && attachmentsForPrompt.length
+            ? this.redactor(`User-provided attachments:\n${stableJsonStringify(attachmentsForPrompt)}`)
+            : "",
       },
       {
         key: "samples",
@@ -3013,9 +3014,10 @@ export class ContextManager {
         {
           key: "attachments",
           priority: 2,
-          text: attachmentsForPrompt?.length
-            ? this.redactor(`User-provided attachments:\n${stableJsonStringify(attachmentsForPrompt)}`)
-            : "",
+          text:
+            Array.isArray(attachmentsForPrompt) && attachmentsForPrompt.length
+              ? this.redactor(`User-provided attachments:\n${stableJsonStringify(attachmentsForPrompt)}`)
+              : "",
         },
         {
           key: "retrieved",
