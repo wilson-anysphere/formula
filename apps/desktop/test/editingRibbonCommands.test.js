@@ -57,6 +57,8 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
 
   const builtinsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
   const builtins = fs.readFileSync(builtinsPath, "utf8");
+  const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
+  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
 
   // Canonical editing ids should be registered as builtin commands so ribbon, command palette,
   // and keybindings share the same execution path (via createRibbonActionsFromCommands).
@@ -95,6 +97,18 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
       `Expected registerBuiltinCommands.ts to not register legacy alias ${id}`,
     );
   }
+
+  // Ribbon-only "Fill → Series…" is registered in registerDesktopCommands so ribbon execution goes through CommandRegistry.
+  assert.match(
+    desktopCommands,
+    /\bregisterBuiltinCommand\(\s*["']home\.editing\.fill\.series["']/,
+    "Expected registerDesktopCommands.ts to register home.editing.fill.series",
+  );
+  assert.doesNotMatch(
+    main,
+    /\bcase\s+["']home\.editing\.fill\.series["']:/,
+    "Expected main.ts to not handle home.editing.fill.series via switch case (should be dispatched by createRibbonActionsFromCommands)",
+  );
 
   // Ensure the old ribbon-only ids are no longer mapped in main.ts.
   const legacyCases = [

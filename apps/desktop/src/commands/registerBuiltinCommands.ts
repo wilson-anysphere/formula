@@ -772,6 +772,38 @@ export function registerBuiltinCommands(params: {
     },
   );
 
+  // Page Layout → Arrange (Selection Pane).
+  //
+  // The ribbon schema uses this id, so register it as a builtin command so the ribbon can rely on
+  // CommandRegistry (and we don't need `main.ts` ribbon switch-case wiring).
+  commandRegistry.registerBuiltinCommand(
+    "pageLayout.arrange.selectionPane",
+    "Selection Pane",
+    () => {
+      openDockPanel(PanelIds.SELECTION_PANE);
+
+      // The panel is a React mount; wait a frame so DOM nodes exist before focusing.
+      if (typeof document !== "undefined" && typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const el = document.querySelector<HTMLElement>('[data-testid="selection-pane"]');
+            try {
+              el?.focus();
+            } catch {
+              // Best-effort.
+            }
+          }),
+        );
+      }
+    },
+    {
+      category: "Page Layout",
+      icon: null,
+      description: "Open the Selection Pane panel",
+      keywords: ["selection pane", "arrange", "objects", "drawings", "charts"],
+    },
+  );
+
   // --- What-If Analysis / Solver (ribbon ids) ---------------------------------
   // Register the ribbon ids directly so:
   // - the ribbon doesn't have to rely on `main.ts` fallbacks to stay enabled
