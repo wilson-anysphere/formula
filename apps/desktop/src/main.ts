@@ -6347,12 +6347,12 @@ if (
   window.addEventListener(
     "keydown",
     (e) => {
-      void keybindingService.dispatchKeydown(e, { allowBuiltins: true, allowExtensions: false });
+      void keybindingService.dispatchKeydown(e, { allowBuiltins: true, allowExtensions: false }).catch(() => {});
     },
     { capture: true },
   );
   window.addEventListener("keydown", (e) => {
-    void keybindingService.dispatchKeydown(e, { allowBuiltins: false, allowExtensions: true });
+    void keybindingService.dispatchKeydown(e, { allowBuiltins: false, allowExtensions: true }).catch(() => {});
   });
 
   const updateKeybindings = () => {
@@ -6377,7 +6377,7 @@ if (
     for (const panelId of openPanelIds) {
       const def = panelRegistry.get(panelId) as any;
       if (def?.source?.kind !== "extension") continue;
-      void extensionPanelBridge.activateView(panelId);
+      void extensionPanelBridge.activateView(panelId).catch(() => {});
     }
   };
 
@@ -8401,7 +8401,7 @@ if (
       "debugShowSystemNotification",
       t("command.debugShowSystemNotification"),
       () => {
-        void notify({ title: "Formula", body: "This is a test system notification." });
+        void notify({ title: "Formula", body: "This is a test system notification." }).catch(() => {});
       },
       { category: t("commandCategory.debug") },
     );

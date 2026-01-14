@@ -88,7 +88,7 @@ export class ExtensionPanelBridge {
       }
     }
 
-    void this.activateView(id);
+    void this.activateView(id).catch(() => {});
   }
 
   disconnect(panelId: string, iframe: HTMLIFrameElement): void {
@@ -218,4 +218,3 @@ export class ExtensionPanelBridge {
     }
   };
 }
-

@@ -908,7 +908,7 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
               ? tWithVars("updater.systemNotificationBodyWithNotesUnknownVersion", { appName, notes: body })
               : tWithVars("updater.systemNotificationBodyGeneric", { appName });
 
-      void notify({ title: t("updater.updateAvailableTitle"), body: message });
+      void notify({ title: t("updater.updateAvailableTitle"), body: message }).catch(() => {});
     }
   }
 

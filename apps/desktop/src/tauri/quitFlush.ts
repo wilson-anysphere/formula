@@ -14,7 +14,11 @@ function nextMicrotask(): Promise<void> {
     }
     // Extremely old JS runtimes may not provide `queueMicrotask`; fall back to a
     // resolved promise turn.
-    void Promise.resolve().then(resolve);
+    void Promise.resolve()
+      .then(resolve)
+      .catch(() => {
+        // Best-effort: avoid unhandled rejections if the microtask callback throws.
+      });
   });
 }
 
