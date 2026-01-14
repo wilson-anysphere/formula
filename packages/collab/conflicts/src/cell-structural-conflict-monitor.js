@@ -62,6 +62,9 @@ export class CellStructuralConflictMonitor {
    *   Pruning is conservative: records are not deleted in the same op-log
    *   transaction they are added, so late-arriving/offline records have a chance
    *   to be ingested by other clients before being removed.
+   *
+   *   Pruning is incremental: very large logs may take multiple passes to fully
+   *   clean up.
    *   Defaults to null (disabled).
    */
   constructor(opts) {
