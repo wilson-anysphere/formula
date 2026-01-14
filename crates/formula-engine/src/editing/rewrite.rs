@@ -190,6 +190,35 @@ pub fn rewrite_formula_for_sheet_delete(
     })
 }
 
+/// Rewrite sheet references inside `formula` when a sheet is deleted, supporting both the sheet's
+/// stable key and its user-visible display name.
+///
+/// The engine has two naming schemes for worksheets:
+/// - **Stable sheet keys** (host-provided identifiers, used by engine APIs)
+/// - **Display names** (Excel-like tab names, used in formulas)
+///
+/// Both forms can appear in persisted formula text (e.g. for backward compatibility or to keep
+/// references stable across display-name renames). When deleting a sheet we must rewrite *either*
+/// spelling, and we must also handle mixed 3D span boundaries like `Sheet1:sheet3_key!A1`.
+pub fn rewrite_formula_for_sheet_delete_with_aliases(
+    formula: &str,
+    cell_origin: CellAddr,
+    deleted_sheet_key: &str,
+    deleted_sheet_display_name: &str,
+    sheet_order_keys: &[String],
+    sheet_order_display_names: &[String],
+) -> (String, bool) {
+    rewrite_formula_via_ast(formula, cell_origin, |expr| {
+        rewrite_expr_for_sheet_delete_with_aliases(
+            expr,
+            deleted_sheet_key,
+            deleted_sheet_display_name,
+            sheet_order_keys,
+            sheet_order_display_names,
+        )
+    })
+}
+
 fn rewrite_formula_via_ast<F>(formula: &str, cell_origin: CellAddr, f: F) -> (String, bool)
 where
     F: FnOnce(&Expr) -> (Expr, bool),
@@ -514,6 +543,12 @@ enum DeleteSheetRefRewrite {
     Invalidate,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SheetNameForm {
+    Key,
+    Display,
+}
+
 fn rewrite_sheet_ref_for_delete(
     sheet: &SheetRef,
     deleted_sheet: &str,
@@ -585,6 +620,127 @@ fn rewrite_sheet_ref_for_delete(
     }
 }
 
+fn sheet_index_in_order_dual(
+    sheet_order_keys: &[String],
+    sheet_order_display_names: &[String],
+    name: &str,
+) -> Option<(usize, SheetNameForm)> {
+    if let Some(idx) = sheet_order_keys
+        .iter()
+        .position(|sheet_name| sheet_name_eq_case_insensitive(sheet_name, name))
+    {
+        return Some((idx, SheetNameForm::Key));
+    }
+    sheet_order_display_names
+        .iter()
+        .position(|sheet_name| sheet_name_eq_case_insensitive(sheet_name, name))
+        .map(|idx| (idx, SheetNameForm::Display))
+}
+
+fn rewrite_sheet_ref_for_delete_with_aliases(
+    sheet: &SheetRef,
+    deleted_sheet_key: &str,
+    deleted_sheet_display_name: &str,
+    sheet_order_keys: &[String],
+    sheet_order_display_names: &[String],
+) -> DeleteSheetRefRewrite {
+    let matches_deleted = |name: &str| {
+        sheet_name_eq_case_insensitive(name, deleted_sheet_key)
+            || sheet_name_eq_case_insensitive(name, deleted_sheet_display_name)
+    };
+
+    match sheet {
+        SheetRef::Sheet(name) => {
+            if matches_deleted(name) {
+                DeleteSheetRefRewrite::Invalidate
+            } else {
+                DeleteSheetRefRewrite::Unchanged
+            }
+        }
+        SheetRef::SheetRange { start, end } => {
+            let start_matches = matches_deleted(start);
+            let end_matches = matches_deleted(end);
+            if !start_matches && !end_matches {
+                return DeleteSheetRefRewrite::Unchanged;
+            }
+
+            let Some((start_idx, start_form)) =
+                sheet_index_in_order_dual(sheet_order_keys, sheet_order_display_names, start)
+            else {
+                return DeleteSheetRefRewrite::Invalidate;
+            };
+            let Some((end_idx, end_form)) =
+                sheet_index_in_order_dual(sheet_order_keys, sheet_order_display_names, end)
+            else {
+                return DeleteSheetRefRewrite::Invalidate;
+            };
+
+            // The span references only a single sheet (and that sheet is being deleted).
+            if start_idx == end_idx {
+                return DeleteSheetRefRewrite::Invalidate;
+            }
+
+            let dir: isize = if end_idx > start_idx { 1 } else { -1 };
+            let mut new_start_idx = start_idx as isize;
+            let mut new_end_idx = end_idx as isize;
+
+            // When deleting a 3D boundary, Excel shifts it one sheet toward the other boundary.
+            if start_matches {
+                new_start_idx += dir;
+            }
+            if end_matches {
+                new_end_idx -= dir;
+            }
+
+            let len = sheet_order_keys.len() as isize;
+            if new_start_idx < 0 || new_start_idx >= len || new_end_idx < 0 || new_end_idx >= len {
+                return DeleteSheetRefRewrite::Invalidate;
+            }
+
+            let new_start_idx_usize: usize = new_start_idx as usize;
+            let new_end_idx_usize: usize = new_end_idx as usize;
+
+            let choose_name = |idx: usize, form: SheetNameForm| -> Option<String> {
+                match form {
+                    SheetNameForm::Key => sheet_order_keys.get(idx).cloned(),
+                    SheetNameForm::Display => sheet_order_display_names.get(idx).cloned(),
+                }
+            };
+
+            let Some(new_start) = (if start_matches {
+                choose_name(new_start_idx_usize, start_form)
+            } else {
+                Some(start.clone())
+            }) else {
+                return DeleteSheetRefRewrite::Invalidate;
+            };
+            let Some(new_end) = (if end_matches {
+                choose_name(new_end_idx_usize, end_form)
+            } else {
+                Some(end.clone())
+            }) else {
+                return DeleteSheetRefRewrite::Invalidate;
+            };
+
+            // If the rewritten boundaries refer to the same sheet (even if they use different naming
+            // schemes), collapse to a single-sheet prefix.
+            if new_start_idx_usize == new_end_idx_usize {
+                let name = if start_matches {
+                    new_start
+                } else {
+                    new_end
+                };
+                return DeleteSheetRefRewrite::Adjusted(SheetRef::Sheet(name));
+            }
+
+            DeleteSheetRefRewrite::Adjusted(SheetRef::SheetRange {
+                start: new_start,
+                end: new_end,
+            })
+        }
+    }
+}
+
 fn rewrite_cell_ref_for_sheet_delete(
     r: &AstCellRef,
     deleted_sheet: &str,
@@ -598,6 +754,37 @@ fn rewrite_cell_ref_for_sheet_delete(
     };
 
     match rewrite_sheet_ref_for_delete(sheet_ref, deleted_sheet, sheet_order) {
+        DeleteSheetRefRewrite::Unchanged => (expr_ref(r.clone()), false),
+        DeleteSheetRefRewrite::Adjusted(new_sheet) => {
+            let mut out = r.clone();
+            out.sheet = Some(new_sheet);
+            (expr_ref(out), true)
+        }
+        DeleteSheetRefRewrite::Invalidate => (Expr::Error(REF_ERROR.to_string()), true),
+    }
+}
+
+fn rewrite_cell_ref_for_sheet_delete_with_aliases(
+    r: &AstCellRef,
+    deleted_sheet_key: &str,
+    deleted_sheet_display_name: &str,
+    sheet_order_keys: &[String],
+    sheet_order_display_names: &[String],
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (expr_ref(r.clone()), false);
+    }
+    let Some(sheet_ref) = r.sheet.as_ref() else {
+        return (expr_ref(r.clone()), false);
+    };
+
+    match rewrite_sheet_ref_for_delete_with_aliases(
+        sheet_ref,
+        deleted_sheet_key,
+        deleted_sheet_display_name,
+        sheet_order_keys,
+        sheet_order_display_names,
+    ) {
         DeleteSheetRefRewrite::Unchanged => (expr_ref(r.clone()), false),
         DeleteSheetRefRewrite::Adjusted(new_sheet) => {
             let mut out = r.clone();
@@ -631,6 +818,37 @@ fn rewrite_row_ref_for_sheet_delete(
     }
 }
 
+fn rewrite_row_ref_for_sheet_delete_with_aliases(
+    r: &AstRowRef,
+    deleted_sheet_key: &str,
+    deleted_sheet_display_name: &str,
+    sheet_order_keys: &[String],
+    sheet_order_display_names: &[String],
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::RowRef(r.clone()), false);
+    }
+    let Some(sheet_ref) = r.sheet.as_ref() else {
+        return (Expr::RowRef(r.clone()), false);
+    };
+
+    match rewrite_sheet_ref_for_delete_with_aliases(
+        sheet_ref,
+        deleted_sheet_key,
+        deleted_sheet_display_name,
+        sheet_order_keys,
+        sheet_order_display_names,
+    ) {
+        DeleteSheetRefRewrite::Unchanged => (Expr::RowRef(r.clone()), false),
+        DeleteSheetRefRewrite::Adjusted(new_sheet) => {
+            let mut out = r.clone();
+            out.sheet = Some(new_sheet);
+            (Expr::RowRef(out), true)
+        }
+        DeleteSheetRefRewrite::Invalidate => (Expr::Error(REF_ERROR.to_string()), true),
+    }
+}
+
 fn rewrite_col_ref_for_sheet_delete(
     r: &AstColRef,
     deleted_sheet: &str,
@@ -644,6 +862,37 @@ fn rewrite_col_ref_for_sheet_delete(
     };
 
     match rewrite_sheet_ref_for_delete(sheet_ref, deleted_sheet, sheet_order) {
+        DeleteSheetRefRewrite::Unchanged => (Expr::ColRef(r.clone()), false),
+        DeleteSheetRefRewrite::Adjusted(new_sheet) => {
+            let mut out = r.clone();
+            out.sheet = Some(new_sheet);
+            (Expr::ColRef(out), true)
+        }
+        DeleteSheetRefRewrite::Invalidate => (Expr::Error(REF_ERROR.to_string()), true),
+    }
+}
+
+fn rewrite_col_ref_for_sheet_delete_with_aliases(
+    r: &AstColRef,
+    deleted_sheet_key: &str,
+    deleted_sheet_display_name: &str,
+    sheet_order_keys: &[String],
+    sheet_order_display_names: &[String],
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::ColRef(r.clone()), false);
+    }
+    let Some(sheet_ref) = r.sheet.as_ref() else {
+        return (Expr::ColRef(r.clone()), false);
+    };
+
+    match rewrite_sheet_ref_for_delete_with_aliases(
+        sheet_ref,
+        deleted_sheet_key,
+        deleted_sheet_display_name,
+        sheet_order_keys,
+        sheet_order_display_names,
+    ) {
         DeleteSheetRefRewrite::Unchanged => (Expr::ColRef(r.clone()), false),
         DeleteSheetRefRewrite::Adjusted(new_sheet) => {
             let mut out = r.clone();
@@ -677,6 +926,37 @@ fn rewrite_name_ref_for_sheet_delete(
     }
 }
 
+fn rewrite_name_ref_for_sheet_delete_with_aliases(
+    r: &crate::NameRef,
+    deleted_sheet_key: &str,
+    deleted_sheet_display_name: &str,
+    sheet_order_keys: &[String],
+    sheet_order_display_names: &[String],
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::NameRef(r.clone()), false);
+    }
+    let Some(sheet_ref) = r.sheet.as_ref() else {
+        return (Expr::NameRef(r.clone()), false);
+    };
+
+    match rewrite_sheet_ref_for_delete_with_aliases(
+        sheet_ref,
+        deleted_sheet_key,
+        deleted_sheet_display_name,
+        sheet_order_keys,
+        sheet_order_display_names,
+    ) {
+        DeleteSheetRefRewrite::Unchanged => (Expr::NameRef(r.clone()), false),
+        DeleteSheetRefRewrite::Adjusted(new_sheet) => {
+            let mut out = r.clone();
+            out.sheet = Some(new_sheet);
+            (Expr::NameRef(out), true)
+        }
+        DeleteSheetRefRewrite::Invalidate => (Expr::Error(REF_ERROR.to_string()), true),
+    }
+}
+
 fn rewrite_structured_ref_for_sheet_delete(
     r: &crate::StructuredRef,
     deleted_sheet: &str,
@@ -690,6 +970,37 @@ fn rewrite_structured_ref_for_sheet_delete(
     };
 
     match rewrite_sheet_ref_for_delete(sheet_ref, deleted_sheet, sheet_order) {
+        DeleteSheetRefRewrite::Unchanged => (Expr::StructuredRef(r.clone()), false),
+        DeleteSheetRefRewrite::Adjusted(new_sheet) => {
+            let mut out = r.clone();
+            out.sheet = Some(new_sheet);
+            (Expr::StructuredRef(out), true)
+        }
+        DeleteSheetRefRewrite::Invalidate => (Expr::Error(REF_ERROR.to_string()), true),
+    }
+}
+
+fn rewrite_structured_ref_for_sheet_delete_with_aliases(
+    r: &crate::StructuredRef,
+    deleted_sheet_key: &str,
+    deleted_sheet_display_name: &str,
+    sheet_order_keys: &[String],
+    sheet_order_display_names: &[String],
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::StructuredRef(r.clone()), false);
+    }
+    let Some(sheet_ref) = r.sheet.as_ref() else {
+        return (Expr::StructuredRef(r.clone()), false);
+    };
+
+    match rewrite_sheet_ref_for_delete_with_aliases(
+        sheet_ref,
+        deleted_sheet_key,
+        deleted_sheet_display_name,
+        sheet_order_keys,
+        sheet_order_display_names,
+    ) {
         DeleteSheetRefRewrite::Unchanged => (Expr::StructuredRef(r.clone()), false),
         DeleteSheetRefRewrite::Adjusted(new_sheet) => {
             let mut out = r.clone();
@@ -750,6 +1061,111 @@ fn rewrite_expr_for_sheet_delete(
         }
         _ => rewrite_expr_children(expr, |child| {
             rewrite_expr_for_sheet_delete(child, deleted_sheet, sheet_order)
+        }),
+    }
+}
+
+fn rewrite_expr_for_sheet_delete_with_aliases(
+    expr: &Expr,
+    deleted_sheet_key: &str,
+    deleted_sheet_display_name: &str,
+    sheet_order_keys: &[String],
+    sheet_order_display_names: &[String],
+) -> (Expr, bool) {
+    match expr {
+        Expr::FieldAccess(access) => {
+            let (base, changed) = rewrite_expr_for_sheet_delete_with_aliases(
+                access.base.as_ref(),
+                deleted_sheet_key,
+                deleted_sheet_display_name,
+                sheet_order_keys,
+                sheet_order_display_names,
+            );
+            if !changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::FieldAccess(FieldAccessExpr {
+                    base: Box::new(base),
+                    field: access.field.clone(),
+                }),
+                true,
+            )
+        }
+        Expr::CellRef(r) => rewrite_cell_ref_for_sheet_delete_with_aliases(
+            r,
+            deleted_sheet_key,
+            deleted_sheet_display_name,
+            sheet_order_keys,
+            sheet_order_display_names,
+        ),
+        Expr::RowRef(r) => rewrite_row_ref_for_sheet_delete_with_aliases(
+            r,
+            deleted_sheet_key,
+            deleted_sheet_display_name,
+            sheet_order_keys,
+            sheet_order_display_names,
+        ),
+        Expr::ColRef(r) => rewrite_col_ref_for_sheet_delete_with_aliases(
+            r,
+            deleted_sheet_key,
+            deleted_sheet_display_name,
+            sheet_order_keys,
+            sheet_order_display_names,
+        ),
+        Expr::NameRef(r) => rewrite_name_ref_for_sheet_delete_with_aliases(
+            r,
+            deleted_sheet_key,
+            deleted_sheet_display_name,
+            sheet_order_keys,
+            sheet_order_display_names,
+        ),
+        Expr::StructuredRef(r) => rewrite_structured_ref_for_sheet_delete_with_aliases(
+            r,
+            deleted_sheet_key,
+            deleted_sheet_display_name,
+            sheet_order_keys,
+            sheet_order_display_names,
+        ),
+        Expr::Binary(b) if b.op == BinaryOp::Range => {
+            let (left, left_changed) = rewrite_expr_for_sheet_delete_with_aliases(
+                &b.left,
+                deleted_sheet_key,
+                deleted_sheet_display_name,
+                sheet_order_keys,
+                sheet_order_display_names,
+            );
+            let (right, right_changed) = rewrite_expr_for_sheet_delete_with_aliases(
+                &b.right,
+                deleted_sheet_key,
+                deleted_sheet_display_name,
+                sheet_order_keys,
+                sheet_order_display_names,
+            );
+
+            if matches!(left, Expr::Error(_)) || matches!(right, Expr::Error(_)) {
+                return (Expr::Error(REF_ERROR.to_string()), true);
+            }
+            if !left_changed && !right_changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::Binary(BinaryExpr {
+                    op: b.op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }),
+                true,
+            )
+        }
+        _ => rewrite_expr_children(expr, |child| {
+            rewrite_expr_for_sheet_delete_with_aliases(
+                child,
+                deleted_sheet_key,
+                deleted_sheet_display_name,
+                sheet_order_keys,
+                sheet_order_display_names,
+            )
         }),
     }
 }

@@ -183,6 +183,67 @@ fn delete_sheet_adjusts_3d_boundaries_when_display_name_differs_from_stable_key(
 }
 
 #[test]
+fn delete_sheet_adjusts_mixed_3d_boundaries_with_stable_keys_and_display_names() {
+    let mut engine = Engine::new();
+
+    for (key, display) in [
+        ("sheet1_key", "Sheet1"),
+        ("sheet2_key", "Sheet2"),
+        ("sheet3_key", "Sheet3"),
+    ] {
+        engine.ensure_sheet(key);
+        engine.set_sheet_display_name(key, display);
+    }
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    // Mixed 3D span boundaries: start uses display name, end uses stable key.
+    engine
+        .set_cell_formula("Sheet2", "B1", "=SUM(Sheet1:sheet3_key!A1)")
+        .unwrap();
+    // Mixed 3D span boundaries: start uses stable key, end uses display name.
+    engine
+        .set_cell_formula("Sheet2", "B2", "=SUM(sheet1_key:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "B1"), Value::Number(6.0));
+    assert_eq!(engine.get_cell_value("Sheet2", "B2"), Value::Number(6.0));
+
+    engine.delete_sheet("Sheet1").unwrap();
+    assert_eq!(
+        engine.get_cell_formula("Sheet2", "B1"),
+        Some("=SUM(Sheet2:sheet3_key!A1)")
+    );
+    assert_eq!(
+        engine.get_cell_formula("Sheet2", "B2"),
+        Some("=SUM(sheet2_key:Sheet3!A1)")
+    );
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "B1"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet2", "B2"), Value::Number(5.0));
+}
+
+#[test]
+fn delete_sheet_rewrites_references_that_mix_stable_key_and_display_name_spellings() {
+    let mut engine = Engine::new();
+
+    engine.ensure_sheet("sheet1_key");
+    engine.ensure_sheet("sheet2_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
+    engine.set_sheet_display_name("sheet2_key", "Sheet2");
+
+    engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=sheet1_key!A1+Sheet1!A1")
+        .unwrap();
+
+    engine.delete_sheet("Sheet1").unwrap();
+    assert_eq!(engine.get_cell_formula("Sheet2", "A1"), Some("=#REF!+#REF!"));
+}
+
+#[test]
 fn rename_sheet_rewrites_table_column_formulas_but_not_external_refs() {
     let mut engine = Engine::new();
     engine.ensure_sheet("Sheet1");
@@ -281,11 +342,11 @@ fn delete_sheet_invalidates_table_column_formulas_but_not_external_refs() {
 
     assert_eq!(
         table.columns[0].formula.as_deref(),
-        Some("#REF!+'[Book.xlsx]Sheet1'!A1")
+        Some("#REF!+[Book.xlsx]Sheet1!A1")
     );
     assert_eq!(
         table.columns[0].totals_formula.as_deref(),
-        Some("#REF!+'[Book.xlsx]Sheet1'!A1")
+        Some("#REF!+[Book.xlsx]Sheet1!A1")
     );
 }
 
