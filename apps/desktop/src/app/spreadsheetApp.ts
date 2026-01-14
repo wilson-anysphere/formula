@@ -7594,7 +7594,10 @@ export class SpreadsheetApp {
       if (numericCount === 0) {
         summary.textContent = "No numeric values";
       } else {
-        summary.textContent = `Sum: ${sum} · Count: ${numericCount}`;
+        const formatter =
+          this.selectionStatsFormatter ??
+          (this.selectionStatsFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }));
+        summary.textContent = `Sum: ${formatter.format(sum)} · Count: ${formatter.format(numericCount)}`;
       }
     }
 
