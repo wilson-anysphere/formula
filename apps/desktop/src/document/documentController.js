@@ -6511,6 +6511,35 @@ export class DocumentController {
     })();
 
     const parseBytes = (value) => {
+      // Some interop layers wrap byte payloads as singleton arrays or objects with numeric keys
+      // (e.g. `{0: [1,2,3]}` or `{0: "AQID"}`). Be careful to *not* unwrap legitimate byte
+      // objects where `"0"` is a real byte index (including 1-byte payloads like `{0: 255}`).
+      let unwrapped = value;
+      for (let depth = 0; depth < 4; depth++) {
+        // Only unwrap singleton arrays when the wrapped payload is not a number, so `[255]`
+        // (valid 1-byte arrays) remains intact.
+        if (Array.isArray(unwrapped) && unwrapped.length === 1 && typeof unwrapped[0] !== "number") {
+          unwrapped = unwrapped[0];
+          continue;
+        }
+        if (
+          unwrapped &&
+          typeof unwrapped === "object" &&
+          !Array.isArray(unwrapped) &&
+          Object.keys(unwrapped).length === 1 &&
+          Object.prototype.hasOwnProperty.call(unwrapped, "0") &&
+          unwrapped[0] != null &&
+          typeof unwrapped[0] !== "number"
+        ) {
+          // Using numeric property access (`unwrapped[0]`) is intentional: JS coerces it to `"0"`,
+          // which matches JSON-parsed keys and wasm-bindgen tuple objects.
+          unwrapped = unwrapped[0];
+          continue;
+        }
+        break;
+      }
+      value = unwrapped;
+
       if (value instanceof Uint8Array) {
         if (value.byteLength > MAX_IMAGE_BYTES) return null;
         return value.slice();
