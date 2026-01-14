@@ -564,7 +564,7 @@ checks for a complete ARM64 MSVC + SDK toolchain:
 If any of these are missing, CI installs the MSVC ARM64 component via `vs_installer.exe` and fails
 with a clear error if the runner image still lacks the required ARM64 SDK libraries. If the Windows
 SDK ARM64 libs are missing, CI also attempts to install the matching `Windows10SDK.*` component via
-`vs_installer.exe` before failing.
+`vs_installer.exe` before failing (tries both `Windows10SDK.*` and `Windows11SDK.*` component IDs).
 
 CI smoke test:
 

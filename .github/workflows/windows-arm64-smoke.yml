@@ -177,20 +177,36 @@ jobs:
               $sdkBuild = "20348"
             }
 
-            $sdkComponent = "Microsoft.VisualStudio.Component.Windows10SDK.$sdkBuild"
-            Write-Host "Windows SDK ARM64 libs not found; installing Visual Studio component $sdkComponent"
+            $sdkComponents = @(
+              "Microsoft.VisualStudio.Component.Windows10SDK.$sdkBuild",
+              "Microsoft.VisualStudio.Component.Windows11SDK.$sdkBuild"
+            ) | Select-Object -Unique
+            Write-Host "Windows SDK ARM64 libs not found; attempting to install one of:"
+            $sdkComponents | ForEach-Object { Write-Host "  - $_" }
             $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
             if (!(Test-Path $vsInstaller)) {
               throw "Visual Studio installer not found at $vsInstaller"
             }
-            & $vsInstaller modify --installPath $installPath --add $sdkComponent --includeRecommended --passive --norestart
-            $exitCode = $LASTEXITCODE
-            # 3010 is a common "success, reboot required" code for Windows installers.
-            if ($exitCode -ne 0 -and $exitCode -ne 3010) {
-              throw "vs_installer.exe failed with exit code $exitCode while installing Windows SDK component $sdkComponent."
+            $installErrors = @()
+            foreach ($sdkComponent in $sdkComponents) {
+              Write-Host "Installing Windows SDK component: $sdkComponent"
+              & $vsInstaller modify --installPath $installPath --add $sdkComponent --includeRecommended --passive --norestart
+              $exitCode = $LASTEXITCODE
+              # 3010 is a common "success, reboot required" code for Windows installers.
+              if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+                $installErrors += "$sdkComponent (exit code $exitCode)"
+                continue
+              }
+              $sdkInfo = Find-SdkArm64 $sdkLibRoot
+              if ($sdkInfo.VersionDir) {
+                break
+              }
             }
 
-            $sdkInfo = Find-SdkArm64 $sdkLibRoot
+            if (-not $sdkInfo.VersionDir -and $installErrors.Count -gt 0) {
+              Write-Host "Windows SDK component install attempts failed:"
+              $installErrors | ForEach-Object { Write-Host "  - $_" }
+            }
           }
 
           if (-not $sdkInfo.VersionDir) {
