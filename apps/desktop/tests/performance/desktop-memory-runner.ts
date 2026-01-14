@@ -505,12 +505,14 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
 
 function printSummary(summary: Summary): void {
   const status = summary.rssMb.p95 <= summary.rssMb.targetMb ? "PASS" : "FAIL";
+  const measurement = process.platform === "win32" ? "working_set" : "rss";
   // eslint-disable-next-line no-console
   console.log(
     [
       "[desktop-memory]",
       `runs=${summary.runs}`,
       `idleRssMb(${status} p50=${summary.rssMb.p50.toFixed(1)}MB,p95=${summary.rssMb.p95.toFixed(1)}MB,target=${summary.rssMb.targetMb}MB)`,
+      `kind=${measurement}`,
       summary.enforce ? "enforced=1" : "enforced=0",
     ].join(" "),
   );
@@ -581,6 +583,7 @@ async function main(): Promise<void> {
   if (jsonPath) {
     const outputPath = resolve(jsonPath);
     mkdirSync(dirname(outputPath), { recursive: true });
+    const measurement = process.platform === "win32" ? "working_set" : "rss";
     writeFileSync(
       outputPath,
       JSON.stringify(
@@ -589,7 +592,7 @@ async function main(): Promise<void> {
           platform: process.platform,
           // On Windows we record process-tree Working Set (not true RSS). On Unix we record RSS.
           // Keeping this explicit in the JSON helps cross-platform comparisons.
-          measurement: process.platform === "win32" ? "working_set" : "rss",
+          measurement,
           binPath,
           runs: results.length,
           settleMs,
