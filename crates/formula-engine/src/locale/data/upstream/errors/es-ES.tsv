@@ -1,9 +1,10 @@
 # Canonical	Localized
-# Source: Curated from Microsoft Excel (es-ES) error literal spellings.
+# Source: Extracted from Microsoft Excel via COM automation (tools/excel-oracle/extract-error-literals.ps1).
+# Excel UI locale: es-ES
 #
 # Note: Spanish Excel error literals can use leading inverted punctuation (e.g. `#¡VALOR!`,
-# `#¿NOMBRE?`). The formula engine's lexer supports these spellings, and `src/locale/registry.rs`
-# maps them for localized formula round-tripping.
+# `#¡DESBORDAMIENTO!`, `#¿NOMBRE?`). The formula engine's lexer supports these spellings, and
+# `src/locale/registry.rs` maps them for localized formula round-tripping.
 #NULL!	#NULL!
 #DIV/0!	#DIV/0!
 #VALUE!	#¡VALOR!
@@ -12,7 +13,7 @@
 #NUM!	#NUM!
 #N/A	#N/A
 #GETTING_DATA	#OBTENIENDO_DATOS
-#SPILL!	#SPILL!
+#SPILL!	#¡DESBORDAMIENTO!
 #CALC!	#CALC!
 #FIELD!	#FIELD!
 #CONNECT!	#CONNECT!

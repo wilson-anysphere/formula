@@ -1,15 +1,17 @@
 # Canonical	Localized
-# Source: Curated from Microsoft Excel (de-DE) error literal spellings.
+# Source: Extracted from Microsoft Excel via COM automation (tools/excel-oracle/extract-error-literals.ps1).
+# Excel UI locale: de-DE
+#
 #NULL!	#NULL!
 #DIV/0!	#DIV/0!
 #VALUE!	#WERT!
 #REF!	#BEZUG!
 #NAME?	#NAME?
-#NUM!	#NUM!
-#N/A	#N/A
+#NUM!	#ZAHL!
+#N/A	#NV
 #GETTING_DATA	#DATEN_ABRUFEN
 #SPILL!	#ÜBERLAUF!
-#CALC!	#CALC!
+#CALC!	#KALK!
 #FIELD!	#FIELD!
 #CONNECT!	#CONNECT!
 #BLOCKED!	#BLOCKED!

@@ -2,15 +2,15 @@
 # See `src/locale/data/README.md` for format + generators.
 
 #BLOCKED!	#BLOCKED!
-#CALC!	#CALC!
+#CALC!	#KALK!
 #CONNECT!	#CONNECT!
 #DIV/0!	#DIV/0!
 #FIELD!	#FIELD!
 #GETTING_DATA	#DATEN_ABRUFEN
-#N/A	#N/A
+#N/A	#NV
 #NAME?	#NAME?
 #NULL!	#NULL!
-#NUM!	#NUM!
+#NUM!	#ZAHL!
 #REF!	#BEZUG!
 #SPILL!	#ÜBERLAUF!
 #UNKNOWN!	#UNKNOWN!

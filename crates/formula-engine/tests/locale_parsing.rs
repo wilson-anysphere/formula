@@ -709,16 +709,31 @@ fn canonicalize_and_localize_error_literals() {
         de
     );
 
+    let de_num = "=#ZAHL!";
+    let canon = locale::canonicalize_formula(de_num, &locale::DE_DE).unwrap();
+    assert_eq!(canon, "=#NUM!");
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
+        de_num
+    );
+
+    let de_na = "=#NV";
+    let canon = locale::canonicalize_formula(de_na, &locale::DE_DE).unwrap();
+    assert_eq!(canon, "=#N/A");
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
+        de_na
+    );
+
     // Canonicalization should normalize error spelling/casing to the engine's canonical codes.
     assert_eq!(
         locale::canonicalize_formula("=#n/a!", &locale::EN_US).unwrap(),
         "=#N/A"
     );
     // Localization should defensively normalize non-canonical inputs before mapping.
-    // de-DE currently keeps #N/A in canonical form (no localized mapping).
     assert_eq!(
         locale::localize_formula("=#n/a!", &locale::DE_DE).unwrap(),
-        "=#N/A"
+        "=#NV"
     );
 
     // Non-ASCII localized errors should be translated using Unicode-aware case folding.
@@ -741,6 +756,22 @@ fn canonicalize_and_localize_error_literals() {
         fr
     );
 
+    let fr_num = "=#NOMBRE!";
+    let canon = locale::canonicalize_formula(fr_num, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=#NUM!");
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
+        fr_num
+    );
+
+    let fr_spill = "=#DEVERSEMENT!";
+    let canon = locale::canonicalize_formula(fr_spill, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=#SPILL!");
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
+        fr_spill
+    );
+
     // Spanish (Spain) uses leading inverted punctuation.
     let es_value_variants = ["=#¡VALOR!", "=#¡valor!", "=#¡VaLoR!"];
     for src in es_value_variants {
@@ -759,6 +790,20 @@ fn canonicalize_and_localize_error_literals() {
         assert_eq!(
             locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
             "=#¿NOMBRE?"
+        );
+    }
+
+    let es_spill_variants = [
+        "=#¡DESBORDAMIENTO!",
+        "=#¡desbordamiento!",
+        "=#¡DeSbOrDaMiEnTo!",
+    ];
+    for src in es_spill_variants {
+        let canon = locale::canonicalize_formula(src, &locale::ES_ES).unwrap();
+        assert_eq!(canon, "=#SPILL!");
+        assert_eq!(
+            locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
+            "=#¡DESBORDAMIENTO!"
         );
     }
 }
