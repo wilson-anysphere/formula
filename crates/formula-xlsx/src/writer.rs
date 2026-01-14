@@ -663,7 +663,7 @@ mod sheet_format_pr_tests {
     fn renders_expected_attributes_with_trimmed_floats() {
         let mut sheet = Worksheet::new(1, "Sheet1");
         sheet.base_col_width = Some(8);
-        sheet.default_col_width = Some(8.5);
+        sheet.default_col_width = Some(8.43);
         sheet.default_row_height = Some(15.0);
 
         let xml = sheet_format_pr_xml(&sheet);
@@ -671,7 +671,7 @@ mod sheet_format_pr_tests {
         let node = doc.root_element();
         assert_eq!(node.tag_name().name(), "sheetFormatPr");
         assert_eq!(node.attribute("baseColWidth"), Some("8"));
-        assert_eq!(node.attribute("defaultColWidth"), Some("8.5"));
+        assert_eq!(node.attribute("defaultColWidth"), Some("8.43"));
         assert_eq!(node.attribute("defaultRowHeight"), Some("15"));
     }
 
