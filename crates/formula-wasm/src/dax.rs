@@ -5,8 +5,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use formula_dax::{
-    pivot, Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext,
-    GroupByColumn, PivotMeasure, Relationship, RowContext, Table, Value,
+    pivot, pivot_crosstab, Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError,
+    FilterContext, GroupByColumn, PivotMeasure, Relationship, RowContext, Table, Value,
 };
 
 fn js_error(message: impl AsRef<str>) -> JsValue {
@@ -162,7 +162,9 @@ impl DaxModel {
             to_table: dto.to_table,
             to_column: dto.to_column,
             cardinality: cardinality_from_js(dto.cardinality.as_deref())?,
-            cross_filter_direction: cross_filter_direction_from_js(dto.cross_filter_direction.as_deref())?,
+            cross_filter_direction: cross_filter_direction_from_js(
+                dto.cross_filter_direction.as_deref(),
+            )?,
             is_active: dto.is_active.unwrap_or(true),
             enforce_referential_integrity: dto.enforce_referential_integrity.unwrap_or(true),
         };
@@ -296,7 +298,7 @@ impl DaxFilterContext {
 }
 
 // -----------------------------------------------------------------------------
-// Compatibility: a minimal pivot-only API added in an earlier iteration.
+// Compatibility: a minimal serde-friendly pivot API added in an earlier iteration.
 // -----------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Deserialize)]
@@ -329,6 +331,20 @@ pub struct PivotRequestDto {
 pub struct PivotResultDto {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<JsonValue>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotCrosstabRequestDto {
+    pub base_table: String,
+    pub row_fields: Vec<GroupByColumnDto>,
+    pub column_fields: Vec<GroupByColumnDto>,
+    pub measures: Vec<MeasureDto>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct PivotGridDto {
+    pub data: Vec<Vec<JsonValue>>,
 }
 
 fn json_scalar_to_dax_value(value: &JsonValue) -> Result<Value, JsValue> {
@@ -401,6 +417,47 @@ impl WasmDaxDataModel {
             .map_err(|err| super::js_err(err.to_string()))
     }
 
+    #[wasm_bindgen(js_name = "insertRow")]
+    pub fn insert_row(&mut self, table: String, row: JsValue) -> Result<(), JsValue> {
+        let row: Vec<JsonValue> =
+            serde_wasm_bindgen::from_value(row).map_err(|err| super::js_err(err.to_string()))?;
+
+        let mut values = Vec::with_capacity(row.len());
+        for cell in row {
+            values.push(json_scalar_to_dax_value(&cell)?);
+        }
+
+        self.inner
+            .insert_row(&table, values)
+            .map_err(|err| super::js_err(err.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = "addRelationship")]
+    pub fn add_relationship(&mut self, relationship: JsValue) -> Result<(), JsValue> {
+        let dto: RelationshipDto = serde_wasm_bindgen::from_value(relationship)
+            .map_err(|err| super::js_err(err.to_string()))?;
+
+        let relationship = Relationship {
+            name: dto.name,
+            from_table: dto.from_table,
+            from_column: dto.from_column,
+            to_table: dto.to_table,
+            to_column: dto.to_column,
+            cardinality: cardinality_from_js(dto.cardinality.as_deref())?,
+            cross_filter_direction: cross_filter_direction_from_js(
+                dto.cross_filter_direction.as_deref(),
+            )?,
+            is_active: dto.is_active.unwrap_or(true),
+            // Unlike `DaxModel`, default to *not* enforcing referential integrity so fact rows with
+            // missing dimension keys still participate via the virtual blank row.
+            enforce_referential_integrity: dto.enforce_referential_integrity.unwrap_or(false),
+        };
+
+        self.inner
+            .add_relationship(relationship)
+            .map_err(|err| super::js_err(err.to_string()))
+    }
+
     #[wasm_bindgen(js_name = "pivot")]
     pub fn pivot(&self, request: JsValue) -> Result<JsValue, JsValue> {
         let request: PivotRequestDto = serde_wasm_bindgen::from_value(request)
@@ -442,6 +499,74 @@ impl WasmDaxDataModel {
         use serde::ser::Serialize as _;
         out.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
             .map_err(|err| super::js_err(err.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = "pivotCrosstab")]
+    pub fn pivot_crosstab(&self, request: JsValue) -> Result<JsValue, JsValue> {
+        let request: PivotCrosstabRequestDto = serde_wasm_bindgen::from_value(request)
+            .map_err(|err| super::js_err(err.to_string()))?;
+
+        let row_fields: Vec<GroupByColumn> = request
+            .row_fields
+            .into_iter()
+            .map(|col| GroupByColumn::new(col.table, col.column))
+            .collect();
+        let column_fields: Vec<GroupByColumn> = request
+            .column_fields
+            .into_iter()
+            .map(|col| GroupByColumn::new(col.table, col.column))
+            .collect();
+
+        let measures: Vec<PivotMeasure> = request
+            .measures
+            .into_iter()
+            .map(|m| PivotMeasure::new(m.name, m.expression))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| super::js_err(err.to_string()))?;
+
+        let grid = pivot_crosstab(
+            &self.inner,
+            &request.base_table,
+            &row_fields,
+            &column_fields,
+            &measures,
+            &FilterContext::empty(),
+        )
+        .map_err(|err| super::js_err(err.to_string()))?;
+
+        let data = grid
+            .data
+            .into_iter()
+            .map(|row| row.iter().map(dax_value_to_json_scalar).collect())
+            .collect();
+
+        let out = PivotGridDto { data };
+
+        use serde::ser::Serialize as _;
+        out.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|err| super::js_err(err.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dax_value_json_scalar_roundtrip_smoke() {
+        let values = vec![
+            Value::Blank,
+            Value::from(true),
+            Value::from(false),
+            Value::from(42.0),
+            Value::from("Hello"),
+        ];
+
+        for value in values {
+            let json = dax_value_to_json_scalar(&value);
+            let back = json_scalar_to_dax_value(&json).unwrap();
+            assert_eq!(back, value);
+        }
     }
 }
 
