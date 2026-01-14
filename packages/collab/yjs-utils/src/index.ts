@@ -62,6 +62,37 @@ export function isYAbstractType(value: unknown): boolean {
   return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
 }
 
+export type DocTypeConstructors = { Map: new () => any; Array: new () => any; Text: new () => any };
+
+/**
+ * Return constructors for Y.Map/Y.Array/Y.Text that match the module instance used to
+ * create `doc`.
+ *
+ * In pnpm workspaces it is possible to load both the ESM + CJS builds of Yjs in the
+ * same process (for example via y-websocket). Yjs types cannot be moved across module
+ * instances; using constructors derived from the target doc avoids "Unexpected content
+ * type" errors when cloning values into that doc.
+ */
+export function getDocTypeConstructors(doc: unknown): DocTypeConstructors {
+  const DocCtor = (doc as any)?.constructor as (new () => any) | undefined;
+  if (typeof DocCtor !== "function") {
+    return { Map: Y.Map, Array: Y.Array, Text: Y.Text };
+  }
+
+  try {
+    const probe = new DocCtor();
+    const ctors: DocTypeConstructors = {
+      Map: probe.getMap("__ctor_probe_map").constructor,
+      Array: probe.getArray("__ctor_probe_array").constructor,
+      Text: probe.getText("__ctor_probe_text").constructor,
+    };
+    probe.destroy?.();
+    return ctors;
+  } catch {
+    return { Map: Y.Map, Array: Y.Array, Text: Y.Text };
+  }
+}
+
 const patchedItemConstructors = new WeakSet<Function>();
 const patchedContentConstructors = new WeakMap<Function, Function>();
 

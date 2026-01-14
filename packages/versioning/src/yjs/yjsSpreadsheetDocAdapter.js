@@ -1,44 +1,23 @@
 import * as Y from "yjs";
 import { cloneYjsValue } from "./cloneYjsValue.js";
-import { getArrayRoot, getMapRoot, getTextRoot, getYArray, getYMap, getYText, isYAbstractType } from "../../../collab/yjs-utils/src/index.ts";
+import {
+  getArrayRoot,
+  getDocTypeConstructors,
+  getMapRoot,
+  getTextRoot,
+  getYArray,
+  getYMap,
+  getYText,
+  isYAbstractType,
+} from "../../../collab/yjs-utils/src/index.ts";
 
 /**
  * @typedef {{ name: string, kind: "map" | "array" | "text" }} RootTypeSpec
  */
 
 /**
- * @typedef {{ Map: new () => any, Array: new () => any, Text: new () => any }} YjsTypeConstructors
+ * @typedef {import("../../../collab/yjs-utils/src/index.ts").DocTypeConstructors} YjsTypeConstructors
  */
-
-/**
- * Return constructors for Y.Map/Y.Array/Y.Text that match the module instance
- * used to create `doc`.
- *
- * In pnpm workspaces it is possible to load both the ESM + CJS builds of Yjs in
- * the same process (for example via y-websocket). Yjs types cannot be moved
- * across module instances; the safest approach is to clone nested types using
- * constructors from the target doc's module instance.
- *
- * @param {any} doc
- * @returns {YjsTypeConstructors}
- */
-function getDocConstructors(doc) {
-  const DocCtor = /** @type {any} */ (doc)?.constructor;
-  if (typeof DocCtor !== "function") {
-    return { Map: Y.Map, Array: Y.Array, Text: Y.Text };
-  }
-
-  try {
-    const probe = new DocCtor();
-    return {
-      Map: probe.getMap("__ctor_probe_map").constructor,
-      Array: probe.getArray("__ctor_probe_array").constructor,
-      Text: probe.getText("__ctor_probe_text").constructor,
-    };
-  } catch {
-    return { Map: Y.Map, Array: Y.Array, Text: Y.Text };
-  }
-}
 
 /**
  * Returns true if the placeholder contains no visible data (no map entries and
@@ -310,11 +289,11 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
     },
     /**
      * @param {Uint8Array} snapshot
-     */
+      */
     applyState(snapshot) {
       const restored = new Y.Doc();
       Y.applyUpdate(restored, snapshot);
-      const docConstructors = getDocConstructors(doc);
+      const docConstructors = getDocTypeConstructors(doc);
 
       /** @type {Map<string, { kind: RootTypeSpec["kind"], source: string }>} */
       const roots = new Map();

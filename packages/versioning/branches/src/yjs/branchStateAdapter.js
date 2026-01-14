@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import { normalizeCell } from "../cell.js";
 import { normalizeDocumentState } from "../state.js";
 import { a1ToRowCol, rowColToA1 } from "./a1.js";
-import { getArrayRoot, getMapRoot, getYArray, getYMap, getYText, yjsValueToJson } from "../../../../collab/yjs-utils/src/index.ts";
+import { getArrayRoot, getDocTypeConstructors, getMapRoot, getYArray, getYMap, getYText, yjsValueToJson } from "../../../../collab/yjs-utils/src/index.ts";
 
 /**
  * @typedef {import("../types.js").DocumentState} DocumentState
@@ -13,45 +13,11 @@ import { getArrayRoot, getMapRoot, getYArray, getYMap, getYText, yjsValueToJson 
  */
 
 /**
- * @typedef {{ Map: new () => any, Array: new () => any, Text: new () => any }} YjsTypeConstructors
- */
-
-/**
  * @param {any} value
  * @returns {value is Record<string, any>}
  */
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-/**
- * Return constructors for Y.Map/Y.Array/Y.Text that match the module instance used
- * to create `doc`.
- *
- * In pnpm workspaces it is possible to load both the ESM + CJS builds of Yjs in
- * the same process. Yjs types cannot be moved across module instances; the
- * safest approach is to construct nested types using constructors from the
- * target doc's module instance.
- *
- * @param {any} doc
- * @returns {YjsTypeConstructors}
- */
-function getDocConstructors(doc) {
-  const DocCtor = /** @type {any} */ (doc)?.constructor;
-  if (typeof DocCtor !== "function") {
-    return { Map: Y.Map, Array: Y.Array, Text: Y.Text };
-  }
-
-  try {
-    const probe = new DocCtor();
-    return {
-      Map: probe.getMap("__ctor_probe_map").constructor,
-      Array: probe.getArray("__ctor_probe_array").constructor,
-      Text: probe.getText("__ctor_probe_text").constructor,
-    };
-  } catch {
-    return { Map: Y.Map, Array: Y.Array, Text: Y.Text };
-  }
 }
 
 /**
@@ -561,7 +527,7 @@ export function branchStateFromYjsDoc(doc) {
  */
 export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
   const normalized = normalizeDocumentState(state);
-  const docConstructors = getDocConstructors(doc);
+  const docConstructors = getDocTypeConstructors(doc);
 
   /**
    * @param {any} value
