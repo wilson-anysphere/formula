@@ -744,15 +744,8 @@ async fn show_system_notification(
     title: String,
     body: Option<String>,
 ) -> Result<(), String> {
-    desktop::ipc_origin::ensure_main_window(
-        window.label(),
-        "notifications",
-        desktop::ipc_origin::Verb::Are,
-    )?;
-
-    let url = window.url().map_err(|err| err.to_string())?;
-    desktop::ipc_origin::ensure_trusted_origin(
-        &url,
+    desktop::ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
         "notifications",
         desktop::ipc_origin::Verb::Are,
     )?;
@@ -773,15 +766,8 @@ async fn oauth_loopback_listen(
     state: State<'_, SharedOauthLoopbackState>,
     redirect_uri: String,
 ) -> Result<(), String> {
-    desktop::ipc_origin::ensure_main_window(
-        window.label(),
-        "oauth loopback listeners",
-        desktop::ipc_origin::Verb::Are,
-    )?;
-
-    let url = window.url().map_err(|err| err.to_string())?;
-    desktop::ipc_origin::ensure_trusted_origin(
-        &url,
+    desktop::ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
         "oauth loopback listeners",
         desktop::ipc_origin::Verb::Are,
     )?;

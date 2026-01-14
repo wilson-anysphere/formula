@@ -114,9 +114,11 @@ pub fn verify_ed25519_signature(
 ) -> Result<bool, String> {
     use crate::ipc_origin::Verb;
 
-    crate::ipc_origin::ensure_main_window(window.label(), "ed25519 verification", Verb::Is)?;
-    let url = window.url().map_err(|err| err.to_string())?;
-    crate::ipc_origin::ensure_trusted_origin(&url, "ed25519 verification", Verb::Is)?;
+    crate::ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
+        "ed25519 verification",
+        Verb::Is,
+    )?;
 
     verify_ed25519_signature_payload(&payload.0, &signature_base64, &public_key_pem)
 }

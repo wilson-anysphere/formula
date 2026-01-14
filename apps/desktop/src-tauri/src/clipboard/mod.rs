@@ -615,13 +615,11 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn clipboard_read(window: tauri::WebviewWindow) -> Result<ClipboardContent, String> {
-    crate::ipc_origin::ensure_main_window(
-        window.label(),
+    crate::ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
         "clipboard access",
         crate::ipc_origin::Verb::Is,
     )?;
-    let url = window.url().map_err(|err| err.to_string())?;
-    crate::ipc_origin::ensure_trusted_origin(&url, "clipboard access", crate::ipc_origin::Verb::Is)?;
 
     // Clipboard APIs on macOS call into AppKit, which is not thread-safe.
     // Dispatch to the main thread before touching NSPasteboard.
@@ -649,13 +647,11 @@ pub async fn clipboard_write(
     window: tauri::WebviewWindow,
     payload: ClipboardWritePayload,
 ) -> Result<(), String> {
-    crate::ipc_origin::ensure_main_window(
-        window.label(),
+    crate::ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
         "clipboard access",
         crate::ipc_origin::Verb::Is,
     )?;
-    let url = window.url().map_err(|err| err.to_string())?;
-    crate::ipc_origin::ensure_trusted_origin(&url, "clipboard access", crate::ipc_origin::Verb::Is)?;
 
     // See `clipboard_read` for why we dispatch to the main thread on macOS.
     #[cfg(target_os = "macos")]

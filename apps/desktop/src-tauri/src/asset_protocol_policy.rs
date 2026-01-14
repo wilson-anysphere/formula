@@ -1,7 +1,7 @@
 use url::Url;
 
 use crate::ipc_origin;
-use crate::tauri_origin::{self, DesktopPlatform};
+use crate::tauri_origin::DesktopPlatform;
 
 /// Returns whether the `asset://` protocol should be available for a given window URL.
 ///
@@ -31,12 +31,7 @@ pub fn is_asset_protocol_allowed(
         return false;
     }
 
-    // Require the current origin to match the stable origin exactly. This prevents a navigation to
-    // another trusted-but-different localhost origin (e.g. a different dev port) from gaining
-    // access to `asset://`.
-    let current_origin =
-        tauri_origin::webview_origin_from_url(window_url, use_https_scheme, platform);
-    current_origin == stable_origin
+    ipc_origin::matches_webview_origin(window_url, stable_origin, use_https_scheme, platform)
 }
 
 #[cfg(test)]

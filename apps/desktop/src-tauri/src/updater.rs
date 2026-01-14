@@ -246,9 +246,11 @@ async fn spawn_update_download(
 /// Intended to be called after the user approves a restart via `restartToInstallUpdate()`.
 #[tauri::command]
 pub async fn install_downloaded_update(window: tauri::WebviewWindow) -> Result<(), String> {
-    ipc_origin::ensure_main_window(window.label(), "update installation", ipc_origin::Verb::Is)?;
-    let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(&url, "update installation", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
+        "update installation",
+        ipc_origin::Verb::Is,
+    )?;
 
     loop {
         // Create the wait handle *before* checking state so we can't miss a `notify_waiters()`
