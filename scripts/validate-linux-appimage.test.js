@@ -12,6 +12,7 @@ const tauriConfig = JSON.parse(
 );
 const expectedVersion = String(tauriConfig?.version ?? "").trim();
 const expectedMainBinaryName = String(tauriConfig?.mainBinaryName ?? "").trim() || "formula-desktop";
+const expectedIdentifier = String(tauriConfig?.identifier ?? "").trim() || "app.formula.desktop";
 const expectedFileAssociationMimeTypes = Array.from(
   new Set(
     (tauriConfig?.bundle?.fileAssociations ?? [])
@@ -123,8 +124,8 @@ BIN
   ${withLicense ? 'echo "LICENSE stub" > squashfs-root/usr/share/doc/' + mainBinaryName + '/LICENSE' : ":"}
   ${withNotice ? 'echo "NOTICE stub" > squashfs-root/usr/share/doc/' + mainBinaryName + '/NOTICE' : ":"}
   ${
-    withParquetMimeDefinition
-      ? `cat > squashfs-root/usr/share/mime/packages/app.formula.desktop.xml <<'MIME'\n${parquetMimeContents}\nMIME`
+     withParquetMimeDefinition
+      ? `cat > squashfs-root/usr/share/mime/packages/${expectedIdentifier}.xml <<'MIME'\n${parquetMimeContents}\nMIME`
       : ":"
   }
 

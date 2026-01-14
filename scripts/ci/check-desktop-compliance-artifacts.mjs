@@ -172,12 +172,18 @@ function validateLinuxDepends(depends, kind) {
  * @param {unknown} files
  * @param {string} kind
  */
-function validateLinuxMimeFiles(files, kind) {
+function validateLinuxMimeFiles(files, kind, identifier) {
   const obj = asObject(files);
   if (!obj) {
     die(`bundle.linux.${kind}.files must be an object mapping destination -> source`);
   }
-  const dest = "usr/share/mime/packages/app.formula.desktop.xml";
+  const normalizedIdentifier = String(identifier ?? "").trim();
+  if (!normalizedIdentifier) {
+    die("tauri.conf.json identifier must be a non-empty string when Parquet file association is configured");
+  }
+
+  const mimeFilename = `${normalizedIdentifier}.xml`;
+  const dest = `usr/share/mime/packages/${mimeFilename}`;
   if (!(dest in obj)) {
     const keys = Object.keys(obj);
     die(
@@ -188,7 +194,7 @@ function validateLinuxMimeFiles(files, kind) {
   if (typeof src !== "string") {
     die(`bundle.linux.${kind}.files[${JSON.stringify(dest)}] must be a string source path (got ${typeof src})`);
   }
-  resolveAndAssertFileExists(src, "app.formula.desktop.xml");
+  resolveAndAssertFileExists(src, mimeFilename);
 }
 
 let raw = "";
@@ -206,6 +212,7 @@ try {
 }
 
 const mainBinaryName = String(config?.mainBinaryName ?? "").trim() || "formula-desktop";
+const identifier = String(config?.identifier ?? "").trim();
 const bundle = asObject(config?.bundle) ?? {};
 
 const resources = bundle.resources;
@@ -231,9 +238,9 @@ validateLinuxFiles(asObject(linux.appimage)?.files, mainBinaryName, "appimage");
 // so the MIME database can map `*.parquet` correctly even on distros whose shared-mime-info
 // package does not include a Parquet glob by default.
 if (hasParquetAssociation(bundle.fileAssociations)) {
-  validateLinuxMimeFiles(asObject(linux.deb)?.files, "deb");
-  validateLinuxMimeFiles(asObject(linux.rpm)?.files, "rpm");
-  validateLinuxMimeFiles(asObject(linux.appimage)?.files, "appimage");
+  validateLinuxMimeFiles(asObject(linux.deb)?.files, "deb", identifier);
+  validateLinuxMimeFiles(asObject(linux.rpm)?.files, "rpm", identifier);
+  validateLinuxMimeFiles(asObject(linux.appimage)?.files, "appimage", identifier);
 
   // Ensure the distro-native packages pull in `update-mime-database` on install.
   validateLinuxDepends(asObject(linux.deb)?.depends, "deb");

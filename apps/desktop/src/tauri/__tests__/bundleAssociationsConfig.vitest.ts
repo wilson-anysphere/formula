@@ -106,8 +106,11 @@ describe("tauri.conf.json bundle association guardrails", () => {
     const linux = config?.bundle?.linux;
     expect(linux && typeof linux === "object", "expected bundle.linux to be configured").toBeTruthy();
 
-    const expectedDest = "usr/share/mime/packages/app.formula.desktop.xml";
-    const expectedSrc = "mime/app.formula.desktop.xml";
+    const identifier = typeof config?.identifier === "string" ? config.identifier.trim() : "";
+    expect(identifier, "expected tauri.conf.json identifier to be configured").toBeTruthy();
+
+    const expectedDest = `usr/share/mime/packages/${identifier}.xml`;
+    const expectedSrc = `mime/${identifier}.xml`;
 
     for (const target of ["deb", "rpm", "appimage"] as const) {
       const files = linux?.[target]?.files;
@@ -128,7 +131,10 @@ describe("tauri.conf.json bundle association guardrails", () => {
       return;
     }
 
-    const xmlUrl = new URL("../../../src-tauri/mime/app.formula.desktop.xml", import.meta.url);
+    const identifier = typeof config?.identifier === "string" ? config.identifier.trim() : "";
+    expect(identifier, "expected tauri.conf.json identifier to be configured").toBeTruthy();
+
+    const xmlUrl = new URL(`../../../src-tauri/mime/${identifier}.xml`, import.meta.url);
     const xml = readFileSync(xmlUrl, "utf8");
     expect(xml).toContain('mime-type type="application/vnd.apache.parquet"');
     expect(xml).toContain('glob pattern="*.parquet"');

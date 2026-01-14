@@ -188,6 +188,36 @@ if [ -z "$EXPECTED_VERSION" ]; then
   die "Unable to determine expected desktop version from $TAURI_CONF_PATH"
 fi
 
+# Expected app identifier (reverse-DNS) from tauri.conf.json. We use it for the
+# shared-mime-info definition filename under:
+#   usr/share/mime/packages/<identifier>.xml
+EXPECTED_IDENTIFIER=""
+if [ -f "$TAURI_CONF_PATH" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    EXPECTED_IDENTIFIER="$(
+      python3 - "$TAURI_CONF_PATH" <<'PY' 2>/dev/null || true
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+print((conf.get("identifier") or "").strip())
+PY
+    )"
+  fi
+  if [ -z "$EXPECTED_IDENTIFIER" ] && command -v node >/dev/null 2>&1; then
+    EXPECTED_IDENTIFIER="$(
+      node -p 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); String(conf.identifier ?? "").trim()' "$TAURI_CONF_PATH" 2>/dev/null || true
+    )"
+  fi
+  if [ -z "$EXPECTED_IDENTIFIER" ]; then
+    EXPECTED_IDENTIFIER="$(sed -nE 's/^[[:space:]]*"identifier"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "$TAURI_CONF_PATH" | head -n 1)"
+  fi
+fi
+if [ -z "$EXPECTED_IDENTIFIER" ]; then
+  die "Unable to determine expected desktop identifier from $TAURI_CONF_PATH"
+fi
+EXPECTED_MIME_DEFINITION_BASENAME="${EXPECTED_IDENTIFIER}.xml"
+
 discover_appimages() {
   local base="$1"
   if [ ! -d "$base" ]; then
@@ -454,12 +484,12 @@ validate_appimage() {
   # advertised MIME type (`application/vnd.apache.parquet`) on distros that don't
   # include it by default.
   local parquet_mime_def
-  parquet_mime_def="$appdir/usr/share/mime/packages/app.formula.desktop.xml"
+  parquet_mime_def="$appdir/usr/share/mime/packages/${EXPECTED_MIME_DEFINITION_BASENAME}"
   if [ ! -f "$parquet_mime_def" ]; then
-    die "Missing Parquet shared-mime-info definition in AppImage: squashfs-root/usr/share/mime/packages/app.formula.desktop.xml"
+    die "Missing Parquet shared-mime-info definition in AppImage: squashfs-root/usr/share/mime/packages/${EXPECTED_MIME_DEFINITION_BASENAME}"
   fi
   if ! grep -Fq 'application/vnd.apache.parquet' "$parquet_mime_def" || ! grep -Fq '*.parquet' "$parquet_mime_def"; then
-    die "Parquet shared-mime-info definition file is missing expected content in AppImage: squashfs-root/usr/share/mime/packages/app.formula.desktop.xml"
+    die "Parquet shared-mime-info definition file is missing expected content in AppImage: squashfs-root/usr/share/mime/packages/${EXPECTED_MIME_DEFINITION_BASENAME}"
   fi
 
   local applications_dir

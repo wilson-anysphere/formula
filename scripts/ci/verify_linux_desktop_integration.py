@@ -191,7 +191,8 @@ def verify_parquet_mime_definition(package_root: Path) -> None:
         "[linux] ERROR: Parquet file association configured but no packaged shared-mime-info definition was found.\n"
         f"Expected a *.xml under {mime_packages_dir} defining:\n"
         f"  - {expected_mime} with glob {expected_glob}\n"
-        "Hint: keep apps/desktop/src-tauri/mime/app.formula.desktop.xml packaged via tauri.conf.json bundle.linux.*.files."
+        "Hint: keep apps/desktop/src-tauri/mime/<identifier>.xml packaged via tauri.conf.json bundle.linux.*.files "
+        "(where <identifier> comes from tauri.conf.json identifier)."
     )
 
 

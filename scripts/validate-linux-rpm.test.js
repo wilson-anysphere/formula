@@ -10,6 +10,8 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
 const expectedVersion = String(tauriConf?.version ?? "").trim();
 const expectedMainBinary = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
+const expectedIdentifier = String(tauriConf?.identifier ?? "").trim() || "app.formula.desktop";
+const expectedMimeDefinitionPath = `/usr/share/mime/packages/${expectedIdentifier}.xml`;
 const expectedRpmName = expectedMainBinary;
 const expectedFileAssociationMimeTypes = Array.from(
   new Set(
@@ -217,7 +219,7 @@ mkdir -p usr/share/doc/${docPackageName}
 echo "LICENSE stub" > usr/share/doc/${docPackageName}/LICENSE
 echo "NOTICE stub" > usr/share/doc/${docPackageName}/NOTICE
 
-cat > usr/share/mime/packages/app.formula.desktop.xml <<'XML'
+cat > usr/share/mime/packages/${expectedIdentifier}.xml <<'XML'
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/vnd.apache.parquet">
     <glob pattern="*.parquet" />
@@ -283,7 +285,7 @@ test(
       [
         `/usr/bin/${expectedMainBinary}`,
         "/usr/share/applications/formula.desktop",
-        "/usr/share/mime/packages/app.formula.desktop.xml",
+        expectedMimeDefinitionPath,
         `/usr/share/doc/${expectedRpmName}/LICENSE`,
         `/usr/share/doc/${expectedRpmName}/NOTICE`,
       ].join("\n"),
@@ -353,7 +355,7 @@ test("validate-linux-rpm accepts --rpm pointing at a directory of RPMs", { skip:
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
-      "/usr/share/mime/packages/app.formula.desktop.xml",
+      expectedMimeDefinitionPath,
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
@@ -423,7 +425,7 @@ test("validate-linux-rpm accepts when RPM %{NAME} is overridden for validation",
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
-      "/usr/share/mime/packages/app.formula.desktop.xml",
+      expectedMimeDefinitionPath,
       `/usr/share/doc/${overrideName}/LICENSE`,
       `/usr/share/doc/${overrideName}/NOTICE`,
     ].join("\n"),
@@ -652,7 +654,7 @@ test("validate-linux-rpm fails when extracted .desktop is missing MimeType=", { 
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
-      "/usr/share/mime/packages/app.formula.desktop.xml",
+      expectedMimeDefinitionPath,
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
@@ -681,7 +683,7 @@ test("validate-linux-rpm fails when extracted .desktop lacks xlsx integration", 
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
-      "/usr/share/mime/packages/app.formula.desktop.xml",
+      expectedMimeDefinitionPath,
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
@@ -709,7 +711,7 @@ test("validate-linux-rpm fails when extracted .desktop Exec= lacks a file placeh
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
-      "/usr/share/mime/packages/app.formula.desktop.xml",
+      expectedMimeDefinitionPath,
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
@@ -741,7 +743,7 @@ test("validate-linux-rpm fails when extracted .desktop lacks Parquet MIME type (
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
-      "/usr/share/mime/packages/app.formula.desktop.xml",
+      expectedMimeDefinitionPath,
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
@@ -773,7 +775,7 @@ test("validate-linux-rpm fails when extracted .desktop lacks URL scheme handler 
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
-      "/usr/share/mime/packages/app.formula.desktop.xml",
+      expectedMimeDefinitionPath,
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),

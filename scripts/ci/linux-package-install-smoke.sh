@@ -52,7 +52,34 @@ PY
   printf '%s\n' "${val}"
 }
 
+read_tauri_identifier() {
+  local conf="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
+  local val=""
+  if [[ -f "${conf}" ]] && command -v python3 >/dev/null 2>&1; then
+    val="$(
+      python3 - "${conf}" <<'PY' 2>/dev/null || true
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+v = conf.get("identifier")
+if isinstance(v, str):
+    print(v.strip())
+PY
+    )"
+  elif [[ -f "${conf}" ]] && command -v node >/dev/null 2>&1; then
+    val="$(
+      node -p 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); (conf.identifier ?? "").trim()' "${conf}" 2>/dev/null || true
+    )"
+  fi
+  if [[ -z "${val}" ]]; then
+    val="app.formula.desktop"
+  fi
+  printf '%s\n' "${val}"
+}
+
 MAIN_BINARY_NAME="$(read_main_binary_name)"
+TAURI_IDENTIFIER="$(read_tauri_identifier)"
 
 kind="${1:-all}"
 case "${kind}" in
@@ -222,11 +249,14 @@ deb_smoke_test_dir() {
   docker run --rm \
     ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
     -e "FORMULA_MAIN_BINARY_NAME=${MAIN_BINARY_NAME}" \
+    -e "FORMULA_TAURI_IDENTIFIER=${TAURI_IDENTIFIER}" \
     -v "${deb_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
       export DEBIAN_FRONTEND=noninteractive
       bin="${FORMULA_MAIN_BINARY_NAME:-formula-desktop}"
+      ident="${FORMULA_TAURI_IDENTIFIER:-app.formula.desktop}"
+      mime_xml="/usr/share/mime/packages/${ident}.xml"
       echo "Container OS:"; cat /etc/os-release
       echo "Mounted artifacts:"; ls -lah /mounted
       apt-get update
@@ -242,9 +272,9 @@ deb_smoke_test_dir() {
       # Many distros do not ship a Parquet glob by default, so the package ships a
       # shared-mime-info definition under /usr/share/mime/packages and relies on the
       # shared-mime-info triggers to rebuild /usr/share/mime/globs2.
-      test -f /usr/share/mime/packages/app.formula.desktop.xml
-      grep -F "application/vnd.apache.parquet" /usr/share/mime/packages/app.formula.desktop.xml
-      grep -F "*.parquet" /usr/share/mime/packages/app.formula.desktop.xml
+      test -f "${mime_xml}"
+      grep -F "application/vnd.apache.parquet" "${mime_xml}"
+      grep -F "*.parquet" "${mime_xml}"
       if ! grep -Eq "application/vnd\.apache\.parquet:.*\*\.parquet" /usr/share/mime/globs2; then
         echo "Missing Parquet MIME mapping in /usr/share/mime/globs2 (expected application/vnd.apache.parquet -> *.parquet)" >&2
         echo "Parquet-related globs2 lines:" >&2
@@ -327,10 +357,13 @@ rpm_smoke_test_dir() {
   docker run --rm \
     ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
     -e "FORMULA_MAIN_BINARY_NAME=${MAIN_BINARY_NAME}" \
+    -e "FORMULA_TAURI_IDENTIFIER=${TAURI_IDENTIFIER}" \
     -v "${rpm_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
       bin="${FORMULA_MAIN_BINARY_NAME:-formula-desktop}"
+      ident="${FORMULA_TAURI_IDENTIFIER:-app.formula.desktop}"
+      mime_xml="/usr/share/mime/packages/${ident}.xml"
       echo "Container OS:"; cat /etc/os-release
       echo "Mounted artifacts:"; ls -lah /mounted
       # Install the local RPM using whatever package manager is available in the container.
@@ -356,9 +389,9 @@ rpm_smoke_test_dir() {
       test -f "/usr/share/doc/${bin}/NOTICE"
 
       # Validate that installer-time MIME integration ran successfully.
-      test -f /usr/share/mime/packages/app.formula.desktop.xml
-      grep -F "application/vnd.apache.parquet" /usr/share/mime/packages/app.formula.desktop.xml
-      grep -F "*.parquet" /usr/share/mime/packages/app.formula.desktop.xml
+      test -f "${mime_xml}"
+      grep -F "application/vnd.apache.parquet" "${mime_xml}"
+      grep -F "*.parquet" "${mime_xml}"
       if ! grep -Eq "application/vnd\.apache\.parquet:.*\*\.parquet" /usr/share/mime/globs2; then
         echo "Missing Parquet MIME mapping in /usr/share/mime/globs2 (expected application/vnd.apache.parquet -> *.parquet)" >&2
         echo "Parquet-related globs2 lines:" >&2

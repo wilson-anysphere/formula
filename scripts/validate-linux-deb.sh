@@ -178,6 +178,15 @@ if [[ -z "$EXPECTED_MAIN_BINARY" ]]; then
   EXPECTED_MAIN_BINARY="formula-desktop"
 fi
 
+# The app identifier (reverse-DNS). We use it for MIME definition filenames under:
+#   /usr/share/mime/packages/<identifier>.xml
+EXPECTED_IDENTIFIER="$(read_tauri_conf_value identifier)"
+if [[ -z "$EXPECTED_IDENTIFIER" ]]; then
+  die "Expected $TAURI_CONF to contain a non-empty \"identifier\" field."
+fi
+EXPECTED_MIME_DEFINITION_BASENAME="${EXPECTED_IDENTIFIER}.xml"
+EXPECTED_MIME_DEFINITION_PATH="/usr/share/mime/packages/${EXPECTED_MIME_DEFINITION_BASENAME}"
+
 # Debian package name should typically match the main binary name, but allow overriding
 # just the Package field/doc dir name for validation purposes.
 EXPECTED_DEB_NAME="${FORMULA_DEB_NAME_OVERRIDE:-$EXPECTED_MAIN_BINARY}"
@@ -305,9 +314,9 @@ assert_contains_any() {
 validate_desktop_integration_extracted() {
   local package_root="$1"
 
-  local mime_xml="$package_root/usr/share/mime/packages/app.formula.desktop.xml"
+  local mime_xml="$package_root${EXPECTED_MIME_DEFINITION_PATH}"
   if [[ ! -f "$mime_xml" ]]; then
-    err "Extracted payload missing shared-mime-info definition file: usr/share/mime/packages/app.formula.desktop.xml"
+    err "Extracted payload missing shared-mime-info definition file: ${EXPECTED_MIME_DEFINITION_PATH#/}"
     return 1
   fi
   if ! grep -Fq 'application/vnd.apache.parquet' "$mime_xml" || ! grep -Fq '*.parquet' "$mime_xml"; then
@@ -528,8 +537,8 @@ validate_static() {
       die "DEB payload missing compliance file: ./usr/share/doc/${EXPECTED_DEB_NAME}/${filename}"
     fi
   done
-  if ! grep -qx "./usr/share/mime/packages/app.formula.desktop.xml" <<<"${file_list}"; then
-    die "DEB payload missing Parquet shared-mime-info definition: ./usr/share/mime/packages/app.formula.desktop.xml"
+  if ! grep -qx "./${EXPECTED_MIME_DEFINITION_PATH#/}" <<<"${file_list}"; then
+    die "DEB payload missing Parquet shared-mime-info definition: ./${EXPECTED_MIME_DEFINITION_PATH#/}"
   fi
 
   # Extract payload and validate desktop integration metadata.
@@ -606,9 +615,10 @@ validate_container() {
     # Many distros do not ship a Parquet glob by default, so the package ships a
     # shared-mime-info definition under /usr/share/mime/packages and relies on
     # shared-mime-info triggers to rebuild /usr/share/mime/globs2.
-    test -f /usr/share/mime/packages/app.formula.desktop.xml
-    grep -F "application/vnd.apache.parquet" /usr/share/mime/packages/app.formula.desktop.xml
-    grep -F "*.parquet" /usr/share/mime/packages/app.formula.desktop.xml
+    mime_xml="'"${EXPECTED_MIME_DEFINITION_PATH}"'"
+    test -f "${mime_xml}"
+    grep -F "application/vnd.apache.parquet" "${mime_xml}"
+    grep -F "*.parquet" "${mime_xml}"
     grep -Eq "application/vnd\\.apache\\.parquet:.*\\*\\.parquet" /usr/share/mime/globs2
 
     # Validate desktop integration metadata is present in the installed .desktop entry.

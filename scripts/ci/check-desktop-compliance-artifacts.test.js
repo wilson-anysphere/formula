@@ -9,6 +9,12 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "check-desktop-compliance-artifacts.mjs");
 
+const testIdentifier = "com.example.formula.desktop";
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function run(config, { writeLicense = true, writeNotice = true } = {}) {
   const tmpdir = mkdtempSync(path.join(os.tmpdir(), "formula-desktop-compliance-"));
   const confPath = path.join(tmpdir, "tauri.conf.json");
@@ -20,11 +26,14 @@ function run(config, { writeLicense = true, writeNotice = true } = {}) {
   if (writeNotice) {
     writeFileSync(path.join(tmpdir, "NOTICE"), "NOTICE stub\n", "utf8");
   }
+  const identifier =
+    typeof config?.identifier === "string" && config.identifier.trim() ? config.identifier.trim() : "app.formula.desktop";
+  const mimeBasename = `${identifier}.xml`;
   mkdirSync(path.join(tmpdir, "mime"), { recursive: true });
-  writeFileSync(path.join(tmpdir, "mime", "app.formula.desktop.xml"), "<mime-info />\n", "utf8");
+  writeFileSync(path.join(tmpdir, "mime", mimeBasename), "<mime-info />\n", "utf8");
   // Some configs may reference the MIME definition file at repo root (basename-only); create
   // a stub for that path too.
-  writeFileSync(path.join(tmpdir, "app.formula.desktop.xml"), "<mime-info />\n", "utf8");
+  writeFileSync(path.join(tmpdir, mimeBasename), "<mime-info />\n", "utf8");
   writeFileSync(confPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 
   const proc = spawnSync(process.execPath, [scriptPath], {
@@ -221,7 +230,10 @@ test("fails when bundle.resources is missing NOTICE", () => {
 });
 
 test("fails when Linux doc dir does not match mainBinaryName", () => {
+  const mimeDest = `usr/share/mime/packages/${testIdentifier}.xml`;
+  const mimeSrc = `mime/${testIdentifier}.xml`;
   const proc = run({
+    identifier: testIdentifier,
     mainBinaryName: "formula-desktop",
     bundle: {
       resources: ["LICENSE", "NOTICE"],
@@ -232,7 +244,7 @@ test("fails when Linux doc dir does not match mainBinaryName", () => {
           files: {
             "usr/share/doc/other/LICENSE": "LICENSE",
             "usr/share/doc/other/NOTICE": "NOTICE",
-            "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
+            [mimeDest]: mimeSrc,
           },
         },
         rpm: {
@@ -240,14 +252,14 @@ test("fails when Linux doc dir does not match mainBinaryName", () => {
           files: {
             "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
             "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
-            "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
+            [mimeDest]: mimeSrc,
           },
         },
         appimage: {
           files: {
             "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
             "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
-            "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
+            [mimeDest]: mimeSrc,
           },
         },
       },
@@ -259,7 +271,10 @@ test("fails when Linux doc dir does not match mainBinaryName", () => {
 });
 
 test("passes when Parquet MIME file + shared-mime-info deps are configured", () => {
+  const mimeDest = `usr/share/mime/packages/${testIdentifier}.xml`;
+  const mimeSrc = `mime/${testIdentifier}.xml`;
   const proc = run({
+    identifier: testIdentifier,
     mainBinaryName: "formula-desktop",
     bundle: {
       resources: ["LICENSE", "NOTICE"],
@@ -268,7 +283,7 @@ test("passes when Parquet MIME file + shared-mime-info deps are configured", () 
         deb: {
           depends: ["shared-mime-info"],
           files: {
-            "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
+            [mimeDest]: mimeSrc,
             "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
             "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
@@ -276,14 +291,14 @@ test("passes when Parquet MIME file + shared-mime-info deps are configured", () 
         rpm: {
           depends: ["shared-mime-info"],
           files: {
-            "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
+            [mimeDest]: mimeSrc,
             "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
             "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
         },
         appimage: {
           files: {
-            "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
+            [mimeDest]: mimeSrc,
             "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
             "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
@@ -295,7 +310,9 @@ test("passes when Parquet MIME file + shared-mime-info deps are configured", () 
 });
 
 test("fails when Parquet association is configured but Linux bundles omit MIME definition mapping", () => {
+  const mimeDest = `usr/share/mime/packages/${testIdentifier}.xml`;
   const proc = run({
+    identifier: testIdentifier,
     mainBinaryName: "formula-desktop",
     bundle: {
       resources: ["LICENSE", "NOTICE"],
@@ -325,11 +342,14 @@ test("fails when Parquet association is configured but Linux bundles omit MIME d
     },
   });
   assert.notEqual(proc.status, 0);
-  assert.match(proc.stderr, /usr\/share\/mime\/packages\/app\.formula\.desktop\.xml/i);
+  assert.match(proc.stderr, new RegExp(escapeRegExp(mimeDest), "i"));
 });
 
 test("fails when Parquet association is configured but Linux package deps omit shared-mime-info", () => {
+  const mimeDest = `usr/share/mime/packages/${testIdentifier}.xml`;
+  const mimeSrc = `mime/${testIdentifier}.xml`;
   const proc = run({
+    identifier: testIdentifier,
     mainBinaryName: "formula-desktop",
     bundle: {
       resources: ["LICENSE", "NOTICE"],
@@ -338,7 +358,7 @@ test("fails when Parquet association is configured but Linux package deps omit s
         deb: {
           depends: ["libwebkit2gtk-4.1-0"],
           files: {
-            "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
+            [mimeDest]: mimeSrc,
             "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
             "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
@@ -346,14 +366,14 @@ test("fails when Parquet association is configured but Linux package deps omit s
         rpm: {
           depends: ["(webkit2gtk4.1 or libwebkit2gtk-4_1-0)"],
           files: {
-            "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
+            [mimeDest]: mimeSrc,
             "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
             "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
         },
         appimage: {
           files: {
-            "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml",
+            [mimeDest]: mimeSrc,
             "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
             "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },

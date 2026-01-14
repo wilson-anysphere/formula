@@ -10,6 +10,8 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
 const expectedVersion = String(tauriConf?.version ?? "").trim();
 const expectedMainBinary = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
+const expectedIdentifier = String(tauriConf?.identifier ?? "").trim() || "app.formula.desktop";
+const expectedMimeDefinitionContentsPath = `./usr/share/mime/packages/${expectedIdentifier}.xml`;
 const expectedDebName = expectedMainBinary;
 const expectedFileAssociationMimeTypes = Array.from(
   new Set(
@@ -122,7 +124,7 @@ DESKTOP
 
     echo "LICENSE stub" > "$dest/usr/share/doc/$fake_package/LICENSE"
     echo "NOTICE stub" > "$dest/usr/share/doc/$fake_package/NOTICE"
-    cat > "$dest/usr/share/mime/packages/app.formula.desktop.xml" <<'XML'
+    cat > "$dest/usr/share/mime/packages/${expectedIdentifier}.xml" <<'XML'
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/vnd.apache.parquet">
     <glob pattern="*.parquet" />
@@ -177,7 +179,7 @@ function writeDefaultContentsFile(
   add(`./usr/share/doc/${packageName}/LICENSE`);
   add(`./usr/share/doc/${packageName}/NOTICE`);
   if (includeParquetMimeDefinition) {
-    add("./usr/share/mime/packages/app.formula.desktop.xml");
+    add(expectedMimeDefinitionContentsPath);
   }
   writeFileSync(p, lines.join("\n"), "utf8");
   return p;

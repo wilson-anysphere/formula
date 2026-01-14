@@ -193,6 +193,15 @@ if [[ -z "$EXPECTED_MAIN_BINARY" ]]; then
   EXPECTED_MAIN_BINARY="formula-desktop"
 fi
 
+# The app identifier (reverse-DNS). We use it for MIME definition filenames under:
+#   /usr/share/mime/packages/<identifier>.xml
+EXPECTED_IDENTIFIER="$(read_tauri_conf_value identifier)"
+if [[ -z "$EXPECTED_IDENTIFIER" ]]; then
+  die "Expected $TAURI_CONF to contain a non-empty \"identifier\" field."
+fi
+EXPECTED_MIME_DEFINITION_BASENAME="${EXPECTED_IDENTIFIER}.xml"
+EXPECTED_MIME_DEFINITION_PATH="/usr/share/mime/packages/${EXPECTED_MIME_DEFINITION_BASENAME}"
+
 # RPM %{NAME} (package name) should match our decided package name. By default we keep this
 # in sync with tauri.conf.json mainBinaryName, but allow overriding just the *package name*
 # for validation purposes (some distros may prefer different naming conventions).
@@ -265,9 +274,9 @@ validate_desktop_mime_associations_extracted() {
   # Ensure we ship a shared-mime-info definition for Parquet so `*.parquet` resolves to the
   # advertised MIME type (`application/vnd.apache.parquet`) on distros whose shared-mime-info DB
   # does not include a Parquet glob by default.
-  local mime_xml="$tmpdir/usr/share/mime/packages/app.formula.desktop.xml"
+  local mime_xml="$tmpdir${EXPECTED_MIME_DEFINITION_PATH}"
   if [ ! -f "$mime_xml" ]; then
-    err "RPM payload missing Parquet shared-mime-info definition after extraction: usr/share/mime/packages/app.formula.desktop.xml"
+    err "RPM payload missing Parquet shared-mime-info definition after extraction: ${EXPECTED_MIME_DEFINITION_PATH#/}"
     return 1
   fi
   if ! grep -Fq 'application/vnd.apache.parquet' "$mime_xml" || ! grep -Fq '*.parquet' "$mime_xml"; then
@@ -722,8 +731,8 @@ validate_static() {
   # We ship a shared-mime-info definition for Parquet so `*.parquet` resolves to our
   # advertised MIME type (`application/vnd.apache.parquet`) on distros that don't
   # include it by default.
-  if ! grep -qx "/usr/share/mime/packages/app.formula.desktop.xml" <<<"${file_list}"; then
-    err "RPM payload missing Parquet shared-mime-info definition: /usr/share/mime/packages/app.formula.desktop.xml"
+  if ! grep -qx "${EXPECTED_MIME_DEFINITION_PATH}" <<<"${file_list}"; then
+    err "RPM payload missing Parquet shared-mime-info definition: ${EXPECTED_MIME_DEFINITION_PATH}"
     err "First 200 lines of rpm file list:"
     echo "${file_list}" | head -n 200 >&2
     static_validation_failed=1
@@ -782,9 +791,9 @@ validate_container() {
   container_cmd+=$'test -x "${binary_path}"\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/LICENSE\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/NOTICE\n'
-  container_cmd+=$'test -f /usr/share/mime/packages/app.formula.desktop.xml\n'
-  container_cmd+=$'grep -F "application/vnd.apache.parquet" /usr/share/mime/packages/app.formula.desktop.xml\n'
-  container_cmd+=$'grep -F "*.parquet" /usr/share/mime/packages/app.formula.desktop.xml\n'
+  container_cmd+=$'test -f '"${EXPECTED_MIME_DEFINITION_PATH}"$'\n'
+  container_cmd+=$'grep -F "application/vnd.apache.parquet" '"${EXPECTED_MIME_DEFINITION_PATH}"$'\n'
+  container_cmd+=$'grep -F "*.parquet" '"${EXPECTED_MIME_DEFINITION_PATH}"$'\n'
   container_cmd+=$'grep -Eq "application/vnd\\.apache\\.parquet:.*\\*\\.parquet" /usr/share/mime/globs2\n'
   container_cmd+=$'\n'
   container_cmd+=$'# Validate file association metadata is present in the installed .desktop entry.\n'

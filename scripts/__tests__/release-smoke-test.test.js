@@ -169,6 +169,8 @@ test("release-smoke-test: --local-bundles runs validate-linux-deb.sh with --no-c
   const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, "utf8"));
   const expectedVersion = String(tauriConf?.version ?? "").trim();
   const expectedDebName = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
+  const expectedIdentifier = String(tauriConf?.identifier ?? "").trim() || "app.formula.desktop";
+  const expectedMimeDefinitionContentsPath = `./usr/share/mime/packages/${expectedIdentifier}.xml`;
   assert.ok(expectedVersion, "Expected tauri.conf.json to contain a non-empty version");
 
   // Like the empty-artifacts test above, avoid relying on / mutating any real bundle outputs
@@ -244,7 +246,7 @@ case "$cmd" in
 -rw-r--r-- root/root 0 2024-01-01 00:00 ./usr/share/applications/formula.desktop
 -rw-r--r-- root/root 0 2024-01-01 00:00 ./usr/share/doc/$expected_pkg/LICENSE
 -rw-r--r-- root/root 0 2024-01-01 00:00 ./usr/share/doc/$expected_pkg/NOTICE
--rw-r--r-- root/root 0 2024-01-01 00:00 ./usr/share/mime/packages/app.formula.desktop.xml
+-rw-r--r-- root/root 0 2024-01-01 00:00 ${expectedMimeDefinitionContentsPath}
 EOF
     exit 0
     ;;
@@ -265,7 +267,7 @@ MimeType=${mimeList};
 EOF
     echo "LICENSE stub" > "$dest/usr/share/doc/$expected_pkg/LICENSE"
     echo "NOTICE stub" > "$dest/usr/share/doc/$expected_pkg/NOTICE"
-    cat > "$dest/usr/share/mime/packages/app.formula.desktop.xml" <<'XML'
+    cat > "$dest/usr/share/mime/packages/${expectedIdentifier}.xml" <<'XML'
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/vnd.apache.parquet">
     <glob pattern="*.parquet" />

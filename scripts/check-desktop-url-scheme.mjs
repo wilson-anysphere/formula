@@ -26,14 +26,6 @@ const infoPlistPath = resolvePath(
   process.env.FORMULA_INFO_PLIST_PATH,
   path.join(repoRoot, "apps", "desktop", "src-tauri", "Info.plist"),
 );
-const parquetMimeDefinitionPath = path.join(
-  repoRoot,
-  "apps",
-  "desktop",
-  "src-tauri",
-  "mime",
-  "app.formula.desktop.xml",
-);
 
 const REQUIRED_SCHEME = "formula";
 // Desktop builds are expected to open common spreadsheet/data file formats.
@@ -158,6 +150,16 @@ function isParquetAssociationConfigured(config) {
 }
 
 /**
+ * @param {any} config
+ * @returns {string}
+ */
+function getTauriIdentifier(config) {
+  const raw = config?.identifier;
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  return "";
+}
+
+/**
  * Parquet is not consistently defined in distros' shared-mime-info DB.
  *
  * If we advertise Parquet (`application/vnd.apache.parquet`) in `.desktop` MimeType=
@@ -169,6 +171,16 @@ function isParquetAssociationConfigured(config) {
 function validateParquetMimeDefinition(config) {
   if (!isParquetAssociationConfigured(config)) return;
 
+  const identifier = getTauriIdentifier(config);
+  if (!identifier) {
+    errBlock("Parquet file association configured, but identifier is missing (tauri.conf.json)", [
+      "Expected a non-empty top-level `identifier` field in apps/desktop/src-tauri/tauri.conf.json.",
+      "This is used as the shared-mime-info XML filename under:",
+      "  - /usr/share/mime/packages/<identifier>.xml",
+    ]);
+    return;
+  }
+
   const linux = config?.bundle?.linux;
   if (!linux || typeof linux !== "object") {
     errBlock("Parquet file association configured, but bundle.linux is missing (tauri.conf.json)", [
@@ -177,8 +189,8 @@ function validateParquetMimeDefinition(config) {
     return;
   }
 
-  const expectedDest = "usr/share/mime/packages/app.formula.desktop.xml";
-  const expectedSrc = "mime/app.formula.desktop.xml";
+  const expectedDest = `usr/share/mime/packages/${identifier}.xml`;
+  const expectedSrc = `mime/${identifier}.xml`;
 
   for (const target of ["deb", "rpm", "appimage"]) {
     const files = linux?.[target]?.files;
@@ -211,6 +223,7 @@ function validateParquetMimeDefinition(config) {
     ]);
   }
 
+  const parquetMimeDefinitionPath = path.join(path.dirname(tauriConfigPath), "mime", `${identifier}.xml`);
   try {
     const xml = readFileSync(parquetMimeDefinitionPath, "utf8");
     if (!xml.includes('mime-type type="application/vnd.apache.parquet"') || !xml.includes('glob pattern="*.parquet"')) {
