@@ -243,12 +243,13 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
         return true;
     }
 
-    if !(first.is_ascii_alphabetic() || first == '_') {
+    // DAX identifiers are Unicode-aware; allow non-ASCII letters/digits without quoting.
+    if !(first.is_alphabetic() || first == '_') {
         return true;
     }
 
     for ch in chars {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
+        if ch.is_alphanumeric() || ch == '_' {
             continue;
         }
         return true;
