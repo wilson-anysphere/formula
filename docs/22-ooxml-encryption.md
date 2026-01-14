@@ -30,7 +30,11 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   - `Error::PasswordRequired`
   - `Error::InvalidPassword`
   - `Error::UnsupportedOoxmlEncryption`
-- **MS-OFFCRYPTO parsing + decryption building blocks:** `crates/formula-offcrypto`
+- **Agile (4.4) reference decryptor (includes `dataIntegrity` HMAC verification):**
+  `crates/formula-xlsx/src/offcrypto/*`
+- **End-to-end decrypt helpers + Agile writer (OLE wrapper → decrypted ZIP bytes):**
+  `crates/formula-office-crypto`
+- **MS-OFFCRYPTO parsing + low-level building blocks:** `crates/formula-offcrypto`
   - `parse_encryption_info`, `inspect_encryption_info` (`crates/formula-offcrypto/src/lib.rs`)
   - Agile password verifier + secret key (`crates/formula-offcrypto/src/agile.rs`)
   - Agile `EncryptedPackage` segment decryption + IV derivation
@@ -50,7 +54,7 @@ uses today: **Agile Encryption (version 4.4) with password-based key encryption*
 | Package key sizes | 128/192/256-bit (`keyBits` 128/192/256) |
 | Hash algorithms | `SHA1`, `SHA256`, `SHA384`, `SHA512` (case-insensitive) |
 | Key encryptor | **Password** key-encryptor only (`uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password"`) |
-| Integrity | `dataIntegrity` is parsed; HMAC verification algorithm is documented below (not yet validated in `formula-offcrypto`) |
+| Integrity | `dataIntegrity` HMAC verification (implemented in `crates/formula-xlsx::offcrypto`; algorithm documented below) |
 
 ### Explicitly unsupported (hard errors)
 
@@ -76,6 +80,11 @@ For Agile encryption this is typically `4.4` with `flags=0x00000040`, followed b
 
 See also: `crates/formula-io/src/bin/ooxml-encryption-info.rs` (a small helper that prints the
 version header and sniffs the XML root tag).
+
+Note: the spec says the XML follows immediately after the 8-byte version header, but some
+non-Excel producers have been observed to include extra bytes (e.g. a 4-byte length prefix or
+UTF-16LE XML). `crates/formula-offcrypto` includes conservative heuristics to handle these cases
+(`parse_agile_encryption_info_xml`).
 
 ### Key point: there are *two* parameter sets
 
@@ -161,7 +170,7 @@ Do **not** reuse the per-segment IV logic from `EncryptedPackage` here.
 
 ## Decrypting `EncryptedPackage`
 
-The `EncryptedPackage` stream layout (after decrypting) is:
+The `EncryptedPackage` stream layout (on disk / as stored) is:
 
 ```text
 8B   original_package_size (u64 little-endian, *not encrypted*)
@@ -247,8 +256,8 @@ The Agile decryption errors are designed to be actionable. The most important di
 | Error | Meaning | Typical user action |
 |------|---------|---------------------|
 | `formula_io::Error::PasswordRequired` | Encrypted OOXML detected, but no password provided | Prompt for password |
-| `formula_io::Error::InvalidPassword` / `formula_offcrypto::OffcryptoError::InvalidPassword` | Password verifier mismatch | Retry password |
-| *(recommended)* integrity mismatch (HMAC) | HMAC mismatch (tampering/corruption) | Re-download file; if persistent, treat as corrupted |
+| `formula_io::Error::InvalidPassword` / `formula_offcrypto::OffcryptoError::InvalidPassword` / `formula_xlsx::offcrypto::OffCryptoError::WrongPassword` | Password verifier mismatch | Retry password |
+| `formula_xlsx::offcrypto::OffCryptoError::IntegrityMismatch` | HMAC mismatch (tampering/corruption) | Re-download file; if persistent, treat as corrupted |
 | `formula_io::Error::UnsupportedOoxmlEncryption` / `formula_offcrypto::OffcryptoError::UnsupportedVersion` | `EncryptionInfo` version not recognized | Re-save without encryption; or add support |
 | `formula_offcrypto::OffcryptoError::UnsupportedEncryption { encryption_type: ... }` | Encryption type known but not supported by selected decrypt mode | Use correct decrypt mode / add support |
 | XML/structure errors (`InvalidEncryptionInfo`, base64 decode, ciphertext alignment) | Malformed/corrupt encrypted wrapper | Treat as corrupted file |
@@ -257,6 +266,7 @@ For the exact user-facing strings, see:
 
 - `crates/formula-io/src/lib.rs` (`formula_io::Error`)
 - `crates/formula-offcrypto/src/lib.rs` (`formula_offcrypto::OffcryptoError`)
+- `crates/formula-xlsx/src/offcrypto/error.rs` (`formula_xlsx::offcrypto::OffCryptoError`)
 
 ## Test oracles / cross-validation
 
