@@ -83,7 +83,9 @@ function deriveColumnsFromSelection(params: {
 }): { columns: Array<{ index: number; name: string }>; headerDetected: boolean } {
   const selection = normalizeRange(params.selection);
   const width = selection.endCol - selection.startCol + 1;
-  const labels = Array.from({ length: width }, (_, idx) => colIndexToLabel(idx));
+  // Use *sheet* column letters (A/B/C/...) for the selected columns so the dialog
+  // is intuitive even when the selection starts mid-sheet.
+  const labels = Array.from({ length: width }, (_, idx) => colIndexToLabel(selection.startCol + idx));
 
   const rawHeaderTexts = labels.map((_fallback, idx) => {
     const value = params.host.getCellValue(params.sheetId, { row: selection.startRow, col: selection.startCol + idx });
