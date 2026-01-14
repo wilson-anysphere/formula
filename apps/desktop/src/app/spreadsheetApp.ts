@@ -1269,7 +1269,14 @@ export class SpreadsheetApp {
   );
   private readonly document = new DocumentController({ engine: this.engine });
   private readonly imageStore = new DesktopImageStore();
-  private readonly sharedGridImageResolver: CanvasGridImageResolver = async (imageId) => this.document.getImage(imageId)?.bytes ?? null;
+  private readonly sharedGridImageResolver: CanvasGridImageResolver = async (imageId) => {
+    // Prefer returning a `Blob` so CanvasGridRenderer can use its `<img>` fallback path when
+    // `createImageBitmap(blob)` fails to decode certain valid Excel fixtures in headless Chromium.
+    // (See desktop e2e `drawings-images-rendering.spec.ts`.)
+    const blob = this.document.getImageBlob?.(imageId) ?? null;
+    if (blob) return blob;
+    return this.document.getImage(imageId)?.bytes ?? null;
+  };
   /**
    * In collaborative mode, keyboard undo/redo must use Yjs UndoManager semantics
    * (see `@formula/collab-undo`) so we never overwrite newer remote edits.
