@@ -262,6 +262,7 @@ export class FormulaBarFunctionAutocompleteController {
     this.#textarea.setAttribute("aria-haspopup", "listbox");
     this.#textarea.setAttribute("aria-controls", this.#listboxId);
     this.#textarea.setAttribute("aria-expanded", "false");
+    this.#textarea.setAttribute("aria-autocomplete", "list");
 
     const updateNow = () => this.update();
     const onBlur = () => this.close();
@@ -300,6 +301,7 @@ export class FormulaBarFunctionAutocompleteController {
     this.#textarea.removeAttribute("aria-haspopup");
     this.#textarea.removeAttribute("aria-controls");
     this.#textarea.removeAttribute("aria-expanded");
+    this.#textarea.removeAttribute("aria-autocomplete");
     this.#dropdownEl.remove();
   }
 
