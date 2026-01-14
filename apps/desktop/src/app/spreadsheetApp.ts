@@ -4569,8 +4569,7 @@ export class SpreadsheetApp {
       const headerCols = 1;
       this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
       this.syncSharedGridAxisSizesFromDocument();
-      // Force scrollbars + overlay layers to re-measure frozen extents.
-      this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
+      // Scrollbars + overlays update via DesktopSharedGrid's renderer viewport subscription.
       return;
     }
 
