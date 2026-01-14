@@ -38,7 +38,6 @@ pub enum SubtotalPosition {
     #[default]
     None,
 }
-
 /// Enables/disables row/column grand totals in the rendered pivot output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
