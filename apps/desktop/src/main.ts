@@ -1602,7 +1602,7 @@ function applyFormattingToSelection(
 ): void {
   // Match SpreadsheetApp guards: formatting commands should never mutate the sheet while the user
   // is actively editing (cell editor / formula bar / inline edit).
-  if (app.isEditing()) return;
+  if (isSpreadsheetEditing()) return;
   const isReadOnly = app.isReadOnly?.() === true;
   // By default, read-only collab roles (viewer/commenter) are allowed to apply formatting *only*
   // when the selection is a full row/column/sheet band (i.e. "formatting defaults"). These
