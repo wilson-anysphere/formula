@@ -658,6 +658,30 @@ fn is_ser_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "ser"
 }
 
+fn is_title_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "title"
+}
+
+fn is_legend_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "legend"
+}
+
+fn is_legend_pos_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "legendPos"
+}
+
+fn is_overlay_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "overlay"
+}
+
+fn is_tx_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "tx"
+}
+
+fn is_txpr_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "txPr"
+}
+
 fn is_plot_area_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "plotArea"
 }
@@ -1040,19 +1064,25 @@ fn parse_title(
 
     let Some(title_node) = chart_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "title")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_title_node))
+        .find(|n| n.tag_name().name() == "title")
     else {
         return None;
     };
 
     let tx_node = title_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "tx");
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_tx_node))
+        .find(|n| n.tag_name().name() == "tx");
 
     let mut parsed = tx_node.and_then(|tx| parse_text_from_tx(tx, diagnostics, "title.tx"));
     let style = title_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "txPr")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_txpr_node))
+        .find(|n| n.tag_name().name() == "txPr")
         .and_then(parse_txpr);
     if let (Some(style), Some(text)) = (style, parsed.as_mut()) {
         text.style = Some(style);
@@ -1060,7 +1090,9 @@ fn parse_title(
 
     let box_style = title_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_sppr_node))
+        .find(|n| n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
     if let (Some(box_style), Some(text)) = (box_style, parsed.as_mut()) {
         text.box_style = Some(box_style);
@@ -1084,30 +1116,40 @@ fn parse_legend(
 ) -> Option<LegendModel> {
     let legend_node = chart_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "legend")?;
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_legend_node))
+        .find(|n| n.tag_name().name() == "legend")?;
 
     let position = legend_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "legendPos")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_legend_pos_node))
+        .find(|n| n.tag_name().name() == "legendPos")
         .and_then(|n| n.attribute("val"))
         .map(|v| parse_legend_position(v, diagnostics))
         .unwrap_or(LegendPosition::Unknown);
 
     let overlay = legend_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "overlay")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_overlay_node))
+        .find(|n| n.tag_name().name() == "overlay")
         .and_then(|n| n.attribute("val"))
         .map(parse_ooxml_bool)
         .unwrap_or(false);
 
     let text_style = legend_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "txPr")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_txpr_node))
+        .find(|n| n.tag_name().name() == "txPr")
         .and_then(parse_txpr);
 
     let style = legend_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_sppr_node))
+        .find(|n| n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
 
     let layout = parse_layout_manual(legend_node);

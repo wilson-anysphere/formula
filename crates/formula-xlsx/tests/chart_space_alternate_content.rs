@@ -252,6 +252,72 @@ fn captures_chart_ext_lst_wrapped_in_mc_alternate_content() {
 }
 
 #[test]
+fn parses_title_wrapped_in_mc_alternate_content() {
+    let xml = r#"<c:chartSpace
+    xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <c:chart>
+    <mc:AlternateContent>
+      <mc:Choice>
+        <c:spPr />
+      </mc:Choice>
+      <mc:Fallback>
+        <c:title>
+          <c:tx><c:v>My Title</c:v></c:tx>
+        </c:title>
+      </mc:Fallback>
+    </mc:AlternateContent>
+    <c:plotArea>
+      <c:barChart>
+        <c:barDir val="col"/>
+      </c:barChart>
+    </c:plotArea>
+  </c:chart>
+ </c:chartSpace>
+ "#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "xl/charts/chart1.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+    let title = model.title.expect("title parsed");
+    assert_eq!(title.rich_text.plain_text(), "My Title");
+}
+
+#[test]
+fn parses_legend_wrapped_in_mc_alternate_content() {
+    let xml = r#"<c:chartSpace
+    xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <c:chart>
+    <mc:AlternateContent>
+      <mc:Choice>
+        <c:spPr />
+      </mc:Choice>
+      <mc:Fallback>
+        <c:legend>
+          <c:legendPos val="r"/>
+          <c:overlay val="0"/>
+        </c:legend>
+      </mc:Fallback>
+    </mc:AlternateContent>
+    <c:plotArea>
+      <c:barChart>
+        <c:barDir val="col"/>
+      </c:barChart>
+    </c:plotArea>
+  </c:chart>
+ </c:chartSpace>
+ "#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "xl/charts/chart1.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+    let legend = model.legend.expect("legend parsed");
+    assert_eq!(legend.position, formula_model::charts::LegendPosition::Right);
+    assert!(!legend.overlay);
+}
+
+#[test]
 fn chooses_fallback_when_choice_contains_unsupported_chart_type() {
     // If `mc:Choice` contains a chart type we don't yet support, but `mc:Fallback`
     // contains a supported chart, we should still parse the fallback chart.
