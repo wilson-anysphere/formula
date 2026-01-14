@@ -183,6 +183,47 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     root.remove();
   });
 
+  it("does not enable drawing interactions in shared-grid mode when inserting via file picker", async () => {
+    process.env.DESKTOP_GRID_MODE = "shared";
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
+    const sheetId = app.getCurrentSheetId();
+
+    app.activateCell({ row: 1, col: 2 }, { scrollIntoView: false, focus: false });
+    app.insertImageFromLocalFile();
+
+    const input = root.querySelector<HTMLInputElement>('input[data-testid="insert-image-input"]');
+    expect(input).not.toBeNull();
+
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]);
+    const file = new File([bytes], "test.png", { type: "image/png" });
+    Object.defineProperty(input!, "files", { configurable: true, value: [file] });
+    input!.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await waitFor(() => {
+      const drawings = (app.getDocument() as any)?.getSheetDrawings?.(sheetId) ?? [];
+      return Array.isArray(drawings) && drawings.length === 1;
+    });
+
+    const drawings = (app.getDocument() as any)?.getSheetDrawings?.(sheetId) ?? [];
+    expect(drawings).toHaveLength(1);
+    const obj = drawings[0]!;
+
+    expect(String(app.getSelectedDrawingId())).toBe(String(obj.id));
+
+    expect((app as any).drawingInteractionController).toBeNull();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("inserts into the original sheet even if the user switches sheets mid-insert", async () => {
     const root = createRoot();
     const status = {

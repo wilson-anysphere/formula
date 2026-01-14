@@ -11528,7 +11528,7 @@ export class SpreadsheetApp {
         }
         this.drawingOverlay.setSelectedId(inserted.id);
         if (this.gridMode === "shared") {
-          this.ensureDrawingInteractionController().setSelectedId(inserted.id);
+          this.drawingInteractionController?.setSelectedId(inserted.id);
         }
         this.splitViewSecondaryDrawingInteractionController?.setSelectedId(inserted.id);
         if (prevSelected !== inserted.id) {
