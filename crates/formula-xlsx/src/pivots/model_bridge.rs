@@ -23,18 +23,33 @@ pub fn pivot_table_to_model_value_fields(
     cache_def: &PivotCacheDefinition,
     styles: &StylesPart,
 ) -> Vec<ValueField> {
+    fn cache_field_ref(cache_def: &PivotCacheDefinition, name: String) -> PivotFieldRef {
+        // Worksheet-backed caches should treat cache field names as literal header text. Parsing
+        // DAX-like strings (e.g. `Table[Column]`) is reserved for Data Model / external pivots.
+        match &cache_def.cache_source_type {
+            super::PivotCacheSourceType::Worksheet => PivotFieldRef::CacheFieldName(name),
+            _ => name.into(),
+        }
+    }
+
     table
         .data_fields
         .iter()
         .filter_map(|df| {
             let field_idx = df.fld? as usize;
             let source_field_name = cache_def.cache_fields.get(field_idx)?.name.clone();
+            let source_field = cache_field_ref(cache_def, source_field_name.clone());
             let aggregation = map_subtotal(df.subtotal.as_deref());
-            let default_name = format!(
-                "{} of {}",
-                aggregation_display_name(aggregation),
-                source_field_name
-            );
+            let default_name = {
+                // For Data Model measures, prefer a human-friendly caption without DAX brackets
+                // (Excel displays the measure as `Total Sales`, not `[Total Sales]`, in the default
+                // "Sum of ..." label).
+                let label = match &source_field {
+                    PivotFieldRef::DataModelMeasure(measure) => measure.clone(),
+                    _ => source_field.canonical_name().into_owned(),
+                };
+                format!("{} of {}", aggregation_display_name(aggregation), label)
+            };
             let name = df
                 .name
                 .clone()
@@ -45,7 +60,6 @@ pub fn pivot_table_to_model_value_fields(
                 .num_fmt_id
                 .and_then(|id| resolve_pivot_num_fmt_id(id, styles));
 
-            let source_field: PivotFieldRef = source_field_name.into();
             Some(ValueField {
                 source_field,
                 name,
@@ -57,6 +71,79 @@ pub fn pivot_table_to_model_value_fields(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pivots::{PivotCacheField, PivotCacheSourceType};
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn worksheet_pivots_preserve_cache_field_names_that_look_like_dax_in_model_bridge() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dataFields count="1">
+    <dataField fld="0"/>
+  </dataFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+        let cache_def = PivotCacheDefinition {
+            cache_source_type: PivotCacheSourceType::Worksheet,
+            cache_fields: vec![PivotCacheField {
+                name: "Table[Column]".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let mut workbook = formula_model::Workbook::new();
+        let styles =
+            StylesPart::parse_or_default(None, &mut workbook.styles).expect("styles default");
+
+        let value_fields = pivot_table_to_model_value_fields(&table, &cache_def, &styles);
+        assert_eq!(value_fields.len(), 1);
+        assert_eq!(
+            value_fields[0].source_field.as_cache_field_name(),
+            Some("Table[Column]")
+        );
+        assert_eq!(value_fields[0].name, "Sum of Table[Column]");
+    }
+
+    #[test]
+    fn data_model_pivots_default_value_field_name_uses_measure_without_brackets_in_model_bridge() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dataFields count="1">
+    <dataField fld="0"/>
+  </dataFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+        let cache_def = PivotCacheDefinition {
+            cache_source_type: PivotCacheSourceType::External,
+            cache_fields: vec![PivotCacheField {
+                name: "[Total Sales]".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let mut workbook = formula_model::Workbook::new();
+        let styles =
+            StylesPart::parse_or_default(None, &mut workbook.styles).expect("styles default");
+
+        let value_fields = pivot_table_to_model_value_fields(&table, &cache_def, &styles);
+        assert_eq!(value_fields.len(), 1);
+        assert_eq!(
+            value_fields[0].source_field,
+            PivotFieldRef::DataModelMeasure("Total Sales".to_string())
+        );
+        assert_eq!(value_fields[0].name, "Sum of Total Sales");
+    }
 }
 
 fn resolve_pivot_num_fmt_id(num_fmt_id: u32, styles: &StylesPart) -> Option<String> {
