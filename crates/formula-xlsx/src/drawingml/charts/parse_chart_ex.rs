@@ -273,12 +273,12 @@ fn detect_chart_kind(
     } else {
         hints.join(", ")
     };
-    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("");
-    let root_ns_display = if root_ns.is_empty() {
-        "<none>"
-    } else {
-        root_ns
-    };
+    let root_ns_display = doc
+        .root_element()
+        .tag_name()
+        .namespace()
+        .filter(|ns| !ns.is_empty())
+        .unwrap_or("<none>");
     // 4) Unknown: capture a richer diagnostic to make it easier to debug/extend
     // detection for new ChartEx variants.
     diagnostics.push(ChartDiagnostic {
