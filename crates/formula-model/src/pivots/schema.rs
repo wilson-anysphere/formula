@@ -318,6 +318,21 @@ fn quote_dax_identifier(raw: &str) -> String {
     out
 }
 
+fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    // DAX identifiers can be unquoted (e.g. `Sales`) or single-quoted (e.g. `'Dim Product'`).
+    // Use a conservative heuristic: quote when any character is not an ASCII letter/digit/underscore,
+    // or when the identifier is empty.
+    raw.is_empty()
+        || raw
+            .chars()
+            .any(|c| !(c.is_ascii_alphanumeric() || c == '_'))
+}
+
+fn quote_dax_identifier(raw: &str) -> String {
+    // Within quoted identifiers, `'` is escaped as `''`.
+    format!("'{}'", raw.replace('\'', "''"))
+}
+
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
