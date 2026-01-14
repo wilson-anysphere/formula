@@ -241,25 +241,32 @@ describe("DrawingInteractionController anchor normalization", () => {
       const beforeScroll = effectiveScrollX(before.anchor.type === "oneCell" ? before.anchor.from.cell.col : 0);
       expect(beforeScroll).toBe(0);
 
-      // Drag into column 1 (non-frozen when frozenCols=1).
-      element.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 20, clientY: 20, pointerId: 1 }));
-      element.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 80, clientY: 20, pointerId: 1 })); // +60px
-      element.dispatchPointerEvent("pointerup", createPointerEvent({ clientX: 80, clientY: 20, pointerId: 1 }));
+      // Drag from the frozen pane into the scrollable pane. When `scrollX` is non-zero, the
+      // same screen-space delta should translate into a larger sheet-space delta once the
+      // pointer enters the scrollable pane.
+      const startX = 20;
+      const endX = 80; // crosses the frozen boundary at x=50.
+      const dxScreen = endX - startX;
+      element.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: startX, clientY: 20, pointerId: 1 }));
+      element.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: endX, clientY: 20, pointerId: 1 }));
+      element.dispatchPointerEvent("pointerup", createPointerEvent({ clientX: endX, clientY: 20, pointerId: 1 }));
 
       const after = getObject();
       expect(after.anchor.type).toBe("oneCell");
       if (after.anchor.type !== "oneCell") return;
 
-      expect(after.anchor.from.cell.col).toBe(1);
+      expect(after.anchor.from.cell.col).toBeGreaterThanOrEqual(frozenCols);
       const afterScroll = effectiveScrollX(after.anchor.from.cell.col);
       expect(afterScroll).toBe(scrollX);
 
-      // Demonstrate how the scroll behavior would change in a frozen-pane layout
-      // that keys off `from.cell.col`.
       const beforeRect = anchorToRectPx(before.anchor, geom);
       const afterRect = anchorToRectPx(after.anchor, geom);
+      // The object should remain under the pointer as it crosses the frozen boundary.
+      // (The pointer started at x=20, i.e. 20px from the object's left edge.)
       expect(beforeRect.x - beforeScroll).toBe(0);
-      expect(afterRect.x - afterScroll).toBe(-40);
+      expect(afterRect.x - afterScroll).toBe(dxScreen);
+      // The underlying sheet-space position must include the scroll offset once in the scrollable pane.
+      expect(afterRect.x).toBe(beforeRect.x + dxScreen + scrollX);
     } finally {
       dispose();
     }

@@ -13801,11 +13801,19 @@ export class SpreadsheetApp {
       const viewport = this.getDrawingInteractionViewport();
       const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
       const gesture = this.drawingGesture;
-      const scroll = effectiveScrollForAnchor(gesture.startAnchor, viewport);
       const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
       const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
-      const sheetX = x - headerOffsetX + scroll.scrollX;
-      const sheetY = y - headerOffsetY + scroll.scrollY;
+      const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? Math.max(headerOffsetX, viewport.frozenWidthPx!) : headerOffsetX;
+      const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? Math.max(headerOffsetY, viewport.frozenHeightPx!) : headerOffsetY;
+      const inHeader = x < headerOffsetX || y < headerOffsetY;
+      const pointInFrozenCols = !inHeader && x < frozenBoundaryX;
+      const pointInFrozenRows = !inHeader && y < frozenBoundaryY;
+      // Absolute anchors always scroll; oneCell/twoCell anchors use the frozen pane under the pointer.
+      const alwaysScroll = gesture.startAnchor.type === "absolute";
+      const scrollX = alwaysScroll ? viewport.scrollX : pointInFrozenCols ? 0 : viewport.scrollX;
+      const scrollY = alwaysScroll ? viewport.scrollY : pointInFrozenRows ? 0 : viewport.scrollY;
+      const sheetX = x - headerOffsetX + scrollX;
+      const sheetY = y - headerOffsetY + scrollY;
 
       let dxPx = sheetX - gesture.startSheetX;
       let dyPx = sheetY - gesture.startSheetY;

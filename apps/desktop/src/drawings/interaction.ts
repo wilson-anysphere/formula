@@ -104,14 +104,14 @@ export class DrawingInteractionController {
   private hitTestIndexObjects: readonly DrawingObject[] | null = null;
   private hitTestIndexZoom: number = 1;
   private dragging:
-    | { id: number; startX: number; startY: number; startObjects: DrawingObject[]; pointerId: number }
+    | { id: number; startSheetX: number; startSheetY: number; startObjects: DrawingObject[]; pointerId: number }
     | null = null;
   private resizing:
     | {
         id: number;
         handle: ResizeHandle;
-        startX: number;
-        startY: number;
+        startSheetX: number;
+        startSheetY: number;
         startObjects: DrawingObject[];
         pointerId: number;
         transform?: DrawingTransform;
@@ -265,6 +265,8 @@ export class DrawingInteractionController {
     const inHeader = x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY;
     const pointInFrozenCols = !inHeader && x < paneLayout.frozenBoundaryX;
     const pointInFrozenRows = !inHeader && y < paneLayout.frozenBoundaryY;
+    const startSheetX = x - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
+    const startSheetY = y - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
 
     // Allow grabbing a resize handle for the current selection even when the
     // pointer is slightly outside the object's bounds (handles are centered on
@@ -337,16 +339,16 @@ export class DrawingInteractionController {
           this.trySetPointerCapture(e.pointerId);
           this.callbacks.beginBatch?.({ label: "Resize Picture" });
           this.attachEscapeListener();
-           this.resizing = {
-             id: selectedObject.id,
-             handle,
-             startX: x,
-             startY: y,
-             startObjects,
-             pointerId: e.pointerId,
-             transform: selectedObject.transform,
-             startWidthPx: selectedBounds.width,
-             startHeightPx: selectedBounds.height,
+            this.resizing = {
+              id: selectedObject.id,
+              handle,
+              startSheetX,
+              startSheetY,
+              startObjects,
+              pointerId: e.pointerId,
+              transform: selectedObject.transform,
+              startWidthPx: selectedBounds.width,
+              startHeightPx: selectedBounds.height,
              aspectRatio:
               selectedObject.kind.type === "image" && selectedBounds.width > 0 && selectedBounds.height > 0
                 ? selectedBounds.width / selectedBounds.height
@@ -385,8 +387,8 @@ export class DrawingInteractionController {
       this.resizing = {
         id: hit.object.id,
         handle,
-        startX: x,
-        startY: y,
+        startSheetX,
+        startSheetY,
         startObjects,
         pointerId: e.pointerId,
         transform: hit.object.transform,
@@ -403,8 +405,8 @@ export class DrawingInteractionController {
       this.attachEscapeListener();
       this.dragging = {
         id: hit.object.id,
-        startX: x,
-        startY: y,
+        startSheetX,
+        startSheetY,
         startObjects,
         pointerId: e.pointerId,
       };
@@ -444,9 +446,16 @@ export class DrawingInteractionController {
       const rect = this.activeRect ?? this.element.getBoundingClientRect();
       const { x, y } = this.getLocalPoint(e, rect);
 
-      const zoom = sanitizeZoom(this.callbacks.getViewport().zoom);
-      let dx = x - this.resizing.startX;
-      let dy = y - this.resizing.startY;
+      const viewport = this.callbacks.getViewport();
+      const zoom = sanitizeZoom(viewport.zoom);
+      const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
+      const inHeader = x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY;
+      const pointInFrozenCols = !inHeader && x < paneLayout.frozenBoundaryX;
+      const pointInFrozenRows = !inHeader && y < paneLayout.frozenBoundaryY;
+      const sheetX = x - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
+      const sheetY = y - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
+      let dx = sheetX - this.resizing.startSheetX;
+      let dy = sheetY - this.resizing.startSheetY;
 
       const handle = this.resizing.handle;
       const isCornerHandle = handle === "nw" || handle === "ne" || handle === "se" || handle === "sw";
@@ -499,9 +508,16 @@ export class DrawingInteractionController {
       const rect = this.activeRect ?? this.element.getBoundingClientRect();
       const { x, y } = this.getLocalPoint(e, rect);
 
-      const zoom = sanitizeZoom(this.callbacks.getViewport().zoom);
-      const dx = x - this.dragging.startX;
-      const dy = y - this.dragging.startY;
+      const viewport = this.callbacks.getViewport();
+      const zoom = sanitizeZoom(viewport.zoom);
+      const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
+      const inHeader = x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY;
+      const pointInFrozenCols = !inHeader && x < paneLayout.frozenBoundaryX;
+      const pointInFrozenRows = !inHeader && y < paneLayout.frozenBoundaryY;
+      const sheetX = x - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
+      const sheetY = y - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
+      const dx = sheetX - this.dragging.startSheetX;
+      const dy = sheetY - this.dragging.startSheetY;
 
       const next = this.dragging.startObjects.map((obj) => {
         if (obj.id !== this.dragging!.id) return obj;
