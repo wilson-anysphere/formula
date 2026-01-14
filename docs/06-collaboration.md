@@ -1199,6 +1199,9 @@ const session = createCollabSession({
   cellConflicts: {
     localUserId: userId,
     onConflict: (conflict) => console.log("structural conflict", conflict),
+    // Optional: bound growth of the shared op log in long-lived docs.
+    // maxOpRecordsPerUser: 2000,
+    // maxOpRecordAgeMs: 7 * 24 * 60 * 60 * 1000,
   },
 
   // Optional: detect value-vs-value conflicts when you are NOT using formula+value mode above.
@@ -1215,6 +1218,9 @@ Notes:
 - For deterministic delete-vs-overwrite detection, formula clears must be represented as `formula = null`
   (not `cell.delete("formula")`) because Yjs map deletes do not create Items.
 - `remoteUserId` attribution is best-effort and may be empty if the overwriting writer did not update `modifiedBy`.
+- `cellConflicts` writes causal metadata into a shared `cellStructuralOps` log. Per-user history is bounded via
+  `maxOpRecordsPerUser`, and you can additionally enable age-based pruning (`maxOpRecordAgeMs`) to avoid
+  unbounded growth in docs with many distinct user ids over time (best-effort).
 - Implementation: [`packages/collab/conflicts/src/formula-conflict-monitor.js`](../packages/collab/conflicts/src/formula-conflict-monitor.js)
 - Conflict monitors support an `ignoredOrigins` option to ignore bulk “time travel” transactions such as version restores
   (`"versioning-restore"`) and branch apply operations (`"branching-apply"`). `createCollabSession` wires this by default.
