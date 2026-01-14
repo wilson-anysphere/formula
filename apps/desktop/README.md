@@ -667,4 +667,4 @@ Backend completions are routed to a Cursor-managed endpoint (e.g. `/api/ai/tab-c
 
 Notes:
 
-- Structured-reference preview is evaluated for simple table column refs (`Table[Column]` / `Table[[#All],[Column]]`) when table range metadata is available. More complex structured refs still fall back to `(preview unavailable)`.
+- Structured-reference preview is evaluated for structured refs that resolve to a rectangular range when table range metadata is available (e.g. `Table[Column]`, `Table[[#All],[Column]]`, and contiguous multi-column forms like `Table[[#All],[Col1],[Col2]]` / `Table[[Col1]:[Col3]]`). Non-rectangular unions still fall back to `(preview unavailable)`.
