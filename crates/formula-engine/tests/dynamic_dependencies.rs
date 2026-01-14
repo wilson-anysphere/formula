@@ -464,6 +464,29 @@ fn cell_width_does_not_record_dynamic_dependencies_for_indirect_reference_arg() 
 }
 
 #[test]
+fn cell_format_without_reference_does_not_create_self_edge_in_dynamic_dep_tracing() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=LEN(CELL("format"))+INDIRECT("B1")"#)
+        .unwrap();
+    engine.recalculate();
+
+    // `CELL("format")` defaults to using the current cell as its implicit reference, but that
+    // implicit self-reference should not be recorded as a calculation dependency when dynamic
+    // dependency tracing is active.
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 1 }, // B1
+        }]
+    );
+    assert!(engine.dependents("Sheet1", "A1").unwrap().is_empty());
+}
+
+#[test]
 fn indirect_updates_precedents_and_dependents_when_reference_is_dereferenced_by_array_lift() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
