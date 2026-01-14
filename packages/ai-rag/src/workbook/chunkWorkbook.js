@@ -148,7 +148,8 @@ function hasNonFormulaNonEmptyCell(cells, signal) {
  * Packed coordinate key used to avoid allocating `${row},${col}` strings for
  * region detection.
  *
- * We prefer a 32-bit packed Number when we can guarantee the bounds (fast, cheap),
+ * We prefer a packed Number key when the result stays within the 53-bit safe-integer
+ * range (fast, cheap),
  * otherwise we fall back to BigInt packing. If BigInt isn't available at runtime,
  * we fall back to the original string key representation.
  *
