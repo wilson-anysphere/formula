@@ -16,9 +16,18 @@ import { createCollaborationBenchmarks } from './benchmarks/collaboration.bench.
 import { createRenderBenchmarks } from './benchmarks/render.bench.ts';
 import { createSharedGridRendererBenchmarks } from './benchmarks/sharedGridRenderer.bench.ts';
 import { createStartupBenchmarks } from './benchmarks/startup.bench.ts';
-import { formatMb, formatMs, repoRoot, runBenchmark, type BenchmarkResult } from './desktopStartupUtil.ts';
+import {
+  formatMb,
+  formatMs,
+  installEpipeHandler,
+  repoRoot,
+  runBenchmark,
+  type BenchmarkResult,
+} from './desktopStartupUtil.ts';
 import { runDesktopStartupBenchmarks } from './desktopStartupBench.ts';
 import { runDesktopMemoryBenchmarks } from './desktopMemoryBench.ts';
+
+installEpipeHandler();
 
 type DetailedReport = {
   generatedAt: string;
