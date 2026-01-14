@@ -110,7 +110,8 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
         with:
-          version: 9
+          # Pin pnpm patch version for deterministic installs (keep in sync with package.json).
+          version: 9.0.0
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
