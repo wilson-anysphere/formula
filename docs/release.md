@@ -175,11 +175,9 @@ After building (per-platform), CI also validates that the expected Tauri bundle 
 release):
 
 ```bash
-# Run after a local `cargo tauri build` / `tauri-action` build.
+# Run on the same OS you built on (the script defaults to `RUNNER_OS`).
 # If you don't have updater signing configured locally, skip signature enforcement:
-FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES=false node scripts/ci/check-desktop-release-artifacts.mjs --os linux
-FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES=false node scripts/ci/check-desktop-release-artifacts.mjs --os windows
-FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES=false node scripts/ci/check-desktop-release-artifacts.mjs --os macos
+FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES=false node scripts/ci/check-desktop-release-artifacts.mjs
 ```
 
 After all platform builds finish, CI also verifies the **uploaded GitHub Release assets** are
