@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { dirname, isAbsolute, resolve, relative } from 'node:path';
+import { dirname, isAbsolute, parse, resolve, relative } from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
@@ -228,6 +228,13 @@ export async function runOnce({
   // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
   // Optionally, force a clean state between iterations to avoid cache pollution.
   if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === '1') {
+    // Extra guardrails: if a caller misconfigures `FORMULA_PERF_HOME` / `profileDir`, avoid
+    // `rm -rf /` style footguns.
+    const rootDir = parse(profileDir).root;
+    if (profileDir === rootDir || profileDir === repoRoot) {
+      throw new Error(`Refusing to reset unsafe desktop benchmark profile dir: ${profileDir}`);
+    }
+
     const safeRoot = perfHome;
     if (profileDir !== safeRoot && !isSubpath(safeRoot, profileDir)) {
       throw new Error(

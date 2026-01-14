@@ -3,7 +3,8 @@
  *
  * Reproducibility + safety:
  * - The desktop process is spawned with user-data directories redirected under
- *   `target/perf-home` so the benchmark cannot read/write the real user profile.
+ *   `target/perf-home` (by default; override via `FORMULA_PERF_HOME`) so the benchmark cannot
+ *   read/write the real user profile.
  * - This keeps caches deterministic on CI runners (and avoids polluting developer machines).
  *
  * Environment isolation:
@@ -19,7 +20,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { readFile, readlink, readdir } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, parse, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
@@ -38,8 +39,16 @@ import {
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
+function resolvePerfHome(): string {
+  const fromEnv = process.env.FORMULA_PERF_HOME;
+  if (fromEnv && fromEnv.trim() !== '') {
+    return resolve(repoRoot, fromEnv);
+  }
+  return resolve(repoRoot, 'target', 'perf-home');
+}
+
 // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
-const perfHome = resolve(repoRoot, 'target', 'perf-home');
+const perfHome = resolvePerfHome();
 const perfTmp = resolve(perfHome, 'tmp');
 const perfXdgConfig = resolve(perfHome, 'xdg-config');
 const perfXdgCache = resolve(perfHome, 'xdg-cache');
@@ -351,6 +360,10 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
 
   // Optionally, force a clean state between iterations to avoid cache pollution.
   if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === '1') {
+    const rootDir = parse(perfHome).root;
+    if (perfHome === rootDir || perfHome === repoRoot) {
+      throw new Error(`Refusing to reset unsafe desktop benchmark home dir: ${perfHome}`);
+    }
     rmSync(perfHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 
