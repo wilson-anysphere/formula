@@ -709,7 +709,10 @@ mod tests {
 
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
-        assert_eq!(cfg.value_fields[0].base_field.as_deref(), Some("Region"));
+        assert_eq!(
+            cfg.value_fields[0].base_field,
+            Some(PivotFieldRef::CacheFieldName("Region".to_string()))
+        );
     }
 
     #[test]
@@ -743,7 +746,10 @@ mod tests {
 
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
-        assert_eq!(cfg.value_fields[0].base_field.as_deref(), Some("Region"));
+        assert_eq!(
+            cfg.value_fields[0].base_field,
+            Some(PivotFieldRef::CacheFieldName("Region".to_string()))
+        );
         assert_eq!(cfg.value_fields[0].base_item.as_deref(), Some("East"));
     }
 
@@ -859,11 +865,11 @@ mod tests {
             cfg.filter_fields,
             vec![
                 FilterField {
-                    source_field: "Region".to_string(),
+                    source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
                     allowed: None
                 },
                 FilterField {
-                    source_field: "Sales".to_string(),
+                    source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                     allowed: None
                 }
             ]
@@ -902,7 +908,7 @@ mod tests {
         assert_eq!(
             cfg.filter_fields,
             vec![FilterField {
-                source_field: "Region".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
                 allowed: Some(allowed),
             }]
         );
@@ -933,7 +939,7 @@ mod tests {
         assert_eq!(
             cfg.filter_fields,
             vec![FilterField {
-                source_field: "Region".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
                 allowed: None,
             }]
         );
@@ -964,7 +970,7 @@ mod tests {
         assert_eq!(
             cfg.filter_fields,
             vec![FilterField {
-                source_field: "Region".to_string(),
+                source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
                 allowed: None,
             }]
         );
@@ -1194,7 +1200,10 @@ mod tests {
             &parts,
         );
         assert_eq!(filters.len(), 1);
-        assert_eq!(filters[0].source_field, "Region");
+        assert_eq!(
+            filters[0].source_field,
+            PivotFieldRef::CacheFieldName("Region".to_string())
+        );
         assert_eq!(
             filters[0].allowed.as_ref(),
             Some(&HashSet::from([PivotKeyPart::Text("East".to_string())]))

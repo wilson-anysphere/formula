@@ -1905,7 +1905,7 @@ mod engine_filter_field_tests {
         let mut expected_allowed = HashSet::new();
         expected_allowed.insert(formula_engine::pivot::PivotKeyPart::Text("East".to_string()));
         let expected = formula_engine::pivot::FilterField {
-            source_field: "Region".to_string(),
+            source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
             allowed: Some(expected_allowed),
         };
 
@@ -1923,7 +1923,7 @@ mod engine_filter_field_tests {
             slicer_selection_to_engine_filter_field_with_resolver("Region", &selection, |_| None);
 
         let expected = formula_engine::pivot::FilterField {
-            source_field: "Region".to_string(),
+            source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
             allowed: None,
         };
 

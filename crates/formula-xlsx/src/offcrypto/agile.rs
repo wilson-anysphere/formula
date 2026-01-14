@@ -300,7 +300,7 @@ pub fn parse_agile_encryption_info_stream_with_options(
         });
     }
     let key_data_salt_value = decode_b64_attr("keyData", key_data_node, "saltValue", opts)?;
-    if key_data_salt_value.len() != key_data_salt_size as usize {
+    if key_data_salt_value.len() > key_data_salt_size as usize {
         return Err(OffCryptoError::InvalidAttribute {
             element: "keyData".to_string(),
             attr: "saltValue".to_string(),
@@ -431,7 +431,7 @@ pub fn parse_agile_encryption_info_stream_with_options(
     }
     let key_encryptor_salt_value =
         decode_b64_attr("encryptedKey", encrypted_key_node, "saltValue", opts)?;
-    if key_encryptor_salt_value.len() != key_encryptor_salt_size as usize {
+    if key_encryptor_salt_value.len() > key_encryptor_salt_size as usize {
         return Err(OffCryptoError::InvalidAttribute {
             element: "encryptedKey".to_string(),
             attr: "saltValue".to_string(),

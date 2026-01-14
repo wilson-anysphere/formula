@@ -355,6 +355,8 @@ fn decrypt_agile_encrypted_package_impl(
     let key_encrypt_key_len =
         key_len_bytes(info.password_key.key_bits, "p:encryptedKey", "keyBits")?;
     let package_key_len = key_len_bytes(info.key_data.key_bits, "keyData", "keyBits")?;
+    // Some producers vary how the AES-CBC IV is derived for the password-key-encryptor blobs.
+    // Try both strategies for compatibility.
     let key_value = match decrypt_agile_package_key_from_password(
         &info,
         &password_hash,

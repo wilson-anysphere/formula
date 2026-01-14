@@ -1135,7 +1135,10 @@ mod tests {
             }]
         );
         assert_eq!(cfg.value_fields.len(), 1);
-        assert_eq!(cfg.value_fields[0].source_field, "Profit".to_string());
+        assert_eq!(
+            cfg.value_fields[0].source_field,
+            formula_model::pivots::PivotFieldRef::CacheFieldName("Profit".to_string())
+        );
     }
 
     #[test]
