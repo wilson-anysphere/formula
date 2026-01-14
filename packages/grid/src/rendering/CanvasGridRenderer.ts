@@ -310,7 +310,10 @@ async function guardPngBlob(blob: Blob): Promise<void> {
       }
       break;
     }
-    return idx < len && initial[idx] === 0x3c; // '<'
+    // If the initial sniff slice is all whitespace, treat it as SVG-like so we can read more bytes.
+    // Valid SVGs can include leading whitespace/newlines before the first tag.
+    if (idx >= len) return true;
+    return initial[idx] === 0x3c; // '<'
   })();
   let headerBytes = initial;
 

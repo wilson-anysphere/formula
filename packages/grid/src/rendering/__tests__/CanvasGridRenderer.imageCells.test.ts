@@ -1144,8 +1144,9 @@ describe("CanvasGridRenderer image cells", () => {
 
     // Ensure `<svg ...>` appears after the initial TYPE_SNIFF_BYTES (32) to exercise the
     // larger SVG header read path in guardPngBlob.
+    const leadingWhitespace = " ".repeat(40);
     const prefix = "a".repeat(9_000);
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" width="10001" height="1"></svg>`;
+    const svg = `${leadingWhitespace}<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" width="10001" height="1"></svg>`;
     const bytes = createSvgBytes(svg);
     const imageResolver = vi.fn(async () => new Blob([bytes], { type: "image/svg+xml" }));
 
