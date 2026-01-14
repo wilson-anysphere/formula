@@ -57,11 +57,11 @@ import {
   median,
   percentile,
   runDesktopStartupIterations,
+  resolveDesktopStartupBenchKind,
+  resolveDesktopStartupMode,
   resolveDesktopStartupTargets,
   resolvePerfHome,
   stdDev,
-  type DesktopStartupBenchKind,
-  type DesktopStartupMode,
   type StartupMetrics,
 } from './desktopStartupUtil.ts';
 
@@ -97,32 +97,6 @@ function buildResult(
     targetMs: target,
     passed: p95 <= target,
   };
-}
-
-function parseStartupMode(): DesktopStartupMode {
-  const modeRaw = (process.env.FORMULA_DESKTOP_STARTUP_MODE ?? 'cold').trim().toLowerCase();
-  if (modeRaw !== 'cold' && modeRaw !== 'warm') {
-    throw new Error(
-      `Invalid FORMULA_DESKTOP_STARTUP_MODE=${JSON.stringify(modeRaw)} (expected "cold" or "warm")`,
-    );
-  }
-  return modeRaw;
-}
-
-function parseBenchKind(): DesktopStartupBenchKind {
-  const kindRaw = (process.env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? '').trim().toLowerCase();
-  if (!kindRaw) {
-    // Default to the full end-to-end app startup measurement (requires the desktop frontend assets
-    // embedded in the built binary). For a lightweight CI mode that does not require `apps/desktop/dist`,
-    // set `FORMULA_DESKTOP_STARTUP_BENCH_KIND=shell` (runs `--startup-bench`).
-    return 'full';
-  }
-  if (kindRaw !== 'full' && kindRaw !== 'shell') {
-    throw new Error(
-      `Invalid FORMULA_DESKTOP_STARTUP_BENCH_KIND=${JSON.stringify(kindRaw)} (expected "full" or "shell")`,
-    );
-  }
-  return kindRaw;
 }
 
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -338,8 +312,8 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
     return [];
   }
 
-  const startupMode = parseStartupMode();
-  const benchKind = parseBenchKind();
+  const startupMode = resolveDesktopStartupMode({ defaultMode: 'cold' });
+  const benchKind = resolveDesktopStartupBenchKind({ defaultKind: 'full' });
 
   const runs = Math.max(1, Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? '20') || 20);
   const timeoutMs = Math.max(

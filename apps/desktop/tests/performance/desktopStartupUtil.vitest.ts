@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseStartupLine, resolveDesktopStartupTargets } from './desktopStartupUtil.ts';
+import {
+  parseStartupLine,
+  resolveDesktopStartupBenchKind,
+  resolveDesktopStartupMode,
+  resolveDesktopStartupTargets,
+} from './desktopStartupUtil.ts';
 
 describe('desktopStartupUtil parseStartupLine', () => {
   it('parses the legacy startup metrics line (no first_render_ms)', () => {
@@ -141,5 +146,39 @@ describe('desktopStartupUtil resolveDesktopStartupTargets', () => {
       firstRenderTargetMs: 500,
       ttiTargetMs: 1000,
     });
+  });
+});
+
+describe('desktopStartupUtil resolveDesktopStartupMode', () => {
+  it('defaults to cold', () => {
+    expect(resolveDesktopStartupMode({ env: {} })).toBe('cold');
+  });
+
+  it('parses warm', () => {
+    expect(resolveDesktopStartupMode({ env: { FORMULA_DESKTOP_STARTUP_MODE: 'warm' } })).toBe('warm');
+  });
+
+  it('throws on invalid mode', () => {
+    expect(() => resolveDesktopStartupMode({ env: { FORMULA_DESKTOP_STARTUP_MODE: 'wat' } })).toThrow(
+      /FORMULA_DESKTOP_STARTUP_MODE/,
+    );
+  });
+});
+
+describe('desktopStartupUtil resolveDesktopStartupBenchKind', () => {
+  it('uses the provided default when env is empty', () => {
+    expect(resolveDesktopStartupBenchKind({ env: {}, defaultKind: 'shell' })).toBe('shell');
+  });
+
+  it('parses full', () => {
+    expect(resolveDesktopStartupBenchKind({ env: { FORMULA_DESKTOP_STARTUP_BENCH_KIND: 'full' }, defaultKind: 'shell' })).toBe(
+      'full',
+    );
+  });
+
+  it('throws on invalid bench kind', () => {
+    expect(() =>
+      resolveDesktopStartupBenchKind({ env: { FORMULA_DESKTOP_STARTUP_BENCH_KIND: 'wat' }, defaultKind: 'full' }),
+    ).toThrow(/FORMULA_DESKTOP_STARTUP_BENCH_KIND/);
   });
 });

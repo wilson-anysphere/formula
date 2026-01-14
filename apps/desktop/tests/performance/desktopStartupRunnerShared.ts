@@ -32,6 +32,61 @@ export type DesktopStartupTargets = {
   ttiTargetMs: number;
 };
 
+export function parseDesktopStartupMode(raw: string): DesktopStartupMode | null {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'cold' || normalized === 'warm') return normalized;
+  return null;
+}
+
+export function resolveDesktopStartupMode(options: {
+  /**
+   * Override env vars for tests.
+   *
+   * Defaults to `process.env`.
+   */
+  env?: NodeJS.ProcessEnv;
+  defaultMode?: DesktopStartupMode;
+}): DesktopStartupMode {
+  const env = options.env ?? process.env;
+  const defaultMode = options.defaultMode ?? 'cold';
+  const modeRaw = String(env.FORMULA_DESKTOP_STARTUP_MODE ?? '').trim().toLowerCase();
+  if (!modeRaw) return defaultMode;
+  const parsed = parseDesktopStartupMode(modeRaw);
+  if (!parsed) {
+    throw new Error(
+      `Invalid FORMULA_DESKTOP_STARTUP_MODE=${JSON.stringify(modeRaw)} (expected "cold" or "warm")`,
+    );
+  }
+  return parsed;
+}
+
+export function parseDesktopStartupBenchKind(raw: string): DesktopStartupBenchKind | null {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'full' || normalized === 'shell') return normalized;
+  return null;
+}
+
+export function resolveDesktopStartupBenchKind(options: {
+  /**
+   * Override env vars for tests.
+   *
+   * Defaults to `process.env`.
+   */
+  env?: NodeJS.ProcessEnv;
+  defaultKind: DesktopStartupBenchKind;
+}): DesktopStartupBenchKind {
+  const env = options.env ?? process.env;
+  const kindRaw = String(env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? '').trim().toLowerCase();
+  if (!kindRaw) return options.defaultKind;
+  const parsed = parseDesktopStartupBenchKind(kindRaw);
+  if (!parsed) {
+    throw new Error(
+      `Invalid FORMULA_DESKTOP_STARTUP_BENCH_KIND=${JSON.stringify(kindRaw)} (expected "full" or "shell")`,
+    );
+  }
+  return parsed;
+}
+
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 

@@ -5,6 +5,8 @@ import {
   defaultDesktopBinPath,
   percentile,
   runDesktopStartupIterations,
+  resolveDesktopStartupBenchKind,
+  resolveDesktopStartupMode,
   resolveDesktopStartupTargets,
   resolvePerfHome,
   type DesktopStartupBenchKind,
@@ -60,14 +62,6 @@ function usage(): string {
   ].join("\n");
 }
 
-function parseBenchKindFromEnv(): DesktopStartupBenchKind | null {
-  const raw = (process.env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? "").trim().toLowerCase();
-  if (!raw) return null;
-  if (raw === "shell") return "shell";
-  if (raw === "full") return "full";
-  return null;
-}
-
 function parseArgs(argv: string[]): {
   mode: DesktopStartupMode;
   runs: number;
@@ -83,23 +77,16 @@ function parseArgs(argv: string[]): {
   benchKind: DesktopStartupBenchKind;
 } {
   const args = [...argv];
-
-  const modeRaw = (process.env.FORMULA_DESKTOP_STARTUP_MODE ?? "cold").trim().toLowerCase();
-  if (modeRaw !== "cold" && modeRaw !== "warm") {
-    throw new Error(
-      `Invalid FORMULA_DESKTOP_STARTUP_MODE=${JSON.stringify(modeRaw)} (expected "cold" or "warm")`,
-    );
-  }
-  let mode: DesktopStartupMode = modeRaw;
+  let mode: DesktopStartupMode = resolveDesktopStartupMode({ defaultMode: "cold" });
 
   const envRuns = Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? "") || 20;
   const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS ?? "") || 15_000;
   const envBin = process.env.FORMULA_DESKTOP_BIN ?? null;
 
   const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH === "1";
-
-  const envKind = parseBenchKindFromEnv();
-  const defaultKind: DesktopStartupBenchKind = envKind ?? (process.env.CI ? "shell" : "full");
+  const defaultKind: DesktopStartupBenchKind = resolveDesktopStartupBenchKind({
+    defaultKind: process.env.CI ? "shell" : "full",
+  });
 
   let windowTargetMsOverride: number | null = null;
   let firstRenderTargetMsOverride: number | null = null;
