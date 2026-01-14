@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { pxToEmu, type GridGeometry, type Viewport } from "../overlay";
 import { DrawingInteractionController } from "../interaction";
+import { getResizeHandleCenters } from "../selectionHandles";
 import type { DrawingObject } from "../types";
 
 type Listener = (e: any) => void;
@@ -218,6 +219,55 @@ describe("DrawingInteractionController image resize aspect ratio", () => {
 
     // Move down by 50px while holding Shift. This corresponds to +50px local width delta.
     el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 50, clientY: 200, pointerId: 1, shiftKey: true }));
+
+    expect(objects[0]?.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(250), cy: pxToEmu(125) },
+    });
+  });
+
+  it("keeps the original aspect ratio for rotated+flipped images (lock is applied in local coords)", () => {
+    const el = new StubEventTarget({ left: 0, top: 0 });
+    const obj: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img_1" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(200), yEmu: pxToEmu(200) },
+        size: { cx: pxToEmu(200), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+      transform: { rotationDeg: 90, flipH: true, flipV: false },
+    };
+    let objects: DrawingObject[] = [obj];
+
+    new DrawingInteractionController(el as unknown as HTMLElement, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+    });
+
+    const bounds = { x: 200, y: 200, width: 200, height: 100 };
+    const handleCenter = getResizeHandleCenters(bounds, obj.transform).find((c) => c.handle === "se");
+    expect(handleCenter).toBeTruthy();
+
+    el.dispatchPointerEvent(
+      "pointerdown",
+      createPointerEvent({ clientX: handleCenter!.x, clientY: handleCenter!.y, pointerId: 1 }),
+    );
+
+    // For a 90deg rotation with flipH, moving up by 50px corresponds to +50px local width delta.
+    el.dispatchPointerEvent(
+      "pointermove",
+      createPointerEvent({
+        clientX: handleCenter!.x,
+        clientY: handleCenter!.y - 50,
+        pointerId: 1,
+        shiftKey: true,
+      }),
+    );
 
     expect(objects[0]?.anchor).toMatchObject({
       type: "absolute",
