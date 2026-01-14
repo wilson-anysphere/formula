@@ -215,6 +215,17 @@
   overflow: hidden;
 }
 
+.formula-table-filter-dropdown__search {
+  padding: 6px;
+  border-bottom: 1px solid var(--formula-grid-line, var(--border));
+}
+
+.formula-table-filter-dropdown__search .formula-sort-filter__input {
+  background: var(--formula-grid-bg, var(--bg-primary));
+  color: inherit;
+  border-color: var(--formula-grid-line, var(--border));
+}
+
 .formula-table-filter-dropdown__list {
   max-height: 240px;
   overflow: auto;
