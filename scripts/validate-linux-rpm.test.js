@@ -18,6 +18,19 @@ const hasBash = (() => {
   return probe.status === 0;
 })();
 
+test("validate-linux-rpm --help prints usage and mentions key env vars", { skip: !hasBash }, () => {
+  const proc = spawnSync("bash", [join(repoRoot, "scripts", "validate-linux-rpm.sh"), "--help"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  if (proc.error) throw proc.error;
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /validate-linux-rpm\.sh/i);
+  assert.match(proc.stdout, /--no-container/);
+  assert.match(proc.stdout, /DOCKER_PLATFORM/);
+  assert.match(proc.stdout, /FORMULA_RPM_NAME_OVERRIDE/);
+});
+
 function writeFakeRpmTool(binDir) {
   const rpmScript = `#!/usr/bin/env bash
  set -euo pipefail

@@ -25,7 +25,7 @@ early:
 - Validate the extracted `.desktop` file exists and advertises spreadsheet (xlsx) integration
 
 See `scripts/ci/check-appimage.sh`.
-See also `scripts/validate-linux-appimage.sh`.
+See also `scripts/validate-linux-appimage.sh` (desktop integration metadata + bundle version checks vs `tauri.conf.json`).
 
 Tip: `scripts/validate-linux-appimage.sh` supports an optional exec sanity check that runs the
 extracted `AppRun` entrypoint in a quick-exit mode:
@@ -35,7 +35,7 @@ extracted `AppRun` entrypoint in a quick-exit mode:
 bash scripts/validate-linux-appimage.sh --exec-check --exec-timeout 30
 ```
 
-For Linux RPM bundles, see `scripts/validate-linux-rpm.sh` (host `rpm -qp` metadata checks + optional Fedora container install smoke test).
+For Linux RPM bundles, see `scripts/validate-linux-rpm.sh` (host `rpm -qp` metadata checks including version/package name vs `tauri.conf.json` + optional Fedora container install smoke test).
 
 For the **exact** `latest.json.platforms` key names (and which asset each key should point to),
 see:
@@ -364,6 +364,10 @@ bash scripts/validate-linux-rpm.sh
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/validate-windows-bundles.ps1
 # (Note: NSIS `.exe` payload validation uses 7-Zip / `7z.exe` when available.)
 ```
+
+In addition to checking desktop integration and compliance artifacts, these validators also enforce
+that the **built artifacts** report the expected **version** (and where applicable, identifier/name)
+from `apps/desktop/src-tauri/tauri.conf.json`. This helps catch stale/mispackaged bundles in CI.
 
 ## Updater restart semantics (important)
 

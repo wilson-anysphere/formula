@@ -25,7 +25,7 @@ cd "$REPO_ROOT"
 
 usage() {
   cat <<EOF
-${SCRIPT_NAME} - validate a formula-desktop RPM bundle
+${SCRIPT_NAME} - validate a Linux RPM bundle (Tauri desktop build)
 
 Usage:
   ${SCRIPT_NAME} [--rpm <path>] [--no-container] [--image <fedora-image>]
@@ -38,13 +38,17 @@ Options:
                          - apps/desktop/target/**/release/bundle/rpm/*.rpm
                          - target/**/release/bundle/rpm/*.rpm
   --no-container      Skip the Fedora container installability check.
-                      Note: we still extract the RPM payload to validate desktop integration
-                      metadata (MimeType= in *.desktop). This requires rpm2cpio + cpio on the host.
+                       Note: we still extract the RPM payload to validate desktop integration
+                       metadata (MimeType= in *.desktop). This requires rpm2cpio + cpio on the host.
   --image <image>     Fedora image to use for the container step (default: fedora:40).
-
-Environment variables:
-  DOCKER_PLATFORM     Optional docker --platform override (default: host architecture).
   -h, --help          Show this help text.
+
+Environment:
+  DOCKER_PLATFORM
+                      Optional docker --platform override (default: host architecture).
+  FORMULA_RPM_NAME_OVERRIDE
+                      Override the expected RPM %{NAME} package name for validation purposes.
+                      (Does NOT affect the expected /usr/bin/<mainBinaryName> path inside the RPM.)
 EOF
 }
 
