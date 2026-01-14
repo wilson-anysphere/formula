@@ -54,8 +54,8 @@ fn map_offcrypto_error(err: crate::offcrypto::OffCryptoError) -> EncryptedOoxmlE
         }
         OffCryptoError::UnsupportedEncryptionVersion { .. }
         | OffCryptoError::UnsupportedCipherAlgorithm { .. }
-        | OffCryptoError::UnsupportedChainingMode { .. }
         | OffCryptoError::UnsupportedCipherChaining { .. }
+        | OffCryptoError::UnsupportedChainingMode { .. }
         | OffCryptoError::UnsupportedHashAlgorithm { .. } => {
             EncryptedOoxmlError::UnsupportedEncryption(err.to_string())
         }
@@ -100,12 +100,9 @@ pub(crate) fn maybe_decrypt_office_encrypted_package<'a>(
         stream.read_to_end(&mut encrypted_package)?;
     }
 
-    let decrypted = crate::offcrypto::decrypt_agile_encrypted_package(
-        &encryption_info,
-        &encrypted_package,
-        password,
-    )
-    .map_err(map_offcrypto_error)?;
+    let decrypted =
+        crate::offcrypto::decrypt_ooxml_encrypted_package(&encryption_info, &encrypted_package, password)
+            .map_err(map_offcrypto_error)?;
 
     // The decrypted content should be the underlying ZIP package (`.xlsx`/`.xlsm`). Sanity check
     // with ZIP parsing so callers get a clearer error than "unexpected EOF" later.
