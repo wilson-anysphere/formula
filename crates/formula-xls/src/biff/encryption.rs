@@ -1662,6 +1662,49 @@ mod tests {
     }
 
     #[test]
+    fn xor_method1_decrypt_uses_method2_password_byte_encoding() {
+        // Some BIFF XOR "Method 1" implementations derive password bytes from UTF-16 code units
+        // using MS-OFFCRYPTO 2.3.7.4 "method 2": use low byte unless it is zero, else use high
+        // byte.
+        //
+        // This test uses U+0100 ("Ā") which is not representable in Windows-1252 (common Excel ANSI
+        // encoding), and whose UTF-16 low byte is 0. This ensures the decryptor's candidate
+        // generation must consider method-2 bytes to successfully match the stored key/verifier.
+        let password = "Ā";
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+
+        // Method 2 byte encoding for U+0100 => [0x01] (low byte is 0 so we use high byte).
+        let password_bytes = [0x01u8];
+
+        let key = create_xor_key_method1(&password_bytes);
+        let verifier = create_password_verifier_method1(&password_bytes);
+        let filepass_payload = [
+            0x00, 0x00, // wEncryptionType (XOR)
+            key.to_le_bytes()[0],
+            key.to_le_bytes()[1],
+            verifier.to_le_bytes()[0],
+            verifier.to_le_bytes()[1],
+        ];
+
+        let plain = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_payload),
+            record(RECORD_DUMMY, &dummy_payload(64, 0x99)),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut encrypted = plain.clone();
+        let encrypted_start = filepass_payload_range(&encrypted).end;
+        let xor_array = create_xor_array_method1(&password_bytes, key);
+        encrypt_payloads_after_filepass_xor_method1(&mut encrypted, encrypted_start, &xor_array)
+            .expect("encrypt");
+
+        decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
+        assert_eq!(encrypted, plain);
+    }
+
+    #[test]
     fn decrypt_workbook_stream_returns_no_filepass_when_missing() {
         let bof_payload = [0x00, 0x06, 0x05, 0x00];
         let mut stream = [
