@@ -2210,6 +2210,267 @@ fn update_sheet_protection_xml(
     let mut inserted = false;
     let mut pending_insert_after_sheet_data = false;
 
+    fn append_attr_raw(writer: &mut Vec<u8>, key: &[u8], val: &str) {
+        writer.push(b' ');
+        writer.extend_from_slice(key);
+        writer.extend_from_slice(b"=\"");
+        writer.extend_from_slice(escape_attr(val).as_bytes());
+        writer.push(b'"');
+    }
+
+    fn append_attr_bool(writer: &mut Vec<u8>, key: &[u8], original: Option<&str>, desired: bool) {
+        writer.push(b' ');
+        writer.extend_from_slice(key);
+        writer.extend_from_slice(b"=\"");
+        if let Some(original) = original {
+            if parse_xml_bool(original) == desired {
+                writer.extend_from_slice(escape_attr(original).as_bytes());
+            } else {
+                writer.extend_from_slice(if desired { b"1" } else { b"0" });
+            }
+        } else {
+            writer.extend_from_slice(if desired { b"1" } else { b"0" });
+        }
+        writer.push(b'"');
+    }
+
+    fn append_attr_password(
+        writer: &mut Vec<u8>,
+        key: &[u8],
+        original: Option<&str>,
+        desired: Option<u16>,
+    ) {
+        let Some(original) = original else {
+            if let Some(hash) = desired {
+                writer.push(b' ');
+                writer.extend_from_slice(key);
+                writer.extend_from_slice(b"=\"");
+                writer.extend_from_slice(format!("{:04X}", hash).as_bytes());
+                writer.push(b'"');
+            }
+            return;
+        };
+
+        let original_hash = parse_xml_u16_hex(original).filter(|hash| *hash != 0);
+        match desired {
+            Some(hash) => {
+                writer.push(b' ');
+                writer.extend_from_slice(key);
+                writer.extend_from_slice(b"=\"");
+                if original_hash == Some(hash) {
+                    writer.extend_from_slice(escape_attr(original).as_bytes());
+                } else {
+                    writer.extend_from_slice(format!("{:04X}", hash).as_bytes());
+                }
+                writer.push(b'"');
+            }
+            None => {
+                // Preserve semantically-empty password hashes (e.g. `0000`) but drop real ones.
+                if original_hash.is_none() {
+                    append_attr_raw(writer, key, original);
+                }
+            }
+        }
+    }
+
+    fn write_patched_sheet_protection_start(
+        writer: &mut Writer<Vec<u8>>,
+        e: &quick_xml::events::BytesStart<'_>,
+        protection: &SheetProtection,
+        is_empty: bool,
+    ) -> Result<(), WriteError> {
+        let mut wrote_sheet = false;
+        let mut wrote_select_locked_cells = false;
+        let mut wrote_select_unlocked_cells = false;
+        let mut wrote_format_cells = false;
+        let mut wrote_format_columns = false;
+        let mut wrote_format_rows = false;
+        let mut wrote_insert_columns = false;
+        let mut wrote_insert_rows = false;
+        let mut wrote_insert_hyperlinks = false;
+        let mut wrote_delete_columns = false;
+        let mut wrote_delete_rows = false;
+        let mut wrote_sort = false;
+        let mut wrote_auto_filter = false;
+        let mut wrote_pivot_tables = false;
+        let mut wrote_objects = false;
+        let mut wrote_scenarios = false;
+        let mut wrote_password = false;
+
+        let tag = e.name();
+        let tag = tag.as_ref();
+        let buf = writer.get_mut();
+        buf.extend_from_slice(b"<");
+        buf.extend_from_slice(tag);
+
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr?;
+            let key = attr.key.as_ref();
+            let val = attr.unescape_value()?.into_owned();
+
+            match key {
+                b"sheet" => {
+                    wrote_sheet = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.enabled);
+                }
+                b"selectLockedCells" => {
+                    wrote_select_locked_cells = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.select_locked_cells);
+                }
+                b"selectUnlockedCells" => {
+                    wrote_select_unlocked_cells = true;
+                    append_attr_bool(
+                        buf,
+                        key,
+                        Some(val.as_str()),
+                        protection.select_unlocked_cells,
+                    );
+                }
+                b"formatCells" => {
+                    wrote_format_cells = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.format_cells);
+                }
+                b"formatColumns" => {
+                    wrote_format_columns = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.format_columns);
+                }
+                b"formatRows" => {
+                    wrote_format_rows = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.format_rows);
+                }
+                b"insertColumns" => {
+                    wrote_insert_columns = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.insert_columns);
+                }
+                b"insertRows" => {
+                    wrote_insert_rows = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.insert_rows);
+                }
+                b"insertHyperlinks" => {
+                    wrote_insert_hyperlinks = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.insert_hyperlinks);
+                }
+                b"deleteColumns" => {
+                    wrote_delete_columns = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.delete_columns);
+                }
+                b"deleteRows" => {
+                    wrote_delete_rows = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.delete_rows);
+                }
+                b"sort" => {
+                    wrote_sort = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.sort);
+                }
+                b"autoFilter" => {
+                    wrote_auto_filter = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.auto_filter);
+                }
+                b"pivotTables" => {
+                    wrote_pivot_tables = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), protection.pivot_tables);
+                }
+                // Inverted "protected" flags.
+                b"objects" => {
+                    wrote_objects = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), !protection.edit_objects);
+                }
+                b"scenarios" => {
+                    wrote_scenarios = true;
+                    append_attr_bool(buf, key, Some(val.as_str()), !protection.edit_scenarios);
+                }
+                b"password" => {
+                    wrote_password = true;
+                    append_attr_password(buf, key, Some(val.as_str()), protection.password_hash);
+                }
+                _ => {
+                    append_attr_raw(buf, key, val.as_str());
+                }
+            }
+        }
+
+        // Only add missing allow-list attributes when the desired value differs from the implicit
+        // defaults used by our parser when the attribute is absent.
+        let mut implied_defaults = SheetProtection::default();
+        implied_defaults.enabled = true;
+
+        if protection.enabled != implied_defaults.enabled && !wrote_sheet {
+            append_attr_bool(buf, b"sheet", None, protection.enabled);
+        }
+        if protection.select_locked_cells != implied_defaults.select_locked_cells
+            && !wrote_select_locked_cells
+        {
+            append_attr_bool(
+                buf,
+                b"selectLockedCells",
+                None,
+                protection.select_locked_cells,
+            );
+        }
+        if protection.select_unlocked_cells != implied_defaults.select_unlocked_cells
+            && !wrote_select_unlocked_cells
+        {
+            append_attr_bool(
+                buf,
+                b"selectUnlockedCells",
+                None,
+                protection.select_unlocked_cells,
+            );
+        }
+        if protection.format_cells != implied_defaults.format_cells && !wrote_format_cells {
+            append_attr_bool(buf, b"formatCells", None, protection.format_cells);
+        }
+        if protection.format_columns != implied_defaults.format_columns && !wrote_format_columns {
+            append_attr_bool(buf, b"formatColumns", None, protection.format_columns);
+        }
+        if protection.format_rows != implied_defaults.format_rows && !wrote_format_rows {
+            append_attr_bool(buf, b"formatRows", None, protection.format_rows);
+        }
+        if protection.insert_columns != implied_defaults.insert_columns && !wrote_insert_columns {
+            append_attr_bool(buf, b"insertColumns", None, protection.insert_columns);
+        }
+        if protection.insert_rows != implied_defaults.insert_rows && !wrote_insert_rows {
+            append_attr_bool(buf, b"insertRows", None, protection.insert_rows);
+        }
+        if protection.insert_hyperlinks != implied_defaults.insert_hyperlinks
+            && !wrote_insert_hyperlinks
+        {
+            append_attr_bool(buf, b"insertHyperlinks", None, protection.insert_hyperlinks);
+        }
+        if protection.delete_columns != implied_defaults.delete_columns && !wrote_delete_columns {
+            append_attr_bool(buf, b"deleteColumns", None, protection.delete_columns);
+        }
+        if protection.delete_rows != implied_defaults.delete_rows && !wrote_delete_rows {
+            append_attr_bool(buf, b"deleteRows", None, protection.delete_rows);
+        }
+        if protection.sort != implied_defaults.sort && !wrote_sort {
+            append_attr_bool(buf, b"sort", None, protection.sort);
+        }
+        if protection.auto_filter != implied_defaults.auto_filter && !wrote_auto_filter {
+            append_attr_bool(buf, b"autoFilter", None, protection.auto_filter);
+        }
+        if protection.pivot_tables != implied_defaults.pivot_tables && !wrote_pivot_tables {
+            append_attr_bool(buf, b"pivotTables", None, protection.pivot_tables);
+        }
+        if protection.edit_objects != implied_defaults.edit_objects && !wrote_objects {
+            append_attr_bool(buf, b"objects", None, !protection.edit_objects);
+        }
+        if protection.edit_scenarios != implied_defaults.edit_scenarios && !wrote_scenarios {
+            append_attr_bool(buf, b"scenarios", None, !protection.edit_scenarios);
+        }
+        if protection.password_hash.is_some() && !wrote_password {
+            append_attr_password(buf, b"password", None, protection.password_hash);
+        }
+
+        if is_empty {
+            buf.extend_from_slice(b"/>");
+        } else {
+            buf.push(b'>');
+        }
+
+        Ok(())
+    }
+
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
@@ -2244,18 +2505,21 @@ fn update_sheet_protection_xml(
             Event::Start(ref e) if e.local_name().as_ref() == b"sheetProtection" => {
                 replaced = true;
                 pending_insert_after_sheet_data = false;
-                if !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                if protection.enabled {
+                    write_patched_sheet_protection_start(&mut writer, e, protection, false)?;
+                } else {
+                    // When protection is disabled, remove any `<sheetProtection>` element (even if
+                    // it used `sheet="0"` and includes nested content).
+                    skip_depth = 1;
                 }
-                // Skip any nested content so we fully replace the element even if it's written as
-                // `<sheetProtection>...</sheetProtection>`.
-                skip_depth = 1;
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"sheetProtection" => {
                 replaced = true;
                 pending_insert_after_sheet_data = false;
-                if !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                if protection.enabled {
+                    write_patched_sheet_protection_start(&mut writer, e, protection, true)?;
+                } else {
+                    // Drop the element entirely.
                 }
             }
             Event::End(ref e) if e.local_name().as_ref() == b"sheetData" => {

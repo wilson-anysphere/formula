@@ -82,6 +82,15 @@ fn build_minimal_xlsx_with_sheet1(sheet1_xml: &str) -> Vec<u8> {
     zip.finish().expect("finish zip").into_inner()
 }
 
+fn zip_part_to_string(bytes: &[u8], part_name: &str) -> String {
+    let cursor = std::io::Cursor::new(bytes);
+    let mut archive = ZipArchive::new(cursor).expect("open zip");
+    let mut file = archive.by_name(part_name).expect("part missing");
+    let mut xml = String::new();
+    file.read_to_string(&mut xml).expect("read part");
+    xml
+}
+
 #[test]
 fn writes_spreadsheetml_formula_text_without_leading_equals() {
     let mut workbook = formula_model::Workbook::new();
@@ -113,6 +122,108 @@ fn writes_spreadsheetml_formula_text_without_leading_equals() {
             "SpreadsheetML <f> text must not start with '=' (got {f:?})"
         );
     }
+}
+
+#[test]
+fn sheet_protection_patching_preserves_modern_hashing_attrs_and_children() {
+    let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+  <x:sheetProtection sheet="1" formatCells="0" objects="true" algorithmName="SHA-512" hashValue="aGFzaA==" saltValue="c2FsdA==" spinCount="100000" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac"><extLst><ext uri="{01234567-89AB-CDEF-0123-456789ABCDEF}"><x14ac:protection foo="bar"/></ext></extLst></x:sheetProtection>
+</worksheet>"#;
+    let input = build_minimal_xlsx_with_sheet1(sheet1_xml);
+
+    let mut doc = crate::load_from_bytes(&input).expect("load minimal xlsx");
+    let sheet_id = doc.workbook.sheets[0].id;
+    {
+        let sheet = doc.workbook.sheet_mut(sheet_id).expect("sheet exists");
+        assert!(
+            sheet.sheet_protection.enabled,
+            "expected protection enabled"
+        );
+        assert!(
+            sheet.sheet_protection.password_hash.is_none(),
+            "fixture should not use legacy password hash"
+        );
+        // Flip one allow-list flag without touching the legacy password.
+        sheet.sheet_protection.format_cells = true;
+    }
+
+    let out = write_to_vec(&doc).expect("write patched xlsx");
+    let xml = zip_part_to_string(&out, "xl/worksheets/sheet1.xml");
+
+    // The original worksheet used a prefixed sheetProtection tag; the patcher must preserve the
+    // qualified name (including the prefix) exactly.
+    assert!(
+        xml.contains("<x:sheetProtection"),
+        "expected sheetProtection tag prefix to be preserved:\n{xml}"
+    );
+
+    // Modern hashing attributes must be preserved.
+    assert!(
+        xml.contains(r#"algorithmName="SHA-512""#),
+        "missing algorithmName attr after patch:\n{xml}"
+    );
+    assert!(
+        xml.contains(r#"hashValue="aGFzaA==""#),
+        "missing hashValue attr after patch:\n{xml}"
+    );
+    assert!(
+        xml.contains(r#"saltValue="c2FsdA==""#),
+        "missing saltValue attr after patch:\n{xml}"
+    );
+    assert!(
+        xml.contains(r#"spinCount="100000""#),
+        "missing spinCount attr after patch:\n{xml}"
+    );
+
+    // Nested extension list must be preserved byte-for-byte.
+    let extlst = r#"<extLst><ext uri="{01234567-89AB-CDEF-0123-456789ABCDEF}"><x14ac:protection foo="bar"/></ext></extLst>"#;
+    assert!(
+        xml.contains(extlst),
+        "sheetProtection children were not preserved:\n{xml}"
+    );
+
+    // Unchanged allow-list flags should preserve original value formatting.
+    assert!(
+        xml.contains(r#"objects="true""#),
+        "expected objects=\"true\" to be preserved:\n{xml}"
+    );
+
+    // Edited allow-list flags must update.
+    assert!(
+        xml.contains(r#"formatCells="1""#),
+        "expected formatCells to flip to 1:\n{xml}"
+    );
+}
+
+#[test]
+fn sheet_protection_disabled_removes_element() {
+    let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+  <sheetProtection sheet="1" formatCells="0"/>
+</worksheet>"#;
+    let input = build_minimal_xlsx_with_sheet1(sheet1_xml);
+
+    let mut doc = crate::load_from_bytes(&input).expect("load minimal xlsx");
+    let sheet_id = doc.workbook.sheets[0].id;
+    doc.workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet exists")
+        .sheet_protection
+        .enabled = false;
+
+    let out = write_to_vec(&doc).expect("write patched xlsx");
+    let xml = zip_part_to_string(&out, "xl/worksheets/sheet1.xml");
+    assert!(
+        !xml.contains("sheetProtection"),
+        "expected sheetProtection element to be removed when disabled:\n{xml}"
+    );
 }
 
 #[test]
@@ -205,8 +316,16 @@ fn sheetdata_patch_emits_vm_cm_for_inserted_cells() {
     }
 
     assert!(found, "expected to find <c r=\"B1\"> in patched worksheet");
-    assert_eq!(found_vm.as_deref(), Some("1"), "missing/incorrect vm= on B1");
-    assert_eq!(found_cm.as_deref(), Some("2"), "missing/incorrect cm= on B1");
+    assert_eq!(
+        found_vm.as_deref(),
+        Some("1"),
+        "missing/incorrect vm= on B1"
+    );
+    assert_eq!(
+        found_cm.as_deref(),
+        Some("2"),
+        "missing/incorrect cm= on B1"
+    );
 }
 
 #[test]
@@ -333,7 +452,10 @@ fn ensure_content_types_default_inserts_png() {
         r#"<Default Extension="xml" ContentType="application/xml"/>"#,
         r#"</Types>"#
     );
-    parts.insert("[Content_Types].xml".to_string(), minimal.as_bytes().to_vec());
+    parts.insert(
+        "[Content_Types].xml".to_string(),
+        minimal.as_bytes().to_vec(),
+    );
 
     ensure_content_types_default(&mut parts, "png", "image/png").expect("insert png default");
 
@@ -357,7 +479,10 @@ fn ensure_content_types_default_idempotent() {
         r#"<Default Extension="xml" ContentType="application/xml"/>"#,
         r#"</Types>"#
     );
-    parts.insert("[Content_Types].xml".to_string(), minimal.as_bytes().to_vec());
+    parts.insert(
+        "[Content_Types].xml".to_string(),
+        minimal.as_bytes().to_vec(),
+    );
 
     ensure_content_types_default(&mut parts, "png", "image/png").expect("first insert");
     let once = parts.get("[Content_Types].xml").cloned().unwrap();
@@ -386,7 +511,10 @@ fn ensure_content_types_default_does_not_false_positive_on_extension_substrings(
     );
 
     let mut parts = BTreeMap::new();
-    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+    parts.insert(
+        "[Content_Types].xml".to_string(),
+        ct_xml.as_bytes().to_vec(),
+    );
 
     ensure_content_types_default(&mut parts, "png", "image/png").expect("insert png default");
 
@@ -407,7 +535,10 @@ fn ensure_content_types_default_preserves_prefix_only_content_types() {
 </ct:Types>"#;
 
     let mut parts = BTreeMap::new();
-    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+    parts.insert(
+        "[Content_Types].xml".to_string(),
+        ct_xml.as_bytes().to_vec(),
+    );
 
     ensure_content_types_default(&mut parts, "png", "image/png").expect("patch content types");
 
@@ -438,7 +569,10 @@ fn ensure_content_types_default_expands_self_closing_prefix_only_root() {
 <ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
 
     let mut parts = BTreeMap::new();
-    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+    parts.insert(
+        "[Content_Types].xml".to_string(),
+        ct_xml.as_bytes().to_vec(),
+    );
 
     ensure_content_types_default(&mut parts, "png", "image/png").expect("patch content types");
 
@@ -539,7 +673,10 @@ fn ensure_content_types_override_preserves_prefix_only_content_types() {
 </ct:Types>"#;
 
     let mut parts = BTreeMap::new();
-    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+    parts.insert(
+        "[Content_Types].xml".to_string(),
+        ct_xml.as_bytes().to_vec(),
+    );
 
     ensure_content_types_override(
         &mut parts,
@@ -575,7 +712,10 @@ fn ensure_content_types_override_expands_self_closing_prefix_only_root() {
 <ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
 
     let mut parts = BTreeMap::new();
-    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+    parts.insert(
+        "[Content_Types].xml".to_string(),
+        ct_xml.as_bytes().to_vec(),
+    );
 
     ensure_content_types_override(
         &mut parts,
@@ -611,7 +751,10 @@ fn patch_content_types_for_sheet_edits_preserves_prefix_only_content_types() {
 </ct:Types>"#;
 
     let mut parts = BTreeMap::new();
-    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+    parts.insert(
+        "[Content_Types].xml".to_string(),
+        ct_xml.as_bytes().to_vec(),
+    );
 
     let added = vec![SheetMeta {
         worksheet_id: 1,
@@ -899,7 +1042,10 @@ fn patch_workbook_xml_expands_self_closing_root_and_declares_r_namespace_when_mi
     Document::parse(patched).expect("patched workbook.xml must parse as XML");
 
     assert!(
-        patched.contains(&format!(r#"xmlns:r="{}""#, crate::xml::OFFICE_RELATIONSHIPS_NS)),
+        patched.contains(&format!(
+            r#"xmlns:r="{}""#,
+            crate::xml::OFFICE_RELATIONSHIPS_NS
+        )),
         "expected patched workbook.xml to declare xmlns:r; got:\n{patched}"
     );
     assert!(
@@ -952,8 +1098,14 @@ fn sheet_structure_patchers_expand_self_closing_prefix_only_roots() {
 <ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
 
     let mut parts = BTreeMap::new();
-    parts.insert(WORKBOOK_RELS_PART.to_string(), workbook_rels_xml.as_bytes().to_vec());
-    parts.insert("[Content_Types].xml".to_string(), content_types_xml.as_bytes().to_vec());
+    parts.insert(
+        WORKBOOK_RELS_PART.to_string(),
+        workbook_rels_xml.as_bytes().to_vec(),
+    );
+    parts.insert(
+        "[Content_Types].xml".to_string(),
+        content_types_xml.as_bytes().to_vec(),
+    );
 
     let added = vec![SheetMeta {
         worksheet_id: 1,
@@ -966,8 +1118,8 @@ fn sheet_structure_patchers_expand_self_closing_prefix_only_roots() {
     patch_workbook_rels_for_sheet_edits(&mut parts, &[], &added).expect("patch workbook rels");
     patch_content_types_for_sheet_edits(&mut parts, &[], &added).expect("patch content types");
 
-    let updated_rels = std::str::from_utf8(parts.get(WORKBOOK_RELS_PART).expect("rels part"))
-        .expect("utf8 rels");
+    let updated_rels =
+        std::str::from_utf8(parts.get(WORKBOOK_RELS_PART).expect("rels part")).expect("utf8 rels");
     assert_parses_xml(updated_rels);
     assert!(
         updated_rels.contains(r#"<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">"#)
