@@ -207,6 +207,11 @@ describe("Ribbon UI state overrides", () => {
   it("includes expected editing-mode disabled command ids", () => {
     const expected = [
       "view.toggleShowFormulas",
+      "view.window.freezePanes",
+      "view.freezePanes",
+      "view.freezeTopRow",
+      "view.freezeFirstColumn",
+      "view.unfreezePanes",
       "audit.togglePrecedents",
       "audit.toggleDependents",
       "audit.toggleTransitive",
