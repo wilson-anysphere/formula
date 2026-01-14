@@ -2267,12 +2267,18 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             ...RIBBON_DISABLED_BY_ID_WHILE_EDITING,
           }
         : null),
-      "comments.addComment": isEditing || !canComment,
-      // Comment mutations should be disabled for viewers even if the UI surface
-      // is otherwise visible (e.g. the Review tab includes delete actions).
-      "review.comments.deleteComment": !canComment,
-      "review.comments.deleteComment.deleteThread": !canComment,
-      "review.comments.deleteComment.deleteAll": !canComment,
+      ...(isEditing || !canComment ? { "comments.addComment": true } : null),
+      // Comment mutations should be disabled for viewers even if the UI surface is otherwise
+      // visible (e.g. the Review tab includes delete actions). Use conditional spreads so we
+      // don't accidentally override the CommandRegistry baseline (which disables unregistered
+      // placeholder commands) with explicit `false` values.
+      ...(!canComment
+        ? {
+            "review.comments.deleteComment": true,
+            "review.comments.deleteComment.deleteThread": true,
+            "review.comments.deleteComment.deleteAll": true,
+          }
+        : null),
       ...(isReadOnly
         ? {
             // Editing clipboard actions are disabled in read-only mode.
@@ -2306,10 +2312,14 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "pageLayout.export.exportPdf": true,
           }),
       // View/zoom controls depend on the current runtime (e.g. shared-grid mode).
-      "view.togglePerformanceStats": !perfStatsSupported,
-      "view.zoom.zoom": zoomDisabled,
-      "view.zoom.zoom100": zoomDisabled,
-      "view.zoom.zoomToSelection": zoomDisabled,
+      ...(!perfStatsSupported ? { "view.togglePerformanceStats": true } : null),
+      ...(zoomDisabled
+        ? {
+            "view.zoom.zoom": true,
+            "view.zoom.zoom100": true,
+            "view.zoom.zoomToSelection": true,
+          }
+        : null),
       ...(outlineDisabled
         ? {
             // Shared-grid mode does not yet support outline groups.
