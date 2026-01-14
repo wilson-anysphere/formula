@@ -99,7 +99,7 @@ export interface AIAuditStore {
 
 - `session_id?: string`
 - `workbook_id?: string`
-- `mode?: AIMode | AIMode[]`
+- `mode?: AIMode | AIMode[]` (empty array is treated as no mode filter)
 - `after_timestamp_ms?: number` – inclusive lower bound on `timestamp_ms` (≥)
 - `before_timestamp_ms?: number` – exclusive upper bound on `timestamp_ms` (<)
 - `cursor?: { before_timestamp_ms: number; before_id?: string }` – **stable pagination cursor**
