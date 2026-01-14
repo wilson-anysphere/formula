@@ -58,4 +58,3 @@ fn bench_get_range_values_vs_get_cell_value() {
         height, width, bulk_elapsed, per_cell_elapsed
     );
 }
-

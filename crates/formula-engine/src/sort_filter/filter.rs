@@ -326,7 +326,11 @@ pub fn apply_autofilter_with_value_locale(
     }
 }
 
-fn evaluate_column_filter(cell: &CellValue, filter: &ColumnFilter, value_locale: ValueLocaleConfig) -> bool {
+fn evaluate_column_filter(
+    cell: &CellValue,
+    filter: &ColumnFilter,
+    value_locale: ValueLocaleConfig,
+) -> bool {
     if filter.criteria.is_empty() {
         return true;
     }
@@ -343,7 +347,11 @@ fn evaluate_column_filter(cell: &CellValue, filter: &ColumnFilter, value_locale:
     }
 }
 
-fn evaluate_criterion(cell: &CellValue, criterion: &FilterCriterion, value_locale: ValueLocaleConfig) -> bool {
+fn evaluate_criterion(
+    cell: &CellValue,
+    criterion: &FilterCriterion,
+    value_locale: ValueLocaleConfig,
+) -> bool {
     match criterion {
         FilterCriterion::Blanks => is_blank(cell),
         FilterCriterion::NonBlanks => !is_blank(cell),
@@ -437,15 +445,17 @@ fn date_cmp(cell: &CellValue, cmp: &DateComparison, value_locale: ValueLocaleCon
 fn cell_to_string(cell: &CellValue, value_locale: ValueLocaleConfig) -> String {
     match cell {
         CellValue::Blank => String::new(),
-        CellValue::Number(n) => formula_format::format_value(
-            FormatValue::Number(*n),
-            None,
-            &FormatOptions {
-                locale: value_locale.separators,
-                date_system: DateSystem::Excel1900,
-            },
-        )
-        .text,
+        CellValue::Number(n) => {
+            formula_format::format_value(
+                FormatValue::Number(*n),
+                None,
+                &FormatOptions {
+                    locale: value_locale.separators,
+                    date_system: DateSystem::Excel1900,
+                },
+            )
+            .text
+        }
         CellValue::Text(s) => s.clone(),
         CellValue::Bool(b) => {
             if *b {
@@ -642,8 +652,7 @@ mod tests {
             )]),
         };
 
-        let result =
-            apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
+        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
         assert_eq!(result.visible_rows, vec![true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![2]);
     }
@@ -669,8 +678,7 @@ mod tests {
             )]),
         };
 
-        let result =
-            apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
+        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
         assert_eq!(result.visible_rows, vec![true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![2]);
     }
@@ -697,8 +705,7 @@ mod tests {
             )]),
         };
 
-        let result =
-            apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::en_us());
+        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::en_us());
         assert_eq!(result.visible_rows, vec![true, true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![3]);
     }
@@ -857,7 +864,10 @@ mod tests {
     #[test]
     fn locale_aware_text_filters_format_numbers_and_bools_like_excel() {
         let data = range(vec![
-            vec![CellValue::Text("Val".into()), CellValue::Text("Flag".into())],
+            vec![
+                CellValue::Text("Val".into()),
+                CellValue::Text("Flag".into()),
+            ],
             vec![CellValue::Number(1.5), CellValue::Bool(true)],
         ]);
         let filter = AutoFilter {

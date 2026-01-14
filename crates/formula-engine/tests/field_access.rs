@@ -1,4 +1,6 @@
-use formula_engine::{parse_formula, parse_formula_partial, Engine, ErrorKind, ParseOptions, SerializeOptions, Value};
+use formula_engine::{
+    parse_formula, parse_formula_partial, Engine, ErrorKind, ParseOptions, SerializeOptions, Value,
+};
 
 #[test]
 fn field_access_roundtrip_ident() {
@@ -43,16 +45,26 @@ fn field_access_partial_parse_trailing_dot() {
 fn field_access_evaluates_to_value_error_for_non_rich_values() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 123.0).unwrap();
-    engine.set_cell_formula("Sheet1", "B1", "=A1.Price").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=A1.Price")
+        .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]
 fn field_access_propagates_base_error() {
     let mut engine = Engine::new();
     engine.set_cell_formula("Sheet1", "A1", "=1/0").unwrap();
-    engine.set_cell_formula("Sheet1", "B1", "=A1.Price").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=A1.Price")
+        .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Div0)
+    );
 }

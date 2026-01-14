@@ -53,7 +53,10 @@ fn skew_and_kurt_domain_errors() {
     assert_eq!(sheet.eval("=KURT({1,2,3})"), Value::Error(ErrorKind::Div0));
 
     assert_eq!(sheet.eval("=SKEW({2,2,2})"), Value::Error(ErrorKind::Div0));
-    assert_eq!(sheet.eval("=SKEW.P({2,2,2})"), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        sheet.eval("=SKEW.P({2,2,2})"),
+        Value::Error(ErrorKind::Div0)
+    );
     assert_eq!(
         sheet.eval("=KURT({2,2,2,2})"),
         Value::Error(ErrorKind::Div0)
@@ -72,7 +75,11 @@ fn skew_ignores_text_and_logicals_in_references() {
     assert_eq!(sheet.eval("=SKEW(A1:A4)"), Value::Error(ErrorKind::Div0));
 
     // As direct scalar arguments, numeric text/bools are coerced.
-    assert_number_tol(&sheet.eval(r#"=SKEW(1,"2",TRUE,3)"#), 0.8545630383279712, 1e-9);
+    assert_number_tol(
+        &sheet.eval(r#"=SKEW(1,"2",TRUE,3)"#),
+        0.8545630383279712,
+        1e-9,
+    );
 }
 
 #[test]
@@ -87,4 +94,3 @@ fn moments_reject_lambda_values() {
         Value::Error(ErrorKind::Value)
     );
 }
-

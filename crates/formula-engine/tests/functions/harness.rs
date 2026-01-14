@@ -53,7 +53,9 @@ impl TestSheet {
     }
 
     pub fn clear_cell(&mut self, addr: &str) {
-        self.engine.clear_cell(self.sheet, addr).expect("clear cell");
+        self.engine
+            .clear_cell(self.sheet, addr)
+            .expect("clear cell");
     }
 
     pub fn clear_range(&mut self, range_a1: &str) {

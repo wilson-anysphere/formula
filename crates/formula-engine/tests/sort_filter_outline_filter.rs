@@ -1,5 +1,7 @@
 use formula_engine::locale::ValueLocaleConfig;
-use formula_engine::sort_filter::{apply_autofilter_to_outline, apply_autofilter_to_outline_with_value_locale};
+use formula_engine::sort_filter::{
+    apply_autofilter_to_outline, apply_autofilter_to_outline_with_value_locale,
+};
 use formula_model::{
     CellRef, CellValue, FilterColumn, FilterCriterion, FilterJoin, FilterValue, NumberComparison,
     Outline, Range, SheetAutoFilter, TextMatch, TextMatchKind, Worksheet,
@@ -90,7 +92,10 @@ fn autofilter_preserves_user_hidden_rows() {
 fn autofilter_blanks_does_not_treat_errors_as_blank() {
     let mut sheet = Worksheet::new(1, "Sheet1");
     sheet.set_value(CellRef::new(0, 0), CellValue::String("Val".into()));
-    sheet.set_value(CellRef::new(1, 0), CellValue::Error(formula_model::ErrorValue::Div0));
+    sheet.set_value(
+        CellRef::new(1, 0),
+        CellValue::Error(formula_model::ErrorValue::Div0),
+    );
     sheet.set_value(CellRef::new(2, 0), CellValue::Empty);
 
     let range = Range::from_a1("A1:A3").unwrap();

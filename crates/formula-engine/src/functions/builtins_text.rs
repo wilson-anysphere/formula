@@ -302,7 +302,9 @@ inventory::submit! {
 fn upper_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
-        Ok(Value::Text(text.coerce_to_string_with_ctx(ctx)?.to_uppercase()))
+        Ok(Value::Text(
+            text.coerce_to_string_with_ctx(ctx)?.to_uppercase(),
+        ))
     })
 }
 
@@ -323,7 +325,9 @@ inventory::submit! {
 fn lower_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
-        Ok(Value::Text(text.coerce_to_string_with_ctx(ctx)?.to_lowercase()))
+        Ok(Value::Text(
+            text.coerce_to_string_with_ctx(ctx)?.to_lowercase(),
+        ))
     })
 }
 
@@ -700,7 +704,13 @@ fn textjoin_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
-    match crate::functions::text::textjoin(&delimiter, ignore_empty, &values, ctx.date_system(), ctx.value_locale()) {
+    match crate::functions::text::textjoin(
+        &delimiter,
+        ignore_empty,
+        &values,
+        ctx.date_system(),
+        ctx.value_locale(),
+    ) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -1304,7 +1314,10 @@ fn coerce_single_char(value: &Value, ctx: &dyn FunctionContext) -> Result<char, 
     }
 }
 
-fn coerce_optional_single_char(value: &Value, ctx: &dyn FunctionContext) -> Result<Option<char>, ErrorKind> {
+fn coerce_optional_single_char(
+    value: &Value,
+    ctx: &dyn FunctionContext,
+) -> Result<Option<char>, ErrorKind> {
     let s = value.coerce_to_string_with_ctx(ctx)?;
     if s.is_empty() {
         return Ok(None);

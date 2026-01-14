@@ -60,16 +60,17 @@ fn sheet_references_are_case_insensitive() {
 #[test]
 fn sheet_references_are_case_insensitive_unicode() {
     let mut engine = Engine::new();
-    engine
-        .set_cell_value("Übersicht", "A1", 10.0)
-        .unwrap();
+    engine.set_cell_value("Übersicht", "A1", 10.0).unwrap();
     engine
         .set_cell_formula("Sheet1", "B1", "='übersicht'!A1")
         .unwrap();
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(10.0));
-    assert_eq!(engine.get_cell_value("übersicht", "A1"), Value::Number(10.0));
+    assert_eq!(
+        engine.get_cell_value("übersicht", "A1"),
+        Value::Number(10.0)
+    );
 }
 
 #[test]

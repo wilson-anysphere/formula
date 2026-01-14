@@ -801,7 +801,10 @@ fn bytecode_backend_enforces_lambda_recursion_limit() {
 
     engine.recalculate_single_threaded();
     assert_engine_matches_ast(&engine, "=LET(f,LAMBDA(x,f(x)),f(1))", "A1");
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Calc));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Calc)
+    );
 }
 
 #[test]
@@ -832,7 +835,8 @@ fn bytecode_backend_supports_isomitted_inside_lambdas() {
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 4);
     assert_eq!(
-        stats.compiled, 4,
+        stats.compiled,
+        4,
         "expected ISOMITTED lambda formulas to compile to bytecode (report={:?})",
         engine.bytecode_compile_report(32)
     );
@@ -1449,9 +1453,7 @@ fn bytecode_backend_inlines_defined_name_spill_range_refs() {
     let mut engine = Engine::new();
 
     // Create a spill on Sheet1 starting at A1 (spills into B1).
-    engine
-        .set_cell_formula("Sheet1", "A1", "={1,2}")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "={1,2}").unwrap();
     engine
         .define_name(
             "MySpill",
@@ -1675,7 +1677,10 @@ fn bytecode_backend_let_array_returning_abs_allows_concat_to_flatten_arrays() {
 
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("12".into()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("12".into())
+    );
     assert_engine_matches_ast(&engine, formula, "B1");
 }
 
@@ -1692,7 +1697,10 @@ fn bytecode_backend_let_xlookup_array_returning_xlookup_allows_concat_bytecode()
     assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("2021".into()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("2021".into())
+    );
     assert_engine_matches_ast(&engine, formula, "B1");
 }
 
@@ -1707,7 +1715,10 @@ fn bytecode_backend_let_xlookup_array_if_not_found_allows_concat_bytecode() {
     assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("100200".into()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("100200".into())
+    );
     assert_engine_matches_ast(&engine, formula, "B1");
 }
 
@@ -1723,7 +1734,10 @@ fn bytecode_backend_row_array_result_allows_concat_bytecode() {
 
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("12".into()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("12".into())
+    );
     assert_engine_matches_ast(&engine, formula, "B1");
 }
 
@@ -1739,7 +1753,10 @@ fn bytecode_backend_if_array_result_allows_concat_bytecode() {
 
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("12".into()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("12".into())
+    );
     assert_engine_matches_ast(&engine, formula, "B1");
 }
 
@@ -1755,7 +1772,10 @@ fn bytecode_backend_xlookup_array_result_allows_concat_bytecode() {
 
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("2021".into()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("2021".into())
+    );
     assert_engine_matches_ast(&engine, formula, "B1");
 }
 
@@ -1773,7 +1793,10 @@ fn bytecode_backend_let_single_cell_reference_local_is_scalar_safe_for_concat() 
 
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("hello".into()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("hello".into())
+    );
     assert_engine_matches_ast(&engine, formula, "B1");
 }
 
@@ -3110,13 +3133,25 @@ fn bytecode_backend_coupon_basis_4_uses_fixed_period_length_and_preserves_additi
         .set_cell_formula("Sheet1", "A2", r#"=COUPNCD("2020-11-15","2021-02-28",2,4)"#)
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A3", r#"=COUPDAYS("2020-11-15","2021-02-28",2,4)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=COUPDAYS("2020-11-15","2021-02-28",2,4)"#,
+        )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A4", r#"=COUPDAYBS("2020-11-15","2021-02-28",2,4)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            r#"=COUPDAYBS("2020-11-15","2021-02-28",2,4)"#,
+        )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A5", r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,4)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A5",
+            r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,4)"#,
+        )
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();
@@ -3131,8 +3166,14 @@ fn bytecode_backend_coupon_basis_4_uses_fixed_period_length_and_preserves_additi
     let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 8, 31), system).unwrap() as f64;
     let expected_ncd = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap() as f64;
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_pcd));
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(expected_ncd));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(expected_pcd)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Number(expected_ncd)
+    );
 
     // COUPDAYS uses the fixed modeled coupon period length for basis=4.
     assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(180.0));
@@ -3158,8 +3199,16 @@ fn bytecode_backend_coupon_basis_4_uses_fixed_period_length_and_preserves_additi
     assert_engine_matches_ast(&engine, r#"=COUPPCD("2020-11-15","2021-02-28",2,4)"#, "A1");
     assert_engine_matches_ast(&engine, r#"=COUPNCD("2020-11-15","2021-02-28",2,4)"#, "A2");
     assert_engine_matches_ast(&engine, r#"=COUPDAYS("2020-11-15","2021-02-28",2,4)"#, "A3");
-    assert_engine_matches_ast(&engine, r#"=COUPDAYBS("2020-11-15","2021-02-28",2,4)"#, "A4");
-    assert_engine_matches_ast(&engine, r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,4)"#, "A5");
+    assert_engine_matches_ast(
+        &engine,
+        r#"=COUPDAYBS("2020-11-15","2021-02-28",2,4)"#,
+        "A4",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,4)"#,
+        "A5",
+    );
     let Value::Number(days) = engine.get_cell_value("Sheet1", "A3") else {
         panic!("expected COUPDAYS to return a number");
     };
@@ -3181,13 +3230,25 @@ fn bytecode_backend_coupon_basis_0_preserves_additivity_even_when_days360_is_not
     // on the start-date day). Excel preserves the invariant COUPDAYBS + COUPDAYSNC == COUPDAYS by
     // computing COUPDAYSNC as E - A (where E is fixed at 360/frequency).
     engine
-        .set_cell_formula("Sheet1", "A1", r#"=COUPDAYS("2020-11-15","2021-02-28",2,0)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=COUPDAYS("2020-11-15","2021-02-28",2,0)"#,
+        )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A2", r#"=COUPDAYBS("2020-11-15","2021-02-28",2,0)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            r#"=COUPDAYBS("2020-11-15","2021-02-28",2,0)"#,
+        )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A3", r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,0)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,0)"#,
+        )
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();
@@ -3223,8 +3284,16 @@ fn bytecode_backend_coupon_basis_0_preserves_additivity_even_when_days360_is_not
     assert_ne!(dsc_us as f64, daysnc);
 
     assert_engine_matches_ast(&engine, r#"=COUPDAYS("2020-11-15","2021-02-28",2,0)"#, "A1");
-    assert_engine_matches_ast(&engine, r#"=COUPDAYBS("2020-11-15","2021-02-28",2,0)"#, "A2");
-    assert_engine_matches_ast(&engine, r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,0)"#, "A3");
+    assert_engine_matches_ast(
+        &engine,
+        r#"=COUPDAYBS("2020-11-15","2021-02-28",2,0)"#,
+        "A2",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,0)"#,
+        "A3",
+    );
 }
 
 #[test]
@@ -3439,7 +3508,11 @@ fn bytecode_backend_financial_functions_compile_with_omitted_optional_args() {
         .set_cell_formula("Sheet1", "A2", r#"=COUPDAYS("2020-02-01","2025-01-15",2)"#)
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A3", r#"=COUPDAYSNC("2020-02-01","2025-01-15",2)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=COUPDAYSNC("2020-02-01","2025-01-15",2)"#,
+        )
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "A4", r#"=COUPNCD("2020-02-01","2025-01-15",2)"#)
@@ -3560,37 +3633,19 @@ fn bytecode_backend_financial_functions_compile_with_omitted_optional_args() {
         (r#"=COUPNUM("2020-02-01","2025-01-15",2)"#, "A5"),
         (r#"=COUPPCD("2020-02-01","2025-01-15",2)"#, "A6"),
         // Standard bonds
-        (
-            r#"=PRICE("2020-02-01","2025-01-15",0.05,0.04,100,2)"#,
-            "B1",
-        ),
-        (
-            r#"=YIELD("2020-02-01","2025-01-15",0.05,95,100,2)"#,
-            "B2",
-        ),
-        (
-            r#"=DURATION("2020-02-01","2025-01-15",0.05,0.04,2)"#,
-            "B3",
-        ),
-        (
-            r#"=MDURATION("2020-02-01","2025-01-15",0.05,0.04,2)"#,
-            "B4",
-        ),
+        (r#"=PRICE("2020-02-01","2025-01-15",0.05,0.04,100,2)"#, "B1"),
+        (r#"=YIELD("2020-02-01","2025-01-15",0.05,95,100,2)"#, "B2"),
+        (r#"=DURATION("2020-02-01","2025-01-15",0.05,0.04,2)"#, "B3"),
+        (r#"=MDURATION("2020-02-01","2025-01-15",0.05,0.04,2)"#, "B4"),
         // ACCRINT*
-        (
-            r#"=ACCRINTM("2019-12-31","2020-03-31",0.05,1000)"#,
-            "C1",
-        ),
+        (r#"=ACCRINTM("2019-12-31","2020-03-31",0.05,1000)"#, "C1"),
         (
             r#"=ACCRINT("2019-12-31","2020-06-30","2020-03-31",0.05,1000,2)"#,
             "C2",
         ),
         // Discount securities
         (r#"=DISC("2020-01-01","2020-12-31",97,100)"#, "D1"),
-        (
-            r#"=PRICEDISC("2020-01-01","2020-12-31",0.05,100)"#,
-            "D2",
-        ),
+        (r#"=PRICEDISC("2020-01-01","2020-12-31",0.05,100)"#, "D2"),
         (r#"=YIELDDISC("2020-01-01","2020-12-31",97,100)"#, "D3"),
         (r#"=INTRATE("2020-01-01","2020-12-31",97,100)"#, "D4"),
         (r#"=RECEIVED("2020-01-01","2020-12-31",97,0.05)"#, "D5"),
@@ -3763,10 +3818,7 @@ fn bytecode_backend_discount_security_text_dates_reject_numeric_strings() {
             r#"=PRICEMAT("1","2020-12-31","2019-12-31",0.05,0.04)"#,
             "A8",
         ),
-        (
-            r#"=YIELDMAT("1","2020-12-31","2019-12-31",0.05,95)"#,
-            "A9",
-        ),
+        (r#"=YIELDMAT("1","2020-12-31","2019-12-31",0.05,95)"#, "A9"),
     ] {
         assert_engine_matches_ast(&engine, formula, cell);
     }
@@ -3786,7 +3838,11 @@ fn bytecode_backend_bond_text_dates_reject_numeric_strings() {
         .set_cell_formula("Sheet1", "A2", r#"=DURATION("1","2025-01-15",0.05,0.04,2)"#)
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A3", r#"=MDURATION("1","2025-01-15",0.05,0.04,2)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=MDURATION("1","2025-01-15",0.05,0.04,2)"#,
+        )
         .unwrap();
     engine
         .set_cell_formula(
@@ -4088,32 +4144,32 @@ fn bytecode_backend_standard_bond_basis_0_and_4_use_different_day_counts() {
         .set_cell_formula(
             "Sheet1",
             "A1",
-            &format!(r#"=PRICE("{settlement}","{maturity}",{rate},{yld},{redemption},{frequency},0)"#),
+            &format!(
+                r#"=PRICE("{settlement}","{maturity}",{rate},{yld},{redemption},{frequency},0)"#
+            ),
         )
         .unwrap();
     engine
         .set_cell_formula(
             "Sheet1",
             "A2",
-            &format!(r#"=PRICE("{settlement}","{maturity}",{rate},{yld},{redemption},{frequency},4)"#),
+            &format!(
+                r#"=PRICE("{settlement}","{maturity}",{rate},{yld},{redemption},{frequency},4)"#
+            ),
         )
         .unwrap();
     engine
         .set_cell_formula(
             "Sheet1",
             "B1",
-            &format!(
-                r#"=YIELD("{settlement}","{maturity}",{rate},A1,{redemption},{frequency},0)"#
-            ),
+            &format!(r#"=YIELD("{settlement}","{maturity}",{rate},A1,{redemption},{frequency},0)"#),
         )
         .unwrap();
     engine
         .set_cell_formula(
             "Sheet1",
             "B2",
-            &format!(
-                r#"=YIELD("{settlement}","{maturity}",{rate},A2,{redemption},{frequency},4)"#
-            ),
+            &format!(r#"=YIELD("{settlement}","{maturity}",{rate},A2,{redemption},{frequency},4)"#),
         )
         .unwrap();
 
@@ -4161,8 +4217,8 @@ fn bytecode_backend_standard_bond_basis_0_and_4_use_different_day_counts() {
     let settlement_serial = ymd_to_serial(ExcelDate::new(2021, 5, 1), system).unwrap();
     let a_us = formula_engine::functions::date_time::days360(pcd, settlement_serial, false, system)
         .unwrap();
-    let a_eu =
-        formula_engine::functions::date_time::days360(pcd, settlement_serial, true, system).unwrap();
+    let a_eu = formula_engine::functions::date_time::days360(pcd, settlement_serial, true, system)
+        .unwrap();
     assert_eq!(a_us, 61);
     assert_eq!(a_eu, 63);
 
@@ -4179,16 +4235,12 @@ fn bytecode_backend_standard_bond_basis_0_and_4_use_different_day_counts() {
     );
     assert_engine_matches_ast(
         &engine,
-        &format!(
-            r#"=YIELD("{settlement}","{maturity}",{rate},A1,{redemption},{frequency},0)"#
-        ),
+        &format!(r#"=YIELD("{settlement}","{maturity}",{rate},A1,{redemption},{frequency},0)"#),
         "B1",
     );
     assert_engine_matches_ast(
         &engine,
-        &format!(
-            r#"=YIELD("{settlement}","{maturity}",{rate},A2,{redemption},{frequency},4)"#
-        ),
+        &format!(r#"=YIELD("{settlement}","{maturity}",{rate},A2,{redemption},{frequency},4)"#),
         "B2",
     );
 }
@@ -4212,10 +4264,19 @@ fn bytecode_backend_financial_date_text_respects_value_locale() {
     let system = engine.date_system();
     let settlement_us = ymd_to_serial(ExcelDate::new(2020, 1, 2), system).unwrap();
     let maturity_us = ymd_to_serial(ExcelDate::new(2020, 1, 3), system).unwrap();
-    let expected_us =
-        formula_engine::functions::financial::disc(settlement_us, maturity_us, 97.0, 100.0, 0, system)
-            .unwrap();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_us));
+    let expected_us = formula_engine::functions::financial::disc(
+        settlement_us,
+        maturity_us,
+        97.0,
+        100.0,
+        0,
+        system,
+    )
+    .unwrap();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(expected_us)
+    );
     assert_engine_matches_ast(&engine, formula, "A1");
 
     // Switch to a DMY locale and ensure the same text dates are parsed differently.
@@ -4226,11 +4287,20 @@ fn bytecode_backend_financial_date_text_respects_value_locale() {
     // de-DE is DMY: "01/02/2020" == Feb 1, 2020.
     let settlement_de = ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap();
     let maturity_de = ymd_to_serial(ExcelDate::new(2020, 3, 1), system).unwrap();
-    let expected_de =
-        formula_engine::functions::financial::disc(settlement_de, maturity_de, 97.0, 100.0, 0, system)
-            .unwrap();
+    let expected_de = formula_engine::functions::financial::disc(
+        settlement_de,
+        maturity_de,
+        97.0,
+        100.0,
+        0,
+        system,
+    )
+    .unwrap();
     assert_ne!(expected_de, expected_us);
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_de));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(expected_de)
+    );
     assert_engine_matches_ast(&engine, formula, "A1");
 }
 
@@ -4256,7 +4326,10 @@ fn bytecode_backend_coupon_date_text_respects_value_locale() {
     let expected_us =
         formula_engine::functions::financial::coupdaybs(settlement_us, maturity_us, 2, 0, system)
             .unwrap();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_us));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(expected_us)
+    );
     assert_engine_matches_ast(&engine, formula, "A1");
 
     // Switch to a DMY locale and ensure the same text dates are parsed differently.
@@ -4271,7 +4344,10 @@ fn bytecode_backend_coupon_date_text_respects_value_locale() {
         formula_engine::functions::financial::coupdaybs(settlement_de, maturity_de, 2, 0, system)
             .unwrap();
     assert_ne!(expected_de, expected_us);
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_de));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(expected_de)
+    );
     assert_engine_matches_ast(&engine, formula, "A1");
 }
 
@@ -4299,7 +4375,10 @@ fn bytecode_backend_financial_date_text_respects_engine_date_system() {
     let expected =
         formula_engine::functions::financial::disc(settlement, maturity, 97.0, 100.0, 0, system)
             .unwrap();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(expected)
+    );
     assert_engine_matches_ast(&engine, formula, "A1");
 
     // Flip date system after the formula has been compiled to ensure the runtime context is used.
@@ -4331,8 +4410,12 @@ fn bytecode_backend_financial_numeric_dates_respect_engine_date_system() {
     let pcd_formula = &format!(r#"=COUPPCD({settlement_serial},"{maturity}",2)"#);
     let ncd_formula = &format!(r#"=COUPNCD({settlement_serial},"{maturity}",2)"#);
 
-    engine.set_cell_formula("Sheet1", "A1", pcd_formula).unwrap();
-    engine.set_cell_formula("Sheet1", "A2", ncd_formula).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", pcd_formula)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", ncd_formula)
+        .unwrap();
 
     // Ensure we're exercising the bytecode path.
     let stats = engine.bytecode_compile_stats();
@@ -4351,8 +4434,14 @@ fn bytecode_backend_financial_numeric_dates_respect_engine_date_system() {
         ymd_to_serial(ExcelDate::new(settlement_date.year, 1, 1), system).unwrap() as f64;
     let expected_ncd =
         ymd_to_serial(ExcelDate::new(settlement_date.year, 7, 1), system).unwrap() as f64;
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_pcd));
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(expected_ncd));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(expected_pcd)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Number(expected_ncd)
+    );
 
     assert_engine_matches_ast(&engine, pcd_formula, "A1");
     assert_engine_matches_ast(&engine, ncd_formula, "A2");
@@ -4368,8 +4457,14 @@ fn bytecode_backend_financial_numeric_dates_respect_engine_date_system() {
         ymd_to_serial(ExcelDate::new(settlement_date.year, 1, 1), system).unwrap() as f64;
     let expected_ncd =
         ymd_to_serial(ExcelDate::new(settlement_date.year, 7, 1), system).unwrap() as f64;
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_pcd));
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(expected_ncd));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(expected_pcd)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Number(expected_ncd)
+    );
 
     assert_engine_matches_ast(&engine, pcd_formula, "A1");
     assert_engine_matches_ast(&engine, ncd_formula, "A2");
@@ -4621,7 +4716,7 @@ fn bytecode_lower_flattens_concat_operator_chains() {
         &mut resolve_sheet,
         &mut sheet_dimensions,
     )
-        .expect("lower to bytecode expr");
+    .expect("lower to bytecode expr");
 
     let bytecode::Expr::FuncCall { func, args } = expr else {
         panic!("expected FuncCall");
@@ -4887,15 +4982,14 @@ fn bytecode_implicit_intersection_matches_ast_for_2d_range_inside_rectangle() {
 
     let mut resolve_sheet = |_name: &str| Some(0usize);
     let mut sheet_dimensions = |_sheet_id: usize| Some((10u32, 10u32));
-    let bc_expr =
-        formula_engine::bytecode::lower_canonical_expr(
-            &ast.expr,
-            origin,
-            0,
-            &mut resolve_sheet,
-            &mut sheet_dimensions,
-        )
-        .expect("lower to bytecode expr");
+    let bc_expr = formula_engine::bytecode::lower_canonical_expr(
+        &ast.expr,
+        origin,
+        0,
+        &mut resolve_sheet,
+        &mut sheet_dimensions,
+    )
+    .expect("lower to bytecode expr");
 
     let cache = formula_engine::bytecode::BytecodeCache::new();
     let program = cache.get_or_compile(&bc_expr);
@@ -5509,18 +5603,10 @@ fn bytecode_backend_vlookup_hlookup_match_reject_3d_sheet_span_table_ranges() {
     }
 
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "B1",
-            "=VLOOKUP(1, Sheet1:Sheet3!A1:B1, 2, FALSE)",
-        )
+        .set_cell_formula("Sheet1", "B1", "=VLOOKUP(1, Sheet1:Sheet3!A1:B1, 2, FALSE)")
         .unwrap();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "B2",
-            "=HLOOKUP(1, Sheet1:Sheet3!A1:B1, 2, FALSE)",
-        )
+        .set_cell_formula("Sheet1", "B2", "=HLOOKUP(1, Sheet1:Sheet3!A1:B1, 2, FALSE)")
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "B3", "=MATCH(1, Sheet1:Sheet3!A1, 0)")
@@ -5764,7 +5850,10 @@ fn bytecode_backend_applies_implicit_intersection_for_xlookup_xmatch_mode_ranges
     engine.recalculate_single_threaded();
 
     // XMATCH match_mode varies per row.
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::NA)
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
     assert_eq!(
         engine.get_cell_value("Sheet1", "B5"),
@@ -5838,11 +5927,7 @@ fn bytecode_backend_xlookup_xmatch_mode_args_error_on_array_expressions_like_ast
         .set_cell_formula("Sheet1", "A3", "=XMATCH(2,{1;2;3},0,D1:D3*0)")
         .unwrap();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "A4",
-            "=XLOOKUP(2,{1;2;3},{10;20;30},,0,D1:D3*0)",
-        )
+        .set_cell_formula("Sheet1", "A4", "=XLOOKUP(2,{1;2;3},{10;20;30},,0,D1:D3*0)")
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();
@@ -7199,7 +7284,10 @@ fn bytecode_backend_reference_algebra_as_formula_result_matches_ast() {
     assert_engine_spill_matches_ast(&engine, "=(A1:C3 B2:D4)", "E2");
 
     // Discontiguous unions cannot be spilled as a single rectangle.
-    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E1"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]
@@ -7997,9 +8085,13 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
     engine.set_cell_formula("Sheet1", "A2", "=RAND()").unwrap();
     // Cross-sheet reference.
     engine.set_cell_value("Sheet2", "A1", 42.0).unwrap();
-    engine.set_cell_formula("Sheet1", "A3", "=Sheet2!A1").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=Sheet2!A1")
+        .unwrap();
     // Lowering error (unsupported expression): sheet-qualified defined name.
-    engine.set_cell_formula("Sheet1", "A4", "=Sheet1!Foo").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=Sheet1!Foo")
+        .unwrap();
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 4);
@@ -8067,7 +8159,10 @@ fn bytecode_compile_diagnostics_compiles_indirect() {
     );
 
     let report = engine.bytecode_compile_report(10);
-    assert!(report.is_empty(), "unexpected bytecode fallback report: {report:?}");
+    assert!(
+        report.is_empty(),
+        "unexpected bytecode fallback report: {report:?}"
+    );
 
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
@@ -8092,7 +8187,10 @@ fn bytecode_compile_diagnostics_compiles_offset() {
     );
 
     let report = engine.bytecode_compile_report(10);
-    assert!(report.is_empty(), "unexpected bytecode fallback report: {report:?}");
+    assert!(
+        report.is_empty(),
+        "unexpected bytecode fallback report: {report:?}"
+    );
 
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
@@ -8874,7 +8972,9 @@ fn bytecode_backend_inlines_constant_defined_names_inside_array_literals() {
             NameDefinition::Constant(Value::Number(2.0)),
         )
         .unwrap();
-    engine.set_cell_formula("Sheet1", "A1", "=SUM({1,X})").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM({1,X})")
+        .unwrap();
 
     // Ensure the constant is inlined so numeric-only array-literal lowering can proceed.
     assert_eq!(engine.bytecode_program_count(), 1);

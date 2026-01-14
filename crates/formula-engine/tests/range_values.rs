@@ -1,5 +1,5 @@
-use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
 use formula_engine::eval::CellAddr;
+use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
 use formula_model::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -7,9 +7,7 @@ use std::sync::Arc;
 #[test]
 fn get_range_values_includes_blanks_for_unset_cells() {
     let mut engine = Engine::new();
-    engine
-        .set_cell_value("Sheet1", "A1", 1.0)
-        .expect("set A1");
+    engine.set_cell_value("Sheet1", "A1", 1.0).expect("set A1");
     engine
         .set_cell_value("Sheet1", "C2", "hello")
         .expect("set C2");
@@ -23,11 +21,7 @@ fn get_range_values_includes_blanks_for_unset_cells() {
         values,
         vec![
             vec![Value::Number(1.0), Value::Blank, Value::Blank],
-            vec![
-                Value::Blank,
-                Value::Blank,
-                Value::Text("hello".to_string())
-            ],
+            vec![Value::Blank, Value::Blank, Value::Text("hello".to_string())],
         ]
     );
 }

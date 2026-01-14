@@ -39,7 +39,12 @@ fn validate_probability_strict(p: f64) -> Result<f64, ErrorKind> {
     Ok(p)
 }
 
-pub fn binom_dist(number_s: f64, trials: f64, probability_s: f64, cumulative: bool) -> Result<f64, ErrorKind> {
+pub fn binom_dist(
+    number_s: f64,
+    trials: f64,
+    probability_s: f64,
+    cumulative: bool,
+) -> Result<f64, ErrorKind> {
     let trials = trunc_to_u64_nonneg(trials)?;
     let k = trunc_to_i64(number_s)?;
     if k < 0 || k as u64 > trials {
@@ -61,7 +66,11 @@ pub fn binom_dist(number_s: f64, trials: f64, probability_s: f64, cumulative: bo
     }
     if p == 1.0 {
         return Ok(if cumulative {
-            if (k as u64) >= trials { 1.0 } else { 0.0 }
+            if (k as u64) >= trials {
+                1.0
+            } else {
+                0.0
+            }
         } else if (k as u64) == trials {
             1.0
         } else {
@@ -113,7 +122,11 @@ pub fn binom_dist_range(
     }
     if p == 1.0 {
         // Degenerate at n.
-        let prob = if lo <= trials_u && trials_u <= hi { 1.0 } else { 0.0 };
+        let prob = if lo <= trials_u && trials_u <= hi {
+            1.0
+        } else {
+            0.0
+        };
         return Ok(prob);
     }
 
@@ -203,8 +216,7 @@ pub fn negbinom_dist(
         });
     }
 
-    let dist =
-        NegativeBinomial::new(s_i as f64, p).map_err(|_| ErrorKind::Num)?;
+    let dist = NegativeBinomial::new(s_i as f64, p).map_err(|_| ErrorKind::Num)?;
     let out = if cumulative {
         dist.cdf(f_i as u64)
     } else {
@@ -249,11 +261,7 @@ pub fn hypgeom_dist(
     }
 
     let dist = Hypergeometric::new(pop, succ_pop, draws).map_err(|_| ErrorKind::Num)?;
-    let out = if cumulative {
-        dist.cdf(k)
-    } else {
-        dist.pmf(k)
-    };
+    let out = if cumulative { dist.cdf(k) } else { dist.pmf(k) };
     if out.is_finite() {
         Ok(out)
     } else {

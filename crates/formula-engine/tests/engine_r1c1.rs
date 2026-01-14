@@ -188,7 +188,10 @@ fn engine_evaluates_r1c1_bracket_field_access_and_roundtrips() {
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(5.0));
-    assert_eq!(engine.get_cell_formula("Sheet1", "B1"), Some(r#"=A1.["Change%"]"#));
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "B1"),
+        Some(r#"=A1.["Change%"]"#)
+    );
     assert_eq!(
         engine.get_cell_formula_r1c1("Sheet1", "B1"),
         Some(r#"=RC[-1].["Change%"]"#.to_string())

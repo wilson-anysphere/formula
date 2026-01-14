@@ -217,6 +217,9 @@ mod tests {
     #[test]
     fn coerce_value_to_number_returns_none_for_non_numeric_values() {
         let value = Value::Array(crate::value::Array::new(1, 1, vec![Value::Number(1.0)]));
-        assert_eq!(coerce_value_to_number(&value, ValueLocaleConfig::en_us()), None);
+        assert_eq!(
+            coerce_value_to_number(&value, ValueLocaleConfig::en_us()),
+            None
+        );
     }
 }

@@ -15,7 +15,11 @@ pub(crate) fn parse_text_number(text: &str, value_locale: ValueLocaleConfig) -> 
     // as numeric values during sort/filter type detection.
     if separators.thousands_sep == '.' && text.contains(separators.thousands_sep) {
         if let Some(compact) = compact_for_grouping_validation(text) {
-            if !has_valid_thousands_grouping(&compact, separators.decimal_sep, separators.thousands_sep) {
+            if !has_valid_thousands_grouping(
+                &compact,
+                separators.decimal_sep,
+                separators.thousands_sep,
+            ) {
                 return None;
             }
         }
@@ -28,7 +32,10 @@ pub(crate) fn parse_text_number(text: &str, value_locale: ValueLocaleConfig) -> 
     .ok()
 }
 
-pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -> Option<NaiveDateTime> {
+pub(crate) fn parse_text_datetime(
+    text: &str,
+    value_locale: ValueLocaleConfig,
+) -> Option<NaiveDateTime> {
     let s = text.trim();
     if s.is_empty() {
         return None;

@@ -116,11 +116,7 @@ fn cubemember_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None
     };
 
-    provider.cube_member(
-        &connection,
-        &member_expression,
-        caption.as_deref(),
-    )
+    provider.cube_member(&connection, &member_expression, caption.as_deref())
 }
 
 inventory::submit! {
@@ -146,10 +142,11 @@ fn cubememberproperty_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Va
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let member_expression_or_handle = match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
+    let member_expression_or_handle =
+        match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
     let property = match eval_scalar_arg(ctx, &args[2]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
@@ -181,10 +178,11 @@ fn cuberankedmember_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Valu
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let set_expression_or_handle = match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
+    let set_expression_or_handle =
+        match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
     let rank = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
@@ -290,10 +288,11 @@ fn cubesetcount_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::NA);
     };
 
-    let set_expression_or_handle = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
+    let set_expression_or_handle =
+        match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
 
     provider.cube_set_count(&set_expression_or_handle)
 }
@@ -339,10 +338,5 @@ fn cubekpimember_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None
     };
 
-    provider.cube_kpi_member(
-        &connection,
-        &kpi_name,
-        &kpi_property,
-        caption.as_deref(),
-    )
+    provider.cube_kpi_member(&connection, &kpi_name, &kpi_property, caption.as_deref())
 }

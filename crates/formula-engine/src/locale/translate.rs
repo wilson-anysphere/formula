@@ -196,9 +196,7 @@ fn translate_formula_with_style(
                         // 2) Normalize canonical spelling/casing for known errors
                         //    (e.g. `#N/A!` -> `#N/A`, `#value!` -> `#VALUE!`).
                         // 3) Otherwise preserve the original token text.
-                        let canonical = locale
-                            .canonical_error_literal(raw)
-                            .unwrap_or(raw.as_str());
+                        let canonical = locale.canonical_error_literal(raw).unwrap_or(raw.as_str());
                         if let Some(kind) = ErrorKind::from_code(canonical) {
                             out.push_str(kind.as_code());
                         } else {
@@ -227,9 +225,11 @@ fn translate_formula_with_style(
                         src_config.decimal_separator,
                         dst_config.decimal_separator,
                     )),
-                    Direction::ToLocalized => {
-                        out.push_str(&localize_number(raw, src_config.decimal_separator, dst_config))
-                    }
+                    Direction::ToLocalized => out.push_str(&localize_number(
+                        raw,
+                        src_config.decimal_separator,
+                        dst_config,
+                    )),
                 }
                 idx += 1;
             }
@@ -437,7 +437,10 @@ fn is_sheet_prefix_ident(tokens: &[Token], idx: usize) -> bool {
             ) {
                 colon_idx += 1;
             }
-            if !matches!(tokens.get(colon_idx).map(|t| &t.kind), Some(TokenKind::Colon)) {
+            if !matches!(
+                tokens.get(colon_idx).map(|t| &t.kind),
+                Some(TokenKind::Colon)
+            ) {
                 return false;
             }
 
@@ -453,7 +456,10 @@ fn is_sheet_prefix_ident(tokens: &[Token], idx: usize) -> bool {
                 _ => return false,
             }
 
-            matches!(next_non_trivia_kind(tokens, end_sheet_idx), Some(TokenKind::Bang))
+            matches!(
+                next_non_trivia_kind(tokens, end_sheet_idx),
+                Some(TokenKind::Bang)
+            )
         }
         _ => false,
     }

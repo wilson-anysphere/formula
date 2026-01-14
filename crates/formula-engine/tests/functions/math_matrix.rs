@@ -38,11 +38,7 @@ fn minverse_spills_and_matches_known_matrices() {
 
     // Inverse of {{1,2,3},{0,1,4},{5,6,0}} has determinant 1 and integer inverse:
     // {{-24,18,5},{20,-15,-4},{-5,4,1}}
-    let expected = [
-        (-24.0, 18.0, 5.0),
-        (20.0, -15.0, -4.0),
-        (-5.0, 4.0, 1.0),
-    ];
+    let expected = [(-24.0, 18.0, 5.0), (20.0, -15.0, -4.0), (-5.0, 4.0, 1.0)];
     for (r, (a, b, c)) in expected.into_iter().enumerate() {
         let row = r + 1;
         assert_number(&engine.get_cell_value("Sheet1", &format!("D{row}")), a);
@@ -63,7 +59,10 @@ fn mmult_returns_value_on_shape_mismatch() {
 #[test]
 fn minverse_returns_num_on_singular_matrix() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval("=MINVERSE({1,2;2,4})"), Value::Error(ErrorKind::Num));
+    assert_eq!(
+        sheet.eval("=MINVERSE({1,2;2,4})"),
+        Value::Error(ErrorKind::Num)
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
-use crate::LocaleConfig;
-use crate::value::ErrorKind;
 use crate::value::casefold;
+use crate::value::ErrorKind;
+use crate::LocaleConfig;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -216,26 +216,23 @@ impl ErrorTranslations {
     }
 
     fn localized_to_canonical(&self, localized: &str) -> Option<&'static str> {
-        self.maps()
-            .loc_to_canon
-            .get(&casefold(localized))
-            .copied()
+        self.maps().loc_to_canon.get(&casefold(localized)).copied()
     }
 
     fn canonical_to_localized(&self, canonical: &str) -> Option<&'static str> {
-        self.maps()
-            .canon_to_loc
-            .get(&casefold(canonical))
-            .copied()
+        self.maps().canon_to_loc.get(&casefold(canonical)).copied()
     }
 }
 
 static EMPTY_ERRORS: ErrorTranslations = ErrorTranslations::new("");
 // Locale error TSVs live in `src/locale/data/`. See `src/locale/data/README.md` for
 // contributor docs (format, completeness requirements, and generators).
-static DE_DE_ERRORS: ErrorTranslations = ErrorTranslations::new(include_str!("data/de-DE.errors.tsv"));
-static FR_FR_ERRORS: ErrorTranslations = ErrorTranslations::new(include_str!("data/fr-FR.errors.tsv"));
-static ES_ES_ERRORS: ErrorTranslations = ErrorTranslations::new(include_str!("data/es-ES.errors.tsv"));
+static DE_DE_ERRORS: ErrorTranslations =
+    ErrorTranslations::new(include_str!("data/de-DE.errors.tsv"));
+static FR_FR_ERRORS: ErrorTranslations =
+    ErrorTranslations::new(include_str!("data/fr-FR.errors.tsv"));
+static ES_ES_ERRORS: ErrorTranslations =
+    ErrorTranslations::new(include_str!("data/es-ES.errors.tsv"));
 
 /// Locale configuration for parsing and rendering formulas.
 ///
@@ -459,14 +456,7 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
 };
 
 static ALL_LOCALES: [&FormulaLocale; 8] = [
-    &EN_US,
-    &JA_JP,
-    &ZH_CN,
-    &KO_KR,
-    &ZH_TW,
-    &DE_DE,
-    &FR_FR,
-    &ES_ES,
+    &EN_US, &JA_JP, &ZH_CN, &KO_KR, &ZH_TW, &DE_DE, &FR_FR, &ES_ES,
 ];
 
 /// Enumerate every [`FormulaLocale`] that the engine ships with.
@@ -563,10 +553,19 @@ AVERAGE\tSOMME
 ",
         );
         // First localized spelling should be preferred for canonical->localized.
-        assert_eq!(translations.canonical_to_localized("#VALUE!"), Some("#WERT!"));
+        assert_eq!(
+            translations.canonical_to_localized("#VALUE!"),
+            Some("#WERT!")
+        );
         // All localized spellings should be accepted for localized->canonical.
-        assert_eq!(translations.localized_to_canonical("#WERT!"), Some("#VALUE!"));
-        assert_eq!(translations.localized_to_canonical("#VALEUR!"), Some("#VALUE!"));
+        assert_eq!(
+            translations.localized_to_canonical("#WERT!"),
+            Some("#VALUE!")
+        );
+        assert_eq!(
+            translations.localized_to_canonical("#VALEUR!"),
+            Some("#VALUE!")
+        );
     }
 
     #[test]

@@ -224,7 +224,10 @@ fn copy_range_to_far_row_grows_sheet_dimensions() {
         engine.get_cell_value("Sheet1", "A2000000"),
         Value::Number(42.0)
     );
-    assert_eq!(engine.sheet_dimensions("Sheet1"), Some((2_000_000, EXCEL_MAX_COLS)));
+    assert_eq!(
+        engine.sheet_dimensions("Sheet1"),
+        Some((2_000_000, EXCEL_MAX_COLS))
+    );
 }
 
 #[test]

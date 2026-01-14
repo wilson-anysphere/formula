@@ -41,7 +41,10 @@ fn eval_matrix_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Mat
     }
 }
 
-fn coerce_reference_to_matrix(ctx: &dyn FunctionContext, reference: Reference) -> Result<Matrix, ErrorKind> {
+fn coerce_reference_to_matrix(
+    ctx: &dyn FunctionContext,
+    reference: Reference,
+) -> Result<Matrix, ErrorKind> {
     let reference = reference.normalized();
     ctx.record_reference(&reference);
 
@@ -280,7 +283,11 @@ fn multiply(a: &Matrix, b: &Matrix) -> Result<Matrix, ErrorKind> {
         }
     }
 
-    Ok(Matrix { rows, cols, values: out })
+    Ok(Matrix {
+        rows,
+        cols,
+        values: out,
+    })
 }
 
 fn matrix_to_value_array(matrix: Matrix) -> Result<Value, ErrorKind> {

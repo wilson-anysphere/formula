@@ -371,7 +371,9 @@ fn prepare_series_month_step(
                 values,
                 start_month_id,
                 months_step,
-                |months| date_time::eomonth(start_serial, months, system).map_err(|_| ErrorKind::Num),
+                |months| {
+                    date_time::eomonth(start_serial, months, system).map_err(|_| ErrorKind::Num)
+                },
             )?;
             (
                 known,
@@ -423,10 +425,7 @@ fn prepare_series_month_step(
         }
     }
 
-    Ok(PreparedSeries {
-        step,
-        values: out,
-    })
+    Ok(PreparedSeries { step, values: out })
 }
 
 fn month_step_position(
@@ -496,9 +495,8 @@ fn month_end_step_position(
 
     // Ensure date_k <= target_date < date_{k+1}.
     for _ in 0..4 {
-        let date_k =
-            date_time::eomonth(start_serial, k * months_step, system).map_err(|_| ErrorKind::Num)?
-                as f64;
+        let date_k = date_time::eomonth(start_serial, k * months_step, system)
+            .map_err(|_| ErrorKind::Num)? as f64;
         if target_date < date_k {
             k -= 1;
             continue;
@@ -619,10 +617,7 @@ fn aggregate_group(values: &[f64], method: AggregationMethod) -> Result<f64, Err
             .iter()
             .copied()
             .fold(f64::NEG_INFINITY, |a, b| a.max(b))),
-        AggregationMethod::Min => Ok(values
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, |a, b| a.min(b))),
+        AggregationMethod::Min => Ok(values.iter().copied().fold(f64::INFINITY, |a, b| a.min(b))),
         AggregationMethod::Sum => Ok(values.iter().sum::<f64>()),
         AggregationMethod::Median => {
             let mut sorted = values.to_vec();
@@ -710,7 +705,10 @@ fn optimize_params(values: &[f64], seasonality: usize) -> (f64, f64, f64, f64) {
 
     let mut simplex: Vec<Vertex> = Vec::with_capacity(dims + 1);
     let f0 = objective(values, seasonality, &x0);
-    simplex.push(Vertex { x: x0.clone(), f: f0 });
+    simplex.push(Vertex {
+        x: x0.clone(),
+        f: f0,
+    });
 
     let steps = [0.05, 0.05, 0.05, 0.02];
     for i in 0..dims {
@@ -923,7 +921,8 @@ fn simulate(
                 err_count += 1;
             }
 
-            level = alpha * (values[t] - prev_season) + (1.0 - alpha) * (prev_level + phi * prev_trend);
+            level =
+                alpha * (values[t] - prev_season) + (1.0 - alpha) * (prev_level + phi * prev_trend);
             trend = beta * (level - prev_level) + (1.0 - beta) * phi * prev_trend;
             seasonals[idx] = gamma * (values[t] - level) + (1.0 - gamma) * prev_season;
 
@@ -1062,8 +1061,7 @@ pub fn norm_s_inv(p: f64) -> Result<f64, ErrorKind> {
     } else if p <= P_HIGH {
         let q = p - 0.5;
         let r = q * q;
-        (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5])
-            * q
+        (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q
             / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0)
     } else {
         let q = (-2.0 * (1.0 - p).ln()).sqrt();

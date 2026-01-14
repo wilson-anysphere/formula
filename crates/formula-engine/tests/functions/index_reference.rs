@@ -83,8 +83,14 @@ fn index_truncates_fractional_indices_toward_zero() {
     assert_eq!(sheet.eval("=INDEX(A1:C1,1,2.1)"), Value::Number(1.0));
 
     // Negative indices become #VALUE! after truncation.
-    assert_eq!(sheet.eval("=INDEX(A1:A3,-1.1)"), Value::Error(ErrorKind::Value));
-    assert_eq!(sheet.eval("=INDEX(A1:C1,1,-2.9)"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=INDEX(A1:A3,-1.1)"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=INDEX(A1:C1,1,-2.9)"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]
@@ -98,10 +104,7 @@ fn index_area_num_defaults_and_bounds() {
     sheet.set("C3", 30.0);
 
     // Default area_num is 1.
-    assert_eq!(
-        sheet.eval("=INDEX((A1:A3,C1:C3),2,1)"),
-        Value::Number(2.0)
-    );
+    assert_eq!(sheet.eval("=INDEX((A1:A3,C1:C3),2,1)"), Value::Number(2.0));
 
     // Out of bounds area_num -> #REF!
     assert_eq!(

@@ -89,7 +89,12 @@ fn is_last_day_of_month(serial_number: i32, system: ExcelDateSystem) -> ExcelRes
 ///
 /// When `method` is `true`, Excel uses the European method:
 /// - Dates that fall on the 31st are treated as day 30.
-pub fn days360(start_date: i32, end_date: i32, method: bool, system: ExcelDateSystem) -> ExcelResult<i64> {
+pub fn days360(
+    start_date: i32,
+    end_date: i32,
+    method: bool,
+    system: ExcelDateSystem,
+) -> ExcelResult<i64> {
     let start = crate::date::serial_to_ymd(start_date, system)?;
     let end = crate::date::serial_to_ymd(end_date, system)?;
 
@@ -144,7 +149,11 @@ pub fn days360(start_date: i32, end_date: i32, method: bool, system: ExcelDateSy
     Ok(total)
 }
 
-fn whole_years_between(start_date: i32, end_date: i32, system: ExcelDateSystem) -> ExcelResult<i32> {
+fn whole_years_between(
+    start_date: i32,
+    end_date: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
     debug_assert!(end_date >= start_date);
     let start = crate::date::serial_to_ymd(start_date, system)?;
     let end = crate::date::serial_to_ymd(end_date, system)?;
@@ -161,7 +170,12 @@ fn whole_years_between(start_date: i32, end_date: i32, system: ExcelDateSystem) 
 }
 
 /// YEARFRAC(start_date, end_date, [basis])
-pub fn yearfrac(start_date: i32, end_date: i32, basis: i32, system: ExcelDateSystem) -> ExcelResult<f64> {
+pub fn yearfrac(
+    start_date: i32,
+    end_date: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<f64> {
     if !(0..=4).contains(&basis) {
         return Err(ExcelError::Num);
     }
@@ -204,7 +218,11 @@ pub fn yearfrac(start_date: i32, end_date: i32, basis: i32, system: ExcelDateSys
     }
 }
 
-fn full_months_between(start_date: i32, end_date: i32, system: ExcelDateSystem) -> ExcelResult<i32> {
+fn full_months_between(
+    start_date: i32,
+    end_date: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
     debug_assert!(end_date >= start_date);
     let start = crate::date::serial_to_ymd(start_date, system)?;
     let end = crate::date::serial_to_ymd(end_date, system)?;
@@ -229,7 +247,12 @@ fn normalize_unit(unit: &str) -> Option<String> {
 }
 
 /// DATEDIF(start_date, end_date, unit)
-pub fn datedif(start_date: i32, end_date: i32, unit: &str, system: ExcelDateSystem) -> ExcelResult<i64> {
+pub fn datedif(
+    start_date: i32,
+    end_date: i32,
+    unit: &str,
+    system: ExcelDateSystem,
+) -> ExcelResult<i64> {
     if start_date > end_date {
         return Err(ExcelError::Num);
     }
@@ -320,12 +343,22 @@ fn is_workday_with_weekend(
 }
 
 /// WORKDAY(start_date, days, [holidays])
-pub fn workday(start_date: i32, days: i32, holidays: Option<&[i32]>, system: ExcelDateSystem) -> ExcelResult<i32> {
+pub fn workday(
+    start_date: i32,
+    days: i32,
+    holidays: Option<&[i32]>,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
     workday_intl(start_date, days, DEFAULT_WEEKEND_MASK, holidays, system)
 }
 
 /// NETWORKDAYS(start_date, end_date, [holidays])
-pub fn networkdays(start_date: i32, end_date: i32, holidays: Option<&[i32]>, system: ExcelDateSystem) -> ExcelResult<i32> {
+pub fn networkdays(
+    start_date: i32,
+    end_date: i32,
+    holidays: Option<&[i32]>,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
     networkdays_intl(start_date, end_date, DEFAULT_WEEKEND_MASK, holidays, system)
 }
 
@@ -401,7 +434,11 @@ pub fn networkdays_intl(
 }
 
 /// WEEKNUM(serial_number, [return_type])
-pub fn weeknum(serial_number: i32, return_type: Option<i32>, system: ExcelDateSystem) -> ExcelResult<i32> {
+pub fn weeknum(
+    serial_number: i32,
+    return_type: Option<i32>,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
     let date = crate::date::serial_to_ymd(serial_number, system)?;
     let return_type = return_type.unwrap_or(1);
 

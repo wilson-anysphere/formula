@@ -115,10 +115,7 @@ fn isomitted_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     };
 
-    let key = format!(
-        "{LAMBDA_OMITTED_PREFIX}{}",
-        casefold(name.trim())
-    );
+    let key = format!("{LAMBDA_OMITTED_PREFIX}{}", casefold(name.trim()));
     let env = ctx.capture_lexical_env();
     Value::Bool(matches!(env.get(&key), Some(Value::Bool(true))))
 }

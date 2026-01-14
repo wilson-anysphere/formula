@@ -99,18 +99,26 @@ pub(crate) fn replaceb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> V
     let num_bytes = array_lift::eval_arg(ctx, &args[2]);
     let new_text = array_lift::eval_arg(ctx, &args[3]);
 
-    array_lift::lift4(old_text, start_num, num_bytes, new_text, |old, start, num, new| {
-        let old = old.coerce_to_string_with_ctx(ctx)?;
-        let start = start.coerce_to_i64_with_ctx(ctx)?;
-        let num = num.coerce_to_i64_with_ctx(ctx)?;
-        let new = new.coerce_to_string_with_ctx(ctx)?;
-        if start < 1 || num < 0 {
-            return Err(ErrorKind::Value);
-        }
-        let start0 = (start - 1) as usize;
-        let num = usize::try_from(num).unwrap_or(usize::MAX);
-        Ok(Value::Text(replaceb_bytes(codepage, &old, start0, num, &new)))
-    })
+    array_lift::lift4(
+        old_text,
+        start_num,
+        num_bytes,
+        new_text,
+        |old, start, num, new| {
+            let old = old.coerce_to_string_with_ctx(ctx)?;
+            let start = start.coerce_to_i64_with_ctx(ctx)?;
+            let num = num.coerce_to_i64_with_ctx(ctx)?;
+            let new = new.coerce_to_string_with_ctx(ctx)?;
+            if start < 1 || num < 0 {
+                return Err(ErrorKind::Value);
+            }
+            let start0 = (start - 1) as usize;
+            let num = usize::try_from(num).unwrap_or(usize::MAX);
+            Ok(Value::Text(replaceb_bytes(
+                codepage, &old, start0, num, &new,
+            )))
+        },
+    )
 }
 
 pub(crate) fn leftb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
@@ -892,10 +900,7 @@ fn slice_bytes_dbcs(codepage: u16, text: &str, start0: usize, len: usize) -> Str
         .iter()
         .position(|&b| b >= start0)
         .unwrap_or(prefixes.len().saturating_sub(1));
-    let end_char_excl = prefixes
-        .iter()
-        .rposition(|&b| b <= end0)
-        .unwrap_or(0);
+    let end_char_excl = prefixes.iter().rposition(|&b| b <= end0).unwrap_or(0);
 
     if end_char_excl <= start_char {
         return String::new();
@@ -907,7 +912,13 @@ fn slice_bytes_dbcs(codepage: u16, text: &str, start0: usize, len: usize) -> Str
         .collect()
 }
 
-fn replaceb_bytes(codepage: u16, old_text: &str, start0: usize, len: usize, new_text: &str) -> String {
+fn replaceb_bytes(
+    codepage: u16,
+    old_text: &str,
+    start0: usize,
+    len: usize,
+    new_text: &str,
+) -> String {
     let prefixes = encoded_byte_prefixes(codepage, old_text);
     let total = prefixes.last().copied().unwrap_or(0);
 
@@ -926,8 +937,9 @@ fn replaceb_bytes(codepage: u16, old_text: &str, start0: usize, len: usize, new_
     let start_byte = char_pos_to_byte(old_text, start_char);
     let end_byte = char_pos_to_byte(old_text, end_char_excl);
 
-    let mut out =
-        String::with_capacity(old_text.len() - end_byte.saturating_sub(start_byte) + new_text.len());
+    let mut out = String::with_capacity(
+        old_text.len() - end_byte.saturating_sub(start_byte) + new_text.len(),
+    );
     out.push_str(&old_text[..start_byte]);
     out.push_str(new_text);
     out.push_str(&old_text[end_byte..]);
@@ -944,7 +956,13 @@ fn char_pos_to_byte(s: &str, char_pos: usize) -> usize {
         .unwrap_or_else(|| s.len())
 }
 
-fn findb_impl(codepage: u16, needle: &str, haystack: &str, start: i64, case_insensitive: bool) -> Value {
+fn findb_impl(
+    codepage: u16,
+    needle: &str,
+    haystack: &str,
+    start: i64,
+    case_insensitive: bool,
+) -> Value {
     if start < 1 {
         return Value::Error(ErrorKind::Value);
     }
@@ -1011,7 +1029,11 @@ fn findb_impl(codepage: u16, needle: &str, haystack: &str, start: i64, case_inse
         for orig_idx in start_idx..hay_chars.len() {
             let folded_idx = folded_starts[orig_idx];
             if matches_pattern(&needle_tokens, &hay_folded, folded_idx) {
-                let byte_pos = byte_prefixes.get(orig_idx).copied().unwrap_or(0).saturating_add(1);
+                let byte_pos = byte_prefixes
+                    .get(orig_idx)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(1);
                 return Value::Number(byte_pos as f64);
             }
         }

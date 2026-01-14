@@ -51,4 +51,3 @@ fn sheet_span_ordering_is_correct_after_reorder_and_delete_many_sheets() {
         Value::Error(ErrorKind::Ref)
     );
 }
-

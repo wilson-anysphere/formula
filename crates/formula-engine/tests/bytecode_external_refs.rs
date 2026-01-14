@@ -133,7 +133,10 @@ fn bytecode_indirect_external_cell_ref_compiles_and_is_ref_error() {
     );
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
     assert_eq!(
         provider.calls(),
         0,
@@ -165,7 +168,10 @@ fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_returns_ref_error() 
     );
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
     assert!(
         provider.calls() == 0,
         "expected INDIRECT to reject external workbook refs without consulting the provider"
@@ -255,7 +261,10 @@ fn bytecode_sum_over_external_reference_union_uses_provider_tab_order_for_error_
     );
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
 }
 
 #[test]

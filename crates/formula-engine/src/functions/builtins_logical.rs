@@ -268,24 +268,24 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 any = true;
                                 if !b {
                                     all_true = false;
+                                }
                             }
-                        }
-                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                        // Text and blanks in references are ignored.
-                        other => {
-                            if is_text_like(&other)
-                                || matches!(
-                                    other,
-                                    Value::Blank
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                            // Text and blanks in references are ignored.
+                            other => {
+                                if is_text_like(&other)
+                                    || matches!(
+                                        other,
+                                        Value::Blank
                                             | Value::Array(_)
                                             | Value::Spill { .. }
                                             | Value::Reference(_)
                                             | Value::ReferenceUnion(_)
-                                )
-                            {
-                                continue;
+                                    )
+                                {
+                                    continue;
+                                }
                             }
-                        }
                         }
                     }
                 }
@@ -438,28 +438,28 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 any = true;
                                 if b {
                                     any_true = true;
+                                }
                             }
-                        }
-                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                        other => {
-                            if is_text_like(&other)
-                                || matches!(
-                                    other,
-                                    Value::Blank
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                            other => {
+                                if is_text_like(&other)
+                                    || matches!(
+                                        other,
+                                        Value::Blank
                                             | Value::Array(_)
                                             | Value::Spill { .. }
                                             | Value::Reference(_)
                                             | Value::ReferenceUnion(_)
-                                )
-                            {
-                                continue;
+                                    )
+                                {
+                                    continue;
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
     }
 
     if !any {

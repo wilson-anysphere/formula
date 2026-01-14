@@ -25,17 +25,17 @@ impl TestExternalProvider {
     }
 
     fn set_table(&self, workbook: &str, sheet: &str, table: Table) {
-        self.tables
-            .lock()
-            .expect("lock poisoned")
-            .insert((workbook.to_string(), table.name.clone()), (sheet.to_string(), table));
+        self.tables.lock().expect("lock poisoned").insert(
+            (workbook.to_string(), table.name.clone()),
+            (sheet.to_string(), table),
+        );
     }
 
     fn set_sheet_order(&self, workbook: &str, order: &[&str]) {
-        self.sheet_order
-            .lock()
-            .expect("lock poisoned")
-            .insert(workbook.to_string(), order.iter().map(|s| s.to_string()).collect());
+        self.sheet_order.lock().expect("lock poisoned").insert(
+            workbook.to_string(),
+            order.iter().map(|s| s.to_string()).collect(),
+        );
     }
 }
 
@@ -1017,8 +1017,16 @@ fn debug_trace_supports_path_qualified_external_workbook_cell_refs() {
 #[test]
 fn debug_trace_supports_path_qualified_external_workbook_range_refs() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(r"[C:\path\Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
-    provider.set(r"[C:\path\Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 2.0);
+    provider.set(
+        r"[C:\path\Book.xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        1.0,
+    );
+    provider.set(
+        r"[C:\path\Book.xlsx]Sheet1",
+        CellAddr { row: 1, col: 0 },
+        2.0,
+    );
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -1035,14 +1043,19 @@ fn debug_trace_supports_path_qualified_external_workbook_range_refs() {
     assert_eq!(
         dbg.trace.reference,
         Some(TraceRef::Range {
-            sheet: formula_engine::functions::SheetId::External(r"[C:\path\Book.xlsx]Sheet1".into()),
+            sheet: formula_engine::functions::SheetId::External(
+                r"[C:\path\Book.xlsx]Sheet1".into()
+            ),
             start: CellAddr { row: 0, col: 0 },
             end: CellAddr { row: 1, col: 0 },
         })
     );
 
     let Value::Array(arr) = dbg.value else {
-        panic!("expected Value::Array from debug evaluation, got {:?}", dbg.value);
+        panic!(
+            "expected Value::Array from debug evaluation, got {:?}",
+            dbg.value
+        );
     };
     assert_eq!(arr.rows, 2);
     assert_eq!(arr.cols, 1);

@@ -107,10 +107,7 @@ impl DependencyTrace {
     }
 
     #[must_use]
-    pub fn precedents(
-        &self,
-        sheet_tab_index: impl Fn(usize) -> usize,
-    ) -> Vec<FnReference> {
+    pub fn precedents(&self, sheet_tab_index: impl Fn(usize) -> usize) -> Vec<FnReference> {
         let mut out: Vec<FnReference> = self.precedents.iter().cloned().collect();
         out.sort_by(|a, b| {
             match (&a.sheet_id, &b.sheet_id) {
@@ -121,10 +118,10 @@ impl DependencyTrace {
                 (FnSheetId::External(_), FnSheetId::Local(_)) => Ordering::Greater,
                 (FnSheetId::External(a_key), FnSheetId::External(b_key)) => a_key.cmp(b_key),
             }
-                .then_with(|| a.start.row.cmp(&b.start.row))
-                .then_with(|| a.start.col.cmp(&b.start.col))
-                .then_with(|| a.end.row.cmp(&b.end.row))
-                .then_with(|| a.end.col.cmp(&b.end.col))
+            .then_with(|| a.start.row.cmp(&b.start.row))
+            .then_with(|| a.start.col.cmp(&b.start.col))
+            .then_with(|| a.end.row.cmp(&b.end.row))
+            .then_with(|| a.end.col.cmp(&b.end.col))
         });
         out
     }
@@ -532,7 +529,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 // - error precedence across multi-area unions
                 //
                 // Fall back to lexicographic ordering when workbook order is unavailable.
-                match (split_external_sheet_key(a_key), split_external_sheet_key(b_key)) {
+                match (
+                    split_external_sheet_key(a_key),
+                    split_external_sheet_key(b_key),
+                ) {
                     (Some((a_wb, a_sheet)), Some((b_wb, b_sheet))) if a_wb == b_wb => {
                         match self.resolver.workbook_sheet_names(a_wb) {
                             Some(order) => {
@@ -543,9 +543,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                                     formula_model::sheet_name_eq_case_insensitive(s, b_sheet)
                                 });
                                 match (a_idx, b_idx) {
-                                    (Some(a_idx), Some(b_idx)) => a_idx
-                                        .cmp(&b_idx)
-                                        .then_with(|| a_key.cmp(b_key)),
+                                    (Some(a_idx), Some(b_idx)) => {
+                                        a_idx.cmp(&b_idx).then_with(|| a_key.cmp(b_key))
+                                    }
                                     _ => a_key.cmp(b_key),
                                 }
                             }
@@ -860,8 +860,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
-                        let Some((start, end)) =
-                            self.resolve_range_bounds(&sheet_id, addr, addr)
+                        let Some((start, end)) = self.resolve_range_bounds(&sheet_id, addr, addr)
                         else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
@@ -959,15 +958,14 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| format!("[{workbook}]{table_sheet}"));
 
-                    let ranges =
-                        match crate::structured_refs::resolve_structured_ref_in_table(
-                            &table,
-                            self.ctx.current_cell,
-                            &sref_expr.sref,
-                        ) {
-                            Ok(ranges) => ranges,
-                            Err(_) => return EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
-                        };
+                    let ranges = match crate::structured_refs::resolve_structured_ref_in_table(
+                        &table,
+                        self.ctx.current_cell,
+                        &sref_expr.sref,
+                    ) {
+                        Ok(ranges) => ranges,
+                        Err(_) => return EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                    };
 
                     if ranges.is_empty() {
                         return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
@@ -986,7 +984,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 }
 
                 // Local structured references resolve via workbook table metadata.
-                match self.resolver.resolve_structured_ref(self.ctx, &sref_expr.sref) {
+                match self
+                    .resolver
+                    .resolve_structured_ref(self.ctx, &sref_expr.sref)
+                {
                     Ok(ranges) if !ranges.is_empty() => {
                         if !ranges
                             .iter()
@@ -1810,11 +1811,11 @@ mod tests {
     #[test]
     fn split_external_sheet_key_rejects_invalid_inputs() {
         for key in [
-            "Book.xlsx]Sheet1",  // missing leading '['
-            "[Book.xlsxSheet1",  // missing closing ']'
-            "Sheet1",            // missing workbook prefix
-            "[]Sheet1",          // empty workbook
-            "[Book.xlsx]",       // empty sheet
+            "Book.xlsx]Sheet1", // missing leading '['
+            "[Book.xlsxSheet1", // missing closing ']'
+            "Sheet1",           // missing workbook prefix
+            "[]Sheet1",         // empty workbook
+            "[Book.xlsx]",      // empty sheet
         ] {
             assert!(
                 split_external_sheet_key(key).is_none(),
@@ -1825,7 +1826,11 @@ mod tests {
 
     #[test]
     fn split_external_sheet_span_key_rejects_missing_endpoints() {
-        for key in ["[Book.xlsx]Sheet1", "[Book.xlsx]Sheet1:", "[Book.xlsx]:Sheet2"] {
+        for key in [
+            "[Book.xlsx]Sheet1",
+            "[Book.xlsx]Sheet1:",
+            "[Book.xlsx]:Sheet2",
+        ] {
             assert!(
                 split_external_sheet_span_key(key).is_none(),
                 "expected None for key {key:?}"

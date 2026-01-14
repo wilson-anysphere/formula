@@ -160,9 +160,15 @@ pub fn price(
     }
 
     let schedule = coupon_schedule(settlement, maturity, frequency, basis, system)?;
-    let (dirty, _deriv_sum, _g) =
-        dirty_price_and_deriv_sum(coupon_payment, redemption, yld, freq, schedule.d, schedule.n)
-            .ok_or(ExcelError::Num)?;
+    let (dirty, _deriv_sum, _g) = dirty_price_and_deriv_sum(
+        coupon_payment,
+        redemption,
+        yld,
+        freq,
+        schedule.d,
+        schedule.n,
+    )
+    .ok_or(ExcelError::Num)?;
 
     let clean = dirty - coupon_payment * schedule.a_over_e;
     if clean.is_finite() {
@@ -217,7 +223,8 @@ pub fn yield_rate(
     let f = |y: f64| {
         // Near the `-frequency` boundary, the dirty price can overflow (approaching +∞). Excel
         // still brackets a solution in that region; treat overflow as a large positive residual.
-        match dirty_price_and_deriv_sum(coupon_payment, redemption, y, freq, schedule.d, schedule.n) {
+        match dirty_price_and_deriv_sum(coupon_payment, redemption, y, freq, schedule.d, schedule.n)
+        {
             Some((dirty, _deriv_sum, _g)) => {
                 let clean = dirty - coupon_payment * schedule.a_over_e;
                 let fx = clean - pr;
@@ -280,9 +287,15 @@ pub fn duration(
     let redemption = 100.0;
 
     let schedule = coupon_schedule(settlement, maturity, frequency, basis, system)?;
-    let (dirty, deriv_sum, _g) =
-        dirty_price_and_deriv_sum(coupon_payment, redemption, yld, freq, schedule.d, schedule.n)
-            .ok_or(ExcelError::Num)?;
+    let (dirty, deriv_sum, _g) = dirty_price_and_deriv_sum(
+        coupon_payment,
+        redemption,
+        yld,
+        freq,
+        schedule.d,
+        schedule.n,
+    )
+    .ok_or(ExcelError::Num)?;
     if dirty == 0.0 {
         return Err(ExcelError::Div0);
     }

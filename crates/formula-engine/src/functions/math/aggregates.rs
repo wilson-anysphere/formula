@@ -498,10 +498,9 @@ pub(crate) fn coerce_sumproduct_number(
         Value::Blank => Ok(0.0),
         Value::Error(e) => Err(*e),
         Value::Lambda(_) => Err(ErrorKind::Value),
-        Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Array(_)
-        | Value::Spill { .. } => Ok(0.0),
+        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Array(_) | Value::Spill { .. } => {
+            Ok(0.0)
+        }
     }
 }
 

@@ -1,5 +1,5 @@
-use formula_engine::{ErrorKind, Value};
 use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
 
@@ -19,10 +19,7 @@ fn norm_dist_pdf_and_cdf_match_known_values() {
     assert_number(&sheet.eval("=NORM.DIST(0,0,1,TRUE)"), 0.5);
 
     // Standard normal at 1.
-    assert_number(
-        &sheet.eval("=NORM.S.DIST(1,FALSE)"),
-        0.24197072451914337,
-    );
+    assert_number(&sheet.eval("=NORM.S.DIST(1,FALSE)"), 0.24197072451914337);
     assert_number(&sheet.eval("=NORM.S.DIST(1,TRUE)"), 0.8413447460685429);
 }
 
@@ -80,14 +77,8 @@ fn normal_distribution_domain_errors_match_excel() {
         Value::Error(ErrorKind::Num)
     );
 
-    assert_eq!(
-        sheet.eval("=NORM.S.INV(0)"),
-        Value::Error(ErrorKind::Num)
-    );
-    assert_eq!(
-        sheet.eval("=NORM.S.INV(1)"),
-        Value::Error(ErrorKind::Num)
-    );
+    assert_eq!(sheet.eval("=NORM.S.INV(0)"), Value::Error(ErrorKind::Num));
+    assert_eq!(sheet.eval("=NORM.S.INV(1)"), Value::Error(ErrorKind::Num));
 }
 
 #[test]
@@ -96,7 +87,10 @@ fn normal_distribution_parses_numeric_text_using_value_locale() {
     sheet.set_value_locale(ValueLocaleConfig::de_de());
 
     // Numeric text should parse using the workbook/value locale (de-DE uses comma decimal sep).
-    assert_number(&sheet.eval("=NORM.S.DIST(\"1,0\",TRUE)"), 0.8413447460685429);
+    assert_number(
+        &sheet.eval("=NORM.S.DIST(\"1,0\",TRUE)"),
+        0.8413447460685429,
+    );
     assert_number(&sheet.eval("=NORM.S.INV(\"0,975\")"), 1.959963984540054);
 }
 
@@ -104,7 +98,10 @@ fn normal_distribution_parses_numeric_text_using_value_locale() {
 fn norm_functions_accept_xlfn_prefix() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=_xlfn.NORM.DIST(0,0,1,TRUE)"), 0.5);
-    assert_number(&sheet.eval("=_xlfn.NORM.S.DIST(1,TRUE)"), 0.8413447460685429);
+    assert_number(
+        &sheet.eval("=_xlfn.NORM.S.DIST(1,TRUE)"),
+        0.8413447460685429,
+    );
     assert_number(&sheet.eval("=_xlfn.NORM.INV(0.5,1,2)"), 1.0);
     assert_number(&sheet.eval("=_xlfn.NORM.S.INV(0.5)"), 0.0);
 }

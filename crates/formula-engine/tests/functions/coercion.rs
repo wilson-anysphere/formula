@@ -28,4 +28,3 @@ fn text_dates_coerce_to_serial_numbers() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=YEAR(\"2020-01-01\")"), 2020.0);
 }
-

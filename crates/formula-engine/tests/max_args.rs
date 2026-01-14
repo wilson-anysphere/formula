@@ -2,7 +2,9 @@ use formula_engine::eval::{
     CellAddr, EvalContext, Evaluator, Expr as EvalExpr, NameRef, RecalcContext, SheetReference,
 };
 use formula_engine::functions::{ArgValue, FunctionContext};
-use formula_engine::{parse_formula, parse_formula_partial, ErrorKind, ParseOptions, Value, EXCEL_MAX_ARGS};
+use formula_engine::{
+    parse_formula, parse_formula_partial, ErrorKind, ParseOptions, Value, EXCEL_MAX_ARGS,
+};
 
 #[test]
 fn strict_parse_rejects_function_call_with_256_args() {

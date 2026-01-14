@@ -370,10 +370,7 @@ fn phonetic_metadata_is_cleared_when_cell_input_changes() {
     // Editing the cell value should clear stored phonetic metadata so PHONETIC never returns stale
     // furigana.
     sheet.set("A1", "東京");
-    assert_eq!(
-        sheet.eval("=PHONETIC(A1)"),
-        Value::Text("東京".to_string())
-    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("東京".to_string()));
 
     // Editing the cell formula should also clear stored phonetic metadata.
     sheet.set("A1", "日本");
@@ -384,10 +381,7 @@ fn phonetic_metadata_is_cleared_when_cell_input_changes() {
     );
 
     sheet.set_formula("A1", "=\"大阪\"");
-    assert_eq!(
-        sheet.eval("=PHONETIC(A1)"),
-        Value::Text("大阪".to_string())
-    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("大阪".to_string()));
 }
 
 #[test]
@@ -402,10 +396,7 @@ fn phonetic_metadata_is_cleared_when_set_range_values_overwrites_cell() {
 
     let values = vec![vec![Value::Text("東京".to_string())]];
     sheet.set_range_values("A1", &values);
-    assert_eq!(
-        sheet.eval("=PHONETIC(A1)"),
-        Value::Text("東京".to_string())
-    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("東京".to_string()));
 }
 
 #[test]
@@ -421,10 +412,7 @@ fn phonetic_metadata_is_cleared_when_copy_range_overwrites_cell() {
         dst_top_left: CellRef::from_a1("A1").expect("cell"),
     });
 
-    assert_eq!(
-        sheet.eval("=PHONETIC(A1)"),
-        Value::Text("東京".to_string())
-    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("東京".to_string()));
 }
 
 #[test]
@@ -440,10 +428,7 @@ fn phonetic_metadata_is_cleared_when_fill_overwrites_cell() {
         dst: Range::from_a1("A1").expect("range"),
     });
 
-    assert_eq!(
-        sheet.eval("=PHONETIC(A1)"),
-        Value::Text("東京".to_string())
-    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("東京".to_string()));
 }
 
 #[test]
@@ -459,10 +444,7 @@ fn phonetic_metadata_is_cleared_when_move_range_overwrites_cell() {
         dst_top_left: CellRef::from_a1("A1").expect("cell"),
     });
 
-    assert_eq!(
-        sheet.eval("=PHONETIC(A1)"),
-        Value::Text("東京".to_string())
-    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("東京".to_string()));
 }
 
 #[test]
@@ -477,10 +459,7 @@ fn phonetic_metadata_is_not_copied_by_copy_range() {
         dst_top_left: CellRef::from_a1("A1").expect("cell"),
     });
 
-    assert_eq!(
-        sheet.eval("=PHONETIC(A1)"),
-        Value::Text("漢字".to_string())
-    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("漢字".to_string()));
 }
 
 #[test]
@@ -495,10 +474,7 @@ fn phonetic_metadata_is_not_copied_by_fill() {
         dst: Range::from_a1("A1").expect("range"),
     });
 
-    assert_eq!(
-        sheet.eval("=PHONETIC(A1)"),
-        Value::Text("漢字".to_string())
-    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("漢字".to_string()));
 }
 
 #[test]
@@ -645,10 +621,7 @@ fn phonetic_metadata_does_not_stick_to_address_on_delete_rows() {
 
     // After deleting the first row, the content from A2 moves into A1. The old phonetic metadata
     // must not "stick" to the address.
-    assert_eq!(
-        sheet.eval("=PHONETIC(A1)"),
-        Value::Text("東京".to_string())
-    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("東京".to_string()));
 }
 
 #[test]
@@ -666,10 +639,7 @@ fn phonetic_metadata_does_not_stick_to_address_on_delete_cols() {
 
     // After deleting the first column, the content from B1 moves into A1. The old phonetic metadata
     // must not "stick" to the address.
-    assert_eq!(
-        sheet.eval("=PHONETIC(A1)"),
-        Value::Text("東京".to_string())
-    );
+    assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Text("東京".to_string()));
 }
 
 #[test]
@@ -756,8 +726,14 @@ fn phonetic_metadata_is_removed_when_set_cell_value_clears_contents_but_preserve
     // Clearing contents should preserve style, but must clear phonetic metadata.
     engine.set_cell_value("Sheet1", "A1", Value::Blank).unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
-    assert_eq!(engine.get_cell_style_id("Sheet1", "A1").unwrap(), Some(style_id));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text(String::new())
+    );
+    assert_eq!(
+        engine.get_cell_style_id("Sheet1", "A1").unwrap(),
+        Some(style_id)
+    );
     assert_eq!(engine.get_cell_phonetic("Sheet1", "A1"), None);
 }
 
@@ -842,8 +818,5 @@ fn changing_text_codepage_marks_formulas_dirty() {
 
     sheet.set_text_codepage(932);
     sheet.recalc();
-    assert_eq!(
-        sheet.get("A1"),
-        Value::Text("ＡＢＣ　１２３".to_string())
-    );
+    assert_eq!(sheet.get("A1"), Value::Text("ＡＢＣ　１２３".to_string()));
 }

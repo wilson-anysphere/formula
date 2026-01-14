@@ -67,7 +67,10 @@ impl PivotResult {
                 // Always apply a date format when the pivot output is a typed date.
                 if matches!(value, PivotValue::Date(_)) {
                     number_format = Some(options.default_date_number_format.clone());
-                } else if options.apply_number_formats && r > 0 && value_field_count > 0 && c >= row_label_width
+                } else if options.apply_number_formats
+                    && r > 0
+                    && value_field_count > 0
+                    && c >= row_label_width
                 {
                     let vf_idx = (c - row_label_width) % value_field_count;
                     let vf = &config.value_fields[vf_idx];

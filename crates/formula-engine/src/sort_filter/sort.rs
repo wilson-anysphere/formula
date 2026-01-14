@@ -272,7 +272,11 @@ fn detect_header_row(
     0
 }
 
-fn detect_key_value(cell: &CellValue, key: &SortKey, value_locale: ValueLocaleConfig) -> SortKeyValue {
+fn detect_key_value(
+    cell: &CellValue,
+    key: &SortKey,
+    value_locale: ValueLocaleConfig,
+) -> SortKeyValue {
     match cell {
         CellValue::Blank => return SortKeyValue::Blank,
         // Treat empty/whitespace-only text as blank, matching Excel AutoFilter "Blanks" semantics.
@@ -283,16 +287,23 @@ fn detect_key_value(cell: &CellValue, key: &SortKey, value_locale: ValueLocaleCo
     }
 
     match key.value_type {
-        SortValueType::Text => {
-            SortKeyValue::Text(fold_text(cell_to_string(cell, value_locale), key.case_sensitive))
-        }
+        SortValueType::Text => SortKeyValue::Text(fold_text(
+            cell_to_string(cell, value_locale),
+            key.case_sensitive,
+        )),
         SortValueType::Number => match coerce_number(cell, value_locale) {
             Some(n) => SortKeyValue::Number(n),
-            None => SortKeyValue::Text(fold_text(cell_to_string(cell, value_locale), key.case_sensitive)),
+            None => SortKeyValue::Text(fold_text(
+                cell_to_string(cell, value_locale),
+                key.case_sensitive,
+            )),
         },
         SortValueType::DateTime => match coerce_datetime(cell, value_locale) {
             Some(dt) => SortKeyValue::DateTime(dt),
-            None => SortKeyValue::Text(fold_text(cell_to_string(cell, value_locale), key.case_sensitive)),
+            None => SortKeyValue::Text(fold_text(
+                cell_to_string(cell, value_locale),
+                key.case_sensitive,
+            )),
         },
         SortValueType::Auto => {
             if let CellValue::Bool(b) = cell {
@@ -306,7 +317,10 @@ fn detect_key_value(cell: &CellValue, key: &SortKey, value_locale: ValueLocaleCo
                 return SortKeyValue::DateTime(dt);
             }
             match cell {
-                _ => SortKeyValue::Text(fold_text(cell_to_string(cell, value_locale), key.case_sensitive)),
+                _ => SortKeyValue::Text(fold_text(
+                    cell_to_string(cell, value_locale),
+                    key.case_sensitive,
+                )),
             }
         }
     }
@@ -323,15 +337,17 @@ fn fold_text(s: String, case_sensitive: bool) -> String {
 fn cell_to_string(cell: &CellValue, value_locale: ValueLocaleConfig) -> String {
     match cell {
         CellValue::Blank => String::new(),
-        CellValue::Number(n) => formula_format::format_value(
-            FormatValue::Number(*n),
-            None,
-            &FormatOptions {
-                locale: value_locale.separators,
-                date_system: DateSystem::Excel1900,
-            },
-        )
-        .text,
+        CellValue::Number(n) => {
+            formula_format::format_value(
+                FormatValue::Number(*n),
+                None,
+                &FormatOptions {
+                    locale: value_locale.separators,
+                    date_system: DateSystem::Excel1900,
+                },
+            )
+            .text
+        }
         CellValue::Text(s) => s.clone(),
         CellValue::Bool(b) => {
             if *b {

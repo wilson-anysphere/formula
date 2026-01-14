@@ -1,5 +1,5 @@
-use formula_engine::Value;
 use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::Value;
 
 use super::harness::{assert_number, TestSheet};
 
@@ -111,13 +111,22 @@ fn roundbaht_examples() {
 #[test]
 fn isthaidigit_and_thaidigit_roundtrip() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval("=THAIDIGIT(\"123\")"), Value::Text("๑๒๓".to_string()));
-    assert_eq!(sheet.eval("=THAIDIGIT(1234)"), Value::Text("๑๒๓๔".to_string()));
+    assert_eq!(
+        sheet.eval("=THAIDIGIT(\"123\")"),
+        Value::Text("๑๒๓".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=THAIDIGIT(1234)"),
+        Value::Text("๑๒๓๔".to_string())
+    );
     assert_eq!(
         sheet.eval("=THAIDIGIT(\"A1B2\")"),
         Value::Text("A๑B๒".to_string())
     );
-    assert_eq!(sheet.eval("=ISTHAIDIGIT(THAIDIGIT(\"123\"))"), Value::Bool(true));
+    assert_eq!(
+        sheet.eval("=ISTHAIDIGIT(THAIDIGIT(\"123\"))"),
+        Value::Bool(true)
+    );
     assert_eq!(sheet.eval("=ISTHAIDIGIT(\"๑๒๓\")"), Value::Bool(true));
     assert_eq!(sheet.eval("=ISTHAIDIGIT(\"123\")"), Value::Bool(false));
     assert_eq!(sheet.eval("=ISTHAIDIGIT(\"\")"), Value::Bool(false));
@@ -128,7 +137,10 @@ fn thaidigit_coerces_numbers_using_value_locale() {
     let mut sheet = TestSheet::new();
     sheet.set_value_locale(ValueLocaleConfig::de_de());
     // de-DE numeric -> text coercion uses ',' as decimal separator.
-    assert_eq!(sheet.eval("=THAIDIGIT(1.5)"), Value::Text("๑,๕".to_string()));
+    assert_eq!(
+        sheet.eval("=THAIDIGIT(1.5)"),
+        Value::Text("๑,๕".to_string())
+    );
 }
 
 #[test]

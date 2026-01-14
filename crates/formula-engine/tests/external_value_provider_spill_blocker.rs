@@ -45,4 +45,3 @@ fn spill_is_blocked_by_provider_values_even_with_style_only_cells() {
     assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(999.0));
     assert!(engine.spill_range("Sheet1", "D1").is_none());
 }
-

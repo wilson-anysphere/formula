@@ -20,7 +20,10 @@ fn assert_number_close(v: Value, expected: f64, abs_tol: f64, rel_tol: f64) {
         Value::Number(n) => {
             let diff = (n - expected).abs();
             let tol = abs_tol.max(rel_tol * expected.abs());
-            assert!(diff <= tol, "expected {expected}, got {n} (diff={diff}, tol={tol})");
+            assert!(
+                diff <= tol,
+                "expected {expected}, got {n} (diff={diff}, tol={tol})"
+            );
         }
         other => panic!("expected number, got {other:?}"),
     }
@@ -196,4 +199,3 @@ fn odd_coupon_validation_cases_match_excel_oracle() {
         1e-6,
     );
 }
-

@@ -5,4 +5,3 @@
 // `cargo test -p formula-engine --test workbook_info`.
 #[path = "functions/workbook_info.rs"]
 mod workbook_info;
-

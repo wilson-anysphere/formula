@@ -140,7 +140,8 @@ fn bytecode_blocked_spills_match_ast() {
 fn bytecode_spills_match_ast_for_row_and_column_functions() {
     let mut ast = setup_base_engine(false);
     ast.set_cell_formula("Sheet1", "C1", "=ROW(A1:A3)").unwrap();
-    ast.set_cell_formula("Sheet1", "D1", "=COLUMN(A1:C1)").unwrap();
+    ast.set_cell_formula("Sheet1", "D1", "=COLUMN(A1:C1)")
+        .unwrap();
     ast.recalculate_single_threaded();
 
     let mut bytecode = setup_base_engine(true);
@@ -157,8 +158,14 @@ fn bytecode_spills_match_ast_for_row_and_column_functions() {
     );
     bytecode.recalculate_single_threaded();
 
-    assert_eq!(bytecode.spill_range("Sheet1", "C1"), ast.spill_range("Sheet1", "C1"));
-    assert_eq!(bytecode.spill_range("Sheet1", "D1"), ast.spill_range("Sheet1", "D1"));
+    assert_eq!(
+        bytecode.spill_range("Sheet1", "C1"),
+        ast.spill_range("Sheet1", "C1")
+    );
+    assert_eq!(
+        bytecode.spill_range("Sheet1", "D1"),
+        ast.spill_range("Sheet1", "D1")
+    );
 
     for addr in ["C1", "C2", "C3", "D1", "E1", "F1"] {
         assert_eq!(
@@ -181,7 +188,9 @@ fn bytecode_spills_match_ast_for_row_and_column_functions_over_spill_ranges() {
         engine
             .set_cell_formula("Sheet1", "A1", "=SEQUENCE(3)")
             .unwrap();
-        engine.set_cell_formula("Sheet1", "C1", "=ROW(A1#)").unwrap();
+        engine
+            .set_cell_formula("Sheet1", "C1", "=ROW(A1#)")
+            .unwrap();
 
         engine
             .set_cell_formula("Sheet1", "A10", "=SEQUENCE(1,3)")
@@ -202,7 +211,10 @@ fn bytecode_spills_match_ast_for_row_and_column_functions_over_spill_ranges() {
         "expected ROW/COLUMN formulas over spill-range refs to compile to bytecode"
     );
 
-    assert_eq!(bytecode.spill_range("Sheet1", "C1"), ast.spill_range("Sheet1", "C1"));
+    assert_eq!(
+        bytecode.spill_range("Sheet1", "C1"),
+        ast.spill_range("Sheet1", "C1")
+    );
     assert_eq!(
         bytecode.spill_range("Sheet1", "E10"),
         ast.spill_range("Sheet1", "E10")

@@ -49,9 +49,7 @@ fn bit_shift(value: u64, shift: i32, dir: ShiftDirection) -> Result<u64, ErrorKi
 
     let out = match shift_dir {
         ShiftDirection::Left => {
-            let shifted = (value as u128)
-                .checked_shl(amount)
-                .ok_or(ErrorKind::Num)?;
+            let shifted = (value as u128).checked_shl(amount).ok_or(ErrorKind::Num)?;
             if shifted > (BIT_MAX as u128) {
                 return Err(ErrorKind::Num);
             }

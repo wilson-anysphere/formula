@@ -137,9 +137,11 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                     args: vec![c, t],
                 }),
                 // CHOOSE(index, value1, value2)
-                (scalar.clone(), inner.clone(), inner.clone()).prop_map(|(idx, a, b)| Expr::FuncCall {
-                    func: Function::Choose,
-                    args: vec![idx, a, b],
+                (scalar.clone(), inner.clone(), inner.clone()).prop_map(|(idx, a, b)| {
+                    Expr::FuncCall {
+                        func: Function::Choose,
+                        args: vec![idx, a, b],
+                    }
                 }),
                 // IFS(cond1, value1, cond2, value2)
                 (scalar.clone(), inner.clone(), scalar.clone(), inner.clone()).prop_map(

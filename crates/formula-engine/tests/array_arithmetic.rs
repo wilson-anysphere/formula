@@ -220,9 +220,7 @@ fn outer_broadcasting_over_spilled_ranges_spills_2d_arrays() {
     engine
         .set_cell_formula("Sheet1", "C1", "=SEQUENCE(1,4)")
         .unwrap();
-    engine
-        .set_cell_formula("Sheet1", "A5", "=A1#+C1#")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A5", "=A1#+C1#").unwrap();
     engine.recalculate_single_threaded();
 
     let (start, end) = engine.spill_range("Sheet1", "A5").expect("spill range");

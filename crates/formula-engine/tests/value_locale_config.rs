@@ -18,10 +18,16 @@ fn set_value_locale_marks_compiled_formulas_dirty() {
 
     engine.set_cell_formula("Sheet1", "A1", "=1+1").unwrap();
     engine.recalculate();
-    assert!(!engine.has_dirty_cells(), "engine should be clean after recalc");
+    assert!(
+        !engine.has_dirty_cells(),
+        "engine should be clean after recalc"
+    );
 
     engine.set_value_locale(ValueLocaleConfig::de_de());
-    assert!(engine.has_dirty_cells(), "locale change should dirty compiled formulas");
+    assert!(
+        engine.has_dirty_cells(),
+        "locale change should dirty compiled formulas"
+    );
     assert_eq!(engine.value_locale(), ValueLocaleConfig::de_de());
 }
 
@@ -94,8 +100,7 @@ fn bytecode_countif_respects_workbook_locale_for_dot_separated_date_criteria_str
 #[test]
 fn set_value_locale_id_accepts_common_en_dmy_locales_and_uses_dmy_date_order() {
     let system = ExcelDateSystem::EXCEL_1900;
-    let expected_serial =
-        ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap() as f64;
+    let expected_serial = ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap() as f64;
 
     // Many English-speaking regions use DMY date order (Excel-compatible parsing).
     // Note: formula parsing locale still resolves to `en-US`; this only affects value parsing.
@@ -134,5 +139,8 @@ fn en_us_value_locale_uses_mdy_date_order_for_ambiguous_numeric_dates() {
 
     let system = ExcelDateSystem::EXCEL_1900;
     let expected_serial = ymd_to_serial(ExcelDate::new(2020, 1, 2), system).unwrap() as f64;
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_serial));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(expected_serial)
+    );
 }

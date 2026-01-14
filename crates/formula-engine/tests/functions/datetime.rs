@@ -93,7 +93,10 @@ fn time_and_timevalue_conversions() {
         &sheet.eval("=TIMEVALUE(\"2020-01-01 1:30 PM\")"),
         13.5 / 24.0,
     );
-    assert_eq!(sheet.eval("=TIMEVALUE(\"nope\")"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=TIMEVALUE(\"nope\")"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]
@@ -111,7 +114,10 @@ fn datevalue_edate_and_eomonth() {
         sheet.eval("=DATEVALUE(\"January 2, 2020\")"),
         sheet.eval("=DATE(2020,1,2)")
     );
-    assert_eq!(sheet.eval("=DATEVALUE(\"nope\")"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=DATEVALUE(\"nope\")"),
+        Value::Error(ErrorKind::Value)
+    );
     assert_eq!(
         sheet.eval("=DATEVALUE(\"2019-02-29\")"),
         Value::Error(ErrorKind::Value)
@@ -166,7 +172,10 @@ fn days_returns_day_difference() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=DAYS(DATE(2020,1,2),DATE(2020,1,1))"), 1.0);
     assert_number(&sheet.eval("=DAYS(\"2020-01-02\",\"2020-01-01\")"), 1.0);
-    assert_eq!(sheet.eval("=DAYS(\"nope\",DATE(2020,1,1))"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=DAYS(\"nope\",DATE(2020,1,1))"),
+        Value::Error(ErrorKind::Value)
+    );
 
     sheet.set("A1", Value::Number(f64::INFINITY));
     assert_eq!(sheet.eval("=DAYS(A1,0)"), Value::Error(ErrorKind::Num));
@@ -175,7 +184,10 @@ fn days_returns_day_difference() {
 #[test]
 fn days_spills_over_array_inputs() {
     let mut sheet = TestSheet::new();
-    sheet.set_formula("A1", "=DAYS({\"2020-01-02\";\"2020-01-03\"},\"2020-01-01\")");
+    sheet.set_formula(
+        "A1",
+        "=DAYS({\"2020-01-02\";\"2020-01-03\"},\"2020-01-01\")",
+    );
     sheet.recalc();
     assert_number(&sheet.get("A1"), 1.0);
     assert_number(&sheet.get("A2"), 2.0);
@@ -331,10 +343,7 @@ fn days360_accounts_for_lotus_bug_feb_1900() {
     let mut sheet = TestSheet::new();
     sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: true });
 
-    assert_number(
-        &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1))"),
-        3.0,
-    );
+    assert_number(&sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1))"), 3.0);
     assert_number(
         &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1),TRUE)"),
         3.0,
@@ -349,10 +358,7 @@ fn days360_accounts_for_lotus_bug_feb_1900() {
         1.0,
     );
 
-    assert_number(
-        &sheet.eval("=DAYS360(DATE(1900,2,29),DATE(1900,3,1))"),
-        1.0,
-    );
+    assert_number(&sheet.eval("=DAYS360(DATE(1900,2,29),DATE(1900,3,1))"), 1.0);
     assert_number(
         &sheet.eval("=DAYS360(DATE(1900,2,29),DATE(1900,3,1),TRUE)"),
         2.0,
@@ -390,13 +396,12 @@ fn days360_accounts_for_lotus_bug_feb_1900() {
 #[test]
 fn days360_respects_lotus_compat_flag_for_feb_1900() {
     let mut sheet = TestSheet::new();
-    sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: false });
+    sheet.set_date_system(ExcelDateSystem::Excel1900 {
+        lotus_compat: false,
+    });
 
     // Without the Lotus bug, Feb 28 1900 is month-end.
-    assert_number(
-        &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1))"),
-        1.0,
-    );
+    assert_number(&sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1))"), 1.0);
     assert_number(
         &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1),TRUE)"),
         3.0,
@@ -416,7 +421,10 @@ fn days360_respects_lotus_compat_flag_for_feb_1900() {
 #[test]
 fn days360_spills_over_array_inputs() {
     let mut sheet = TestSheet::new();
-    sheet.set_formula("A1", "=DAYS360({DATE(2011,1,1);DATE(2011,1,31)},DATE(2011,12,31))");
+    sheet.set_formula(
+        "A1",
+        "=DAYS360({DATE(2011,1,1);DATE(2011,1,31)},DATE(2011,12,31))",
+    );
     sheet.recalc();
     assert_number(&sheet.get("A1"), 360.0);
     assert_number(&sheet.get("A2"), 330.0);
@@ -590,7 +598,9 @@ fn yearfrac_basis1_accounts_for_lotus_bug_feb_1900() {
 #[test]
 fn yearfrac_basis1_respects_lotus_compat_flag_for_1900() {
     let mut sheet = TestSheet::new();
-    sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: false });
+    sheet.set_date_system(ExcelDateSystem::Excel1900 {
+        lotus_compat: false,
+    });
 
     assert_number(
         &sheet.eval("=YEARFRAC(DATE(1900,1,1),DATE(1900,12,31),1)"),
@@ -737,7 +747,10 @@ fn yearfrac_spills_over_array_inputs() {
     let mut sheet = TestSheet::new();
     let expected1 = sheet.eval("=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1))");
     let expected2 = sheet.eval("=YEARFRAC(DATE(2020,1,2),DATE(2021,1,1))");
-    sheet.set_formula("A1", "=YEARFRAC({DATE(2020,1,1);DATE(2020,1,2)},DATE(2021,1,1))");
+    sheet.set_formula(
+        "A1",
+        "=YEARFRAC({DATE(2020,1,1);DATE(2020,1,2)},DATE(2021,1,1))",
+    );
     sheet.recalc();
     assert_eq!(sheet.get("A1"), expected1);
     assert_eq!(sheet.get("A2"), expected2);
@@ -829,7 +842,10 @@ fn date_errors_on_non_finite_numbers() {
 #[test]
 fn date_time_mismatched_array_shapes_return_value_error() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval("=TIME({1,2},{3;4},0)"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=TIME({1,2},{3;4},0)"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]
@@ -862,7 +878,10 @@ fn workday_and_networkdays_skip_weekends_and_holidays() {
         sheet.eval("=DATE(2020,1,3)")
     );
 
-    assert_number(&sheet.eval("=NETWORKDAYS(DATE(2020,1,1),DATE(2020,1,10))"), 8.0);
+    assert_number(
+        &sheet.eval("=NETWORKDAYS(DATE(2020,1,1),DATE(2020,1,10))"),
+        8.0,
+    );
     assert_number(
         &sheet.eval("=NETWORKDAYS(DATE(2020,1,1),DATE(2020,1,10),{DATE(2020,1,2),DATE(2020,1,3)})"),
         6.0,

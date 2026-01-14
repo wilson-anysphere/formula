@@ -1,4 +1,6 @@
-use formula_engine::functions::financial::{effect, fv, ipmt, nominal, nper, pmt, ppmt, pv, rate, rri};
+use formula_engine::functions::financial::{
+    effect, fv, ipmt, nominal, nper, pmt, ppmt, pv, rate, rri,
+};
 use formula_engine::ExcelError;
 
 fn assert_close(actual: f64, expected: f64, tol: f64) {
@@ -78,7 +80,11 @@ fn effect_and_nominal_roundtrip() {
 
     let eff_trunc_1 = effect(nominal_rate, 1.0).unwrap();
     assert_close(effect(nominal_rate, 1.1).unwrap(), eff_trunc_1, 1e-12);
-    assert_close(effect(nominal_rate, 1.999999999).unwrap(), eff_trunc_1, 1e-12);
+    assert_close(
+        effect(nominal_rate, 1.999999999).unwrap(),
+        eff_trunc_1,
+        1e-12,
+    );
 
     let nom_trunc_2 = nominal(eff, 2.0).unwrap();
     assert_close(nominal(eff, 2.9).unwrap(), nom_trunc_2, 1e-12);

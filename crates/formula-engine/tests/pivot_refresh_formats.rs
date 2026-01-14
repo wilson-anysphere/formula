@@ -211,7 +211,9 @@ fn refresh_pivot_infers_dates_from_column_number_formats_when_cell_styles_inheri
         }),
         ..Style::default()
     });
-    engine.set_cell_style_id("Sheet1", "A2", bold_style).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A2", bold_style)
+        .unwrap();
 
     let pivot_id = engine.add_pivot_table(PivotTableDefinition {
         id: 0,
@@ -304,7 +306,9 @@ fn refresh_pivot_infers_dates_from_range_run_number_formats_when_cell_styles_inh
         }),
         ..Style::default()
     });
-    engine.set_cell_style_id("Sheet1", "A2", bold_style).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A2", bold_style)
+        .unwrap();
 
     let pivot_id = engine.add_pivot_table(PivotTableDefinition {
         id: 0,

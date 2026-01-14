@@ -103,12 +103,6 @@ fn builtins_db_and_vdb_wiring() {
     let mut sheet = TestSheet::new();
 
     assert_number(&sheet.eval("=DB(10000,1000,5,1)"), 3690.0);
-    assert_number(
-        &sheet.eval("=DB(10000,1000,5,6,7)"),
-        191.27749950985103,
-    );
-    assert_number(
-        &sheet.eval("=VDB(2400,0,10,6,10,2,TRUE)"),
-        371.44756224,
-    );
+    assert_number(&sheet.eval("=DB(10000,1000,5,6,7)"), 191.27749950985103);
+    assert_number(&sheet.eval("=VDB(2400,0,10,6,10,2,TRUE)"), 371.44756224);
 }

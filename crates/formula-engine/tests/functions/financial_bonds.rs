@@ -32,17 +32,7 @@ fn price_matches_excel_doc_example() {
     let settlement = ymd_to_serial(ExcelDate::new(2008, 2, 15), system).unwrap();
     let maturity = ymd_to_serial(ExcelDate::new(2017, 11, 15), system).unwrap();
 
-    let result = price(
-        settlement,
-        maturity,
-        0.0575,
-        0.065,
-        100.0,
-        2,
-        0,
-        system,
-    )
-    .unwrap();
+    let result = price(settlement, maturity, 0.0575, 0.065, 100.0, 2, 0, system).unwrap();
     assert_close(result, 94.634361, 1e-6);
 }
 
@@ -85,19 +75,14 @@ fn yield_price_roundtrip() {
     let basis = 0;
 
     let pr = price(
-        settlement,
-        maturity,
-        rate,
-        yld,
-        redemption,
-        frequency,
-        basis,
-        system,
+        settlement, maturity, rate, yld, redemption, frequency, basis, system,
     )
     .unwrap();
 
-    let back =
-        yield_rate(settlement, maturity, rate, pr, redemption, frequency, basis, system).unwrap();
+    let back = yield_rate(
+        settlement, maturity, rate, pr, redemption, frequency, basis, system,
+    )
+    .unwrap();
     assert_close(back, yld, 1e-10);
 }
 
@@ -114,14 +99,7 @@ fn settlement_on_coupon_date_has_zero_accrued_interest() {
 
     // On coupon date, accrued interest should be 0 and the clean price should equal the dirty price.
     let pr = price(
-        settlement,
-        maturity,
-        rate,
-        yld,
-        redemption,
-        frequency,
-        basis,
-        system,
+        settlement, maturity, rate, yld, redemption, frequency, basis, system,
     )
     .unwrap();
     assert!(pr.is_finite());
@@ -139,18 +117,14 @@ fn yield_price_roundtrip_end_of_month_schedule() {
     let basis = 3; // Actual/365 has a fixed coupon-period length (365/frequency).
 
     let pr = price(
-        settlement,
-        maturity,
-        rate,
-        yld,
-        redemption,
-        frequency,
-        basis,
-        system,
+        settlement, maturity, rate, yld, redemption, frequency, basis, system,
     )
     .unwrap();
 
-    let recovered = yield_rate(settlement, maturity, rate, pr, redemption, frequency, basis, system).unwrap();
+    let recovered = yield_rate(
+        settlement, maturity, rate, pr, redemption, frequency, basis, system,
+    )
+    .unwrap();
     assert_close(recovered, yld, 1e-10);
 }
 
@@ -179,11 +153,16 @@ fn negative_yield_below_minus_one_is_allowed_when_frequency_gt_one() {
     let freq = frequency as f64;
     let coupon_payment = 100.0 * rate / freq;
     let expected = (coupon_payment + redemption) / (1.0 + yld / freq);
-    let actual = price(settlement, maturity, rate, yld, redemption, frequency, basis, system).unwrap();
+    let actual = price(
+        settlement, maturity, rate, yld, redemption, frequency, basis, system,
+    )
+    .unwrap();
     assert_close(actual, expected, 1e-12);
 
-    let solved =
-        yield_rate(settlement, maturity, rate, expected, redemption, frequency, basis, system).unwrap();
+    let solved = yield_rate(
+        settlement, maturity, rate, expected, redemption, frequency, basis, system,
+    )
+    .unwrap();
     assert_close(solved, yld, 1e-10);
 
     // With a single cashflow one semiannual period away, Macaulay duration is 0.5 years.
@@ -236,7 +215,10 @@ fn price_coupon_payment_is_based_on_face_value() {
     let frequency = 2;
 
     let expected = redemption + 100.0 * rate / (frequency as f64);
-    let actual = price(settlement, maturity, rate, yld, redemption, frequency, 0, system).unwrap();
+    let actual = price(
+        settlement, maturity, rate, yld, redemption, frequency, 0, system,
+    )
+    .unwrap();
     assert_close(actual, expected, 1e-12);
 }
 
@@ -262,14 +244,20 @@ fn price_basis_2_and_3_use_fixed_coupon_period_length() {
     let e2 = 360.0 / freq;
     let t2 = dsc / e2 + 1.0; // maturity is one full period after NCD
     let expected2 = redemption * g.powf(-t2);
-    let actual2 = price(settlement, maturity, 0.0, yld, redemption, frequency, 2, system).unwrap();
+    let actual2 = price(
+        settlement, maturity, 0.0, yld, redemption, frequency, 2, system,
+    )
+    .unwrap();
     assert_close(actual2, expected2, 1e-10);
 
     // basis 3: E = 365/freq
     let e3 = 365.0 / freq;
     let t3 = dsc / e3 + 1.0;
     let expected3 = redemption * g.powf(-t3);
-    let actual3 = price(settlement, maturity, 0.0, yld, redemption, frequency, 3, system).unwrap();
+    let actual3 = price(
+        settlement, maturity, 0.0, yld, redemption, frequency, 3, system,
+    )
+    .unwrap();
     assert_close(actual3, expected3, 1e-10);
 }
 
@@ -300,7 +288,10 @@ fn coupon_schedule_is_anchored_on_maturity_for_eom_dates() {
     let e = 360.0 / (frequency as f64);
     let expected = dirty - coupon_payment * (a / e);
 
-    let actual = price(settlement, maturity, rate, yld, redemption, frequency, basis, system).unwrap();
+    let actual = price(
+        settlement, maturity, rate, yld, redemption, frequency, basis, system,
+    )
+    .unwrap();
     assert_close(actual, expected, 1e-10);
 }
 
@@ -374,7 +365,11 @@ fn coupon_schedule_sanity_basis_0_and_1() {
         16.0,
         0.0,
     );
-    assert_close(coupdays(settlement, maturity, 2, 0, system).unwrap(), 180.0, 0.0);
+    assert_close(
+        coupdays(settlement, maturity, 2, 0, system).unwrap(),
+        180.0,
+        0.0,
+    );
 
     // Basis 1 (Actual/Actual).
     assert_eq!(
@@ -390,13 +385,21 @@ fn coupon_schedule_sanity_basis_0_and_1() {
     let a_actual = (settlement - pcd_expected) as f64;
     let dsc_actual = (ncd_expected - settlement) as f64;
     let e_actual = (ncd_expected - pcd_expected) as f64;
-    assert_close(coupdaybs(settlement, maturity, 2, 1, system).unwrap(), a_actual, 0.0);
+    assert_close(
+        coupdaybs(settlement, maturity, 2, 1, system).unwrap(),
+        a_actual,
+        0.0,
+    );
     assert_close(
         coupdaysnc(settlement, maturity, 2, 1, system).unwrap(),
         dsc_actual,
         0.0,
     );
-    assert_close(coupdays(settlement, maturity, 2, 1, system).unwrap(), e_actual, 0.0);
+    assert_close(
+        coupdays(settlement, maturity, 2, 1, system).unwrap(),
+        e_actual,
+        0.0,
+    );
 }
 
 #[test]
@@ -433,8 +436,10 @@ fn yield_duration_and_mduration_one_cashflow_case_is_analytic() {
     let basis = 0;
 
     let pr = 110.0 / (1.0 + yld_expected);
-    let yld =
-        yield_rate(settlement, maturity, coupon, pr, redemption, frequency, basis, system).unwrap();
+    let yld = yield_rate(
+        settlement, maturity, coupon, pr, redemption, frequency, basis, system,
+    )
+    .unwrap();
     assert_close(yld, yld_expected, 1e-12);
 
     let dur = duration(
@@ -560,11 +565,9 @@ fn coup_functions_coerce_basis_like_excel() {
     }
 
     // Regression: truncation, not rounding (1.999... -> 1).
-    let baseline_days = eval_number_or_skip(
-        &mut sheet,
-        "=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,1)",
-    )
-    .expect("COUPDAYS should evaluate for basis=1");
+    let baseline_days =
+        eval_number_or_skip(&mut sheet, "=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,1)")
+            .expect("COUPDAYS should evaluate for basis=1");
     let with_float = eval_number_or_skip(
         &mut sheet,
         "=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,1.999999999)",
@@ -704,33 +707,34 @@ fn standard_bond_functions_coerce_basis_like_excel() {
 fn accrint_functions_coerce_frequency_and_basis_like_excel() {
     let mut sheet = TestSheet::new();
 
-    let accrint_baseline = match sheet.eval(
-        "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2,0,FALSE)",
-    ) {
+    let accrint_baseline = match sheet
+        .eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2,0,FALSE)")
+    {
         Value::Error(ErrorKind::Name) => return,
         Value::Number(n) => n,
         other => panic!("expected number, got {other:?}"),
     };
 
-    let accrint_float_freq = match sheet.eval(
-        "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2.9,0,FALSE)",
-    ) {
+    let accrint_float_freq = match sheet
+        .eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2.9,0,FALSE)")
+    {
         Value::Number(n) => n,
         other => panic!("expected number, got {other:?}"),
     };
     assert_close(accrint_float_freq, accrint_baseline, 1e-12);
 
-    let accrint_float_basis = match sheet.eval(
-        "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2,0.9,FALSE)",
-    ) {
+    let accrint_float_basis = match sheet
+        .eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2,0.9,FALSE)")
+    {
         Value::Number(n) => n,
         other => panic!("expected number, got {other:?}"),
     };
     assert_close(accrint_float_basis, accrint_baseline, 1e-12);
 
-    let Some(accrintm_baseline) =
-        eval_number_or_skip(&mut sheet, "=ACCRINTM(DATE(2020,1,1),DATE(2020,7,1),0.1,1000,0)")
-    else {
+    let Some(accrintm_baseline) = eval_number_or_skip(
+        &mut sheet,
+        "=ACCRINTM(DATE(2020,1,1),DATE(2020,7,1),0.1,1000,0)",
+    ) else {
         return;
     };
     let accrintm_float_basis = eval_number_or_skip(

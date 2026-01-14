@@ -9,7 +9,10 @@ fn out_of_bounds_cell_reference_evaluates_to_ref_error() {
         .unwrap();
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Ref)
+    );
 }
 
 #[test]
@@ -19,7 +22,10 @@ fn growing_sheet_dimensions_makes_far_references_valid() {
         .set_cell_formula("Sheet1", "B1", "=A2000000")
         .unwrap();
     engine.recalculate();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Ref)
+    );
 
     // Grow the sheet by writing a value in a far row (but not in A2000000 itself).
     engine.set_cell_value("Sheet1", "B2000000", 1.0).unwrap();
@@ -43,7 +49,10 @@ fn out_of_bounds_range_reference_evaluates_to_ref_error() {
         .unwrap();
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Ref)
+    );
 }
 
 #[test]

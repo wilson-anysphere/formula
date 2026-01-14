@@ -18,7 +18,11 @@ pub fn norm_dist(x: f64, mean: f64, standard_dev: f64, cumulative: bool) -> Resu
         return Err(ErrorKind::Num);
     }
     let normal = normal(mean, standard_dev)?;
-    let out = if cumulative { normal.cdf(x) } else { normal.pdf(x) };
+    let out = if cumulative {
+        normal.cdf(x)
+    } else {
+        normal.pdf(x)
+    };
     if out.is_finite() {
         Ok(out)
     } else {
@@ -72,4 +76,3 @@ pub fn gauss(z: f64) -> Result<f64, ErrorKind> {
         Err(ErrorKind::Num)
     }
 }
-

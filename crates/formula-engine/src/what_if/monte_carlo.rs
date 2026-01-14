@@ -271,8 +271,7 @@ impl Distribution {
                 } else {
                     // `StatrsBeta::new` should not fail after `validate`, but we avoid panics
                     // here since this pathway is only used when correlations are requested.
-                    let dist =
-                        StatrsBeta::new(*alpha, *beta).expect("validated beta parameters");
+                    let dist = StatrsBeta::new(*alpha, *beta).expect("validated beta parameters");
                     dist.inverse_cdf(u)
                 };
                 scale_unit_interval(raw, *min, *max)

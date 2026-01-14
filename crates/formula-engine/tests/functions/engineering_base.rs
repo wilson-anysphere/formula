@@ -27,14 +27,8 @@ fn fixed_width_base_conversions_match_expected_values() {
 
     assert_eq!(sheet.eval("=OCT2DEC(\"17\")"), Value::Number(15.0));
     assert_eq!(sheet.eval("=OCT2DEC(\"7777777777\")"), Value::Number(-1.0));
-    assert_eq!(
-        sheet.eval("=HEX2DEC(\"FF\")"),
-        Value::Number(255.0)
-    );
-    assert_eq!(
-        sheet.eval("=HEX2DEC(\"FFFFFFFFFF\")"),
-        Value::Number(-1.0)
-    );
+    assert_eq!(sheet.eval("=HEX2DEC(\"FF\")"), Value::Number(255.0));
+    assert_eq!(sheet.eval("=HEX2DEC(\"FFFFFFFFFF\")"), Value::Number(-1.0));
 
     assert_eq!(
         sheet.eval("=BIN2HEX(\"1111111111\")"),
@@ -51,7 +45,10 @@ fn fixed_width_base_conversions_validate_inputs() {
     let mut sheet = TestSheet::new();
 
     // Invalid digits.
-    assert_eq!(sheet.eval("=BIN2DEC(\"102\")"), Value::Error(ErrorKind::Num));
+    assert_eq!(
+        sheet.eval("=BIN2DEC(\"102\")"),
+        Value::Error(ErrorKind::Num)
+    );
     assert_eq!(sheet.eval("=OCT2DEC(\"8\")"), Value::Error(ErrorKind::Num));
     assert_eq!(sheet.eval("=HEX2DEC(\"GG\")"), Value::Error(ErrorKind::Num));
 
@@ -70,10 +67,7 @@ fn fixed_width_base_conversions_validate_inputs() {
 
     // Places validation.
     assert_eq!(sheet.eval("=DEC2BIN(10,2)"), Value::Error(ErrorKind::Num));
-    assert_eq!(
-        sheet.eval("=DEC2BIN(10,11)"),
-        Value::Error(ErrorKind::Num)
-    );
+    assert_eq!(sheet.eval("=DEC2BIN(10,11)"), Value::Error(ErrorKind::Num));
 }
 
 #[test]
@@ -88,7 +82,10 @@ fn base_and_decimal_support_radix_and_min_length() {
     assert_eq!(sheet.eval("=DECIMAL(\"FF\",16)"), Value::Number(255.0));
 
     assert_eq!(sheet.eval("=BASE(1,1)"), Value::Error(ErrorKind::Num));
-    assert_eq!(sheet.eval("=DECIMAL(\"2\",2)"), Value::Error(ErrorKind::Num));
+    assert_eq!(
+        sheet.eval("=DECIMAL(\"2\",2)"),
+        Value::Error(ErrorKind::Num)
+    );
 }
 
 #[test]
@@ -108,9 +105,5 @@ fn bit_functions_match_expected_results_and_reject_invalid_inputs() {
         sheet.eval(&format!("=BITXOR({},1)", (1u64 << 48))),
         Value::Error(ErrorKind::Num)
     );
-    assert_eq!(
-        sheet.eval("=BITLSHIFT(1,48)"),
-        Value::Error(ErrorKind::Num)
-    );
+    assert_eq!(sheet.eval("=BITLSHIFT(1,48)"), Value::Error(ErrorKind::Num));
 }
-

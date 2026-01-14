@@ -7,10 +7,10 @@ mod normal;
 pub use normal::{gauss, norm_dist, norm_inv, norm_s_dist, norm_s_inv, phi};
 mod frequency;
 pub use frequency::frequency;
-pub mod ets;
-pub mod regression;
 mod discrete;
+pub mod ets;
 mod hypothesis;
+pub mod regression;
 
 pub use discrete::*;
 pub use hypothesis::*;
@@ -95,7 +95,10 @@ pub fn var_s(values: &[f64]) -> Result<f64, ErrorKind> {
 ///
 /// This is primarily used by Excel's `*A` statistical functions, which include text/logical/blank
 /// cells as zero when arguments are references.
-fn variance_components_with_zeros(values: &[f64], zeros: u64) -> Result<(u64, f64, f64), ErrorKind> {
+fn variance_components_with_zeros(
+    values: &[f64],
+    zeros: u64,
+) -> Result<(u64, f64, f64), ErrorKind> {
     let count = (values.len() as u64).saturating_add(zeros);
     if count == 0 {
         return Err(ErrorKind::Div0);

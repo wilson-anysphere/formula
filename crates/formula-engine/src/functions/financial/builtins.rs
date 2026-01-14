@@ -142,7 +142,11 @@ fn collect_irr_values_from_arg(
         ArgValue::Scalar(v) => match v {
             Value::Error(e) => Err(e),
             Value::Number(n) => Ok(vec![n]),
-            Value::Bool(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Blank => Ok(vec![0.0]),
+            Value::Bool(_)
+            | Value::Text(_)
+            | Value::Entity(_)
+            | Value::Record(_)
+            | Value::Blank => Ok(vec![0.0]),
             Value::Lambda(_) => Err(ErrorKind::Value),
             Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {

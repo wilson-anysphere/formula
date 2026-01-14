@@ -91,7 +91,11 @@ fn image_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
-    let display_field = if alt_text.is_some() { "alt_text" } else { "source" };
+    let display_field = if alt_text.is_some() {
+        "alt_text"
+    } else {
+        "source"
+    };
     let display = alt_text.clone().unwrap_or_else(|| source.clone());
     let alt_value = alt_text.map(Value::Text).unwrap_or(Value::Blank);
 

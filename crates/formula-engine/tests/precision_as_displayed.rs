@@ -1,6 +1,6 @@
 use formula_engine::calc_settings::CalcSettings;
-use formula_engine::{Engine, Value};
 use formula_engine::metadata::FormatRun;
+use formula_engine::{Engine, Value};
 use formula_model::{Font, Style};
 
 #[test]

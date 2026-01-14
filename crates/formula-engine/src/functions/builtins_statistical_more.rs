@@ -76,12 +76,12 @@ fn push_frequency_data_numbers_from_value(
             Ok(())
         }
         Value::Lambda(_) => Err(ErrorKind::Value),
-        Value::Bool(_)
-        | Value::Text(_)
-        | Value::Entity(_)
-        | Value::Record(_)
-        | Value::Blank => Ok(()),
-        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+        Value::Bool(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Blank => {
+            Ok(())
+        }
+        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Spill { .. } => {
+            Err(ErrorKind::Value)
+        }
     }
 }
 

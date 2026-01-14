@@ -19,11 +19,17 @@ fn sheet_lifecycle_by_id_rename_reorder_delete() {
     let sheet3_id = engine.sheet_id("Sheet3").expect("Sheet3 id");
 
     // Tab order should be based on the explicit tab ordering vector, not stable ids.
-    assert_eq!(engine.sheet_ids_in_order(), vec![sheet1_id, sheet2_id, sheet3_id]);
+    assert_eq!(
+        engine.sheet_ids_in_order(),
+        vec![sheet1_id, sheet2_id, sheet3_id]
+    );
 
     // Reorder by id should update tab order but keep ids stable.
     engine.reorder_sheet_by_id(sheet3_id, 0).unwrap();
-    assert_eq!(engine.sheet_ids_in_order(), vec![sheet3_id, sheet1_id, sheet2_id]);
+    assert_eq!(
+        engine.sheet_ids_in_order(),
+        vec![sheet3_id, sheet1_id, sheet2_id]
+    );
     assert_eq!(engine.sheet_id("Sheet3"), Some(sheet3_id));
 
     // Rename by id should update the name mapping for future lookups.
@@ -42,7 +48,9 @@ fn sheet_lifecycle_by_id_rename_reorder_delete() {
 
     // Invalid / tombstoned ids should be handled gracefully (no-op, workbook unchanged).
     let order_before = engine.sheet_ids_in_order();
-    engine.rename_sheet_by_id(sheet1_id, "DoesNotExist").unwrap();
+    engine
+        .rename_sheet_by_id(sheet1_id, "DoesNotExist")
+        .unwrap();
     engine.reorder_sheet_by_id(sheet1_id, 0).unwrap();
     engine.delete_sheet_by_id(sheet1_id).unwrap();
     assert_eq!(engine.sheet_ids_in_order(), order_before);
@@ -84,7 +92,9 @@ fn sheet_lifecycle_by_id_validates_names_and_indices() {
         SheetLifecycleError::InvalidName(SheetNameError::EmptyName)
     );
     assert_eq!(
-        engine.rename_sheet_by_id(sheet2_id, "Bad:Name").unwrap_err(),
+        engine
+            .rename_sheet_by_id(sheet2_id, "Bad:Name")
+            .unwrap_err(),
         SheetLifecycleError::InvalidName(SheetNameError::InvalidCharacter(':'))
     );
 

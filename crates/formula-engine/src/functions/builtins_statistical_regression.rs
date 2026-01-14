@@ -20,10 +20,9 @@ fn scalar_to_number(ctx: &dyn FunctionContext, value: Value) -> Result<Option<f6
         Value::Text(s) => Ok(Some(Value::Text(s).coerce_to_number_with_ctx(ctx)?)),
         Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
         Value::Array(arr) => Ok(Some(arr.top_left().coerce_to_number_with_ctx(ctx)?)),
-        Value::Lambda(_)
-        | Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Spill { .. } => Err(ErrorKind::Value),
+        Value::Lambda(_) | Value::Reference(_) | Value::ReferenceUnion(_) | Value::Spill { .. } => {
+            Err(ErrorKind::Value)
+        }
     }
 }
 
@@ -131,7 +130,10 @@ fn parse_y_vector(y: &MatrixArg) -> Result<(usize, usize, Vec<Option<f64>>), Err
     Ok((y.rows, y.cols, y.values.clone()))
 }
 
-fn parse_x_matrix(x: &MatrixArg, n_obs: usize) -> Result<(XOrientation, usize /*p*/ , Vec<Option<f64>>), ErrorKind> {
+fn parse_x_matrix(
+    x: &MatrixArg,
+    n_obs: usize,
+) -> Result<(XOrientation, usize /*p*/, Vec<Option<f64>>), ErrorKind> {
     if x.rows == 0 || x.cols == 0 {
         return Err(ErrorKind::Ref);
     }
@@ -167,9 +169,7 @@ fn build_filtered_xy(
     let mut out_x = Vec::new();
     let mut kept = Vec::new();
 
-    out_y
-        .try_reserve_exact(n_obs)
-        .map_err(|_| ErrorKind::Num)?;
+    out_y.try_reserve_exact(n_obs).map_err(|_| ErrorKind::Num)?;
     out_x
         .try_reserve_exact(n_obs.saturating_mul(p))
         .map_err(|_| ErrorKind::Num)?;
@@ -286,7 +286,10 @@ fn parse_known_xy(
     })
 }
 
-fn parse_const_arg(ctx: &dyn FunctionContext, expr: Option<&CompiledExpr>) -> Result<bool, ErrorKind> {
+fn parse_const_arg(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+) -> Result<bool, ErrorKind> {
     let Some(expr) = expr else {
         return Ok(true);
     };
@@ -298,7 +301,10 @@ fn parse_const_arg(ctx: &dyn FunctionContext, expr: Option<&CompiledExpr>) -> Re
     v.coerce_to_bool_with_ctx(ctx)
 }
 
-fn parse_stats_arg(ctx: &dyn FunctionContext, expr: Option<&CompiledExpr>) -> Result<bool, ErrorKind> {
+fn parse_stats_arg(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+) -> Result<bool, ErrorKind> {
     let Some(expr) = expr else {
         return Ok(false);
     };
@@ -640,13 +646,19 @@ fn trend_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let new_x_arg = args.get(2).map(|expr| ctx.eval_arg(expr));
 
-    trend_predict_with_arg(ctx, &parsed, new_x_arg, |row| {
-        let mut acc = fit.intercept;
-        for (m, x) in fit.slopes.iter().zip(row.iter()) {
-            acc += m * *x;
-        }
-        acc
-    }, fit.slopes.len())
+    trend_predict_with_arg(
+        ctx,
+        &parsed,
+        new_x_arg,
+        |row| {
+            let mut acc = fit.intercept;
+            for (m, x) in fit.slopes.iter().zip(row.iter()) {
+                acc += m * *x;
+            }
+            acc
+        },
+        fit.slopes.len(),
+    )
 }
 
 fn growth_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
@@ -674,13 +686,19 @@ fn growth_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let new_x_arg = args.get(2).map(|expr| ctx.eval_arg(expr));
 
-    trend_predict_with_arg(ctx, &parsed, new_x_arg, |row| {
-        let mut acc = fit.intercept;
-        for (m, x) in fit.bases.iter().zip(row.iter()) {
-            acc *= m.powf(*x);
-        }
-        acc
-    }, fit.bases.len())
+    trend_predict_with_arg(
+        ctx,
+        &parsed,
+        new_x_arg,
+        |row| {
+            let mut acc = fit.intercept;
+            for (m, x) in fit.bases.iter().zip(row.iter()) {
+                acc *= m.powf(*x);
+            }
+            acc
+        },
+        fit.bases.len(),
+    )
 }
 
 inventory::submit! {

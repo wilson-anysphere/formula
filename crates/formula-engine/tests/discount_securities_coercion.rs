@@ -27,10 +27,18 @@ fn discount_security_optional_basis_treats_blank_as_zero() {
         )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A2", "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100,0)")
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100,0)",
+        )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A3", "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100,)")
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100,)",
+        )
         .unwrap();
 
     engine
@@ -167,7 +175,11 @@ fn discount_security_optional_basis_treats_blank_as_zero() {
 
     engine.recalculate();
 
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "A1")), 0.03, 1e-12);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A1")),
+        0.03,
+        1e-12,
+    );
     assert_close(
         assert_number(engine.get_cell_value("Sheet1", "A1")),
         assert_number(engine.get_cell_value("Sheet1", "A2")),
@@ -179,7 +191,11 @@ fn discount_security_optional_basis_treats_blank_as_zero() {
         1e-12,
     );
 
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "B1")), 95.0, 1e-12);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "B1")),
+        95.0,
+        1e-12,
+    );
     assert_close(
         assert_number(engine.get_cell_value("Sheet1", "B1")),
         assert_number(engine.get_cell_value("Sheet1", "B2")),
@@ -191,7 +207,11 @@ fn discount_security_optional_basis_treats_blank_as_zero() {
         1e-12,
     );
 
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "C1")), 100.0, 1e-12);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "C1")),
+        100.0,
+        1e-12,
+    );
     assert_close(
         assert_number(engine.get_cell_value("Sheet1", "C1")),
         assert_number(engine.get_cell_value("Sheet1", "C2")),
@@ -258,5 +278,9 @@ fn discount_security_date_coercion_floors_numeric_serials() {
         .unwrap();
 
     engine.recalculate();
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "A1")), 0.03, 1e-12);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A1")),
+        0.03,
+        1e-12,
+    );
 }

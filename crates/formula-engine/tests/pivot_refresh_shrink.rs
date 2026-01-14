@@ -72,7 +72,10 @@ fn pivot_shrinking_clears_stale_cells() {
 
     engine.refresh_pivot_table(pivot_id).unwrap();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Text("West".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D3"),
+        Value::Text("West".to_string())
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(200.0));
 
     // Collapse West into East -> pivot output shrinks (removes the West row).
@@ -154,7 +157,10 @@ fn pivot_refresh_failure_does_not_clear_previous_output() {
     });
 
     engine.refresh_pivot_table(pivot_id).unwrap();
-    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Text("West".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D3"),
+        Value::Text("West".to_string())
+    );
 
     // Move the pivot destination anchor beyond the engine's supported row bounds so refresh fails.
     {
@@ -170,7 +176,10 @@ fn pivot_refresh_failure_does_not_clear_previous_output() {
     ));
 
     // The previous pivot output should remain intact because the refresh never applied.
-    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Text("West".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D3"),
+        Value::Text("West".to_string())
+    );
 }
 
 #[test]

@@ -286,4 +286,3 @@ pub fn chisq_test(
     }
     Ok(p)
 }
-

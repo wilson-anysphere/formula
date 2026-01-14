@@ -75,4 +75,3 @@ pub fn atan2(x_num: f64, y_num: f64) -> ExcelResult<f64> {
     }
     checked_out(out)
 }
-

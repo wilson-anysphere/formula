@@ -67,10 +67,15 @@ fn bytecode_reference_intersection_binds_tighter_than_union() {
     match &expr {
         Expr::Binary { op, left, right } => {
             assert_eq!(*op, BinaryOp::Union);
-            assert!(matches!(left.as_ref(), Expr::Binary { op: BinaryOp::Intersect, .. }));
+            assert!(matches!(
+                left.as_ref(),
+                Expr::Binary {
+                    op: BinaryOp::Intersect,
+                    ..
+                }
+            ));
             assert!(matches!(right.as_ref(), Expr::RangeRef(_)));
         }
         other => panic!("expected union binary expression, got {other:?}"),
     }
 }
-

@@ -18,8 +18,14 @@ fn countif_numeric_operator_criteria() {
     engine.set_cell_value("Sheet1", "A2", 6.0).unwrap();
     engine.set_cell_value("Sheet1", "A3", 10.0).unwrap();
 
-    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A3, ">5")"#), Value::Number(2.0));
-    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A3, "<=3")"#), Value::Number(1.0));
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A3, ">5")"#),
+        Value::Number(2.0)
+    );
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A3, "<=3")"#),
+        Value::Number(1.0)
+    );
 }
 
 #[test]
@@ -32,9 +38,18 @@ fn countif_text_wildcards() {
     engine.set_cell_value("Sheet1", "A5", "ab").unwrap();
     engine.set_cell_value("Sheet1", "A6", "a").unwrap();
 
-    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A6, "ap*")"#), Value::Number(2.0));
-    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A6, "~*")"#), Value::Number(1.0));
-    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A6, "??")"#), Value::Number(1.0));
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A6, "ap*")"#),
+        Value::Number(2.0)
+    );
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A6, "~*")"#),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A6, "??")"#),
+        Value::Number(1.0)
+    );
 }
 
 #[test]
@@ -44,9 +59,18 @@ fn countif_blank_criteria() {
     engine.set_cell_value("Sheet1", "A2", "").unwrap();
     // A3 left unset (blank).
 
-    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A3, "")"#), Value::Number(2.0));
-    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A3, "=")"#), Value::Number(2.0));
-    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A3, "<>")"#), Value::Number(1.0));
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A3, "")"#),
+        Value::Number(2.0)
+    );
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A3, "=")"#),
+        Value::Number(2.0)
+    );
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A3, "<>")"#),
+        Value::Number(1.0)
+    );
 }
 
 #[test]
@@ -107,7 +131,10 @@ fn countif_error_criteria_counts_errors_and_criteria_errors_propagate() {
     );
 
     // Candidate cell errors must not propagate.
-    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A3, ">0")"#), Value::Number(1.0));
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A3, ">0")"#),
+        Value::Number(1.0)
+    );
 }
 
 #[test]
@@ -159,22 +186,17 @@ fn countif_text_wildcards_match_entity_and_record_display_strings() {
     engine.set_bytecode_enabled(false);
 
     engine
-        .set_cell_value(
-            "Sheet1",
-            "A1",
-            Value::Entity(EntityValue::new("Apple")),
-        )
+        .set_cell_value("Sheet1", "A1", Value::Entity(EntityValue::new("Apple")))
         .unwrap();
     engine
-        .set_cell_value(
-            "Sheet1",
-            "A2",
-            Value::Record(RecordValue::new("Apple")),
-        )
+        .set_cell_value("Sheet1", "A2", Value::Record(RecordValue::new("Apple")))
         .unwrap();
     engine.set_cell_value("Sheet1", "A3", "Banana").unwrap();
 
-    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A3, "*pp*")"#), Value::Number(2.0));
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A3, "*pp*")"#),
+        Value::Number(2.0)
+    );
 }
 
 #[test]
@@ -188,18 +210,10 @@ fn countif_accepts_entity_record_criteria_argument_as_text() {
     engine.set_cell_value("Sheet1", "A3", "Banana").unwrap();
 
     engine
-        .set_cell_value(
-            "Sheet1",
-            "B1",
-            Value::Entity(EntityValue::new("Apple")),
-        )
+        .set_cell_value("Sheet1", "B1", Value::Entity(EntityValue::new("Apple")))
         .unwrap();
     engine
-        .set_cell_value(
-            "Sheet1",
-            "C1",
-            Value::Record(RecordValue::new("Apple")),
-        )
+        .set_cell_value("Sheet1", "C1", Value::Record(RecordValue::new("Apple")))
         .unwrap();
 
     assert_eq!(eval(&mut engine, "=COUNTIF(A1:A3, B1)"), Value::Number(2.0));
@@ -216,8 +230,14 @@ fn countif_boolean_criteria() {
     engine.set_cell_value("Sheet1", "A5", "TRUE").unwrap();
     // A6 left unset (blank).
 
-    assert_eq!(eval(&mut engine, "=COUNTIF(A1:A6, TRUE)"), Value::Number(2.0));
-    assert_eq!(eval(&mut engine, "=COUNTIF(A1:A6, FALSE)"), Value::Number(3.0));
+    assert_eq!(
+        eval(&mut engine, "=COUNTIF(A1:A6, TRUE)"),
+        Value::Number(2.0)
+    );
+    assert_eq!(
+        eval(&mut engine, "=COUNTIF(A1:A6, FALSE)"),
+        Value::Number(3.0)
+    );
 }
 
 #[test]
@@ -424,7 +444,10 @@ fn countifs_sparse_driver_iteration_skips_implicit_blanks() {
     engine.set_cell_value("Sheet1", "B2", 1.0).unwrap();
 
     assert_eq!(
-        eval(&mut engine, r#"=COUNTIFS(A1:A1048576, "", B1:B1048576, ">0")"#),
+        eval(
+            &mut engine,
+            r#"=COUNTIFS(A1:A1048576, "", B1:B1048576, ">0")"#
+        ),
         Value::Number(1.0)
     );
 }

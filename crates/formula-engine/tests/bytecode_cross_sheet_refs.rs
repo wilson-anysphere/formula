@@ -33,9 +33,7 @@ fn bytecode_cross_sheet_refs_compile_and_eval() {
         .unwrap();
 
     // Cross-sheet spill range operator (Sheet2 spills an array; Sheet1 references it).
-    engine
-        .set_cell_formula("Sheet2", "A5", "={1;2;3}")
-        .unwrap();
+    engine.set_cell_formula("Sheet2", "A5", "={1;2;3}").unwrap();
     engine
         .set_cell_formula("Sheet1", "B1", "=Sheet2!A5#")
         .unwrap();
@@ -43,7 +41,10 @@ fn bytecode_cross_sheet_refs_compile_and_eval() {
     // Ensure the formulas compiled to bytecode (and did not fall back to AST).
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 9);
-    assert_eq!(stats.compiled, 9, "expected all formulas to compile to bytecode");
+    assert_eq!(
+        stats.compiled, 9,
+        "expected all formulas to compile to bytecode"
+    );
     assert_eq!(stats.fallback, 0);
     assert!(
         engine.bytecode_compile_report(usize::MAX).is_empty(),

@@ -42,7 +42,10 @@ fn lambda_invocation_syntax_and_named_fallback() {
 #[test]
 fn top_level_lambda_returns_calc_error() {
     let mut engine = Engine::new();
-    assert_eq!(eval(&mut engine, "=LAMBDA(x,x)"), Value::Error(ErrorKind::Calc));
+    assert_eq!(
+        eval(&mut engine, "=LAMBDA(x,x)"),
+        Value::Error(ErrorKind::Calc)
+    );
 }
 
 #[test]

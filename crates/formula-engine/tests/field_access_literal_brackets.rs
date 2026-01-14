@@ -17,4 +17,3 @@ fn field_access_supports_literal_bracketed_field_names() {
 
     assert_eq!(sheet.eval(r#"=A1.["[Price]"]"#), Value::Number(12.5));
 }
-

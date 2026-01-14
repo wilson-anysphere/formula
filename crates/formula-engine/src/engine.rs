@@ -29,12 +29,12 @@ use crate::value::{Array, ErrorKind, Value};
 use formula_format::{
     DateSystem as FmtDateSystem, FormatOptions as FmtFormatOptions, Value as FmtValue,
 };
+use formula_model::table::TableColumn;
 use formula_model::{
     rewrite_table_names_in_formula, validate_table_name, CellId, CellRef, ColProperties,
-    HorizontalAlignment, Range, RowProperties, Style, StyleTable, Table, TableError, EXCEL_MAX_COLS,
-    EXCEL_MAX_ROWS,
+    HorizontalAlignment, Range, RowProperties, Style, StyleTable, Table, TableError,
+    EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
-use formula_model::table::TableColumn;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 use std::cell::RefCell;
@@ -425,7 +425,8 @@ impl Workbook {
         // key).
         self.sheet_display_name_to_id.insert(key, id);
         self.sheet_order.push(id);
-        self.sheet_tab_index_by_id.push(self.sheet_order.len().saturating_sub(1));
+        self.sheet_tab_index_by_id
+            .push(self.sheet_order.len().saturating_sub(1));
         id
     }
     fn rebuild_sheet_tab_index_by_id(&mut self) {
@@ -979,9 +980,9 @@ impl Engine {
                     crate::eval::AddressParseError::RowOutOfRange,
                 ));
             }
-            sheet_dims_changed =
-                self.workbook
-                    .grow_sheet_dimensions(sheet_id, CellAddr { row: max_row, col });
+            sheet_dims_changed = self
+                .workbook
+                .grow_sheet_dimensions(sheet_id, CellAddr { row: max_row, col });
         } else if self
             .workbook
             .grow_sheet_dimensions(sheet_id, CellAddr { row: 0, col })
@@ -1258,17 +1259,13 @@ impl Engine {
                 for column in &mut table.columns {
                     if let Some(formula) = column.formula.as_mut() {
                         let rewritten = formula_model::rewrite_sheet_names_in_formula(
-                            formula,
-                            &old_name,
-                            new_name,
+                            formula, &old_name, new_name,
                         );
                         *formula = rewritten;
                     }
                     if let Some(formula) = column.totals_formula.as_mut() {
                         let rewritten = formula_model::rewrite_sheet_names_in_formula(
-                            formula,
-                            &old_name,
-                            new_name,
+                            formula, &old_name, new_name,
                         );
                         *formula = rewritten;
                     }
@@ -1280,9 +1277,7 @@ impl Engine {
                     NameDefinition::Constant(_) => {}
                     NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
                         let rewritten = formula_model::rewrite_sheet_names_in_formula(
-                            formula,
-                            &old_name,
-                            new_name,
+                            formula, &old_name, new_name,
                         );
                         *formula = rewritten;
                     }
@@ -1687,7 +1682,11 @@ impl Engine {
             self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
             self.mark_all_compiled_cells_dirty();
         }
-        if let Some(max_row) = runs.iter().map(|r| r.end_row_exclusive.saturating_sub(1)).max() {
+        if let Some(max_row) = runs
+            .iter()
+            .map(|r| r.end_row_exclusive.saturating_sub(1))
+            .max()
+        {
             if self.workbook.grow_sheet_dimensions(
                 sheet_id,
                 CellAddr {
@@ -1784,8 +1783,10 @@ impl Engine {
         // Pivot definitions store sheet names as raw strings. If we leave stale references behind,
         // refreshing a pivot can silently resurrect the old display name via `ensure_sheet`.
         for pivot in self.workbook.pivots.values_mut() {
-            if formula_model::sheet_name_eq_case_insensitive(&pivot.destination.sheet, &old_display_name)
-            {
+            if formula_model::sheet_name_eq_case_insensitive(
+                &pivot.destination.sheet,
+                &old_display_name,
+            ) {
                 pivot.destination.sheet = display_name.to_string();
             }
             if let PivotSource::Range { sheet, .. } = &mut pivot.source {
@@ -1870,7 +1871,11 @@ impl Engine {
             .workbook
             .sheet_ids_in_order()
             .iter()
-            .filter_map(|&id| self.workbook.sheet_key_name(id).map(|name| name.to_string()))
+            .filter_map(|&id| {
+                self.workbook
+                    .sheet_key_name(id)
+                    .map(|name| name.to_string())
+            })
             .collect();
         let sheet_order_display_names: Vec<String> = self
             .workbook
@@ -1882,45 +1887,46 @@ impl Engine {
         // or by their stable sheet key (backward compatibility / host-provided identifiers). When
         // deleting a sheet, we must rewrite both forms so references cannot resurrect if a sheet
         // with the same name/key is later re-created.
-        let rewrite_deleted_sheet_formula = |formula: &str, origin: crate::CellAddr| -> Option<String> {
-            let (key_rewritten, key_changed) = rewrite_formula_for_sheet_delete(
-                formula,
-                origin,
-                &deleted_sheet_key,
-                &sheet_order_keys,
-            );
-            let (display_rewritten, display_changed) = rewrite_formula_for_sheet_delete(
-                formula,
-                origin,
-                &deleted_sheet_display_name,
-                &sheet_order_display_names,
-            );
+        let rewrite_deleted_sheet_formula =
+            |formula: &str, origin: crate::CellAddr| -> Option<String> {
+                let (key_rewritten, key_changed) = rewrite_formula_for_sheet_delete(
+                    formula,
+                    origin,
+                    &deleted_sheet_key,
+                    &sheet_order_keys,
+                );
+                let (display_rewritten, display_changed) = rewrite_formula_for_sheet_delete(
+                    formula,
+                    origin,
+                    &deleted_sheet_display_name,
+                    &sheet_order_display_names,
+                );
 
-            match (key_changed, display_changed) {
-                (false, false) => None,
-                (true, false) => Some(key_rewritten),
-                (false, true) => Some(display_rewritten),
-                (true, true) => {
-                    // Prefer the rewrite that preserves the most structure (i.e. doesn't overly
-                    // invalidate 3D spans due to using the wrong naming scheme).
-                    let key_ref_count = key_rewritten.matches("#REF!").count();
-                    let display_ref_count = display_rewritten.matches("#REF!").count();
-                    if display_ref_count < key_ref_count {
-                        Some(display_rewritten)
-                    } else if key_ref_count < display_ref_count {
-                        Some(key_rewritten)
-                    } else {
-                        // Tie-breaker: prefer display-name rewrites to match Excel's serialized
-                        // formula text, but avoid allocating twice when the strings are identical.
-                        if key_rewritten == display_rewritten {
+                match (key_changed, display_changed) {
+                    (false, false) => None,
+                    (true, false) => Some(key_rewritten),
+                    (false, true) => Some(display_rewritten),
+                    (true, true) => {
+                        // Prefer the rewrite that preserves the most structure (i.e. doesn't overly
+                        // invalidate 3D spans due to using the wrong naming scheme).
+                        let key_ref_count = key_rewritten.matches("#REF!").count();
+                        let display_ref_count = display_rewritten.matches("#REF!").count();
+                        if display_ref_count < key_ref_count {
+                            Some(display_rewritten)
+                        } else if key_ref_count < display_ref_count {
                             Some(key_rewritten)
                         } else {
-                            Some(display_rewritten)
+                            // Tie-breaker: prefer display-name rewrites to match Excel's serialized
+                            // formula text, but avoid allocating twice when the strings are identical.
+                            if key_rewritten == display_rewritten {
+                                Some(key_rewritten)
+                            } else {
+                                Some(display_rewritten)
+                            }
                         }
                     }
                 }
-            }
-        };
+            };
         let rewrite_deleted_sheet_table_formula = |formula: &str| -> Option<String> {
             let key_rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
                 formula,
@@ -1957,7 +1963,9 @@ impl Engine {
         };
 
         // Mark the sheet as deleted while keeping its id stable.
-        self.workbook.sheet_key_to_id.remove(&deleted_sheet_key_norm);
+        self.workbook
+            .sheet_key_to_id
+            .remove(&deleted_sheet_key_norm);
         self.workbook
             .sheet_display_name_to_id
             .remove(&deleted_sheet_display_key_norm);
@@ -1967,7 +1975,9 @@ impl Engine {
         if let Some(name) = self.workbook.sheet_display_names.get_mut(deleted_sheet_id) {
             *name = None;
         }
-        self.workbook.sheet_order.retain(|&id| id != deleted_sheet_id);
+        self.workbook
+            .sheet_order
+            .retain(|&id| id != deleted_sheet_id);
         self.workbook.rebuild_sheet_tab_index_by_id();
 
         // Drop any sheet-scoped state for the deleted worksheet.
@@ -2090,11 +2100,10 @@ impl Engine {
             .or_else(|| self.workbook.sheet_name(id))
             .expect("sheet exists")
             .to_string();
-        self.delete_sheet(&name)
-            .map_err(|e| match e {
-                EngineError::CannotDeleteLastSheet => SheetLifecycleError::CannotDeleteLastSheet,
-                other => SheetLifecycleError::Internal(other.to_string()),
-            })
+        self.delete_sheet(&name).map_err(|e| match e {
+            EngineError::CannotDeleteLastSheet => SheetLifecycleError::CannotDeleteLastSheet,
+            other => SheetLifecycleError::Internal(other.to_string()),
+        })
     }
     /// Store a pivot table definition in the engine and return its allocated id.
     ///
@@ -2158,9 +2167,17 @@ impl Engine {
             let Some(pivot) = self.workbook.pivots.get(id) else {
                 return (usize::MAX, u32::MAX, u32::MAX, *id);
             };
-            let sheet_id = self.workbook.sheet_id(&pivot.destination.sheet).unwrap_or(usize::MAX);
+            let sheet_id = self
+                .workbook
+                .sheet_id(&pivot.destination.sheet)
+                .unwrap_or(usize::MAX);
             let tab = tab_index.get(sheet_id).copied().unwrap_or(usize::MAX);
-            (tab, pivot.destination.cell.row, pivot.destination.cell.col, *id)
+            (
+                tab,
+                pivot.destination.cell.row,
+                pivot.destination.cell.col,
+                *id,
+            )
         });
 
         let previous = self.calc_settings.clone();
@@ -2361,7 +2378,11 @@ impl Engine {
     ///
     /// When the origin changes, any formulas that depend on `INFO("origin")` are marked dirty so
     /// the next recalculation observes the updated view state.
-    pub fn set_sheet_origin(&mut self, sheet: &str, origin: Option<&str>) -> Result<(), EngineError> {
+    pub fn set_sheet_origin(
+        &mut self,
+        sheet: &str,
+        origin: Option<&str>,
+    ) -> Result<(), EngineError> {
         let sheet_id = self.workbook.ensure_sheet(sheet);
 
         let origin = origin.map(str::trim).filter(|s| !s.is_empty());
@@ -2401,7 +2422,10 @@ impl Engine {
                 .origin_dependents
                 .iter()
                 .copied()
-                .map(|addr| CellKey { sheet: sheet_id, addr })
+                .map(|addr| CellKey {
+                    sheet: sheet_id,
+                    addr,
+                })
                 .collect()
         };
 
@@ -2482,13 +2506,8 @@ impl Engine {
         let style_id = style_id.filter(|id| *id != 0);
         let dims_changed = style_id
             .map(|_| {
-                self.workbook.grow_sheet_dimensions(
-                    sheet_id,
-                    CellAddr {
-                        row: row0,
-                        col: 0,
-                    },
-                )
+                self.workbook
+                    .grow_sheet_dimensions(sheet_id, CellAddr { row: row0, col: 0 })
             })
             .unwrap_or(false);
 
@@ -2512,11 +2531,7 @@ impl Engine {
         if prev != style_id {
             match style_id {
                 Some(id) => {
-                    sheet_state
-                        .row_properties
-                        .entry(row0)
-                        .or_default()
-                        .style_id = Some(id);
+                    sheet_state.row_properties.entry(row0).or_default().style_id = Some(id);
                 }
                 None => {
                     if let Some(props) = sheet_state.row_properties.get_mut(&row0) {
@@ -2554,13 +2569,8 @@ impl Engine {
         let style_id = style_id.filter(|id| *id != 0);
         let dims_changed = style_id
             .map(|_| {
-                self.workbook.grow_sheet_dimensions(
-                    sheet_id,
-                    CellAddr {
-                        row: 0,
-                        col: col0,
-                    },
-                )
+                self.workbook
+                    .grow_sheet_dimensions(sheet_id, CellAddr { row: 0, col: col0 })
             })
             .unwrap_or(false);
 
@@ -2584,11 +2594,7 @@ impl Engine {
         if prev != style_id {
             match style_id {
                 Some(id) => {
-                    sheet_state
-                        .col_properties
-                        .entry(col0)
-                        .or_default()
-                        .style_id = Some(id);
+                    sheet_state.col_properties.entry(col0).or_default().style_id = Some(id);
                 }
                 None => {
                     if let Some(props) = sheet_state.col_properties.get_mut(&col0) {
@@ -3947,14 +3953,13 @@ impl Engine {
 
         for (key, formula, ast) in formulas {
             let cell_id = cell_id_from_key(key);
-            let (names, volatile, thread_safe, dynamic_deps, origin_deps) =
-                analyze_expr_flags(
-                    &ast,
-                    key,
-                    &tables_by_sheet,
-                    &self.workbook,
-                    self.external_refs_volatile,
-                );
+            let (names, volatile, thread_safe, dynamic_deps, origin_deps) = analyze_expr_flags(
+                &ast,
+                key,
+                &tables_by_sheet,
+                &self.workbook,
+                self.external_refs_volatile,
+            );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) = analyze_external_dependencies(
                 &ast,
@@ -4251,14 +4256,13 @@ impl Engine {
                 &mut sheet_dims,
             );
 
-            let (names, volatile, thread_safe, dynamic_deps, origin_deps) =
-                analyze_expr_flags(
-                    &compiled_ast,
-                    key,
-                    &tables_by_sheet,
-                    &self.workbook,
-                    self.external_refs_volatile,
-                );
+            let (names, volatile, thread_safe, dynamic_deps, origin_deps) = analyze_expr_flags(
+                &compiled_ast,
+                key,
+                &tables_by_sheet,
+                &self.workbook,
+                self.external_refs_volatile,
+            );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) = analyze_external_dependencies(
                 &compiled_ast,
@@ -4558,13 +4562,12 @@ impl Engine {
             .iter()
             .map(|s| s.tables.clone())
             .collect();
-        let (names, volatile, thread_safe, dynamic_deps, origin_deps) =
-            analyze_expr_flags(
-                &compiled,
-                key,
-                &tables_by_sheet,
-                &self.workbook,
-                self.external_refs_volatile,
+        let (names, volatile, thread_safe, dynamic_deps, origin_deps) = analyze_expr_flags(
+            &compiled,
+            key,
+            &tables_by_sheet,
+            &self.workbook,
+            self.external_refs_volatile,
         );
         self.set_cell_name_refs(key, names);
         let (external_sheets, external_workbooks) = analyze_external_dependencies(
@@ -5737,15 +5740,16 @@ impl Engine {
                     };
                     let value = match compiled {
                         CompiledFormula::Ast(expr) => {
-                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
-                                &snapshot,
-                                ctx,
-                                recalc_ctx,
-                                date_system,
-                                value_locale,
-                                locale_config.clone(),
-                            )
-                            .with_text_codepage(text_codepage);
+                            let evaluator =
+                                crate::eval::Evaluator::new_with_date_system_and_locales(
+                                    &snapshot,
+                                    ctx,
+                                    recalc_ctx,
+                                    date_system,
+                                    value_locale,
+                                    locale_config.clone(),
+                                )
+                                .with_text_codepage(text_codepage);
                             evaluator.eval_formula(expr)
                         }
                         CompiledFormula::Bytecode(bc) => {
@@ -6018,7 +6022,11 @@ impl Engine {
                 let mut dynamic_external_precedents: HashSet<crate::functions::Reference> =
                     HashSet::new();
                 for reference in traced_precedents {
-                    let crate::functions::Reference { sheet_id, start, end } = reference;
+                    let crate::functions::Reference {
+                        sheet_id,
+                        start,
+                        end,
+                    } = reference;
                     match sheet_id {
                         crate::functions::SheetId::Local(sheet_id) => {
                             let sheet_id = sheet_id_for_graph(sheet_id);
@@ -6862,7 +6870,12 @@ impl Engine {
             }
             bytecode::SheetId::External(_) => (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32),
         };
-        bytecode_expr_within_grid_limits(&expr, origin, (sheet_rows, sheet_cols), &mut sheet_bounds)?;
+        bytecode_expr_within_grid_limits(
+            &expr,
+            origin,
+            (sheet_rows, sheet_cols),
+            &mut sheet_bounds,
+        )?;
         Ok(self.bytecode_cache.get_or_compile(&expr))
     }
 
@@ -7973,7 +7986,8 @@ impl Engine {
             }
         }
 
-        self.cell_dynamic_external_precedents.insert(cell, precedents);
+        self.cell_dynamic_external_precedents
+            .insert(cell, precedents);
 
         if !sheet_keys.is_empty() {
             self.cell_dynamic_external_sheet_refs
@@ -8023,13 +8037,12 @@ impl Engine {
             let cell_id = cell_id_from_key(key);
             self.clear_cell_dynamic_external_precedents(key);
 
-            let (names, volatile, thread_safe, dynamic_deps, origin_deps) =
-                analyze_expr_flags(
-                    &ast,
-                    key,
-                    &tables_by_sheet,
-                    &self.workbook,
-                    self.external_refs_volatile,
+            let (names, volatile, thread_safe, dynamic_deps, origin_deps) = analyze_expr_flags(
+                &ast,
+                key,
+                &tables_by_sheet,
+                &self.workbook,
+                self.external_refs_volatile,
             );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) = analyze_external_dependencies(
@@ -8679,9 +8692,13 @@ impl PivotRefreshContext for Engine {
             max_col = max_col.max(cell.col);
         }
 
-        let sheet_dims_changed = self
-            .workbook
-            .grow_sheet_dimensions(sheet_id, CellAddr { row: max_row, col: max_col });
+        let sheet_dims_changed = self.workbook.grow_sheet_dimensions(
+            sheet_id,
+            CellAddr {
+                row: max_row,
+                col: max_col,
+            },
+        );
         if sheet_dims_changed {
             self.sheet_dims_generation = self.sheet_dims_generation.wrapping_add(1);
             self.mark_all_compiled_cells_dirty();
@@ -8693,7 +8710,10 @@ impl PivotRefreshContext for Engine {
                 row: cell.row,
                 col: cell.col,
             };
-            let key = CellKey { sheet: sheet_id, addr };
+            let key = CellKey {
+                sheet: sheet_id,
+                addr,
+            };
 
             let existing_style_id = self
                 .workbook
@@ -10725,7 +10745,13 @@ impl Snapshot {
             .sheets
             .iter()
             .enumerate()
-            .map(|(sheet_id, s)| if workbook.sheet_exists(sheet_id) { s.origin } else { None })
+            .map(|(sheet_id, s)| {
+                if workbook.sheet_exists(sheet_id) {
+                    s.origin
+                } else {
+                    None
+                }
+            })
             .collect();
         let mut values = HashMap::new();
         let mut phonetics = HashMap::new();
@@ -11179,7 +11205,13 @@ impl crate::eval::ValueResolver for Snapshot {
         let run_style_id = self.format_run_style_id(sheet_id, addr);
         let cell_style_id = self.cell_style_id(sheet_id, addr);
 
-        for style_id in [sheet_style_id, col_style_id, row_style_id, run_style_id, cell_style_id] {
+        for style_id in [
+            sheet_style_id,
+            col_style_id,
+            row_style_id,
+            run_style_id,
+            cell_style_id,
+        ] {
             if style_id == 0 {
                 continue;
             }
@@ -13070,11 +13102,7 @@ fn bytecode_expr_within_grid_limits_inner(
         bytecode::Expr::Literal(_) => Ok(()),
         bytecode::Expr::CellRef(r) => {
             let coord = r.resolve(origin);
-            if coord.row >= 0
-                && coord.col >= 0
-                && coord.row < max_rows
-                && coord.col < max_cols
-            {
+            if coord.row >= 0 && coord.col >= 0 && coord.row < max_rows && coord.col < max_cols {
                 Ok(())
             } else {
                 Err(BytecodeCompileReason::ExceedsGridLimits)
@@ -13115,15 +13143,13 @@ fn bytecode_expr_within_grid_limits_inner(
             }
             Ok(())
         }
-        bytecode::Expr::SpillRange(inner) => {
-            bytecode_expr_within_grid_limits_inner(
-                inner,
-                origin,
-                origin_sheet_bounds,
-                sheet_bounds,
-                max_range_cells,
-            )
-        }
+        bytecode::Expr::SpillRange(inner) => bytecode_expr_within_grid_limits_inner(
+            inner,
+            origin,
+            origin_sheet_bounds,
+            sheet_bounds,
+            max_range_cells,
+        ),
         bytecode::Expr::NameRef(_) => Ok(()),
         bytecode::Expr::Unary { op, expr } => match op {
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
@@ -13241,10 +13267,13 @@ fn bytecode_expr_within_grid_limits_inner(
                                                 || resolved.row_end >= max_rows
                                                 || resolved.col_end >= max_cols
                                             {
-                                                return Err(BytecodeCompileReason::ExceedsGridLimits);
+                                                return Err(
+                                                    BytecodeCompileReason::ExceedsGridLimits,
+                                                );
                                             }
 
-                                            let (sheet_rows, sheet_cols) = sheet_bounds(&only.sheet);
+                                            let (sheet_rows, sheet_cols) =
+                                                sheet_bounds(&only.sheet);
                                             // If the range is out-of-bounds for the referenced
                                             // sheet, evaluation returns `#REF!` without attempting
                                             // to allocate. Do not reject these formulas due to
@@ -13258,11 +13287,9 @@ fn bytecode_expr_within_grid_limits_inner(
                                             }
 
                                             let spans_all_cols = resolved.col_start == 0
-                                                && resolved.col_end
-                                                    == sheet_cols.saturating_sub(1);
+                                                && resolved.col_end == sheet_cols.saturating_sub(1);
                                             let spans_all_rows = resolved.row_start == 0
-                                                && resolved.row_end
-                                                    == sheet_rows.saturating_sub(1);
+                                                && resolved.row_end == sheet_rows.saturating_sub(1);
 
                                             let cells = if spans_all_cols || spans_all_rows {
                                                 match func {
@@ -13275,7 +13302,9 @@ fn bytecode_expr_within_grid_limits_inner(
                                                     * (i64::from(resolved.cols()))
                                             };
                                             if cells > BYTECODE_MAX_RANGE_CELLS {
-                                                return Err(BytecodeCompileReason::ExceedsRangeCellLimit);
+                                                return Err(
+                                                    BytecodeCompileReason::ExceedsRangeCellLimit,
+                                                );
                                             }
                                             continue;
                                         }
@@ -13291,7 +13320,9 @@ fn bytecode_expr_within_grid_limits_inner(
                                                     || resolved.row_end >= max_rows
                                                     || resolved.col_end >= max_cols
                                                 {
-                                                    return Err(BytecodeCompileReason::ExceedsGridLimits);
+                                                    return Err(
+                                                        BytecodeCompileReason::ExceedsGridLimits,
+                                                    );
                                                 }
                                             }
                                             continue;
@@ -14773,10 +14804,10 @@ fn walk_expr_flags(
                             }
                         }
                     }
-                     "LET" => {
-                         if args.len() < 3 || args.len() % 2 == 0 {
-                             return;
-                         }
+                    "LET" => {
+                        if args.len() < 3 || args.len() % 2 == 0 {
+                            return;
+                        }
 
                         lexical_scopes.push(HashSet::new());
                         for pair in args[..args.len() - 1].chunks_exact(2) {
@@ -15487,7 +15518,8 @@ fn walk_external_expr(
                     let Some(addr) = r.addr.resolve(current_cell.addr) else {
                         return;
                     };
-                    if let Some(expanded) = expand_external_sheet_span_key(key, external_value_provider)
+                    if let Some(expanded) =
+                        expand_external_sheet_span_key(key, external_value_provider)
                     {
                         for sheet_key in expanded {
                             precedents.insert(PrecedentNode::ExternalCell {
@@ -15522,7 +15554,8 @@ fn walk_external_expr(
                     };
                     let start = clamp_addr_to_excel_dimensions(start);
                     let end = clamp_addr_to_excel_dimensions(end);
-                    if let Some(expanded) = expand_external_sheet_span_key(key, external_value_provider)
+                    if let Some(expanded) =
+                        expand_external_sheet_span_key(key, external_value_provider)
                     {
                         for sheet_key in expanded {
                             precedents.insert(PrecedentNode::ExternalRange {
@@ -16203,25 +16236,31 @@ fn walk_calc_expr(
                                 // cell in `reference` (Excel behavior). Represent direct
                                 // references as single-cell precedents to avoid range-node cycles
                                 // when the formula cell is inside the referenced range.
-                                let insert_cell = |precedents: &mut HashSet<Precedent>,
-                                                   sheet_id: SheetId,
-                                                   addr: CellAddr| {
-                                    if sheet_id == current_cell.sheet && addr == current_cell.addr {
-                                        return;
-                                    }
-                                    precedents.insert(Precedent::Cell(CellId::new(
-                                        sheet_id_for_graph(sheet_id),
-                                        addr.row,
-                                        addr.col,
-                                    )));
-                                };
+                                let insert_cell =
+                                    |precedents: &mut HashSet<Precedent>,
+                                     sheet_id: SheetId,
+                                     addr: CellAddr| {
+                                        if sheet_id == current_cell.sheet
+                                            && addr == current_cell.addr
+                                        {
+                                            return;
+                                        }
+                                        precedents.insert(Precedent::Cell(CellId::new(
+                                            sheet_id_for_graph(sheet_id),
+                                            addr.row,
+                                            addr.col,
+                                        )));
+                                    };
 
                                 match &args[1] {
                                     Expr::CellRef(r) => {
-                                        if let Some(sheets) =
-                                            resolve_sheet_span(&r.sheet, current_cell.sheet, workbook)
-                                        {
-                                            let Some(addr) = r.addr.resolve(current_cell.addr) else {
+                                        if let Some(sheets) = resolve_sheet_span(
+                                            &r.sheet,
+                                            current_cell.sheet,
+                                            workbook,
+                                        ) {
+                                            let Some(addr) = r.addr.resolve(current_cell.addr)
+                                            else {
                                                 return;
                                             };
                                             for sheet_id in sheets {
@@ -16233,7 +16272,8 @@ fn walk_calc_expr(
                                         if let Some(sheets) =
                                             resolve_sheet_span(sheet, current_cell.sheet, workbook)
                                         {
-                                            let Some(start) = start.resolve(current_cell.addr) else {
+                                            let Some(start) = start.resolve(current_cell.addr)
+                                            else {
                                                 return;
                                             };
                                             let Some(end) = end.resolve(current_cell.addr) else {
@@ -16252,12 +16292,14 @@ fn walk_calc_expr(
                                         if matches!(&sref_expr.sheet, SheetReference::External(_)) {
                                             return;
                                         }
-                                        if let Ok(ranges) = crate::structured_refs::resolve_structured_ref(
-                                            tables_by_sheet,
-                                            current_cell.sheet,
-                                            current_cell.addr,
-                                            &sref_expr.sref,
-                                        ) {
+                                        if let Ok(ranges) =
+                                            crate::structured_refs::resolve_structured_ref(
+                                                tables_by_sheet,
+                                                current_cell.sheet,
+                                                current_cell.addr,
+                                                &sref_expr.sref,
+                                            )
+                                        {
                                             for (sheet_id, start, end) in ranges {
                                                 let addr = CellAddr {
                                                     row: start.row.min(end.row),
@@ -16268,7 +16310,9 @@ fn walk_calc_expr(
                                         }
                                     }
                                     Expr::SpillRange(inner) => {
-                                        if let Some(target) = spill_range_target_cell(inner, current_cell) {
+                                        if let Some(target) =
+                                            spill_range_target_cell(inner, current_cell)
+                                        {
                                             insert_cell(precedents, target.sheet, target.addr);
                                         } else {
                                             walk_calc_expr_reference_context(
@@ -16285,10 +16329,13 @@ fn walk_calc_expr(
                                     }
                                     Expr::ImplicitIntersection(inner) => match inner.as_ref() {
                                         Expr::CellRef(r) => {
-                                            if let Some(sheets) =
-                                                resolve_sheet_span(&r.sheet, current_cell.sheet, workbook)
-                                            {
-                                                let Some(addr) = r.addr.resolve(current_cell.addr) else {
+                                            if let Some(sheets) = resolve_sheet_span(
+                                                &r.sheet,
+                                                current_cell.sheet,
+                                                workbook,
+                                            ) {
+                                                let Some(addr) = r.addr.resolve(current_cell.addr)
+                                                else {
                                                     return;
                                                 };
                                                 for sheet_id in sheets {
@@ -16297,7 +16344,8 @@ fn walk_calc_expr(
                                             }
                                         }
                                         Expr::RangeRef(RangeRef { sheet, start, end }) => {
-                                            let Some(start) = start.resolve(current_cell.addr) else {
+                                            let Some(start) = start.resolve(current_cell.addr)
+                                            else {
                                                 return;
                                             };
                                             let Some(end) = end.resolve(current_cell.addr) else {
@@ -16316,19 +16364,17 @@ fn walk_calc_expr(
                                                         col: col_start,
                                                     })
                                                 } else if col_start == col_end {
-                                                    (cur.row >= row_start && cur.row <= row_end).then(
-                                                        || CellAddr {
+                                                    (cur.row >= row_start && cur.row <= row_end)
+                                                        .then(|| CellAddr {
                                                             row: cur.row,
                                                             col: col_start,
-                                                        },
-                                                    )
+                                                        })
                                                 } else if row_start == row_end {
-                                                    (cur.col >= col_start && cur.col <= col_end).then(
-                                                        || CellAddr {
+                                                    (cur.col >= col_start && cur.col <= col_end)
+                                                        .then(|| CellAddr {
                                                             row: row_start,
                                                             col: cur.col,
-                                                        },
-                                                    )
+                                                        })
                                                 } else {
                                                     (cur.row >= row_start
                                                         && cur.row <= row_end
@@ -16339,7 +16385,11 @@ fn walk_calc_expr(
 
                                             if let (Some(intersected), Some(sheets)) = (
                                                 intersected,
-                                                resolve_sheet_span(sheet, current_cell.sheet, workbook),
+                                                resolve_sheet_span(
+                                                    sheet,
+                                                    current_cell.sheet,
+                                                    workbook,
+                                                ),
                                             ) {
                                                 for sheet_id in sheets {
                                                     insert_cell(precedents, sheet_id, intersected);
@@ -16347,15 +16397,20 @@ fn walk_calc_expr(
                                             }
                                         }
                                         Expr::StructuredRef(sref_expr) => {
-                                            if matches!(&sref_expr.sheet, SheetReference::External(_)) {
+                                            if matches!(
+                                                &sref_expr.sheet,
+                                                SheetReference::External(_)
+                                            ) {
                                                 return;
                                             }
-                                            if let Ok(ranges) = crate::structured_refs::resolve_structured_ref(
-                                                tables_by_sheet,
-                                                current_cell.sheet,
-                                                current_cell.addr,
-                                                &sref_expr.sref,
-                                            ) {
+                                            if let Ok(ranges) =
+                                                crate::structured_refs::resolve_structured_ref(
+                                                    tables_by_sheet,
+                                                    current_cell.sheet,
+                                                    current_cell.addr,
+                                                    &sref_expr.sref,
+                                                )
+                                            {
                                                 for (sheet_id, start, end) in ranges {
                                                     let addr = CellAddr {
                                                         row: start.row.min(end.row),
@@ -16551,7 +16606,9 @@ fn walk_calc_expr(
                         // not its evaluated value. Avoid introducing range-node cycles by
                         // representing direct references as single-cell precedents.
                         let insert_cell =
-                            |precedents: &mut HashSet<Precedent>, sheet_id: SheetId, addr: CellAddr| {
+                            |precedents: &mut HashSet<Precedent>,
+                             sheet_id: SheetId,
+                             addr: CellAddr| {
                                 if sheet_id == current_cell.sheet && addr == current_cell.addr {
                                     return;
                                 }
@@ -16655,28 +16712,33 @@ fn walk_calc_expr(
                                     let col_end = start.col.max(end.col);
                                     let cur = current_cell.addr;
 
-                                    let intersected = if row_start == row_end && col_start == col_end {
-                                        Some(CellAddr {
-                                            row: row_start,
-                                            col: col_start,
-                                        })
-                                    } else if col_start == col_end {
-                                        (cur.row >= row_start && cur.row <= row_end).then(|| CellAddr {
-                                            row: cur.row,
-                                            col: col_start,
-                                        })
-                                    } else if row_start == row_end {
-                                        (cur.col >= col_start && cur.col <= col_end).then(|| CellAddr {
-                                            row: row_start,
-                                            col: cur.col,
-                                        })
-                                    } else {
-                                        (cur.row >= row_start
-                                            && cur.row <= row_end
-                                            && cur.col >= col_start
-                                            && cur.col <= col_end)
-                                            .then(|| cur)
-                                    };
+                                    let intersected =
+                                        if row_start == row_end && col_start == col_end {
+                                            Some(CellAddr {
+                                                row: row_start,
+                                                col: col_start,
+                                            })
+                                        } else if col_start == col_end {
+                                            (cur.row >= row_start && cur.row <= row_end).then(
+                                                || CellAddr {
+                                                    row: cur.row,
+                                                    col: col_start,
+                                                },
+                                            )
+                                        } else if row_start == row_end {
+                                            (cur.col >= col_start && cur.col <= col_end).then(
+                                                || CellAddr {
+                                                    row: row_start,
+                                                    col: cur.col,
+                                                },
+                                            )
+                                        } else {
+                                            (cur.row >= row_start
+                                                && cur.row <= row_end
+                                                && cur.col >= col_start
+                                                && cur.col <= col_end)
+                                                .then(|| cur)
+                                        };
 
                                     if let (Some(intersected), Some(sheets)) = (
                                         intersected,
@@ -17355,9 +17417,7 @@ mod tests {
             ..Style::default()
         });
         engine.set_cell_value("Sheet1", "A1", 123.0).unwrap();
-        engine
-            .set_cell_style_id("Sheet1", "A1", style_id)
-            .unwrap();
+        engine.set_cell_style_id("Sheet1", "A1", style_id).unwrap();
 
         let range = Range::from_a1("A1:A1").expect("range");
         let values = vec![vec![Value::Blank]];
@@ -17610,15 +17670,14 @@ mod tests {
         engine.recalculate_single_threaded();
 
         // Match the CELL("contents") implementation: ensure the serialized formula has a leading '='.
-        let formula = engine.get_cell_formula("Sheet1", "A1").expect("formula stored");
+        let formula = engine
+            .get_cell_formula("Sheet1", "A1")
+            .expect("formula stored");
         let mut expected = formula.to_string();
         if !expected.trim_start().starts_with('=') {
             expected.insert(0, '=');
         }
-        assert_eq!(
-            engine.get_cell_value("Sheet1", "A1"),
-            Value::Text(expected)
-        );
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text(expected));
     }
 
     #[test]
@@ -17648,15 +17707,14 @@ mod tests {
         assert_eq!(engine.circular_reference_count(), 0);
 
         // Match the CELL("contents") implementation: ensure the serialized formula has a leading '='.
-        let formula = engine.get_cell_formula("Sheet1", "A1").expect("formula stored");
+        let formula = engine
+            .get_cell_formula("Sheet1", "A1")
+            .expect("formula stored");
         let mut expected = formula.to_string();
         if !expected.trim_start().starts_with('=') {
             expected.insert(0, '=');
         }
-        assert_eq!(
-            engine.get_cell_value("Sheet1", "A1"),
-            Value::Text(expected)
-        );
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text(expected));
     }
 
     #[test]
@@ -17701,12 +17759,11 @@ mod tests {
 
         assert_eq!(engine.circular_reference_count(), 0);
 
-        let stored = engine.get_cell_formula("Sheet1", "A1").expect("formula stored");
+        let stored = engine
+            .get_cell_formula("Sheet1", "A1")
+            .expect("formula stored");
         let expected = crate::functions::information::workbook::normalize_formula_text(stored);
-        assert_eq!(
-            engine.get_cell_value("Sheet1", "A1"),
-            Value::Text(expected)
-        );
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text(expected));
     }
 
     #[test]
@@ -17733,7 +17790,10 @@ mod tests {
         engine.recalculate_single_threaded();
 
         assert_eq!(engine.circular_reference_count(), 0);
-        assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::NA));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A2"),
+            Value::Error(ErrorKind::NA)
+        );
     }
 
     #[test]
@@ -17757,12 +17817,24 @@ mod tests {
 
         // Self-referential single-cell references should not become calc-graph cycles.
         engine.set_cell_formula("Sheet1", "D1", "=ROW(D1)").unwrap();
-        engine.set_cell_formula("Sheet1", "D2", "=COLUMN(D2)").unwrap();
-        engine.set_cell_formula("Sheet1", "D3", "=ROWS(D1:D3)").unwrap();
-        engine.set_cell_formula("Sheet1", "D4", "=COLUMNS(B:D)").unwrap();
-        engine.set_cell_formula("Sheet1", "D5", "=SHEET(D5)").unwrap();
-        engine.set_cell_formula("Sheet1", "D6", "=SHEETS(D6)").unwrap();
-        engine.set_cell_formula("Sheet1", "D7", "=AREAS(D7)").unwrap();
+        engine
+            .set_cell_formula("Sheet1", "D2", "=COLUMN(D2)")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "D3", "=ROWS(D1:D3)")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "D4", "=COLUMNS(B:D)")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "D5", "=SHEET(D5)")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "D6", "=SHEETS(D6)")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "D7", "=AREAS(D7)")
+            .unwrap();
         engine
             .set_cell_formula("Sheet1", "D8", "=ROW(OFFSET(D8,0,0))")
             .unwrap();

@@ -1,7 +1,7 @@
 use formula_engine::eval::CellAddr;
+use formula_engine::value::EntityValue;
 use formula_engine::{Engine, PrecedentNode, Value};
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
-use formula_engine::value::EntityValue;
 use std::collections::HashMap;
 
 #[test]
@@ -66,12 +66,8 @@ fn precedents_for_filled_formulas_resolve_against_formula_cell() {
     let mut engine = Engine::new();
 
     // Simulate a fill-down pattern where each row references cells in the same row.
-    engine
-        .set_cell_formula("Sheet1", "C1", "=A1+B1")
-        .unwrap();
-    engine
-        .set_cell_formula("Sheet1", "C2", "=A2+B2")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "C1", "=A1+B1").unwrap();
+    engine.set_cell_formula("Sheet1", "C2", "=A2+B2").unwrap();
 
     assert_eq!(
         engine.precedents("Sheet1", "C2").unwrap(),

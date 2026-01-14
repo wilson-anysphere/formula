@@ -219,4 +219,3 @@ const TOKENS_FORM4: [Token; 25] = [
     (4, "IV"),
     (1, "I"),
 ];
-

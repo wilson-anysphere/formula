@@ -439,7 +439,10 @@ fn rename_sheet_updates_pivot_definition_and_refresh_does_not_recreate_old_sheet
     // The old *display name* should not be present anymore (sheet keys remain stable across renames
     // for persistence/back-compat, so `sheet_id("Sheet1")` can still resolve).
     assert!(
-        !engine.sheet_names_in_order().iter().any(|name| name == "Sheet1"),
+        !engine
+            .sheet_names_in_order()
+            .iter()
+            .any(|name| name == "Sheet1"),
         "expected old display name to be absent after rename"
     );
 
@@ -453,7 +456,10 @@ fn rename_sheet_updates_pivot_definition_and_refresh_does_not_recreate_old_sheet
 
     // Refresh should *not* recreate the old sheet.
     assert!(
-        !engine.sheet_names_in_order().iter().any(|name| name == "Sheet1"),
+        !engine
+            .sheet_names_in_order()
+            .iter()
+            .any(|name| name == "Sheet1"),
         "expected refresh not to recreate a new sheet with the old display name"
     );
 }

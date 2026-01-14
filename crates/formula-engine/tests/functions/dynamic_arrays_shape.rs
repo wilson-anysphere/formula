@@ -270,10 +270,7 @@ fn expand_expands_with_default_and_custom_padding() {
     assert_eq!(engine.get_cell_value("Sheet1", "D7"), Value::Number(0.0));
     assert_eq!(engine.get_cell_value("Sheet1", "G7"), Value::Number(0.0));
 
-    assert_eq!(
-        engine.get_cell_value("Sheet1", "D9"),
-        Value::Number(1.0)
-    );
+    assert_eq!(engine.get_cell_value("Sheet1", "D9"), Value::Number(1.0));
     assert_eq!(
         engine.get_cell_value("Sheet1", "F9"),
         Value::Error(ErrorKind::NA)

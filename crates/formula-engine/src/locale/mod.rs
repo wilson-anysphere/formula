@@ -56,8 +56,7 @@ fn parse_locale_key(key: &str) -> Option<LocaleKeyParts<'_>> {
     let lang = parts.next()?;
     let mut next = parts.next();
     // Optional script subtag (4 alpha characters) comes before the region.
-    let script = next
-        .filter(|p| p.len() == 4 && p.chars().all(|c| c.is_ascii_alphabetic()));
+    let script = next.filter(|p| p.len() == 4 && p.chars().all(|c| c.is_ascii_alphabetic()));
     if script.is_some() {
         next = parts.next();
     }

@@ -24,7 +24,9 @@ fn bytecode_backend_preserves_entity_values_through_cell_ref_pass_through() {
 
     // Field access is lowered to an internal `_FIELDACCESS` builtin. Ensure the bytecode backend
     // can evaluate the lowered form and preserve rich values across cells.
-    engine.set_cell_formula("Sheet1", "C1", "=B1.Price").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=B1.Price")
+        .unwrap();
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 2);
@@ -62,7 +64,9 @@ fn bytecode_backend_preserves_record_values_through_cell_ref_pass_through() {
     engine.set_cell_formula("Sheet1", "B1", "=A1").unwrap();
     assert_eq!(engine.bytecode_program_count(), 1);
 
-    engine.set_cell_formula("Sheet1", "C1", "=B1.Price").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=B1.Price")
+        .unwrap();
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 2);

@@ -1,10 +1,10 @@
 use pretty_assertions::assert_eq;
 
-use formula_engine::{Engine, Value};
 use formula_engine::pivot::{
     AggregationType, GrandTotals, Layout, PivotConfig, PivotDestination, PivotField, PivotFieldRef,
     PivotSource, PivotTable, PivotTableDefinition, PivotValue, SubtotalPosition, ValueField,
 };
+use formula_engine::{Engine, Value};
 use formula_model::{CellRef, Range};
 
 fn cell(a1: &str) -> CellRef {

@@ -41,7 +41,10 @@ fn fvschedule_propagates_errors_in_schedule() {
     sheet.set("A1", 0.1);
     sheet.set_formula("A2", "=1/0");
 
-    assert_eq!(sheet.eval("=FVSCHEDULE(100,A1:A2)"), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        sheet.eval("=FVSCHEDULE(100,A1:A2)"),
+        Value::Error(ErrorKind::Div0)
+    );
 }
 
 #[test]

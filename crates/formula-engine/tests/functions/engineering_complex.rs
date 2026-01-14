@@ -1,5 +1,5 @@
-use formula_engine::{ErrorKind, Value};
 use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
 
@@ -37,18 +37,39 @@ fn complex_suffix_preserved_for_operations() {
 #[test]
 fn complex_error_mapping() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval(r#"=IMREAL("nope")"#), Value::Error(ErrorKind::Num));
-    assert_eq!(sheet.eval(r#"=IMREAL("3+4")"#), Value::Error(ErrorKind::Num));
-    assert_eq!(sheet.eval(r#"=IMREAL("1e9999+0i")"#), Value::Error(ErrorKind::Num));
-    assert_eq!(sheet.eval(r#"=COMPLEX(1,2,"k")"#), Value::Error(ErrorKind::Value));
-    assert_eq!(sheet.eval(r#"=IMDIV("1+i","0")"#), Value::Error(ErrorKind::Div0));
-    assert_eq!(sheet.eval(r#"=IMARGUMENT("0")"#), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        sheet.eval(r#"=IMREAL("nope")"#),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval(r#"=IMREAL("3+4")"#),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval(r#"=IMREAL("1e9999+0i")"#),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval(r#"=COMPLEX(1,2,"k")"#),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval(r#"=IMDIV("1+i","0")"#),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        sheet.eval(r#"=IMARGUMENT("0")"#),
+        Value::Error(ErrorKind::Div0)
+    );
 }
 
 #[test]
 fn complex_power_and_sqrt() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval(r#"=IMPOWER("i",2)"#), Value::Text("-1".to_string()));
+    assert_eq!(
+        sheet.eval(r#"=IMPOWER("i",2)"#),
+        Value::Text("-1".to_string())
+    );
     assert_eq!(sheet.eval(r#"=IMSQRT("-1")"#), Value::Text("i".to_string()));
 }
 
@@ -57,8 +78,14 @@ fn complex_respects_value_locale_for_parsing_and_formatting() {
     let mut sheet = TestSheet::new();
     sheet.set_value_locale(ValueLocaleConfig::de_de());
 
-    assert_eq!(sheet.eval("=COMPLEX(1.5,0)"), Value::Text("1,5".to_string()));
-    assert_eq!(sheet.eval("=COMPLEX(0,1.5)"), Value::Text("1,5i".to_string()));
+    assert_eq!(
+        sheet.eval("=COMPLEX(1.5,0)"),
+        Value::Text("1,5".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=COMPLEX(0,1.5)"),
+        Value::Text("1,5i".to_string())
+    );
 
     assert_number(&sheet.eval(r#"=IMREAL("1,5+0i")"#), 1.5);
     assert_number(&sheet.eval(r#"=IMREAL("1.5+0i")"#), 1.5);

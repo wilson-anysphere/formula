@@ -97,5 +97,7 @@ fn vdb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    excel_result_number(super::vdb(cost, salvage, life, start, end, factor, no_switch))
+    excel_result_number(super::vdb(
+        cost, salvage, life, start, end, factor, no_switch,
+    ))
 }

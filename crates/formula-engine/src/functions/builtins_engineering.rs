@@ -264,7 +264,11 @@ fn fixed_base_to_fixed_base_fn(
     }
 }
 
-fn decimal_to_fixed_base_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], dst: FixedBase) -> Value {
+fn decimal_to_fixed_base_fn(
+    ctx: &dyn FunctionContext,
+    args: &[CompiledExpr],
+    dst: FixedBase,
+) -> Value {
     let number = match eval_i64_trunc(ctx, &args[0]) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
@@ -414,7 +418,11 @@ fn bitxor_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     bit_binary_op(ctx, args, engineering::bitxor)
 }
 
-fn bit_binary_op(ctx: &dyn FunctionContext, args: &[CompiledExpr], op: fn(u64, u64) -> u64) -> Value {
+fn bit_binary_op(
+    ctx: &dyn FunctionContext,
+    args: &[CompiledExpr],
+    op: fn(u64, u64) -> u64,
+) -> Value {
     let a = match eval_bit_u64(ctx, &args[0]) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
@@ -518,7 +526,10 @@ fn eval_i64_trunc(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<i64,
     Ok(t as i64)
 }
 
-fn eval_u64_trunc_nonnegative(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<u64, ErrorKind> {
+fn eval_u64_trunc_nonnegative(
+    ctx: &dyn FunctionContext,
+    expr: &CompiledExpr,
+) -> Result<u64, ErrorKind> {
     let n = eval_finite_number(ctx, expr)?;
     let t = n.trunc();
     if t < 0.0 {
@@ -541,7 +552,10 @@ fn eval_u32_trunc(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<u32,
     Ok(t as u32)
 }
 
-fn eval_usize_trunc_nonnegative(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<usize, ErrorKind> {
+fn eval_usize_trunc_nonnegative(
+    ctx: &dyn FunctionContext,
+    expr: &CompiledExpr,
+) -> Result<usize, ErrorKind> {
     let n = eval_finite_number(ctx, expr)?;
     let t = n.trunc();
     if t < 0.0 || t > (usize::MAX as f64) {

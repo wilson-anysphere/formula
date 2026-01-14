@@ -166,10 +166,7 @@ fn parse_error_tsv(
         // Error literals themselves start with `#`, so comments are `#` followed by whitespace.
         let is_comment = trimmed == "#"
             || (trimmed.starts_with('#')
-                && trimmed
-                    .chars()
-                    .nth(1)
-                    .is_some_and(|c| c.is_whitespace()));
+                && trimmed.chars().nth(1).is_some_and(|c| c.is_whitespace()));
 
         if trimmed.is_empty() || is_comment {
             continue;
@@ -283,23 +280,23 @@ fn discover_tsvs_in_dir(dir: &Path) -> BTreeMap<String, PathBuf> {
                 dir.display()
             )
         });
-        let file_type = entry.file_type().unwrap_or_else(|err| {
-            panic!(
-                "failed to stat entry {}: {err}",
-                entry.path().display()
-            )
-        });
+        let file_type = entry
+            .file_type()
+            .unwrap_or_else(|err| panic!("failed to stat entry {}: {err}", entry.path().display()));
         if !file_type.is_file() {
             continue;
         }
 
         let path = entry.path();
-        let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or_else(|| {
-            panic!(
-                "locale data directory contains a non-utf8 file name: {}",
-                path.display()
-            )
-        });
+        let file_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_else(|| {
+                panic!(
+                    "locale data directory contains a non-utf8 file name: {}",
+                    path.display()
+                )
+            });
 
         if !file_name.ends_with(".tsv") {
             continue;
@@ -335,7 +332,10 @@ fn locale_function_tsv_completeness_function_tsvs_are_complete_and_unique() {
 
     for (locale_id, path) in &locale_tsvs {
         let tsv = std::fs::read_to_string(path).unwrap_or_else(|err| {
-            panic!("failed to read locale function TSV {}: {err}", path.display())
+            panic!(
+                "failed to read locale function TSV {}: {err}",
+                path.display()
+            )
         });
         let parsed = parse_locale_tsv(locale_id, path, &tsv);
 
@@ -484,8 +484,12 @@ fn locale_function_tsv_completeness_error_tsvs_are_complete_and_unique() {
             )
         });
 
-        let parsed =
-            parse_error_tsv(locale_id, &generated_path, &generated_tsv, /*require_sorted*/ true);
+        let parsed = parse_error_tsv(
+            locale_id,
+            &generated_path,
+            &generated_tsv,
+            /*require_sorted*/ true,
+        );
         let upstream = parse_error_tsv(
             locale_id,
             upstream_path,
@@ -493,11 +497,20 @@ fn locale_function_tsv_completeness_error_tsvs_are_complete_and_unique() {
             /*require_sorted*/ false,
         );
 
-        let missing: Vec<String> = expected.difference(&parsed.canonical_keys).cloned().collect();
-        let extra: Vec<String> = parsed.canonical_keys.difference(&expected).cloned().collect();
+        let missing: Vec<String> = expected
+            .difference(&parsed.canonical_keys)
+            .cloned()
+            .collect();
+        let extra: Vec<String> = parsed
+            .canonical_keys
+            .difference(&expected)
+            .cloned()
+            .collect();
 
-        let upstream_missing: Vec<String> =
-            expected.difference(&upstream.canonical_keys).cloned().collect();
+        let upstream_missing: Vec<String> = expected
+            .difference(&upstream.canonical_keys)
+            .cloned()
+            .collect();
         let upstream_extra: Vec<String> = upstream
             .canonical_keys
             .difference(&expected)
@@ -561,9 +574,8 @@ fn locale_function_tsv_completeness_error_tsvs_are_complete_and_unique() {
         }
 
         if !mapping_matches_upstream {
-            failures.push_str(
-                "\n  Error TSV does not match upstream mapping source. Regenerate it.\n",
-            );
+            failures
+                .push_str("\n  Error TSV does not match upstream mapping source. Regenerate it.\n");
         }
 
         failures.push_str(&format!(
@@ -574,9 +586,8 @@ fn locale_function_tsv_completeness_error_tsvs_are_complete_and_unique() {
     }
 
     if !failures.is_empty() {
-        let mut report = String::from(
-            "Locale error TSVs are out of sync with the engine's error registry.\n",
-        );
+        let mut report =
+            String::from("Locale error TSVs are out of sync with the engine's error registry.\n");
         report.push_str(
             "\nWhen adding new ErrorKind variants, update each locale's upstream error-literal mapping and regenerate TSVs.\n",
         );

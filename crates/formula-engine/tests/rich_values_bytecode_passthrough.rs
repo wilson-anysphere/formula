@@ -24,7 +24,10 @@ fn rich_values_roundtrip_through_bytecode_and_enable_chaining() {
     );
 
     let b1 = engine.get_cell_value("Sheet1", "B1");
-    assert!(matches!(b1, Value::Entity(_)), "expected B1 to be an entity");
+    assert!(
+        matches!(b1, Value::Entity(_)),
+        "expected B1 to be an entity"
+    );
     assert_eq!(b1, Value::Entity(entity.clone()));
 
     engine

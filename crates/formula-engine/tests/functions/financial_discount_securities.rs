@@ -416,5 +416,8 @@ fn error_cases() {
         tbillprice(settlement, valid_maturity, 2.0),
         Err(ExcelError::Num)
     );
-    assert_eq!(tbilleq(settlement, valid_maturity, 2.0), Err(ExcelError::Num));
+    assert_eq!(
+        tbilleq(settlement, valid_maturity, 2.0),
+        Err(ExcelError::Num)
+    );
 }

@@ -1,5 +1,5 @@
-use crate::eval::CompiledExpr;
 use crate::eval::split_external_sheet_key;
+use crate::eval::CompiledExpr;
 use crate::functions::information::workbook as workbook_info;
 use crate::functions::{
     ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference, SheetId, ThreadSafety,
@@ -156,7 +156,9 @@ fn sheets_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         ArgValue::Reference(_r) => Value::Number(1.0),
         ArgValue::ReferenceUnion(ranges) => sheets_count_value_for_references(&ranges),
         ArgValue::Scalar(Value::Reference(_r)) => Value::Number(1.0),
-        ArgValue::Scalar(Value::ReferenceUnion(ranges)) => sheets_count_value_for_references(&ranges),
+        ArgValue::Scalar(Value::ReferenceUnion(ranges)) => {
+            sheets_count_value_for_references(&ranges)
+        }
         ArgValue::Scalar(Value::Error(e)) => Value::Error(e),
         ArgValue::Scalar(_) => Value::Error(ErrorKind::Value),
     }
@@ -214,9 +216,8 @@ fn formulatext_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // FORMULATEXT reads formula metadata (not the computed cell value), so a direct self-reference
     // (e.g. `=FORMULATEXT(A1)` in `A1`) is not a true dependency and should not be recorded for
     // dynamic dependency tracing (avoids spurious self-edges).
-    let is_self_reference =
-        matches!(&reference.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
-            && reference.start == ctx.current_cell_addr();
+    let is_self_reference = matches!(&reference.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
+        && reference.start == ctx.current_cell_addr();
     if !is_self_reference {
         ctx.record_reference(&reference);
     }
@@ -249,9 +250,8 @@ fn isformula_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     // ISFORMULA reads formula presence metadata (not the computed value), so a direct self-reference
     // should not be recorded as a dynamic dependency.
-    let is_self_reference =
-        matches!(&reference.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
-            && reference.start == ctx.current_cell_addr();
+    let is_self_reference = matches!(&reference.sheet_id, SheetId::Local(id) if *id == ctx.current_sheet_id())
+        && reference.start == ctx.current_cell_addr();
     if !is_self_reference {
         ctx.record_reference(&reference);
     }

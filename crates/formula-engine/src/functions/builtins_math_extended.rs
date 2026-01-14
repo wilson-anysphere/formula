@@ -956,13 +956,14 @@ inventory::submit! {
 }
 
 fn subtotal_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let function_num = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_i64_with_ctx(ctx) {
-        Ok(v) => match i32::try_from(v) {
-            Ok(v) => v,
-            Err(_) => return Value::Error(ErrorKind::Value),
-        },
-        Err(e) => return Value::Error(e),
-    };
+    let function_num =
+        match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_i64_with_ctx(ctx) {
+            Ok(v) => match i32::try_from(v) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Value),
+            },
+            Err(e) => return Value::Error(e),
+        };
 
     let mut values = Vec::new();
     for arg in &args[1..] {
@@ -990,13 +991,14 @@ inventory::submit! {
 }
 
 fn aggregate_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let function_num = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_i64_with_ctx(ctx) {
-        Ok(v) => match i32::try_from(v) {
-            Ok(v) => v,
-            Err(_) => return Value::Error(ErrorKind::Value),
-        },
-        Err(e) => return Value::Error(e),
-    };
+    let function_num =
+        match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_i64_with_ctx(ctx) {
+            Ok(v) => match i32::try_from(v) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Value),
+            },
+            Err(e) => return Value::Error(e),
+        };
     let options = match scalar_from_arg(ctx, ctx.eval_arg(&args[1])).coerce_to_i64_with_ctx(ctx) {
         Ok(v) => match i32::try_from(v) {
             Ok(v) => v,

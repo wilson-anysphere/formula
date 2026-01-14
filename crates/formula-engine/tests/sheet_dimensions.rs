@@ -51,7 +51,9 @@ fn sheet_dimensions_affect_full_row_columns() {
 #[test]
 fn row_and_column_handle_row_and_column_refs_with_custom_dimensions() {
     let mut engine = Engine::new();
-    engine.set_sheet_dimensions("Sheet1", 2_000_000, 100).unwrap();
+    engine
+        .set_sheet_dimensions("Sheet1", 2_000_000, 100)
+        .unwrap();
 
     // Avoid a circular ref: `5:7` includes row 5..7, so keep the formula outside those rows.
     engine
@@ -88,9 +90,15 @@ fn row_and_array_lift_return_spill_for_huge_whole_column_outputs() {
         .set_sheet_dimensions("Sheet1", 5_000_001, EXCEL_MAX_COLS)
         .unwrap();
 
-    engine.set_cell_formula("Sheet1", "B1", "=ROW(A:A)").unwrap();
-    engine.set_cell_formula("Sheet1", "B2", "=ABS(A:A)").unwrap();
-    engine.set_cell_formula("Sheet1", "B3", "=VALUE(A:A)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ROW(A:A)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=ABS(A:A)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=VALUE(A:A)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "B4", "=FILTER(A:A,A:A)")
         .unwrap();
@@ -133,7 +141,9 @@ fn defined_name_whole_column_tracks_sheet_dimensions() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(10.0));
 
     // Growing the sheet should also grow whole-column references inside defined names.
-    engine.set_sheet_dimensions("Sheet1", 2_000_000, 10).unwrap();
+    engine
+        .set_sheet_dimensions("Sheet1", 2_000_000, 10)
+        .unwrap();
     engine.recalculate();
     assert_eq!(
         engine.get_cell_value("Sheet1", "B1"),
@@ -215,9 +225,13 @@ fn precedents_clamp_whole_row_and_column_to_sheet_dimensions() {
     let mut engine = Engine::new();
     engine.set_sheet_dimensions("Sheet1", 100, 10).unwrap();
 
-    engine.set_cell_formula("Sheet1", "B1", "=SUM(A:A)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(A:A)")
+        .unwrap();
     // Avoid a circular reference: `1:1` includes row 1, so keep the formula outside row 1.
-    engine.set_cell_formula("Sheet1", "A2", "=SUM(1:1)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=SUM(1:1)")
+        .unwrap();
     engine.recalculate();
 
     assert_eq!(
@@ -254,7 +268,9 @@ fn precedents_clamp_whole_row_and_column_from_defined_names_and_indirect() {
 
     // A workbook-defined name that expands to a whole-column reference should clamp to sheet dims
     // in the auditing API.
-    engine.set_cell_formula("Sheet1", "B1", "=SUM(MyCol)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(MyCol)")
+        .unwrap();
 
     // INDIRECT dynamic dependencies should also clamp whole-column refs to sheet dims.
     engine

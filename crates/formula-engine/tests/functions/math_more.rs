@@ -122,7 +122,10 @@ fn series_and_sumx_helpers_match_excel_semantics() {
     assert_number(&sheet.eval("=SUMXMY2({1,2},{3,4})"), 8.0);
     assert_number(&sheet.eval("=SUMX2MY2({1,2},{3,4})"), -20.0);
     assert_number(&sheet.eval("=SUMX2PY2({1,2},{3,4})"), 30.0);
-    assert_eq!(sheet.eval("=SUMXMY2({1,2},{3})"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        sheet.eval("=SUMXMY2({1,2},{3})"),
+        Value::Error(ErrorKind::NA)
+    );
     assert_number(&sheet.eval("=SUMXMY2({1,\"x\",3},{1,2,3})"), 0.0);
 }
 

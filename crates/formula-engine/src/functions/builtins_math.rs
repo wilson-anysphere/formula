@@ -192,7 +192,9 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
-                Value::Reference(_) | Value::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
+                Value::Reference(_) | Value::ReferenceUnion(_) => {
+                    return Value::Error(ErrorKind::Value)
+                }
             },
             ArgValue::Reference(r) => {
                 let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
@@ -394,7 +396,9 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
-                Value::Reference(_) | Value::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
+                Value::Reference(_) | Value::ReferenceUnion(_) => {
+                    return Value::Error(ErrorKind::Value)
+                }
             },
             ArgValue::Reference(r) => {
                 let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];

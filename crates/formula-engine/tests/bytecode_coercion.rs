@@ -14,10 +14,17 @@ fn eval_single_cell_with_date_system(
     engine.set_bytecode_enabled(bytecode_enabled);
     engine.set_cell_formula("Sheet1", "A1", formula).unwrap();
     engine.recalculate_single_threaded();
-    (engine.get_cell_value("Sheet1", "A1"), engine.bytecode_program_count())
+    (
+        engine.get_cell_value("Sheet1", "A1"),
+        engine.bytecode_program_count(),
+    )
 }
 
-fn eval_single_cell(formula: &str, bytecode_enabled: bool, locale: ValueLocaleConfig) -> (Value, usize) {
+fn eval_single_cell(
+    formula: &str,
+    bytecode_enabled: bool,
+    locale: ValueLocaleConfig,
+) -> (Value, usize) {
     eval_single_cell_with_date_system(
         formula,
         bytecode_enabled,
@@ -217,10 +224,10 @@ fn bytecode_coercion_not_date_string_matches_ast() {
 fn bytecode_coercion_date_order_matches_ast() {
     let formula = "=\"1/2/2020\"+0";
 
-    let expected_mdy = ymd_to_serial(ExcelDate::new(2020, 1, 2), ExcelDateSystem::EXCEL_1900)
-        .unwrap() as f64;
-    let expected_dmy = ymd_to_serial(ExcelDate::new(2020, 2, 1), ExcelDateSystem::EXCEL_1900)
-        .unwrap() as f64;
+    let expected_mdy =
+        ymd_to_serial(ExcelDate::new(2020, 1, 2), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+    let expected_dmy =
+        ymd_to_serial(ExcelDate::new(2020, 2, 1), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
     assert_ne!(expected_mdy, expected_dmy);
 
     // en-US: MDY => Jan 2, 2020
@@ -244,7 +251,8 @@ fn bytecode_coercion_date_order_matches_ast() {
 fn bytecode_coercion_respects_excel_1904_date_system() {
     let formula = "=\"2020-01-01\"+0";
 
-    let expected = ymd_to_serial(ExcelDate::new(2020, 1, 1), ExcelDateSystem::Excel1904).unwrap() as f64;
+    let expected =
+        ymd_to_serial(ExcelDate::new(2020, 1, 1), ExcelDateSystem::Excel1904).unwrap() as f64;
 
     let (ast_val, _) = eval_single_cell_with_date_system(
         formula,

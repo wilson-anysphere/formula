@@ -416,7 +416,11 @@ fn row_matches(
     Ok(any_clause)
 }
 
-fn qualify_unprefixed_sheet_references(expr: &crate::Expr, workbook: &str, sheet: &str) -> crate::Expr {
+fn qualify_unprefixed_sheet_references(
+    expr: &crate::Expr,
+    workbook: &str,
+    sheet: &str,
+) -> crate::Expr {
     match expr {
         crate::Expr::Number(v) => crate::Expr::Number(v.clone()),
         crate::Expr::String(v) => crate::Expr::String(v.clone()),
@@ -426,7 +430,11 @@ fn qualify_unprefixed_sheet_references(expr: &crate::Expr, workbook: &str, sheet
         crate::Expr::NameRef(n) => crate::Expr::NameRef(n.clone()),
         crate::Expr::StructuredRef(r) => crate::Expr::StructuredRef(r.clone()),
         crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
-            base: Box::new(qualify_unprefixed_sheet_references(&access.base, workbook, sheet)),
+            base: Box::new(qualify_unprefixed_sheet_references(
+                &access.base,
+                workbook,
+                sheet,
+            )),
             field: access.field.clone(),
         }),
         crate::Expr::CellRef(r) => {
@@ -486,16 +494,24 @@ fn qualify_unprefixed_sheet_references(expr: &crate::Expr, workbook: &str, sheet
         }),
         crate::Expr::Unary(u) => crate::Expr::Unary(crate::UnaryExpr {
             op: u.op,
-            expr: Box::new(qualify_unprefixed_sheet_references(&u.expr, workbook, sheet)),
+            expr: Box::new(qualify_unprefixed_sheet_references(
+                &u.expr, workbook, sheet,
+            )),
         }),
         crate::Expr::Postfix(p) => crate::Expr::Postfix(crate::PostfixExpr {
             op: p.op,
-            expr: Box::new(qualify_unprefixed_sheet_references(&p.expr, workbook, sheet)),
+            expr: Box::new(qualify_unprefixed_sheet_references(
+                &p.expr, workbook, sheet,
+            )),
         }),
         crate::Expr::Binary(b) => crate::Expr::Binary(crate::BinaryExpr {
             op: b.op,
-            left: Box::new(qualify_unprefixed_sheet_references(&b.left, workbook, sheet)),
-            right: Box::new(qualify_unprefixed_sheet_references(&b.right, workbook, sheet)),
+            left: Box::new(qualify_unprefixed_sheet_references(
+                &b.left, workbook, sheet,
+            )),
+            right: Box::new(qualify_unprefixed_sheet_references(
+                &b.right, workbook, sheet,
+            )),
         }),
     }
 }

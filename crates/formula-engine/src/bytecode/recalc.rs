@@ -7,9 +7,9 @@ use crate::locale::ValueLocaleConfig;
 use ahash::{AHashMap, AHashSet};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
+use std::sync::Arc;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use std::sync::OnceLock;
-use std::sync::Arc;
 
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 static RECALC_THREAD_POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
@@ -195,27 +195,24 @@ impl RecalcEngine {
                 {
                     if let Some(pool) = recalc_thread_pool() {
                         pool.install(|| {
-                            results
-                                .par_iter_mut()
-                                .zip(level.par_iter())
-                                .for_each_init(
-                                    || {
-                                        (
-                                            Vm::with_capacity(32),
-                                            super::runtime::set_thread_eval_context(
-                                                date_system,
-                                                value_locale,
-                                                now_utc.clone(),
-                                                recalc_id,
-                                            ),
-                                        )
-                                    },
-                                    |(vm, _guard), (out, &idx)| {
-                                        let node = &graph.nodes[idx];
-                                        super::runtime::set_thread_current_sheet_id(0);
-                                        *out = vm.eval(&node.program, g, 0, node.coord, &locale);
-                                    },
-                                );
+                            results.par_iter_mut().zip(level.par_iter()).for_each_init(
+                                || {
+                                    (
+                                        Vm::with_capacity(32),
+                                        super::runtime::set_thread_eval_context(
+                                            date_system,
+                                            value_locale,
+                                            now_utc.clone(),
+                                            recalc_id,
+                                        ),
+                                    )
+                                },
+                                |(vm, _guard), (out, &idx)| {
+                                    let node = &graph.nodes[idx];
+                                    super::runtime::set_thread_current_sheet_id(0);
+                                    *out = vm.eval(&node.program, g, 0, node.coord, &locale);
+                                },
+                            );
                         });
                     } else {
                         eval_level_serial(&mut results);
@@ -347,7 +344,7 @@ mod tests {
             recalc_value, en_us_value,
             "recalc should evaluate using the engine's deterministic context"
         );
- 
+
         // Ensure `recalc` restores the thread-local context after it finishes.
         let after_value = vm.eval(&program, &empty_grid, 0, origin, &locale_config);
         assert_eq!(

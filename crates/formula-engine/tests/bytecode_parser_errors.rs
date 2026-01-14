@@ -1,5 +1,5 @@
-use formula_engine::bytecode::{parse_formula, CellCoord, ErrorKind, Expr, ParseError, Value};
 use formula_engine::bytecode::ast::Function;
+use formula_engine::bytecode::{parse_formula, CellCoord, ErrorKind, Expr, ParseError, Value};
 
 #[test]
 fn parses_excel_error_literals() {

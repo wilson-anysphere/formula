@@ -665,11 +665,7 @@ fn discount_security_date_text_inputs_work_for_iso_and_slash_formats() {
         )
         .unwrap();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "A3",
-            "=DISC(\"1/1/2024\",\"7/2/2024\",97,100,1)",
-        )
+        .set_cell_formula("Sheet1", "A3", "=DISC(\"1/1/2024\",\"7/2/2024\",97,100,1)")
         .unwrap();
 
     engine.recalculate();

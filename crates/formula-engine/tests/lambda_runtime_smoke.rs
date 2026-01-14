@@ -6,8 +6,8 @@ use formula_engine::eval::{
     CellAddr, EvalContext, Evaluator, RecalcContext, ResolvedName, SheetReference, ValueResolver,
 };
 use formula_engine::functions::{ArgValue, FunctionContext, Reference, SheetId};
-use formula_engine::Engine;
 use formula_engine::value::{ErrorKind, Lambda, Value};
+use formula_engine::Engine;
 
 #[derive(Default)]
 struct TestResolver {
@@ -94,7 +94,10 @@ fn lambda_value_captures_locals_and_supports_call_syntax() {
     };
     assert_eq!(evaluator.eval_formula(&named_call), Value::Number(4.0));
 
-    assert!(matches!(evaluator.eval_formula(&callee_ref), Value::Lambda(_)));
+    assert!(matches!(
+        evaluator.eval_formula(&callee_ref),
+        Value::Lambda(_)
+    ));
 }
 
 #[test]
@@ -220,7 +223,10 @@ fn lambda_calls_can_return_reference_values() {
         end: CellAddr { row: 2, col: 0 },
     };
 
-    assert_eq!(evaluator.eval_arg(&call_expr), ArgValue::Reference(expected));
+    assert_eq!(
+        evaluator.eval_arg(&call_expr),
+        ArgValue::Reference(expected)
+    );
 }
 
 #[test]

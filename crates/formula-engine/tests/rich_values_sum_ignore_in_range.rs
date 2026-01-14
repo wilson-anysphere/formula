@@ -1,5 +1,5 @@
-use formula_engine::{Engine, Value};
 use formula_engine::value::{EntityValue, RecordValue};
+use formula_engine::{Engine, Value};
 
 #[test]
 fn sum_ignores_entity_in_range_bytecode() {
@@ -8,11 +8,13 @@ fn sum_ignores_entity_in_range_bytecode() {
     // test exercises the SIMD column-slice cache population path.
     engine.set_bytecode_enabled(true);
 
+    engine.set_cell_value("Sheet1", "A1", 1.0).expect("set A1");
     engine
-        .set_cell_value("Sheet1", "A1", 1.0)
-        .expect("set A1");
-    engine
-        .set_cell_value("Sheet1", "A2", Value::Entity(EntityValue::new("SomeEntity")))
+        .set_cell_value(
+            "Sheet1",
+            "A2",
+            Value::Entity(EntityValue::new("SomeEntity")),
+        )
         .expect("set A2");
     engine
         .set_cell_formula("Sheet1", "B1", "=SUM(A1:A2)")
@@ -37,11 +39,13 @@ fn sum_ignores_record_in_range_bytecode() {
     let mut engine = Engine::new();
     engine.set_bytecode_enabled(true);
 
+    engine.set_cell_value("Sheet1", "A1", 1.0).expect("set A1");
     engine
-        .set_cell_value("Sheet1", "A1", 1.0)
-        .expect("set A1");
-    engine
-        .set_cell_value("Sheet1", "A2", Value::Record(RecordValue::new("SomeRecord")))
+        .set_cell_value(
+            "Sheet1",
+            "A2",
+            Value::Record(RecordValue::new("SomeRecord")),
+        )
         .expect("set A2");
     engine
         .set_cell_formula("Sheet1", "B1", "=SUM(A1:A2)")

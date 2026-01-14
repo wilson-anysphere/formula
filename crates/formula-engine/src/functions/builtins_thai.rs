@@ -222,7 +222,9 @@ fn isthaidigit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |v| {
         let text = v.coerce_to_string_with_ctx(ctx)?;
-        Ok(Value::Bool(crate::functions::text::thai::is_thai_digit(&text)))
+        Ok(Value::Bool(crate::functions::text::thai::is_thai_digit(
+            &text,
+        )))
     })
 }
 

@@ -155,10 +155,18 @@ fn evaluates_amortization_financial_functions() {
     let mut engine = Engine::new();
 
     engine
-        .set_cell_formula("Sheet1", "A1", "=CUMIPMT(0.09/12, 30*12, 125000, 13, 24, 0)")
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=CUMIPMT(0.09/12, 30*12, 125000, 13, 24, 0)",
+        )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A2", "=CUMPRINC(0.09/12, 30*12, 125000, 13, 24, 0)")
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=CUMPRINC(0.09/12, 30*12, 125000, 13, 24, 0)",
+        )
         .unwrap();
     // Coercion: text numbers should be accepted.
     engine
@@ -169,7 +177,9 @@ fn evaluates_amortization_financial_functions() {
         )
         .unwrap();
     // Non-finite numbers should produce #NUM.
-    engine.set_cell_value("Sheet1", "B1", f64::INFINITY).unwrap();
+    engine
+        .set_cell_value("Sheet1", "B1", f64::INFINITY)
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "A4", "=CUMIPMT(B1, 360, 125000, 13, 24, 0)")
         .unwrap();

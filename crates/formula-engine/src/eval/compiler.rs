@@ -68,10 +68,7 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             let Some(addr) = Ref::from_abs_cell_addr(CellAddr { row, col }) else {
                 return Expr::Error(ErrorKind::Ref);
             };
-            Expr::CellRef(CellRef {
-                sheet,
-                addr,
-            })
+            Expr::CellRef(CellRef { sheet, addr })
         }
         crate::Expr::ColRef(r) => {
             let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
@@ -87,11 +84,7 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             }) else {
                 return Expr::Error(ErrorKind::Ref);
             };
-            Expr::RangeRef(RangeRef {
-                sheet,
-                start,
-                end,
-            })
+            Expr::RangeRef(RangeRef { sheet, start, end })
         }
         crate::Expr::RowRef(r) => {
             let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
@@ -107,11 +100,7 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             }) else {
                 return Expr::Error(ErrorKind::Ref);
             };
-            Expr::RangeRef(RangeRef {
-                sheet,
-                start,
-                end,
-            })
+            Expr::RangeRef(RangeRef { sheet, start, end })
         }
         crate::Expr::StructuredRef(r) => lower_structured_ref(r),
         crate::Expr::Array(arr) => lower_array_literal(arr, origin),
@@ -276,10 +265,9 @@ fn lower_structured_ref(r: &crate::StructuredRef) -> Expr<String> {
     text.push(']');
 
     match crate::structured_refs::parse_structured_ref(&text, 0) {
-        Some((sref, end)) if end == text.len() => Expr::StructuredRef(StructuredRefExpr {
-            sheet,
-            sref,
-        }),
+        Some((sref, end)) if end == text.len() => {
+            Expr::StructuredRef(StructuredRefExpr { sheet, sref })
+        }
         _ => Expr::Error(ErrorKind::Name),
     }
 }
@@ -478,10 +466,7 @@ fn compile_expr_inner(
             let Some(addr) = Ref::from_abs_cell_addr(CellAddr { row, col }) else {
                 return Expr::Error(ErrorKind::Ref);
             };
-            Expr::CellRef(CellRef {
-                sheet,
-                addr,
-            })
+            Expr::CellRef(CellRef { sheet, addr })
         }
         crate::Expr::ColRef(r) => {
             let sheet =
@@ -498,11 +483,7 @@ fn compile_expr_inner(
             }) else {
                 return Expr::Error(ErrorKind::Ref);
             };
-            Expr::RangeRef(RangeRef {
-                sheet,
-                start,
-                end,
-            })
+            Expr::RangeRef(RangeRef { sheet, start, end })
         }
         crate::Expr::RowRef(r) => {
             let sheet =
@@ -519,11 +500,7 @@ fn compile_expr_inner(
             }) else {
                 return Expr::Error(ErrorKind::Ref);
             };
-            Expr::RangeRef(RangeRef {
-                sheet,
-                start,
-                end,
-            })
+            Expr::RangeRef(RangeRef { sheet, start, end })
         }
         crate::Expr::StructuredRef(r) => {
             let sheet =
@@ -536,10 +513,9 @@ fn compile_expr_inner(
             text.push_str(&r.spec);
             text.push(']');
             match crate::structured_refs::parse_structured_ref(&text, 0) {
-                Some((sref, end)) if end == text.len() => Expr::StructuredRef(StructuredRefExpr {
-                    sheet,
-                    sref,
-                }),
+                Some((sref, end)) if end == text.len() => {
+                    Expr::StructuredRef(StructuredRefExpr { sheet, sref })
+                }
                 _ => Expr::Error(ErrorKind::Name),
             }
         }

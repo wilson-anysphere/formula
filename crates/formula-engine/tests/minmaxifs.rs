@@ -20,15 +20,17 @@ fn minmaxifs_basic_filtering() {
         ("A4", 2.0),
         ("A5", 9.0),
     ] {
-        engine
-            .set_cell_value("Sheet1", addr, v)
-            .expect("set value");
+        engine.set_cell_value("Sheet1", addr, v).expect("set value");
     }
 
-    for (addr, v) in [("B1", "A"), ("B2", "B"), ("B3", "A"), ("B4", "B"), ("B5", "A")] {
-        engine
-            .set_cell_value("Sheet1", addr, v)
-            .expect("set value");
+    for (addr, v) in [
+        ("B1", "A"),
+        ("B2", "B"),
+        ("B3", "A"),
+        ("B4", "B"),
+        ("B5", "A"),
+    ] {
+        engine.set_cell_value("Sheet1", addr, v).expect("set value");
     }
 
     assert_eq!(
@@ -98,19 +100,25 @@ fn minmaxifs_multiple_criteria() {
         ("A4", 2.0),
         ("A5", 9.0),
     ] {
-        engine
-            .set_cell_value("Sheet1", addr, v)
-            .expect("set value");
+        engine.set_cell_value("Sheet1", addr, v).expect("set value");
     }
-    for (addr, v) in [("B1", "A"), ("B2", "B"), ("B3", "A"), ("B4", "B"), ("B5", "A")] {
-        engine
-            .set_cell_value("Sheet1", addr, v)
-            .expect("set value");
+    for (addr, v) in [
+        ("B1", "A"),
+        ("B2", "B"),
+        ("B3", "A"),
+        ("B4", "B"),
+        ("B5", "A"),
+    ] {
+        engine.set_cell_value("Sheet1", addr, v).expect("set value");
     }
-    for (addr, v) in [("C1", 1.0), ("C2", 2.0), ("C3", 3.0), ("C4", 4.0), ("C5", 5.0)] {
-        engine
-            .set_cell_value("Sheet1", addr, v)
-            .expect("set value");
+    for (addr, v) in [
+        ("C1", 1.0),
+        ("C2", 2.0),
+        ("C3", 3.0),
+        ("C4", 4.0),
+        ("C5", 5.0),
+    ] {
+        engine.set_cell_value("Sheet1", addr, v).expect("set value");
     }
 
     assert_eq!(
@@ -259,12 +267,9 @@ fn minmaxifs_date_criteria_is_parsed_with_date_system() {
     let mut engine = Engine::new();
 
     let system = ExcelDateSystem::EXCEL_1900;
-    let jan1 = ymd_to_serial(ExcelDate::new(2020, 1, 1), system)
-        .expect("date serial") as f64;
-    let jan2 = ymd_to_serial(ExcelDate::new(2020, 1, 2), system)
-        .expect("date serial") as f64;
-    let jan3 = ymd_to_serial(ExcelDate::new(2020, 1, 3), system)
-        .expect("date serial") as f64;
+    let jan1 = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).expect("date serial") as f64;
+    let jan2 = ymd_to_serial(ExcelDate::new(2020, 1, 2), system).expect("date serial") as f64;
+    let jan3 = ymd_to_serial(ExcelDate::new(2020, 1, 3), system).expect("date serial") as f64;
 
     engine
         .set_cell_value("Sheet1", "A1", jan1)
@@ -331,15 +336,11 @@ fn minmaxifs_accepts_reference_returning_functions() {
     let mut engine = Engine::new();
 
     for (addr, v) in [("A1", 5.0), ("A2", 3.0), ("A3", 7.0)] {
-        engine
-            .set_cell_value("Sheet1", addr, v)
-            .expect("set value");
+        engine.set_cell_value("Sheet1", addr, v).expect("set value");
     }
 
     for (addr, v) in [("B1", "A"), ("B2", "B"), ("B3", "A")] {
-        engine
-            .set_cell_value("Sheet1", addr, v)
-            .expect("set value");
+        engine.set_cell_value("Sheet1", addr, v).expect("set value");
     }
 
     // OFFSET returns a reference value; MINIFS/MAXIFS should accept those wherever a range is expected.
@@ -364,9 +365,7 @@ fn minmaxifs_error_precedence_is_row_major_for_sparse_iteration() {
 
     // Criteria range: include everything.
     for (addr, v) in [("D1", 1.0), ("E1", 1.0), ("D2", 1.0), ("E2", 1.0)] {
-        engine
-            .set_cell_value("Sheet1", addr, v)
-            .expect("set value");
+        engine.set_cell_value("Sheet1", addr, v).expect("set value");
     }
 
     // Target range has multiple errors. We expect the *first* error in row-major order

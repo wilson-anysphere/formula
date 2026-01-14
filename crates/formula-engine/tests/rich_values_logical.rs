@@ -36,4 +36,3 @@ fn not_returns_value_error_for_entity() {
     sheet.set("A1", Value::Entity(EntityValue::new("Entity")));
     assert_eq!(sheet.eval("=NOT(A1)"), Value::Error(ErrorKind::Value));
 }
-

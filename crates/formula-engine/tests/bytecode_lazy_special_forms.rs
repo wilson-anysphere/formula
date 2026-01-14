@@ -153,8 +153,7 @@ fn bytecode_choose_selected_cell_ref_coerces_in_if_condition() {
     // condition, that single-cell reference should behave like a scalar (matching the evaluator's
     // `eval_arg` behavior for IF conditions).
     let origin = CellCoord::new(0, 0);
-    let expr =
-        bytecode::parse_formula("=IF(CHOOSE(1, A1, FALSE), 1, 0)", origin).expect("parse");
+    let expr = bytecode::parse_formula("=IF(CHOOSE(1, A1, FALSE), 1, 0)", origin).expect("parse");
     let program = bytecode::Compiler::compile(Arc::from("choose_if_condition"), &expr);
     let locale = formula_engine::LocaleConfig::en_us();
 

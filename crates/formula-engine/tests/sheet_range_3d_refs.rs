@@ -204,7 +204,10 @@ fn sheet_range_membership_updates_after_reorder() {
     ast_engine.set_bytecode_enabled(false);
     setup(&mut ast_engine);
     ast_engine.recalculate_single_threaded();
-    assert_eq!(ast_engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
+    assert_eq!(
+        ast_engine.get_cell_value("Summary", "A1"),
+        Value::Number(6.0)
+    );
 
     assert!(ast_engine.reorder_sheet("Sheet2", 3));
     ast_engine.recalculate_single_threaded();
@@ -284,7 +287,10 @@ fn bytecode_concat_over_sheet_range_uses_tab_order_after_reorder() {
     );
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Text("123".into()));
+    assert_eq!(
+        engine.get_cell_value("Summary", "A1"),
+        Value::Text("123".into())
+    );
 
     // Reverse the sheet tab order: Sheet3, Sheet2, Sheet1, Summary.
     assert!(engine.reorder_sheet("Sheet3", 0));
@@ -299,7 +305,10 @@ fn bytecode_concat_over_sheet_range_uses_tab_order_after_reorder() {
     );
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Text("321".into()));
+    assert_eq!(
+        engine.get_cell_value("Summary", "A1"),
+        Value::Text("321".into())
+    );
 }
 
 #[test]
@@ -571,7 +580,10 @@ fn bytecode_dynamic_deref_sheet_range_ref_matches_ast() {
     let ast_value = engine.get_cell_value("Summary", "A1");
 
     assert_eq!(bytecode_value, ast_value);
-    assert_eq!(bytecode_value, Value::Error(formula_engine::ErrorKind::Value));
+    assert_eq!(
+        bytecode_value,
+        Value::Error(formula_engine::ErrorKind::Value)
+    );
 }
 
 #[test]

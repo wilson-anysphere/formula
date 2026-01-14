@@ -23,8 +23,12 @@ fn load_function_catalog() -> FunctionCatalog {
         .join("functionCatalog.json");
     let raw_catalog = std::fs::read_to_string(&catalog_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", catalog_path.display()));
-    serde_json::from_str(&raw_catalog)
-        .unwrap_or_else(|e| panic!("parse shared/functionCatalog.json ({}): {e}", catalog_path.display()))
+    serde_json::from_str(&raw_catalog).unwrap_or_else(|e| {
+        panic!(
+            "parse shared/functionCatalog.json ({}): {e}",
+            catalog_path.display()
+        )
+    })
 }
 
 fn normalize_function_name(name: &str) -> String {
@@ -38,9 +42,7 @@ fn parse_catalog_volatility(name: &str, volatility: &str) -> Volatility {
     match volatility {
         "volatile" => Volatility::Volatile,
         "non_volatile" => Volatility::NonVolatile,
-        other => panic!(
-            "unknown volatility in shared/functionCatalog.json for {name}: {other}"
-        ),
+        other => panic!("unknown volatility in shared/functionCatalog.json for {name}: {other}"),
     }
 }
 
@@ -150,4 +152,3 @@ fn all_registered_functions_exist_in_function_catalog() {
             .join("\n")
     );
 }
-

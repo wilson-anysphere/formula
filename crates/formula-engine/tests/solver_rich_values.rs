@@ -15,16 +15,14 @@ fn solver_model_new_errors_on_entity_var_value_and_includes_display_string() {
     // Rich scalar value whose display string is non-numeric. Solver should surface the display
     // text in the error message.
     engine
-        .set_cell_value("Sheet1", "A1", Value::Entity(EntityValue::new("Entity display")))
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Entity(EntityValue::new("Entity display")),
+        )
         .unwrap();
 
-    let err = match EngineSolverModel::new(
-        &mut engine,
-        "Sheet1",
-        "B1",
-        vec!["A1"],
-        Vec::new(),
-    ) {
+    let err = match EngineSolverModel::new(&mut engine, "Sheet1", "B1", vec!["A1"], Vec::new()) {
         Ok(_) => panic!("expected EngineSolverModel::new to fail for non-numeric var cell"),
         Err(err) => err,
     };
@@ -50,16 +48,14 @@ fn solver_model_new_errors_on_record_var_value_and_includes_display_string() {
 
     engine.set_cell_value("Sheet1", "B1", 0.0).unwrap();
     engine
-        .set_cell_value("Sheet1", "A1", Value::Record(RecordValue::new("Record display")))
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::new("Record display")),
+        )
         .unwrap();
 
-    let err = match EngineSolverModel::new(
-        &mut engine,
-        "Sheet1",
-        "B1",
-        vec!["A1"],
-        Vec::new(),
-    ) {
+    let err = match EngineSolverModel::new(&mut engine, "Sheet1", "B1", vec!["A1"], Vec::new()) {
         Ok(_) => panic!("expected EngineSolverModel::new to fail for non-numeric var cell"),
         Err(err) => err,
     };

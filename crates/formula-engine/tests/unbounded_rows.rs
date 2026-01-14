@@ -67,9 +67,7 @@ fn row_limit_is_capped_at_i32_max() {
 
     // The largest allowed 1-indexed row is `i32::MAX` (because internal row arithmetic relies on
     // i32 offsets).
-    engine
-        .set_cell_value("Sheet1", "A2147483647", 1.0)
-        .unwrap();
+    engine.set_cell_value("Sheet1", "A2147483647", 1.0).unwrap();
     assert_eq!(
         engine.sheet_dimensions("Sheet1"),
         Some((i32::MAX as u32, EXCEL_MAX_COLS))

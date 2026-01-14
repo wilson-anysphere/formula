@@ -74,13 +74,7 @@ fn depreciation_step(cost: f64, salvage: f64, life: f64, factor: f64, accumulate
 /// - The depreciation rate is rounded to 3 decimals.
 /// - The first period is prorated by `month/12` (default `month = 12`).
 /// - If `month != 12`, Excel adds one extra period (`life + 1`) prorated by `(12-month)/12`.
-pub fn db(
-    cost: f64,
-    salvage: f64,
-    life: f64,
-    period: f64,
-    month: Option<f64>,
-) -> ExcelResult<f64> {
+pub fn db(cost: f64, salvage: f64, life: f64, period: f64, month: Option<f64>) -> ExcelResult<f64> {
     let month = month.unwrap_or(12.0);
     if !cost.is_finite()
         || !salvage.is_finite()
@@ -176,8 +170,7 @@ pub fn vdb(
         return Err(ExcelError::Num);
     }
 
-    if cost <= 0.0 || salvage < 0.0 || life <= 0.0 || start < 0.0 || end <= start || factor <= 0.0
-    {
+    if cost <= 0.0 || salvage < 0.0 || life <= 0.0 || start < 0.0 || end <= start || factor <= 0.0 {
         return Err(ExcelError::Num);
     }
 

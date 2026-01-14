@@ -52,4 +52,3 @@ pub fn frequency(data: &[f64], bins: &[f64]) -> Result<Vec<u64>, ErrorKind> {
 
     Ok(counts)
 }
-

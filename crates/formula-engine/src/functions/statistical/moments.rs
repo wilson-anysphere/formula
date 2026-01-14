@@ -44,7 +44,11 @@ fn mean_and_scale(values: &[f64]) -> Result<(f64, f64), ErrorKind> {
 ///
 /// This scaling keeps the powers bounded (|z| ≤ 1), preventing overflow when the
 /// raw values have large magnitude.
-fn standardized_moment_sums(values: &[f64], mean: f64, scale: f64) -> Result<(f64, f64, f64), ErrorKind> {
+fn standardized_moment_sums(
+    values: &[f64],
+    mean: f64,
+    scale: f64,
+) -> Result<(f64, f64, f64), ErrorKind> {
     if scale == 0.0 {
         return Ok((0.0, 0.0, 0.0));
     }

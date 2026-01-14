@@ -28,4 +28,3 @@ fn runtime_sheet_name_lookup_uses_nfkc_case_insensitive_matching() {
     // "Kelvin" was created first, so it is sheet number 1.
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.0));
 }
-

@@ -38,4 +38,3 @@ inventory::submit! {
 fn false_fn(_ctx: &dyn FunctionContext, _args: &[CompiledExpr]) -> Value {
     Value::Bool(false)
 }
-

@@ -292,10 +292,7 @@ fn lower_cell_ref(r: &crate::CellRef) -> Option<CellRef<String>> {
     let row = coord_index(&r.row)?;
     let col = coord_index(&r.col)?;
     let addr = Ref::from_abs_cell_addr(CellAddr { row, col })?;
-    Some(CellRef {
-        sheet,
-        addr,
-    })
+    Some(CellRef { sheet, addr })
 }
 
 fn rect_from_col_ref(r: &crate::ColRef) -> Option<RectRef> {
@@ -375,10 +372,9 @@ fn lower_structured_ref(r: &crate::StructuredRef) -> ParsedExpr {
     text.push(']');
 
     match crate::structured_refs::parse_structured_ref(&text, 0) {
-        Some((sref, end)) if end == text.len() => Expr::StructuredRef(StructuredRefExpr {
-            sheet,
-            sref,
-        }),
+        Some((sref, end)) if end == text.len() => {
+            Expr::StructuredRef(StructuredRefExpr { sheet, sref })
+        }
         _ => Expr::Error(ErrorKind::Name),
     }
 }

@@ -13,7 +13,9 @@ fn assert_rich_values_compare_and_sort_like_text(mut engine: Engine) {
         .unwrap();
 
     engine.set_cell_formula("Sheet1", "C1", "=A1=B1").unwrap();
-    engine.set_cell_formula("Sheet1", "C2", r#"=A1>"Aardvark""#).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", r#"=A1>"Aardvark""#)
+        .unwrap();
     engine.set_cell_formula("Sheet1", "E1", "=D1=B1").unwrap();
 
     // Validate lookup binary-search semantics as well: type precedence should treat entities

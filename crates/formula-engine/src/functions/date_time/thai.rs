@@ -52,4 +52,3 @@ pub fn thaiyear(serial_number: i32, system: ExcelDateSystem) -> ExcelResult<i32>
         .checked_add(BUDDHIST_ERA_OFFSET)
         .ok_or(ExcelError::Num)
 }
-

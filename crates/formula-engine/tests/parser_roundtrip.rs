@@ -158,10 +158,7 @@ fn serializes_external_workbook_prefixes_with_quoted_sheet_names_when_required()
 
     // Sheet names with spaces must be quoted (even when the workbook is unquoted).
     let ast = parse_formula("=[Book.xlsx]'My Sheet'!A1+1", opts).unwrap();
-    assert_eq!(
-        ast.to_string(ser).unwrap(),
-        "='[Book.xlsx]My Sheet'!A1+1"
-    );
+    assert_eq!(ast.to_string(ser).unwrap(), "='[Book.xlsx]My Sheet'!A1+1");
 }
 
 #[test]

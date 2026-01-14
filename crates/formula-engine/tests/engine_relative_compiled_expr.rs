@@ -15,12 +15,8 @@ fn fill_down_formula_uses_per_cell_origin_and_shares_bytecode_program() {
     // Filled pattern:
     // C1: =A1+B1
     // C2: =A2+B2
-    engine
-        .set_cell_formula("Sheet1", "C1", "=A1+B1")
-        .unwrap();
-    engine
-        .set_cell_formula("Sheet1", "C2", "=A2+B2")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "C1", "=A1+B1").unwrap();
+    engine.set_cell_formula("Sheet1", "C2", "=A2+B2").unwrap();
 
     // These two formulas should share a single normalized bytecode program (interning) because
     // their references are the same once expressed as offsets from the formula origin cell.
@@ -233,12 +229,8 @@ fn mixed_absolute_and_relative_refs_use_per_cell_origin_and_share_bytecode_progr
     //
     // Once expressed as offsets + absolute flags from the formula origin cell, these should share
     // a single normalized bytecode program.
-    engine
-        .set_cell_formula("Sheet1", "C1", "=$A1+B$1")
-        .unwrap();
-    engine
-        .set_cell_formula("Sheet1", "C2", "=$A2+B$1")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "C1", "=$A1+B$1").unwrap();
+    engine.set_cell_formula("Sheet1", "C2", "=$A2+B$1").unwrap();
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 2);

@@ -388,7 +388,11 @@ pub trait FunctionContext {
     /// Return per-column properties (width/hidden/default style), if present.
     ///
     /// `ColProperties.width` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
-    fn col_properties(&self, _sheet_id: &SheetId, _col: u32) -> Option<formula_model::ColProperties> {
+    fn col_properties(
+        &self,
+        _sheet_id: &SheetId,
+        _col: u32,
+    ) -> Option<formula_model::ColProperties> {
         None
     }
 

@@ -44,7 +44,13 @@ fn bytecode_reference_union_can_be_used_as_one_argument_among_many() {
         Expr::FuncCall { func, args } => {
             assert_eq!(func, &Function::Sum);
             assert_eq!(args.len(), 2);
-            assert!(matches!(args[0], Expr::Binary { op: BinaryOp::Union, .. }));
+            assert!(matches!(
+                args[0],
+                Expr::Binary {
+                    op: BinaryOp::Union,
+                    ..
+                }
+            ));
             assert_eq!(args[1], Expr::Literal(Value::Number(1.0)));
         }
         other => panic!("expected SUM func call, got {other:?}"),
@@ -83,4 +89,3 @@ fn bytecode_reference_union_supports_ranges() {
     assert_eq!(vm_value, Value::Number(10.0));
     assert_eq!(ast_value, Value::Number(10.0));
 }
-

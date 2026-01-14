@@ -3,7 +3,14 @@ use crate::functions::financial::iterative::EXCEL_ITERATION_TOLERANCE;
 
 use super::time_value::{ipmt, ppmt};
 
-fn validate_inputs(rate: f64, nper: f64, pv: f64, start: f64, end: f64, typ: f64) -> ExcelResult<()> {
+fn validate_inputs(
+    rate: f64,
+    nper: f64,
+    pv: f64,
+    start: f64,
+    end: f64,
+    typ: f64,
+) -> ExcelResult<()> {
     if !rate.is_finite()
         || !nper.is_finite()
         || !pv.is_finite()
@@ -32,7 +39,9 @@ fn validate_inputs(rate: f64, nper: f64, pv: f64, start: f64, end: f64, typ: f64
     // unexpected periods.
     let start_int = start.round();
     let end_int = end.round();
-    if (start - start_int).abs() > EXCEL_ITERATION_TOLERANCE || (end - end_int).abs() > EXCEL_ITERATION_TOLERANCE {
+    if (start - start_int).abs() > EXCEL_ITERATION_TOLERANCE
+        || (end - end_int).abs() > EXCEL_ITERATION_TOLERANCE
+    {
         return Err(ExcelError::Num);
     }
 
@@ -65,9 +74,10 @@ pub fn cumipmt(rate: f64, nper: f64, pv: f64, start: f64, end: f64, typ: f64) ->
     let start_period = start.round() as i64;
     let end_period = end.round() as i64;
 
-    kahan_sum((start_period..=end_period).map(|per| {
-        ipmt(rate, per as f64, nper, pv, Some(0.0), Some(typ))
-    }))
+    kahan_sum(
+        (start_period..=end_period)
+            .map(|per| ipmt(rate, per as f64, nper, pv, Some(0.0), Some(typ))),
+    )
 }
 
 pub fn cumprinc(rate: f64, nper: f64, pv: f64, start: f64, end: f64, typ: f64) -> ExcelResult<f64> {
@@ -76,8 +86,8 @@ pub fn cumprinc(rate: f64, nper: f64, pv: f64, start: f64, end: f64, typ: f64) -
     let start_period = start.round() as i64;
     let end_period = end.round() as i64;
 
-    kahan_sum((start_period..=end_period).map(|per| {
-        ppmt(rate, per as f64, nper, pv, Some(0.0), Some(typ))
-    }))
+    kahan_sum(
+        (start_period..=end_period)
+            .map(|per| ppmt(rate, per as f64, nper, pv, Some(0.0), Some(typ))),
+    )
 }
-

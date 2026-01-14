@@ -125,7 +125,11 @@ where
     }
 
     // Start inside the bracket; prefer the original guess if it's in range.
-    let mut x = if (a..=b).contains(&guess) { guess } else { (a + b) * 0.5 };
+    let mut x = if (a..=b).contains(&guess) {
+        guess
+    } else {
+        (a + b) * 0.5
+    };
     let mut fx = f_guess;
     if !(a..=b).contains(&x) {
         x = (a + b) * 0.5;

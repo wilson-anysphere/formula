@@ -1,5 +1,5 @@
-use formula_engine::eval::CellAddr;
 use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+use formula_engine::eval::CellAddr;
 use formula_engine::{Engine, ExternalValueProvider, PrecedentNode, Value};
 use formula_model::table::TableColumn;
 use formula_model::{Range, Table};
@@ -29,10 +29,10 @@ impl TestExternalProvider {
     }
 
     fn set_table(&self, workbook: &str, sheet: &str, table: Table) {
-        self.tables
-            .lock()
-            .expect("lock poisoned")
-            .insert((workbook.to_string(), table.name.clone()), (sheet.to_string(), table));
+        self.tables.lock().expect("lock poisoned").insert(
+            (workbook.to_string(), table.name.clone()),
+            (sheet.to_string(), table),
+        );
     }
 }
 
@@ -115,11 +115,7 @@ impl ExternalValueProvider for ProviderWithoutSheetOrder {
 #[test]
 fn external_cell_ref_resolves_via_provider() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        41.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -134,11 +130,7 @@ fn external_cell_ref_resolves_via_provider() {
 #[test]
 fn external_cell_ref_with_workbook_name_containing_lbracket_resolves_via_provider() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[A1[Name.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        41.0,
-    );
+    provider.set("[A1[Name.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -173,11 +165,7 @@ fn external_cell_ref_with_workbook_name_containing_lbracket_and_escaped_rbracket
 #[test]
 fn quoted_external_cell_ref_with_workbook_name_containing_lbracket_resolves_via_provider() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[A1[Name.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        41.0,
-    );
+    provider.set("[A1[Name.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -212,11 +200,7 @@ fn quoted_external_cell_ref_with_workbook_name_containing_lbracket_and_escaped_r
 #[test]
 fn indirect_external_cell_ref_is_ref_error() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        41.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -234,11 +218,7 @@ fn indirect_external_cell_ref_is_ref_error() {
 #[test]
 fn external_cell_ref_participates_in_arithmetic() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        41.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -273,11 +253,7 @@ fn external_cell_ref_with_path_qualified_workbook_resolves_via_provider() {
 fn sum_over_external_range_uses_reference_semantics() {
     // Excel quirk: SUM over references ignores logicals/text stored in cells.
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        1.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
     provider.set(
         "[Book.xlsx]Sheet1",
         CellAddr { row: 1, col: 0 },
@@ -325,26 +301,10 @@ fn indirect_external_range_ref_is_ref_error() {
 #[test]
 fn external_range_spills_to_grid() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        1.0,
-    );
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 1 },
-        2.0,
-    );
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 1, col: 0 },
-        3.0,
-    );
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 1, col: 1 },
-        4.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 1 }, 2.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 3.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 1 }, 4.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -355,10 +315,7 @@ fn external_range_spills_to_grid() {
 
     assert_eq!(
         engine.spill_range("Sheet1", "C1"),
-        Some((
-            CellAddr { row: 0, col: 2 },
-            CellAddr { row: 1, col: 3 }
-        ))
+        Some((CellAddr { row: 0, col: 2 }, CellAddr { row: 1, col: 3 }))
     );
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(2.0));
@@ -402,11 +359,7 @@ fn precedents_include_external_refs() {
 #[test]
 fn precedents_include_dynamic_external_precedents_from_indirect() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        41.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -433,11 +386,7 @@ fn precedents_include_dynamic_external_precedents_from_indirect() {
 #[test]
 fn precedents_include_dynamic_external_precedents_from_offset() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 1, col: 0 },
-        41.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -634,11 +583,7 @@ fn precedents_omit_external_3d_sheet_spans_when_sheet_order_unavailable() {
 #[test]
 fn external_refs_are_volatile() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        1.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider.clone()));
@@ -650,11 +595,7 @@ fn external_refs_are_volatile() {
 
     // Mutate the provider without marking any cells dirty. Volatile external references should be
     // included in subsequent recalculation passes.
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        2.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 2.0);
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
 }
@@ -808,11 +749,7 @@ fn external_sheet_invalidation_dirties_dynamic_external_dependents_from_indirect
 #[test]
 fn degenerate_external_3d_sheet_range_ref_resolves_via_provider() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        41.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -827,11 +764,7 @@ fn degenerate_external_3d_sheet_range_ref_resolves_via_provider() {
 #[test]
 fn degenerate_external_3d_sheet_range_ref_matches_endpoints_nfkc_case_insensitively_for_bytecode() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Kelvin",
-        CellAddr { row: 0, col: 0 },
-        41.0,
-    );
+    provider.set("[Book.xlsx]Kelvin", CellAddr { row: 0, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -1009,18 +942,10 @@ fn index_over_external_3d_span_uses_provider_tab_order_when_lexicographic_order_
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "A1",
-            "=INDEX([Book.xlsx]Sheet2:Sheet10!A1,1,1,1)",
-        )
+        .set_cell_formula("Sheet1", "A1", "=INDEX([Book.xlsx]Sheet2:Sheet10!A1,1,1,1)")
         .unwrap();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "A2",
-            "=INDEX([Book.xlsx]Sheet2:Sheet10!A1,1,1,2)",
-        )
+        .set_cell_formula("Sheet1", "A2", "=INDEX([Book.xlsx]Sheet2:Sheet10!A1,1,1,2)")
         .unwrap();
     engine.recalculate();
 
@@ -1224,9 +1149,7 @@ fn database_functions_support_computed_criteria_over_external_database() {
     engine.set_external_value_provider(Some(provider));
 
     // Computed criteria: blank header + formula referencing the first database record row.
-    engine
-        .set_cell_formula("Sheet1", "F2", "=C2>30")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "F2", "=C2>30").unwrap();
 
     // Evaluate a representative set of D* functions over the external database range.
     engine

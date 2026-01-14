@@ -1,9 +1,9 @@
 use formula_engine::editing::rewrite::{
     rewrite_formula_for_copy_delta, rewrite_formula_for_range_map,
-    rewrite_formula_for_range_map_with_resolver,
-    rewrite_formula_for_sheet_delete,
-    rewrite_formula_for_structural_edit, rewrite_formula_for_structural_edit_with_sheet_order_resolver,
-    GridRange, RangeMapEdit, StructuralEdit,
+    rewrite_formula_for_range_map_with_resolver, rewrite_formula_for_sheet_delete,
+    rewrite_formula_for_structural_edit,
+    rewrite_formula_for_structural_edit_with_sheet_order_resolver, GridRange, RangeMapEdit,
+    StructuralEdit,
 };
 use formula_engine::CellAddr;
 use pretty_assertions::assert_eq;
@@ -55,13 +55,8 @@ fn copy_delta_preserves_absolute_external_cell_ref() {
 #[test]
 fn copy_delta_shifts_external_rectangular_range() {
     let origin = CellAddr::new(2, 2);
-    let (out, changed) = rewrite_formula_for_copy_delta(
-        "=SUM([Book.xlsx]Sheet1!A1:B2)",
-        "Sheet1",
-        origin,
-        1,
-        1,
-    );
+    let (out, changed) =
+        rewrite_formula_for_copy_delta("=SUM([Book.xlsx]Sheet1!A1:B2)", "Sheet1", origin, 1, 1);
 
     assert!(changed);
     assert_eq!(out, "=SUM([Book.xlsx]Sheet1!B2:C3)");

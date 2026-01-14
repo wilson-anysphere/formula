@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
 
 use crate::coercion::datetime::parse_value_text;
+use crate::coercion::number::parse_number_strict;
 use crate::coercion::ValueLocaleConfig;
 use crate::date::ExcelDateSystem;
 use crate::error::{ExcelError, ExcelResult};
-use crate::coercion::number::parse_number_strict;
 
 /// VALUE(text)
 ///
@@ -12,7 +12,12 @@ use crate::coercion::number::parse_number_strict;
 /// - Numeric parsing with locale-aware separators
 /// - Date/time text parsing (via DATEVALUE/TIMEVALUE rules)
 pub fn value(text: &str) -> ExcelResult<f64> {
-    value_with_locale(text, ValueLocaleConfig::en_us(), Utc::now(), ExcelDateSystem::EXCEL_1900)
+    value_with_locale(
+        text,
+        ValueLocaleConfig::en_us(),
+        Utc::now(),
+        ExcelDateSystem::EXCEL_1900,
+    )
 }
 
 pub fn value_with_locale(

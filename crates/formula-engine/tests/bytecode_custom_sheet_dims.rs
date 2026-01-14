@@ -15,8 +15,12 @@ fn bytecode_custom_sheet_dims_whole_row_and_column_refs() {
     engine.set_cell_value("Sheet1", "A10", 3.0).unwrap();
 
     // Avoid circular references by keeping these formulas out of the referenced row/column.
-    engine.set_cell_formula("Sheet1", "B1", "=SUM(A:A)").unwrap();
-    engine.set_cell_formula("Sheet1", "B2", "=ROWS(A:A)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(A:A)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=ROWS(A:A)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "B3", "=COLUMNS(1:1)")
         .unwrap();
@@ -28,7 +32,9 @@ fn bytecode_custom_sheet_dims_whole_row_and_column_refs() {
         "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
     );
     assert!(
-        !report.iter().any(|e| e.reason == BytecodeCompileReason::NonDefaultSheetDimensions),
+        !report
+            .iter()
+            .any(|e| e.reason == BytecodeCompileReason::NonDefaultSheetDimensions),
         "NonDefaultSheetDimensions should not be reported after dimension-aware lowering"
     );
 
@@ -217,7 +223,8 @@ fn bytecode_custom_sheet_dims_column_spill_uses_referenced_sheet_dimensions() {
 }
 
 #[test]
-fn bytecode_custom_sheet_dims_column_sheet_prefixed_whole_column_does_not_trigger_range_cell_limit() {
+fn bytecode_custom_sheet_dims_column_sheet_prefixed_whole_column_does_not_trigger_range_cell_limit()
+{
     // Regression test: `COLUMN(Sheet2!A:A)` produces a single value even if Sheet2 has a very large
     // row count, so the bytecode compiler should not reject it based on the referenced range's
     // cell count.
@@ -244,7 +251,8 @@ fn bytecode_custom_sheet_dims_column_sheet_prefixed_whole_column_does_not_trigge
 }
 
 #[test]
-fn bytecode_custom_sheet_dims_column_sheet_prefixed_column_range_does_not_trigger_range_cell_limit() {
+fn bytecode_custom_sheet_dims_column_sheet_prefixed_column_range_does_not_trigger_range_cell_limit()
+{
     // Regression test: `COLUMN(Sheet2!A:B)` returns a 1x2 vector even though `A:B` spans all rows.
     // The compiler should not reject it based on the dense range cell count.
     let mut engine = Engine::new();
@@ -278,7 +286,8 @@ fn bytecode_custom_sheet_dims_column_sheet_prefixed_column_range_does_not_trigge
 }
 
 #[test]
-fn bytecode_custom_sheet_dims_row_sheet_prefixed_full_row_range_does_not_trigger_range_cell_limit() {
+fn bytecode_custom_sheet_dims_row_sheet_prefixed_full_row_range_does_not_trigger_range_cell_limit()
+{
     // Regression test: `ROW(Sheet2!1:1000)` spans an entire *row range* (all columns), but the
     // output is a 1000x1 vector (one element per row), not a dense 1000xN grid. The bytecode
     // compiler should therefore apply the same 1-D cell-count limit logic used for unprefixed
@@ -313,8 +322,14 @@ fn bytecode_custom_sheet_dims_row_sheet_prefixed_full_row_range_does_not_trigger
     assert_eq!(end.col, 1);
 
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
-    assert_eq!(engine.get_cell_value("Sheet1", "B500"), Value::Number(500.0));
-    assert_eq!(engine.get_cell_value("Sheet1", "B1000"), Value::Number(1000.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B500"),
+        Value::Number(500.0)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1000"),
+        Value::Number(1000.0)
+    );
 }
 
 #[test]
@@ -350,7 +365,9 @@ fn bytecode_custom_sheet_dims_use_referenced_sheet_for_sheet_prefixed_whole_row_
         "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
     );
     assert!(
-        !report.iter().any(|e| e.reason == BytecodeCompileReason::NonDefaultSheetDimensions),
+        !report
+            .iter()
+            .any(|e| e.reason == BytecodeCompileReason::NonDefaultSheetDimensions),
         "NonDefaultSheetDimensions should not be reported after dimension-aware lowering"
     );
 

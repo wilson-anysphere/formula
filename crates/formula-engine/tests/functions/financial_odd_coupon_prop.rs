@@ -74,12 +74,8 @@ fn arb_oddf_case() -> impl Strategy<Value = OddFirstCase> {
                 move |(year, month, n_coupons, issue_offset_days, rate, yld, redemption)| {
                     let first_coupon =
                         ymd_to_serial(ExcelDate::new(year, month, 15), SYSTEM).unwrap();
-                    let maturity = edate(
-                        first_coupon,
-                        months_per_period * n_coupons,
-                        SYSTEM,
-                    )
-                    .unwrap();
+                    let maturity =
+                        edate(first_coupon, months_per_period * n_coupons, SYSTEM).unwrap();
 
                     let issue = first_coupon - issue_offset_days;
 

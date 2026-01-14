@@ -8,7 +8,10 @@ use crate::value::{ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
 
-fn eval_complex_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<ParsedComplex, ErrorKind> {
+fn eval_complex_arg(
+    ctx: &dyn FunctionContext,
+    expr: &CompiledExpr,
+) -> Result<ParsedComplex, ErrorKind> {
     let v = eval_scalar_arg(ctx, expr);
     match v {
         Value::Error(e) => Err(e),
@@ -32,9 +35,11 @@ fn eval_complex_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Pa
         Value::Text(s) => parse_complex(&s, ctx.number_locale()),
         Value::Entity(v) => parse_complex(&v.display, ctx.number_locale()),
         Value::Record(v) => parse_complex(&v.display, ctx.number_locale()),
-        Value::Array(_) | Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
-            Err(ErrorKind::Value)
-        }
+        Value::Array(_)
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => Err(ErrorKind::Value),
     }
 }
 
@@ -383,11 +388,12 @@ fn impower_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // Excel returns exact real results for common integer powers (e.g. IMPOWER("i",2) == "-1").
     // `powf` goes through exp/ln and can introduce small rounding artifacts in the imaginary part,
     // so prefer integer exponentiation when possible.
-    let out_raw = if power.fract() == 0.0 && power >= (i32::MIN as f64) && power <= (i32::MAX as f64) {
-        a.value.powi(power as i32)
-    } else {
-        a.value.powf(power)
-    };
+    let out_raw =
+        if power.fract() == 0.0 && power >= (i32::MIN as f64) && power <= (i32::MAX as f64) {
+            a.value.powi(power as i32)
+        } else {
+            a.value.powf(power)
+        };
 
     let out = match checked_complex(out_raw) {
         Ok(v) => v,

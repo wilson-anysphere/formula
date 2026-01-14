@@ -410,7 +410,12 @@ fn cube_and_rtd_delegate_to_provider() {
     let mut engine = Engine::new();
     engine.set_external_data_provider(Some(provider.clone()));
 
-    provider.set_rtd("prog", "server", &["topic"], Value::Text("rtd-ok".to_string()));
+    provider.set_rtd(
+        "prog",
+        "server",
+        &["topic"],
+        Value::Text("rtd-ok".to_string()),
+    );
     assert_eq!(
         eval(&mut engine, "=RTD(\"prog\",\"server\",\"topic\")"),
         Value::Text("rtd-ok".to_string())
@@ -424,11 +429,7 @@ fn cube_and_rtd_delegate_to_provider() {
         })]
     );
 
-    provider.set_cube_value(
-        "conn",
-        &["tuple1", "tuple2"],
-        Value::Number(42.0),
-    );
+    provider.set_cube_value("conn", &["tuple1", "tuple2"], Value::Number(42.0));
     assert_eq!(
         eval(&mut engine, "=CUBEVALUE(\"conn\",\"tuple1\",\"tuple2\")"),
         Value::Number(42.0)
@@ -580,11 +581,17 @@ fn cube_rtd_are_volatile_and_refresh_without_dirtying_cells() {
 
     provider.set_rtd("prog", "server", &["topic"], Value::Text("v1".to_string()));
     engine.recalculate();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("v1".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("v1".to_string())
+    );
 
     provider.set_rtd("prog", "server", &["topic"], Value::Text("v2".to_string()));
     engine.recalculate();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("v2".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("v2".to_string())
+    );
 }
 
 #[test]
@@ -620,4 +627,3 @@ fn provider_returned_getting_data_is_surfaced() {
         Value::Error(ErrorKind::GettingData)
     );
 }
-

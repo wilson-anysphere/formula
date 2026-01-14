@@ -44,4 +44,3 @@ fn build_rayon_pool() -> Option<ThreadPool> {
 pub(crate) fn rayon_pool() -> Option<&'static ThreadPool> {
     RAYON_POOL.get_or_init(build_rayon_pool).as_ref()
 }
-

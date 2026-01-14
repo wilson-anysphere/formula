@@ -56,11 +56,7 @@ fn sumif_parses_nbsp_thousands_separator_in_fr_fr_criteria_strings() {
     engine.set_cell_value("Sheet1", "A2", 1235).unwrap();
     engine.set_cell_value("Sheet1", "A3", 2000).unwrap();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "B1",
-            "=SUMIF(A1:A3,\">1\u{00A0}234,5\",A1:A3)",
-        )
+        .set_cell_formula("Sheet1", "B1", "=SUMIF(A1:A3,\">1\u{00A0}234,5\",A1:A3)")
         .unwrap();
 
     engine.recalculate_single_threaded();
@@ -76,11 +72,7 @@ fn sumif_parses_narrow_nbsp_thousands_separator_in_fr_fr_criteria_strings() {
     engine.set_cell_value("Sheet1", "A2", 1235).unwrap();
     engine.set_cell_value("Sheet1", "A3", 2000).unwrap();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "B1",
-            "=SUMIF(A1:A3,\">1\u{202F}234,5\",A1:A3)",
-        )
+        .set_cell_formula("Sheet1", "B1", "=SUMIF(A1:A3,\">1\u{202F}234,5\",A1:A3)")
         .unwrap();
 
     engine.recalculate_single_threaded();
@@ -104,7 +96,10 @@ fn sumif_parses_multiple_nbsp_thousands_separators_in_fr_fr_criteria_strings() {
         .unwrap();
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3_234_568.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Number(3_234_568.0)
+    );
 }
 
 #[test]
@@ -124,5 +119,8 @@ fn sumif_parses_mixed_nbsp_and_narrow_nbsp_thousands_separators_in_fr_fr_criteri
         .unwrap();
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3_234_568.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Number(3_234_568.0)
+    );
 }

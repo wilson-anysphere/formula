@@ -42,4 +42,3 @@ fn field_error_propagates_through_bytecode_formulas() {
         Value::Error(ErrorKind::Field)
     );
 }
-

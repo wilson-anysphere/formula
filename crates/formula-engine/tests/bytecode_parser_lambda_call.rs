@@ -37,11 +37,8 @@ fn bytecode_parser_supports_parenthesized_name_invocation_for_recursive_let_bind
     let locale = formula_engine::LocaleConfig::en_us();
     let grid = ColumnarGrid::new(1, 1);
 
-    let expr = bytecode::parse_formula(
-        "=LET(f, LAMBDA(n, IF(n=0, 1, n*f(n-1))), (f)(5))",
-        origin,
-    )
-    .expect("parse");
+    let expr = bytecode::parse_formula("=LET(f, LAMBDA(n, IF(n=0, 1, n*f(n-1))), (f)(5))", origin)
+        .expect("parse");
     let program = bytecode::Compiler::compile(Arc::from("recursive_let_lambda_call"), &expr);
 
     let mut vm = Vm::with_capacity(64);

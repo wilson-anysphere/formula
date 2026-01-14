@@ -1,6 +1,10 @@
 use crate::error::{ExcelError, ExcelResult};
 
-pub(crate) fn parse_number_strict(text: &str, decimal_sep: char, group_sep: Option<char>) -> ExcelResult<f64> {
+pub(crate) fn parse_number_strict(
+    text: &str,
+    decimal_sep: char,
+    group_sep: Option<char>,
+) -> ExcelResult<f64> {
     if text.trim().is_empty() {
         return Err(ExcelError::Value);
     }
@@ -23,7 +27,11 @@ pub(crate) fn parse_number_coercion(
     parse_number_nonempty(s, decimal_sep, group_sep)
 }
 
-fn parse_number_nonempty(mut s: &str, decimal_sep: char, group_sep: Option<char>) -> ExcelResult<f64> {
+fn parse_number_nonempty(
+    mut s: &str,
+    decimal_sep: char,
+    group_sep: Option<char>,
+) -> ExcelResult<f64> {
     if group_sep == Some(decimal_sep) {
         return Err(ExcelError::Value);
     }

@@ -41,15 +41,21 @@ fn norm_dist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mean = array_lift::eval_arg(ctx, &args[1]);
     let std_dev = array_lift::eval_arg(ctx, &args[2]);
     let cumulative = array_lift::eval_arg(ctx, &args[3]);
-    array_lift::lift4(x, mean, std_dev, cumulative, |x, mean, std_dev, cumulative| {
-        let x = x.coerce_to_number_with_ctx(ctx)?;
-        let mean = mean.coerce_to_number_with_ctx(ctx)?;
-        let std_dev = std_dev.coerce_to_number_with_ctx(ctx)?;
-        let cumulative = cumulative.coerce_to_bool_with_ctx(ctx)?;
-        Ok(Value::Number(crate::functions::statistical::norm_dist(
-            x, mean, std_dev, cumulative,
-        )?))
-    })
+    array_lift::lift4(
+        x,
+        mean,
+        std_dev,
+        cumulative,
+        |x, mean, std_dev, cumulative| {
+            let x = x.coerce_to_number_with_ctx(ctx)?;
+            let mean = mean.coerce_to_number_with_ctx(ctx)?;
+            let std_dev = std_dev.coerce_to_number_with_ctx(ctx)?;
+            let cumulative = cumulative.coerce_to_bool_with_ctx(ctx)?;
+            Ok(Value::Number(crate::functions::statistical::norm_dist(
+                x, mean, std_dev, cumulative,
+            )?))
+        },
+    )
 }
 
 inventory::submit! {
@@ -96,7 +102,9 @@ fn norms_dist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let z = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(z, |z| {
         let z = z.coerce_to_number_with_ctx(ctx)?;
-        Ok(Value::Number(crate::functions::statistical::norm_s_dist(z, true)?))
+        Ok(Value::Number(crate::functions::statistical::norm_s_dist(
+            z, true,
+        )?))
     })
 }
 
@@ -137,7 +145,9 @@ fn norm_inv_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let mean = mean.coerce_to_number_with_ctx(ctx)?;
         let std_dev = std_dev.coerce_to_number_with_ctx(ctx)?;
         Ok(Value::Number(crate::functions::statistical::norm_inv(
-            probability, mean, std_dev,
+            probability,
+            mean,
+            std_dev,
         )?))
     })
 }

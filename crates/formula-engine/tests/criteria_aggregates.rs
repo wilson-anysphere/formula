@@ -1,7 +1,7 @@
-use formula_engine::value::{EntityValue, ErrorKind, RecordValue};
-use formula_engine::{Engine, PrecedentNode, Value};
 use formula_engine::eval::CellAddr;
 use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::value::{EntityValue, ErrorKind, RecordValue};
+use formula_engine::{Engine, PrecedentNode, Value};
 
 struct TestSheet {
     engine: Engine,
@@ -82,7 +82,10 @@ fn sumif_numeric_criteria_does_not_treat_text_as_zero() {
         "expected SUMIF formula to compile to bytecode for this test"
     );
     sheet.engine.recalculate();
-    assert_number(&sheet.engine.get_cell_value(sheet.sheet, sheet.scratch_cell), 30.0);
+    assert_number(
+        &sheet.engine.get_cell_value(sheet.sheet, sheet.scratch_cell),
+        30.0,
+    );
 }
 
 #[test]
@@ -107,7 +110,10 @@ fn sumifs_numeric_criteria_does_not_treat_text_as_zero() {
         "expected SUMIFS formula to compile to bytecode for this test"
     );
     sheet.engine.recalculate();
-    assert_number(&sheet.engine.get_cell_value(sheet.sheet, sheet.scratch_cell), 30.0);
+    assert_number(
+        &sheet.engine.get_cell_value(sheet.sheet, sheet.scratch_cell),
+        30.0,
+    );
 }
 
 #[test]
@@ -127,7 +133,10 @@ fn averageif_numeric_criteria_does_not_treat_text_as_zero() {
         "expected AVERAGEIF formula to compile to bytecode for this test"
     );
     sheet.engine.recalculate();
-    assert_number(&sheet.engine.get_cell_value(sheet.sheet, sheet.scratch_cell), 15.0);
+    assert_number(
+        &sheet.engine.get_cell_value(sheet.sheet, sheet.scratch_cell),
+        15.0,
+    );
 }
 
 #[test]
@@ -146,13 +155,19 @@ fn averageifs_numeric_criteria_does_not_treat_text_as_zero() {
     sheet.set("C2", 10);
     sheet.set("C3", 20);
 
-    sheet.set_formula(sheet.scratch_cell, r#"=AVERAGEIFS(C1:C3,A1:A3,0,B1:B3,">0")"#);
+    sheet.set_formula(
+        sheet.scratch_cell,
+        r#"=AVERAGEIFS(C1:C3,A1:A3,0,B1:B3,">0")"#,
+    );
     assert!(
         sheet.engine.bytecode_program_count() > 0,
         "expected AVERAGEIFS formula to compile to bytecode for this test"
     );
     sheet.engine.recalculate();
-    assert_number(&sheet.engine.get_cell_value(sheet.sheet, sheet.scratch_cell), 15.0);
+    assert_number(
+        &sheet.engine.get_cell_value(sheet.sheet, sheet.scratch_cell),
+        15.0,
+    );
 }
 
 #[test]
@@ -339,10 +354,7 @@ fn sumifs_multiple_criteria_and_shape_mismatch() {
     sheet.set("C3", 30);
     sheet.set("C4", 40);
 
-    assert_number(
-        &sheet.eval(r#"=SUMIFS(C1:C4,A1:A4,"A",B1:B4,">1")"#),
-        20.0,
-    );
+    assert_number(&sheet.eval(r#"=SUMIFS(C1:C4,A1:A4,"A",B1:B4,">1")"#), 20.0);
 
     assert_eq!(
         sheet.eval(r#"=SUMIFS(C1:C4,A1:A3,"A")"#),

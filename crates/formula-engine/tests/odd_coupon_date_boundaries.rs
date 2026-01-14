@@ -21,10 +21,7 @@ fn eval_formula_1904(formula: &str) -> Value {
 
 fn assert_number_close(v: Value, expected: f64, tol: f64) {
     match v {
-        Value::Number(n) => assert!(
-            (n - expected).abs() <= tol,
-            "expected {expected}, got {n}"
-        ),
+        Value::Number(n) => assert!((n - expected).abs() <= tol, "expected {expected}, got {n}"),
         other => panic!("expected number, got {other:?}"),
     }
 }
@@ -113,7 +110,9 @@ fn oddfyield_allows_first_coupon_equal_maturity() {
 fn oddfprice_rejects_settlement_equal_maturity() {
     // Even when `first_coupon == maturity` is valid, `settlement` must still be strictly before
     // maturity.
-    assert_num_error_in_both_systems("=ODDFPRICE(DATE(2020,7,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
+    assert_num_error_in_both_systems(
+        "=ODDFPRICE(DATE(2020,7,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+    );
 }
 
 #[test]

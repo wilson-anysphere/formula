@@ -220,11 +220,13 @@ fn sort_orders_field_error_by_error_code() {
 fn sort_record_display_field_error_is_an_error_key() {
     let mut engine = Engine::new();
 
-    let mut record_field_err = RecordValue::new("aaa").field("Name", Value::Error(ErrorKind::Field));
+    let mut record_field_err =
+        RecordValue::new("aaa").field("Name", Value::Error(ErrorKind::Field));
     record_field_err.display_field = Some("Name".to_string());
     let record_field_err = Value::Record(record_field_err);
 
-    let mut record_value_err = RecordValue::new("zzz").field("Name", Value::Error(ErrorKind::Value));
+    let mut record_value_err =
+        RecordValue::new("zzz").field("Name", Value::Error(ErrorKind::Value));
     record_value_err.display_field = Some("Name".to_string());
     let record_value_err = Value::Record(record_value_err);
 
@@ -367,9 +369,7 @@ fn unique_uses_record_display_field_for_deduping() {
     engine
         .set_cell_value("Sheet1", "A1", record_a.clone())
         .unwrap();
-    engine
-        .set_cell_value("Sheet1", "A2", record_b)
-        .unwrap();
+    engine.set_cell_value("Sheet1", "A2", record_b).unwrap();
     engine
         .set_cell_formula("Sheet1", "C1", "=UNIQUE(A1:A2)")
         .unwrap();

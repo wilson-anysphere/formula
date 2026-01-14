@@ -235,9 +235,7 @@ fn find_table<'a>(
         return Err(ErrorKind::Name);
     }
 
-    let tables = tables_by_sheet
-        .get(origin_sheet)
-        .ok_or(ErrorKind::Ref)?;
+    let tables = tables_by_sheet.get(origin_sheet).ok_or(ErrorKind::Ref)?;
 
     let origin_cell_model = addr_to_model(origin_cell);
     let table = tables

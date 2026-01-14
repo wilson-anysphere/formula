@@ -1,5 +1,7 @@
 use crate::locale::ValueLocaleConfig;
-use crate::sort_filter::sort::{compute_header_rows_with_value_locale, compute_row_permutation_with_value_locale};
+use crate::sort_filter::sort::{
+    compute_header_rows_with_value_locale, compute_row_permutation_with_value_locale,
+};
 use crate::sort_filter::{
     apply_autofilter_with_value_locale, AutoFilter, CellValue, FilterResult, RowPermutation,
     SortSpec,
@@ -280,7 +282,7 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                             } else {
                                 Some(CellValue::Text(display))
                             }
-                        },
+                        }
                         ModelCellValue::Image(image) => {
                             Some(image_alt_text_to_sort_value(image.alt_text.as_deref()))
                         }
@@ -341,9 +343,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                 .and_then(|v| v.as_str())?;
             Some(CellValue::Text(display_value.to_string()))
         }
-        "image" => {
-            Some(image_payload_to_sort_value(serialized.get("value")))
-        }
+        "image" => Some(image_payload_to_sort_value(serialized.get("value"))),
         "record" => {
             let record = serialized.get("value")?;
             // Some legacy IPC payloads represented record values as a simple display string.
@@ -373,44 +373,47 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     .get("value")
                                     .and_then(|v| v.as_f64())
                                     .map(CellValue::Number),
-                                 "string" => display_value
-                                     .get("value")
-                                     .and_then(|v| v.as_str())
-                                     .map(|s| CellValue::Text(s.to_string())),
-                                 "boolean" => display_value
-                                     .get("value")
-                                     .and_then(|v| v.as_bool())
-                                     .map(CellValue::Bool),
-                                 "error" => display_value
+                                "string" => display_value
                                     .get("value")
                                     .and_then(|v| v.as_str())
-                                    .map(|err_str| {
+                                    .map(|s| CellValue::Text(s.to_string())),
+                                "boolean" => display_value
+                                    .get("value")
+                                    .and_then(|v| v.as_bool())
+                                    .map(CellValue::Bool),
+                                "error" => display_value.get("value").and_then(|v| v.as_str()).map(
+                                    |err_str| {
                                         let err = err_str
                                             .parse::<formula_model::ErrorValue>()
                                             .unwrap_or(formula_model::ErrorValue::Unknown);
                                         CellValue::Error(err)
-                                    }),
+                                    },
+                                ),
                                 "rich_text" => display_value
                                     .get("value")
                                     .and_then(|v| v.get("text"))
                                     .and_then(|v| v.as_str())
                                     .map(|s| CellValue::Text(s.to_string())),
-                                "image" => Some(image_payload_to_sort_value(display_value.get("value"))),
+                                "image" => {
+                                    Some(image_payload_to_sort_value(display_value.get("value")))
+                                }
                                 // Degrade nested rich values (e.g. records whose display field is
                                 // an entity/record) using the same logic as the main conversion.
                                 //
-                                 // Note: `"image"` is handled explicitly above so we can prefer its
-                                 // alt text without an extra deserialize roundtrip.
-                                 "entity" | "record" => serde_json::from_value(display_value.clone())
-                                     .ok()
-                                     .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v)),
-                                 _ => None,
-                             };
+                                // Note: `"image"` is handled explicitly above so we can prefer its
+                                // alt text without an extra deserialize roundtrip.
+                                "entity" | "record" => {
+                                    serde_json::from_value(display_value.clone())
+                                        .ok()
+                                        .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v))
+                                }
+                                _ => None,
+                            };
 
-                             if parsed.is_some() {
-                                 return parsed;
-                             }
-                         }
+                            if parsed.is_some() {
+                                return parsed;
+                            }
+                        }
                     }
                 }
             }
@@ -437,7 +440,8 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
 #[cfg(test)]
 mod tests {
     use super::{
-        image_payload_to_sort_value, model_cell_value_to_sort_value, rich_model_cell_value_to_sort_value,
+        image_payload_to_sort_value, model_cell_value_to_sort_value,
+        rich_model_cell_value_to_sort_value,
     };
     use crate::sort_filter::CellValue;
     use formula_model::CellValue as ModelCellValue;
@@ -558,7 +562,10 @@ mod tests {
         })) else {
             return;
         };
-        assert_eq!(model_cell_value_to_sort_value(&record_bool), CellValue::Bool(true));
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_bool),
+            CellValue::Bool(true)
+        );
 
         let Some(record_error) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
@@ -657,16 +664,18 @@ mod tests {
             CellValue::Blank
         );
 
-        let Some(record_invalid_display_field_with_display) = from_json_or_skip_unknown_variant(json!({
-            "type": "record",
-            "value": {
-                "displayField": "missing",
-                "displayValue": "Fallback display",
-                "fields": {
-                    "name": { "type": "string", "value": "Alice" }
+        let Some(record_invalid_display_field_with_display) =
+            from_json_or_skip_unknown_variant(json!({
+                "type": "record",
+                "value": {
+                    "displayField": "missing",
+                    "displayValue": "Fallback display",
+                    "fields": {
+                        "name": { "type": "string", "value": "Alice" }
+                    }
                 }
-            }
-        })) else {
+            }))
+        else {
             return;
         };
         assert_eq!(

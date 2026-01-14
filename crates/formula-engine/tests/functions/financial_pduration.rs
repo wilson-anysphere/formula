@@ -34,4 +34,3 @@ fn pduration_returns_div0_when_denominator_ln_is_zero() {
     // A positive rate so small that `1 + rate` rounds to 1.0 in f64.
     assert_eq!(pduration(1e-20, 100.0, 110.0), Err(ExcelError::Div0));
 }
-

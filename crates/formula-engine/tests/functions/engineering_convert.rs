@@ -5,7 +5,10 @@ use super::harness::{assert_number, TestSheet};
 #[test]
 fn convert_length_meters_and_feet() {
     let mut sheet = TestSheet::new();
-    assert_number(&sheet.eval(r#"=CONVERT(1,"m","ft")"#), 3.280_839_895_013_123);
+    assert_number(
+        &sheet.eval(r#"=CONVERT(1,"m","ft")"#),
+        3.280_839_895_013_123,
+    );
     assert_number(&sheet.eval(r#"=CONVERT(1,"ft","m")"#), 0.3048);
 }
 
@@ -53,4 +56,3 @@ fn convert_invalid_units_return_na() {
         Value::Error(ErrorKind::NA)
     );
 }
-

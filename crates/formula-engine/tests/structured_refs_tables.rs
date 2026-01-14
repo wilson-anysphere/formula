@@ -184,9 +184,15 @@ fn setup_engine_with_table_shifted_right_one_col() -> Engine {
     engine.set_cell_value("Sheet1", "C3", 20.0_f64).expect("C3");
     engine.set_cell_value("Sheet1", "C4", 30.0_f64).expect("C4");
 
-    engine.set_cell_value("Sheet1", "D2", 100.0_f64).expect("D2");
-    engine.set_cell_value("Sheet1", "D3", 200.0_f64).expect("D3");
-    engine.set_cell_value("Sheet1", "D4", 300.0_f64).expect("D4");
+    engine
+        .set_cell_value("Sheet1", "D2", 100.0_f64)
+        .expect("D2");
+    engine
+        .set_cell_value("Sheet1", "D3", 200.0_f64)
+        .expect("D3");
+    engine
+        .set_cell_value("Sheet1", "D4", 300.0_f64)
+        .expect("D4");
 
     engine
 }
@@ -205,22 +211,42 @@ fn setup_engine_with_table_and_totals() -> Engine {
     engine.set_cell_value("Sheet1", "A2", 1.0_f64).expect("A2");
     engine.set_cell_value("Sheet1", "A3", 2.0_f64).expect("A3");
     engine.set_cell_value("Sheet1", "A4", 3.0_f64).expect("A4");
-    engine.set_cell_value("Sheet1", "A5", 6.0_f64).expect("A5 totals");
+    engine
+        .set_cell_value("Sheet1", "A5", 6.0_f64)
+        .expect("A5 totals");
 
     engine.set_cell_value("Sheet1", "B2", 10.0_f64).expect("B2");
     engine.set_cell_value("Sheet1", "B3", 20.0_f64).expect("B3");
     engine.set_cell_value("Sheet1", "B4", 30.0_f64).expect("B4");
-    engine.set_cell_value("Sheet1", "B5", 60.0_f64).expect("B5 totals");
+    engine
+        .set_cell_value("Sheet1", "B5", 60.0_f64)
+        .expect("B5 totals");
 
-    engine.set_cell_value("Sheet1", "C2", 100.0_f64).expect("C2");
-    engine.set_cell_value("Sheet1", "C3", 200.0_f64).expect("C3");
-    engine.set_cell_value("Sheet1", "C4", 300.0_f64).expect("C4");
-    engine.set_cell_value("Sheet1", "C5", 600.0_f64).expect("C5 totals");
+    engine
+        .set_cell_value("Sheet1", "C2", 100.0_f64)
+        .expect("C2");
+    engine
+        .set_cell_value("Sheet1", "C3", 200.0_f64)
+        .expect("C3");
+    engine
+        .set_cell_value("Sheet1", "C4", 300.0_f64)
+        .expect("C4");
+    engine
+        .set_cell_value("Sheet1", "C5", 600.0_f64)
+        .expect("C5 totals");
 
-    engine.set_cell_value("Sheet1", "D2", 1000.0_f64).expect("D2");
-    engine.set_cell_value("Sheet1", "D3", 2000.0_f64).expect("D3");
-    engine.set_cell_value("Sheet1", "D4", 3000.0_f64).expect("D4");
-    engine.set_cell_value("Sheet1", "D5", 6000.0_f64).expect("D5 totals");
+    engine
+        .set_cell_value("Sheet1", "D2", 1000.0_f64)
+        .expect("D2");
+    engine
+        .set_cell_value("Sheet1", "D3", 2000.0_f64)
+        .expect("D3");
+    engine
+        .set_cell_value("Sheet1", "D4", 3000.0_f64)
+        .expect("D4");
+    engine
+        .set_cell_value("Sheet1", "D5", 6000.0_f64)
+        .expect("D5 totals");
 
     engine
 }
@@ -377,11 +403,7 @@ fn evaluates_multi_column_structured_ref_sum() {
 fn evaluates_header_area_multi_column_selection() {
     let mut engine = setup_engine_with_table();
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "E1",
-            "=COUNTA(Table1[[#Headers],[Col1],[Col2]])",
-        )
+        .set_cell_formula("Sheet1", "E1", "=COUNTA(Table1[[#Headers],[Col1],[Col2]])")
         .expect("formula");
     engine.recalculate_single_threaded();
 
@@ -409,11 +431,7 @@ fn this_row_structured_refs_still_work() {
         .expect("formula");
     // `[#This Row]` works with an explicit table name.
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "D3",
-            "=SUM(Table1[[#This Row],[Col1],[Col3]])",
-        )
+        .set_cell_formula("Sheet1", "D3", "=SUM(Table1[[#This Row],[Col1],[Col3]])")
         .expect("formula");
 
     engine.recalculate_single_threaded();
@@ -451,11 +469,7 @@ fn this_row_structured_refs_do_not_resolve_outside_the_table_sheet() {
     let mut engine = setup_engine_with_table();
     // Use a cell address that would otherwise fall within the table's data-range coordinates.
     engine
-        .set_cell_formula(
-            "Sheet2",
-            "D2",
-            "=SUM(Table1[[#This Row],[Col1],[Col3]])",
-        )
+        .set_cell_formula("Sheet2", "D2", "=SUM(Table1[[#This Row],[Col1],[Col3]])")
         .expect("formula");
     engine.recalculate_single_threaded();
 
@@ -530,7 +544,11 @@ fn evaluates_multi_item_structured_ref_union_column_range() {
 fn evaluates_multi_item_structured_ref_union_discontiguous_rows() {
     let mut engine = setup_engine_with_table_and_totals();
     engine
-        .set_cell_formula("Sheet1", "E1", "=COUNTA(Table1[[#Headers],[#Totals],[Col1]])")
+        .set_cell_formula(
+            "Sheet1",
+            "E1",
+            "=COUNTA(Table1[[#Headers],[#Totals],[Col1]])",
+        )
         .expect("formula");
     engine.recalculate_single_threaded();
 
@@ -742,7 +760,10 @@ fn rename_table_rewrites_formulas_that_use_display_name() {
         .rename_table("Table1", "Sales")
         .expect("rename should succeed");
 
-    assert_eq!(engine.get_cell_formula("Sheet1", "B1"), Some("=SUM(Sales[Col])"));
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "B1"),
+        Some("=SUM(Sales[Col])")
+    );
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
 }

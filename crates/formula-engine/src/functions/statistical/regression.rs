@@ -52,7 +52,12 @@ fn checked_usize_mul(a: usize, b: usize) -> Result<usize, ErrorKind> {
     a.checked_mul(b).ok_or(ErrorKind::Num)
 }
 
-fn householder_qr_least_squares(mut a: Vec<f64>, mut b: Vec<f64>, n: usize, k: usize) -> Result<LeastSquaresFit, ErrorKind> {
+fn householder_qr_least_squares(
+    mut a: Vec<f64>,
+    mut b: Vec<f64>,
+    n: usize,
+    k: usize,
+) -> Result<LeastSquaresFit, ErrorKind> {
     debug_assert_eq!(a.len(), n.saturating_mul(k));
     debug_assert_eq!(b.len(), n);
 
@@ -234,11 +239,7 @@ pub fn linest(
 
     let mut slopes = Vec::with_capacity(p);
     slopes.extend_from_slice(&fit.beta[..p]);
-    let intercept = if include_intercept {
-        fit.beta[p]
-    } else {
-        0.0
-    };
+    let intercept = if include_intercept { fit.beta[p] } else { 0.0 };
 
     // Total sum of squares.
     let sst = if include_intercept {
@@ -261,7 +262,11 @@ pub fn linest(
     let ssr = (sst - sse).max(0.0);
 
     let r_squared = if sst == 0.0 {
-        if sse == 0.0 { 1.0 } else { 0.0 }
+        if sse == 0.0 {
+            1.0
+        } else {
+            0.0
+        }
     } else {
         1.0 - (sse / sst)
     };
@@ -305,13 +310,21 @@ pub fn linest(
                 return Err(ErrorKind::Num);
             }
 
-            let df_reg = if include_intercept { (k - 1) as f64 } else { k as f64 };
+            let df_reg = if include_intercept {
+                (k - 1) as f64
+            } else {
+                k as f64
+            };
             let f = if df_reg == 0.0 || sse == 0.0 {
                 None
             } else {
                 let msr = ssr / df_reg;
                 let f = msr / mse;
-                if f.is_finite() { Some(f) } else { None }
+                if f.is_finite() {
+                    Some(f)
+                } else {
+                    None
+                }
             };
 
             (Some(ses), se_intercept, Some(se_y), f)
@@ -432,4 +445,3 @@ pub fn logest(
         ss_resid: lin.ss_resid,
     })
 }
-

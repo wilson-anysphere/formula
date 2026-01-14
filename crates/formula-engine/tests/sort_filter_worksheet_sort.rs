@@ -59,7 +59,10 @@ fn worksheet_sort_places_errors_after_booleans_and_orders_by_error_code() {
     sheet.set_value(CellRef::new(1, 0), CellValue::Boolean(true));
     sheet.set_value(CellRef::new(2, 0), CellValue::Error(ErrorValue::Field));
     sheet.set_value(CellRef::new(3, 0), CellValue::String("a".into()));
-    sheet.set_value(CellRef::new(4, 0), CellValue::Error(ErrorValue::GettingData));
+    sheet.set_value(
+        CellRef::new(4, 0),
+        CellValue::Error(ErrorValue::GettingData),
+    );
     sheet.set_value(CellRef::new(5, 0), CellValue::Error(ErrorValue::Div0));
     sheet.set_value(CellRef::new(6, 0), CellValue::Number(1.0));
     sheet.set_value(CellRef::new(7, 0), CellValue::Boolean(false));
@@ -81,15 +84,24 @@ fn worksheet_sort_places_errors_after_booleans_and_orders_by_error_code() {
     // Excel ordering: numbers < text < booleans < errors < blanks.
     // Errors ordered by `ErrorValue::code()` (Div0=2, GettingData=8, Field=11).
     assert_eq!(sheet.value(CellRef::new(1, 0)), CellValue::Number(1.0));
-    assert_eq!(sheet.value(CellRef::new(2, 0)), CellValue::String("a".into()));
+    assert_eq!(
+        sheet.value(CellRef::new(2, 0)),
+        CellValue::String("a".into())
+    );
     assert_eq!(sheet.value(CellRef::new(3, 0)), CellValue::Boolean(false));
     assert_eq!(sheet.value(CellRef::new(4, 0)), CellValue::Boolean(true));
-    assert_eq!(sheet.value(CellRef::new(5, 0)), CellValue::Error(ErrorValue::Div0));
+    assert_eq!(
+        sheet.value(CellRef::new(5, 0)),
+        CellValue::Error(ErrorValue::Div0)
+    );
     assert_eq!(
         sheet.value(CellRef::new(6, 0)),
         CellValue::Error(ErrorValue::GettingData)
     );
-    assert_eq!(sheet.value(CellRef::new(7, 0)), CellValue::Error(ErrorValue::Field));
+    assert_eq!(
+        sheet.value(CellRef::new(7, 0)),
+        CellValue::Error(ErrorValue::Field)
+    );
     assert_eq!(sheet.value(CellRef::new(8, 0)), CellValue::Empty);
 }
 

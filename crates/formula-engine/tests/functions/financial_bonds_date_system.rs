@@ -68,8 +68,8 @@ fn standard_coupon_bond_functions_respect_workbook_date_system() {
         cell_number_or_skip(&sheet, "A1").expect("PRICE should return a number under Excel1904");
     let yield_1904 =
         cell_number_or_skip(&sheet, "A2").expect("YIELD should return a number under Excel1904");
-    let duration_1904 = cell_number_or_skip(&sheet, "A3")
-        .expect("DURATION should return a number under Excel1904");
+    let duration_1904 =
+        cell_number_or_skip(&sheet, "A3").expect("DURATION should return a number under Excel1904");
     let mduration_1904 = cell_number_or_skip(&sheet, "A4")
         .expect("MDURATION should return a number under Excel1904");
 
@@ -85,30 +85,18 @@ fn coup_schedule_components_respect_workbook_date_system() {
 
     // COUP* returns serial numbers, which are expected to differ between Excel 1900 and 1904 date
     // systems. Compare calendar components instead.
-    sheet.set_formula(
-        "A1",
-        "=YEAR(COUPNCD(DATE(2008,2,15),DATE(2017,11,15),2,0))",
-    );
+    sheet.set_formula("A1", "=YEAR(COUPNCD(DATE(2008,2,15),DATE(2017,11,15),2,0))");
     sheet.set_formula(
         "A2",
         "=MONTH(COUPNCD(DATE(2008,2,15),DATE(2017,11,15),2,0))",
     );
-    sheet.set_formula(
-        "A3",
-        "=DAY(COUPNCD(DATE(2008,2,15),DATE(2017,11,15),2,0))",
-    );
-    sheet.set_formula(
-        "B1",
-        "=YEAR(COUPPCD(DATE(2008,2,15),DATE(2017,11,15),2,0))",
-    );
+    sheet.set_formula("A3", "=DAY(COUPNCD(DATE(2008,2,15),DATE(2017,11,15),2,0))");
+    sheet.set_formula("B1", "=YEAR(COUPPCD(DATE(2008,2,15),DATE(2017,11,15),2,0))");
     sheet.set_formula(
         "B2",
         "=MONTH(COUPPCD(DATE(2008,2,15),DATE(2017,11,15),2,0))",
     );
-    sheet.set_formula(
-        "B3",
-        "=DAY(COUPPCD(DATE(2008,2,15),DATE(2017,11,15),2,0))",
-    );
+    sheet.set_formula("B3", "=DAY(COUPPCD(DATE(2008,2,15),DATE(2017,11,15),2,0))");
     sheet.recalc();
 
     let ncd_year_1900 = match cell_number_or_skip(&sheet, "A1") {
@@ -143,14 +131,14 @@ fn coup_schedule_components_respect_workbook_date_system() {
         .expect("COUPNCD/YEAR should return a number under Excel1904");
     let ncd_month_1904 = cell_number_or_skip(&sheet, "A2")
         .expect("COUPNCD/MONTH should return a number under Excel1904");
-    let ncd_day_1904 =
-        cell_number_or_skip(&sheet, "A3").expect("COUPNCD/DAY should return a number under Excel1904");
+    let ncd_day_1904 = cell_number_or_skip(&sheet, "A3")
+        .expect("COUPNCD/DAY should return a number under Excel1904");
     let pcd_year_1904 = cell_number_or_skip(&sheet, "B1")
         .expect("COUPPCD/YEAR should return a number under Excel1904");
     let pcd_month_1904 = cell_number_or_skip(&sheet, "B2")
         .expect("COUPPCD/MONTH should return a number under Excel1904");
-    let pcd_day_1904 =
-        cell_number_or_skip(&sheet, "B3").expect("COUPPCD/DAY should return a number under Excel1904");
+    let pcd_day_1904 = cell_number_or_skip(&sheet, "B3")
+        .expect("COUPPCD/DAY should return a number under Excel1904");
 
     assert_close(ncd_year_1904, ncd_year_1900, 0.0);
     assert_close(ncd_month_1904, ncd_month_1900, 0.0);
@@ -159,4 +147,3 @@ fn coup_schedule_components_respect_workbook_date_system() {
     assert_close(pcd_month_1904, pcd_month_1900, 0.0);
     assert_close(pcd_day_1904, pcd_day_1900, 0.0);
 }
-

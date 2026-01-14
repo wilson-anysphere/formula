@@ -10,7 +10,10 @@ fn image_returns_record_with_standard_fields() {
     let mut expected = RecordValue::with_fields_iter(
         "https://example.com/cat.png",
         [
-            ("source", Value::Text("https://example.com/cat.png".to_string())),
+            (
+                "source",
+                Value::Text("https://example.com/cat.png".to_string()),
+            ),
             ("alt_text", Value::Blank),
             ("sizing", Value::Number(0.0)),
             ("height", Value::Blank),
@@ -28,7 +31,10 @@ fn image_uses_alt_text_for_display() {
     let mut expected = RecordValue::with_fields_iter(
         "cat",
         [
-            ("source", Value::Text("https://example.com/cat.png".to_string())),
+            (
+                "source",
+                Value::Text("https://example.com/cat.png".to_string()),
+            ),
             ("alt_text", Value::Text("cat".to_string())),
             ("sizing", Value::Number(0.0)),
             ("height", Value::Blank),
@@ -131,5 +137,8 @@ fn image_dimensions_are_ignored_when_not_custom_sizing() {
 #[test]
 fn image_record_does_not_coerce_to_number() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval(r#"=1+IMAGE("x")"#), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval(r#"=1+IMAGE("x")"#),
+        Value::Error(ErrorKind::Value)
+    );
 }

@@ -123,9 +123,7 @@ fn cell_format_reflects_explicit_cell_style() {
         number_format: Some("0.00".into()),
         ..Default::default()
     });
-    engine
-        .set_cell_style_id("Sheet1", "A1", style_id)
-        .unwrap();
+    engine.set_cell_style_id("Sheet1", "A1", style_id).unwrap();
     engine
         .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
         .unwrap();
@@ -146,9 +144,7 @@ fn cell_color_and_parentheses_reflect_explicit_cell_style() {
         number_format: Some("0;[Red](0)".into()),
         ..Default::default()
     });
-    engine
-        .set_cell_style_id("Sheet1", "A1", style_id)
-        .unwrap();
+    engine.set_cell_style_id("Sheet1", "A1", style_id).unwrap();
     engine
         .set_cell_formula("Sheet1", "B1", "=CELL(\"color\",A1)")
         .unwrap();
@@ -170,9 +166,7 @@ fn cell_format_and_flags_handle_builtin_placeholder_styles() {
         number_format: Some("__builtin_numFmtId:6".into()),
         ..Default::default()
     });
-    engine
-        .set_cell_style_id("Sheet1", "A1", style_id)
-        .unwrap();
+    engine.set_cell_style_id("Sheet1", "A1", style_id).unwrap();
     engine
         .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
         .unwrap();
@@ -367,7 +361,9 @@ fn cell_format_classifies_thousands_separated_numbers_as_n() {
         number_format: Some("__builtin_numFmtId:4".to_string()),
         ..Style::default()
     });
-    engine.set_cell_style_id("Sheet1", "A1", grouped_builtin).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A1", grouped_builtin)
+        .unwrap();
     engine.recalculate_single_threaded();
     assert_eq!(
         engine.get_cell_value("Sheet1", "B1"),
@@ -457,9 +453,18 @@ fn cell_protect_prefix_and_width_return_ref_for_out_of_bounds_reference() {
 
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::Ref));
-    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A3"),
+        Value::Error(ErrorKind::Ref)
+    );
 }
 
 #[test]
@@ -500,7 +505,10 @@ fn cell_sheet_default_style_affects_format_prefix_and_protect() {
         engine.get_cell_value("Sheet1", "B1"),
         Value::Text("F2".to_string())
     );
-    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Text("'".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Text("'".to_string())
+    );
     assert_number(&engine.get_cell_value("Sheet1", "B3"), 0.0);
 }
 
@@ -658,7 +666,10 @@ fn cell_prefix_alignment_codes_match_excel() {
 
     // Default alignment ("General") returns the empty string.
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text(String::new())
+    );
 
     for (alignment, expected) in [
         (HorizontalAlignment::Left, "'"),
@@ -695,11 +706,17 @@ fn cell_prefix_general_is_empty_for_text_and_number() {
         .set_cell_formula("Sheet1", "B1", "=CELL(\"prefix\",A1)")
         .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text(String::new())
+    );
 
     engine.set_cell_value("Sheet1", "A1", "x").unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text(String::new())
+    );
 }
 
 #[test]
@@ -747,17 +764,30 @@ fn cell_prefix_respects_layered_alignment_and_explicit_clears() {
     engine.set_row_style_id("Sheet1", 0, Some(style_right)); // row 1
     engine.recalculate_single_threaded();
     // Row overrides col.
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("\"".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("\"".to_string())
+    );
 
     // Cell override wins.
-    engine.set_cell_style_id("Sheet1", "A1", style_center).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_center)
+        .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("^".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("^".to_string())
+    );
 
     // Explicit clear should override inherited formatting and revert to General (empty prefix).
-    engine.set_cell_style_id("Sheet1", "A1", style_general).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_general)
+        .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text(String::new())
+    );
 }
 
 #[test]
@@ -803,7 +833,10 @@ fn cell_prefix_respects_range_run_precedence() {
 
     engine.set_row_style_id("Sheet1", 0, Some(style_right));
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("\"".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("\"".to_string())
+    );
 
     // Range-run overrides row/col.
     engine
@@ -818,17 +851,30 @@ fn cell_prefix_respects_range_run_precedence() {
         )
         .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("^".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("^".to_string())
+    );
 
     // Cell override wins over range-run.
-    engine.set_cell_style_id("Sheet1", "A1", style_fill).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_fill)
+        .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("\\".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("\\".to_string())
+    );
 
     // Explicitly clearing the cell alignment should not fall back to the range run.
-    engine.set_cell_style_id("Sheet1", "A1", style_general).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_general)
+        .unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text(String::new()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text(String::new())
+    );
 }
 
 #[test]
@@ -1221,13 +1267,20 @@ fn cell_format_color_and_parentheses_fallback_to_general_for_external_refs() {
         .set_cell_formula("Sheet1", "A2", r#"=CELL("color",[Book.xlsx]Sheet1!A1)"#)
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A3", r#"=CELL("parentheses",[Book.xlsx]Sheet1!A1)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=CELL("parentheses",[Book.xlsx]Sheet1!A1)"#,
+        )
         .unwrap();
     engine.recalculate_single_threaded();
 
     // The engine does not track number formats for external workbooks, so these should fall back
     // to General semantics.
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("G".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("G".to_string())
+    );
     assert_number(&engine.get_cell_value("Sheet1", "A2"), 0.0);
     assert_number(&engine.get_cell_value("Sheet1", "A3"), 0.0);
 }
@@ -1247,10 +1300,16 @@ fn cell_filename_is_empty_for_unsaved_workbooks() {
     let mut sheet = TestSheet::new();
 
     // Excel returns "" until the workbook has been saved.
-    assert_eq!(sheet.eval("=CELL(\"filename\")"), Value::Text(String::new()));
+    assert_eq!(
+        sheet.eval("=CELL(\"filename\")"),
+        Value::Text(String::new())
+    );
 
     // Excel returns #N/A until the workbook has been saved.
-    assert_eq!(sheet.eval("=INFO(\"directory\")"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        sheet.eval("=INFO(\"directory\")"),
+        Value::Error(ErrorKind::NA)
+    );
 }
 
 #[test]
@@ -1436,7 +1495,10 @@ fn workbook_file_metadata_treats_empty_strings_as_unknown() {
 
     engine.set_workbook_file_metadata(Some(""), Some(""));
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text(String::new()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text(String::new())
+    );
     assert_eq!(
         engine.get_cell_value("Sheet1", "A2"),
         Value::Error(ErrorKind::NA)
@@ -2531,7 +2593,10 @@ fn cell_format_classifies_locale_variant_datetime_formats() {
     assert_eq!(engine.get_cell_value("Sheet1", "B5"), b4);
 
     // hh:mm:ss should classify as a time-with-seconds (`D8`).
-    assert_eq!(engine.get_cell_value("Sheet1", "B6"), Value::Text("D8".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B6"),
+        Value::Text("D8".to_string())
+    );
 
     // System long date tokens should classify as some date code (not currency).
     match engine.get_cell_value("Sheet1", "B7") {

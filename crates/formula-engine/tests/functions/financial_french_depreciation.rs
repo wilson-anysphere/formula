@@ -18,7 +18,17 @@ fn amorlinc_example_from_excel_docs() {
     let system = ExcelDateSystem::EXCEL_1900;
     let purchased = ymd_to_serial(ExcelDate::new(2008, 8, 19), system).unwrap();
     let first_period = ymd_to_serial(ExcelDate::new(2008, 12, 31), system).unwrap();
-    let dep = amorlinc(2400.0, purchased, first_period, 300.0, 1.0, 0.15, Some(1), system).unwrap();
+    let dep = amorlinc(
+        2400.0,
+        purchased,
+        first_period,
+        300.0,
+        1.0,
+        0.15,
+        Some(1),
+        system,
+    )
+    .unwrap();
     assert_close(dep, 360.0, 1e-12);
 }
 
@@ -29,7 +39,17 @@ fn amordegrec_example_from_excel_docs() {
     let system = ExcelDateSystem::EXCEL_1900;
     let purchased = ymd_to_serial(ExcelDate::new(2008, 8, 19), system).unwrap();
     let first_period = ymd_to_serial(ExcelDate::new(2008, 12, 31), system).unwrap();
-    let dep = amordegrec(2400.0, purchased, first_period, 300.0, 1.0, 0.15, Some(1), system).unwrap();
+    let dep = amordegrec(
+        2400.0,
+        purchased,
+        first_period,
+        300.0,
+        1.0,
+        0.15,
+        Some(1),
+        system,
+    )
+    .unwrap();
     assert_close(dep, 776.0, 1e-12);
 }
 
@@ -38,8 +58,28 @@ fn amor_functions_error_on_invalid_basis() {
     let system = ExcelDateSystem::EXCEL_1900;
     let purchased = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
     let first_period = ymd_to_serial(ExcelDate::new(2020, 12, 31), system).unwrap();
-    assert!(amorlinc(1000.0, purchased, first_period, 0.0, 0.0, 0.1, Some(5), system).is_err());
-    assert!(amordegrec(1000.0, purchased, first_period, 0.0, 0.0, 0.1, Some(5), system).is_err());
+    assert!(amorlinc(
+        1000.0,
+        purchased,
+        first_period,
+        0.0,
+        0.0,
+        0.1,
+        Some(5),
+        system
+    )
+    .is_err());
+    assert!(amordegrec(
+        1000.0,
+        purchased,
+        first_period,
+        0.0,
+        0.0,
+        0.1,
+        Some(5),
+        system
+    )
+    .is_err());
 }
 
 #[test]
@@ -48,7 +88,16 @@ fn amor_functions_error_on_invalid_chronology() {
     let purchased = ymd_to_serial(ExcelDate::new(2020, 12, 31), system).unwrap();
     let first_period = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
     assert!(matches!(
-        amorlinc(1000.0, purchased, first_period, 0.0, 0.0, 0.1, Some(0), system),
+        amorlinc(
+            1000.0,
+            purchased,
+            first_period,
+            0.0,
+            0.0,
+            0.1,
+            Some(0),
+            system
+        ),
         Err(formula_engine::ExcelError::Num)
     ));
 }
@@ -74,4 +123,3 @@ fn builtins_error_invalid_basis() {
         Value::Error(ErrorKind::Num)
     );
 }
-

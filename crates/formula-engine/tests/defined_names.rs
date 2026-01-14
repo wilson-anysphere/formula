@@ -223,9 +223,14 @@ fn defined_name_lambdas_called_like_functions_register_dependencies() {
 #[test]
 fn defining_name_after_function_call_recalculates_dependents() {
     let mut engine = Engine::new();
-    engine.set_cell_formula("Sheet1", "A1", "=NewLambda(2)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=NewLambda(2)")
+        .unwrap();
     engine.recalculate();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Name));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Name)
+    );
 
     engine
         .define_name(
@@ -267,7 +272,11 @@ fn let_bound_lambda_calls_do_not_depend_on_same_named_defined_names() {
 fn let_variable_names_do_not_register_defined_name_dependencies() {
     let mut engine = Engine::new();
     engine
-        .define_name("X", NameScope::Workbook, NameDefinition::Constant(Value::Number(1.0)))
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(1.0)),
+        )
         .unwrap();
 
     engine
@@ -282,7 +291,11 @@ fn let_variable_names_do_not_register_defined_name_dependencies() {
     // Updating a workbook-scoped name "X" should not dirty the cell because all references to "X"
     // in the LET expression are local bindings.
     engine
-        .define_name("X", NameScope::Workbook, NameDefinition::Constant(Value::Number(2.0)))
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(2.0)),
+        )
         .unwrap();
     assert!(
         !engine.is_dirty("Sheet1", "A1"),
@@ -294,7 +307,11 @@ fn let_variable_names_do_not_register_defined_name_dependencies() {
 fn lambda_parameter_names_do_not_register_defined_name_dependencies() {
     let mut engine = Engine::new();
     engine
-        .define_name("X", NameScope::Workbook, NameDefinition::Constant(Value::Number(1.0)))
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(1.0)),
+        )
         .unwrap();
 
     engine
@@ -309,7 +326,11 @@ fn lambda_parameter_names_do_not_register_defined_name_dependencies() {
     // Updating a workbook-scoped name "X" should not dirty the cell because the LAMBDA parameter
     // shadows the defined name within the body.
     engine
-        .define_name("X", NameScope::Workbook, NameDefinition::Constant(Value::Number(2.0)))
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(2.0)),
+        )
         .unwrap();
     assert!(
         !engine.is_dirty("Sheet1", "A1"),

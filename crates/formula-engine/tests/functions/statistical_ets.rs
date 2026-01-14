@@ -78,10 +78,7 @@ fn forecast_ets_accepts_monthly_date_timeline() {
         0.0,
     );
     assert_number(&sheet.eval("=FORECAST.ETS.SEASONALITY(A1:A4,B1:B4)"), 1.0);
-    assert_number(
-        &sheet.eval("=FORECAST.ETS.STAT(A1:A4,B1:B4,1,1,1,8)"),
-        0.0,
-    );
+    assert_number(&sheet.eval("=FORECAST.ETS.STAT(A1:A4,B1:B4,1,1,1,8)"), 0.0);
 }
 
 #[test]
@@ -113,10 +110,7 @@ fn forecast_ets_accepts_month_end_date_timeline_across_leap_day() {
         0.0,
     );
     assert_number(&sheet.eval("=FORECAST.ETS.SEASONALITY(A1:A4,B1:B4)"), 1.0);
-    assert_number(
-        &sheet.eval("=FORECAST.ETS.STAT(A1:A4,B1:B4,1,1,1,8)"),
-        0.0,
-    );
+    assert_number(&sheet.eval("=FORECAST.ETS.STAT(A1:A4,B1:B4,1,1,1,8)"), 0.0);
 }
 
 #[test]
@@ -185,7 +179,10 @@ fn forecast_ets_dedupes_overlapping_reference_unions() {
 
     match (base, union) {
         (Value::Number(a), Value::Number(b)) => {
-            assert!((a - b).abs() < 1e-9, "expected union to match base; got {a} vs {b}");
+            assert!(
+                (a - b).abs() < 1e-9,
+                "expected union to match base; got {a} vs {b}"
+            );
         }
         (a, b) => panic!("expected numbers, got {a:?} and {b:?}"),
     }

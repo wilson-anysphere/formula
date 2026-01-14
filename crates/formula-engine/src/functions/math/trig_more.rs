@@ -80,4 +80,3 @@ pub fn acot(number: f64) -> ExcelResult<f64> {
         checked_out(base + std::f64::consts::PI)
     }
 }
-

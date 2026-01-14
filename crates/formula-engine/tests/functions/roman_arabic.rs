@@ -4,15 +4,24 @@ use formula_engine::value::{ErrorKind, Value};
 #[test]
 fn roman_known_conversions() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval("=ROMAN(1999)"), Value::Text("MCMXCIX".to_string()));
+    assert_eq!(
+        sheet.eval("=ROMAN(1999)"),
+        Value::Text("MCMXCIX".to_string())
+    );
     assert_eq!(sheet.eval("=ROMAN(0)"), Value::Text("".to_string()));
 }
 
 #[test]
 fn roman_form_variants_match_excel_docs() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval("=ROMAN(499,0)"), Value::Text("CDXCIX".to_string()));
-    assert_eq!(sheet.eval("=ROMAN(499,1)"), Value::Text("LDVLIV".to_string()));
+    assert_eq!(
+        sheet.eval("=ROMAN(499,0)"),
+        Value::Text("CDXCIX".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=ROMAN(499,1)"),
+        Value::Text("LDVLIV".to_string())
+    );
     assert_eq!(sheet.eval("=ROMAN(499,2)"), Value::Text("XDIX".to_string()));
     assert_eq!(sheet.eval("=ROMAN(499,3)"), Value::Text("VDIV".to_string()));
     assert_eq!(sheet.eval("=ROMAN(499,4)"), Value::Text("ID".to_string()));
@@ -49,6 +58,12 @@ fn arabic_parses_roman_strings() {
 #[test]
 fn arabic_rejects_invalid_numerals() {
     let mut sheet = TestSheet::new();
-    assert_eq!(sheet.eval("=ARABIC(\"VV\")"), Value::Error(ErrorKind::Value));
-    assert_eq!(sheet.eval("=ARABIC(\"IIV\")"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=ARABIC(\"VV\")"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=ARABIC(\"IIV\")"),
+        Value::Error(ErrorKind::Value)
+    );
 }

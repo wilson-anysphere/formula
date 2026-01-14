@@ -11,10 +11,7 @@ fn eval_formula(formula: &str) -> Value {
 
 fn assert_number_close(v: Value, expected: f64, tol: f64) {
     match v {
-        Value::Number(n) => assert!(
-            (n - expected).abs() <= tol,
-            "expected {expected}, got {n}"
-        ),
+        Value::Number(n) => assert!((n - expected).abs() <= tol, "expected {expected}, got {n}"),
         other => panic!("expected number, got {other:?}"),
     }
 }
@@ -61,4 +58,3 @@ fn coupdaysnc_basis4_eom_feb28_matches_excel_oracle() {
     let v = eval_formula("=COUPDAYSNC(DATE(2020,11,15),DATE(2021,2,28),2,4)");
     assert_number_close(v, 105.0, 0.0);
 }
-

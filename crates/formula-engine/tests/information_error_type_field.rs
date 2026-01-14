@@ -27,10 +27,13 @@ fn type_treats_rich_values_as_text() {
     engine
         .set_cell_value("Sheet1", "A2", Value::Record(RecordValue::new("record")))
         .unwrap();
-    engine.set_cell_formula("Sheet1", "B1", "=TYPE(A1)").unwrap();
-    engine.set_cell_formula("Sheet1", "B2", "=TYPE(A2)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=TYPE(A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=TYPE(A2)")
+        .unwrap();
     engine.recalculate();
     assert_number(&engine.get_cell_value("Sheet1", "B1"), 2.0);
     assert_number(&engine.get_cell_value("Sheet1", "B2"), 2.0);
 }
-

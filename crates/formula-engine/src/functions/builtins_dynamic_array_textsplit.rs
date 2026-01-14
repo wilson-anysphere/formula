@@ -78,11 +78,11 @@ fn textsplit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if matches!(args[5], Expr::Blank) {
             Value::Error(ErrorKind::NA)
         } else {
-        let v = ctx.eval_scalar(&args[5]);
-        match v {
-            Value::Array(_) | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
-            other => other,
-        }
+            let v = ctx.eval_scalar(&args[5]);
+            match v {
+                Value::Array(_) | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
+                other => other,
+            }
         }
     } else {
         Value::Error(ErrorKind::NA)
@@ -153,7 +153,10 @@ fn eval_optional_row_delimiters(
     Ok(delimiters)
 }
 
-fn eval_delimiter_set(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Vec<String>, ErrorKind> {
+fn eval_delimiter_set(
+    ctx: &dyn FunctionContext,
+    expr: &CompiledExpr,
+) -> Result<Vec<String>, ErrorKind> {
     let v = eval_scalar_arg(ctx, expr);
     match v {
         Value::Array(arr) => {
@@ -170,7 +173,12 @@ fn eval_delimiter_set(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<
     }
 }
 
-fn split_on_any(text: &str, delimiters: &[String], ignore_empty: bool, match_mode: MatchMode) -> Vec<String> {
+fn split_on_any(
+    text: &str,
+    delimiters: &[String],
+    ignore_empty: bool,
+    match_mode: MatchMode,
+) -> Vec<String> {
     match match_mode {
         MatchMode::CaseSensitive => {
             let delims: Vec<&str> = delimiters.iter().map(|d| d.as_str()).collect();
@@ -180,7 +188,8 @@ fn split_on_any(text: &str, delimiters: &[String], ignore_empty: bool, match_mod
             // ASCII fast path: preserve existing TEXTSPLIT behavior and avoid Unicode case-fold allocations.
             if text.is_ascii() && delimiters.iter().all(|d| d.is_ascii()) {
                 let haystack = text.to_ascii_lowercase();
-                let lowered: Vec<String> = delimiters.iter().map(|s| s.to_ascii_lowercase()).collect();
+                let lowered: Vec<String> =
+                    delimiters.iter().map(|s| s.to_ascii_lowercase()).collect();
                 let delims: Vec<&str> = lowered.iter().map(|d| d.as_str()).collect();
                 return split_on_any_impl(text, haystack.as_str(), &delims, ignore_empty);
             }
@@ -190,7 +199,12 @@ fn split_on_any(text: &str, delimiters: &[String], ignore_empty: bool, match_mod
     }
 }
 
-fn split_on_any_impl(original: &str, haystack: &str, delimiters: &[&str], ignore_empty: bool) -> Vec<String> {
+fn split_on_any_impl(
+    original: &str,
+    haystack: &str,
+    delimiters: &[&str],
+    ignore_empty: bool,
+) -> Vec<String> {
     let mut segments = Vec::new();
     let mut cursor = 0usize;
     let mut segment_start = 0usize;
@@ -300,7 +314,8 @@ fn split_on_any_unicode_case_insensitive(
     let mut char_starts: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
     char_starts.push(text.len());
 
-    let folded_delimiters: Vec<Vec<char>> = delimiters.iter().map(|d| fold_str_uppercase(d)).collect();
+    let folded_delimiters: Vec<Vec<char>> =
+        delimiters.iter().map(|d| fold_str_uppercase(d)).collect();
 
     let mut segments = Vec::new();
     let mut cursor = 0usize;

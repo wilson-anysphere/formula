@@ -54,7 +54,9 @@ fn tbill_functions_coerce_date_serials_like_excel() {
         .unwrap();
 
     // Non-finite serials should return #NUM!
-    engine.set_cell_value("Sheet1", "B4", f64::INFINITY).unwrap();
+    engine
+        .set_cell_value("Sheet1", "B4", f64::INFINITY)
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "A5", "=TBILLEQ(B4,B2,0.05)")
         .unwrap();
@@ -85,4 +87,3 @@ fn tbill_functions_coerce_date_serials_like_excel() {
         Value::Error(ErrorKind::Num)
     );
 }
-

@@ -263,4 +263,3 @@ fn to_radix_upper(mut value: u64, radix: u32) -> String {
     }
     buf.iter().rev().collect()
 }
-

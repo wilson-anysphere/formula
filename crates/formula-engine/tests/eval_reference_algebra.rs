@@ -90,5 +90,8 @@ fn deref_full_sheet_range_as_formula_result_returns_spill_error() {
         .set_cell_formula("Sheet2", "A1", "=Sheet1!A:XFD")
         .unwrap();
     engine.recalculate();
-    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Error(ErrorKind::Spill));
+    assert_eq!(
+        engine.get_cell_value("Sheet2", "A1"),
+        Value::Error(ErrorKind::Spill)
+    );
 }

@@ -53,4 +53,3 @@ mod locale_parse_number {
         assert_eq!(locale.parse_number("1.23E3"), Some(1230.0));
     }
 }
-

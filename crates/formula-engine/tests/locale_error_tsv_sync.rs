@@ -39,10 +39,7 @@ fn is_error_tsv_comment_line(line: &str) -> bool {
     if trimmed.starts_with('#') {
         // Error literals start with `#`, so treat comments as `#` followed by whitespace (or a bare
         // `#`), matching the runtime loader + generator conventions.
-        return trimmed
-            .chars()
-            .nth(1)
-            .is_some_and(|c| c.is_whitespace());
+        return trimmed.chars().nth(1).is_some_and(|c| c.is_whitespace());
     }
     false
 }
@@ -185,7 +182,8 @@ fn locale_error_tsv_sync() {
         let canon_set: BTreeSet<String> = rows.iter().map(|(canon, _)| canon.clone()).collect();
 
         assert_eq!(
-            canon_set, expected,
+            canon_set,
+            expected,
             "error TSV canonical set mismatch for {locale_id} ({})",
             path.display()
         );
@@ -201,7 +199,9 @@ fn locale_error_tsv_sync() {
         }
 
         for (canon, preferred_loc) in preferred_by_canon {
-            let runtime_loc = locale.localized_error_literal(&canon).unwrap_or(canon.as_str());
+            let runtime_loc = locale
+                .localized_error_literal(&canon)
+                .unwrap_or(canon.as_str());
             assert_eq!(
                 runtime_loc, preferred_loc,
                 "preferred localized error literal mismatch for locale {locale_id}: canonical={canon:?}"

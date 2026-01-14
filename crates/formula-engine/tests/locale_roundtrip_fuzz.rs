@@ -41,9 +41,7 @@ fn discover_translated_locale_ids() -> Vec<String> {
             continue;
         }
 
-        let id = file_name
-            .strip_suffix(".tsv")
-            .expect("checked .tsv suffix");
+        let id = file_name.strip_suffix(".tsv").expect("checked .tsv suffix");
         ids.push(id.to_string());
     }
 
@@ -112,8 +110,10 @@ fn arb_decimal_number() -> impl Strategy<Value = String> {
         Just(".5".to_string()),
         (0u32..=1000, 0u32..=999).prop_map(|(int, frac)| format!("{int}.{frac:03}")),
         (0u32..=1000, 0u32..=99).prop_map(|(int, frac)| format!("{int}.{frac:02}")),
-        (1u32..=9, 0u32..=99, 1u32..=6).prop_map(|(int, frac, exp)| format!("{int}.{frac:02}E{exp}")),
-        (1u32..=9, 0u32..=99, 1u32..=6).prop_map(|(int, frac, exp)| format!("{int}.{frac:02}E-{exp}")),
+        (1u32..=9, 0u32..=99, 1u32..=6)
+            .prop_map(|(int, frac, exp)| format!("{int}.{frac:02}E{exp}")),
+        (1u32..=9, 0u32..=99, 1u32..=6)
+            .prop_map(|(int, frac, exp)| format!("{int}.{frac:02}E-{exp}")),
     ]
 }
 
@@ -190,69 +190,67 @@ fn arb_array_literal() -> impl Strategy<Value = String> {
         )
             .prop_map(|(a, b, c, d)| format!("{{{a},{b};{c},{d}}}")),
         // Array containing a function call to stress comma-disambiguation (arg separators vs array separators).
-        (arb_decimal_number(), arb_decimal_number(), arb_decimal_number()).prop_map(|(a, b, c)| {
-            format!("{{SUM({a},{b}),{c}}}")
-        }),
+        (
+            arb_decimal_number(),
+            arb_decimal_number(),
+            arb_decimal_number()
+        )
+            .prop_map(|(a, b, c)| { format!("{{SUM({a},{b}),{c}}}") }),
     ]
 }
 
 fn arb_union_intersection_expr() -> impl Strategy<Value = String> {
     // Intersection uses whitespace; union uses the locale list separator in canonical form (`,`).
     // Use parentheses to ensure commas are treated as the union operator, not function arg separators.
-    (arb_ref_operand(), arb_ref_operand(), arb_ref_operand()).prop_map(|(a, b, c)| {
-        format!("({a},{b}) ({b},{c})")
-    })
+    (arb_ref_operand(), arb_ref_operand(), arb_ref_operand())
+        .prop_map(|(a, b, c)| format!("({a},{b}) ({b},{c})"))
 }
 
 fn arb_canonical_formula() -> impl Strategy<Value = String> {
     prop_oneof![
         // Function calls + decimal numbers.
-        (arb_decimal_number(), arb_decimal_number())
-            .prop_map(|(a, b)| format!("=SUM({a},{b})")),
+        (arb_decimal_number(), arb_decimal_number()).prop_map(|(a, b)| format!("=SUM({a},{b})")),
         // Function name + whitespace before `(`.
-        (arb_decimal_number(), arb_decimal_number())
-            .prop_map(|(a, b)| format!("=SUM ({a},{b})")),
+        (arb_decimal_number(), arb_decimal_number()).prop_map(|(a, b)| format!("=SUM ({a},{b})")),
         // Boolean literals.
-        (arb_bool_literal(), arb_decimal_number(), arb_decimal_number())
+        (
+            arb_bool_literal(),
+            arb_decimal_number(),
+            arb_decimal_number()
+        )
             .prop_map(|(cond, a, b)| format!("=IF({cond},{a},{b})")),
         // Error literals.
-        (arb_error_literal(), arb_decimal_number()).prop_map(|(err, fallback)| {
-            format!("=IFERROR({err},{fallback})")
-        }),
+        (arb_error_literal(), arb_decimal_number())
+            .prop_map(|(err, fallback)| { format!("=IFERROR({err},{fallback})") }),
         // Standalone error literal.
         arb_error_literal().prop_map(|err| format!("={err}")),
         // Array literals (including comma ambiguity inside nested calls).
         arb_array_literal().prop_map(|arr| format!("={arr}")),
         // Function call with array literal argument + trailing scalar arg.
-        (arb_array_literal(), arb_decimal_number()).prop_map(|(arr, scalar)| {
-            format!("=SUM({arr},{scalar})")
-        }),
+        (arb_array_literal(), arb_decimal_number())
+            .prop_map(|(arr, scalar)| { format!("=SUM({arr},{scalar})") }),
         // Structured references (brackets + commas that must not be translated).
-        (arb_structured_ref(), arb_decimal_number()).prop_map(|(sref, n)| {
-            format!("=SUM({sref},{n})")
-        }),
+        (arb_structured_ref(), arb_decimal_number())
+            .prop_map(|(sref, n)| { format!("=SUM({sref},{n})") }),
         // External workbook references (brackets + punctuation that must not be translated).
-        (arb_external_cell_ref(), arb_decimal_number()).prop_map(|(ext, n)| {
-            format!("=SUM({ext},{n})")
-        }),
+        (arb_external_cell_ref(), arb_decimal_number())
+            .prop_map(|(ext, n)| { format!("=SUM({ext},{n})") }),
         // Mix external + structured refs in a single argument list to stress bracket-depth tracking.
-        (arb_external_cell_ref(), arb_structured_ref(), arb_decimal_number()).prop_map(
-            |(ext, sref, n)| format!("=SUM({ext},{sref},{n})"),
-        ),
+        (
+            arb_external_cell_ref(),
+            arb_structured_ref(),
+            arb_decimal_number()
+        )
+            .prop_map(|(ext, sref, n)| format!("=SUM({ext},{sref},{n})"),),
         // Dotted localized names (CUBE* functions in fr-FR/es-ES), plus decimal punctuation.
-        arb_decimal_number().prop_map(|n| {
-            format!("=CUBEVALUE(\"conn\",\"member\",{n})")
-        }),
+        arb_decimal_number().prop_map(|n| { format!("=CUBEVALUE(\"conn\",\"member\",{n})") }),
         // `_xlfn.` prefix handling for translated functions.
         (1u32..=5, 1u32..=5).prop_map(|(rows, cols)| format!("=_xlfn.SEQUENCE({rows},{cols})")),
         // `_xlfn.` prefix + dotted localized function names.
-        arb_decimal_number().prop_map(|n| {
-            format!("=_xlfn.CUBEVALUE(\"conn\",\"member\",{n})")
-        }),
+        arb_decimal_number().prop_map(|n| { format!("=_xlfn.CUBEVALUE(\"conn\",\"member\",{n})") }),
         // Union + intersection.
-        (arb_union_intersection_expr(), arb_decimal_number()).prop_map(|(refs, n)| {
-            format!("=SUM({refs},{n})")
-        }),
+        (arb_union_intersection_expr(), arb_decimal_number())
+            .prop_map(|(refs, n)| { format!("=SUM({refs},{n})") }),
     ]
 }
 
@@ -286,6 +284,8 @@ fn proptest_locale_localize_canonicalize_roundtrip() {
     );
 
     runner
-        .run(&arb_canonical_formula(), |canonical| assert_locale_roundtrip(&canonical))
+        .run(&arb_canonical_formula(), |canonical| {
+            assert_locale_roundtrip(&canonical)
+        })
         .unwrap();
 }

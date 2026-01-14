@@ -15,7 +15,10 @@ fn skew_and_skew_p_match_known_values() {
     // Dataset with known exact results:
     // - SKEW = 9*sqrt(5)/16
     // - SKEW.P = 27/32
-    assert_number(&sheet.eval("=SKEW({1,1,1,2,3})"), 9.0 * 5.0_f64.sqrt() / 16.0);
+    assert_number(
+        &sheet.eval("=SKEW({1,1,1,2,3})"),
+        9.0 * 5.0_f64.sqrt() / 16.0,
+    );
     assert_number(&sheet.eval("=SKEW.P({1,1,1,2,3})"), 27.0 / 32.0);
 }
 
@@ -86,6 +89,8 @@ fn frequency_ignores_text_in_data_range_and_propagates_errors() {
 
     // Errors propagate.
     sheet.set("A1", Value::Error(ErrorKind::Div0));
-    assert_eq!(sheet.eval("=FREQUENCY(A1:A2,B1:B1)"), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        sheet.eval("=FREQUENCY(A1:A2,B1:B1)"),
+        Value::Error(ErrorKind::Div0)
+    );
 }
-

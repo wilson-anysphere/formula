@@ -3,10 +3,7 @@ use formula_engine::{Engine, ErrorKind, Value};
 fn assert_number(value: &Value, expected: f64) {
     match value {
         Value::Number(n) => {
-            assert!(
-                (*n - expected).abs() < 1e-9,
-                "expected {expected}, got {n}"
-            );
+            assert!((*n - expected).abs() < 1e-9, "expected {expected}, got {n}");
         }
         other => panic!("expected number {expected}, got {other:?}"),
     }
@@ -24,15 +21,21 @@ fn eval(formula: &str) -> Value {
 #[test]
 fn text_to_number_coercion_accepts_common_excel_forms() {
     assert_eq!(
-        Value::Text(" 1,234.50 ".to_string()).coerce_to_number().unwrap(),
+        Value::Text(" 1,234.50 ".to_string())
+            .coerce_to_number()
+            .unwrap(),
         1234.5
     );
     assert_eq!(
-        Value::Text("(1,000)".to_string()).coerce_to_number().unwrap(),
+        Value::Text("(1,000)".to_string())
+            .coerce_to_number()
+            .unwrap(),
         -1000.0
     );
     assert_eq!(
-        Value::Text("$12,345.67".to_string()).coerce_to_number().unwrap(),
+        Value::Text("$12,345.67".to_string())
+            .coerce_to_number()
+            .unwrap(),
         12345.67
     );
     assert_eq!(
@@ -45,29 +48,48 @@ fn text_to_number_coercion_accepts_common_excel_forms() {
     );
 
     // Excel normalizes negative zero to 0 in coercions.
-    assert_eq!(Value::Text("-0".to_string()).coerce_to_number().unwrap(), 0.0);
+    assert_eq!(
+        Value::Text("-0".to_string()).coerce_to_number().unwrap(),
+        0.0
+    );
     assert_eq!(Value::Text("".to_string()).coerce_to_number().unwrap(), 0.0);
-    assert_eq!(Value::Text("   ".to_string()).coerce_to_number().unwrap(), 0.0);
+    assert_eq!(
+        Value::Text("   ".to_string()).coerce_to_number().unwrap(),
+        0.0
+    );
 
     assert_eq!(
-        Value::Text("INF".to_string()).coerce_to_number().unwrap_err(),
+        Value::Text("INF".to_string())
+            .coerce_to_number()
+            .unwrap_err(),
         ErrorKind::Value
     );
     assert_eq!(
-        Value::Text("1e309".to_string()).coerce_to_number().unwrap_err(),
+        Value::Text("1e309".to_string())
+            .coerce_to_number()
+            .unwrap_err(),
         ErrorKind::Num
     );
 }
 
 #[test]
 fn text_to_bool_coercion_matches_numeric_coercion() {
-    assert_eq!(Value::Text("TRUE".to_string()).coerce_to_bool().unwrap(), true);
+    assert_eq!(
+        Value::Text("TRUE".to_string()).coerce_to_bool().unwrap(),
+        true
+    );
     assert_eq!(
         Value::Text("FALSE".to_string()).coerce_to_bool().unwrap(),
         false
     );
-    assert_eq!(Value::Text("  0  ".to_string()).coerce_to_bool().unwrap(), false);
-    assert_eq!(Value::Text("  2  ".to_string()).coerce_to_bool().unwrap(), true);
+    assert_eq!(
+        Value::Text("  0  ".to_string()).coerce_to_bool().unwrap(),
+        false
+    );
+    assert_eq!(
+        Value::Text("  2  ".to_string()).coerce_to_bool().unwrap(),
+        true
+    );
 }
 
 #[test]
@@ -90,7 +112,10 @@ fn number_to_text_general_formatting_is_excel_like() {
         "0.000123456789012345"
     );
     // General switches to scientific at 1e11 but not 1e10.
-    assert_eq!(Value::Number(1e10).coerce_to_string().unwrap(), "10000000000");
+    assert_eq!(
+        Value::Number(1e10).coerce_to_string().unwrap(),
+        "10000000000"
+    );
     assert_eq!(Value::Number(1e11).coerce_to_string().unwrap(), "1E+11");
     assert_eq!(Value::Number(1e20).coerce_to_string().unwrap(), "1E+20");
     assert_eq!(Value::Number(1e-10).coerce_to_string().unwrap(), "1E-10");

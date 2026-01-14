@@ -25,14 +25,18 @@ fn entity_field_access_variants() {
         )
         .unwrap();
 
-    engine.set_cell_formula("Sheet1", "B1", "=A1.Price").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=A1.Price")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "C1", r#"=A1.["Change%"]"#)
         .unwrap();
     engine.set_cell_formula("Sheet1", "D1", "=A1.Nope").unwrap();
 
     engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
-    engine.set_cell_formula("Sheet1", "B2", "=A2.Price").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=A2.Price")
+        .unwrap();
 
     engine.recalculate();
 

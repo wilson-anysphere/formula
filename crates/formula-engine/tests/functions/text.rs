@@ -56,11 +56,25 @@ fn textjoin_concatenates_and_can_ignore_empty() {
         Value::Number(1.0),
     ];
     assert_eq!(
-        text::textjoin(",", true, &values, ExcelDateSystem::EXCEL_1900, ValueLocaleConfig::en_us()).unwrap(),
+        text::textjoin(
+            ",",
+            true,
+            &values,
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::en_us()
+        )
+        .unwrap(),
         "a,1"
     );
     assert_eq!(
-        text::textjoin(",", false, &values, ExcelDateSystem::EXCEL_1900, ValueLocaleConfig::en_us()).unwrap(),
+        text::textjoin(
+            ",",
+            false,
+            &values,
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::en_us()
+        )
+        .unwrap(),
         "a,,,1"
     );
 }
@@ -252,7 +266,14 @@ fn textjoin_propagates_errors() {
         Value::from("b"),
     ];
     assert_eq!(
-        text::textjoin(",", true, &values, ExcelDateSystem::EXCEL_1900, ValueLocaleConfig::en_us()).unwrap_err(),
+        text::textjoin(
+            ",",
+            true,
+            &values,
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::en_us()
+        )
+        .unwrap_err(),
         ErrorKind::Div0
     );
 }
@@ -313,7 +334,10 @@ fn hyperlink_respects_value_locale_for_numeric_text_coercion() {
     let mut sheet = TestSheet::new();
     sheet.set_value_locale(ValueLocaleConfig::de_de());
 
-    assert_eq!(sheet.eval("=HYPERLINK(1.5)"), Value::Text("1,5".to_string()));
+    assert_eq!(
+        sheet.eval("=HYPERLINK(1.5)"),
+        Value::Text("1,5".to_string())
+    );
     assert_eq!(
         sheet.eval("=HYPERLINK(\"https://example.com\",1.5)"),
         Value::Text("1,5".to_string())

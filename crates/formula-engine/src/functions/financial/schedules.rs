@@ -23,4 +23,3 @@ pub fn fvschedule(principal: f64, schedule: &[f64]) -> ExcelResult<f64> {
     }
     Ok(acc)
 }
-

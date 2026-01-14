@@ -4,7 +4,9 @@ use formula_model::EXCEL_MAX_SHEET_NAME_LEN;
 fn assert_rename_rejected_without_side_effects(new_name: &str) {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
-    engine.set_cell_formula("Sheet2", "A1", "=Sheet1!A1").unwrap();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=Sheet1!A1")
+        .unwrap();
 
     let sheet_id = engine.sheet_id("Sheet1").unwrap();
     let old_sheet_name = engine.sheet_name(sheet_id).unwrap().to_string();
@@ -59,4 +61,3 @@ fn rename_sheet_rejects_names_longer_than_31_utf16_units() {
     let too_long = "a".repeat(EXCEL_MAX_SHEET_NAME_LEN + 1);
     assert_rename_rejected_without_side_effects(&too_long);
 }
-

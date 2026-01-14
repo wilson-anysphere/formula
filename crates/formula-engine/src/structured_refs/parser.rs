@@ -178,7 +178,10 @@ fn parse_inner_spec(inner: &str) -> Option<(Vec<StructuredRefItem>, StructuredCo
             return Some((vec![item], StructuredColumns::All));
         }
 
-        Some((Vec::new(), StructuredColumns::Single(unescape_column_name(trimmed))))
+        Some((
+            Vec::new(),
+            StructuredColumns::Single(unescape_column_name(trimmed)),
+        ))
     }
 }
 

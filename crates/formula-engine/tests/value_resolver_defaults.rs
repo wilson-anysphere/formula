@@ -67,4 +67,3 @@ fn default_expand_sheet_span_skips_missing_sheets_in_3d_spans() {
         Value::Number(2.0)
     );
 }
-

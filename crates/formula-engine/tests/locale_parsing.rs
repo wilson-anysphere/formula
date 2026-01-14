@@ -64,23 +64,14 @@ fn canonicalize_and_localize_more_function_names_for_de_de() {
 
     // Ensure CONCAT (TEXTKETTE) and CONCATENATE (VERKETTEN) remain distinct.
     assert_roundtrip("=CONCAT(\"a\",\"b\")", "=TEXTKETTE(\"a\";\"b\")");
-    assert_roundtrip(
-        "=CONCATENATE(\"a\",\"b\")",
-        "=VERKETTEN(\"a\";\"b\")",
-    );
+    assert_roundtrip("=CONCATENATE(\"a\",\"b\")", "=VERKETTEN(\"a\";\"b\")");
 
     assert_roundtrip(
         "=TEXTJOIN(\",\",TRUE,\"a\",\"b\")",
         "=TEXTVERKETTEN(\",\";WAHR;\"a\";\"b\")",
     );
-    assert_roundtrip(
-        "=VLOOKUP(1,A1:B2,2,FALSE)",
-        "=SVERWEIS(1;A1:B2;2;FALSCH)",
-    );
-    assert_roundtrip(
-        "=HLOOKUP(1,A1:B2,2,FALSE)",
-        "=WVERWEIS(1;A1:B2;2;FALSCH)",
-    );
+    assert_roundtrip("=VLOOKUP(1,A1:B2,2,FALSE)", "=SVERWEIS(1;A1:B2;2;FALSCH)");
+    assert_roundtrip("=HLOOKUP(1,A1:B2,2,FALSE)", "=WVERWEIS(1;A1:B2;2;FALSCH)");
     assert_roundtrip("=IFERROR(1/0,42)", "=WENNFEHLER(1/0;42)");
 
     // Dotted canonical function name; ensure `.` survives translation.
@@ -98,11 +89,11 @@ fn canonicalize_and_localize_more_function_names_for_de_de() {
     assert_roundtrip("=DROP(A1:A3,1)", "=WEGLASSEN(A1:A3;1)");
     assert_roundtrip("=TOCOL(A1:B2,1)", "=ZUSPALTE(A1:B2;1)");
     assert_roundtrip("=TOROW(A1:B2,1)", "=ZUZEILE(A1:B2;1)");
+    assert_roundtrip("=XLOOKUP(1,A1:A3,B1:B3)", "=XVERWEIS(1;A1:A3;B1:B3)");
     assert_roundtrip(
-        "=XLOOKUP(1,A1:A3,B1:B3)",
-        "=XVERWEIS(1;A1:A3;B1:B3)",
+        "=IMAGE(\"https://example.com\")",
+        "=BILD(\"https://example.com\")",
     );
-    assert_roundtrip("=IMAGE(\"https://example.com\")", "=BILD(\"https://example.com\")");
 
     // TRUE()/FALSE() as functions (not just boolean literals).
     assert_roundtrip("=TRUE()", "=WAHR()");
@@ -122,9 +113,9 @@ fn de_de_function_translation_table_covers_all_registered_functions() {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (canon_name, loc_name) = line
-            .split_once('\t')
-            .unwrap_or_else(|| panic!("invalid function translation line (expected TSV): {line:?}"));
+        let (canon_name, loc_name) = line.split_once('\t').unwrap_or_else(|| {
+            panic!("invalid function translation line (expected TSV): {line:?}")
+        });
         assert!(
             canon.insert(canon_name.to_string()),
             "duplicate canonical function translation entry: {canon_name}"
@@ -245,12 +236,18 @@ fn translates_xlfn_prefixed_external_data_functions() {
     let fr = "=_xlfn.VALEUR.CUBE(\"conn\";\"member\";1,5)";
     let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
     assert_eq!(canon, "=_xlfn.CUBEVALUE(\"conn\",\"member\",1.5)");
-    assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), fr);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
+        fr
+    );
 
     let es = "=_xlfn.VALOR.CUBO(\"conn\";\"member\";1,5)";
     let canon = locale::canonicalize_formula(es, &locale::ES_ES).unwrap();
     assert_eq!(canon, "=_xlfn.CUBEVALUE(\"conn\",\"member\",1.5)");
-    assert_eq!(locale::localize_formula(&canon, &locale::ES_ES).unwrap(), es);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
+        es
+    );
 }
 
 #[test]
@@ -277,7 +274,10 @@ fn translates_external_data_functions_with_whitespace_before_paren() {
             locale::canonicalize_formula(localized, locale).unwrap(),
             canonical
         );
-        assert_eq!(locale::localize_formula(canonical, locale).unwrap(), localized);
+        assert_eq!(
+            locale::localize_formula(canonical, locale).unwrap(),
+            localized
+        );
     }
 }
 
@@ -408,14 +408,8 @@ fn canonicalize_and_localize_additional_function_names_for_fr_fr() {
         "=SOMME.SI(A1:A3;\">0\";B1:B3)",
     );
     assert_roundtrip("=AVERAGEIF(A1:A3,\">0\")", "=MOYENNE.SI(A1:A3;\">0\")");
-    assert_roundtrip(
-        "=VLOOKUP(1,A1:B3,2,FALSE)",
-        "=RECHERCHEV(1;A1:B3;2;FAUX)",
-    );
-    assert_roundtrip(
-        "=HLOOKUP(1,A1:C2,2,FALSE)",
-        "=RECHERCHEH(1;A1:C2;2;FAUX)",
-    );
+    assert_roundtrip("=VLOOKUP(1,A1:B3,2,FALSE)", "=RECHERCHEV(1;A1:B3;2;FAUX)");
+    assert_roundtrip("=HLOOKUP(1,A1:C2,2,FALSE)", "=RECHERCHEH(1;A1:C2;2;FAUX)");
     assert_roundtrip("=LEFT(\"abc\",2)", "=GAUCHE(\"abc\";2)");
     assert_roundtrip("=RIGHT(\"abc\",2)", "=DROITE(\"abc\";2)");
     assert_roundtrip("=MID(\"abc\",2,1)", "=STXT(\"abc\";2;1)");
@@ -446,7 +440,10 @@ fn canonicalize_and_localize_true_false_functions_for_de_de_and_es_es() {
             locale::canonicalize_formula(localized, locale).unwrap(),
             canonical
         );
-        assert_eq!(locale::localize_formula(canonical, locale).unwrap(), localized);
+        assert_eq!(
+            locale::localize_formula(canonical, locale).unwrap(),
+            localized
+        );
     }
 
     // TRUE()/FALSE() also exist as zero-arg worksheet functions and are localized in Excel.
@@ -465,8 +462,14 @@ fn structured_reference_items_are_not_translated() {
         ("=SUM(Table1[#All],1)", "Table1[#All]"),
         ("=SUM(Table1[#Data],1)", "Table1[#Data]"),
         ("=SUM(Table1[#Totals],1)", "Table1[#Totals]"),
-        ("=SUM(Table1[[#Headers],[Qty]],1)", "Table1[[#Headers],[Qty]]"),
-        ("=SUM(Table1[[#This Row],[Qty]],1)", "Table1[[#This Row],[Qty]]"),
+        (
+            "=SUM(Table1[[#Headers],[Qty]],1)",
+            "Table1[[#Headers],[Qty]]",
+        ),
+        (
+            "=SUM(Table1[[#This Row],[Qty]],1)",
+            "Table1[[#This Row],[Qty]]",
+        ),
         (
             "=SUM(Table1[[#All],[Col1],[Col2]],1)",
             "Table1[[#All],[Col1],[Col2]]",
@@ -670,10 +673,7 @@ fn locale_error_literal_maps_match_generated_error_tsvs() {
             // Error literals themselves start with `#`, so comments are `#` followed by whitespace.
             let is_comment = trimmed == "#"
                 || (trimmed.starts_with('#')
-                    && trimmed
-                        .chars()
-                        .nth(1)
-                        .is_some_and(|ch| ch.is_whitespace()));
+                    && trimmed.chars().nth(1).is_some_and(|ch| ch.is_whitespace()));
             if trimmed.is_empty() || is_comment {
                 continue;
             }
@@ -788,18 +788,9 @@ fn canonicalize_and_localize_additional_function_translations_for_es_es() {
     }
 
     // Common translated worksheet functions.
-    assert_roundtrip(
-        "=CONTAR.SI(A1:A10;\">0\")",
-        "=COUNTIF(A1:A10,\">0\")",
-    );
-    assert_roundtrip(
-        "=BUSCARV(1;A1:B3;2;FALSO)",
-        "=VLOOKUP(1,A1:B3,2,FALSE)",
-    );
-    assert_roundtrip(
-        "=BUSCARH(1;A1:C2;2;VERDADERO)",
-        "=HLOOKUP(1,A1:C2,2,TRUE)",
-    );
+    assert_roundtrip("=CONTAR.SI(A1:A10;\">0\")", "=COUNTIF(A1:A10,\">0\")");
+    assert_roundtrip("=BUSCARV(1;A1:B3;2;FALSO)", "=VLOOKUP(1,A1:B3,2,FALSE)");
+    assert_roundtrip("=BUSCARH(1;A1:C2;2;VERDADERO)", "=HLOOKUP(1,A1:C2,2,TRUE)");
     assert_roundtrip(
         "=SUMAR.SI(A1:A10;\">0\";B1:B10)",
         "=SUMIF(A1:A10,\">0\",B1:B10)",
@@ -808,10 +799,7 @@ fn canonicalize_and_localize_additional_function_translations_for_es_es() {
         "=SUMAR.SI.CONJUNTO(B1:B10;A1:A10;\">0\";A1:A10;\"<10\")",
         "=SUMIFS(B1:B10,A1:A10,\">0\",A1:A10,\"<10\")",
     );
-    assert_roundtrip(
-        "=PROMEDIO.SI(A1:A10;\">0\")",
-        "=AVERAGEIF(A1:A10,\">0\")",
-    );
+    assert_roundtrip("=PROMEDIO.SI(A1:A10;\">0\")", "=AVERAGEIF(A1:A10,\">0\")");
     assert_roundtrip(
         "=PROMEDIO.SI.CONJUNTO(B1:B10;A1:A10;\">0\";A1:A10;\"<10\")",
         "=AVERAGEIFS(B1:B10,A1:A10,\">0\",A1:A10,\"<10\")",
@@ -868,15 +856,24 @@ fn true_false_functions_are_case_insensitive() {
         ),
     ] {
         for src in true_variants {
-            assert_eq!(locale::canonicalize_formula(src, locale).unwrap(), "=TRUE()");
+            assert_eq!(
+                locale::canonicalize_formula(src, locale).unwrap(),
+                "=TRUE()"
+            );
         }
         for src in false_variants {
-            assert_eq!(locale::canonicalize_formula(src, locale).unwrap(), "=FALSE()");
+            assert_eq!(
+                locale::canonicalize_formula(src, locale).unwrap(),
+                "=FALSE()"
+            );
         }
 
         // Localization should also accept canonical function names case-insensitively and emit the
         // normalized spelling from the locale TSV.
-        assert_eq!(locale::localize_formula("=true()", locale).unwrap(), localized_true);
+        assert_eq!(
+            locale::localize_formula("=true()", locale).unwrap(),
+            localized_true
+        );
         assert_eq!(
             locale::localize_formula("=False()", locale).unwrap(),
             localized_false
@@ -1354,7 +1351,10 @@ fn canonicalize_and_localize_all_cube_function_names() {
             locale::canonicalize_formula(localized, locale).unwrap(),
             canonical
         );
-        assert_eq!(locale::localize_formula(canonical, locale).unwrap(), localized);
+        assert_eq!(
+            locale::localize_formula(canonical, locale).unwrap(),
+            localized
+        );
     }
 
     // de-DE
@@ -1488,8 +1488,9 @@ fn canonicalize_and_localize_with_style_r1c1_for_external_data_functions() {
             "=CUBEVALUE(\"conn\",R[-4]C[-2],1.5)",
         ),
     ] {
-        let canon = locale::canonicalize_formula_with_style(localized, locale, ReferenceStyle::R1C1)
-            .unwrap();
+        let canon =
+            locale::canonicalize_formula_with_style(localized, locale, ReferenceStyle::R1C1)
+                .unwrap();
         assert_eq!(canon, canonical);
         let localized_roundtrip =
             locale::localize_formula_with_style(&canon, locale, ReferenceStyle::R1C1).unwrap();
@@ -1502,17 +1503,26 @@ fn localized_function_names_are_not_translated_in_sheet_prefixes() {
     let de = "=SUMME(CUBEWERT!A1;1)";
     let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
     assert_eq!(canon, "=SUM(CUBEWERT!A1,1)");
-    assert_eq!(locale::localize_formula(&canon, &locale::DE_DE).unwrap(), de);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
+        de
+    );
 
     let fr = "=SOMME(VALEUR.CUBE!A1;1)";
     let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
     assert_eq!(canon, "=SUM(VALEUR.CUBE!A1,1)");
-    assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), fr);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
+        fr
+    );
 
     let es = "=SUMA(VALOR.CUBO!A1;1)";
     let canon = locale::canonicalize_formula(es, &locale::ES_ES).unwrap();
     assert_eq!(canon, "=SUM(VALOR.CUBO!A1,1)");
-    assert_eq!(locale::localize_formula(&canon, &locale::ES_ES).unwrap(), es);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
+        es
+    );
 }
 
 #[test]
@@ -1523,17 +1533,26 @@ fn localized_external_data_function_names_are_not_translated_when_used_as_identi
     let de = "=CUBEWERT+1";
     let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
     assert_eq!(canon, de);
-    assert_eq!(locale::localize_formula(&canon, &locale::DE_DE).unwrap(), de);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
+        de
+    );
 
     let fr = "=VALEUR.CUBE+1";
     let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
     assert_eq!(canon, fr);
-    assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), fr);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
+        fr
+    );
 
     let es = "=VALOR.CUBO+1";
     let canon = locale::canonicalize_formula(es, &locale::ES_ES).unwrap();
     assert_eq!(canon, es);
-    assert_eq!(locale::localize_formula(&canon, &locale::ES_ES).unwrap(), es);
+    assert_eq!(
+        locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
+        es
+    );
 }
 
 #[test]
@@ -1658,8 +1677,14 @@ fn engine_accepts_localized_external_data_formulas_and_persists_canonical() {
         // Without an external data provider, RTD/CUBE* functions should be recognized and return
         // `#N/A` rather than `#NAME?`.
         engine.recalculate();
-        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::NA));
-        assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::NA));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Error(ErrorKind::NA)
+        );
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A2"),
+            Value::Error(ErrorKind::NA)
+        );
         assert_eq!(
             engine.get_cell_value("Sheet1", "A3"),
             Value::Error(ErrorKind::GettingData)
@@ -1714,11 +1739,20 @@ fn engine_accepts_localized_external_data_r1c1_formulas_and_persists_canonical_a
         engine
             .set_cell_formula_localized_r1c1("Sheet1", "A1", localized_err, locale)
             .unwrap();
-        assert_eq!(engine.get_cell_formula("Sheet1", "A1"), Some("=#GETTING_DATA"));
+        assert_eq!(
+            engine.get_cell_formula("Sheet1", "A1"),
+            Some("=#GETTING_DATA")
+        );
 
         engine.recalculate();
-        assert_eq!(engine.get_cell_value("Sheet1", "C5"), Value::Error(ErrorKind::NA));
-        assert_eq!(engine.get_cell_value("Sheet1", "C6"), Value::Error(ErrorKind::NA));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "C5"),
+            Value::Error(ErrorKind::NA)
+        );
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "C6"),
+            Value::Error(ErrorKind::NA)
+        );
         assert_eq!(
             engine.get_cell_value("Sheet1", "A1"),
             Value::Error(ErrorKind::GettingData)
@@ -1765,12 +1799,7 @@ fn engine_accepts_localized_r1c1_formulas_with_field_access() {
     // - R1C1 reference rewriting (`RC[-1]` in B1 -> `A1`)
     // - field access parsing after an R1C1 reference (`RC[-1].Price`)
     engine
-        .set_cell_formula_localized_r1c1(
-            "Sheet1",
-            "B1",
-            "=SUMME(RC[-1].Price;1,5)",
-            &locale::DE_DE,
-        )
+        .set_cell_formula_localized_r1c1("Sheet1", "B1", "=SUMME(RC[-1].Price;1,5)", &locale::DE_DE)
         .unwrap();
     engine.recalculate_single_threaded();
 

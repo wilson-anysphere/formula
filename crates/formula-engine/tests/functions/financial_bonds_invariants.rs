@@ -56,13 +56,9 @@ fn coup_invariants_when_settlement_is_coupon_date() {
     // Skip this entire test module if the COUP* functions aren't available yet.
     let check = "=COUPDAYBS(DATE(2020,7,1),DATE(2021,1,1),2,0)";
     if eval_number_or_skip(&mut sheet, check).is_none()
-        || eval_number_or_skip(
-            &mut sheet,
-            "=COUPDAYSNC(DATE(2020,7,1),DATE(2021,1,1),2,0)",
-        )
-        .is_none()
-        || eval_number_or_skip(&mut sheet, "=COUPDAYS(DATE(2020,7,1),DATE(2021,1,1),2,0)")
+        || eval_number_or_skip(&mut sheet, "=COUPDAYSNC(DATE(2020,7,1),DATE(2021,1,1),2,0)")
             .is_none()
+        || eval_number_or_skip(&mut sheet, "=COUPDAYS(DATE(2020,7,1),DATE(2021,1,1),2,0)").is_none()
     {
         return;
     }
@@ -145,11 +141,8 @@ fn coup_days_additivity_for_30_360_bases() {
             "=COUPDAYSNC(DATE(2020,7,15),DATE(2021,7,15),2,0)",
         )
         .is_none()
-        || eval_number_or_skip(
-            &mut sheet,
-            "=COUPDAYS(DATE(2020,7,15),DATE(2021,7,15),2,0)",
-        )
-        .is_none()
+        || eval_number_or_skip(&mut sheet, "=COUPDAYS(DATE(2020,7,15),DATE(2021,7,15),2,0)")
+            .is_none()
     {
         return;
     }
@@ -201,21 +194,9 @@ fn coup_schedule_roundtrips_when_settlement_is_coupon_date() {
     let mut sheet = TestSheet::new();
 
     // Skip if the COUP date helpers aren't registered yet.
-    if eval_number_or_skip(
-        &mut sheet,
-        "=COUPPCD(DATE(2020,7,1),DATE(2021,1,1),2,0)",
-    )
-    .is_none()
-        || eval_number_or_skip(
-            &mut sheet,
-            "=COUPNCD(DATE(2020,7,1),DATE(2021,1,1),2,0)",
-        )
-        .is_none()
-        || eval_number_or_skip(
-            &mut sheet,
-            "=COUPNUM(DATE(2020,7,1),DATE(2021,1,1),2,0)",
-        )
-        .is_none()
+    if eval_number_or_skip(&mut sheet, "=COUPPCD(DATE(2020,7,1),DATE(2021,1,1),2,0)").is_none()
+        || eval_number_or_skip(&mut sheet, "=COUPNCD(DATE(2020,7,1),DATE(2021,1,1),2,0)").is_none()
+        || eval_number_or_skip(&mut sheet, "=COUPNUM(DATE(2020,7,1),DATE(2021,1,1),2,0)").is_none()
     {
         return;
     }

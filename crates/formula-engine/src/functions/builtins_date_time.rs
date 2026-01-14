@@ -29,7 +29,9 @@ fn date_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let month = eval_scalar_arg(ctx, &args[1]);
     let day = eval_scalar_arg(ctx, &args[2]);
     let system = ctx.date_system();
-    broadcast_map3(year, month, day, |y, m, d| date_from_parts(ctx, &y, &m, &d, system))
+    broadcast_map3(year, month, day, |y, m, d| {
+        date_from_parts(ctx, &y, &m, &d, system)
+    })
 }
 
 fn date_from_parts(
@@ -224,9 +226,11 @@ fn time_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let hour = eval_scalar_arg(ctx, &args[0]);
     let minute = eval_scalar_arg(ctx, &args[1]);
     let second = eval_scalar_arg(ctx, &args[2]);
-    broadcast_map3(hour, minute, second, |h, m, s| match time_from_parts(ctx, &h, &m, &s) {
-        Ok(v) => Value::Number(v),
-        Err(e) => Value::Error(e),
+    broadcast_map3(hour, minute, second, |h, m, s| {
+        match time_from_parts(ctx, &h, &m, &s) {
+            Ok(v) => Value::Number(v),
+            Err(e) => Value::Error(e),
+        }
     })
 }
 
@@ -246,12 +250,13 @@ inventory::submit! {
 
 fn hour_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
-    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| {
-        match time_components_from_value(ctx, &v, cfg) {
+    map_unary(
+        array_lift::eval_arg(ctx, &args[0]),
+        |v| match time_components_from_value(ctx, &v, cfg) {
             Ok((h, _, _)) => Value::Number(h as f64),
             Err(e) => Value::Error(e),
-        }
-    })
+        },
+    )
 }
 
 inventory::submit! {
@@ -270,12 +275,13 @@ inventory::submit! {
 
 fn minute_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
-    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| {
-        match time_components_from_value(ctx, &v, cfg) {
+    map_unary(
+        array_lift::eval_arg(ctx, &args[0]),
+        |v| match time_components_from_value(ctx, &v, cfg) {
             Ok((_, m, _)) => Value::Number(m as f64),
             Err(e) => Value::Error(e),
-        }
-    })
+        },
+    )
 }
 
 inventory::submit! {
@@ -294,12 +300,13 @@ inventory::submit! {
 
 fn second_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
-    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| {
-        match time_components_from_value(ctx, &v, cfg) {
+    map_unary(
+        array_lift::eval_arg(ctx, &args[0]),
+        |v| match time_components_from_value(ctx, &v, cfg) {
             Ok((_, _, s)) => Value::Number(s as f64),
             Err(e) => Value::Error(e),
-        }
-    })
+        },
+    )
 }
 
 inventory::submit! {
@@ -318,10 +325,13 @@ inventory::submit! {
 
 fn timevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let cfg = ctx.value_locale();
-    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match timevalue_from_value(ctx, &v, cfg) {
-        Ok(n) => Value::Number(n),
-        Err(e) => Value::Error(e),
-    })
+    map_unary(
+        eval_scalar_arg(ctx, &args[0]),
+        |v| match timevalue_from_value(ctx, &v, cfg) {
+            Ok(n) => Value::Number(n),
+            Err(e) => Value::Error(e),
+        },
+    )
 }
 
 inventory::submit! {
@@ -342,12 +352,13 @@ fn datevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
     let cfg = ctx.value_locale();
-    map_unary(eval_scalar_arg(ctx, &args[0]), |v| {
-        match datevalue_from_value(ctx, &v, system, cfg, now_utc) {
+    map_unary(
+        eval_scalar_arg(ctx, &args[0]),
+        |v| match datevalue_from_value(ctx, &v, system, cfg, now_utc) {
             Ok(n) => Value::Number(n as f64),
             Err(e) => Value::Error(e),
-        }
-    })
+        },
+    )
 }
 
 inventory::submit! {
@@ -409,24 +420,29 @@ fn days360_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let now_utc = ctx.now_utc();
     let cfg = ctx.value_locale();
 
-    broadcast_map3(start_date, end_date, method, |start_date, end_date, method| {
-        let start_serial = match datevalue_from_value(ctx, &start_date, system, cfg, now_utc) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let end_serial = match datevalue_from_value(ctx, &end_date, system, cfg, now_utc) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let method = match coerce_to_bool_finite(ctx, &method) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        match date_time::days360(start_serial, end_serial, method, system) {
-            Ok(v) => Value::Number(v as f64),
-            Err(e) => Value::Error(excel_error_kind(e)),
-        }
-    })
+    broadcast_map3(
+        start_date,
+        end_date,
+        method,
+        |start_date, end_date, method| {
+            let start_serial = match datevalue_from_value(ctx, &start_date, system, cfg, now_utc) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            let end_serial = match datevalue_from_value(ctx, &end_date, system, cfg, now_utc) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            let method = match coerce_to_bool_finite(ctx, &method) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            match date_time::days360(start_serial, end_serial, method, system) {
+                Ok(v) => Value::Number(v as f64),
+                Err(e) => Value::Error(excel_error_kind(e)),
+            }
+        },
+    )
 }
 
 inventory::submit! {
@@ -455,30 +471,35 @@ fn yearfrac_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let now_utc = ctx.now_utc();
     let cfg = ctx.value_locale();
 
-    broadcast_map3(start_date, end_date, basis, |start_date, end_date, basis| {
-        let start_serial = match datevalue_from_value(ctx, &start_date, system, cfg, now_utc) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let end_serial = match datevalue_from_value(ctx, &end_date, system, cfg, now_utc) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-
-        let basis = if matches!(basis, Value::Blank) {
-            0
-        } else {
-            match coerce_to_i32_trunc(ctx, &basis) {
+    broadcast_map3(
+        start_date,
+        end_date,
+        basis,
+        |start_date, end_date, basis| {
+            let start_serial = match datevalue_from_value(ctx, &start_date, system, cfg, now_utc) {
                 Ok(v) => v,
                 Err(e) => return Value::Error(e),
-            }
-        };
+            };
+            let end_serial = match datevalue_from_value(ctx, &end_date, system, cfg, now_utc) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
 
-        match date_time::yearfrac(start_serial, end_serial, basis, system) {
-            Ok(v) => Value::Number(v),
-            Err(e) => Value::Error(excel_error_kind(e)),
-        }
-    })
+            let basis = if matches!(basis, Value::Blank) {
+                0
+            } else {
+                match coerce_to_i32_trunc(ctx, &basis) {
+                    Ok(v) => v,
+                    Err(e) => return Value::Error(e),
+                }
+            };
+
+            match date_time::yearfrac(start_serial, end_serial, basis, system) {
+                Ok(v) => Value::Number(v),
+                Err(e) => Value::Error(excel_error_kind(e)),
+            }
+        },
+    )
 }
 
 inventory::submit! {
@@ -1010,7 +1031,12 @@ fn broadcast_map2(a: Value, b: Value, mut f: impl FnMut(Value, Value) -> Value) 
     Value::Array(Array::new(rows, cols, out))
 }
 
-fn broadcast_map3(a: Value, b: Value, c: Value, mut f: impl FnMut(Value, Value, Value) -> Value) -> Value {
+fn broadcast_map3(
+    a: Value,
+    b: Value,
+    c: Value,
+    mut f: impl FnMut(Value, Value, Value) -> Value,
+) -> Value {
     let (rows, cols) = match broadcast_shape(&[&a, &b, &c]) {
         Ok(shape) => shape,
         Err(e) => return Value::Error(e),
@@ -1064,7 +1090,9 @@ fn broadcast_shape(values: &[&Value]) -> Result<(usize, usize), ErrorKind> {
 
 fn is_broadcastable(v: &Value, rows: usize, cols: usize) -> bool {
     match v {
-        Value::Array(arr) => (arr.rows == 1 && arr.cols == 1) || (arr.rows == rows && arr.cols == cols),
+        Value::Array(arr) => {
+            (arr.rows == 1 && arr.cols == 1) || (arr.rows == rows && arr.cols == cols)
+        }
         _ => true,
     }
 }

@@ -204,9 +204,7 @@ fn odd_coupon_coupon_payment_is_based_on_face_value() {
         Value::Number(n) => assert_close(n, expected_oddf, 1e-12),
         other => panic!("expected number, got {other:?}"),
     }
-    let v = sheet.eval(
-        "=ODDLPRICE(DATE(2020,7,1),DATE(2021,1,1),DATE(2020,7,1),0.1,0,105,2,0)",
-    );
+    let v = sheet.eval("=ODDLPRICE(DATE(2020,7,1),DATE(2021,1,1),DATE(2020,7,1),0.1,0,105,2,0)");
     match v {
         Value::Number(n) => assert_close(n, expected_oddl, 1e-12),
         other => panic!("expected number, got {other:?}"),
@@ -441,7 +439,10 @@ fn oddf_issue_equal_settlement_boundary_roundtrip() {
         system,
     )
     .expect("ODDFPRICE should allow issue == settlement");
-    assert!(pr.is_finite() && pr > 0.0, "expected positive finite price, got {pr}");
+    assert!(
+        pr.is_finite() && pr > 0.0,
+        "expected positive finite price, got {pr}"
+    );
 
     let yld_out = oddfyield(
         settlement,
@@ -460,7 +461,9 @@ fn oddf_issue_equal_settlement_boundary_roundtrip() {
 
     // Also validate worksheet functions.
     let mut sheet = TestSheet::new();
-    let v = sheet.eval("=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)");
+    let v = sheet.eval(
+        "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
+    );
     assert!(
         matches!(v, Value::Number(n) if n.is_finite() && n > 0.0),
         "expected positive finite number for worksheet ODDFPRICE when issue == settlement, got {v:?}"
@@ -933,12 +936,16 @@ fn odd_coupon_invalid_schedule_inputs_return_num_errors() {
         ),
         Err(ExcelError::Num)
     );
-    let v = sheet.eval("=ODDFPRICE(DATE(2020,8,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
+    let v = sheet.eval(
+        "=ODDFPRICE(DATE(2020,8,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+    );
     assert!(
         matches!(v, Value::Error(ErrorKind::Num)),
         "expected #NUM! for worksheet ODDFPRICE when settlement > first_coupon, got {v:?}"
     );
-    let v = sheet.eval("=ODDFYIELD(DATE(2020,8,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,98,100,2,0)");
+    let v = sheet.eval(
+        "=ODDFYIELD(DATE(2020,8,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,98,100,2,0)",
+    );
     assert!(
         matches!(v, Value::Error(ErrorKind::Num)),
         "expected #NUM! for worksheet ODDFYIELD when settlement > first_coupon, got {v:?}"
@@ -980,7 +987,8 @@ fn odd_coupon_invalid_schedule_inputs_return_num_errors() {
         Err(ExcelError::Num)
     );
 
-    let v = sheet.eval("=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2025,1,2),0.05,0.04,100,2,0)");
+    let v =
+        sheet.eval("=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2025,1,2),0.05,0.04,100,2,0)");
     assert!(
         matches!(v, Value::Error(ErrorKind::Num)),
         "expected #NUM! for worksheet ODDLPRICE invalid schedule, got {v:?}"
@@ -1036,15 +1044,21 @@ fn odd_coupon_misaligned_last_interest_schedule_is_currently_accepted() {
     .expect("ODDLYIELD should currently accept misaligned last_interest schedule");
     assert_close(y, 0.070_416_608_219_943_12, 1e-9);
 
-    let v = sheet.eval("=ODDLPRICE(DATE(2024,8,1),DATE(2025,1,31),DATE(2024,7,30),0.05,0.04,100,2,0)");
+    let v =
+        sheet.eval("=ODDLPRICE(DATE(2024,8,1),DATE(2025,1,31),DATE(2024,7,30),0.05,0.04,100,2,0)");
     match v {
         Value::Number(n) => assert_close(n, pr, 1e-9),
-        other => panic!("expected number for worksheet ODDLPRICE misaligned schedule, got {other:?}"),
+        other => {
+            panic!("expected number for worksheet ODDLPRICE misaligned schedule, got {other:?}")
+        }
     }
-    let v = sheet.eval("=ODDLYIELD(DATE(2024,8,1),DATE(2025,1,31),DATE(2024,7,30),0.05,99,100,2,0)");
+    let v =
+        sheet.eval("=ODDLYIELD(DATE(2024,8,1),DATE(2025,1,31),DATE(2024,7,30),0.05,99,100,2,0)");
     match v {
         Value::Number(n) => assert_close(n, y, 1e-9),
-        other => panic!("expected number for worksheet ODDLYIELD misaligned schedule, got {other:?}"),
+        other => {
+            panic!("expected number for worksheet ODDLYIELD misaligned schedule, got {other:?}")
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -1066,7 +1080,9 @@ fn odd_coupon_misaligned_last_interest_schedule_is_currently_accepted() {
         1,
         system,
     )
-    .expect("ODDLPRICE should currently accept basis=1 EOM mismatch (maturity EOM, last_interest not)");
+    .expect(
+        "ODDLPRICE should currently accept basis=1 EOM mismatch (maturity EOM, last_interest not)",
+    );
     assert_close(pr, 100.453_115_102_272_87, 1e-9);
     let y = oddlyield(
         settlement,
@@ -1079,7 +1095,9 @@ fn odd_coupon_misaligned_last_interest_schedule_is_currently_accepted() {
         1,
         system,
     )
-    .expect("ODDLYIELD should currently accept basis=1 EOM mismatch (maturity EOM, last_interest not)");
+    .expect(
+        "ODDLYIELD should currently accept basis=1 EOM mismatch (maturity EOM, last_interest not)",
+    );
     assert_close(y, 0.072_192_898_126_549_61, 1e-9);
 
     // maturity is not EOM but last_interest is EOM.

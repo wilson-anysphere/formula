@@ -45,4 +45,3 @@ pub fn pduration(rate: f64, pv: f64, fv: f64) -> ExcelResult<f64> {
         Err(ExcelError::Num)
     }
 }
-

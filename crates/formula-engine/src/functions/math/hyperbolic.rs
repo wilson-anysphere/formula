@@ -96,4 +96,3 @@ pub fn acoth(number: f64) -> ExcelResult<f64> {
     // ACOTH(x) = ATANH(1/x) for |x|>1.
     atanh(1.0 / number)
 }
-

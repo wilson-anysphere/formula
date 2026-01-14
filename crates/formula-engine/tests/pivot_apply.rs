@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use formula_engine::pivot::{
-    apply_pivot_result_to_worksheet, AggregationType, GrandTotals, Layout, PivotConfig, PivotField,
-    PivotApplyOptions, PivotFieldRef, PivotResult, PivotValue, SubtotalPosition, ValueField,
+    apply_pivot_result_to_worksheet, AggregationType, GrandTotals, Layout, PivotApplyOptions,
+    PivotConfig, PivotField, PivotFieldRef, PivotResult, PivotValue, SubtotalPosition, ValueField,
 };
 use formula_model::{CellRef, CellValue, DateSystem, Workbook};
 
@@ -85,7 +85,10 @@ fn applies_value_field_number_format_when_present() {
                 PivotValue::Text("Region".to_string()),
                 PivotValue::Text("Sum of Sales".to_string()),
             ],
-            vec![PivotValue::Text("East".to_string()), PivotValue::Number(250.0)],
+            vec![
+                PivotValue::Text("East".to_string()),
+                PivotValue::Number(250.0),
+            ],
         ],
     };
 
@@ -142,7 +145,10 @@ fn applies_percent_format_for_percent_show_as_when_no_explicit_format() {
                 PivotValue::Text("Region".to_string()),
                 PivotValue::Text("Sum of Sales".to_string()),
             ],
-            vec![PivotValue::Text("East".to_string()), PivotValue::Number(0.5)],
+            vec![
+                PivotValue::Text("East".to_string()),
+                PivotValue::Number(0.5),
+            ],
         ],
     };
 

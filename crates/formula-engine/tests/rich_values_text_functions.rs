@@ -18,10 +18,7 @@ fn text_and_textjoin_use_display_strings_for_rich_values() {
         Value::Record(RecordValue {
             display: "Fallback".to_string(),
             display_field: Some("Name".to_string()),
-            fields: HashMap::from([(
-                "Name".to_string(),
-                Value::Text("Apple Inc.".to_string()),
-            )]),
+            fields: HashMap::from([("Name".to_string(), Value::Text("Apple Inc.".to_string()))]),
         }),
     );
 

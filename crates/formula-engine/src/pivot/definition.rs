@@ -5,12 +5,12 @@ use std::collections::HashMap;
 
 use chrono::Datelike;
 
+use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::editing::rewrite::{
     rewrite_formula_for_range_map, rewrite_formula_for_structural_edit, GridRange, RangeMapEdit,
     StructuralEdit,
 };
 use crate::editing::EditOp;
-use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::CellAddr;
 use formula_model::{sheet_name_eq_case_insensitive, CellRef, Range, Style, EXCEL_MAX_COLS};
 
@@ -229,9 +229,11 @@ impl PivotTableDefinition {
 
         // Destination top-left cell behaves like a cell reference.
         if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
-            if let Some(cell) =
-                rewrite_cell_ref_for_structural_edit(self.destination.cell, &self.destination.sheet, edit)
-            {
+            if let Some(cell) = rewrite_cell_ref_for_structural_edit(
+                self.destination.cell,
+                &self.destination.sheet,
+                edit,
+            ) {
                 self.destination.cell = cell;
             } else {
                 // If the destination anchor is deleted, clamp it to the edit start.
@@ -259,7 +261,8 @@ impl PivotTableDefinition {
         // Update (or invalidate) last output footprint.
         if let Some(prev) = self.last_output_range {
             if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
-                self.last_output_range = rewrite_range_for_structural_edit(prev, &self.destination.sheet, edit);
+                self.last_output_range =
+                    rewrite_range_for_structural_edit(prev, &self.destination.sheet, edit);
                 if self.last_output_range.is_none() {
                     self.needs_refresh = true;
                 }
@@ -275,9 +278,11 @@ impl PivotTableDefinition {
         let prev_output = self.last_output_range;
 
         if sheet_name_eq_case_insensitive(&self.destination.sheet, edit_sheet) {
-            if let Some(cell) =
-                rewrite_cell_ref_for_range_map_edit(self.destination.cell, &self.destination.sheet, edit)
-            {
+            if let Some(cell) = rewrite_cell_ref_for_range_map_edit(
+                self.destination.cell,
+                &self.destination.sheet,
+                edit,
+            ) {
                 self.destination.cell = cell;
             } else {
                 // Deleted/moved out of bounds; best-effort clamp to origin of deleted region.
@@ -681,7 +686,8 @@ pub(crate) fn refresh_pivot(
     // Note: computed pivot caches may be reused in the future; for MVP we rebuild each time.
     let result = PivotEngine::calculate(&cache, &def.config)?;
 
-    let rows = u32::try_from(result.data.len()).map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
+    let rows =
+        u32::try_from(result.data.len()).map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
     let cols = u32::try_from(result.data.first().map(|r| r.len()).unwrap_or(0))
         .map_err(|_| PivotRefreshError::OutputOutOfBounds)?;
 
@@ -780,7 +786,11 @@ pub(crate) fn refresh_pivot(
                     }
                 };
                 desired_style_id = Some(style_id);
-            } else if prev_output_range.is_some() && r > 0 && value_field_count > 0 && c >= row_label_width {
+            } else if prev_output_range.is_some()
+                && r > 0
+                && value_field_count > 0
+                && c >= row_label_width
+            {
                 // When a refresh removes a previously-applied value-field number format (e.g. the
                 // user toggles `apply_number_formats` off), reset value-area cells to the default
                 // style so we don't leave stale number formats behind.
@@ -870,7 +880,10 @@ fn engine_value_to_pivot_value(value: crate::value::Value) -> PivotValue {
     }
 }
 
-fn pivot_value_to_engine_value(value: PivotValue, date_system: ExcelDateSystem) -> crate::value::Value {
+fn pivot_value_to_engine_value(
+    value: PivotValue,
+    date_system: ExcelDateSystem,
+) -> crate::value::Value {
     match value {
         PivotValue::Blank => crate::value::Value::Blank,
         PivotValue::Number(n) => crate::value::Value::Number(n),

@@ -16,7 +16,11 @@ fn assert_close(actual: f64, expected: f64, tol: f64) {
 }
 
 fn serial_1900(year: i32, month: u8, day: u8) -> i32 {
-    ymd_to_serial(ExcelDate::new(year, month, day), ExcelDateSystem::EXCEL_1900).unwrap()
+    ymd_to_serial(
+        ExcelDate::new(year, month, day),
+        ExcelDateSystem::EXCEL_1900,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -66,7 +70,11 @@ fn pricemat_yieldmat_accept_iso_date_text_and_blank_basis() {
         assert_number(engine.get_cell_value("Sheet1", "A4")),
         1e-12,
     );
-    assert_close(assert_number(engine.get_cell_value("Sheet1", "A3")), 0.04, 1e-12);
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A3")),
+        0.04,
+        1e-12,
+    );
 }
 
 #[test]
@@ -133,7 +141,7 @@ fn pricemat_yieldmat_coerce_basis_like_excel() {
     engine.set_cell_value("Sheet1", "B1", "2").unwrap(); // text -> number 2
     engine.set_cell_value("Sheet1", "B2", true).unwrap(); // TRUE -> 1
     engine.set_cell_value("Sheet1", "B3", false).unwrap(); // FALSE -> 0
-                                                             // B4 intentionally left blank -> blank -> 0
+                                                           // B4 intentionally left blank -> blank -> 0
     engine.set_cell_value("Sheet1", "B5", 4.9).unwrap(); // trunc -> 4
 
     engine
@@ -333,7 +341,11 @@ fn pricemat_yieldmat_coerce_basis_like_excel() {
 
     // YIELDMAT should invert PRICEMAT (up to floating-point error) for any basis.
     for addr in ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"] {
-        assert_close(assert_number(engine.get_cell_value("Sheet1", addr)), yld, 1e-12);
+        assert_close(
+            assert_number(engine.get_cell_value("Sheet1", addr)),
+            yld,
+            1e-12,
+        );
     }
     assert_eq!(
         engine.get_cell_value("Sheet1", "C9"),

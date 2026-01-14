@@ -55,8 +55,7 @@ fn bytecode_xmatch_rejects_lambda_lookup_value() {
 #[test]
 fn bytecode_xlookup_rejects_lambda_lookup_value() {
     let origin = CellCoord::new(0, 0);
-    let expr =
-        bytecode::parse_formula("=XLOOKUP(LAMBDA(x,x),A1:A2,B1:B2)", origin).expect("parse");
+    let expr = bytecode::parse_formula("=XLOOKUP(LAMBDA(x,x),A1:A2,B1:B2)", origin).expect("parse");
     let program = bytecode::Compiler::compile(Arc::from("xlookup_lambda_lookup_value"), &expr);
 
     let grid = ColumnarGrid::new(10, 10);

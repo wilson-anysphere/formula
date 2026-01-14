@@ -1190,7 +1190,8 @@ impl DependencyGraph {
             return;
         }
 
-        self.dirty.reserve(self.cells.len().saturating_sub(self.dirty.len()));
+        self.dirty
+            .reserve(self.cells.len().saturating_sub(self.dirty.len()));
         self.dirty.extend(self.cells.keys().copied());
     }
 }

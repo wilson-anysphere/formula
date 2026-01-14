@@ -28,9 +28,7 @@ fn engine_evaluates_all_error_literals_ast_and_bytecode() {
         for (idx, (kind, lit)) in all_errors().iter().enumerate() {
             let addr = format!("A{}", idx + 1);
             let formula = format!("={}", lit.to_ascii_lowercase());
-            engine
-                .set_cell_formula("Sheet1", &addr, &formula)
-                .unwrap();
+            engine.set_cell_formula("Sheet1", &addr, &formula).unwrap();
 
             // Ensure the literal survives round-trip/display.
             assert_eq!(kind.as_code(), *lit);
@@ -90,9 +88,7 @@ fn engine_evaluates_na_exclamation_error_literal_ast_and_bytecode() {
         let mut engine = Engine::new();
         engine.set_bytecode_enabled(bytecode_enabled);
 
-        engine
-            .set_cell_formula("Sheet1", "A1", "=#N/A!")
-            .unwrap();
+        engine.set_cell_formula("Sheet1", "A1", "=#N/A!").unwrap();
 
         if bytecode_enabled {
             assert_eq!(engine.bytecode_program_count(), 1);
@@ -101,7 +97,10 @@ fn engine_evaluates_na_exclamation_error_literal_ast_and_bytecode() {
         }
 
         engine.recalculate_single_threaded();
-        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::NA));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Error(ErrorKind::NA)
+        );
     }
 }
 

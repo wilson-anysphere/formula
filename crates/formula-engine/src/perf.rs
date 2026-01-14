@@ -258,9 +258,7 @@ fn setup_bytecode_array_aggregate_engine(size: usize) -> (Engine, String) {
     let half = size / 2;
     // Use ROW over a row-range to produce a large in-memory array on the bytecode backend, then
     // aggregate it. This exercises bytecode `Value::Array` aggregate fast paths (SUM/COUNTIF).
-    let formula = format!(
-        "=LET(x,A1,r,ROW(1:{size}),SUM(r)+COUNTIF(r, \">{half}\")+x)"
-    );
+    let formula = format!("=LET(x,A1,r,ROW(1:{size}),SUM(r)+COUNTIF(r, \">{half}\")+x)");
     engine
         .set_cell_formula("Sheet1", &out_cell, &formula)
         .expect("set bytecode array aggregate formula");

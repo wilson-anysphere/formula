@@ -68,27 +68,21 @@ fn accrint_supports_basis_variants() {
     // Basis 1: actual/actual day counting within the coupon period.
     let expected_basis1 = 50.0 * (123.0 / 184.0);
     assert_number(
-        &sheet.eval(
-            "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,9,15),0.1,1000,2,1,FALSE)",
-        ),
+        &sheet.eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,9,15),0.1,1000,2,1,FALSE)"),
         expected_basis1,
     );
 
     // Basis 2: Actual/360 uses actual days in numerator with a fixed 360/f denominator.
     let expected_basis2 = 50.0 * (123.0 / 180.0);
     assert_number(
-        &sheet.eval(
-            "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,9,15),0.1,1000,2,2,FALSE)",
-        ),
+        &sheet.eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,9,15),0.1,1000,2,2,FALSE)"),
         expected_basis2,
     );
 
     // Basis 3: Actual/365 uses actual days in numerator with a fixed 365/f denominator.
     let expected_basis3 = 50.0 * (123.0 / (365.0 / 2.0));
     assert_number(
-        &sheet.eval(
-            "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,9,15),0.1,1000,2,3,FALSE)",
-        ),
+        &sheet.eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,9,15),0.1,1000,2,3,FALSE)"),
         expected_basis3,
     );
 
@@ -158,7 +152,8 @@ fn accrint_coupon_schedule_pins_month_end_when_first_interest_is_month_end() {
     let from_issue = 30.0 * (31.0 / 90.0);
     let from_pcd = 30.0 * (15.0 / 90.0);
     assert_number(
-        &sheet.eval("=ACCRINT(DATE(2020,1,15),DATE(2020,4,30),DATE(2020,2,15),0.12,1000,4,1,FALSE)"),
+        &sheet
+            .eval("=ACCRINT(DATE(2020,1,15),DATE(2020,4,30),DATE(2020,2,15),0.12,1000,4,1,FALSE)"),
         from_issue,
     );
     assert_number(

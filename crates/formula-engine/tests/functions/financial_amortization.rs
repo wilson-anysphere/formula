@@ -68,10 +68,7 @@ fn amortization_rejects_invalid_inputs() {
         cumipmt(0.1, 0.0, 1000.0, 1.0, 2.0, 0.0),
         Err(ExcelError::Num)
     );
-    assert_eq!(
-        cumipmt(0.1, 10.0, 0.0, 1.0, 2.0, 0.0),
-        Err(ExcelError::Num)
-    );
+    assert_eq!(cumipmt(0.1, 10.0, 0.0, 1.0, 2.0, 0.0), Err(ExcelError::Num));
 
     // Invalid period bounds.
     assert_eq!(

@@ -4210,8 +4210,7 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             let months_per_period = 12 / frequency;
             let eom = is_end_of_month(maturity, system);
             assert!(eom, "expected maturity to be EOM for this scenario");
-            let prev_coupon =
-                coupon_date_with_eom(first_coupon, -months_per_period, eom, system);
+            let prev_coupon = coupon_date_with_eom(first_coupon, -months_per_period, eom, system);
             let days360_eu =
                 date_time::days360(prev_coupon, first_coupon, true, system).unwrap() as f64;
             assert_close(days360_eu, 182.0, 0.0);

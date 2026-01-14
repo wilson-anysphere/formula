@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use formula_engine::eval::{CellAddr, EvalContext, Evaluator, NameRef as EvalNameRef, RecalcContext};
+use formula_engine::eval::{
+    CellAddr, EvalContext, Evaluator, NameRef as EvalNameRef, RecalcContext,
+};
 use formula_engine::eval::{Expr as EvalExpr, ResolvedName, SheetReference, ValueResolver};
 use formula_engine::functions::{ArgValue, FunctionContext};
 use formula_engine::value::{ErrorKind, Value};
@@ -35,7 +37,9 @@ fn partial_parse_records_error_and_caps_args_at_255() {
     let partial = parse_formula_partial(&formula, ParseOptions::default());
     let err = partial.error.expect("expected partial parse error");
     assert!(
-        err.message.to_ascii_lowercase().contains("too many arguments")
+        err.message
+            .to_ascii_lowercase()
+            .contains("too many arguments")
             || err.message.contains("max 255"),
         "unexpected error message: {}",
         err.message
@@ -106,13 +110,14 @@ fn evaluator_rejects_calls_with_more_than_255_args() {
         name: "F".to_string(),
     });
 
-    let args = (0..256)
-        .map(|_| EvalExpr::Number(1.0))
-        .collect::<Vec<_>>();
+    let args = (0..256).map(|_| EvalExpr::Number(1.0)).collect::<Vec<_>>();
     let call_expr = EvalExpr::Call {
         callee: Box::new(callee_ref),
         args,
     };
 
-    assert_eq!(evaluator.eval_formula(&call_expr), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        evaluator.eval_formula(&call_expr),
+        Value::Error(ErrorKind::Value)
+    );
 }

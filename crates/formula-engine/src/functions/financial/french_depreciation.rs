@@ -123,8 +123,16 @@ pub fn amorlinc(
     basis: Option<i32>,
     system: ExcelDateSystem,
 ) -> ExcelResult<f64> {
-    let (life_years, basis, period_i32) =
-        validate_common(cost, date_purchased, first_period, salvage, period, rate, basis, system)?;
+    let (life_years, basis, period_i32) = validate_common(
+        cost,
+        date_purchased,
+        first_period,
+        salvage,
+        period,
+        rate,
+        basis,
+        system,
+    )?;
 
     let first_period_years = date_time::yearfrac(date_purchased, first_period, basis, system)?;
 
@@ -178,8 +186,16 @@ pub fn amordegrec(
     basis: Option<i32>,
     system: ExcelDateSystem,
 ) -> ExcelResult<f64> {
-    let (life_years, basis, period_i32) =
-        validate_common(cost, date_purchased, first_period, salvage, period, rate, basis, system)?;
+    let (life_years, basis, period_i32) = validate_common(
+        cost,
+        date_purchased,
+        first_period,
+        salvage,
+        period,
+        rate,
+        basis,
+        system,
+    )?;
 
     let first_period_years = date_time::yearfrac(date_purchased, first_period, basis, system)?;
 

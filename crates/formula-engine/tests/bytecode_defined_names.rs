@@ -129,9 +129,7 @@ fn bytecode_defined_name_formula_cycles_fall_back_without_recursing_forever() {
 
     // If name inlining doesn't guard against cycles, this will recurse indefinitely during
     // bytecode compilation.
-    engine
-        .set_cell_formula("Sheet1", "A1", "=SelfRef")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=SelfRef").unwrap();
 
     // The bytecode backend should cleanly fall back to AST evaluation.
     assert_eq!(engine.bytecode_program_count(), 0);
@@ -202,9 +200,7 @@ fn bytecode_inlines_defined_name_constants_under_percent_postfix() {
         )
         .unwrap();
 
-    engine
-        .set_cell_formula("Sheet1", "A1", "=Rate%")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=Rate%").unwrap();
 
     assert_eq!(engine.bytecode_program_count(), 1);
 
@@ -224,9 +220,7 @@ fn bytecode_inlines_defined_name_constants_inside_array_literals() {
         )
         .unwrap();
 
-    engine
-        .set_cell_formula("Sheet1", "A1", "={X,2}")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "={X,2}").unwrap();
 
     assert_eq!(engine.bytecode_program_count(), 1);
 
@@ -247,9 +241,7 @@ fn bytecode_inlines_defined_name_constants_inside_concat_binary_op() {
         )
         .unwrap();
 
-    engine
-        .set_cell_formula("Sheet1", "A1", "=X&\"a\"")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=X&\"a\"").unwrap();
 
     assert_eq!(engine.bytecode_program_count(), 1);
 

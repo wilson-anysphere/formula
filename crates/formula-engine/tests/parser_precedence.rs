@@ -70,7 +70,11 @@ fn percent_binds_tighter_than_exponent() {
 fn concat_binds_looser_than_addition() {
     let ast = parse_formula("=1+2&3", ParseOptions::default()).unwrap();
 
-    let expected = bin(BinaryOp::Concat, bin(BinaryOp::Add, num("1"), num("2")), num("3"));
+    let expected = bin(
+        BinaryOp::Concat,
+        bin(BinaryOp::Add, num("1"), num("2")),
+        num("3"),
+    );
     assert_eq!(ast.expr, expected);
 }
 

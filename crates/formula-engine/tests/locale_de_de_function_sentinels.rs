@@ -44,4 +44,3 @@ fn de_de_core_function_spellings_match_excel() {
         );
     }
 }
-

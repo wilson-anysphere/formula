@@ -198,7 +198,9 @@ fn days360_accounts_for_lotus_bug_feb_1900() {
 
 #[test]
 fn days360_respects_lotus_compat_flag_for_feb_1900() {
-    let system = ExcelDateSystem::Excel1900 { lotus_compat: false };
+    let system = ExcelDateSystem::Excel1900 {
+        lotus_compat: false,
+    };
     let feb28 = ymd_to_serial(ExcelDate::new(1900, 2, 28), system).unwrap();
     let mar1 = ymd_to_serial(ExcelDate::new(1900, 3, 1), system).unwrap();
 
@@ -218,20 +220,16 @@ fn yearfrac_respects_basis_conventions() {
     let start = ymd_to_serial(ExcelDate::new(2011, 1, 1), system).unwrap();
     let end = ymd_to_serial(ExcelDate::new(2011, 12, 31), system).unwrap();
     assert!((date_time::yearfrac(start, end, 0, system).unwrap() - 1.0).abs() < 1e-12);
-    assert!(
-        (date_time::yearfrac(start, end, 4, system).unwrap() - (359.0 / 360.0)).abs() < 1e-12
-    );
+    assert!((date_time::yearfrac(start, end, 4, system).unwrap() - (359.0 / 360.0)).abs() < 1e-12);
 
     let start = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
     let end = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
     let actual_days = (i64::from(end) - i64::from(start)) as f64;
     assert!(
-        (date_time::yearfrac(start, end, 2, system).unwrap() - (actual_days / 360.0)).abs()
-            < 1e-12
+        (date_time::yearfrac(start, end, 2, system).unwrap() - (actual_days / 360.0)).abs() < 1e-12
     );
     assert!(
-        (date_time::yearfrac(start, end, 3, system).unwrap() - (actual_days / 365.0)).abs()
-            < 1e-12
+        (date_time::yearfrac(start, end, 3, system).unwrap() - (actual_days / 365.0)).abs() < 1e-12
     );
 
     // Basis 1 counts whole-year anniversaries with leap-day clamping.
@@ -326,7 +324,10 @@ fn yearfrac_respects_basis_conventions() {
     assert!((np - expected_np).abs() < 1e-12);
     assert!((np + date_time::yearfrac(p, n, 1, system).unwrap()).abs() < 1e-12);
 
-    assert_eq!(date_time::yearfrac(start, end, 9, system).unwrap_err(), ExcelError::Num);
+    assert_eq!(
+        date_time::yearfrac(start, end, 9, system).unwrap_err(),
+        ExcelError::Num
+    );
 }
 
 #[test]
@@ -358,12 +359,17 @@ fn yearfrac_basis1_accounts_for_lotus_bug_feb_1900() {
 
     let feb29_to_feb28_1901 = date_time::yearfrac(feb29, feb28_1901, 1, system).unwrap();
     assert!((feb29_to_feb28_1901 - 1.0).abs() < 1e-12);
-    assert!((feb29_to_feb28_1901 + date_time::yearfrac(feb28_1901, feb29, 1, system).unwrap()).abs() < 1e-12);
+    assert!(
+        (feb29_to_feb28_1901 + date_time::yearfrac(feb28_1901, feb29, 1, system).unwrap()).abs()
+            < 1e-12
+    );
 }
 
 #[test]
 fn yearfrac_basis1_respects_lotus_compat_flag_for_1900() {
-    let system = ExcelDateSystem::Excel1900 { lotus_compat: false };
+    let system = ExcelDateSystem::Excel1900 {
+        lotus_compat: false,
+    };
     let jan1 = ymd_to_serial(ExcelDate::new(1900, 1, 1), system).unwrap();
     let dec31 = ymd_to_serial(ExcelDate::new(1900, 12, 31), system).unwrap();
 

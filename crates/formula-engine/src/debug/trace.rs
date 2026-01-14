@@ -1031,9 +1031,10 @@ impl ParserImpl {
                         self.next(); // ':'
                         let end_tok = self.next();
                         let span = Span::new(start_tok.span.start, end_tok.span.end);
-                        let Some(start) =
-                            crate::eval::Ref::from_abs_cell_addr(CellAddr { row: start_row, col: 0 })
-                        else {
+                        let Some(start) = crate::eval::Ref::from_abs_cell_addr(CellAddr {
+                            row: start_row,
+                            col: 0,
+                        }) else {
                             return Ok(SpannedExpr {
                                 span,
                                 kind: SpannedExprKind::Error(ErrorKind::Ref),
@@ -1503,11 +1504,13 @@ impl ParserImpl {
                         table_name: None,
                         items,
                         columns: crate::structured_refs::StructuredColumns::Single(name),
-                    } if items.is_empty() => parse_bracket_quoted_field_name(&name).map_err(|_| {
-                        FormulaParseError::UnexpectedToken(
-                            "expected bracket-quoted field selector".to_string(),
-                        )
-                    })?,
+                    } if items.is_empty() => {
+                        parse_bracket_quoted_field_name(&name).map_err(|_| {
+                            FormulaParseError::UnexpectedToken(
+                                "expected bracket-quoted field selector".to_string(),
+                            )
+                        })?
+                    }
                     _ => {
                         return Err(FormulaParseError::UnexpectedToken(
                             "expected field selector".to_string(),
@@ -1971,17 +1974,17 @@ impl ParserImpl {
                             kind: SpannedExprKind::Error(ErrorKind::Ref),
                         });
                     };
-                Ok(SpannedExpr {
-                    span,
-                    kind: SpannedExprKind::RangeRef(crate::eval::RangeRef {
-                        sheet,
-                        start,
-                        end,
-                    }),
-                })
-            } else {
-                Err(FormulaParseError::UnexpectedToken("number".to_string()))
-            }
+                    Ok(SpannedExpr {
+                        span,
+                        kind: SpannedExprKind::RangeRef(crate::eval::RangeRef {
+                            sheet,
+                            start,
+                            end,
+                        }),
+                    })
+                } else {
+                    Err(FormulaParseError::UnexpectedToken("number".to_string()))
+                }
             }
             other => Err(FormulaParseError::Expected {
                 expected: "cell address".to_string(),
@@ -4473,7 +4476,10 @@ mod tests {
         assert_eq!(split_sheet_span_name(r"[C:\path\Book.xlsx]Sheet1"), None);
         assert_eq!(
             split_sheet_span_name(r"[C:\path\Book.xlsx]Sheet1:Sheet3"),
-            Some((r"[C:\path\Book.xlsx]Sheet1".to_string(), "Sheet3".to_string()))
+            Some((
+                r"[C:\path\Book.xlsx]Sheet1".to_string(),
+                "Sheet3".to_string()
+            ))
         );
 
         // The workbook id itself can contain `[` / `]` when it represents a path with bracketed
@@ -4481,14 +4487,17 @@ mod tests {
         assert_eq!(split_sheet_span_name(r"[C:\[foo]\Book.xlsx]Sheet1"), None);
         assert_eq!(
             split_sheet_span_name(r"[C:\[foo]\Book.xlsx]Sheet1:Sheet3"),
-            Some((r"[C:\[foo]\Book.xlsx]Sheet1".to_string(), "Sheet3".to_string()))
+            Some((
+                r"[C:\[foo]\Book.xlsx]Sheet1".to_string(),
+                "Sheet3".to_string()
+            ))
         );
     }
 
     #[test]
     fn parse_spanned_formula_supports_path_qualified_external_workbook_refs() {
-        let expr =
-            parse_spanned_formula(r#"='C:\path\[Book.xlsx]Sheet1'!A1"#).expect("parse should succeed");
+        let expr = parse_spanned_formula(r#"='C:\path\[Book.xlsx]Sheet1'!A1"#)
+            .expect("parse should succeed");
 
         match expr.kind {
             SpannedExprKind::CellRef(cell) => {
@@ -4506,9 +4515,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_spanned_formula_supports_path_qualified_external_refs_with_bracketed_path_components() {
-        let expr =
-            parse_spanned_formula(r#"='C:\[foo]\[Book.xlsx]Sheet1'!A1"#).expect("parse should succeed");
+    fn parse_spanned_formula_supports_path_qualified_external_refs_with_bracketed_path_components()
+    {
+        let expr = parse_spanned_formula(r#"='C:\[foo]\[Book.xlsx]Sheet1'!A1"#)
+            .expect("parse should succeed");
 
         match expr.kind {
             SpannedExprKind::CellRef(cell) => {

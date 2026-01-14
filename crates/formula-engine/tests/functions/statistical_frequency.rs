@@ -39,7 +39,10 @@ fn frequency_propagates_errors_from_data_array() {
     sheet.set_formula("A2", "=NA()");
     sheet.set("A3", 2);
 
-    assert_eq!(sheet.eval("=FREQUENCY(A1:A3,{2})"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        sheet.eval("=FREQUENCY(A1:A3,{2})"),
+        Value::Error(ErrorKind::NA)
+    );
 }
 
 #[test]
@@ -61,5 +64,8 @@ fn frequency_propagates_errors_from_bins_array() {
     sheet.set("B1", 2);
     sheet.set_formula("B2", "=NA()");
 
-    assert_eq!(sheet.eval("=FREQUENCY(A1:A2,B1:B2)"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        sheet.eval("=FREQUENCY(A1:A2,B1:B2)"),
+        Value::Error(ErrorKind::NA)
+    );
 }

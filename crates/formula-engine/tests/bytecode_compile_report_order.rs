@@ -32,4 +32,3 @@ fn bytecode_compile_report_orders_by_tab_order_after_sheet_reorder() {
         "expected report entries to follow the updated tab order after reorder"
     );
 }
-

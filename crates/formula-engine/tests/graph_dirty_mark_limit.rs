@@ -32,7 +32,10 @@ fn dirty_marking_over_limit_falls_back_to_full_recalc() {
     let dirty: HashSet<CellId> = graph.dirty_cells().into_iter().collect();
     assert_eq!(dirty.len(), all_formulas.len());
     for cell in &all_formulas {
-        assert!(dirty.contains(cell), "{cell:?} should be dirty after full recalc fallback");
+        assert!(
+            dirty.contains(cell),
+            "{cell:?} should be dirty after full recalc fallback"
+        );
     }
 
     // Calculation order/levels should still be computable when everything is dirty.
@@ -96,4 +99,3 @@ fn dirty_marking_under_limit_remains_incremental() {
     let order_set: HashSet<CellId> = order.into_iter().collect();
     assert_eq!(order_set, dirty);
 }
-

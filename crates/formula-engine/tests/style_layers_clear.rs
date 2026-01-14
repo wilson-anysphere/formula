@@ -1,5 +1,5 @@
-use formula_engine::{EditOp, Engine};
 use formula_engine::value::Value;
+use formula_engine::{EditOp, Engine};
 use formula_model::{Protection, Style};
 
 fn unlocked_style_id(engine: &mut Engine) -> u32 {

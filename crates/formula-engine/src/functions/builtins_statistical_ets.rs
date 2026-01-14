@@ -93,7 +93,10 @@ fn collect_paired_series(
     Ok((out_values, out_timeline))
 }
 
-fn parse_optional_i64(ctx: &dyn FunctionContext, expr: Option<&CompiledExpr>) -> Result<Option<i64>, ErrorKind> {
+fn parse_optional_i64(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+) -> Result<Option<i64>, ErrorKind> {
     match expr {
         None => Ok(None),
         Some(e) => {
@@ -107,7 +110,10 @@ fn parse_optional_i64(ctx: &dyn FunctionContext, expr: Option<&CompiledExpr>) ->
     }
 }
 
-fn parse_optional_number(ctx: &dyn FunctionContext, expr: Option<&CompiledExpr>) -> Result<Option<f64>, ErrorKind> {
+fn parse_optional_number(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+) -> Result<Option<f64>, ErrorKind> {
     match expr {
         None => Ok(None),
         Some(e) => {
@@ -223,7 +229,13 @@ fn forecast_ets_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation, ctx.date_system()) {
+    let series = match ets::prepare_series(
+        &values,
+        &timeline,
+        data_completion,
+        aggregation,
+        ctx.date_system(),
+    ) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -323,7 +335,13 @@ fn forecast_ets_confint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> 
         Err(e) => return Value::Error(e),
     };
 
-    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation, ctx.date_system()) {
+    let series = match ets::prepare_series(
+        &values,
+        &timeline,
+        data_completion,
+        aggregation,
+        ctx.date_system(),
+    ) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -400,7 +418,13 @@ fn forecast_ets_seasonality_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr])
         Err(e) => return Value::Error(e),
     };
 
-    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation, ctx.date_system()) {
+    let series = match ets::prepare_series(
+        &values,
+        &timeline,
+        data_completion,
+        aggregation,
+        ctx.date_system(),
+    ) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -464,7 +488,13 @@ fn forecast_ets_stat_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Val
         return Value::Error(ErrorKind::Num);
     }
 
-    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation, ctx.date_system()) {
+    let series = match ets::prepare_series(
+        &values,
+        &timeline,
+        data_completion,
+        aggregation,
+        ctx.date_system(),
+    ) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };

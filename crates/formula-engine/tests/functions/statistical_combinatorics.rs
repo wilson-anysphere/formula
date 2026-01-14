@@ -18,9 +18,15 @@ fn permutationa_matches_known_value() {
 fn combinatorics_domain_errors_match_excel() {
     let mut sheet = TestSheet::new();
     assert_eq!(sheet.eval("=PERMUT(3,4)"), Value::Error(ErrorKind::Num));
-    assert_eq!(sheet.eval("=PERMUTATIONA(0,1)"), Value::Error(ErrorKind::Num));
+    assert_eq!(
+        sheet.eval("=PERMUTATIONA(0,1)"),
+        Value::Error(ErrorKind::Num)
+    );
     assert_eq!(sheet.eval("=PERMUT(-1,1)"), Value::Error(ErrorKind::Num));
-    assert_eq!(sheet.eval("=PERMUTATIONA(-1,1)"), Value::Error(ErrorKind::Num));
+    assert_eq!(
+        sheet.eval("=PERMUTATIONA(-1,1)"),
+        Value::Error(ErrorKind::Num)
+    );
 }
 
 #[test]
@@ -31,4 +37,3 @@ fn permutationa_supports_array_lift() {
     assert_number(&sheet.get("A1"), 4.0);
     assert_number(&sheet.get("B1"), 9.0);
 }
-

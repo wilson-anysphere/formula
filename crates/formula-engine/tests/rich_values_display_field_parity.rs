@@ -13,10 +13,7 @@ fn assert_t_and_switch_use_record_display_field(mut engine: Engine) {
                 // Deliberately use different casing than the stored field key to validate
                 // case-insensitive display_field resolution.
                 display_field: Some("name".to_string()),
-                fields: HashMap::from([(
-                    "Name".to_string(),
-                    Value::Text("Apple".to_string()),
-                )]),
+                fields: HashMap::from([("Name".to_string(), Value::Text("Apple".to_string()))]),
             }),
         )
         .unwrap();
@@ -27,7 +24,10 @@ fn assert_t_and_switch_use_record_display_field(mut engine: Engine) {
         .unwrap();
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("Apple".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("Apple".to_string())
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(1.0));
 }
 
@@ -42,4 +42,3 @@ fn record_display_field_parity_ast() {
     engine.set_bytecode_enabled(false);
     assert_t_and_switch_use_record_display_field(engine);
 }
-

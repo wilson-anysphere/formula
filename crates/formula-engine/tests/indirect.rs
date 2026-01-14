@@ -17,7 +17,10 @@ fn indirect_distinguishes_a1_vs_r1c1_modes() {
     engine.recalculate();
 
     // In A1 mode (default), `R1C1` parses as a name rather than an R1C1 reference.
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Ref)
+    );
 
     // In R1C1 mode, `R1C1` is an absolute ref to `A1`.
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(123.0));
@@ -76,7 +79,10 @@ fn indirect_external_workbook_refs_are_ref_error() {
         .unwrap();
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
     assert_eq!(
         provider.calls(),
         0,
@@ -126,7 +132,10 @@ fn indirect_path_qualified_external_workbook_refs_are_ref_error() {
 
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
     assert_eq!(
         provider.calls(),
         0,
@@ -220,15 +229,13 @@ fn indirect_dynamic_external_workbook_refs_resolve_via_provider_without_bytecode
     );
     // The dynamic ref text is sourced from `B1`, so that cell is a static precedent even though
     // the external workbook reference itself is dynamic.
-    assert!(
-        engine
-            .precedents("Sheet1", "A1")
-            .unwrap()
-            .contains(&PrecedentNode::Cell {
-                sheet: 0,
-                addr: CellAddr { row: 0, col: 1 } // B1
-            })
-    );
+    assert!(engine
+        .precedents("Sheet1", "A1")
+        .unwrap()
+        .contains(&PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 1 } // B1
+        }));
 }
 
 #[test]

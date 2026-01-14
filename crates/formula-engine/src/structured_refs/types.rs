@@ -17,7 +17,10 @@ pub enum StructuredColumn {
 pub enum StructuredColumns {
     All,
     Single(String),
-    Range { start: String, end: String },
+    Range {
+        start: String,
+        end: String,
+    },
     /// A union of non-contiguous column selections (single columns and/or ranges).
     Multi(Vec<StructuredColumn>),
 }

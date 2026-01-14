@@ -346,5 +346,8 @@ fn engine_pivot_coerces_non_finite_numbers_to_num_error_text() {
 
     // Ensure schema sampling remains JSON-friendly (no NaNs).
     let schema = cache.schema(10);
-    assert_eq!(schema.fields[1].sample_values, vec![PivotValue::Text("#NUM!".to_string())]);
+    assert_eq!(
+        schema.fields[1].sample_values,
+        vec![PivotValue::Text("#NUM!".to_string())]
+    );
 }

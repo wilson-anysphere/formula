@@ -194,7 +194,8 @@ fn coupdays_basis_4_uses_fixed_360_over_frequency_and_preserves_additivity() {
     let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 8, 31), system).unwrap();
     let expected_ncd = maturity;
 
-    let days360_coupon = date_time::days360(expected_pcd, expected_ncd, true, system).unwrap() as f64;
+    let days360_coupon =
+        date_time::days360(expected_pcd, expected_ncd, true, system).unwrap() as f64;
     assert_eq!(days360_coupon, 178.0);
 
     assert_eq!(
@@ -206,8 +207,7 @@ fn coupdays_basis_4_uses_fixed_360_over_frequency_and_preserves_additivity() {
         expected_ncd
     );
     assert_eq!(coupnum(settlement, maturity, 2, 4, system).unwrap(), 1.0);
-    let expected_daybs =
-        date_time::days360(expected_pcd, settlement, true, system).unwrap() as f64;
+    let expected_daybs = date_time::days360(expected_pcd, settlement, true, system).unwrap() as f64;
     assert_eq!(expected_daybs, 75.0);
 
     let expected_days = 360.0 / 2.0;
@@ -247,8 +247,14 @@ fn coupdays_basis_4_quarterly_eom_february_diverges_from_european_days360() {
     let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 11, 30), system).unwrap();
     let expected_ncd = maturity;
 
-    assert_eq!(couppcd(settlement, maturity, 4, 4, system).unwrap(), expected_pcd);
-    assert_eq!(coupncd(settlement, maturity, 4, 4, system).unwrap(), expected_ncd);
+    assert_eq!(
+        couppcd(settlement, maturity, 4, 4, system).unwrap(),
+        expected_pcd
+    );
+    assert_eq!(
+        coupncd(settlement, maturity, 4, 4, system).unwrap(),
+        expected_ncd
+    );
     assert_eq!(coupnum(settlement, maturity, 4, 4, system).unwrap(), 1.0);
 
     assert_eq!(
@@ -257,8 +263,7 @@ fn coupdays_basis_4_quarterly_eom_february_diverges_from_european_days360() {
     );
 
     let expected_days = 360.0 / 4.0;
-    let expected_daybs =
-        date_time::days360(expected_pcd, settlement, true, system).unwrap() as f64;
+    let expected_daybs = date_time::days360(expected_pcd, settlement, true, system).unwrap() as f64;
     assert_eq!(expected_daybs, 15.0);
 
     let expected_daysnc = expected_days - expected_daybs;
@@ -476,8 +481,14 @@ fn builtins_coup_handle_leap_day_maturity_schedule() {
     let expected_ncd = ymd_to_serial(ExcelDate::new(2023, 8, 31), system).unwrap() as f64;
 
     for basis in [0, 1, 2, 3, 4] {
-        assert_number(&sheet.eval(&format!("=COUPPCD(A1,A2,2,{basis})")), expected_pcd);
-        assert_number(&sheet.eval(&format!("=COUPNCD(A1,A2,2,{basis})")), expected_ncd);
+        assert_number(
+            &sheet.eval(&format!("=COUPPCD(A1,A2,2,{basis})")),
+            expected_pcd,
+        );
+        assert_number(
+            &sheet.eval(&format!("=COUPNCD(A1,A2,2,{basis})")),
+            expected_ncd,
+        );
         assert_number(&sheet.eval(&format!("=COUPNUM(A1,A2,2,{basis})")), 2.0);
     }
 

@@ -42,7 +42,9 @@ fn sheet_reports_current_and_referenced_sheet_numbers() {
 
     engine.set_cell_formula("Sheet1", "B1", "=SHEET()").unwrap();
     engine.set_cell_formula("Sheet2", "B1", "=SHEET()").unwrap();
-    engine.set_cell_formula("Sheet2", "B2", "=SHEET(A1)").unwrap();
+    engine
+        .set_cell_formula("Sheet2", "B2", "=SHEET(A1)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "B2", "=SHEET(Sheet2!A1)")
         .unwrap();
@@ -62,7 +64,9 @@ fn sheets_reports_workbook_sheet_count_and_3d_reference_span() {
     engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
     engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
 
-    engine.set_cell_formula("Sheet1", "B1", "=SHEETS()").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SHEETS()")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "B2", "=SHEETS(Sheet1:Sheet3!A1)")
         .unwrap();
@@ -119,15 +123,9 @@ fn sheets_3d_span_excludes_deleted_intermediate_sheets() {
 #[test]
 fn sheet_uses_tab_order_after_reorder() {
     let mut engine = Engine::new();
-    engine
-        .set_cell_formula("Sheet1", "A1", "=SHEET()")
-        .unwrap();
-    engine
-        .set_cell_formula("Sheet2", "A1", "=SHEET()")
-        .unwrap();
-    engine
-        .set_cell_formula("Sheet3", "A1", "=SHEET()")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=SHEET()").unwrap();
+    engine.set_cell_formula("Sheet2", "A1", "=SHEET()").unwrap();
+    engine.set_cell_formula("Sheet3", "A1", "=SHEET()").unwrap();
 
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
@@ -273,11 +271,7 @@ fn sheet_reports_external_sheet_number_for_path_qualified_workbook_with_brackets
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
     engine
-        .set_cell_formula(
-            "Sheet1",
-            "A1",
-            r"=SHEET('C:\[foo]\[Book.xlsx]Sheet2'!A1)",
-        )
+        .set_cell_formula("Sheet1", "A1", r"=SHEET('C:\[foo]\[Book.xlsx]Sheet2'!A1)")
         .unwrap();
     engine.recalculate_single_threaded();
 
@@ -326,9 +320,7 @@ fn sheet_reports_external_sheet_number_for_3d_span_argument() {
 #[test]
 fn formulatext_and_isformula_reflect_cell_formula_presence() {
     let mut engine = Engine::new();
-    engine
-        .set_cell_formula("Sheet1", "A1", "=1+1")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=1+1").unwrap();
     engine.set_cell_value("Sheet1", "A2", 5.0).unwrap();
 
     engine

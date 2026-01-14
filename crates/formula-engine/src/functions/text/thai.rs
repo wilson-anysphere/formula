@@ -4,7 +4,16 @@ use unicode_segmentation::UnicodeSegmentation;
 const THAI_DIGITS: [char; 10] = ['๐', '๑', '๒', '๓', '๔', '๕', '๖', '๗', '๘', '๙'];
 
 const THAI_DIGIT_WORDS: [&str; 10] = [
-    "ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า",
+    "ศูนย์",
+    "หนึ่ง",
+    "สอง",
+    "สาม",
+    "สี่",
+    "ห้า",
+    "หก",
+    "เจ็ด",
+    "แปด",
+    "เก้า",
 ];
 
 /// BAHTTEXT(number)
@@ -260,4 +269,3 @@ fn format_number_fixed_trim(number: f64) -> String {
     }
     out
 }
-

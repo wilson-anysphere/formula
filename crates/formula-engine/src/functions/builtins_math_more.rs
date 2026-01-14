@@ -468,7 +468,12 @@ inventory::submit! {
 }
 
 fn permutationa_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    lift2_number(ctx, &args[0], &args[1], crate::functions::math::permutationa)
+    lift2_number(
+        ctx,
+        &args[0],
+        &args[1],
+        crate::functions::math::permutationa,
+    )
 }
 
 inventory::submit! {
@@ -701,10 +706,9 @@ fn push_numbers_from_scalar(
             }
             Ok(())
         }
-        Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Lambda(_)
-        | Value::Spill { .. } => Err(ErrorKind::Value),
+        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
+            Err(ErrorKind::Value)
+        }
     }
 }
 
@@ -776,7 +780,10 @@ fn push_numbers_from_arg(
     }
 }
 
-fn collect_numbers(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Result<Vec<f64>, ErrorKind> {
+fn collect_numbers(
+    ctx: &dyn FunctionContext,
+    args: &[CompiledExpr],
+) -> Result<Vec<f64>, ErrorKind> {
     let mut out = Vec::new();
     for expr in args {
         push_numbers_from_arg(ctx, &mut out, ctx.eval_arg(expr))?;

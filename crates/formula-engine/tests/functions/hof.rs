@@ -56,7 +56,10 @@ fn map_shape_mismatch_returns_value_error() {
         .unwrap();
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E1"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]

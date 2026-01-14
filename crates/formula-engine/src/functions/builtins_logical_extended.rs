@@ -69,10 +69,9 @@ fn xor_update(ctx: &dyn FunctionContext, acc: &mut bool, value: &Value) -> Resul
             }
             Ok(())
         }
-        Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Lambda(_)
-        | Value::Spill { .. } => Err(ErrorKind::Value),
+        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
+            Err(ErrorKind::Value)
+        }
     }
 }
 

@@ -90,6 +90,12 @@ fn builtins_evaluate_doc_examples() {
     assert_number(&sheet.eval("=DOLLARFR(1.125, 16.9)"), 1.02);
 
     // fraction==0 -> #DIV/0!
-    assert_eq!(sheet.eval("=DOLLARDE(1.02, 0)"), Value::Error(ErrorKind::Div0));
-    assert_eq!(sheet.eval("=DOLLARFR(1.125, 0)"), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        sheet.eval("=DOLLARDE(1.02, 0)"),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        sheet.eval("=DOLLARFR(1.125, 0)"),
+        Value::Error(ErrorKind::Div0)
+    );
 }

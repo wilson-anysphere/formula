@@ -18,9 +18,9 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub use formula_model::pivots::{
-    AggregationType, CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout, PivotConfig,
-    PivotField, PivotFieldRef, PivotKeyPart, PivotValue, ShowAsType, SortOrder, SubtotalPosition,
-    ValueField,
+    AggregationType, CalculatedField, CalculatedItem, FilterField, GrandTotals, Layout,
+    PivotConfig, PivotField, PivotFieldRef, PivotKeyPart, PivotValue, ShowAsType, SortOrder,
+    SubtotalPosition, ValueField,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -620,19 +620,13 @@ impl CreatePivotTableRequest {
                     let field = vf.field;
                     let source_field = pivot_field_ref_from_legacy_string(field);
                     let aggregation = vf.aggregation;
-                    let name = vf
-                        .name
-                        .unwrap_or_else(|| {
-                            // For Data Model measures, prefer a human-friendly name without the
-                            // DAX bracket syntax (Excel displays the measure as `Total Sales`, not
-                            // `[Total Sales]`, in the default "Sum of ..." label).
-                            let label = pivot_field_ref_caption(&source_field);
-                            format!(
-                                "{:?} of {}",
-                                aggregation,
-                                label
-                            )
-                        });
+                    let name = vf.name.unwrap_or_else(|| {
+                        // For Data Model measures, prefer a human-friendly name without the
+                        // DAX bracket syntax (Excel displays the measure as `Total Sales`, not
+                        // `[Total Sales]`, in the default "Sum of ..." label).
+                        let label = pivot_field_ref_caption(&source_field);
+                        format!("{:?} of {}", aggregation, label)
+                    });
                     ValueField {
                         source_field,
                         name,
@@ -3611,12 +3605,15 @@ mod tests {
         // Excel doesn't have NaN/Infinity; Formula renders them as #NUM! (matching `formula-format`).
         assert_eq!(PivotValue::Number(f64::NAN).display_string(), "#NUM!");
         assert_eq!(PivotValue::Number(f64::INFINITY).display_string(), "#NUM!");
-        assert_eq!(PivotValue::Number(f64::NEG_INFINITY).display_string(), "#NUM!");
+        assert_eq!(
+            PivotValue::Number(f64::NEG_INFINITY).display_string(),
+            "#NUM!"
+        );
     }
 
     #[test]
-    fn pivot_key_part_display_string_uses_general_number_formatting_and_does_not_saturate_large_ints()
-    {
+    fn pivot_key_part_display_string_uses_general_number_formatting_and_does_not_saturate_large_ints(
+    ) {
         let s = PivotKeyPart::Number((1e20_f64).to_bits()).display_string();
         assert_ne!(s, i64::MAX.to_string());
         assert!(s.contains('E'), "{s}");
@@ -4861,9 +4858,9 @@ mod tests {
 
         assert_eq!(
             result.data,
-                vec![
-                    vec!["Key".into(), "Sum of Sales".into()],
-                    vec!["(blank)".into(), 10.into()],
+            vec![
+                vec!["Key".into(), "Sum of Sales".into()],
+                vec!["(blank)".into(), 10.into()],
             ]
         );
     }
@@ -5985,15 +5982,15 @@ mod tests {
         let cfg = PivotConfig {
             row_fields: vec![PivotField::new("Region")],
             column_fields: vec![PivotField::new("Product")],
-             value_fields: vec![ValueField {
-                 source_field: cache_field("Sales"),
-                 name: "Sum of Sales".to_string(),
-                 aggregation: AggregationType::Sum,
-                 number_format: None,
-                 show_as: None,
-                 base_field: None,
-                 base_item: None,
-             }],
+            value_fields: vec![ValueField {
+                source_field: cache_field("Sales"),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
             filter_fields: vec![],
             calculated_fields: vec![],
             calculated_items: vec![],
@@ -6064,15 +6061,15 @@ mod tests {
         let cfg = PivotConfig {
             row_fields: vec![PivotField::new("Cat")],
             column_fields: vec![],
-             value_fields: vec![ValueField {
-                 source_field: cache_field("Amount"),
-                 name: "Sum of Amount".to_string(),
-                 aggregation: AggregationType::Sum,
-                 number_format: None,
-                 show_as: None,
-                 base_field: None,
-                 base_item: None,
-             }],
+            value_fields: vec![ValueField {
+                source_field: cache_field("Amount"),
+                name: "Sum of Amount".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
             filter_fields: vec![],
             calculated_fields: vec![],
             calculated_items: vec![],

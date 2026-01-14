@@ -14,7 +14,11 @@ fn debug_trace_supports_field_access() {
     let mut fields = HashMap::new();
     fields.insert("Price".to_string(), Value::Number(19.99));
     engine
-        .set_cell_value("Sheet1", "A1", Value::Record(RecordValue::with_fields("Record", fields)))
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields("Record", fields)),
+        )
         .unwrap();
 
     engine
@@ -41,7 +45,11 @@ fn debug_trace_supports_bracket_field_access() {
     let mut fields = HashMap::new();
     fields.insert("List Price".to_string(), Value::Number(42.0));
     engine
-        .set_cell_value("Sheet1", "A1", Value::Record(RecordValue::with_fields("Record", fields)))
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields("Record", fields)),
+        )
         .unwrap();
 
     engine
@@ -65,7 +73,9 @@ fn debug_trace_supports_bracket_field_access() {
 fn debug_trace_field_access_on_non_record_returns_value_error() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
-    engine.set_cell_formula("Sheet1", "B1", "=A1.Price").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=A1.Price")
+        .unwrap();
     engine.recalculate();
 
     let computed = engine.get_cell_value("Sheet1", "B1");

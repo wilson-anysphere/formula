@@ -24,7 +24,10 @@ pub fn format_value_for_display(
         Error(&'static str),
     }
 
-    fn value_to_display_string(value: Value, options: &FormatOptions) -> Result<String, &'static str> {
+    fn value_to_display_string(
+        value: Value,
+        options: &FormatOptions,
+    ) -> Result<String, &'static str> {
         match value {
             Value::Blank => Ok(String::new()),
             Value::Number(n) => {
@@ -34,7 +37,11 @@ pub fn format_value_for_display(
             Value::Text(s) => Ok(s),
             Value::Entity(v) => Ok(v.display),
             Value::Record(v) => record_to_display_text(&v, options).map(|cow| cow.into_owned()),
-            Value::Bool(b) => Ok(if b { "TRUE".to_string() } else { "FALSE".to_string() }),
+            Value::Bool(b) => Ok(if b {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            }),
             Value::Error(e) => Err(e.as_code()),
             Value::Reference(_) | Value::ReferenceUnion(_) => Err("#VALUE!"),
             Value::Array(arr) => value_to_display_string(arr.top_left(), options),
@@ -86,17 +93,21 @@ pub fn format_value_for_display(
             // don't reinterpret their display strings.
             formula_format::format_value(FmtValue::Text(text.as_ref()), format_code, options)
         }
-        DisplayValue::Bool(b) => formula_format::format_value(FmtValue::Bool(b), format_code, options),
+        DisplayValue::Bool(b) => {
+            formula_format::format_value(FmtValue::Bool(b), format_code, options)
+        }
         DisplayValue::Blank => formula_format::format_value(FmtValue::Blank, format_code, options),
-        DisplayValue::Error(err) => formula_format::format_value(FmtValue::Error(err), format_code, options),
+        DisplayValue::Error(err) => {
+            formula_format::format_value(FmtValue::Error(err), format_code, options)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use formula_format::Locale;
     use crate::value::{EntityValue, RecordValue};
+    use formula_format::Locale;
 
     #[test]
     fn formats_entity_as_text_using_display_string() {
@@ -118,7 +129,9 @@ mod tests {
     fn formats_record_using_display_field_when_present() {
         let mut record = RecordValue::new("Fallback");
         record.display_field = Some("Name".to_string());
-        record.fields.insert("Name".to_string(), Value::Text("Apple".to_string()));
+        record
+            .fields
+            .insert("Name".to_string(), Value::Text("Apple".to_string()));
 
         let value = Value::Record(record);
         let formatted = format_value_for_display(&value, None, &FormatOptions::default());
@@ -129,7 +142,9 @@ mod tests {
     fn formats_record_display_field_number_using_locale_options() {
         let mut record = RecordValue::new("Fallback");
         record.display_field = Some("Value".to_string());
-        record.fields.insert("Value".to_string(), Value::Number(1.5));
+        record
+            .fields
+            .insert("Value".to_string(), Value::Number(1.5));
 
         let value = Value::Record(record);
         let options = FormatOptions {

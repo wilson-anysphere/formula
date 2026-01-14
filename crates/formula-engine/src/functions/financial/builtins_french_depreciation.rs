@@ -38,24 +38,16 @@ fn amorlinc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
 
-    let date_purchased = match datevalue_from_value(
-        ctx,
-        &eval_scalar_arg(ctx, &args[1]),
-        system,
-        now_utc,
-    ) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    let first_period = match datevalue_from_value(
-        ctx,
-        &eval_scalar_arg(ctx, &args[2]),
-        system,
-        now_utc,
-    ) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
+    let date_purchased =
+        match datevalue_from_value(ctx, &eval_scalar_arg(ctx, &args[1]), system, now_utc) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+    let first_period =
+        match datevalue_from_value(ctx, &eval_scalar_arg(ctx, &args[2]), system, now_utc) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
 
     let salvage = match coerce_to_finite_number(ctx, &eval_scalar_arg(ctx, &args[3])) {
         Ok(v) => v,
@@ -130,24 +122,16 @@ fn amordegrec_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
 
-    let date_purchased = match datevalue_from_value(
-        ctx,
-        &eval_scalar_arg(ctx, &args[1]),
-        system,
-        now_utc,
-    ) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    let first_period = match datevalue_from_value(
-        ctx,
-        &eval_scalar_arg(ctx, &args[2]),
-        system,
-        now_utc,
-    ) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
+    let date_purchased =
+        match datevalue_from_value(ctx, &eval_scalar_arg(ctx, &args[1]), system, now_utc) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+    let first_period =
+        match datevalue_from_value(ctx, &eval_scalar_arg(ctx, &args[2]), system, now_utc) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
 
     let salvage = match coerce_to_finite_number(ctx, &eval_scalar_arg(ctx, &args[3])) {
         Ok(v) => v,

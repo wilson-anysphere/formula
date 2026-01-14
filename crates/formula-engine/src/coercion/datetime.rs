@@ -200,11 +200,20 @@ fn try_parse_date(
     None
 }
 
-fn date_parts_to_serial(year: i32, month: u8, day: u8, system: ExcelDateSystem) -> ExcelResult<i32> {
+fn date_parts_to_serial(
+    year: i32,
+    month: u8,
+    day: u8,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
     ymd_to_serial(ExcelDate::new(year, month, day), system).map_err(|_| ExcelError::Value)
 }
 
-fn parse_date_token(token: &str, cfg: ValueLocaleConfig, now_year: i32) -> Option<ExcelResult<(i32, u8, u8)>> {
+fn parse_date_token(
+    token: &str,
+    cfg: ValueLocaleConfig,
+    now_year: i32,
+) -> Option<ExcelResult<(i32, u8, u8)>> {
     let token = token.trim_matches(',');
     if token.is_empty() {
         return None;
@@ -218,7 +227,10 @@ fn parse_date_token(token: &str, cfg: ValueLocaleConfig, now_year: i32) -> Optio
         let parts: Vec<&str> = token.split(sep).collect();
         if parts.len() == 3 {
             let numeric_parts = parts.iter().filter(|p| is_ascii_digit_str(p)).count();
-            let month_parts = parts.iter().filter(|p| parse_month_name(p).is_some()).count();
+            let month_parts = parts
+                .iter()
+                .filter(|p| parse_month_name(p).is_some())
+                .count();
             if numeric_parts == 0 && month_parts == 0 {
                 return None;
             }
@@ -256,7 +268,10 @@ fn parse_date_token(token: &str, cfg: ValueLocaleConfig, now_year: i32) -> Optio
             }
 
             let numeric_parts = parts.iter().filter(|p| is_ascii_digit_str(p)).count();
-            let month_parts = parts.iter().filter(|p| parse_month_name(p).is_some()).count();
+            let month_parts = parts
+                .iter()
+                .filter(|p| parse_month_name(p).is_some())
+                .count();
             if numeric_parts == 0 && month_parts == 0 {
                 return None;
             }
@@ -308,7 +323,11 @@ fn parse_numeric_3part_date(parts: &[&str], cfg: ValueLocaleConfig) -> ExcelResu
     }
 }
 
-fn parse_numeric_2part_date(parts: &[&str], cfg: ValueLocaleConfig, now_year: i32) -> ExcelResult<(i32, u8, u8)> {
+fn parse_numeric_2part_date(
+    parts: &[&str],
+    cfg: ValueLocaleConfig,
+    now_year: i32,
+) -> ExcelResult<(i32, u8, u8)> {
     debug_assert_eq!(parts.len(), 2);
     let a = parts[0].trim();
     let b = parts[1].trim();
@@ -663,7 +682,8 @@ mod tests {
             parse_datevalue_text("January 2, 2020", cfg, now, ExcelDateSystem::EXCEL_1900).unwrap();
         let expected = date_parts_to_serial(2020, 1, 2, ExcelDateSystem::EXCEL_1900).unwrap();
         assert_eq!(serial, expected);
-        let serial = parse_datevalue_text("2-Jan-2020", cfg, now, ExcelDateSystem::EXCEL_1900).unwrap();
+        let serial =
+            parse_datevalue_text("2-Jan-2020", cfg, now, ExcelDateSystem::EXCEL_1900).unwrap();
         assert_eq!(serial, expected);
     }
 

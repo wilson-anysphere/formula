@@ -190,7 +190,10 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Err(e) => return Value::Error(e),
             };
             for col in 0..array.cols {
-                out.push(sort_key(ctx, array.get(row_idx, col).unwrap_or(&Value::Blank)));
+                out.push(sort_key(
+                    ctx,
+                    array.get(row_idx, col).unwrap_or(&Value::Blank),
+                ));
             }
             keys.push(out);
         }
@@ -233,7 +236,10 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Err(e) => return Value::Error(e),
         };
         for row in 0..array.rows {
-            out.push(sort_key(ctx, array.get(row, col_idx).unwrap_or(&Value::Blank)));
+            out.push(sort_key(
+                ctx,
+                array.get(row, col_idx).unwrap_or(&Value::Blank),
+            ));
         }
         keys.push(out);
     }
@@ -2330,7 +2336,11 @@ mod tests {
         let mut order: Vec<usize> = (0..values.len()).collect();
         order.sort_by(|&a, &b| {
             let ord = compare_sort_keys(&keys[a], &keys[b], false);
-            if ord == Ordering::Equal { a.cmp(&b) } else { ord }
+            if ord == Ordering::Equal {
+                a.cmp(&b)
+            } else {
+                ord
+            }
         });
         order
     }
@@ -2352,7 +2362,10 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(sorted, vec![ErrorKind::Div0, ErrorKind::Calc, ErrorKind::Field]);
+        assert_eq!(
+            sorted,
+            vec![ErrorKind::Div0, ErrorKind::Calc, ErrorKind::Field]
+        );
     }
 
     #[test]
