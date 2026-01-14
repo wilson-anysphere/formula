@@ -185,6 +185,14 @@ def verify_parquet_mime_definition(package_root: Path, identifier: str) -> None:
             "Hint: `identifier` is required to determine the expected shared-mime-info XML filename "
             "(/usr/share/mime/packages/<identifier>.xml)."
         )
+    if "/" in identifier or "\\" in identifier:
+        raise SystemExit(
+            "[linux] ERROR: Parquet file association configured but tauri.conf.json identifier is not a valid filename "
+            "(contains path separators).\n"
+            f"identifier={identifier!r}\n"
+            "Hint: `identifier` is used as the shared-mime-info XML filename "
+            "(/usr/share/mime/packages/<identifier>.xml). It must not contain '/' or '\\\\'."
+        )
 
     expected_xml = mime_packages_dir / f"{identifier}.xml"
     if not expected_xml.is_file():

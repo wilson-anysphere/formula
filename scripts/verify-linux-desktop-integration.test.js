@@ -398,6 +398,41 @@ test(
 );
 
 test(
+  "verify_linux_desktop_integration fails when Parquet association is configured but tauri identifier contains a path separator",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const identifier = "com/example.formula.desktop";
+    const configPath = writeConfigWithAssociations(tmp, {
+      identifier,
+      fileAssociations: [
+        {
+          ext: ["xlsx"],
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
+        {
+          ext: ["parquet"],
+          mimeType: "application/vnd.apache.parquet",
+        },
+      ],
+    });
+ 
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.apache.parquet;x-scheme-handler/formula;",
+    });
+ 
+    // Ensure the shared-mime-info packages dir exists so the verifier reaches the identifier validation.
+    mkdirSync(path.join(pkgRoot, "usr", "share", "mime", "packages"), { recursive: true });
+ 
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /identifier.*not a valid filename/i);
+    assert.match(proc.stderr, /path separators/i);
+  },
+);
+
+test(
   "verify_linux_desktop_integration fails when Parquet association is configured but MIME XML lacks the *.parquet glob",
   { skip: !hasPython3 },
   () => {
