@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -85,6 +85,48 @@ test("fails when minisign TAURI_PRIVATE_KEY does not match plugins.updater.pubke
   const proc = run({ TAURI_PRIVATE_KEY: key, TAURI_KEY_PASSWORD: "" });
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /Tauri updater key mismatch/i);
+});
+
+test("supports overriding tauri.conf.json path via FORMULA_TAURI_CONF_PATH", () => {
+  const tmpRoot = path.join(repoRoot, ".tmp");
+  mkdirSync(tmpRoot, { recursive: true });
+  const dir = mkdtempSync(path.join(tmpRoot, "check-tauri-updater-secrets-"));
+  try {
+    // Create a fake minisign public key with a known key id (bytes are little-endian in payload).
+    const header = Buffer.from([0x45, 0x64]); // "Ed"
+    const keyId = Buffer.alloc(8, 0x44);
+    const pub = Buffer.alloc(32, 0x55);
+    const pubBinary = Buffer.concat([header, keyId, pub]);
+    const pubPayload = pubBinary.toString("base64").replace(/=+$/, "");
+    const keyIdHex = Buffer.from(keyId).reverse().toString("hex").toUpperCase();
+    const pubKeyFile = `untrusted comment: minisign public key: ${keyIdHex}\n${pubPayload}\n`;
+    const pubkey = Buffer.from(pubKeyFile, "utf8").toString("base64");
+
+    const config = {
+      plugins: {
+        updater: {
+          active: true,
+          dialog: false,
+          endpoints: ["https://example.com/{{target}}/{{current_version}}"],
+          pubkey,
+        },
+      },
+    };
+    const configPath = path.join(dir, "tauri.conf.json");
+    writeFileSync(configPath, `${JSON.stringify(config)}\n`, "utf8");
+
+    const secret = fakeMinisignSecretKey({ encrypted: false, keyId });
+    const proc = run({
+      FORMULA_TAURI_CONF_PATH: configPath,
+      TAURI_PRIVATE_KEY: secret,
+      TAURI_KEY_PASSWORD: "",
+    });
+    // The config uses a placeholder endpoint intentionally; this script only checks secrets.
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.match(proc.stdout, /preflight passed/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("fails for encrypted minisign secret keys (unsupported by release tooling)", () => {
