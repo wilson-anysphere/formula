@@ -40,6 +40,29 @@ fn cell_address_row_and_col() {
 }
 
 #[test]
+fn cell_format_reads_number_format_from_style_table() {
+    use formula_engine::Engine;
+    use formula_model::Style;
+
+    let mut engine = Engine::new();
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_id)
+        .expect("set style id");
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .expect("set formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F2".to_string())
+    );
+}
+
+#[test]
 fn cell_type_codes_match_excel() {
     let mut sheet = TestSheet::new();
 

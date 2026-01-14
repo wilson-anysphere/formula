@@ -1711,21 +1711,53 @@ impl AppState {
             });
         }
 
-        let workbook = self.get_workbook_mut()?;
-        let sheet = workbook
-            .sheet_mut(sheet_id)
-            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+        let (sheet_name, coords) = {
+            let workbook = self.get_workbook_mut()?;
+            let sheet = workbook
+                .sheet_mut(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+            let sheet_name = sheet.name.clone();
 
-        for row in start_row..=end_row {
-            for col in start_col..=end_col {
-                let mut cell = sheet
-                    .cells
-                    .get(&(row, col))
-                    .cloned()
-                    .unwrap_or_else(Cell::empty);
-                cell.number_format = number_format.clone();
-                sheet.set_cell(row, col, cell);
+            let mut coords = Vec::with_capacity(row_count.saturating_mul(col_count));
+            for row in start_row..=end_row {
+                for col in start_col..=end_col {
+                    let mut cell = sheet
+                        .cells
+                        .get(&(row, col))
+                        .cloned()
+                        .unwrap_or_else(Cell::empty);
+                    cell.number_format = number_format.clone();
+                    sheet.set_cell(row, col, cell);
+                    coords.push((row, col));
+                }
             }
+
+            (sheet_name, coords)
+        };
+
+        let mut style_ids_by_format: HashMap<String, u32> = HashMap::new();
+        let style_id = number_format
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|fmt| {
+                if let Some(existing) = style_ids_by_format.get(fmt) {
+                    *existing
+                } else {
+                    let fmt = fmt.to_string();
+                    let style_id = self.engine.intern_style(formula_model::Style {
+                        number_format: Some(fmt.clone()),
+                        ..Default::default()
+                    });
+                    style_ids_by_format.insert(fmt, style_id);
+                    style_id
+                }
+            })
+            .unwrap_or(0);
+
+        for (row, col) in coords {
+            let addr = coord_to_a1(row, col);
+            let _ = self.engine.set_cell_style_id(&sheet_name, &addr, style_id);
         }
 
         self.dirty = true;
@@ -4172,10 +4204,30 @@ impl AppState {
             }
         }
 
+        let mut style_ids_by_format: HashMap<String, u32> = HashMap::new();
         for sheet in &workbook.sheets {
             let sheet_name = &sheet.name;
             for ((row, col), cell) in sheet.cells_iter() {
                 let addr = coord_to_a1(row, col);
+                if let Some(fmt) = cell
+                    .number_format
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    let style_id = if let Some(existing) = style_ids_by_format.get(fmt) {
+                        *existing
+                    } else {
+                        let fmt = fmt.to_string();
+                        let style_id = self.engine.intern_style(formula_model::Style {
+                            number_format: Some(fmt.clone()),
+                            ..Default::default()
+                        });
+                        style_ids_by_format.insert(fmt, style_id);
+                        style_id
+                    };
+                    let _ = self.engine.set_cell_style_id(sheet_name, &addr, style_id);
+                }
                 if let Some(formula) = &cell.formula {
                     if cell.computed_value != CellScalar::Empty {
                         let _ = self.engine.set_cell_value(
@@ -7592,6 +7644,32 @@ mod tests {
                 limit: MAX_RANGE_CELLS_PER_CALL
             }
         ));
+    }
+
+    #[test]
+    fn cell_format_reflects_workbook_number_format_after_engine_rebuild() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .set_range_number_format(&sheet_id, 0, 0, 0, 0, Some("0.00".to_string()))
+            .expect("set_range_number_format");
+        state
+            .set_cell(&sheet_id, 0, 1, None, Some("=CELL(\"format\",A1)".to_string()))
+            .expect("set formula");
+
+        state
+            .rebuild_engine_from_workbook()
+            .expect("rebuild engine");
+        state.engine.recalculate_single_threaded();
+        state.refresh_computed_values().expect("refresh computed values");
+
+        let b1 = state.get_cell(&sheet_id, 0, 1).expect("get B1");
+        assert_eq!(b1.value, CellScalar::Text("F2".to_string()));
     }
 
     #[test]
