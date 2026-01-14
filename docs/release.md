@@ -43,6 +43,17 @@ same version.
 To upgrade Rust, open a PR that bumps `rust-toolchain.toml` (and any workflow pins/comments that the
 CI guard requests) and rely on CI to validate the new toolchain before tagging a release.
 
+## GitHub Actions runner OS pinning (release stability)
+
+The Desktop Release workflow pins GitHub-hosted runner image versions (for example `macos-14`,
+`windows-2022`, `ubuntu-24.04`) instead of using moving `*-latest` labels. GitHub periodically
+updates the `*-latest` aliases to newer OS versions, which can unexpectedly break release builds
+and make historical tagged builds harder to reproduce.
+
+To update runner pins, open a PR that bumps the runner labels in
+`.github/workflows/release.yml` **after** validating that the release workflow succeeds on the new
+runner images (recommended: run the workflow via `workflow_dispatch` with `upload=false`).
+
 ## Testing the release pipeline (workflow_dispatch)
 
 To test packaging/signing changes without creating a git tag, run the **Desktop Release** workflow
