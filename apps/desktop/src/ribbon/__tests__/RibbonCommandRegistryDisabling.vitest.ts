@@ -174,8 +174,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
 
     // These are currently handled directly by the desktop ribbon command handler (not via CommandRegistry),
     // so they must be exempt from the registry-backed disabling allowlist.
-    expect(baselineDisabledById["home.editing.sortFilter.customSort"]).toBeUndefined();
-    expect(baselineDisabledById["data.sortFilter.sort.customSort"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.format.organizeSheets"]).toBeUndefined();
 
     // Home → Cells structural edit commands are also handled directly in `main.ts`.
     expect(baselineDisabledById["home.cells.insert.insertCells"]).toBeUndefined();
@@ -209,6 +208,34 @@ describe("CommandRegistry-backed ribbon disabling", () => {
       "home.editing.autoSum.countNumbers",
       "home.editing.autoSum.max",
       "home.editing.autoSum.min",
+    ] as const;
+    for (const id of ids) {
+      expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+      expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+      expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+    }
+  });
+
+  it("registers Custom Sort ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    const ids = ["home.editing.sortFilter.customSort", "data.sortFilter.sort.customSort"] as const;
+    for (const id of ids) {
+      expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
+      expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
+      expect(baselineDisabledById[id], `Expected '${id}' to not be disabled by baseline`).toBeUndefined();
+    }
+  });
+
+  it("registers panel-backed What-If Analysis and Solver ribbon ids as CommandRegistry commands", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+
+    const ids = [
+      "data.forecast.whatIfAnalysis.scenarioManager",
+      "data.forecast.whatIfAnalysis.monteCarlo",
+      "formulas.solutions.solver",
     ] as const;
     for (const id of ids) {
       expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();

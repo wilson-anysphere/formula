@@ -1,14 +1,17 @@
 import type { SpreadsheetApp } from "../app/spreadsheetApp";
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import { t } from "../i18n/index.js";
+import { openCustomSortDialog } from "../sort-filter/openCustomSortDialog.js";
 import { sortSelection } from "../sort-filter/sortSelection.js";
 
 export const SORT_FILTER_RIBBON_COMMANDS = {
   homeSortAtoZ: "home.editing.sortFilter.sortAtoZ",
   homeSortZtoA: "home.editing.sortFilter.sortZtoA",
+  homeCustomSort: "home.editing.sortFilter.customSort",
 
   dataSortAtoZ: "data.sortFilter.sortAtoZ",
   dataSortZtoA: "data.sortFilter.sortZtoA",
+  dataCustomSort: "data.sortFilter.sort.customSort",
 
   // Data tab "Sort" dropdown menu items.
   dataDropdownSortAtoZ: "data.sortFilter.sort.sortAtoZ",
@@ -40,5 +43,24 @@ export function registerSortFilterCommands(params: { commandRegistry: CommandReg
 
   registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.dataDropdownSortAtoZ, "Sort A to Z", "ascending");
   registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.dataDropdownSortZtoA, "Sort Z to A", "descending");
-}
 
+  const registerCustomSortCommand = (commandId: string): void => {
+    commandRegistry.registerBuiltinCommand(
+      commandId,
+      "Custom Sort…",
+      () =>
+        openCustomSortDialog({
+          isEditing: () => app.isEditing(),
+          getDocument: () => app.getDocument(),
+          getSheetId: () => app.getCurrentSheetId(),
+          getSelectionRanges: () => app.getSelectionRanges(),
+          getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
+          focusGrid: () => app.focus(),
+        }),
+      { category, icon: null, keywords: ["sort", "custom sort"] },
+    );
+  };
+
+  registerCustomSortCommand(SORT_FILTER_RIBBON_COMMANDS.homeCustomSort);
+  registerCustomSortCommand(SORT_FILTER_RIBBON_COMMANDS.dataCustomSort);
+}

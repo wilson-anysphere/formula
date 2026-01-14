@@ -68,13 +68,11 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   "home.cells.delete.deleteSheet",
 
   // Home → Editing.
-  "home.editing.sortFilter.customSort",
   "home.editing.sortFilter.filter",
   "home.editing.sortFilter.clear",
   "home.editing.sortFilter.reapply",
 
   // Data → Sort & Filter.
-  "data.sortFilter.sort.customSort",
   "data.sortFilter.filter",
   "data.sortFilter.clear",
   "data.sortFilter.reapply",
