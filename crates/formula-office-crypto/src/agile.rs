@@ -1491,6 +1491,146 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn agile_decrypt_ignores_trailing_padding_in_verifier_and_hmac_values() {
+        // `encryptedVerifierHashValue` and `encryptedHmacValue` decrypt to AES-block-aligned buffers.
+        // When `hashSize` is not a multiple of 16 (e.g. SHA1=20 bytes), producers may include
+        // trailing padding bytes. Validation should compare only the digest prefix.
+        let password = "pw";
+        let pw_utf16 = password_to_utf16le(password);
+        let hash_alg = HashAlgorithm::Sha1;
+        let spin_count = 10u32;
+        let key_bits = 128usize;
+        let key_bytes = key_bits / 8;
+        let block_size = 16usize;
+        let digest_len = hash_alg.digest_len();
+        assert_eq!(digest_len, 20);
+
+        let key_data_salt: Vec<u8> = (0u8..=15).collect();
+        let password_salt: Vec<u8> = (16u8..=31).collect();
+
+        // Empty ciphertext: the test focuses on verifier + HMAC validation logic.
+        let encrypted_package = 0u64.to_le_bytes().to_vec();
+
+        let verifier_hash_input_plain: [u8; 16] = *b"abcdefghijklmnop";
+        let mut verifier_hash_value_plain = hash_alg.digest(&verifier_hash_input_plain);
+        verifier_hash_value_plain.extend_from_slice(&[0xA5u8; 12]);
+        assert_eq!(verifier_hash_value_plain.len(), 32);
+
+        let package_key_plain: [u8; 16] = [0x11; 16];
+
+        // Derive keys (block keys are used only for key derivation).
+        let key_vhi = derive_agile_key(
+            hash_alg,
+            &password_salt,
+            &pw_utf16,
+            spin_count,
+            key_bytes,
+            BLOCK_KEY_VERIFIER_HASH_INPUT,
+        );
+        let key_vhv = derive_agile_key(
+            hash_alg,
+            &password_salt,
+            &pw_utf16,
+            spin_count,
+            key_bytes,
+            BLOCK_KEY_VERIFIER_HASH_VALUE,
+        );
+        let key_kv = derive_agile_key(
+            hash_alg,
+            &password_salt,
+            &pw_utf16,
+            spin_count,
+            key_bytes,
+            BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+        );
+
+        // Password key encryptor IV scheme: saltValue.
+        let verifier_iv = password_salt
+            .get(..block_size)
+            .expect("saltValue shorter than blockSize");
+        let enc_vhi =
+            aes_cbc_encrypt(&key_vhi, verifier_iv, &verifier_hash_input_plain).expect("enc vhi");
+        let enc_vhv =
+            aes_cbc_encrypt(&key_vhv, verifier_iv, &verifier_hash_value_plain).expect("enc vhv");
+        let enc_kv = aes_cbc_encrypt(&key_kv, verifier_iv, &package_key_plain).expect("enc key");
+
+        // HMAC key/value fields with non-zero trailing bytes.
+        let hmac_key_plain = vec![0x22u8; digest_len];
+        let computed_hmac = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package);
+        assert_eq!(computed_hmac.len(), digest_len);
+
+        let mut hmac_key_plain_padded = hmac_key_plain.clone();
+        hmac_key_plain_padded.extend_from_slice(&[0x5Au8; 12]);
+        let mut hmac_value_plain_padded = computed_hmac.clone();
+        hmac_value_plain_padded.extend_from_slice(&[0xC3u8; 12]);
+
+        let iv_hmac_key = derive_iv(
+            hash_alg,
+            &key_data_salt,
+            BLOCK_KEY_INTEGRITY_HMAC_KEY,
+            block_size,
+        );
+        let encrypted_hmac_key = aes_cbc_encrypt(
+            &package_key_plain,
+            &iv_hmac_key,
+            &hmac_key_plain_padded,
+        )
+        .expect("enc hmac key");
+
+        let iv_hmac_val = derive_iv(
+            hash_alg,
+            &key_data_salt,
+            BLOCK_KEY_INTEGRITY_HMAC_VALUE,
+            block_size,
+        );
+        let encrypted_hmac_value = aes_cbc_encrypt(
+            &package_key_plain,
+            &iv_hmac_val,
+            &hmac_value_plain_padded,
+        )
+        .expect("enc hmac value");
+
+        let info = AgileEncryptionInfo {
+            version_major: 4,
+            version_minor: 4,
+            flags: 0,
+            key_data: AgileKeyData {
+                salt: key_data_salt,
+                block_size,
+                key_bits,
+                hash_algorithm: hash_alg,
+                cipher_algorithm: "AES".to_string(),
+                cipher_chaining: "ChainingModeCBC".to_string(),
+            },
+            data_integrity: AgileDataIntegrity {
+                encrypted_hmac_key,
+                encrypted_hmac_value,
+            },
+            password_key_encryptor: AgilePasswordKeyEncryptor {
+                salt: password_salt,
+                block_size,
+                key_bits,
+                spin_count,
+                hash_algorithm: hash_alg,
+                cipher_algorithm: "AES".to_string(),
+                cipher_chaining: "ChainingModeCBC".to_string(),
+                encrypted_verifier_hash_input: enc_vhi,
+                encrypted_verifier_hash_value: enc_vhv,
+                encrypted_key_value: enc_kv,
+            },
+        };
+
+        let out = decrypt_agile_encrypted_package(
+            &info,
+            &encrypted_package,
+            password,
+            &crate::DecryptOptions::default(),
+        )
+        .expect("decrypt");
+        assert!(out.is_empty());
+    }
+
+    #[test]
     fn decrypt_agile_rejects_spin_count_too_large() {
         // Keep this test cheap: we only want to validate the early guard (and error surfacing),
         // not actually run an expensive password KDF in CI.
