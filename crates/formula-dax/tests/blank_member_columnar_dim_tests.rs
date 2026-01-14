@@ -219,6 +219,31 @@ fn assert_blank_member_semantics(model: &DataModel) {
         model.evaluate_measure("Total Sales", &blank_region).unwrap(),
         7.0.into()
     );
+
+    // Filtering the dimension to non-blank values should exclude the unmatched fact rows (the
+    // relationship-generated blank member itself is filtered out).
+    assert_eq!(
+        engine
+            .evaluate(
+                model,
+                "CALCULATE(COUNTROWS(Orders), Customers[Region] <> BLANK())",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                model,
+                "CALCULATE([Total Sales], Customers[Region] <> BLANK())",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        10.0.into()
+    );
 }
 
 #[test]
@@ -232,4 +257,3 @@ fn blank_member_semantics_work_for_columnar_dimension_and_fact_tables() {
     let model = build_model_blank_member_columnar_dim_and_fact();
     assert_blank_member_semantics(&model);
 }
-
