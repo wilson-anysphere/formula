@@ -1377,6 +1377,11 @@ impl PivotEngine {
         cfg: &PivotConfig,
         field: &str,
     ) -> Option<CalculatedItemPlacement> {
+        let field = field.trim();
+        if field.is_empty() {
+            return None;
+        }
+
         cfg.row_fields
             .iter()
             .position(|f| f.source_field.as_cache_field_name() == Some(field))

@@ -17046,7 +17046,7 @@ mod tests {
             .expect("compiled formula stored");
         assert!(
             matches!(compiled, CompiledFormula::Bytecode(_)),
-            "expected full-sheet aggregate formula to compile to bytecode"
+            "expected compiled formula to take the bytecode path"
         );
 
         let snapshot = Snapshot::from_workbook(
