@@ -159,7 +159,12 @@ fi
 
 # Hash all files in the release asset directory (excluding a pre-existing
 # SHA256SUMS.txt from previous workflow runs).
-mapfile -t rel_files < <(
+rel_files=()
+# Avoid Bash 4-only `mapfile` so this script can run on macOS's default Bash 3.x.
+while IFS= read -r file; do
+  [[ -n "$file" ]] || continue
+  rel_files+=( "$file" )
+done < <(
   cd "$assets_dir"
   find . -maxdepth 1 -type f -print \
     | sed 's|^\./||' \
