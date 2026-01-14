@@ -525,6 +525,34 @@ describe("engine sync helpers", () => {
     expect(changes).toEqual(expected);
   });
 
+  it("does not force a recalc for cell styleId-only deltas when style sync hooks are absent", async () => {
+    const engine = new FakeEngine([{ sheet: "Sheet1", address: "A1", value: 123 }]);
+
+    // Disable style sync hooks for this test.
+    (engine as Partial<EngineSyncTarget> & { internStyle?: unknown; setCellStyleId?: unknown }).internStyle = undefined;
+    (engine as Partial<EngineSyncTarget> & { internStyle?: unknown; setCellStyleId?: unknown }).setCellStyleId = undefined;
+
+    const payload = {
+      recalc: false,
+      deltas: [
+        {
+          sheetId: "Sheet1",
+          row: 0,
+          col: 0,
+          before: { value: null, formula: null, styleId: 0 },
+          after: { value: null, formula: null, styleId: 1 },
+        },
+      ],
+    };
+
+    const changes = await engineApplyDocumentChange(engine, payload, {
+      getStyleById: () => ({ font: { bold: true } }),
+    });
+
+    expect(changes).toEqual([]);
+    expect(engine.recalcCalls).toEqual([]);
+  });
+
   it("forces a recalc for row/col/sheet style layer deltas even when DocumentController emits recalc=false", async () => {
     const styleObj = { font: { italic: true } };
     const recalcResult: CellChange[] = [{ sheet: "Sheet1", address: "B2", value: 456 }];
@@ -588,6 +616,26 @@ describe("engine sync helpers", () => {
     expect(engine.recalcCalls).toEqual([undefined]);
   });
 
+  it("does not force a recalc for sheet view column widths when width hooks are absent", async () => {
+    const doc = new DocumentController();
+    let payload: any = null;
+    const unsubscribe = doc.on("change", (p: any) => {
+      payload = p;
+    });
+
+    doc.setColWidth("Sheet1", 0, 120);
+    unsubscribe();
+
+    const engine = new FakeEngine([]);
+    (engine as Partial<EngineSyncTarget> & { setColWidth?: unknown }).setColWidth = undefined;
+
+    const changes = await engineApplyDocumentChange(engine, payload);
+
+    expect(changes).toEqual([]);
+    expect(engine.colWidthCalls).toEqual([]);
+    expect(engine.recalcCalls).toEqual([]);
+  });
+
   it("engineApplyDocumentChange triggers a recalc tick for sheet renames (sheet meta deltas)", async () => {
     const doc = new DocumentController();
     let payload: any = null;
@@ -618,12 +666,18 @@ describe("engine sync helpers", () => {
     doc.setRangeFormat("Sheet1", "C1", { font: { italic: true } });
     unsubscribe();
     expect(payload?.recalc).toBe(false);
+    const docStyleId = doc.getCell("Sheet1", "C1").styleId;
+    expect(docStyleId).not.toBe(0);
 
     const engine = new FakeEngine([]);
-    await engineApplyDocumentChange(engine, payload);
+    await engineApplyDocumentChange(engine, payload, {
+      getStyleById: (styleId) => doc.styleTable.get(styleId),
+    });
 
     // Formatting-only changes should still advance the engine's recalculation tick so
     // metadata/volatile functions update.
+    expect(engine.internStyleCalls).toEqual([doc.styleTable.get(docStyleId)]);
+    expect(engine.setStyleCalls).toEqual([{ address: "C1", styleId: 1, sheet: "Sheet1" }]);
     expect(engine.recalcCalls).toEqual([undefined]);
   });
   it("engineApplyDocumentChange syncs compressed range-run formatting deltas into the engine", async () => {

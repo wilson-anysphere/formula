@@ -642,6 +642,35 @@ export async function engineApplyDocumentChange(
   const rangeRunDeltas: unknown[] = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
   const sheetMetaDeltas: unknown[] = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
 
+  // Backwards compatibility: older DocumentController payload shapes only include `formatDeltas`.
+  // Prefer the explicit delta streams when present, but derive them from `formatDeltas` if needed.
+  if (
+    formatDeltas.length > 0 &&
+    rowStyleDeltas.length === 0 &&
+    colStyleDeltas.length === 0 &&
+    sheetStyleDeltas.length === 0
+  ) {
+    for (const delta of formatDeltas) {
+      const sheetId = typeof (delta as any)?.sheetId === "string" ? (delta as any).sheetId : "";
+      if (!sheetId) continue;
+      const layer = typeof (delta as any)?.layer === "string" ? (delta as any).layer : "";
+      const afterStyleId = typeof (delta as any)?.afterStyleId === "number" ? (delta as any).afterStyleId : 0;
+      if (!Number.isInteger(afterStyleId) || afterStyleId < 0) continue;
+
+      if (layer === "row") {
+        const row = Number((delta as any)?.index);
+        if (!Number.isInteger(row) || row < 0) continue;
+        rowStyleDeltas.push({ sheetId, row, afterStyleId });
+      } else if (layer === "col") {
+        const col = Number((delta as any)?.index);
+        if (!Number.isInteger(col) || col < 0) continue;
+        colStyleDeltas.push({ sheetId, col, afterStyleId });
+      } else if (layer === "sheet") {
+        sheetStyleDeltas.push({ sheetId, afterStyleId });
+      }
+    }
+  }
+
   // If the caller supplied `getStyleById`, seed a style sync context so both
   // `engineApplyDeltas` (cell styles) and the row/col/sheet helpers can resolve
   // style objects without needing an initial `engineHydrateFromDocument` call.
@@ -649,7 +678,6 @@ export async function engineApplyDocumentChange(
   const canResolveNonZeroStyles = Boolean(engine.internStyle && ctx);
 
   const didApplyCellInputs = deltas.some((d) => cellStateToEngineInput(d.before) !== cellStateToEngineInput(d.after));
-  const hasFormattingOnlyCellDeltas = !didApplyCellInputs && deltas.some((d) => d.before.styleId !== d.after.styleId);
   const didApplyCellStyles =
     Boolean(engine.setCellStyleId) &&
     deltas.some((d) => d.before.styleId !== d.after.styleId && (d.after.styleId === 0 || canResolveNonZeroStyles));
@@ -810,21 +838,20 @@ export async function engineApplyDocumentChange(
   const recalcFlag = typeof payload?.recalc === "boolean" ? (payload.recalc as boolean) : undefined;
   let shouldRecalculate = options.recalculate ?? recalcFlag ?? true;
 
-  // Prefer the explicit style delta streams, but fall back to the raw `formatDeltas` list when
-  // consumers pass through older DocumentController payload shapes.
-  const hasStyles =
-    rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0 || formatDeltas.length > 0;
-  const hasViews = sheetViewDeltas.length > 0;
-  const hasRangeRuns = rangeRunDeltas.length > 0;
-  const hasSheetMeta = sheetMetaDeltas.length > 0;
-
-  const hasMetadataDeltas = hasStyles || hasViews || hasRangeRuns || hasSheetMeta || hasFormattingOnlyCellDeltas;
-
   // DocumentController emits `recalc: false` for many metadata-only edits (formatting, view deltas,
   // sheet meta renames). Volatile worksheet-info functions like `CELL()`/`INFO()` must observe the
   // updated metadata after such edits, so force a recalculation tick unless the caller explicitly
   // disabled it.
-  if (hasMetadataDeltas && options.recalculate !== false) {
+  //
+  // Note: We only force recalculation when the metadata changes were actually applied to the engine
+  // (i.e. the engine exposes the relevant optional hooks). This avoids recalculating in targets that
+  // ignore formatting/view metadata entirely (backwards compatibility).
+  const didApplyAnyFormattingMetadata =
+    didApplyCellStyles || didApplyAnyLayerStyles || didApplyAnyRangeRuns || didApplyAnyColWidths;
+  const hasSheetMeta = sheetMetaDeltas.length > 0;
+  const didApplyAnyMetadataDeltas = didApplyAnyFormattingMetadata || hasSheetMeta;
+
+  if (didApplyAnyMetadataDeltas && options.recalculate !== false) {
     shouldRecalculate = true;
   }
 
@@ -832,6 +859,6 @@ export async function engineApplyDocumentChange(
 
   const didApplyAnyUpdates =
     didApplyCellInputs || didApplyCellStyles || didApplyAnyLayerStyles || didApplyAnyRangeRuns || didApplyAnyColWidths;
-  if (!didApplyAnyUpdates && !hasMetadataDeltas && recalcFlag !== true && options.recalculate !== true) return [];
+  if (!didApplyAnyUpdates && !didApplyAnyMetadataDeltas && recalcFlag !== true && options.recalculate !== true) return [];
   return await engine.recalculate();
 }
