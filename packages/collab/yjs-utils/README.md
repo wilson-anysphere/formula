@@ -26,6 +26,7 @@ of the collab stack doesn’t have to re-implement it.
 - `replaceForeignRootType` – normalize a foreign root into this module’s constructors.
 - `getMapRoot`, `getArrayRoot`, `getTextRoot` – safe root access that avoids constructor-mismatch throws.
 - `patchForeignItemConstructor` – best-effort prototype patching so foreign Yjs `Item` structs pass `instanceof Y.Item` checks (used by UndoManager integrations).
+- `patchForeignAbstractTypeConstructor` – best-effort prototype patching so foreign Yjs types pass `instanceof Y.AbstractType` checks (used by UndoManager integrations).
 - `yjsValueToJson` / `cloneYjsValueToJson` – best-effort conversion of nested Yjs values into plain JSON-ish values.
 
 ## Notes
