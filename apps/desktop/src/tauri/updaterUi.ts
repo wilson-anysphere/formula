@@ -980,12 +980,13 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
     case "update-check-error": {
       if (!shouldSurfaceToast) break;
       setManualUpdateCheckFollowUp(false);
-      const message =
-        typeof payload?.error === "string" && payload.error.trim() !== ""
-          ? payload.error
-          : typeof payload?.message === "string" && payload.message.trim() !== ""
-            ? payload.message
-            : t("updater.unknownError");
+      const message = (() => {
+        const error = typeof payload?.error === "string" ? payload.error.trim() : "";
+        if (error) return error;
+        const msg = typeof payload?.message === "string" ? payload.message.trim() : "";
+        if (msg) return msg;
+        return t("updater.unknownError");
+      })();
       showToast(tWithVars("updater.errorWithMessage", { message }), "error");
       break;
     }
@@ -1004,7 +1005,8 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
         typeof payload?.version === "string" && payload.version.trim() !== ""
           ? payload.version.trim()
           : "unknown";
-      const body = typeof payload?.body === "string" && payload.body.trim() !== "" ? payload.body : null;
+      const bodyText = typeof payload?.body === "string" ? payload.body.trim() : "";
+      const body = bodyText ? bodyText : null;
 
       // If a new version is available, drop any persisted "Later" suppression from prior versions.
       const storage = getLocalStorageOrNull();
@@ -1064,8 +1066,8 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
       // Only surface the error inside an already-open dialog for this version; otherwise keep
       // startup background download failures quiet.
       if (updateDialog && updateInfo?.version === version) {
-        lastUpdateError =
-          typeof payload?.message === "string" && payload.message.trim() !== "" ? payload.message : t("updater.unknownError");
+        const message = typeof payload?.message === "string" ? payload.message.trim() : "";
+        lastUpdateError = message ? message : t("updater.unknownError");
         renderUpdateDialog();
       }
       break;

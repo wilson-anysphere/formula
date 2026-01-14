@@ -313,6 +313,17 @@ describe("updaterUi (events)", () => {
     );
   });
 
+  it("trims release notes text for manual update-available dialogs", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "  Bug fixes  " });
+
+    const dialog = document.querySelector('[data-testid="updater-dialog"]');
+    expect(dialog).toBeTruthy();
+    expect(document.querySelector('[data-testid="updater-body"]')?.textContent).toBe("Bug fixes");
+  });
+
   it("shows an update dialog (and skips the system notification) when a manual check is queued behind an in-flight startup check", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '<div id="toast-root"></div>';
@@ -362,6 +373,17 @@ describe("updaterUi (events)", () => {
     expect(toasts.join("\n")).toContain(t("updater.checking"));
     expect(toasts.join("\n")).toContain(t("updater.upToDate"));
     expect(toasts.join("\n")).toContain("network down");
+  });
+
+  it("trims update-check-error messages before surfacing toasts", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const toastSpy = vi.spyOn(ui, "showToast");
+    await handleUpdaterEvent("update-check-error", { source: "manual", error: "  network down  " });
+
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+    expect(toastSpy).toHaveBeenCalledWith(tWithVars("updater.errorWithMessage", { message: "network down" }), "error");
   });
 
   it("updates progress UI when downloading an update", async () => {

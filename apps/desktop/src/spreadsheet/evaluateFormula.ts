@@ -739,8 +739,8 @@ function evalFunction(
     const filename = typeof meta?.filename === "string" ? meta.filename.trim() : "";
     if (!filename) return "";
 
-    const dirRaw = typeof meta?.directory === "string" ? meta.directory : null;
-    const dir = dirRaw != null && dirRaw.trim() !== "" ? workbookDirForExcel(dirRaw) : "";
+    const dirRaw = typeof meta?.directory === "string" ? meta.directory.trim() : "";
+    const dir = dirRaw ? workbookDirForExcel(dirRaw) : "";
 
     const currentSheetName = (() => {
       const raw = typeof options.currentSheetName === "string" ? options.currentSheetName.trim() : "";
@@ -786,8 +786,8 @@ function evalFunction(
 
     const meta = options.workbookFileMetadata ?? null;
     const filename = typeof meta?.filename === "string" ? meta.filename.trim() : "";
-    const dirRaw = typeof meta?.directory === "string" ? meta.directory : null;
-    const dir = dirRaw != null && dirRaw.trim() !== "" ? workbookDirForExcel(dirRaw) : "";
+    const dirRaw = typeof meta?.directory === "string" ? meta.directory.trim() : "";
+    const dir = dirRaw ? workbookDirForExcel(dirRaw) : "";
     // Match the Rust engine's Excel semantics: `INFO("directory")` returns `#N/A` until the workbook
     // has a known directory (typically after first save). Filename-only metadata (web) also yields
     // `#N/A`.

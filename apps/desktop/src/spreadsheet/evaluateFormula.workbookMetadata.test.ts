@@ -79,6 +79,19 @@ describe("evaluateFormula workbook metadata functions", () => {
     expect(dir).toBe("C:\\tmp\\");
   });
 
+  it("trims workbook metadata strings (defensive)", () => {
+    const value = evaluateFormula('=CELL("filename")', () => null, {
+      workbookFileMetadata: { directory: "  /tmp  ", filename: "  book.xlsx  " },
+      currentSheetName: "Sheet1",
+    });
+    expect(value).toBe("/tmp/[book.xlsx]Sheet1");
+
+    const dir = evaluateFormula('=INFO("directory")', () => null, {
+      workbookFileMetadata: { directory: "  /tmp  ", filename: "  book.xlsx  " },
+    });
+    expect(dir).toBe("/tmp/");
+  });
+
   it("supports nested usage inside string concatenation", () => {
     const value = evaluateFormula('="file="&CELL("filename")', () => null, {
       workbookFileMetadata: { directory: "/tmp/", filename: "book.xlsx" },
