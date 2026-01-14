@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -109,3 +109,41 @@ test(
     assert.equal(proc.status, 0, proc.stderr);
   },
 );
+
+test("verify_linux_desktop_integration fails when LICENSE is missing from /usr/share/doc/<pkg>/", { skip: !hasPython3 }, () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+  const configPath = writeConfig(tmp);
+  const pkgRoot = writePackageRoot(tmp);
+
+  // Remove the LICENSE file after creating the package root.
+  // (Avoid adding extra helper plumbing to keep the test focused.)
+  const licensePath = path.join(pkgRoot, "usr", "share", "doc", "formula-desktop", "LICENSE");
+  try {
+    unlinkSync(licensePath);
+  } catch {
+    // ignore
+  }
+
+  const proc = runValidator({ packageRoot: pkgRoot, configPath });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /missing LICENSE\/NOTICE compliance artifacts/i);
+  assert.match(proc.stderr, /LICENSE/i);
+});
+
+test("verify_linux_desktop_integration fails when NOTICE is missing from /usr/share/doc/<pkg>/", { skip: !hasPython3 }, () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+  const configPath = writeConfig(tmp);
+  const pkgRoot = writePackageRoot(tmp);
+
+  const noticePath = path.join(pkgRoot, "usr", "share", "doc", "formula-desktop", "NOTICE");
+  try {
+    unlinkSync(noticePath);
+  } catch {
+    // ignore
+  }
+
+  const proc = runValidator({ packageRoot: pkgRoot, configPath });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /missing LICENSE\/NOTICE compliance artifacts/i);
+  assert.match(proc.stderr, /NOTICE/i);
+});
