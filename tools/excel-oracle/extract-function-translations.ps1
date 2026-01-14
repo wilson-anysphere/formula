@@ -47,6 +47,22 @@
     -LocaleId de-DE `
     -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
 
+  # Then normalize + regenerate the committed TSVs:
+  node scripts/normalize-locale-function-sources.js
+  node scripts/generate-locale-function-tsv.js
+  node scripts/generate-locale-function-tsv.js --check
+
+.EXAMPLE
+  # Generate the es-ES source JSON from a Spanish Excel install (from repo root)
+  powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
+    -LocaleId es-ES `
+    -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json
+
+  # Then normalize + regenerate the committed TSVs:
+  node scripts/normalize-locale-function-sources.js
+  node scripts/generate-locale-function-tsv.js
+  node scripts/generate-locale-function-tsv.js --check
+
 .EXAMPLE
   # Debug a quick subset while watching Excel + printing per-function formulas
   powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
