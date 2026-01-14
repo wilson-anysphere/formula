@@ -3958,6 +3958,19 @@ fn worksheet_background_picture_rel_id(worksheet_xml: &[u8]) -> Option<String> {
 }
 
 #[cfg(any(feature = "desktop", test))]
+fn open_xlsx_package_for_ipc_extraction(
+    xlsx_bytes: &[u8],
+) -> Result<formula_xlsx::XlsxPackage, formula_xlsx::XlsxError> {
+    formula_xlsx::XlsxPackage::from_bytes_limited(
+        xlsx_bytes,
+        formula_xlsx::XlsxPackageLimits {
+            max_part_bytes: crate::resource_limits::MAX_IPC_XLSX_PACKAGE_PART_BYTES as u64,
+            max_total_bytes: crate::resource_limits::MAX_IPC_XLSX_PACKAGE_TOTAL_BYTES as u64,
+        },
+    )
+}
+
+#[cfg(any(feature = "desktop", test))]
 fn extract_imported_sheet_background_images_from_xlsx_bytes(
     xlsx_bytes: &[u8],
 ) -> Vec<ImportedSheetBackgroundImageInfo> {
@@ -3968,7 +3981,7 @@ fn extract_imported_sheet_background_images_from_xlsx_bytes(
         MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES, MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES,
     };
 
-    let pkg = match formula_xlsx::XlsxPackage::from_bytes(xlsx_bytes) {
+    let pkg = match open_xlsx_package_for_ipc_extraction(xlsx_bytes) {
         Ok(pkg) => pkg,
         Err(_) => return Vec::new(),
     };
@@ -4172,7 +4185,7 @@ pub async fn list_imported_chart_objects(
 
     tauri::async_runtime::spawn_blocking(move || {
         // Best-effort: chart parsing should never prevent workbook interactions.
-        let pkg = match formula_xlsx::XlsxPackage::from_bytes(origin_bytes.as_ref()) {
+        let pkg = match open_xlsx_package_for_ipc_extraction(origin_bytes.as_ref()) {
             Ok(pkg) => pkg,
             Err(_) => return Ok::<_, String>(Vec::new()),
         };
@@ -4274,7 +4287,7 @@ pub async fn list_imported_embedded_cell_images(
         }
 
         // Best-effort: embedded image parsing should never prevent workbook interactions.
-        let pkg = match formula_xlsx::XlsxPackage::from_bytes(origin_bytes.as_ref()) {
+        let pkg = match open_xlsx_package_for_ipc_extraction(origin_bytes.as_ref()) {
             Ok(pkg) => pkg,
             Err(_) => return Ok::<_, String>(Vec::new()),
         };
@@ -4391,7 +4404,7 @@ pub async fn list_imported_drawing_objects(
 
     tauri::async_runtime::spawn_blocking(move || {
         // Best-effort: DrawingML parsing should never prevent workbook interactions.
-        let pkg = match formula_xlsx::XlsxPackage::from_bytes(origin_bytes.as_ref()) {
+        let pkg = match open_xlsx_package_for_ipc_extraction(origin_bytes.as_ref()) {
             Ok(pkg) => pkg,
             Err(_) => {
                 return Ok::<_, String>(ImportedDrawingLayerPayload {
@@ -11111,6 +11124,157 @@ export default async function main(ctx) {
         assert_eq!(extracted[0].image_id, "image1.png");
         assert_eq!(extracted[0].mime_type, "image/png");
         assert_eq!(extracted[0].bytes_base64, STANDARD.encode(b"png-bytes"));
+    }
+
+    #[test]
+    fn extract_imported_sheet_background_images_from_xlsx_bytes_rejects_oversized_packages() {
+        use std::io::Cursor;
+        use zip::write::FileOptions;
+        use zip::ZipWriter;
+
+        // Patch a ZIP file's uncompressed size metadata for `entry_name` in both the central
+        // directory header and the local file header.
+        //
+        // This lets us create a tiny ZIP that *claims* one entry inflates beyond our IPC size cap,
+        // without allocating huge buffers in the test.
+        fn patch_zip_entry_uncompressed_size(
+            mut zip_bytes: Vec<u8>,
+            entry_name: &str,
+            new_uncompressed_size: u32,
+        ) -> Vec<u8> {
+            // Locate the end-of-central-directory record (EOCD) by scanning backwards from the end of
+            // the file. The ZIP spec allows up to 64KiB of trailing comment.
+            const EOCD_SIG: [u8; 4] = [0x50, 0x4B, 0x05, 0x06];
+            let min_eocd = zip_bytes.len().saturating_sub(22);
+            let search_min = zip_bytes.len().saturating_sub(22 + 0xFFFF);
+
+            let mut eocd_offset = None;
+            for i in (search_min..=min_eocd).rev() {
+                if zip_bytes.get(i..i + 4) == Some(&EOCD_SIG) {
+                    eocd_offset = Some(i);
+                    break;
+                }
+            }
+            let eocd_offset = eocd_offset.expect("expected EOCD record in test zip");
+
+            let central_dir_size = u32::from_le_bytes(
+                zip_bytes[eocd_offset + 12..eocd_offset + 16]
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
+            let central_dir_offset = u32::from_le_bytes(
+                zip_bytes[eocd_offset + 16..eocd_offset + 20]
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
+
+            const CEN_SIG: [u8; 4] = [0x50, 0x4B, 0x01, 0x02];
+            const LFH_SIG: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
+            let mut cursor = central_dir_offset;
+            let end = central_dir_offset + central_dir_size;
+            while cursor < end {
+                assert_eq!(
+                    zip_bytes.get(cursor..cursor + 4),
+                    Some(CEN_SIG.as_slice()),
+                    "expected central directory header signature"
+                );
+
+                let name_len =
+                    u16::from_le_bytes(zip_bytes[cursor + 28..cursor + 30].try_into().unwrap())
+                        as usize;
+                let extra_len =
+                    u16::from_le_bytes(zip_bytes[cursor + 30..cursor + 32].try_into().unwrap())
+                        as usize;
+                let comment_len =
+                    u16::from_le_bytes(zip_bytes[cursor + 32..cursor + 34].try_into().unwrap())
+                        as usize;
+                let local_header_offset =
+                    u32::from_le_bytes(zip_bytes[cursor + 42..cursor + 46].try_into().unwrap())
+                        as usize;
+
+                let name_start = cursor + 46;
+                let name_end = name_start + name_len;
+                let name = std::str::from_utf8(&zip_bytes[name_start..name_end])
+                    .expect("expected UTF-8 entry name");
+
+                if name == entry_name {
+                    // Patch central directory header's uncompressed size (offset 24, 4 bytes).
+                    zip_bytes[cursor + 24..cursor + 28]
+                        .copy_from_slice(&new_uncompressed_size.to_le_bytes());
+
+                    // Patch local file header's uncompressed size too (offset 22, 4 bytes).
+                    assert_eq!(
+                        zip_bytes.get(local_header_offset..local_header_offset + 4),
+                        Some(LFH_SIG.as_slice()),
+                        "expected local file header signature"
+                    );
+                    zip_bytes[local_header_offset + 22..local_header_offset + 26]
+                        .copy_from_slice(&new_uncompressed_size.to_le_bytes());
+                    return zip_bytes;
+                }
+
+                cursor += 46 + name_len + extra_len + comment_len;
+            }
+
+            panic!("test zip did not contain expected entry: {entry_name}");
+        }
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <picture r:id="rId2"/>
+</worksheet>"#;
+
+        let sheet_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#;
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml).unwrap();
+        zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+        zip.write_all(workbook_rels).unwrap();
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(sheet_xml).unwrap();
+        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options).unwrap();
+        zip.write_all(sheet_rels).unwrap();
+        zip.start_file("xl/media/image1.png", options).unwrap();
+        zip.write_all(b"png-bytes").unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+
+        let extracted = extract_imported_sheet_background_images_from_xlsx_bytes(&bytes);
+        assert_eq!(extracted.len(), 1, "sanity check: expected extraction to succeed");
+
+        // Now forge the ZIP metadata to claim the worksheet XML is larger than our IPC package part
+        // cap; extraction should reject the package without attempting to inflate it.
+        let oversized_len =
+            crate::resource_limits::MAX_IPC_XLSX_PACKAGE_PART_BYTES as u32 + 1;
+        let patched =
+            patch_zip_entry_uncompressed_size(bytes, "xl/worksheets/sheet1.xml", oversized_len);
+
+        let extracted = extract_imported_sheet_background_images_from_xlsx_bytes(&patched);
+        assert!(
+            extracted.is_empty(),
+            "expected oversized worksheet part metadata to cause package inflation to fail"
+        );
     }
 
     #[cfg(feature = "desktop")]

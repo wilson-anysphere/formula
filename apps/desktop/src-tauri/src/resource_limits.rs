@@ -89,6 +89,18 @@ pub const MAX_WORKBOOK_OPEN_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 /// Subsequent saves fall back to the regeneration-based code path.
 pub const MAX_ORIGIN_XLSX_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
 
+/// Maximum uncompressed size (in bytes) for any single ZIP part when inflating an XLSX/XLSM
+/// package for *IPC-only* inspection/extraction.
+///
+/// Some IPC commands need to inspect the original workbook bytes (e.g. extracting imported
+/// background images or drawing objects). These code paths are best-effort and should never
+/// allocate unbounded memory when given a ZIP bomb.
+pub const MAX_IPC_XLSX_PACKAGE_PART_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
+
+/// Maximum total uncompressed size (in bytes) across all ZIP parts when inflating an XLSX/XLSM
+/// package for *IPC-only* inspection/extraction.
+pub const MAX_IPC_XLSX_PACKAGE_TOTAL_BYTES: usize = 128 * 1024 * 1024; // 128 MiB
+
 /// Maximum number of bytes allowed for `open_workbook`.
 ///
 /// This reads the `FORMULA_MAX_WORKBOOK_OPEN_BYTES` environment variable.
