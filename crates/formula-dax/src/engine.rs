@@ -2136,6 +2136,7 @@ impl DaxEngine {
             keep_filters: bool,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
+            env: &mut VarEnv,
         ) -> DaxResult<()> {
             let mut referenced_tables: HashSet<String> = HashSet::new();
             let mut referenced_columns: HashSet<(String, String)> = HashSet::new();
@@ -2300,6 +2301,7 @@ impl DaxEngine {
                     keep_filters,
                     &mut clear_columns,
                     &mut row_filters,
+                    env,
                 )?,
                 Expr::Call { name, .. }
                     if name.eq_ignore_ascii_case("NOT")
@@ -2315,6 +2317,7 @@ impl DaxEngine {
                         keep_filters,
                         &mut clear_columns,
                         &mut row_filters,
+                        env,
                     )?
                 }
                 Expr::BinaryOp { op, left, right } => {
