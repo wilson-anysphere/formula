@@ -714,55 +714,162 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
 
     if (!hadCalcWrapper) return null;
 
-    // Support a limited subset of calc expressions so `calc(1px - -10000px)` cannot bypass guards.
-    const parseCalcSum = (expr: string): number | null => {
+    // Support a limited subset of calc expressions so `calc(1px - -10000px)` or `calc(10001px * 1)`
+    // cannot bypass guards. We intentionally support only simple arithmetic and disallow nested
+    // parentheses.
+    const parseCalcExpression = (expr: string): number | null => {
       const source = expr.trim();
       if (!source) return null;
-      // Support only + / - sequences (no multiplication, division, or nested parentheses).
-      if (/[*/()]/.test(source)) return null;
+      if (/[()]/.test(source)) return null;
 
-      const tokenRe = /^\s*((?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\s*([a-z%]*)/i;
+      type Token =
+        | { t: "op"; v: "+" | "-" | "*" | "/" }
+        | { t: "number"; n: number }
+        | { t: "length"; px: number };
+
+      const tokens: Token[] = [];
+
+      const numberRe = /^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?/i;
       let idx = 0;
-      let total = 0;
       while (idx < source.length) {
         while (idx < source.length && /\s/.test(source[idx]!)) idx += 1;
         if (idx >= source.length) break;
-
-        // Fold one or more leading +/− operators into a sign.
-        let sign = 1;
-        while (idx < source.length) {
-          const ch = source[idx]!;
-          if (ch === "+") {
-            idx += 1;
-          } else if (ch === "-") {
-            sign = -sign;
-            idx += 1;
-          } else {
-            break;
-          }
-          while (idx < source.length && /\s/.test(source[idx]!)) idx += 1;
+        const ch = source[idx]!;
+        if (ch === "+" || ch === "-" || ch === "*" || ch === "/") {
+          tokens.push({ t: "op", v: ch });
+          idx += 1;
+          continue;
         }
 
-        const match = tokenRe.exec(source.slice(idx));
+        const match = numberRe.exec(source.slice(idx));
         if (!match) return null;
-        const value = Number(match[1]);
-        if (!Number.isFinite(value)) return null;
-        const termPx = convertToPx(value, String(match[2] ?? ""));
-        if (termPx == null) return null;
-        total += sign * termPx;
-        idx += match[0].length;
+        const literal = match[0];
+        const n = Number(literal);
+        if (!Number.isFinite(n)) return null;
+        idx += literal.length;
 
-        while (idx < source.length && /\s/.test(source[idx]!)) idx += 1;
-        if (idx >= source.length) break;
-        const next = source[idx]!;
-        if (next !== "+" && next !== "-") return null;
-        // Leave `idx` pointing at the operator so the next loop iteration consumes it.
+        let unitStart = idx;
+        while (idx < source.length && /[a-z%]/i.test(source[idx]!)) idx += 1;
+        const unit = source.slice(unitStart, idx);
+
+        if (!unit) {
+          tokens.push({ t: "number", n });
+          continue;
+        }
+
+        const px = convertToPx(n, unit);
+        if (px == null) return null;
+        tokens.push({ t: "length", px });
       }
 
-      return Number.isFinite(total) && total > 0 ? total : null;
+      type Value = { k: "number"; n: number } | { k: "length"; px: number };
+      let pos = 0;
+
+      const peekOp = (): ("+" | "-" | "*" | "/") | null => {
+        const tok = tokens[pos];
+        return tok && tok.t === "op" ? tok.v : null;
+      };
+
+      const parsePrimary = (): Value | null => {
+        const tok = tokens[pos];
+        if (!tok) return null;
+        if (tok.t === "number") {
+          pos += 1;
+          return { k: "number", n: tok.n };
+        }
+        if (tok.t === "length") {
+          pos += 1;
+          return { k: "length", px: tok.px };
+        }
+        return null;
+      };
+
+      const parseUnary = (): Value | null => {
+        let sign = 1;
+        while (true) {
+          const op = peekOp();
+          if (op === "+") {
+            pos += 1;
+            continue;
+          }
+          if (op === "-") {
+            pos += 1;
+            sign = -sign;
+            continue;
+          }
+          break;
+        }
+
+        const value = parsePrimary();
+        if (!value) return null;
+        if (sign === 1) return value;
+        return value.k === "length" ? { k: "length", px: value.px * sign } : { k: "number", n: value.n * sign };
+      };
+
+      const parseProduct = (): Value | null => {
+        let left = parseUnary();
+        if (!left) return null;
+        while (true) {
+          const op = peekOp();
+          if (op !== "*" && op !== "/") break;
+          pos += 1;
+          const right = parseUnary();
+          if (!right) return null;
+
+          if (op === "*") {
+            if (left.k === "length" && right.k === "number") {
+              left = { k: "length", px: left.px * right.n };
+            } else if (left.k === "number" && right.k === "length") {
+              left = { k: "length", px: left.n * right.px };
+            } else if (left.k === "number" && right.k === "number") {
+              left = { k: "number", n: left.n * right.n };
+            } else {
+              return null;
+            }
+          } else {
+            // Division
+            if (right.k !== "number") return null;
+            if (right.n === 0) return null;
+            if (left.k === "length") {
+              left = { k: "length", px: left.px / right.n };
+            } else {
+              left = { k: "number", n: left.n / right.n };
+            }
+          }
+
+          if (!Number.isFinite(left.k === "length" ? left.px : left.n)) return null;
+        }
+        return left;
+      };
+
+      const parseSum = (): Value | null => {
+        let left = parseProduct();
+        if (!left) return null;
+        while (true) {
+          const op = peekOp();
+          if (op !== "+" && op !== "-") break;
+          pos += 1;
+          const right = parseProduct();
+          if (!right) return null;
+          if (left.k !== right.k) return null;
+          if (left.k === "length") {
+            left = { k: "length", px: op === "+" ? left.px + right.px : left.px - right.px };
+          } else {
+            left = { k: "number", n: op === "+" ? left.n + right.n : left.n - right.n };
+          }
+          if (!Number.isFinite(left.k === "length" ? left.px : left.n)) return null;
+        }
+        return left;
+      };
+
+      const result = parseSum();
+      if (!result) return null;
+      if (pos !== tokens.length) return null;
+      if (result.k !== "length") return null;
+      return result.px > 0 ? result.px : null;
     };
 
-    return parseCalcSum(normalized);
+    return parseCalcExpression(normalized);
   };
 
   const widthAttr = parseLength(getAttr("width"));
