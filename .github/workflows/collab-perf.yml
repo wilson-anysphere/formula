@@ -50,6 +50,14 @@ on:
         options:
           - "0"
           - "1"
+      include_guards:
+        description: "PERF_INCLUDE_GUARDS (binder perf only; 0 disables canRead/canEdit hooks)"
+        required: true
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "0"
       format_variants:
         description: "PERF_FORMAT_VARIANTS (distinct formats cycled when PERF_INCLUDE_FORMAT=1)"
         required: true
@@ -74,6 +82,7 @@ env:
   PERF_COLS: ${{ inputs.cols }}
   PERF_KEY_ENCODING: ${{ inputs.key_encoding }}
   PERF_INCLUDE_FORMAT: ${{ inputs.include_format }}
+  PERF_INCLUDE_GUARDS: ${{ inputs.include_guards }}
   PERF_FORMAT_VARIANTS: ${{ inputs.format_variants }}
   PERF_TIMEOUT_MS: ${{ inputs.timeout_ms }}
   # Keep the node:test runner conservative for perf stability.

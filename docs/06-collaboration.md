@@ -71,6 +71,7 @@ Common knobs:
 - `PERF_SCENARIO=yjs-to-dc|dc-to-yjs|all` (run one direction only)
 - `PERF_KEY_ENCODING=canonical|legacy|rxc` (Yjs→DC runs; benchmark key normalization)
 - `PERF_INCLUDE_FORMAT=1` / `PERF_FORMAT_VARIANTS` (exercise formatting paths)
+- `PERF_INCLUDE_GUARDS=0` (binder perf only; disable canRead/canEdit hooks)
 
 There is also a manual GitHub Actions workflow to run these in CI: [`.github/workflows/collab-perf.yml`](../.github/workflows/collab-perf.yml).
 
