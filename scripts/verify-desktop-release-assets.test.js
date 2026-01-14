@@ -70,6 +70,62 @@ test("validateLatestJson passes for a minimal manifest (version normalization + 
   assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets));
 });
 
+test("validateLatestJson accepts macOS updater tarballs (.app.tar.gz preferred; allow .tar.gz/.tgz)", () => {
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.tgz", signature: "sig" },
+    },
+  };
+
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+    "Formula.tar.gz",
+    "Formula.tgz",
+  ]);
+
+  assert.doesNotThrow(() => validateLatestJson(manifest, "0.1.0", assets));
+});
+
+test("validateLatestJson rejects Linux AppImage tarballs for macOS updater keys", () => {
+  const manifest = {
+    version: "0.1.0",
+    platforms: {
+      "linux-x86_64": { url: "https://example.com/Formula.AppImage", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      "darwin-x86_64": { url: "https://example.com/Formula.AppImage.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+    },
+  };
+
+  const assets = assetMap([
+    "Formula.AppImage",
+    "Formula_arm64.AppImage",
+    "Formula_x64.msi",
+    "Formula_arm64.msi",
+    "Formula.AppImage.tar.gz",
+    "Formula.app.tar.gz",
+  ]);
+
+  assert.throws(
+    () => validateLatestJson(manifest, "0.1.0", assets),
+    (err) =>
+      err instanceof ActionableError &&
+      err.message.includes("darwin-x86_64") &&
+      /appimage tarballs/i.test(err.message),
+  );
+});
+
 test("validateLatestJson allows installer-specific platform keys to reference installer artifacts", () => {
   const manifest = {
     version: "0.1.0",
