@@ -40,7 +40,25 @@ class GenerateCasesFunctionExtractionTests(unittest.TestCase):
         names = module._extract_function_names('=TEXT("a\"\"b SUM(1)")')
         self.assertEqual(names, ["TEXT"])
 
+    def test_extract_function_names_ignores_sheet_and_bracket_references(self) -> None:
+        module = self._load_generator()
+
+        # Parentheses inside quoted sheet names must not be treated as function calls.
+        names = module._extract_function_names("='Sheet(1)'!A1")
+        self.assertEqual(names, [])
+
+        # Bracketed workbook references can also contain parentheses.
+        names = module._extract_function_names("=SUM([Book(1)]Sheet1!A1)")
+        self.assertEqual(names, ["SUM"])
+
+        # Structured references can contain parentheses in column names.
+        names = module._extract_function_names("=SUM(Table1[Column(1)])")
+        self.assertEqual(names, ["SUM"])
+
+        # Nested structured-reference brackets are common in Excel.
+        names = module._extract_function_names("=SUM(Table1[[#Headers],[Column(1)]])")
+        self.assertEqual(names, ["SUM"])
+
 
 if __name__ == "__main__":
     unittest.main()
-

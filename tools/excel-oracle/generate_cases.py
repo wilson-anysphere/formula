@@ -115,24 +115,30 @@ def _excel_serial_1900(year: int, month: int, day: int) -> int:
 _FUNC_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\s*\(")
 
 
-def _strip_excel_string_literals(formula: str) -> str:
+def _strip_excel_ignored_regions(formula: str) -> str:
     """
-    Return a copy of `formula` with Excel string literal contents replaced by spaces.
+    Return a copy of `formula` with non-formula regions replaced by spaces.
 
     This keeps `_extract_function_names` from mis-identifying function-like tokens inside quoted
-    strings (e.g. `\"SUM(1)\"` should not count as a `SUM` usage).
+    strings or references (e.g. `\"SUM(1)\"` should not count as a `SUM` usage).
 
     Excel string literals use double quotes; embedded quotes are escaped by doubling (`\"\"`).
+    Single quotes are used for sheet/workbook references (not string literals) and can also contain
+    parentheses (`'Sheet(1)'!A1`). Structured references and external workbook segments can include
+    bracketed regions (`Table1[Column(1)]`, `[Book(1)]Sheet1!A1`), which should not be treated as
+    function calls either.
     """
 
     out: list[str] = []
     in_string = False
+    in_single_quote = False
+    bracket_depth = 0
     i = 0
     n = len(formula)
     while i < n:
         ch = formula[i]
-        if ch == '"':
-            if in_string:
+        if in_string:
+            if ch == '"':
                 # Escaped quote inside a string literal.
                 if i + 1 < n and formula[i + 1] == '"':
                     out.append(" ")
@@ -140,12 +146,50 @@ def _strip_excel_string_literals(formula: str) -> str:
                     i += 2
                     continue
                 in_string = False
-            else:
-                in_string = True
             out.append(" ")
             i += 1
             continue
-        out.append(" " if in_string else ch)
+
+        if in_single_quote:
+            if ch == "'":
+                # Escaped single quote inside a quoted sheet name.
+                if i + 1 < n and formula[i + 1] == "'":
+                    out.append(" ")
+                    out.append(" ")
+                    i += 2
+                    continue
+                in_single_quote = False
+            out.append(" ")
+            i += 1
+            continue
+
+        if bracket_depth > 0:
+            if ch == "[":
+                bracket_depth += 1
+            elif ch == "]":
+                bracket_depth -= 1
+            out.append(" ")
+            i += 1
+            continue
+
+        # Normal (code) region.
+        if ch == '"':
+            in_string = True
+            out.append(" ")
+            i += 1
+            continue
+        if ch == "'":
+            in_single_quote = True
+            out.append(" ")
+            i += 1
+            continue
+        if ch == "[":
+            bracket_depth = 1
+            out.append(" ")
+            i += 1
+            continue
+
+        out.append(ch)
         i += 1
     return "".join(out)
 
@@ -157,7 +201,7 @@ def _extract_function_names(formula: str | None) -> list[str]:
     if raw.startswith("="):
         raw = raw[1:]
 
-    raw = _strip_excel_string_literals(raw)
+    raw = _strip_excel_ignored_regions(raw)
     out: list[str] = []
     for match in _FUNC_RE.finditer(raw):
         name = match.group(1).upper()
