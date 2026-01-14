@@ -399,9 +399,30 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
   if (map) {
     const MapCtor = constructors?.Map ?? (map as any).constructor;
     const out = new (MapCtor as any)();
-    const keys = Array.from(map.keys()).sort();
+    const prelim = (map as any)?.doc == null ? (map as any)?._prelimContent : null;
+    const keys =
+      prelim instanceof Map ? Array.from(prelim.keys()).sort() : Array.from(map.keys()).sort();
     for (const key of keys) {
-      out.set(key, cloneYjsValue(map.get(key), constructors));
+      const nextValue = prelim instanceof Map ? prelim.get(key) : map.get(key);
+      out.set(key, cloneYjsValue(nextValue, constructors));
+    }
+
+    // Yjs intentionally warns on reading unintegrated types (doc=null) via `get()`. For cloning
+    // and test usage we want the returned value to behave like a normal map before insertion,
+    // so fall back to `_prelimContent` while the type is unintegrated.
+    const outPrelim = (out as any)?._prelimContent;
+    if ((out as any)?.doc == null && outPrelim instanceof Map && typeof (out as any).get === "function") {
+      const originalGet = (out as any).get as (key: any) => any;
+      try {
+        (out as any).get = function patchedGet(key: any) {
+          if ((this as any)?.doc == null && (this as any)?._prelimContent instanceof Map) {
+            return (this as any)._prelimContent.get(key);
+          }
+          return originalGet.call(this, key);
+        };
+      } catch {
+        // Best-effort.
+      }
     }
     return out;
   }
@@ -410,7 +431,8 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
   if (array) {
     const ArrayCtor = constructors?.Array ?? (array as any).constructor;
     const out = new (ArrayCtor as any)();
-    for (const item of array.toArray()) {
+    const prelim = (array as any)?.doc == null && Array.isArray((array as any)?._prelimContent) ? (array as any)._prelimContent : null;
+    for (const item of prelim ?? array.toArray()) {
       out.push([cloneYjsValue(item, constructors)]);
     }
     return out;
@@ -420,8 +442,69 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
   if (text) {
     const TextCtor = constructors?.Text ?? (text as any).constructor;
     const out = new (TextCtor as any)();
+
+    const cloneDelta = (delta: any[]): any[] => {
+      const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
+      return delta.map((op) => {
+        const next: any = { ...op };
+        if ("insert" in next) {
+          const insert = next.insert;
+          if (insert && typeof insert === "object") {
+            // Y.Text embeds can include nested Yjs types; clone them into the target constructors.
+            const yEmbed = getYMap(insert) || getYArray(insert) || getYText(insert);
+            if (yEmbed) {
+              next.insert = cloneYjsValue(insert, constructors);
+            } else if (typeof structuredCloneFn === "function") {
+              try {
+                next.insert = structuredCloneFn(insert);
+              } catch {
+                // Fall back to returning the embed as-is.
+              }
+            }
+          }
+        }
+        if (next.attributes && typeof next.attributes === "object" && typeof structuredCloneFn === "function") {
+          try {
+            next.attributes = structuredCloneFn(next.attributes);
+          } catch {
+            // ignore
+          }
+        }
+        return next;
+      });
+    };
+
     // Preserve formatting by cloning the Y.Text delta instead of just its plain string.
-    out.applyDelta(structuredClone(text.toDelta()));
+    // Note: unintegrated Y.Text instances store edits in `_pending`; calling `toDelta()` returns
+    // an empty delta until the text is integrated into a Doc. For cloning we best-effort
+    // materialize pending ops via a temporary local Doc.
+    let delta: any[] = [];
+    if ((text as any)?.doc != null) {
+      delta = text.toDelta();
+    } else {
+      try {
+        // Ensure the value is insertable into the local Y.Doc so pending ops can be applied.
+        if (!(text instanceof Y.AbstractType)) {
+          try {
+            Object.setPrototypeOf(text, Y.Text.prototype);
+          } catch {
+            // ignore
+          }
+        }
+
+        const doc = new Y.Doc();
+        const root = doc.getMap("__clone_yjs_value_text");
+        root.set("t", text as any);
+        const integrated = root.get("t");
+        const integratedText = getYText(integrated) ?? integrated;
+        delta = typeof integratedText?.toDelta === "function" ? integratedText.toDelta() : [];
+        doc.destroy?.();
+      } catch {
+        delta = [];
+      }
+    }
+
+    out.applyDelta(cloneDelta(delta));
     return out;
   }
 
