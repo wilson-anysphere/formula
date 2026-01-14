@@ -3883,6 +3883,9 @@ impl WasmWorkbook {
                 if let Some(width) = props.width {
                     wb.set_col_width_chars_internal(&sheet.name, col, Some(width))?;
                 }
+                if props.hidden {
+                    wb.engine.set_col_hidden(&sheet.name, col, true);
+                }
             }
         }
 
