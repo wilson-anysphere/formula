@@ -218,3 +218,80 @@ fn sheet_span_refs_shift_with_fill_and_share_bytecode_program() {
     assert_eq!(engine.get_cell_value("Summary", "B1"), Value::Number(6.0));
     assert_eq!(engine.get_cell_value("Summary", "B2"), Value::Number(139.0));
 }
+
+#[test]
+fn mixed_absolute_and_relative_refs_use_per_cell_origin_and_share_bytecode_program() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+
+    // Filled pattern with mixed absolute/relative refs:
+    // C1: =$A1+B$1
+    // C2: =$A2+B$1
+    //
+    // Once expressed as offsets + absolute flags from the formula origin cell, these should share
+    // a single normalized bytecode program.
+    engine
+        .set_cell_formula("Sheet1", "C1", "=$A1+B$1")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=$A2+B$1")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 2);
+    assert_eq!(stats.compiled, 2);
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    let sheet1_id = engine.sheet_id("Sheet1").unwrap();
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(12.0));
+
+    assert_eq!(
+        engine.precedents("Sheet1", "C1").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: sheet1_id,
+                addr: CellAddr { row: 0, col: 0 }
+            },
+            PrecedentNode::Cell {
+                sheet: sheet1_id,
+                addr: CellAddr { row: 0, col: 1 }
+            }
+        ]
+    );
+    // Precedents are returned sorted by `(row, col)`, so B1 comes before A2 here.
+    assert_eq!(
+        engine.precedents("Sheet1", "C2").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: sheet1_id,
+                addr: CellAddr { row: 0, col: 1 }
+            },
+            PrecedentNode::Cell {
+                sheet: sheet1_id,
+                addr: CellAddr { row: 1, col: 0 }
+            }
+        ]
+    );
+
+    // Dependency graph regression guard: editing A1 should only dirty C1.
+    engine.set_cell_value("Sheet1", "A1", 5.0).unwrap();
+    assert!(engine.is_dirty("Sheet1", "C1"));
+    assert!(!engine.is_dirty("Sheet1", "C2"));
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(7.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(12.0));
+
+    // Editing the absolute-row input B$1 should dirty both formulas.
+    engine.set_cell_value("Sheet1", "B1", 7.0).unwrap();
+    assert!(engine.is_dirty("Sheet1", "C1"));
+    assert!(engine.is_dirty("Sheet1", "C2"));
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(12.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(17.0));
+}
