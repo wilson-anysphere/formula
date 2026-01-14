@@ -297,11 +297,18 @@ pub fn filter_table(table: &ColumnarTable, mask: &BitVec) -> Result<ColumnarTabl
 fn eval_filter_expr(table: &ColumnarTable, expr: &FilterExpr) -> Result<BitVec, QueryError> {
     match expr {
         FilterExpr::And(left, right) => {
-            let mut left_mask = eval_filter_expr(table, left)?;
+            let left_mask = eval_filter_expr(table, left)?;
             if left_mask.count_ones() == 0 {
                 return Ok(left_mask);
             }
+            if left_mask.all_true() {
+                return eval_filter_expr(table, right);
+            }
+            let mut left_mask = left_mask;
             let right_mask = eval_filter_expr(table, right)?;
+            if right_mask.count_ones() == 0 {
+                return Ok(right_mask);
+            }
             if right_mask.all_true() {
                 return Ok(left_mask);
             }
@@ -309,11 +316,18 @@ fn eval_filter_expr(table: &ColumnarTable, expr: &FilterExpr) -> Result<BitVec, 
             Ok(left_mask)
         }
         FilterExpr::Or(left, right) => {
-            let mut left_mask = eval_filter_expr(table, left)?;
+            let left_mask = eval_filter_expr(table, left)?;
             if left_mask.all_true() {
                 return Ok(left_mask);
             }
+            if left_mask.count_ones() == 0 {
+                return eval_filter_expr(table, right);
+            }
+            let mut left_mask = left_mask;
             let right_mask = eval_filter_expr(table, right)?;
+            if right_mask.all_true() {
+                return Ok(right_mask);
+            }
             if right_mask.count_ones() == 0 {
                 return Ok(left_mask);
             }
