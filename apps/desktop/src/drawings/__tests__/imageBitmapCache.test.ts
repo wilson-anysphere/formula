@@ -260,7 +260,10 @@ describe("ImageBitmapCache", () => {
 
     expect(cache.getOrRequest(entry, onReady)).toBeNull();
 
-    // Flush the internal decode completion handlers.
+    // Flush the internal decode completion handlers. `ImageBitmapCache.decode` is async and
+    // can schedule multiple microtasks before the `.then` handlers registered by
+    // `getOrRequest()` run (observed on newer Node versions).
+    await Promise.resolve();
     await Promise.resolve();
 
     expect(onReady).toHaveBeenCalledTimes(1);
@@ -314,6 +317,8 @@ describe("ImageBitmapCache", () => {
     await pending;
 
     resolveDecode(bitmap);
+    // Flush the internal decode completion handlers (see note above).
+    await Promise.resolve();
     await Promise.resolve();
 
     expect(onReady).toHaveBeenCalledTimes(1);
