@@ -64,5 +64,28 @@ describe("collab edit rejection toast", () => {
     const content = document.querySelector("#toast-root")?.textContent ?? "";
     expect(content).toContain("formatting");
   });
-});
 
+  it("shows a drawing toast for rejected drawing edits", () => {
+    showCollabEditRejectedToast([
+      {
+        rejectionKind: "drawing",
+        rejectionReason: "permission",
+      },
+    ]);
+
+    const content = document.querySelector("#toast-root")?.textContent ?? "";
+    expect(content).toContain("edit drawings");
+  });
+
+  it("throttles repeated drawing toasts", () => {
+    vi.setSystemTime(1_000);
+    showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
+    showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
+
+    expect(document.querySelectorAll('[data-testid="toast"]')).toHaveLength(1);
+
+    vi.setSystemTime(2_000);
+    showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
+    expect(document.querySelectorAll('[data-testid="toast"]')).toHaveLength(2);
+  });
+});

@@ -2,7 +2,7 @@ import { showToast } from "../extensions/ui.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 
 type RejectionReason = "permission" | "encryption" | "unknown";
-type RejectionKind = "cell" | "format" | "rangeRun" | "unknown";
+type RejectionKind = "cell" | "format" | "rangeRun" | "drawing" | "unknown";
 
 // Editing surfaces may call this helper in response to every key press (e.g. typing into a
 // read-only sheet). To avoid spamming users with identical warnings, throttle repeated toasts.
@@ -46,7 +46,7 @@ function inferRejectionReason(rejected: any[]): RejectionReason {
 function inferRejectionKind(rejected: any[]): RejectionKind {
   for (const delta of rejected) {
     const kind = typeof delta?.rejectionKind === "string" ? delta.rejectionKind : null;
-    if (kind === "cell" || kind === "format" || kind === "rangeRun") return kind;
+    if (kind === "cell" || kind === "format" || kind === "rangeRun" || kind === "drawing") return kind;
   }
 
   // Backwards compatibility: callers may be using a binder that doesn't annotate deltas.
@@ -78,6 +78,10 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
     const endRow = first.endRowExclusive - 1;
     if (!Number.isInteger(endRow) || endRow < first.startRow) return null;
     return rangeToA1({ startRow: first.startRow, startCol: first.col, endRow, endCol: first.col });
+  }
+
+  if (kind === "drawing") {
+    return null;
   }
 
   return null;
@@ -129,6 +133,10 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
       return target
         ? `Read-only: you don't have permission to change formatting (${target})`
         : "Read-only: you don't have permission to change formatting";
+    }
+
+    if (kind === "drawing") {
+      return "Read-only: you don't have permission to edit drawings";
     }
 
     // Default to a simple "read-only" message for cell edits.

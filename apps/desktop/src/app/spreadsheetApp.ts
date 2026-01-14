@@ -8724,11 +8724,7 @@ export class SpreadsheetApp {
 
   deleteDrawingById(id: DrawingObjectId): void {
     if (this.isReadOnly()) {
-      try {
-        showToast("Read-only: you don't have permission to edit drawings.", "warning");
-      } catch {
-        // `showToast` requires a #toast-root; some test-only contexts don't include it.
-      }
+      showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
@@ -10630,11 +10626,7 @@ export class SpreadsheetApp {
     const isReadOnly = this.isReadOnly();
     if (isReadOnly || this.isSpreadsheetEditingIncludingSecondary()) {
       if (isReadOnly) {
-        try {
-          showToast("Read-only: you don't have permission to edit drawings.", "warning");
-        } catch {
-          // `showToast` requires a #toast-root; some test-only contexts don't include it.
-        }
+        showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
       }
       // Revert any live preview state to the persisted document snapshot.
       this.drawingObjectsCache = null;
@@ -18197,11 +18189,7 @@ export class SpreadsheetApp {
     // If drawings are backed by the document, respect read-only mode and avoid making any
     // in-memory moves that would diverge from the persisted state.
     if (setSheetDrawings && this.isReadOnly()) {
-      try {
-        showToast("Read-only: you don't have permission to edit drawings.", "warning");
-      } catch {
-        // `showToast` requires a #toast-root; some test-only contexts don't include it.
-      }
+      showCollabEditRejectedToast([{ rejectionKind: "drawing", rejectionReason: "permission" }]);
       return;
     }
 
