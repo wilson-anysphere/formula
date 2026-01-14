@@ -366,7 +366,7 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
 
     std::env::set_var("FORMULA_DAX_PIVOT_DISABLE_STAR_SCHEMA", "1");
     group.bench_with_input(
-        BenchmarkId::new("dimension_group_by_row_scan", rows),
+        BenchmarkId::new("dimension_group_by_star_schema_disabled", rows),
         &rows,
         |b, _| {
             b.iter(|| {
