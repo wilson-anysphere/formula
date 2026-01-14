@@ -380,7 +380,15 @@ jobs:
         env:
           FORMULA_ENFORCE_DESKTOP_BINARY_SIZE: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE }}
           FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
-        run: python3 scripts/desktop_binary_size_report.py --no-build
+        run: python3 scripts/desktop_binary_size_report.py --no-build --json-out desktop-binary-size-report.json
+
+      - name: Upload desktop binary size report (JSON)
+        if: always() && steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-binary-size-report
+          path: desktop-binary-size-report.json
+          if-no-files-found: ignore
 
       - name: Fail on absolute target regression
         if: always() && steps.perf.outcome == 'failure'
