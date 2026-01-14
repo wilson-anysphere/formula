@@ -259,25 +259,6 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     }
 }
 
-fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    let mut chars = raw.chars();
-    let Some(first) = chars.next() else {
-        return true;
-    };
-
-    // DAX allows unquoted identifiers in a conservative "C identifier" form; quote anything that
-    // doesn't match ASCII `[A-Za-z_][A-Za-z0-9_]*`.
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return true;
-    }
-    !chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-fn quote_dax_identifier(raw: &str) -> String {
-    // DAX escapes embedded `'` by doubling within `'...'`.
-    format!("'{}'", raw.replace('\'', "''"))
-}
-
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
