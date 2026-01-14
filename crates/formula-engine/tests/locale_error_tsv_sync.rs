@@ -94,6 +94,13 @@ fn parse_error_tsv(path: &Path) -> Vec<(String, String)> {
                 line_no
             );
         }
+        if !loc.starts_with('#') {
+            panic!(
+                "invalid error TSV line (localized must start with '#') at {}:{}: {trimmed:?}",
+                path.display(),
+                line_no
+            );
+        }
 
         rows.push((canon.to_string(), loc.to_string()));
     }

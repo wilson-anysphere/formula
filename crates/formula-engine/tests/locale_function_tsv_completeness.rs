@@ -189,6 +189,12 @@ fn parse_error_tsv(
                 path = path.display()
             );
         }
+        if !canon.starts_with('#') || !loc.starts_with('#') {
+            panic!(
+                "invalid error TSV entry in {locale_id} ({path}) (expected error literals to start with '#') at line {line_no}: {raw_line:?}",
+                path = path.display()
+            );
+        }
 
         if require_sorted {
             if let Some(prev) = prev_canon.as_ref() {
