@@ -30,6 +30,13 @@ done < <(
     \( \
       -name '.git' -o \
       -name 'node_modules' -o \
+      -name '.pnpm-store' -o \
+      -name '.turbo' -o \
+      -name '.cache' -o \
+      -name '.vite' -o \
+      -name 'dist' -o \
+      -name 'build' -o \
+      -name 'coverage' -o \
       -name 'target' -o \
       -path "./${REPORT_DIR}" \
     \) -prune -o \
