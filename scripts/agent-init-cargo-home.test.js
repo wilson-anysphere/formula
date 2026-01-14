@@ -248,6 +248,20 @@ test('agent-init exports RAYON_NUM_THREADS when set without export (bash)', { sk
   assert.equal(out, 'RAYON_NUM_THREADS=11');
 });
 
+test('agent-init exports DISPLAY when set without export (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'unset DISPLAY',
+      // Set but do not export (common interactive usage).
+      'DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'env | grep "^DISPLAY="',
+    ].join(' && '),
+  );
+
+  assert.equal(out, 'DISPLAY=:99');
+});
+
 test('agent-init prepends CARGO_HOME/bin to PATH', { skip: !hasBash }, () => {
   const out = runBash(
     [
@@ -610,6 +624,21 @@ test('agent-init exports RAYON_NUM_THREADS when set without export under /bin/sh
 
   assert.equal(stderr, '');
   assert.equal(stdout, 'RAYON_NUM_THREADS=11');
+});
+
+test('agent-init exports DISPLAY when set without export under /bin/sh', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'unset DISPLAY',
+      // Set but do not export (common interactive usage).
+      'DISPLAY=:99',
+      '. scripts/agent-init.sh >/dev/null',
+      'env | grep "^DISPLAY="',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, 'DISPLAY=:99');
 });
 
 test('agent-init exports FORMULA_CARGO_JOBS when set without export under /bin/sh', { skip: !hasSh }, () => {

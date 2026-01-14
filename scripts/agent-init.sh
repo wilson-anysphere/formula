@@ -278,6 +278,9 @@ setup_display() {
 if command -v Xvfb >/dev/null 2>&1; then
   setup_display
 fi
+if [ -n "${DISPLAY:-}" ]; then
+  export DISPLAY
+fi
 unset -f setup_display
 
 # ============================================================================
