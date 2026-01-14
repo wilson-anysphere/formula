@@ -4,6 +4,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as Y from "yjs";
+
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
@@ -227,6 +229,74 @@ describe("SpreadsheetApp fill large selections", () => {
     app.destroy();
     root.remove();
     formulaBar.remove();
+  });
+
+  it("shows an encryption-aware toast and restores selection when shared-grid fill handle is blocked by canEditCell", async () => {
+    const toastRoot = document.createElement("div");
+    toastRoot.id = "toast-root";
+    document.body.appendChild(toastRoot);
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("shared");
+
+    const doc = app.getDocument();
+    const beginBatch = vi.spyOn(doc, "beginBatch");
+    const setCellInput = vi.spyOn(doc, "setCellInput");
+
+    // Simulate an encryption/permission guard installed by collab mode.
+    (app as any).document.canEditCell = () => false;
+
+    const ydoc = new Y.Doc();
+    const cells = ydoc.getMap("cells");
+    (app as any).collabSession = {
+      cells,
+      getEncryptionConfig: () => ({
+        keyForCell: () => null,
+        shouldEncryptCell: () => true,
+      }),
+    };
+
+    const sharedGrid = (app as any).sharedGrid as any;
+    const onFillCommit = sharedGrid?.callbacks?.onFillCommit as ((event: any) => void) | undefined;
+    expect(typeof onFillCommit).toBe("function");
+
+    const initialSelection = [{ startRow: 1, endRow: 2, startCol: 1, endCol: 2 }];
+    sharedGrid.setSelectionRanges(initialSelection, { activeIndex: 0, activeCell: { row: 1, col: 1 }, scrollIntoView: false });
+
+    // Grid ranges include a 1-row/1-col header at index 0.
+    // Source: A1 (1 cell). Target delta: A2 (1 cell).
+    onFillCommit!({
+      sourceRange: { startRow: 1, endRow: 2, startCol: 1, endCol: 2 },
+      targetRange: { startRow: 2, endRow: 3, startCol: 1, endCol: 2 },
+      mode: "formulas",
+    });
+
+    // Simulate DesktopSharedGrid expanding selection after the callback returns.
+    sharedGrid.setSelectionRanges(
+      [{ startRow: 1, endRow: 3, startCol: 1, endCol: 2 }],
+      { activeIndex: 0, activeCell: { row: 2, col: 1 }, scrollIntoView: false },
+    );
+
+    // Allow any microtasks scheduled by the guard path to flush.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(beginBatch).not.toHaveBeenCalled();
+    expect(setCellInput).not.toHaveBeenCalled();
+
+    expect(sharedGrid.renderer.getSelectionRanges()).toEqual(initialSelection);
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Missing encryption key");
+
+    app.destroy();
+    root.remove();
   });
 
   it("blocks shared-grid fill handle commits when the shell reports split-view editing", async () => {
