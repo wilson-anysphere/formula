@@ -236,13 +236,15 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
     sheet_offset: usize,
     ctx: &rgce::RgceDecodeContext<'_>,
 ) -> Result<PtgExpFallbackResult, String> {
-    // Also parse SHRFMLA/ARRAY records so we can avoid emitting misleading fallback warnings for
-    // well-formed shared/array formula groups that legitimately store `PtgExp` in the base cell
-    // `FORMULA.rgce`.
+    // Lazily parse SHRFMLA/ARRAY definitions when needed so we can suppress misleading fallback
+    // warnings for well-formed shared/array groups whose base cell legitimately stores `PtgExp` in
+    // `FORMULA.rgce` (the real `rgce` lives in SHRFMLA/ARRAY records).
     //
-    // The base-cell fallback is intended for malformed sheets that *lack* those definition records.
-    let parsed_defs =
-        worksheet_formulas::parse_biff8_worksheet_formulas(workbook_stream, sheet_offset).ok();
+    // Parsing the full worksheet formula table is relatively expensive for large sheets, so we only
+    // do it when we encounter a `PtgExp` base cell *and* fail to resolve it via an in-stream SHRFMLA
+    // definition.
+    let mut parsed_defs: Option<worksheet_formulas::ParsedBiff8WorksheetFormulas> = None;
+    let mut parsed_defs_attempted = false;
 
     let allows_continuation = |id: u16| {
         id == worksheet_formulas::RECORD_FORMULA || id == worksheet_formulas::RECORD_SHRFMLA
@@ -403,6 +405,14 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
                 // If a SHRFMLA/ARRAY definition exists for this base cell + range, then the base-cell
                 // fallback is not applicable and we should not emit a misleading warning about a
                 // "missing" definition.
+                if parsed_defs.is_none() && !parsed_defs_attempted {
+                    parsed_defs_attempted = true;
+                    parsed_defs = worksheet_formulas::parse_biff8_worksheet_formulas(
+                        workbook_stream,
+                        sheet_offset,
+                    )
+                    .ok();
+                }
                 if let Some(parsed) = parsed_defs.as_ref() {
                     if parsed
                         .shrfmla
