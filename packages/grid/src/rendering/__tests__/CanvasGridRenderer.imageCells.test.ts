@@ -2014,6 +2014,113 @@ describe("CanvasGridRenderer image cells", () => {
     }
   });
 
+  it("falls back to decoding via <img> when createImageBitmap(blob) throws InvalidStateError for Uint8Array sources", async () => {
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "img1", altText: "img", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    const bitmap = { width: 200, height: 100 } as any;
+
+    const createImageBitmapSpy = vi.fn((src: any) => {
+      if (src instanceof Blob) {
+        const err = new Error("decode failed");
+        (err as any).name = "InvalidStateError";
+        return Promise.reject(err);
+      }
+      return Promise.resolve(bitmap);
+    });
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    // Return raw bytes so the renderer's byte-path decode logic is exercised.
+    const imageResolver = vi.fn(async () => new Uint8Array([1]));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    installContexts(contexts);
+
+    // jsdom does not implement URL.createObjectURL; stub it while keeping the URL constructor.
+    const URLCtor = globalThis.URL as any;
+    const originalCreateObjectURL = URLCtor?.createObjectURL;
+    const originalRevokeObjectURL = URLCtor?.revokeObjectURL;
+    const createObjectURL = vi.fn(() => "blob:fake");
+    const revokeObjectURL = vi.fn();
+    URLCtor.createObjectURL = createObjectURL;
+    URLCtor.revokeObjectURL = revokeObjectURL;
+
+    try {
+      class FakeImage {
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        width = 16;
+        height = 8;
+        naturalWidth = 16;
+        naturalHeight = 8;
+        set src(_value: string) {
+          this.onload?.();
+        }
+      }
+      vi.stubGlobal("Image", FakeImage as unknown as typeof Image);
+
+      const renderer = new CanvasGridRenderer({
+        provider,
+        rowCount: 1,
+        colCount: 1,
+        defaultColWidth: 100,
+        defaultRowHeight: 50,
+        imageResolver
+      });
+      renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+      renderer.resize(100, 50, 1);
+
+      renderer.renderImmediately();
+
+      const pending = (renderer as any).imageBitmapCache.get("img1") as
+        | { state: "pending"; promise: Promise<void> }
+        | { state: string };
+      if (pending?.state === "pending") {
+        await pending.promise;
+      } else {
+        expect(pending?.state).toBe("ready");
+      }
+
+      renderer.renderImmediately();
+
+      expect(imageResolver).toHaveBeenCalledTimes(1);
+      // One call for byte->blob decode attempt, one call for canvas decode after the fallback.
+      expect(createImageBitmapSpy).toHaveBeenCalledTimes(2);
+      expect(createImageBitmapSpy.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
+      expect(createImageBitmapSpy.mock.calls[1]?.[0]).toBeInstanceOf(HTMLCanvasElement);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+      expect(content.rec.drawImages.length).toBeGreaterThan(0);
+    } finally {
+      if (originalCreateObjectURL === undefined) delete URLCtor.createObjectURL;
+      else URLCtor.createObjectURL = originalCreateObjectURL;
+      if (originalRevokeObjectURL === undefined) delete URLCtor.revokeObjectURL;
+      else URLCtor.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
   it("falls back to drawing the decoded canvas when createImageBitmap(canvas) throws", async () => {
     const provider: CellProvider = {
       getCell: (row, col) =>

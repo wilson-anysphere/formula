@@ -1442,7 +1442,20 @@ export class CanvasGridRenderer {
       const bytes = new Uint8Array(source);
       const dims = guardPngBytes(bytes);
       const mimeType = dims ? mimeTypeForHeaderFormat(dims.format) : null;
-      return await create(mimeType ? new Blob([source], { type: mimeType }) : new Blob([source]));
+      const blob = mimeType ? new Blob([source], { type: mimeType }) : new Blob([source]);
+      try {
+        return await create(blob);
+      } catch (err) {
+        // Chrome can decode some malformed/edge-case PNGs via `<img>` but rejects
+        // `createImageBitmap(blob)` (eg certain real Excel fixtures). Mirror the
+        // Blob decode fallback for ArrayBuffer sources by retrying via `<img>` when
+        // the bitmap decode throws `InvalidStateError`.
+        const name = (err as any)?.name;
+        if (name !== "InvalidStateError") throw err;
+        const fallback = await this.decodeBlobViaImageElement(blob, create).catch(() => null);
+        if (fallback) return fallback;
+        throw err;
+      }
     }
 
     if (source instanceof Uint8Array) {
@@ -1458,7 +1471,17 @@ export class CanvasGridRenderer {
               new Uint8Array(out).set(source);
               return out;
             })();
-      return await create(mimeType ? new Blob([buffer], { type: mimeType }) : new Blob([buffer]));
+      const blob = mimeType ? new Blob([buffer], { type: mimeType }) : new Blob([buffer]);
+      try {
+        return await create(blob);
+      } catch (err) {
+        // Same as Blob sources: some images decode via `<img>` but fail with `createImageBitmap`.
+        const name = (err as any)?.name;
+        if (name !== "InvalidStateError") throw err;
+        const fallback = await this.decodeBlobViaImageElement(blob, create).catch(() => null);
+        if (fallback) return fallback;
+        throw err;
+      }
     }
 
     // For drawable sources, prefer `createImageBitmap` when available for performance.
