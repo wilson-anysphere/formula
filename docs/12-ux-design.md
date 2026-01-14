@@ -593,7 +593,9 @@ Formula is designed **light-first**. The default theme preference is **Light**, 
 ### Theme switching
 
 - **Ribbon:** `View → Theme` (System / Light / Dark / High Contrast)
-- **Command palette:** if theme commands are registered, search for `Theme` (e.g. `Theme: Light`)
+- **Command palette:** search for `Theme` and run either:
+  - `Theme…` (opens a picker)
+  - `Theme: System` / `Theme: Light` / `Theme: Dark` / `Theme: High Contrast`
 
 Theme preference is persisted (desktop: `localStorage` key `formula.settings.appearance.v1`) and applied on startup by the theme controller (see `apps/desktop/src/theme/themeController.js`) via the `data-theme` attribute on `<html>`.
 
