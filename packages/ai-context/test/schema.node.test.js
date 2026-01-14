@@ -41,7 +41,7 @@ test("extractSheetSchema: treats rich text + in-cell image values as strings", (
     values: [
       [
         { text: "Product", runs: [{ start: 0, end: 7, style: { bold: true } }] },
-        { type: "image", value: { imageId: "img_1", altText: "Photo" } },
+        { type: "image", value: { imageId: "img_1", altText: " Photo " } },
         "Qty",
       ],
       ["Alpha", { imageId: "img_2" }, 3],
