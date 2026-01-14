@@ -537,10 +537,22 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
    - `=` (direct value filter)
    - `<>`, `<`, `<=`, `>`, `>=` (implemented by scanning rows to compute the set of allowed values)
    - `IN` (value membership) with a one-column table expression, e.g. `Fact[Category] IN { \"A\", \"B\" }` or `Fact[Category] IN VALUES(Dim[Category])`
+ 
+    Multi-column membership is also supported via a row constructor on the LHS:
+ 
+    - `(T[Col1], T[Col2], ...) IN tableExpr`
+ 
+    In `CALCULATE`, row-constructor `IN` filters are applied as a **row filter** (not decomposed into
+    independent per-column value filters) to preserve correlation across columns, e.g.:
+ 
+    - `CALCULATE(COUNTROWS(Orders), (Orders[OrderId], Orders[CustomerId]) IN {(100,1), (102,2)})`
 
    Notes:
    - For `=`/`<>`/`<`/`<=`/`>`/`>=`, the RHS is evaluated as a scalar expression.
-   - For `IN`, the RHS must evaluate to a one-column table expression (table constructor or table function).
+   - For scalar `IN` (`T[Col] IN tableExpr`), the RHS must evaluate to a one-column table expression.
+   - For row-constructor `IN` (`(T[Col1], T[Col2], ...) IN tableExpr`), the RHS must evaluate to a table
+     with the same number of columns. In `CALCULATE` filter arguments, the row constructor must contain
+     only column references and must reference exactly one table.
    - Non-equality comparisons currently build a *value set* by scanning rows under the current filters
      (except the column being filtered).
 
@@ -774,20 +786,27 @@ Supported expression forms:
   - arithmetic: `+ - * /`
   - text concatenation: `&` (single ampersand)
   - comparisons: `= <> < <= > >=`
-  - membership: `expr IN tableExpr` (RHS must evaluate to a one-column table; multi-column membership is via `CONTAINSROW`)
+  - membership:
+    - scalar: `expr IN tableExpr` (RHS must evaluate to a one-column table)
+    - row constructor: `(expr1, expr2, ...) IN tableExpr` (RHS must have the same number of columns)
   - boolean: `&&` and `||`
-- Parentheses for grouping
+- Parentheses for grouping: `(expr)`
+- Row constructors / tuples: `(expr1, expr2, ...)` (comma- or semicolon-separated)  
+  Parsed as a row constructor (`Expr::Tuple`). Row constructors are supported on the LHS of multi-column
+  `IN`, and as the row syntax inside multi-column table constructors (e.g. `{(1,2), (3,4)}`).
 - Variables:
   - `VAR Name = <expr> ... RETURN <expr>` (one or more `VAR` bindings)
   - Variables are referenced by bare identifiers (parsed as `Expr::TableName`) and can be **scalar** or
     **table** valued.
 - Table constructors: `{ 1, 2, 3 }` (one column) and `{ (1, 2), (3, 4) }` (multi-column row tuples)  
-  Separators may be `,` or `;`. Nested table constructors are not supported.
+  Separators may be `,` or `;`. Nested table constructors are not supported, and all rows must have the
+  same number of values.
   - One-column constructors evaluate to a **virtual one-column table** with a synthetic column
     named `[Value]` and can be used on the RHS of the `IN` operator (`expr IN { ... }`), as the
     first argument to `CONTAINSROW`, and as a table expression in iterators and table functions.
   - Multi-column constructors evaluate to a **virtual multi-column table** with synthetic columns
-    named `[Value1]`, `[Value2]`, ... in order. (Note: `IN` still requires a one-column table.)
+    named `[Value1]`, `[Value2]`, ... in order. They can be used as table expressions in iterators, and
+    on the RHS of row-constructor `IN` (`(a,b) IN {(1,2), (3,4)}`) / `CONTAINSROW`.
   Table literals can also be bound to a `VAR` and referenced by name.
 
 Unsupported / not yet implemented in the parser:
@@ -968,7 +987,7 @@ This is not an exhaustive list, but the most common contributor-facing constrain
   - Table constructors (`{ ... }`) support both one-column and multi-column row tuples (no nesting),
     and evaluate to a virtual table with synthetic columns (`[Value]` for one column, `[Value1]`,
     `[Value2]`, ... for multi-column). These are usable in iterators, as well as membership tests via
-    `CONTAINSROW` (and via `IN` for one-column constructors).
+    `CONTAINSROW` and `IN` (including tuple `IN` for multi-column row constructors).
   - Most scalar/table functions are unimplemented (anything not listed above).
 - **Types**
   - Only `Blank`, `Number(ordered_float::OrderedFloat<f64>)`, `Boolean`, and `Text` exist at the DAX layer.
