@@ -45,9 +45,23 @@ describe("drawings hit test index perf", () => {
 
     for (let i = 0; i < 200; i += 1) {
       // No object is near (25, 25) so this exercises the "miss" path repeatedly.
-        expect(hitTestDrawings(index, viewport, 25, 25, geom)).toBeNull();
-      }
+      expect(hitTestDrawings(index, viewport, 25, 25, geom)).toBeNull();
+    }
 
+    expect(sortSpy).toHaveBeenCalledTimes(0);
+  });
+
+  it("avoids index-build sorting when objects are already zOrder-non-increasing (ties allowed)", () => {
+    const objects: DrawingObject[] = [
+      absoluteObject(1, 10, { x: 0, y: 0, width: 10, height: 10 }),
+      absoluteObject(2, 10, { x: 20, y: 0, width: 10, height: 10 }),
+      absoluteObject(3, 5, { x: 40, y: 0, width: 10, height: 10 }),
+      absoluteObject(4, 5, { x: 60, y: 0, width: 10, height: 10 }),
+      absoluteObject(5, 0, { x: 80, y: 0, width: 10, height: 10 }),
+    ];
+
+    const sortSpy = vi.spyOn(Array.prototype, "sort");
+    buildHitTestIndex(objects, geom, { bucketSizePx: 128 });
     expect(sortSpy).toHaveBeenCalledTimes(0);
   });
 

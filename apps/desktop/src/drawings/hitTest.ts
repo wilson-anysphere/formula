@@ -126,22 +126,28 @@ export function buildHitTestIndex(
   // Walk from top to bottom (highest zOrder first).
   //
   // Perf: avoid allocating/sorting when callers already keep objects zOrder-sorted
-  // ascending (back-to-front). In that common case we only need to reverse the
-  // iteration order for hit testing (top-to-bottom).
-  let isAscending = true;
-  let isStrictDescending = true;
+  // ascending (back-to-front). In that common case we only need to reverse for
+  // hit testing (top-to-bottom).
+  //
+  // We also handle the "already descending" case (common for some document
+  // sources) without needing a full sort: if the list is zOrder-non-increasing
+  // we only need to reverse within equal-zOrder runs to match render order.
+  let isNonDecreasing = true;
+  let isNonIncreasing = true;
+  let hasEqual = false;
   for (let i = 1; i < objects.length; i += 1) {
     const prev = objects[i - 1]!.zOrder;
     const curr = objects[i]!.zOrder;
-    if (prev > curr) isAscending = false;
-    // Strict descending requires every step to strictly decrease; equal zOrders
-    // must fall back to a stable sort so hit testing matches render order.
-    if (prev <= curr) isStrictDescending = false;
-    if (!isAscending && !isStrictDescending) break;
+    if (prev > curr) isNonDecreasing = false;
+    if (prev < curr) isNonIncreasing = false;
+    if (prev === curr) hasEqual = true;
+    if (!isNonDecreasing && !isNonIncreasing) break;
   }
 
   const ordered: DrawingObject[] = (() => {
-    if (isAscending) {
+    // Fast paths for common monotonic orderings (no sort).
+    if (objects.length <= 1) return objects as DrawingObject[];
+    if (isNonDecreasing) {
       const reversed = new Array<DrawingObject>(objects.length);
       for (let i = 0; i < objects.length; i += 1) {
         reversed[i] = objects[objects.length - 1 - i]!;
@@ -149,9 +155,27 @@ export function buildHitTestIndex(
       return reversed;
     }
 
-    if (isStrictDescending) {
-      // Already top-to-bottom with unique zOrders.
-      return objects as DrawingObject[];
+    if (isNonIncreasing) {
+      if (!hasEqual) {
+        // Already top-to-bottom with unique zOrders.
+        return objects as DrawingObject[];
+      }
+
+      // Reverse within equal-zOrder runs so ties are hit-tested in reverse render
+      // order (render is stable within equal zOrder values).
+      const out = new Array<DrawingObject>(objects.length);
+      let write = 0;
+      let start = 0;
+      while (start < objects.length) {
+        const z = objects[start]!.zOrder;
+        let end = start + 1;
+        while (end < objects.length && objects[end]!.zOrder === z) end += 1;
+        for (let i = end - 1; i >= start; i -= 1) {
+          out[write++] = objects[i]!;
+        }
+        start = end;
+      }
+      return out;
     }
 
     const sorted = [...objects].sort((a, b) => a.zOrder - b.zOrder);
