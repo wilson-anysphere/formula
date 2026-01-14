@@ -481,4 +481,76 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("hovering a selected drawing's resize handle shows drawing cursor even when a chart is underneath", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+
+      // Add a large chart behind the drawing so chart hover logic would normally return "move".
+      app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Chart Behind Drawing",
+        position: "A1:H10",
+      });
+
+      // Insert a drawing that overlaps the chart area.
+      (app as any).document.setSheetDrawings(sheetId, [
+        {
+          id: "drawing1",
+          zOrder: 0,
+          kind: { type: "shape" },
+          anchor: {
+            type: "oneCell",
+            from: { cell: { row: 0, col: 0 }, offset: { xEmu: pxToEmu(8), yEmu: pxToEmu(8) } },
+            size: { cx: pxToEmu(120), cy: pxToEmu(80) },
+          },
+        },
+      ]);
+      (app as any).drawingObjectsCache = null;
+
+      const objects = (app as any).listDrawingObjectsForSheet();
+      const object = objects[0];
+      expect(object).toBeTruthy();
+
+      // Select the drawing so handle hit testing is active.
+      app.selectDrawingById(object.id);
+
+      const viewport = (app as any).getDrawingInteractionViewport();
+      const geom = (app as any).drawingGeom;
+      const rect = drawingObjectToViewportRect(object, viewport, geom);
+      const handleX = rect.x + rect.width;
+      const handleY = rect.y + rect.height;
+
+      root.style.cursor = "";
+      (app as any).onPointerMove(
+        createPointerEvent({
+          type: "pointermove",
+          pointerId: 1,
+          clientX: handleX,
+          clientY: handleY,
+          pointerType: "mouse",
+          button: 0,
+        }),
+      );
+
+      expect(root.style.cursor).toBe("nwse-resize");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });

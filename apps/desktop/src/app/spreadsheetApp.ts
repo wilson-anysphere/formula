@@ -9857,19 +9857,25 @@ export class SpreadsheetApp {
       return;
     }
 
-    const chartCursor = this.chartCursorAtPoint(x, y);
     const drawingCursor = this.drawingCursorAtPoint(x, y);
-    const nextCursor = chartCursor ?? drawingCursor ?? "";
+    const chartCursor = drawingCursor ? null : this.chartCursorAtPoint(x, y);
+    const nextCursor = drawingCursor ?? chartCursor ?? "";
     if (this.root.style.cursor !== nextCursor) {
       this.root.style.cursor = nextCursor;
     }
     // In shared-grid mode, the selection canvas sets its own cursor value, so apply drawing
     // cursor feedback there as well when the pointermove targets the canvas surface.
-    const cursorOverride = chartCursor ?? drawingCursor;
+    const cursorOverride = drawingCursor ?? chartCursor;
     if (cursorOverride && this.selectionCanvas.style.cursor !== cursorOverride) {
       this.selectionCanvas.style.cursor = cursorOverride;
     }
 
+    if (drawingCursor) {
+      // Drawings sit above cell content; suppress comment tooltips while hovering drawings.
+      this.clearSharedHoverCellCache();
+      this.hideCommentTooltip();
+      return;
+    }
     if (chartCursor) {
       // Charts sit above cell content; suppress comment tooltips while hovering chart bounds.
       this.clearSharedHoverCellCache();
@@ -16684,13 +16690,18 @@ export class SpreadsheetApp {
       x <= fillHandle.x + fillHandle.width &&
       y >= fillHandle.y &&
       y <= fillHandle.y + fillHandle.height;
-    const chartCursor = this.chartCursorAtPoint(x, y);
     const drawingCursor = this.drawingCursorAtPoint(x, y);
-    const nextCursor = chartCursor ?? drawingCursor ?? (overFillHandle ? "crosshair" : "");
+    const chartCursor = drawingCursor ? null : this.chartCursorAtPoint(x, y);
+    const nextCursor = drawingCursor ?? chartCursor ?? (overFillHandle ? "crosshair" : "");
     if (this.root.style.cursor !== nextCursor) {
       this.root.style.cursor = nextCursor;
     }
 
+    if (drawingCursor) {
+      // Drawings sit above cell content; suppress comment tooltips while hovering drawings.
+      this.hideCommentTooltip();
+      return;
+    }
     if (chartCursor) {
       // Charts sit above cell content; suppress comment tooltips while hovering the chart area.
       this.hideCommentTooltip();
