@@ -693,12 +693,7 @@ impl Engine {
         if new_index >= self.workbook.sheet_order.len() {
             return false;
         }
-        let Some(current) = self
-            .workbook
-            .sheet_order
-            .iter()
-            .position(|&id| id == sheet_id)
-        else {
+        let Some(current) = self.workbook.sheet_order.iter().position(|&id| id == sheet_id) else {
             return false;
         };
         if current == new_index {
