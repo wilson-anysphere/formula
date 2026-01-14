@@ -800,6 +800,9 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.view.insertPivotTable"),
       keywords: ["pivot", "pivot table", "table", "range"],
+      // Hide this ribbon alias from context-aware UI surfaces (command palette, etc) to avoid
+      // duplicate "PivotTable…" entries (`view.insertPivotTable` is the canonical command).
+      when: "false",
     },
   );
 
