@@ -204,6 +204,26 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     root.remove();
   });
 
+  it("shows a read-only toast when typing to start an in-cell edit in read-only collab mode", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+ 
+    const app = new SpreadsheetApp(root, status);
+    (app as any).collabSession = { isReadOnly: () => true };
+ 
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+ 
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+    expect(root.querySelector("textarea.cell-editor--open")).toBeNull();
+ 
+    app.destroy();
+    root.remove();
+  });
+
   it("shows a read-only toast when invoking AutoSum in read-only collab mode", () => {
     const root = createRoot();
     const status = {

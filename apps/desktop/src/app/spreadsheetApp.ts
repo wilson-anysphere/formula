@@ -22049,7 +22049,13 @@ export class SpreadsheetApp {
         return;
       }
       e.preventDefault();
-      if (this.isReadOnly()) return;
+      if (this.isReadOnly()) {
+        const cell = this.selection.active;
+        showCollabEditRejectedToast([
+          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+        return;
+      }
       const cell = this.selection.active;
       const bounds = this.getCellRect(cell);
       if (!bounds) return;
