@@ -935,7 +935,7 @@ should observe the Yjs `sheets` array directly (or via a dedicated binder).
 
 - `session.presence` is a `PresenceManager` (or `null` if not enabled)
 - `PresenceManager` writes/reads the Yjs Awareness state field `"presence"`
-- `PresenceManager.subscribe()` emits **remote** presences on the active sheet (it intentionally ignores local cursor/selection changes to reduce re-render pressure)
+- `PresenceManager.subscribe()` calls its listener immediately with the current **remote** presences on the active sheet, and then on any **remote** awareness update (it intentionally ignores local cursor/selection updates to reduce re-render pressure). Pass `{ includeOtherSheets: true }` to include remote users on non-active sheets.
 
 Source: [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js)
 
