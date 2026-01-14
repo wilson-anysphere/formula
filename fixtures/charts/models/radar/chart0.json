@@ -37,8 +37,7 @@
   },
   "modelChartSpace": {
     "chartKind": {
-      "kind": "unknown",
-      "name": "radarChart"
+      "kind": "radar"
     },
     "title": {
       "richText": {
@@ -52,8 +51,12 @@
       "overlay": false
     },
     "plotArea": {
-      "kind": "unknown",
-      "name": "radarChart"
+      "kind": "radar",
+      "radarStyle": "marker",
+      "axIds": [
+        50010001,
+        50010002
+      ]
     },
     "axes": [
       {
@@ -127,12 +130,7 @@
       }
     ],
     "plotVisOnly": true,
-    "diagnostics": [
-      {
-        "level": "warning",
-        "message": "unsupported chart type radarChart; rendering may be incomplete"
-      }
-    ]
+    "diagnostics": []
   },
   "modelChartEx": null
 }

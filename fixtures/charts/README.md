@@ -45,6 +45,7 @@ checked into the repo. For these fixtures we commit a generated placeholder PNG
 
 - `area.png`
 - `bar-horizontal.png`
+- `bubble.png`
 - `radar.png`
 - `stock.png`
 - `doughnut.png`
