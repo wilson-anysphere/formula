@@ -56,7 +56,10 @@ fn parse_standard_rc4_encryption_info(bytes: &[u8]) -> StandardRc4EncryptionInfo
 
     let major = read_u16_le(bytes, 0);
     let minor = read_u16_le(bytes, 2);
-    assert_eq!((major, minor), (3, 2), "expected Standard EncryptionInfo 3.2");
+    assert!(
+        minor == 2 && matches!(major, 2 | 3 | 4),
+        "expected Standard EncryptionInfo version *.2 with major=2/3/4, got {major}.{minor}"
+    );
 
     let header_size = read_u32_le(bytes, 8) as usize;
     let header_start = 12usize;
