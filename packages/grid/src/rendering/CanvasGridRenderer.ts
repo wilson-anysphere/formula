@@ -716,6 +716,7 @@ export class CanvasGridRenderer {
   ];
   private mergedIndex: MergedCellIndex = EMPTY_MERGED_INDEX;
   private mergedIndexKey: string | null = null;
+  private mergedIndexViewport: GridViewportState | null = null;
   private mergedIndexDirty = true;
 
   constructor(options: CanvasGridRendererOptions) {
@@ -7013,7 +7014,12 @@ export class CanvasGridRenderer {
     if (!provider.getMergedRangeAt && !provider.getMergedRangesInRange) {
       this.mergedIndex = EMPTY_MERGED_INDEX;
       this.mergedIndexKey = null;
+      this.mergedIndexViewport = null;
       this.mergedIndexDirty = false;
+      return this.mergedIndex;
+    }
+
+    if (!this.mergedIndexDirty && this.mergedIndexViewport === viewport) {
       return this.mergedIndex;
     }
 
@@ -7021,6 +7027,7 @@ export class CanvasGridRenderer {
     const key = queryRanges.map((range) => `${range.startRow},${range.endRow},${range.startCol},${range.endCol}`).join("|");
 
     if (!this.mergedIndexDirty && this.mergedIndexKey === key) {
+      this.mergedIndexViewport = viewport;
       return this.mergedIndex;
     }
 
@@ -7083,6 +7090,7 @@ export class CanvasGridRenderer {
 
     this.mergedIndex = new MergedCellIndex([...merges.values()], indexedRowRanges);
     this.mergedIndexKey = key;
+    this.mergedIndexViewport = viewport;
     this.mergedIndexDirty = false;
     return this.mergedIndex;
   }
