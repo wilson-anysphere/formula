@@ -1757,10 +1757,7 @@ mod tests {
 
     #[test]
     fn from_bytes_limited_rejects_packages_exceeding_total_limit() {
-        let bytes = build_package(&[
-            ("xl/a.xml", b"123456"),
-            ("xl/b.xml", b"abcdef"),
-        ]);
+        let bytes = build_package(&[("xl/a.xml", b"123456"), ("xl/b.xml", b"abcdef")]);
 
         let limits = XlsxPackageLimits {
             max_part_bytes: 10,
