@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DrawingObject, DrawingObjectId } from "../../drawings/types";
 
@@ -18,6 +18,7 @@ type SelectionPaneApp = {
   deleteDrawingById?(id: DrawingObjectId): void;
   bringSelectedDrawingForward?(): void;
   sendSelectedDrawingBackward?(): void;
+  getCurrentSheetId?(): string;
 };
 
 function DrawingKindIcon({ kind }: { kind: DrawingObject["kind"]["type"] }) {
@@ -33,17 +34,93 @@ function DrawingKindIcon({ kind }: { kind: DrawingObject["kind"]["type"] }) {
   }
 }
 
+type SelectionPaneItem = { obj: DrawingObject; label: string };
+
+type StoredLabel = { kind: DrawingObject["kind"]["type"]; label: string; auto: boolean };
+
+type SheetLabelState = {
+  counters: Record<string, number>;
+  labels: Map<DrawingObjectId, StoredLabel>;
+};
+
 export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const [drawings, setDrawings] = useState<DrawingObject[]>(() => app.listDrawingsForSheet());
+  const labelsBySheetRef = useRef<Map<string, SheetLabelState>>(new Map());
+
+  const computeItems = useCallback(
+    (drawings: DrawingObject[]): SelectionPaneItem[] => {
+      const sheetId = (() => {
+        if (typeof app.getCurrentSheetId !== "function") return "__default";
+        try {
+          const id = String(app.getCurrentSheetId() ?? "").trim();
+          return id || "__default";
+        } catch {
+          return "__default";
+        }
+      })();
+
+      let sheetState = labelsBySheetRef.current.get(sheetId);
+      if (!sheetState) {
+        sheetState = { counters: Object.create(null) as Record<string, number>, labels: new Map() };
+        labelsBySheetRef.current.set(sheetId, sheetState);
+      }
+
+      const seen = new Set<DrawingObjectId>();
+      const nextItems: SelectionPaneItem[] = [];
+
+      for (const obj of drawings) {
+        seen.add(obj.id);
+
+        const kind = obj.kind.type;
+        const explicitLabel = (obj.kind as { label?: string }).label?.trim();
+        if (explicitLabel) {
+          sheetState.labels.set(obj.id, { kind, label: explicitLabel, auto: false });
+          nextItems.push({ obj, label: explicitLabel });
+          continue;
+        }
+
+        const existing = sheetState.labels.get(obj.id);
+        if (existing && (!existing.auto || existing.kind === kind)) {
+          nextItems.push({ obj, label: existing.label });
+          continue;
+        }
+
+        const { counterKey, prefix, includeId } = (() => {
+          // Excel uses "Picture" (not "Image") for inserted images.
+          if (kind === "image") return { counterKey: "Picture", prefix: "Picture", includeId: false };
+          if (kind === "shape") return { counterKey: "Shape", prefix: "Shape", includeId: false };
+          if (kind === "chart") return { counterKey: "Chart", prefix: "Chart", includeId: false };
+          const normalized = kind ? kind.slice(0, 1).toUpperCase() + kind.slice(1) : "Object";
+          return { counterKey: normalized, prefix: normalized, includeId: true };
+        })();
+
+        const nextIndex = (sheetState.counters[counterKey] ?? 0) + 1;
+        sheetState.counters[counterKey] = nextIndex;
+
+        const label = includeId ? `${prefix} ${nextIndex} (id=${obj.id})` : `${prefix} ${nextIndex}`;
+        sheetState.labels.set(obj.id, { kind, label, auto: true });
+        nextItems.push({ obj, label });
+      }
+
+      // Prune labels for objects no longer present on this sheet to avoid leaking memory.
+      for (const id of sheetState.labels.keys()) {
+        if (!seen.has(id)) sheetState.labels.delete(id);
+      }
+
+      return nextItems;
+    },
+    [app],
+  );
+
+  const [items, setItems] = useState<SelectionPaneItem[]>(() => computeItems(app.listDrawingsForSheet()));
   const [selectedId, setSelectedId] = useState<DrawingObjectId | null>(() => app.getSelectedDrawingId());
 
   useEffect(() => {
     const onDrawings = () => {
-      setDrawings(app.listDrawingsForSheet());
+      setItems(computeItems(app.listDrawingsForSheet()));
     };
     return app.subscribeDrawings(onDrawings);
-  }, [app]);
+  }, [app, computeItems]);
 
   useEffect(() => {
     const onSelection = (id: DrawingObjectId | null) => {
@@ -51,36 +128,6 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
     };
     return app.subscribeDrawingSelection(onSelection);
   }, [app]);
-
-  const items = useMemo(() => {
-    // Excel-style auto-naming: `Picture 1`, `Shape 1`, `Chart 1` etc.
-    // Keep this stable for a given list ordering (topmost-first from `listDrawingsForSheet`).
-    let picture = 0;
-    let shape = 0;
-    let chart = 0;
-    let unknown = 0;
-    return drawings.map((obj) => {
-      const kind = obj.kind.type;
-      const explicitLabel = (obj.kind as { label?: string }).label?.trim();
-      if (explicitLabel) {
-        return { obj, label: explicitLabel };
-      }
-      switch (kind) {
-        case "image":
-          picture += 1;
-          return { obj, label: `Picture ${picture}` };
-        case "shape":
-          shape += 1;
-          return { obj, label: `Shape ${shape}` };
-        case "chart":
-          chart += 1;
-          return { obj, label: `Chart ${chart}` };
-        default:
-          unknown += 1;
-          return { obj, label: `${kind} ${unknown} (id=${obj.id})` };
-      }
-    });
-  }, [drawings]);
 
   const scrollItemIntoView = useCallback((id: DrawingObjectId) => {
     if (typeof document === "undefined") return;
