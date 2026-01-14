@@ -55,19 +55,23 @@ See also:
 
 - **`formula-io` `EncryptedPackage` decryptors (baseline AES-ECB)**:
   - `crates/formula-io/src/offcrypto/encrypted_package.rs`
-    - `decrypt_encrypted_package_standard_aes_to_writer` (streaming Standard AES-ECB; no IV)
-    - `decrypt_standard_encrypted_package_stream` (buffered Standard AES-ECB; no IV; truncates to `orig_size`)
-- **`formula-offcrypto` Standard `EncryptedPackage` decryptors**:
-  - `crates/formula-offcrypto/src/encrypted_package.rs`:
+    - `decrypt_encrypted_package_standard_aes_to_writer` (streaming Standard AES-ECB; no IV; `_salt` is unused)
+    - `decrypt_standard_encrypted_package_stream` (buffered Standard AES-ECB; no IV; `_salt` is unused; truncates to `orig_size`)
+- **`formula-offcrypto` Standard `EncryptedPackage` decryptors (ECB + segmented-CBC)**:
+  - `crates/formula-offcrypto/src/encrypted_package.rs`
     - `decrypt_standard_encrypted_package` (AES-ECB)
     - `decrypt_standard_encrypted_package_cbc` (segmented AES-CBC)
     - `decrypt_standard_encrypted_package_auto` (auto-detect ECB vs segmented CBC by ZIP signature)
-  - `crates/formula-offcrypto/src/lib.rs`:
+  - `crates/formula-offcrypto/src/lib.rs`
     - `decrypt_encrypted_package_ecb` (baseline AES-ECB helper)
     - `decrypt_ooxml_standard` (full Standard/CryptoAPI decrypt: parses `EncryptionInfo`, derives key, decrypts `EncryptedPackage`)
-- **More permissive Standard decryptors (handles additional variants / layouts)**:
-  - `crates/formula-io/src/encrypted_ooxml.rs` (tries multiple `EncryptedPackage` layouts for compatibility)
-  - `crates/formula-office-crypto/src/standard.rs`
+- **`formula-office-crypto` multi-scheme decryptor (most permissive)**:
+  - `crates/formula-office-crypto/src/lib.rs`
+    - `decrypt_encrypted_package_streams` / `decrypt_encrypted_package_streams_with_options`
+    - `decrypt_encrypted_package_ole` / `decrypt_encrypted_package_ole_with_options`
+  - `crates/formula-office-crypto/src/standard.rs`: `decrypt_standard_encrypted_package`
+- **`formula-io` Standard decryptor (compatibility across additional `EncryptedPackage` layouts/schemes)**:
+  - `crates/formula-io/src/encrypted_ooxml.rs`
 
 ## Normative spec references (MS-OFFCRYPTO)
 
@@ -148,14 +152,16 @@ iv_i = SHA1(salt || LE32(i))[0..16]
 ```
 
 This is **not** the Excel-default Standard AES scheme (Excel uses AES-ECB), but it appears in the
-wild. Formula supports it in higher-level decryptors:
+wild. In this repo:
 
-- `crates/formula-offcrypto` can auto-detect **AES-ECB** vs **segmented AES-CBC** based on the
-  decrypted `PK..` ZIP signature.
-- `crates/formula-io/src/encrypted_ooxml.rs` includes CBC-segmented compatibility fallbacks on the
-  Standard open path (in addition to the baseline AES-ECB primitives in
-  `crates/formula-io/src/offcrypto/encrypted_package.rs`).
-- `crates/formula-office-crypto` supports additional Standard variants beyond ECB/CBC.
+- The low-level `formula-io` helpers in `crates/formula-io/src/offcrypto/encrypted_package.rs`
+  implement the baseline AES-ECB behavior only (the `salt`/`_salt` arg is accepted but unused).
+- `crates/formula-offcrypto/src/encrypted_package.rs`: `decrypt_standard_encrypted_package_auto`
+  auto-detects **AES-ECB** vs **segmented AES-CBC** by checking for a `PK..` ZIP signature (requires
+  the verifier salt).
+- `crates/formula-office-crypto/src/lib.rs`: `decrypt_encrypted_package_streams` /
+  `decrypt_encrypted_package_ole` is the most permissive Standard decryptor and tries multiple
+  variants/schemes.
 
 ## Padding + truncation (do not trust PKCS#7)
 
