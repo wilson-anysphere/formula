@@ -791,6 +791,22 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
         include_str!("../src/locale/data/es-ES.errors.tsv"),
         /*require_sorted*/ true,
     );
+    assert_error_preferred(&es_es.entries, "#BLOCKED!", "#¡BLOQUEADO!");
+    assert_error_alias(&es_es.entries, "#BLOCKED!", "#BLOQUEADO!");
+    assert_error_preferred(&es_es.entries, "#CALC!", "#¡CALC!");
+    assert_error_alias(&es_es.entries, "#CALC!", "#CALC!");
+    assert_error_preferred(&es_es.entries, "#CONNECT!", "#¡CONECTAR!");
+    assert_error_alias(&es_es.entries, "#CONNECT!", "#CONECTAR!");
+    assert_error_preferred(&es_es.entries, "#DIV/0!", "#¡DIV/0!");
+    assert_error_alias(&es_es.entries, "#DIV/0!", "#DIV/0!");
+    assert_error_preferred(&es_es.entries, "#FIELD!", "#¡CAMPO!");
+    assert_error_alias(&es_es.entries, "#FIELD!", "#CAMPO!");
+    assert_error_preferred(&es_es.entries, "#NULL!", "#¡NULO!");
+    assert_error_alias(&es_es.entries, "#NULL!", "#NULO!");
+    assert_error_preferred(&es_es.entries, "#NUM!", "#¡NUM!");
+    assert_error_alias(&es_es.entries, "#NUM!", "#NUM!");
+    assert_error_preferred(&es_es.entries, "#REF!", "#¡REF!");
+    assert_error_alias(&es_es.entries, "#REF!", "#REF!");
     assert_error_alias(&es_es.entries, "#VALUE!", "#¡VALOR!");
     assert_error_alias(&es_es.entries, "#VALUE!", "#VALOR!");
     assert_error_alias(&es_es.entries, "#NAME?", "#¿NOMBRE?");
@@ -800,6 +816,8 @@ fn locale_error_tsvs_preserve_known_alias_spellings() {
     assert_error_preferred(&es_es.entries, "#VALUE!", "#¡VALOR!");
     assert_error_preferred(&es_es.entries, "#NAME?", "#¿NOMBRE?");
     assert_error_preferred(&es_es.entries, "#SPILL!", "#¡DESBORDAMIENTO!");
+    assert_error_preferred(&es_es.entries, "#UNKNOWN!", "#¡DESCONOCIDO!");
+    assert_error_alias(&es_es.entries, "#UNKNOWN!", "#DESCONOCIDO!");
 
     let es_es_locale = get_locale("es-ES").expect("expected es-ES locale to be registered");
     assert_eq!(
