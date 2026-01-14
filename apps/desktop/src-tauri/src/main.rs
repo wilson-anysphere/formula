@@ -2401,10 +2401,10 @@ fn main() {
                 // harnesses capture the debug stderr output instead of force-killing the process
                 // tree on timeout.
                 const TIMEOUT_SECS: u64 = 13;
-                let window_for_timeout = app.get_webview_window("main");
+                let app_handle_for_timeout = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
-                    if let Some(window) = window_for_timeout {
+                    if let Some(window) = app_handle_for_timeout.get_webview_window("main") {
                         if let Ok(url) = window.url() {
                             eprintln!("[formula][startup-bench] debug url={url}");
                         }
