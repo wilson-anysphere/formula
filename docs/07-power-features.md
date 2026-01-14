@@ -1103,6 +1103,9 @@ export interface SummaryReport {
 Validation + edge cases (Rust behavior):
 
 - `create_scenario`: `changing_cells.len()` must equal `values.len()` → `WhatIfError::InvalidParams("changing_cells and values must have equal length")`.
+- `changing_cells` should not contain duplicates:
+  - The scenario’s `values` are stored in a `HashMap<CellRef, CellValue>`, so duplicates will be de-duplicated (last value wins).
+  - The `Scenario.changing_cells` vector will still contain the duplicates, which can be surprising in reports/UX. This is not currently validated by Rust.
 - Scenario names are not required to be unique. **If two scenarios share a name**, `generate_summary_report` will overwrite the earlier entry in `results` (it’s a `HashMap<String, ...>` keyed by name).
 - `apply_scenario` / `generate_summary_report` with an unknown `ScenarioId` → `WhatIfError::InvalidParams("scenario not found")`.
 - `restore_base` is a no-op if no scenario has been applied yet (`base_values` empty).
@@ -1262,6 +1265,11 @@ Validation + edge cases (Rust behavior):
 - `histogramBins` must be `> 0` → `WhatIfError::InvalidParams("histogram_bins must be > 0")`.
 - `outputCells` must be non-empty → `WhatIfError::InvalidParams("output_cells must not be empty")`.
 - `inputDistributions` may be empty (in which case the simulation simply re-evaluates outputs each iteration without changing any inputs).
+- `outputCells` should not contain duplicates:
+  - The implementation uses a `HashMap<CellRef, Vec<f64>>` for `outputSamples`, but iterates `outputCells` when pushing values, so duplicates would push multiple samples per iteration into the same vector.
+  - This is not currently validated by Rust; hosts/bindings should enforce uniqueness.
+- `inputDistributions[*].cell` should not contain duplicates (not currently validated):
+  - duplicates will cause the same cell to be set multiple times per iteration (last write wins), and correlated sampling becomes ill-defined.
 - Every `Distribution` is validated up-front:
   - normal/lognormal: `stdDev >= 0`
   - uniform: `min <= max`
@@ -1501,6 +1509,8 @@ Proposed WASM binding validation rules (if/when implemented):
   - must be valid A1 addresses
   - should **not** contain `!` (no sheet prefix) if the binding follows the `goalSeek` style
 - `problem.variables.length` must equal `variableCells.length`.
+- `variableCells` should not contain duplicates (not currently validated by Rust); duplicates would cause multiple decision variables to write to the same cell (last write wins).
+- `constraintCells` should not contain duplicates (not currently validated); duplicates are allowed but can make constraints ambiguous in UI.
 - `problem.constraints[*].index` must be within `[0, constraintCells.length)`.
 - Numeric fields in `options` / `problem` should be finite; integer-valued fields should be integers.
 
