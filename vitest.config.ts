@@ -25,6 +25,11 @@ const collabWorkbookEntry = resolve(repoRoot, "packages/collab/workbook/src/inde
 const collabEncryptionEntry = resolve(repoRoot, "packages/collab/encryption/src/index.ts");
 const marketplaceSharedEntry = resolve(repoRoot, "shared");
 const extensionMarketplaceEntry = resolve(repoRoot, "packages/extension-marketplace/src/index.ts");
+const gridEntry = resolve(repoRoot, "packages/grid/src/index.ts");
+const gridNodeEntry = resolve(repoRoot, "packages/grid/src/node.ts");
+const fillEngineEntry = resolve(repoRoot, "packages/fill-engine/src/index.ts");
+const textLayoutEntry = resolve(repoRoot, "packages/text-layout/src/index.js");
+const textLayoutHarfBuzzEntry = resolve(repoRoot, "packages/text-layout/src/harfbuzz.js");
 const spreadsheetFrontendEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/index.ts");
 const spreadsheetFrontendA1Entry = resolve(repoRoot, "packages/spreadsheet-frontend/src/a1.ts");
 const spreadsheetFrontendCacheEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/cache.ts");
@@ -71,6 +76,12 @@ export default defineConfig({
   plugins: [resolveJsToTs()],
   resolve: {
     alias: [
+      // Core UI workspace packages used heavily by desktop tests/benchmarks.
+      { find: /^@formula\/grid$/, replacement: gridEntry },
+      { find: /^@formula\/grid\/node$/, replacement: gridNodeEntry },
+      { find: /^@formula\/fill-engine$/, replacement: fillEngineEntry },
+      { find: /^@formula\/text-layout$/, replacement: textLayoutEntry },
+      { find: /^@formula\/text-layout\/harfbuzz$/, replacement: textLayoutHarfBuzzEntry },
       // `@formula/engine` is imported by many desktop + shared packages. Alias it directly so Vitest
       // runs stay resilient in cached/stale `node_modules` environments that may be missing the
       // pnpm workspace link.
