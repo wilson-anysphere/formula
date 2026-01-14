@@ -202,6 +202,29 @@ fn decrypt_encrypted_package_standard_rejects_unaligned_ciphertext_before_passwo
 }
 
 #[test]
+fn decrypt_encrypted_package_standard_rejects_size_mismatch_before_password_check() {
+    // total_size=32 requires at least 32 bytes of ciphertext (ciphertext is also padded to 16-byte
+    // blocks). Provide only 16 bytes of ciphertext.
+    let encryption_info = minimal_standard_encryption_info_bytes();
+    let mut encrypted_package = 32u64.to_le_bytes().to_vec();
+    encrypted_package.extend_from_slice(&[0u8; 16]);
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        "wrong-password",
+        DecryptOptions::default(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err,
+        OffcryptoError::EncryptedPackageSizeMismatch {
+            total_size: 32,
+            ciphertext_len: 16
+        }
+    );
+}
+
+#[test]
 fn decrypt_encrypted_package_agile_rejects_short_encrypted_package_before_password_check() {
     let encrypted = std::fs::read(fixture("inputs/example_password.xlsx")).expect("read fixture");
     let encryption_info = extract_stream_bytes(&encrypted, "EncryptionInfo");
@@ -233,6 +256,30 @@ fn decrypt_encrypted_package_agile_rejects_unaligned_ciphertext_before_password_
     )
     .unwrap_err();
     assert_eq!(err, OffcryptoError::InvalidCiphertextLength { len: 15 });
+}
+
+#[test]
+fn decrypt_encrypted_package_agile_rejects_size_mismatch_before_password_check() {
+    // total_size=32 requires at least 32 bytes of ciphertext (ciphertext is also padded to 16-byte
+    // blocks). Provide only 16 bytes of ciphertext.
+    let encrypted = std::fs::read(fixture("inputs/example_password.xlsx")).expect("read fixture");
+    let encryption_info = extract_stream_bytes(&encrypted, "EncryptionInfo");
+    let mut encrypted_package = 32u64.to_le_bytes().to_vec();
+    encrypted_package.extend_from_slice(&[0u8; 16]);
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        "wrong-password",
+        DecryptOptions::default(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err,
+        OffcryptoError::EncryptedPackageSizeMismatch {
+            total_size: 32,
+            ciphertext_len: 16
+        }
+    );
 }
 
 #[test]

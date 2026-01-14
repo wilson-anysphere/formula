@@ -3256,7 +3256,25 @@ pub fn decrypt_encrypted_package(
     // KDF work on inputs that cannot be decrypted.
     match &info {
         EncryptionInfo::Standard { .. } => {
-            validate_standard_encrypted_package_stream(encrypted_package)?;
+            let header = parse_encrypted_package_header(encrypted_package)?;
+            let ciphertext_len = encrypted_package.len() - 8;
+            if ciphertext_len % AES_BLOCK_SIZE != 0 {
+                return Err(OffcryptoError::InvalidCiphertextLength { len: ciphertext_len });
+            }
+
+            let total_size = header.original_size;
+            let output_len = usize::try_from(total_size)
+                .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+            // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
+            isize::try_from(output_len)
+                .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+
+            if total_size > ciphertext_len as u64 {
+                return Err(OffcryptoError::EncryptedPackageSizeMismatch {
+                    total_size,
+                    ciphertext_len,
+                });
+            }
         }
         EncryptionInfo::Agile { .. } => {
             let header = parse_encrypted_package_header(encrypted_package)?;
@@ -3265,12 +3283,24 @@ pub fn decrypt_encrypted_package(
                 return Err(OffcryptoError::InvalidCiphertextLength { len: ciphertext_len });
             }
 
+            let total_size = header.original_size;
+            let output_len = usize::try_from(total_size)
+                .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+            // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
+            isize::try_from(output_len)
+                .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+
             // Mirror `agile_decrypt_package`'s plausibility guard: the declared plaintext size should
             // not be wildly larger than the available ciphertext.
             let plausible_max = (encrypted_package.len() as u64).saturating_mul(2);
-            if header.original_size > plausible_max {
-                return Err(OffcryptoError::EncryptedPackageSizeOverflow {
-                    total_size: header.original_size,
+            if total_size > plausible_max {
+                return Err(OffcryptoError::EncryptedPackageSizeOverflow { total_size });
+            }
+
+            if total_size > ciphertext_len as u64 {
+                return Err(OffcryptoError::EncryptedPackageSizeMismatch {
+                    total_size,
+                    ciphertext_len,
                 });
             }
         }
