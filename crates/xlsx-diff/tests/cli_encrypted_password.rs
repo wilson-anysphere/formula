@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::process::Stdio;
+
+use std::io::Write;
 
 const PASSWORD: &str = "password";
 
@@ -89,6 +92,39 @@ fn cli_succeeds_with_password_file() {
     assert!(
         stdout.contains("No differences."),
         "expected output to indicate no differences, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn cli_succeeds_with_password_file_stdin() {
+    let plain = fixture_path("plaintext.xlsx");
+    let encrypted = fixture_path("agile.xlsx");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&plain)
+        .arg(&encrypted)
+        .arg("--password-file")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run xlsx-diff");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be piped")
+        .write_all(format!("{PASSWORD}\n").as_bytes())
+        .expect("write password to stdin");
+
+    let output = child.wait_with_output().expect("wait for xlsx-diff");
+
+    assert!(
+        output.status.success(),
+        "expected exit 0\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
     );
 }
 

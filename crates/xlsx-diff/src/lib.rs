@@ -163,15 +163,13 @@ impl WorkbookArchive {
 
             let password = password.ok_or_else(|| {
                 anyhow!(
-                    "workbook {} is encrypted; provide a password (e.g. --password)",
+                    "workbook {} is encrypted; a password is required to decrypt it",
                     path.display()
                 )
             })?;
 
-            let decrypted =
-                decrypt_encrypted_package_ole(&bytes, password).map_err(|err| {
-                    anyhow!("failed to decrypt workbook {}: {err}", path.display())
-                })?;
+            let decrypted = decrypt_encrypted_package_ole(&bytes, password)
+                .map_err(|err| anyhow!("failed to decrypt workbook {}: {err}", path.display()))?;
 
             return WorkbookArchive::from_bytes(&decrypted);
         }
@@ -322,7 +320,10 @@ pub fn diff_workbooks_with_options(
     Ok(diff_archives_with_options(&expected, &actual, options))
 }
 
-pub fn diff_workbooks_with_inputs(expected: DiffInput<'_>, actual: DiffInput<'_>) -> Result<DiffReport> {
+pub fn diff_workbooks_with_inputs(
+    expected: DiffInput<'_>,
+    actual: DiffInput<'_>,
+) -> Result<DiffReport> {
     diff_workbooks_with_inputs_and_options(expected, actual, &DiffOptions::default())
 }
 

@@ -525,7 +525,16 @@ fn build_ignore_path_rules(args: &Args) -> Result<Vec<IgnorePathRule>> {
 }
 
 fn read_password_file(path: &Path) -> Result<String> {
-    let value =
-        std::fs::read_to_string(path).with_context(|| format!("read password file {}", path.display()))?;
+    let mut value = String::new();
+    if path.as_os_str() == std::ffi::OsStr::new("-") {
+        use std::io::Read;
+        std::io::stdin()
+            .read_to_string(&mut value)
+            .context("read password from stdin")?;
+    } else {
+        value = std::fs::read_to_string(path)
+            .with_context(|| format!("read password file {}", path.display()))?;
+    }
+
     Ok(value.trim_end_matches(&['\r', '\n'][..]).to_string())
 }
