@@ -1387,8 +1387,9 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
      hdiutil detach "$mnt"
      ```
 
-    Tip: on macOS, you can run the repo helper to validate the DMG (and the `.app.tar.gz` updater
-    payload if present), including a universal `lipo` check:
+    Tip: on macOS, you can run the repo helper to validate the DMG (and the updater tarball, if
+    present — `*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`), including a universal `lipo`
+    check:
 
     ```bash
     bash scripts/validate-macos-bundle.sh --dmg "$dmg"
