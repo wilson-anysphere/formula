@@ -126,14 +126,20 @@ FUNCTIONALITY (# of Excel buttons/features)
 --text-primary: #1a1a1a;
 --text-secondary: #5c5c5c;
 
-/* Borders */
---border: #e0e0e0;
---border-strong: #c8c8c8;
+  /* Borders */
+  --border: #e0e0e0;
+  --border-strong: #c8c8c8;
 
-/* Accent */
---accent: #0969da;
---accent-bg: #ddf4ff;
---accent-border: #54aeff;
+  /* Shape */
+  --radius: 4px;
+  --radius-sm: 3px;
+  --radius-xs: 2px;
+  --radius-pill: 999px;
+
+  /* Accent */
+  --accent: #0969da;
+  --accent-bg: #ddf4ff;
+  --accent-border: #54aeff;
 
 /* Selection */
 --selection-bg: rgba(9, 105, 218, 0.08);
