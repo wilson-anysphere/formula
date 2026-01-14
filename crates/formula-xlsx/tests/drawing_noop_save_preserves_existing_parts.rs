@@ -206,3 +206,35 @@ fn multi_sheet_noop_save_preserves_all_drawing_parts() {
         );
     }
 }
+
+#[test]
+fn multi_sheet_cell_edit_preserves_all_drawing_parts() {
+    let original_bytes = build_two_sheet_drawing_workbook();
+
+    let mut doc = load_from_bytes(&original_bytes).expect("load synthetic workbook");
+    let sheet1_id = doc.workbook.sheets[0].id;
+    doc.workbook
+        .sheet_mut(sheet1_id)
+        .expect("sheet1 exists")
+        .set_value(CellRef::from_a1("B2").expect("valid B2"), CellValue::Number(42.0));
+    let saved = doc.save_to_vec().expect("save");
+
+    let before = XlsxPackage::from_bytes(&original_bytes).expect("read original pkg");
+    let after = XlsxPackage::from_bytes(&saved).expect("read saved pkg");
+
+    for part in [
+        "xl/drawings/drawing1.xml",
+        "xl/drawings/drawing2.xml",
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "xl/drawings/_rels/drawing2.xml.rels",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "xl/worksheets/_rels/sheet2.xml.rels",
+        "xl/media/image1.png",
+    ] {
+        assert_eq!(
+            before.part(part).unwrap(),
+            after.part(part).unwrap(),
+            "{part} should be preserved byte-for-byte when editing unrelated cells"
+        );
+    }
+}
