@@ -57,13 +57,13 @@ function coerceString(value: unknown): string | null {
 }
 
 function normalizeFrozenCount(value: unknown): number {
-  const num = Number(value);
+  const num = Number(yjsValueToJson(value));
   if (!Number.isFinite(num)) return 0;
   return Math.max(0, Math.trunc(num));
 }
 
 function normalizeAxisSize(value: unknown): number | null {
-  const num = Number(value);
+  const num = Number(yjsValueToJson(value));
   if (!Number.isFinite(num)) return null;
   if (num <= 0) return null;
   return num;
