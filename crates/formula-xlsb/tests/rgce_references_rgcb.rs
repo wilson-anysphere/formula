@@ -61,6 +61,29 @@ fn rgce_referr_then_array() -> Vec<u8> {
     rgce
 }
 
+fn rgce_attr_choose_with_ptgarray_bytes_in_jump_table() -> Vec<u8> {
+    // PtgAttrChoose:
+    //   [ptg=0x19]
+    //   [grbit=0x04 (tAttrChoose)]
+    //   [wAttr: u16] (number of u16 offsets in the jump table)
+    //   [jump table: wAttr * u16]
+    //
+    // Ensure the jump table contains `0x20` so a naive raw-byte scan would incorrectly
+    // interpret it as `PtgArray`.
+    let mut rgce = vec![0x19, 0x04];
+    rgce.extend_from_slice(&1u16.to_le_bytes());
+    rgce.extend_from_slice(&[0x20, 0x00]);
+    rgce
+}
+
+fn rgce_str_literal_with_ptgarray_byte_sequence() -> Vec<u8> {
+    // PtgStr: [ptg=0x17][cch: u16][utf16 chars...]
+    //
+    // Include a single UTF-16 space (0x0020 -> bytes 0x20 0x00) so a naive scan would
+    // false-positive on `PtgArray`.
+    vec![0x17, 0x01, 0x00, 0x20, 0x00]
+}
+
 fn read_sheet1_bin_from_fixture(bytes: &[u8]) -> Vec<u8> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).expect("open xlsb zip");
     let mut entry = zip
@@ -106,6 +129,30 @@ fn assert_patch_requires_rgcb(new_rgce: Vec<u8>) {
     );
 }
 
+fn assert_patch_does_not_require_rgcb(new_rgce: Vec<u8>) {
+    // Create a minimal worksheet with a single numeric formula that has no trailing `rgcb` bytes.
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_formula_num(0, 0, 1.0, vec![0x1E, 0x01, 0x00], vec![]);
+
+    let xlsb_bytes = builder.build_bytes();
+    let sheet_bin = read_sheet1_bin_from_fixture(&xlsb_bytes);
+
+    patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Number(1.0),
+            new_style: None,
+            new_formula: Some(new_rgce),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("expected patch to succeed without rgcb bytes");
+}
+
 #[test]
 fn rgce_references_rgcb_detects_ptgarray_inside_memfunc() {
     let rgce = rgce_memfunc_with_array();
@@ -135,4 +182,21 @@ fn patch_sheet_bin_errors_when_formula_requires_rgcb_but_new_rgcb_is_none() {
     assert_patch_requires_rgcb(rgce_memfunc_with_array());
     assert_patch_requires_rgcb(rgce_extend_list_then_array());
     assert_patch_requires_rgcb(rgce_referr_then_array());
+}
+
+#[test]
+fn rgce_references_rgcb_does_not_false_positive_on_attr_choose_jump_table() {
+    let rgce = rgce_attr_choose_with_ptgarray_bytes_in_jump_table();
+    assert!(!rgce_references_rgcb(&rgce));
+}
+
+#[test]
+fn rgce_references_rgcb_does_not_false_positive_on_ptgstr_payload() {
+    let rgce = rgce_str_literal_with_ptgarray_byte_sequence();
+    assert!(!rgce_references_rgcb(&rgce));
+}
+
+#[test]
+fn patch_sheet_bin_allows_missing_rgcb_when_ptgarray_bytes_only_in_attr_choose_payload() {
+    assert_patch_does_not_require_rgcb(rgce_attr_choose_with_ptgarray_bytes_in_jump_table());
 }
