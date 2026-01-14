@@ -149,14 +149,17 @@ export class InMemoryVectorStore {
    */
   async search(queryEmbedding, topK, options = {}) {
     const signal = options.signal;
-    /** @type {{ item: any, score: number }[]} */
-    const scored = [];
-    for (const item of this.items.values()) {
-      throwIfAborted(signal);
-      scored.push({ item, score: cosineSimilarity(queryEmbedding, item.embedding) });
-    }
-    throwIfAborted(signal);
-    scored.sort((a, b) => {
+    const count = this.items.size;
+    // Mirror `Array.prototype.slice`'s ToInteger behavior for common cases.
+    const k = Number.isFinite(topK) ? Math.trunc(topK) : count;
+ 
+    /**
+     * Score-descending, id-ascending ordering.
+     *
+     * @param {{ item: any, score: number }} a
+     * @param {{ item: any, score: number }} b
+     */
+    function compareScored(a, b) {
       // Sort by score descending, but ensure deterministic ordering when multiple
       // items share the same similarity score (e.g. identical embeddings).
       if (a.score > b.score) return -1;
@@ -165,7 +168,37 @@ export class InMemoryVectorStore {
       if (a.item.id < b.item.id) return -1;
       if (a.item.id > b.item.id) return 1;
       return 0;
-    });
+    }
+ 
+    // If we're retrieving a strict subset, keep an in-order top-K list rather than
+    // sorting all items. This makes search scale better when row-window chunking
+    // increases the number of stored chunks.
+    const shouldUsePartial = k > 0 && k < count;
+    if (shouldUsePartial) {
+      /** @type {{ item: any, score: number }[]} */
+      const best = [];
+      for (const item of this.items.values()) {
+        throwIfAborted(signal);
+        const entry = { item, score: cosineSimilarity(queryEmbedding, item.embedding) };
+        // Find insertion position in the current best list.
+        let i = 0;
+        while (i < best.length && compareScored(entry, best[i]) > 0) i += 1;
+        if (i >= k) continue;
+        best.splice(i, 0, entry);
+        if (best.length > k) best.pop();
+      }
+      throwIfAborted(signal);
+      return best;
+    }
+ 
+    /** @type {{ item: any, score: number }[]} */
+    const scored = [];
+    for (const item of this.items.values()) {
+      throwIfAborted(signal);
+      scored.push({ item, score: cosineSimilarity(queryEmbedding, item.embedding) });
+    }
+    throwIfAborted(signal);
+    scored.sort(compareScored);
     throwIfAborted(signal);
     return scored.slice(0, topK);
   }
