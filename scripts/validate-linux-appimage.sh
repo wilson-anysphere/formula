@@ -450,6 +450,15 @@ validate_appimage() {
     fi
   done
 
+  # We ship a shared-mime-info definition for Parquet so `*.parquet` resolves to our
+  # advertised MIME type (`application/vnd.apache.parquet`) on distros that don't
+  # include it by default.
+  local parquet_mime_def
+  parquet_mime_def="$appdir/usr/share/mime/packages/app.formula.desktop.xml"
+  if [ ! -f "$parquet_mime_def" ]; then
+    die "Missing Parquet shared-mime-info definition in AppImage: squashfs-root/usr/share/mime/packages/app.formula.desktop.xml"
+  fi
+
   local applications_dir
   applications_dir="$appdir/usr/share/applications"
   if [ ! -d "$applications_dir" ]; then
