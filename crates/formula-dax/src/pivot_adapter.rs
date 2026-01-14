@@ -139,13 +139,20 @@ fn format_dax_table_name(table: &str) -> String {
     format!("'{escaped}'")
 }
 
+fn escape_dax_bracket_identifier(ident: &str) -> String {
+    // DAX bracket identifiers escape `]` as `]]`.
+    ident.replace(']', "]]")
+}
+
 fn format_dax_column_ref(table: &str, column: &str) -> String {
-    format!("{}[{}]", format_dax_table_name(table), column)
+    let escaped = escape_dax_bracket_identifier(column);
+    format!("{}[{}]", format_dax_table_name(table), escaped)
 }
 
 fn format_dax_measure_ref(measure: &str) -> String {
     let name = DataModel::normalize_measure_name(measure);
-    format!("[{name}]")
+    let escaped = escape_dax_bracket_identifier(name);
+    format!("[{escaped}]")
 }
 
 #[cfg(test)]
@@ -255,6 +262,88 @@ mod tests {
                 vec![Value::from("East"), Value::from(30.0)],
                 vec![Value::from("West"), Value::from(5.0)],
             ]
+        );
+    }
+
+    #[test]
+    fn build_data_model_pivot_plan_escapes_bracket_identifiers_in_generated_dax() {
+        let mut model = DataModel::new();
+        let mut orders = Table::new("Orders", vec!["Region]Name", "Amount]USD"]);
+        orders
+            .push_row(vec![Value::from("East"), Value::from(10.0)])
+            .unwrap();
+        orders
+            .push_row(vec![Value::from("East"), Value::from(20.0)])
+            .unwrap();
+        orders
+            .push_row(vec![Value::from("West"), Value::from(5.0)])
+            .unwrap();
+        model.add_table(orders).unwrap();
+
+        model
+            .add_measure("Total]USD", "SUM(Orders[Amount]]USD])")
+            .unwrap();
+
+        let source = PivotSource::DataModel {
+            table: "orders".to_string(),
+        };
+
+        let row_field = PivotField {
+            source_field: PivotFieldRef::DataModelColumn {
+                table: "orders".to_string(),
+                column: "region]name".to_string(),
+            },
+            sort_order: Default::default(),
+            manual_sort: None,
+        };
+
+        let sum_amount_field = ValueField {
+            source_field: PivotFieldRef::DataModelColumn {
+                table: "orders".to_string(),
+                column: "amount]usd".to_string(),
+            },
+            name: "Sum Amount".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        };
+
+        let total_measure_field = ValueField {
+            source_field: PivotFieldRef::DataModelMeasure("total]usd".to_string()),
+            name: "Total Measure".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        };
+
+        let cfg = PivotConfig {
+            row_fields: vec![row_field],
+            column_fields: vec![],
+            value_fields: vec![sum_amount_field, total_measure_field],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals::default(),
+        };
+
+        let plan = build_data_model_pivot_plan(&model, &source, &cfg).unwrap();
+        assert_eq!(plan.base_table, "Orders");
+        assert_eq!(
+            plan.group_by,
+            vec![GroupByColumn::new("Orders", "Region]Name")]
+        );
+        assert_eq!(
+            plan.measures
+                .iter()
+                .map(|m| m.expression.as_str())
+                .collect::<Vec<_>>(),
+            vec!["SUM('Orders'[Amount]]USD])", "[Total]]USD]"]
         );
     }
 }

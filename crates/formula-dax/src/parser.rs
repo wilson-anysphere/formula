@@ -277,17 +277,30 @@ impl<'a> Lexer<'a> {
             '[' => {
                 self.bump();
                 let mut out = String::new();
-                while let Some(c) = self.peek() {
-                    if c == ']' {
-                        break;
+                loop {
+                    match self.peek() {
+                        None => {
+                            return Err(DaxError::Parse(
+                                "unterminated bracket identifier".into(),
+                            ))
+                        }
+                        Some(']') => {
+                            // `]` terminates the identifier unless it is escaped as `]]` (which
+                            // represents a literal `]` inside the identifier).
+                            self.bump();
+                            if self.peek() == Some(']') {
+                                self.bump();
+                                out.push(']');
+                                continue;
+                            }
+                            break;
+                        }
+                        Some(c) => {
+                            out.push(c);
+                            self.bump();
+                        }
                     }
-                    out.push(c);
-                    self.bump();
                 }
-                if self.peek() != Some(']') {
-                    return Err(DaxError::Parse("unterminated bracket identifier".into()));
-                }
-                self.bump();
                 Ok(Token::BracketIdentifier(out.trim().to_string()))
             }
             c if c.is_ascii_digit() || c == '.' => {
