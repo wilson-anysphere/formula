@@ -34,3 +34,16 @@ fn cell_format_code_reserved_datetime_builtin_placeholder_is_datetime() {
         "expected date/time classification for reserved built-in 50, got {code}"
     );
 }
+
+#[test]
+fn cell_format_code_classifies_thousands_separated_numbers_as_n() {
+    assert_eq!(cell_format_code(Some("#,##0")), "N0");
+    assert_eq!(cell_format_code(Some("#,##0.00")), "N2");
+
+    // Placeholder variants for Excel built-ins 3 and 4.
+    assert_eq!(cell_format_code(Some("__builtin_numFmtId:3")), "N0");
+    assert_eq!(cell_format_code(Some("__builtin_numFmtId:4")), "N2");
+
+    // No grouping => fixed classification.
+    assert_eq!(cell_format_code(Some("0.00")), "F2");
+}

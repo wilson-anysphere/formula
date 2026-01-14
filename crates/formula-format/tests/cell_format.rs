@@ -48,14 +48,15 @@ fn cell_format_code_fraction_builtins_12_13() {
 
 #[test]
 fn cell_format_code_accounting_builtins_41_through_44() {
-    // Accounting formats without currency use the fixed ("F") classification.
+    // Accounting formats without currency still use `#,##0`-style grouping, so Excel classifies
+    // them as numbers (`N*`) rather than fixed (`F*`).
     assert_eq!(
         cell_format_code(Some(builtin_format_code(41).unwrap())),
-        "F0"
+        "N0"
     );
     assert_eq!(
         cell_format_code(Some(builtin_format_code(43).unwrap())),
-        "F2"
+        "N2"
     );
 
     // Accounting formats with currency use the currency ("C") classification.
@@ -71,7 +72,7 @@ fn cell_format_code_accounting_builtins_41_through_44() {
     // Placeholder variants.
     assert_eq!(
         cell_format_code(Some(&format!("{BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX}41"))),
-        "F0"
+        "N0"
     );
     assert_eq!(
         cell_format_code(Some(&format!("{BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX}42"))),
@@ -79,7 +80,7 @@ fn cell_format_code_accounting_builtins_41_through_44() {
     );
     assert_eq!(
         cell_format_code(Some(&format!("{BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX}43"))),
-        "F2"
+        "N2"
     );
     assert_eq!(
         cell_format_code(Some(&format!("{BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX}44"))),

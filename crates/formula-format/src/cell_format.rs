@@ -6,7 +6,8 @@ use crate::{builtin_format_code, FormatCode, BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREF
 ///
 /// The return value follows Excel's `CELL("format")` conventions for common numeric formats:
 /// - `"G"` for General
-/// - `"F<n>"` for fixed/number formats (`n` = decimal places)
+/// - `"F<n>"` for fixed formats (`n` = decimal places)
+/// - `"N<n>"` for number formats that use the thousands separator (`n` = decimal places)
 /// - `"C<n>"` for currency formats (`n` = decimal places)
 /// - `"P<n>"` for percent formats (`n` = decimal places)
 /// - `"S<n>"` for scientific formats (`n` = decimal places)
@@ -57,6 +58,8 @@ pub fn cell_format_code(format_code: Option<&str>) -> String {
         'P'
     } else if is_scientific_format(pattern) {
         'S'
+    } else if pattern_has_thousands_separator(pattern) {
+        'N'
     } else {
         'F'
     };
@@ -387,6 +390,46 @@ fn count_decimal_places(pattern: &str) -> usize {
     }
 
     if after_decimal { count } else { 0 }
+}
+
+fn pattern_has_thousands_separator(pattern: &str) -> bool {
+    // Excel uses `,` to indicate grouping in number formats. This helper is intentionally simple:
+    // treat any comma outside quoted literals, escapes, and bracket tokens as a thousands
+    // separator. (Scaling commas are also counted for now.)
+    let mut in_quotes = false;
+    let mut escape = false;
+    let mut in_brackets = false;
+
+    for ch in pattern.chars() {
+        if escape {
+            escape = false;
+            continue;
+        }
+
+        if in_quotes {
+            if ch == '"' {
+                in_quotes = false;
+            }
+            continue;
+        }
+
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_quotes = true,
+            '\\' => escape = true,
+            '[' => in_brackets = true,
+            ',' => return true,
+            _ => {}
+        }
+    }
+
+    false
 }
 
 fn is_percent_format(pattern: &str) -> bool {
