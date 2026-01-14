@@ -155,6 +155,52 @@ fn vlookup_compares_record_and_text_by_display_string_case_insensitive() {
 }
 
 #[test]
+fn vlookup_wildcards_compare_record_display_fields_for_pattern_and_candidate() {
+    for bytecode_enabled in [false, true] {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "A1",
+                Value::Record(RecordValue {
+                    display: "CandidateFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("Apple"))]),
+                }),
+            )
+            .unwrap();
+        engine.set_cell_value("Sheet1", "B1", 42.0).unwrap();
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "C1",
+                Value::Record(RecordValue {
+                    display: "PatternFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("App*"))]),
+                }),
+            )
+            .unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "D1", r#"=VLOOKUP(C1, A1:B1, 2, FALSE)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        if bytecode_enabled {
+            assert!(
+                engine.bytecode_program_count() > 0,
+                "expected VLOOKUP formula to compile to bytecode for this test"
+            );
+        }
+
+        assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(42.0));
+    }
+}
+
+#[test]
 fn xmatch_compares_record_and_text_by_display_string_case_insensitive() {
     let mut engine = Engine::new();
     // Ensure we exercise the AST evaluator path, which preserves rich Value variants.
@@ -170,6 +216,52 @@ fn xmatch_compares_record_and_text_by_display_string_case_insensitive() {
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+}
+
+#[test]
+fn hlookup_wildcards_compare_record_display_fields_for_pattern_and_candidate() {
+    for bytecode_enabled in [false, true] {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "A1",
+                Value::Record(RecordValue {
+                    display: "CandidateFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("Apple"))]),
+                }),
+            )
+            .unwrap();
+        engine.set_cell_value("Sheet1", "A2", 42.0).unwrap();
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "B1",
+                Value::Record(RecordValue {
+                    display: "PatternFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("App*"))]),
+                }),
+            )
+            .unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "C1", r#"=HLOOKUP(B1, A1:A2, 2, FALSE)"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        if bytecode_enabled {
+            assert!(
+                engine.bytecode_program_count() > 0,
+                "expected HLOOKUP formula to compile to bytecode for this test"
+            );
+        }
+
+        assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(42.0));
+    }
 }
 
 #[test]
