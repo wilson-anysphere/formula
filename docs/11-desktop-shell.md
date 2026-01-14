@@ -412,6 +412,9 @@ Release CI runs this check on Linux (and, by default, macOS/Windows) **after** t
 (`--no-build`). If you need to temporarily skip it on macOS/Windows (e.g. a hosted-runner regression makes it flaky), set the GitHub Actions
 variable `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) to keep the Linux check while disabling the non-Linux ones.
 
+Linux/CI note: if the check hangs in a headless environment, set `FORMULA_COI_TIMEOUT_SECS=<seconds>` to apply an outer timeout
+(set it to `0` to disable).
+
 To validate `asset://` (i.e. `convertFileSrc`) resources still load under COEP, the repo also includes:
 
 - `apps/desktop/asset-protocol-test.html` (open in the desktop app and follow the instructions on the page)

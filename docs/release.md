@@ -1492,6 +1492,8 @@ Also verify **cross-origin isolation** is enabled in the packaged app (required 
 - From source (recommended preflight): `pnpm -C apps/desktop check:coi`
   - If you already ran a Tauri build (for example `cargo tauri build` / `tauri-action`), you can reuse the built artifacts:
     `pnpm -C apps/desktop check:coi -- --no-build`
+  - Linux/CI note: if the check hangs in a headless environment, set `FORMULA_COI_TIMEOUT_SECS=<seconds>` to apply an outer timeout
+    (set it to `0` to disable).
 - Or in an installed build: ensure there is no startup toast complaining about missing cross-origin isolation, and (if you have DevTools)
    confirm `globalThis.crossOriginIsolated === true`.
 
