@@ -9,15 +9,18 @@ describe("Organize Sheets ribbon wiring", () => {
     const source = readFileSync(mainTsPath, "utf8");
 
     // Ensure the ribbon command id is explicitly handled and opens the dialog.
-    const caseNeedle = 'case "home.cells.format.organizeSheets":';
-    const caseIndex = source.indexOf(caseNeedle);
+    // Be tolerant of minor formatting differences (single vs double quotes, whitespace).
+    const caseMatch = source.match(/case\s+["']home\.cells\.format\.organizeSheets["']\s*:/);
+    expect(caseMatch).not.toBeNull();
+    const caseIndex = caseMatch?.index ?? -1;
     expect(caseIndex).toBeGreaterThanOrEqual(0);
-    expect(source.slice(caseIndex, caseIndex + 250)).toContain("openOrganizeSheets()");
+    expect(source.slice(caseIndex, caseIndex + 300)).toMatch(/openOrganizeSheets\s*\(/);
 
     // Ensure the helper exists and delegates to `openOrganizeSheetsDialog`.
-    const fnNeedle = "function openOrganizeSheets(): void {";
-    const fnIndex = source.indexOf(fnNeedle);
+    const fnMatch = source.match(/function\s+openOrganizeSheets\s*\(/);
+    expect(fnMatch).not.toBeNull();
+    const fnIndex = fnMatch?.index ?? -1;
     expect(fnIndex).toBeGreaterThanOrEqual(0);
-    expect(source.slice(fnIndex, fnIndex + 1200)).toContain("openOrganizeSheetsDialog(");
+    expect(source.slice(fnIndex, fnIndex + 1600)).toContain("openOrganizeSheetsDialog(");
   });
 });
