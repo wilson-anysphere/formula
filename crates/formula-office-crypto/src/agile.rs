@@ -1489,4 +1489,57 @@ pub(crate) mod tests {
         .expect("decrypt derived-iv variant");
         assert!(out.is_empty());
     }
+
+    #[test]
+    fn decrypt_agile_rejects_spin_count_too_large() {
+        // Keep this test cheap: we only want to validate the early guard (and error surfacing),
+        // not actually run an expensive password KDF in CI.
+        let opts = crate::DecryptOptions { max_spin_count: 1 };
+        let spin_count = 2;
+
+        let info = AgileEncryptionInfo {
+            version_major: 4,
+            version_minor: 4,
+            flags: 0,
+            key_data: AgileKeyData {
+                salt: vec![0u8; 16],
+                block_size: 16,
+                key_bits: 256,
+                hash_algorithm: HashAlgorithm::Sha512,
+                cipher_algorithm: "AES".to_string(),
+                cipher_chaining: "ChainingModeCBC".to_string(),
+            },
+            data_integrity: AgileDataIntegrity {
+                // Not used: decryption fails before integrity checks.
+                encrypted_hmac_key: Vec::new(),
+                encrypted_hmac_value: Vec::new(),
+            },
+            password_key_encryptor: AgilePasswordKeyEncryptor {
+                salt: vec![0u8; 16],
+                block_size: 16,
+                key_bits: 256,
+                spin_count,
+                hash_algorithm: HashAlgorithm::Sha512,
+                cipher_algorithm: "AES".to_string(),
+                cipher_chaining: "ChainingModeCBC".to_string(),
+                encrypted_verifier_hash_input: Vec::new(),
+                encrypted_verifier_hash_value: Vec::new(),
+                encrypted_key_value: Vec::new(),
+            },
+        };
+
+        // Empty `EncryptedPackage` payload: 8-byte length prefix only.
+        let encrypted_package = 0u64.to_le_bytes().to_vec();
+        let err = decrypt_agile_encrypted_package(&info, &encrypted_package, "pw", &opts)
+            .expect_err("expected spinCount limit error");
+
+        assert!(
+            matches!(
+                err,
+                OfficeCryptoError::SpinCountTooLarge { spin_count: got, max }
+                    if got == spin_count && max == opts.max_spin_count
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
 }
