@@ -133,6 +133,11 @@ pnpm perf:desktop-startup -- --json target/perf-artifacts/desktop-startup.json
 pnpm perf:desktop-memory -- --json target/perf-artifacts/desktop-memory.json
 ```
 
+The JSON output includes:
+
+- the resolved `perfHome` and per-invocation `profileRoot` paths (plus `perfHomeRel` / `profileRootRel`, which are repo-relative when possible and otherwise fall back to absolute paths)
+- `runs`, per-run `samples`, and a `summary` object (p50/p95 + targets)
+
 To see runner options without building (useful for discovering tuning flags):
 
 ```bash

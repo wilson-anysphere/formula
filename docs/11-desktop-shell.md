@@ -134,6 +134,8 @@ Notes:
   ```bash
   pnpm perf:desktop-startup -- --json target/perf-artifacts/desktop-startup.json
   ```
+  The JSON output includes the resolved `perfHome` + per-invocation `profileRoot` paths (plus
+  `perfHomeRel` / `profileRootRel` display variants), along with per-run `samples` and a `summary`.
 
   A scheduled cross-platform GitHub Actions workflow also runs this benchmark daily and uploads JSON + log artifacts per OS:
   - `.github/workflows/desktop-perf-platform-matrix.yml`
@@ -166,6 +168,8 @@ To save JSON output (samples + summary):
 ```bash
 pnpm perf:desktop-memory -- --json target/perf-artifacts/desktop-memory.json
 ```
+The JSON output includes the resolved `perfHome` + per-invocation `profileRoot` paths (plus
+`perfHomeRel` / `profileRootRel` display variants), along with per-run `samples` and a `summary`.
 
 To see runner options without building:
 
