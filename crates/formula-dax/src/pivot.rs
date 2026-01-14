@@ -1921,6 +1921,7 @@ fn pivot_planned_row_group_by(
     }
 
     let state_template: Vec<AggState> = agg_specs.iter().map(AggState::new).collect();
+    let base_table_key = normalize_ident(base_table);
 
     let row_sets = (!filter.is_empty())
         .then(|| crate::engine::resolve_row_sets(model, filter))
@@ -1949,7 +1950,7 @@ fn pivot_planned_row_group_by(
 
     if let Some(sets) = row_sets.as_ref() {
         let allowed = sets
-            .get(base_table)
+            .get(base_table_key.as_str())
             .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
         for row in allowed.iter_ones() {
             process_row(row)?;
@@ -1997,6 +1998,7 @@ fn pivot_row_scan(
     let table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+    let base_table_key = normalize_ident(base_table);
     let row_sets = (!filter.is_empty())
         .then(|| crate::engine::resolve_row_sets(model, filter))
         .transpose()?;
@@ -2014,7 +2016,7 @@ fn pivot_row_scan(
 
     if let Some(sets) = row_sets.as_ref() {
         let allowed = sets
-            .get(base_table)
+            .get(base_table_key.as_str())
             .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
         for row in allowed.iter_ones() {
             process_row(row)?;
