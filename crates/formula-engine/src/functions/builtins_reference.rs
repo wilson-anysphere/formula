@@ -569,16 +569,16 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let origin_ast = crate::CellAddr::new(origin.row, origin.col);
     let lowered = crate::eval::lower_ast(&parsed, if a1 { None } else { Some(origin_ast) });
 
-    match lowered {
+            match lowered {
         // Validate that the parsed expression is a "simple" static reference (cell or rectangular
         // range) before compiling it. This preserves the historical behavior of rejecting unions,
         // intersections, defined names, structured refs, etc.
         crate::eval::Expr::CellRef(_) | crate::eval::Expr::RangeRef(_) => {
             let mut resolve_sheet = |name: &str| {
-                // Excel's INDIRECT cannot resolve references into external workbooks. Some
-                // evaluation backends may treat bracketed external sheet keys like
-                // `"[Book.xlsx]Sheet1"` as runtime-resolvable sheet names; block them here so we
-                // consistently return `#REF!`.
+                // Avoid interpreting bracketed external sheet keys like `"[Book.xlsx]Sheet1"` as a
+                // local sheet name (a workbook could contain such a sheet name). External workbook
+                // refs are represented separately by the parser/lowerer and do not go through this
+                // resolver.
                 if name.starts_with('[') {
                     return None;
                 }
@@ -597,10 +597,7 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             match ctx.eval_arg(&compiled) {
                 ArgValue::Reference(r) => {
                     // Excel semantics: INDIRECT does not resolve references into external
-                    // workbooks (even if an external value provider is configured). This keeps
-                    // diagnostics consistent across backends and avoids introducing dynamic
-                    // external dependencies that are not represented in the dependency graph /
-                    // precedents API.
+                    // workbooks (even if an external value provider is configured).
                     if matches!(&r.sheet_id, crate::functions::SheetId::External(_)) {
                         Value::Error(ErrorKind::Ref)
                     } else {

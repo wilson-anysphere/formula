@@ -558,19 +558,20 @@ impl CreatePivotTableRequest {
                 .map(|vf| {
                     let field = vf.field;
                     let source_field = pivot_field_ref_from_legacy_string(field);
+                    let aggregation = vf.aggregation;
                     let name = vf
                         .name
                         .unwrap_or_else(|| {
                             format!(
                                 "{:?} of {}",
-                                vf.aggregation,
+                                aggregation,
                                 pivot_field_ref_caption(&source_field)
                             )
                         });
                     ValueField {
                         source_field,
                         name,
-                        aggregation: vf.aggregation,
+                        aggregation,
                         number_format: None,
                         show_as: None,
                         base_field: None,
@@ -581,11 +582,13 @@ impl CreatePivotTableRequest {
             filter_fields: self
                 .filter_fields
                 .into_iter()
-                .map(|f| FilterField {
-                    source_field: pivot_field_ref_from_legacy_string(f.field),
-                    allowed: f
-                        .allowed
-                        .map(|vals| vals.into_iter().map(|v| v.to_key_part()).collect()),
+                .map(|f| {
+                    let CreatePivotFilterSpec { field, allowed } = f;
+                    FilterField {
+                        source_field: pivot_field_ref_from_legacy_string(field),
+                        allowed: allowed
+                            .map(|vals| vals.into_iter().map(|v| v.to_key_part()).collect()),
+                    }
                 })
                 .collect(),
             calculated_fields: self.calculated_fields.unwrap_or_default(),

@@ -1574,6 +1574,7 @@ fn getpivotdata_from_registry(
         .collect();
 
     'records: for record in &pivot.cache.records {
+        // Apply pivot-config filter fields (report filters / slicers).
         for &(idx, allowed) in &pivot_filter_indices {
             let pv = record.get(idx).unwrap_or(&PivotEngineValue::Blank);
             if !allowed.contains(&pivot_engine_value_to_key_part(pv)) {

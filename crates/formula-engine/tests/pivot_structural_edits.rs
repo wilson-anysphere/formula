@@ -1,6 +1,6 @@
 use formula_engine::pivot::{
-    AggregationType, GrandTotals, Layout, PivotConfig, PivotDestination, PivotField, PivotFieldRef,
-    PivotSource, PivotTableDefinition, SubtotalPosition, ValueField,
+    AggregationType, GrandTotals, Layout, PivotConfig, PivotDestination, PivotField, PivotSource,
+    PivotTableDefinition, SubtotalPosition, ValueField,
 };
 use formula_engine::{EditOp, Engine, Value};
 use formula_model::{CellRef, Range};
@@ -36,7 +36,7 @@ fn sum_sales_by_region_config() -> PivotConfig {
         row_fields: vec![PivotField::new("Region")],
         column_fields: vec![],
         value_fields: vec![ValueField {
-            source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+            source_field: "Sales".into(),
             name: "Sum of Sales".to_string(),
             aggregation: AggregationType::Sum,
             number_format: None,

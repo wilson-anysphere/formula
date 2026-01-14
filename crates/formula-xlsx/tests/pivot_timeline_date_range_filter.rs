@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use formula_engine::pivot::{
-    AggregationType, GrandTotals, Layout, PivotCache, PivotConfig, PivotField, PivotFieldRef,
-    PivotTable, PivotValue, SubtotalPosition, ValueField,
+    AggregationType, GrandTotals, Layout, PivotCache, PivotConfig, PivotField, PivotTable,
+    PivotValue, SubtotalPosition, ValueField,
 };
 use formula_xlsx::pivots::engine_bridge::{pivot_cache_to_engine_source, timeline_selection_to_engine_filter};
 use formula_xlsx::{PivotCacheDefinition, PivotCacheField, PivotCacheRecordsReader, TimelineSelectionState};
@@ -39,7 +39,7 @@ fn timeline_date_range_filters_by_date_values_in_pivot_cache() {
         row_fields: vec![PivotField::new("OrderDate")],
         column_fields: vec![],
         value_fields: vec![ValueField {
-            source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
+            source_field: "Sales".into(),
             name: "Sum of Sales".to_string(),
             aggregation: AggregationType::Sum,
             number_format: None,
