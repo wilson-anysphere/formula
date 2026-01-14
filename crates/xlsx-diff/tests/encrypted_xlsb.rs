@@ -3,12 +3,14 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use ms_offcrypto_writer::Ecma376AgileWriter;
+use rand::{rngs::StdRng, SeedableRng as _};
 
 const PASSWORD: &str = "correct-horse-battery-staple";
 
 fn encrypt_ooxml_with_password(plaintext_zip: &[u8], password: &str) -> Result<Vec<u8>> {
     let mut cursor = Cursor::new(Vec::<u8>::new());
-    let mut writer = Ecma376AgileWriter::create(&mut rand::rng(), password, &mut cursor)
+    let mut rng = StdRng::from_seed([0u8; 32]);
+    let mut writer = Ecma376AgileWriter::create(&mut rng, password, &mut cursor)
         .context("create Ecma376AgileWriter")?;
     writer
         .write_all(plaintext_zip)

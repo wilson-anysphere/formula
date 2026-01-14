@@ -11,6 +11,7 @@ use std::io::{Cursor, Write as _};
 use formula_io::{open_workbook_model_with_password, open_workbook_with_password, Error, Workbook};
 use formula_model::{CellRef, CellValue};
 use ms_offcrypto_writer::Ecma376AgileWriter;
+use rand::{rngs::StdRng, SeedableRng as _};
 
 fn build_tiny_xlsx() -> Vec<u8> {
     let mut workbook = formula_model::Workbook::new();
@@ -28,7 +29,8 @@ fn build_tiny_xlsx() -> Vec<u8> {
 
 fn encrypt_bytes_with_password(plain: &[u8], password: &str) -> Vec<u8> {
     let mut cursor = Cursor::new(Vec::new());
-    let mut agile = Ecma376AgileWriter::create(&mut rand::rng(), password, &mut cursor)
+    let mut rng = StdRng::from_seed([0u8; 32]);
+    let mut agile = Ecma376AgileWriter::create(&mut rng, password, &mut cursor)
         .expect("create agile writer");
     agile
         .write_all(plain)

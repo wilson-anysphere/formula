@@ -7,6 +7,7 @@ use std::io::{Cursor, Write as _};
 use std::path::{Path, PathBuf};
 
 use ms_offcrypto_writer::Ecma376AgileWriter;
+use rand::{rngs::StdRng, SeedableRng as _};
 
 use formula_io::{
     detect_workbook_format, open_workbook_model, open_workbook_model_with_password,
@@ -32,8 +33,9 @@ fn build_tiny_xlsx() -> Vec<u8> {
 
 fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
     let mut cursor = Cursor::new(Vec::new());
+    let mut rng = StdRng::from_seed([0u8; 32]);
     let mut agile =
-        Ecma376AgileWriter::create(&mut rand::rng(), password, &mut cursor).expect("create agile");
+        Ecma376AgileWriter::create(&mut rng, password, &mut cursor).expect("create agile");
     agile
         .write_all(plain_zip)
         .expect("write plaintext zip to agile writer");
