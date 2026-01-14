@@ -609,6 +609,11 @@ key (32 bytes, CryptDeriveKey expansion) =
   de5451b9dc3fcb383792cbeec80b6bc3
   0795c2705e075039407199f7d299b6e4
 
+// AES-192 uses the same derivation output, truncated to 24 bytes:
+key (24 bytes, AES-192) =
+  de5451b9dc3fcb383792cbeec80b6bc3
+  0795c2705e075039
+
 `EncryptedPackage` for baseline Standard AES is decrypted with **AES-ECB** and uses **no IV**.
 
 ### 8.1) AES-128 + AES-ECB `EncryptedPackage` sanity check (real file bytes)
