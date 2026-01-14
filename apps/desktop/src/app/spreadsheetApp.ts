@@ -24689,17 +24689,17 @@ export class SpreadsheetApp {
       await provider.write(payload);
       this.clipboardCopyContext = { range, payload, cells };
     } catch (err) {
-      const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
-      if (isDlpViolation) {
-        try {
-          const message =
-            typeof (err as any)?.message === "string" && (err as any).message.trim()
-              ? String((err as any).message)
-              : "Copy blocked by data loss prevention policy.";
-          // Blocking copy/cut is expected under strict DLP policies; present this as a warning
-          // (rather than an "error") so it reads as a policy restriction instead of a crash.
-          showToast(message, "warning");
-        } catch {
+        const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
+        if (isDlpViolation) {
+          try {
+            const message =
+              typeof (err as any)?.message === "string" && (err as any).message.trim()
+                ? String((err as any).message).trim()
+                : "Copy blocked by data loss prevention policy.";
+            // Blocking copy/cut is expected under strict DLP policies; present this as a warning
+            // (rather than an "error") so it reads as a policy restriction instead of a crash.
+            showToast(message, "warning");
+          } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
         return;
@@ -25449,7 +25449,7 @@ export class SpreadsheetApp {
         try {
           const message =
             typeof (err as any)?.message === "string" && (err as any).message.trim()
-              ? String((err as any).message)
+              ? String((err as any).message).trim()
               : "Cut blocked by data loss prevention policy.";
           // See `copySelectionToClipboard` for rationale.
           showToast(message, "warning");

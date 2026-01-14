@@ -170,6 +170,7 @@ export function CollabVersionHistoryPanel({
   const selectedIsCheckpoint = selectedVersion?.kind === "checkpoint";
   const selectedLocked = selectedIsCheckpoint ? Boolean(selectedVersion?.checkpointLocked) : false;
   const selectedAnnotations = selectedIsCheckpoint ? (selectedVersion?.checkpointAnnotations ?? "") : "";
+  const selectedAnnotationsTrimmed = selectedAnnotations.trim();
 
   const versioningReady = Boolean(collabVersioning);
 
@@ -425,8 +426,8 @@ export function CollabVersionHistoryPanel({
             {selectedIsCheckpoint && selectedLocked ? ` • ${t("versionHistory.meta.locked")}` : ""}
           </div>
 
-          {selectedIsCheckpoint && selectedAnnotations.trim() ? (
-            <div className="collab-version-history__details-annotations">{selectedAnnotations}</div>
+          {selectedIsCheckpoint && selectedAnnotationsTrimmed ? (
+            <div className="collab-version-history__details-annotations">{selectedAnnotationsTrimmed}</div>
           ) : null}
         </div>
       ) : null}
