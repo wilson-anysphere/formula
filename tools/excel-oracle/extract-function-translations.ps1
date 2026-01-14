@@ -323,6 +323,9 @@ try {
       if (-not $localizedName) {
         throw "Failed to parse localized name from FormulaLocal: $local"
       }
+      if ($localizedName.StartsWith("#")) {
+        throw "Unexpected FormulaLocal (appears to be an error literal): $local"
+      }
 
       $translations[$canonicalName] = $localizedName
     } catch {
