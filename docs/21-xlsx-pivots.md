@@ -214,22 +214,20 @@ intentionally ignore fidelity-sensitive options:
      join that information with pivot cache field metadata (e.g. `baseField` → cache field name) to
      produce a stable “this slicer filters field X” mapping.
 
-3) **1904 timeline serial conversion**
-   - Timeline selection parsing can fall back to interpreting numeric values as Excel serial dates,
-     but it currently assumes the **1900** date system. Workbooks using the **1904** date system
-     will be off by 1462 days.
-
-4) **Pivot table sort/manual ordering (partial)**
+3) **Pivot table sort/manual ordering (partial)**
    - We parse `pivotField@sortType` and best-effort manual item ordering (including shared-item
      indices when `sharedItems` metadata is available) and map it into the pivot-engine config.
    - Remaining work: support the full range of Excel sort options (e.g. sorting by a value field),
      and ensure round-trip fidelity for all sort-related XML.
 
-5) **`showDataAs` fidelity (partial)**
-   - We map `dataField@showDataAs` into pivot-engine `ValueField.show_as`, and also map
-     `baseField`/`baseItem` into engine `base_field`/`base_item` when possible.
-   - The pivot engine currently implements only a subset of Excel’s “Show Values As”
-     transformations; unsupported variants are treated as normal values.
+4) **`showDataAs` fidelity (partial)**
+    - We map `dataField@showDataAs` into pivot-engine `ValueField.show_as`, and also map
+      `baseField`/`baseItem` into engine `base_field`/`base_item` when possible.
+    - The pivot engine now implements all `ShowAsType` variants currently represented in the
+      `formula-model` schema (including base-item show-as variants like `percentOf` and
+      `percentDifferenceFrom`).
+    - Remaining work: expand the schema + bridge to cover additional Excel `showDataAs` variants not
+      currently modeled (those will currently be treated as normal values).
 
 ---
 
@@ -251,10 +249,10 @@ This is the rough sequencing we expect to follow for pivot-related fidelity work
    - Respect workbook `date1904` when interpreting timeline serial values.
 
 4) **Pivot table display fidelity**
-   - Parse and preserve sort/manual ordering.
-   - `showDataAs` mapping is now wired into the engine config; remaining work is to implement the
-     missing “show as” transformations and ensure we can round-trip the corresponding XML without
-     normalization.
+    - Parse and preserve sort/manual ordering.
+    - `showDataAs` mapping is wired into the engine config and the current set of modeled
+      transformations are implemented in `formula-engine`; remaining work is to extend the modeled
+      set of Excel variants and preserve/round-trip the corresponding XML without normalization.
 
 5) **Authoring/editing pivots**
    - Move beyond “preserve and parse” into “modify and write”: controlled updates to
