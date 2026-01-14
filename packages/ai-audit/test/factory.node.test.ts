@@ -135,6 +135,14 @@ describe("createDefaultAIAuditStore (node entrypoint)", () => {
     await closeIfSupported(store);
   });
 
+  it('prefer: "sqlite" propagates bounded options', async () => {
+    const store = await createDefaultAIAuditStore({ prefer: "sqlite", bounded: { max_entry_chars: 123 } });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    expect((store as BoundedAIAuditStore).maxEntryChars).toBe(123);
+    expect(unwrap(store)).toBeInstanceOf(SqliteAIAuditStore);
+    await closeIfSupported(store);
+  });
+
   it('prefer: "sqlite" respects bounded:false', async () => {
     const store = await createDefaultAIAuditStore({ prefer: "sqlite", bounded: false });
     expect(store).toBeInstanceOf(SqliteAIAuditStore);

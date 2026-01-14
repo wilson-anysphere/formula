@@ -287,6 +287,19 @@ describe("createDefaultAIAuditStore", () => {
     expect((store as any).store).toBeInstanceOf(IndexedDbAIAuditStore);
   });
 
+  it("propagates bounded options to the default wrapper", async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+    (globalThis as any).indexedDB = indexedDB;
+    (globalThis as any).IDBKeyRange = IDBKeyRange;
+
+    const store = await createDefaultAIAuditStore({ bounded: { max_entry_chars: 123 } });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    expect((store as BoundedAIAuditStore).maxEntryChars).toBe(123);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).store).toBeInstanceOf(IndexedDbAIAuditStore);
+  });
+
   it("defaults to MemoryAIAuditStore in Node runtimes (no window)", async () => {
     // Ensure we don't accidentally treat the test environment as browser-like.
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
