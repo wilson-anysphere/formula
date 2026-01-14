@@ -1302,6 +1302,23 @@ pub fn build_formula_array_constant_continued_rgcb_string_fixture_xls() -> Vec<u
     ole.into_inner().into_inner()
 }
 
+/// Like [`build_formula_array_constant_continued_rgcb_string_fixture_xls`], but the continued string
+/// segment is stored in the *compressed* (single-byte) form (`fHighByte=0`).
+pub fn build_formula_array_constant_continued_rgcb_string_compressed_fixture_xls() -> Vec<u8> {
+    let workbook_stream =
+        build_formula_array_constant_continued_rgcb_string_compressed_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where only the
 /// non-anchor cell (`B1`) has a formatted `BLANK` record.
 ///
@@ -9400,6 +9417,15 @@ fn build_formula_array_constant_continued_rgcb_string_workbook_stream() -> Vec<u
     build_single_sheet_workbook_stream("ArrayConstStr", &sheet_stream, 1252)
 }
 
+fn build_formula_array_constant_continued_rgcb_string_compressed_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream =
+        build_formula_array_constant_continued_rgcb_string_compressed_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("ArrayConstStrCompressed", &sheet_stream, 1252)
+}
+
 fn build_formula_array_constant_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -9479,6 +9505,65 @@ fn build_formula_array_constant_continued_rgcb_string_sheet_stream(xf_cell: u16)
     let mut cont = Vec::new();
     cont.push(1); // continued segment option flags (fHighByte=1)
     cont.extend_from_slice(rest);
+    push_record(&mut sheet, RECORD_CONTINUE, &cont);
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_formula_array_constant_continued_rgcb_string_compressed_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Formula: SUM({\"ABCDE\"})
+    let rgce = [
+        0x20u8, // PtgArray
+        0, 0, 0, 0, 0, 0, 0, // 7-byte header
+        0x22, // PtgFuncVar
+        0x01, // argc=1
+        0x04, 0x00, // iftab=4 (SUM)
+    ];
+
+    let rgcb = rgcb_array_constant_string_1x1("ABCDE");
+    let full_payload = formula_cell_with_rgcb(0, 0, xf_cell, 0.0, &rgce, &rgcb);
+
+    // Split the rgcb string's UTF-16 bytes across a CONTINUE boundary after 2 characters. The
+    // continued fragment is stored in compressed form (fHighByte=0), so we emit single-byte
+    // characters and rely on the importer to expand them back to canonical UTF-16LE.
+    let formula_header_len = 22usize;
+    let rgce_len = rgce.len();
+    let rgcb_string_prefix_len = 4 /* dims */ + 1 /* ty */ + 2 /* cch */;
+    let start_utf16 = formula_header_len + rgce_len + rgcb_string_prefix_len;
+    let split_at = start_utf16 + 4; // two UTF-16 code units ("AB")
+    let (part1, rest_utf16) = full_payload.split_at(split_at);
+
+    push_record(&mut sheet, RECORD_FORMULA, part1);
+
+    let mut rest_compressed = Vec::with_capacity(rest_utf16.len() / 2);
+    assert!(
+        rest_utf16.len() % 2 == 0,
+        "expected UTF-16LE payload to have even length"
+    );
+    for chunk in rest_utf16.chunks_exact(2) {
+        assert_eq!(chunk[1], 0, "expected ASCII string for compressed segment");
+        rest_compressed.push(chunk[0]);
+    }
+
+    let mut cont = Vec::new();
+    cont.push(0); // continued segment option flags (fHighByte=0 => compressed)
+    cont.extend_from_slice(&rest_compressed);
     push_record(&mut sheet, RECORD_CONTINUE, &cont);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
