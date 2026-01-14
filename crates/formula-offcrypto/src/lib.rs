@@ -1935,13 +1935,31 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
 
     let mut encryption_info = Vec::new();
     {
-        let mut stream = ole.open_stream("EncryptionInfo").map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                OffcryptoError::InvalidStructure("missing `EncryptionInfo` stream".to_string())
-            } else {
-                OffcryptoError::InvalidStructure(format!("failed to open `EncryptionInfo`: {e}"))
+        let mut stream = match ole.open_stream("EncryptionInfo") {
+            Ok(stream) => stream,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                // Some CFB implementations treat stream paths as absolute and require a leading `/`.
+                // Be permissive and try both.
+                match ole.open_stream("/EncryptionInfo") {
+                    Ok(stream) => stream,
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                        return Err(OffcryptoError::InvalidStructure(
+                            "missing `EncryptionInfo` stream".to_string(),
+                        ));
+                    }
+                    Err(err) => {
+                        return Err(OffcryptoError::InvalidStructure(format!(
+                            "failed to open `EncryptionInfo`: {err}"
+                        )));
+                    }
+                }
             }
-        })?;
+            Err(err) => {
+                return Err(OffcryptoError::InvalidStructure(format!(
+                    "failed to open `EncryptionInfo`: {err}"
+                )));
+            }
+        };
         stream
             .read_to_end(&mut encryption_info)
             .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to read `EncryptionInfo`: {e}")))?;
@@ -1974,13 +1992,29 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
 
     let mut encrypted_package = Vec::new();
     {
-        let mut stream = ole.open_stream("EncryptedPackage").map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                OffcryptoError::InvalidStructure("missing `EncryptedPackage` stream".to_string())
-            } else {
-                OffcryptoError::InvalidStructure(format!("failed to open `EncryptedPackage`: {e}"))
+        let mut stream = match ole.open_stream("EncryptedPackage") {
+            Ok(stream) => stream,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                match ole.open_stream("/EncryptedPackage") {
+                    Ok(stream) => stream,
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                        return Err(OffcryptoError::InvalidStructure(
+                            "missing `EncryptedPackage` stream".to_string(),
+                        ));
+                    }
+                    Err(err) => {
+                        return Err(OffcryptoError::InvalidStructure(format!(
+                            "failed to open `EncryptedPackage`: {err}"
+                        )));
+                    }
+                }
             }
-        })?;
+            Err(err) => {
+                return Err(OffcryptoError::InvalidStructure(format!(
+                    "failed to open `EncryptedPackage`: {err}"
+                )));
+            }
+        };
         stream
             .read_to_end(&mut encrypted_package)
             .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to read `EncryptedPackage`: {e}")))?;
