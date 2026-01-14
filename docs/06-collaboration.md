@@ -259,6 +259,7 @@ Normalization + dedupe (write support):
 
 - `EncryptedRangeManager` normalizes `metadata.encryptedRanges` into the canonical `Y.Array` + local `Y.Map` entry constructors **before** applying undo-tracked edits. This avoids Yjs `instanceof` pitfalls when a doc was hydrated using a different Yjs module instance (ESM vs CJS), and ensures collaborative undo only captures the user’s explicit change.
 - During normalization it drops malformed entries and dedupes duplicates, including identical ranges with different ids (e.g. from concurrent inserts).
+- If `metadata.encryptedRanges` is present but in an unknown schema (neither `Y.Array`, `Y.Map`, nor a plain JS array), `EncryptedRangeManager` throws rather than clobbering potentially-newer data.
 
 APIs (source: [`packages/collab/encrypted-ranges/src/index.ts`](../packages/collab/encrypted-ranges/src/index.ts)):
 
