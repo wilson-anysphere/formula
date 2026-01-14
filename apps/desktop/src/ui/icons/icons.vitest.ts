@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { stripComments } from "../../__tests__/sourceTextUtils";
+
 function listIconSourceFiles(dir: string) {
   return readdirSync(dir)
     .filter((name) => name.endsWith(".tsx"))
@@ -15,11 +17,11 @@ describe("ui/icons", () => {
   it("does not introduce hardcoded colors and uses Icon base component", () => {
     const iconsDir = dirname(fileURLToPath(import.meta.url));
     const files = listIconSourceFiles(iconsDir);
-    const indexSrc = readFileSync(join(iconsDir, "index.ts"), "utf8");
+    const indexSrc = stripComments(readFileSync(join(iconsDir, "index.ts"), "utf8"));
 
     for (const file of files) {
       const fullPath = join(iconsDir, file);
-      const src = readFileSync(fullPath, "utf8");
+      const src = stripComments(readFileSync(fullPath, "utf8"));
       const exportName = file.replace(/\.tsx$/, "");
 
       // All icon components should go through the shared base component (so sizing,

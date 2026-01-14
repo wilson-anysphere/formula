@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { stripComments } from "../../__tests__/sourceTextUtils";
+
 describe("Tauri capabilities", () => {
   function readPermissions(): unknown[] {
     const capabilityPath = fileURLToPath(new URL("../../../src-tauri/capabilities/main.json", import.meta.url));
@@ -164,7 +166,7 @@ describe("Tauri capabilities", () => {
 
     // Avoid concatenating all runtime source into one giant string (perf/memory).
     for (const runtimePath of runtimeFiles) {
-      const runtimeText = readFileSync(runtimePath, "utf8");
+      const runtimeText = stripComments(readFileSync(runtimePath, "utf8"));
 
       for (const match of runtimeText.matchAll(invokeCall)) {
         const cmd = match[2].trim();

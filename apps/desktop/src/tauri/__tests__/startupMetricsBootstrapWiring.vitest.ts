@@ -2,12 +2,12 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { stripComments } from "../../__tests__/sourceTextUtils";
+import { stripComments, stripHtmlComments } from "../../__tests__/sourceTextUtils";
 
 describe("startup metrics bootstrap wiring", () => {
   it("loads startupMetricsBootstrap before main.ts in index.html (allows JS to report before the full app graph loads)", () => {
     const indexUrl = new URL("../../../index.html", import.meta.url);
-    const source = readFileSync(indexUrl, "utf8");
+    const source = stripHtmlComments(readFileSync(indexUrl, "utf8"));
 
     const bootstrapIdx = source.indexOf('src="/src/tauri/startupMetricsBootstrap.ts"');
     const mainIdx = source.indexOf('src="/src/main.ts"');

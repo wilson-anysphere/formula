@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { stripHtmlComments } from "../../__tests__/sourceTextUtils";
+
 function loadTauriConfig(): any {
   const tauriConfUrl = new URL("../../../src-tauri/tauri.conf.json", import.meta.url);
   return JSON.parse(readFileSync(tauriConfUrl, "utf8")) as any;
@@ -8,7 +10,7 @@ function loadTauriConfig(): any {
 
 function loadInfoPlistText(): string {
   const infoPlistUrl = new URL("../../../src-tauri/Info.plist", import.meta.url);
-  return readFileSync(infoPlistUrl, "utf8");
+  return stripHtmlComments(readFileSync(infoPlistUrl, "utf8"));
 }
 
 function normalizeExt(ext: string): string {
@@ -92,4 +94,3 @@ describe("Info.plist desktop integration guardrails", () => {
     }
   });
 });
-

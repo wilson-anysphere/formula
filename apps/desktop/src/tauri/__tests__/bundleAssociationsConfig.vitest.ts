@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { stripHtmlComments } from "../../__tests__/sourceTextUtils";
+
 function loadTauriConfig(): any {
   const tauriConfUrl = new URL("../../../src-tauri/tauri.conf.json", import.meta.url);
   return JSON.parse(readFileSync(tauriConfUrl, "utf8")) as any;
@@ -140,7 +142,7 @@ describe("tauri.conf.json bundle association guardrails", () => {
     expect(identifier, "expected tauri.conf.json identifier to be configured").toBeTruthy();
 
     const xmlUrl = new URL(`../../../src-tauri/mime/${identifier}.xml`, import.meta.url);
-    const xml = readFileSync(xmlUrl, "utf8");
+    const xml = stripHtmlComments(readFileSync(xmlUrl, "utf8"));
     expect(xml).toContain('mime-type type="application/vnd.apache.parquet"');
     expect(xml).toContain('glob pattern="*.parquet"');
   });

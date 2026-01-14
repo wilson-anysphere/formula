@@ -75,7 +75,9 @@ describe("oauthRedirectIpc wiring", () => {
     // Accept `const x = listen("oauth-redirect", ...); x.then(() => emit("oauth-redirect-ready"))`
     // and close equivalents (e.g. `await x; emit(...)`).
     // Count in the full entrypoint so we catch accidental early/unconditional emits elsewhere.
-    const emitReadyMatches = Array.from(source.matchAll(/\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/g));
+    const emitReadyMatches = Array.from(
+      stripComments(source).matchAll(/\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/g),
+    );
     expect(emitReadyMatches).toHaveLength(1);
 
     const escapeForRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

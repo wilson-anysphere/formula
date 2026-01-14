@@ -215,3 +215,320 @@ export function stripComments(source: string): string {
   }
   return out;
 }
+
+export function stripCssComments(css: string): string {
+  // Strip CSS block comments while preserving string literals and newlines.
+  //
+  // This is used by source-scanning guardrail tests so commented-out selectors/declarations
+  // cannot satisfy or fail assertions.
+  const text = String(css);
+  let out = "";
+  type State = "code" | "single" | "double" | "comment";
+  let state: State = "code";
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!;
+    const next = i + 1 < text.length ? text[i + 1]! : "";
+
+    if (state === "comment") {
+      if (ch === "*" && next === "/") {
+        out += "  ";
+        i += 1;
+        state = "code";
+        continue;
+      }
+      out += ch === "\n" ? "\n" : " ";
+      continue;
+    }
+
+    if (state === "code") {
+      if (ch === "/" && next === "*") {
+        out += "  ";
+        i += 1;
+        state = "comment";
+        continue;
+      }
+
+      if (ch === "'") {
+        state = "single";
+        out += ch;
+        continue;
+      }
+
+      if (ch === '"') {
+        state = "double";
+        out += ch;
+        continue;
+      }
+
+      out += ch;
+      continue;
+    }
+
+    // String literal (single/double quote): preserve content and escapes.
+    out += ch;
+    if (ch === "\\") {
+      if (next) {
+        out += next;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (state === "single" && ch === "'") {
+      state = "code";
+    } else if (state === "double" && ch === '"') {
+      state = "code";
+    }
+  }
+
+  return out;
+}
+
+export function stripHtmlComments(html: string): string {
+  // Strip HTML/XML comments (`<!-- ... -->`) while preserving newlines.
+  //
+  // Guardrail tests should not treat commented-out markup as present.
+  const text = String(html);
+  let out = "";
+
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.startsWith("<!--", i)) {
+      out += "    "; // `<!--`
+      i += 4;
+      while (i < text.length && !text.startsWith("-->", i)) {
+        out += text[i] === "\n" ? "\n" : " ";
+        i += 1;
+      }
+      if (i < text.length) {
+        out += "   "; // `-->`
+        i += 2;
+      } else {
+        break;
+      }
+      continue;
+    }
+
+    out += text[i]!;
+  }
+
+  return out;
+}
+
+export function stripHashComments(source: string): string {
+  // Strip `# ...` comments (YAML/shell-style) while preserving quoted strings and newlines.
+  //
+  // This is a lightweight helper for workflow/docs guardrails that scan text files where
+  // commented-out commands/flags must not satisfy assertions.
+  const text = String(source);
+  let out = "";
+  type State = "code" | "single" | "double";
+  let state: State = "code";
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!;
+    const next = i + 1 < text.length ? text[i + 1]! : "";
+    const prev = i > 0 ? text[i - 1]! : "";
+
+    if (state === "code") {
+      if (ch === "'") {
+        state = "single";
+        out += ch;
+        continue;
+      }
+
+      if (ch === '"') {
+        state = "double";
+        out += ch;
+        continue;
+      }
+
+      const startsLine = i === 0 || prev === "\n";
+      if (ch === "#" && (startsLine || /\s/.test(prev))) {
+        while (i < text.length && text[i] !== "\n") {
+          out += " ";
+          i += 1;
+        }
+        if (i < text.length) out += "\n";
+        continue;
+      }
+
+      out += ch;
+      continue;
+    }
+
+    // String literals: preserve as-is so `#` inside quotes doesn't get stripped.
+    out += ch;
+    if (state === "double" && ch === "\\") {
+      if (next) {
+        out += next;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (state === "single" && ch === "'" && next === "'") {
+      // YAML-style single-quote escaping: `''` => literal `'`.
+      out += next;
+      i += 1;
+      continue;
+    }
+
+    if (state === "single" && ch === "'") {
+      state = "code";
+    } else if (state === "double" && ch === '"') {
+      state = "code";
+    }
+  }
+
+  return out;
+}
+
+function parseRustRawStringStart(source: string, start: number): { endQuote: number; hashCount: number } | null {
+  // Rust raw strings:
+  // - r"..." / r#"..."# / r##"..."## / ...
+  // - br"..." / br#"..."# / ...
+  let i = start;
+  if (source[i] === "b" && source[i + 1] === "r") {
+    i += 2;
+  } else if (source[i] === "r") {
+    i += 1;
+  } else {
+    return null;
+  }
+
+  let hashCount = 0;
+  while (source[i] === "#") {
+    hashCount += 1;
+    i += 1;
+  }
+
+  if (source[i] !== '"') return null;
+  return { endQuote: i, hashCount };
+}
+
+export function stripRustComments(source: string): string {
+  // Strip Rust `//` and `/* */` comments while preserving string literals and newlines.
+  //
+  // Rust block comments are nestable; this is a best-effort implementation sufficient for
+  // source-scanning guardrails in tests (e.g. extracting event names / const definitions).
+  const text = String(source);
+  let out = "";
+  type State = "code" | "string" | "rawString" | "lineComment" | "blockComment";
+  let state: State = "code";
+  let rawHashCount = 0;
+  let blockDepth = 0;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!;
+    const next = i + 1 < text.length ? text[i + 1]! : "";
+
+    if (state === "lineComment") {
+      if (ch === "\n") {
+        out += "\n";
+        state = "code";
+      } else {
+        out += " ";
+      }
+      continue;
+    }
+
+    if (state === "blockComment") {
+      if (ch === "/" && next === "*") {
+        out += "  ";
+        i += 1;
+        blockDepth += 1;
+        continue;
+      }
+      if (ch === "*" && next === "/") {
+        out += "  ";
+        i += 1;
+        blockDepth -= 1;
+        if (blockDepth <= 0) {
+          blockDepth = 0;
+          state = "code";
+        }
+        continue;
+      }
+      out += ch === "\n" ? "\n" : " ";
+      continue;
+    }
+
+    if (state === "string") {
+      out += ch;
+      if (ch === "\\") {
+        if (next) {
+          out += next;
+          i += 1;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        state = "code";
+      }
+      continue;
+    }
+
+    if (state === "rawString") {
+      out += ch;
+      if (ch === '"') {
+        let ok = true;
+        for (let j = 0; j < rawHashCount; j += 1) {
+          if (text[i + 1 + j] !== "#") {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) {
+          for (let j = 0; j < rawHashCount; j += 1) out += "#";
+          i += rawHashCount;
+          state = "code";
+        }
+      }
+      continue;
+    }
+
+    // code
+    const rawStart = parseRustRawStringStart(text, i);
+    if (rawStart) {
+      const { endQuote, hashCount } = rawStart;
+      out += text.slice(i, endQuote + 1);
+      i = endQuote;
+      state = "rawString";
+      rawHashCount = hashCount;
+      continue;
+    }
+
+    if (ch === "b" && next === '"') {
+      out += 'b"';
+      i += 1;
+      state = "string";
+      continue;
+    }
+
+    if (ch === '"') {
+      out += ch;
+      state = "string";
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      out += "  ";
+      i += 1;
+      state = "lineComment";
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      out += "  ";
+      i += 1;
+      state = "blockComment";
+      blockDepth = 1;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}

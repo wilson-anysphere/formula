@@ -135,7 +135,7 @@ function extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaCom
 
 function extractImplementedCommandIdsFromRibbonCommandHandlersTs(schemaCommandIds: Set<string>): Set<string> {
   const handlerPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
-  const source = readFileSync(handlerPath, "utf8");
+  const source = stripComments(readFileSync(handlerPath, "utf8"));
   const ids = new Set<string>();
   for (const match of source.matchAll(/case\s+["']([^"']+)["']/g)) {
     const id = match[1]!;

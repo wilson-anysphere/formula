@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { stripComments } from "../../__tests__/sourceTextUtils";
+
 function listRibbonIconSourceFiles(dir: string) {
   return readdirSync(dir)
     .filter((name) => name.endsWith(".tsx"))
@@ -17,7 +19,7 @@ describe("ribbon/icons", () => {
     const files = listRibbonIconSourceFiles(iconsDir);
 
     for (const file of files) {
-      const src = readFileSync(join(iconsDir, file), "utf8");
+      const src = stripComments(readFileSync(join(iconsDir, file), "utf8"));
 
       expect(src, `${file} should not contain hex colors`).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
       expect(src, `${file} should not contain rgb()/hsl() colors`).not.toMatch(/\b(?:rgb|hsl)a?\(/);
@@ -37,8 +39,7 @@ describe("ribbon/icons", () => {
 
   it("uses the shared <Icon> base component for custom ribbon icons", () => {
     const iconsDir = join(dirname(fileURLToPath(import.meta.url)), "../icons");
-    const commonIconsSrc = readFileSync(join(iconsDir, "commonIcons.tsx"), "utf8");
+    const commonIconsSrc = stripComments(readFileSync(join(iconsDir, "commonIcons.tsx"), "utf8"));
     expect(commonIconsSrc).toContain("<Icon");
   });
 });
-

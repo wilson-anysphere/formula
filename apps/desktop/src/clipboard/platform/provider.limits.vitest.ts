@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
 
 import { CLIPBOARD_LIMITS } from "./provider.js";
+import { stripRustComments } from "../../__tests__/sourceTextUtils";
 
 function readRustConstExpression(source: string, constName: string): string {
   const pattern = new RegExp(`pub const\\s+${constName}\\s*:\\s*usize\\s*=\\s*([^;]+);`);
@@ -47,7 +48,7 @@ function evalRustUsizeExpression(expr: string): number {
 describe("clipboard caps stay in sync with the Rust backend", () => {
   it("JS CLIPBOARD_LIMITS matches Rust MAX_* constants", () => {
     const rustPath = fileURLToPath(new URL("../../../src-tauri/src/clipboard/mod.rs", import.meta.url));
-    const rustSource = readFileSync(rustPath, "utf8");
+    const rustSource = stripRustComments(readFileSync(rustPath, "utf8"));
 
     const rustMaxPngBytes = evalRustUsizeExpression(readRustConstExpression(rustSource, "MAX_PNG_BYTES"));
     const rustMaxTextBytes = evalRustUsizeExpression(readRustConstExpression(rustSource, "MAX_TEXT_BYTES"));

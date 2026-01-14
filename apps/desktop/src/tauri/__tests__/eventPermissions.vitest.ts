@@ -4,6 +4,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripComments, stripRustComments } from "../../__tests__/sourceTextUtils";
+
 type CapabilityPermission =
   | string
   | {
@@ -280,7 +282,15 @@ describe("tauri capability event permissions", () => {
       ...walk(path.join(root, "apps/desktop/src-tauri/src")),
     ];
 
-    const runtimeText = runtimeFiles.map((p) => readFileSync(p, "utf8")).join("\n");
+    const runtimeText = runtimeFiles
+      .map((p) => {
+        const raw = readFileSync(p, "utf8");
+        const ext = path.extname(p);
+        // Strip comments so commented-out `listen("...")` / `emit("...")` calls and event names
+        // cannot satisfy or fail these guardrail assertions.
+        return ext === ".rs" ? stripRustComments(raw) : stripComments(raw);
+      })
+      .join("\n");
 
     // Ensure the frontend's *direct* `listen("...")` / `emit("...")` calls are all allowlisted.
     // (Some subsystems use indirection, e.g. iterating over an array of updater event names; those
@@ -320,7 +330,7 @@ describe("tauri capability event permissions", () => {
       // - only fall back to a global constant map when the name is unambiguous (defined exactly once)
       const globalConstDefs = new Map<string, Set<string>>();
       for (const rustPath of rustFiles) {
-        const rustText = readFileSync(rustPath, "utf8");
+        const rustText = stripRustComments(readFileSync(rustPath, "utf8"));
         for (const match of rustText.matchAll(/\b(?:pub\s+)?const\s+([A-Z0-9_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
           const name = match[1];
           const value = match[2];
@@ -340,7 +350,7 @@ describe("tauri capability event permissions", () => {
       const rustListens = new Set<string>();
 
       for (const rustPath of rustFiles) {
-        const rustText = readFileSync(rustPath, "utf8");
+        const rustText = stripRustComments(readFileSync(rustPath, "utf8"));
 
         const localConsts = new Map<string, string>();
         for (const match of rustText.matchAll(/\b(?:pub\s+)?const\s+([A-Z0-9_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
@@ -388,7 +398,7 @@ describe("tauri capability event permissions", () => {
     // allowlisted too.
     {
       const updaterUiPath = path.join(root, "apps/desktop/src/tauri/updaterUi.ts");
-      const updaterUiText = readFileSync(updaterUiPath, "utf8");
+      const updaterUiText = stripComments(readFileSync(updaterUiPath, "utf8"));
 
       const eventsList = updaterUiText.match(/const\s+events\s*:\s*UpdaterEventName\[\]\s*=\s*\[([\s\S]*?)\];/);
       expect(eventsList).toBeTruthy();
