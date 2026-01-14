@@ -2679,12 +2679,59 @@ impl DaxEngine {
                 Expr::Call { .. } | Expr::TableName(_) => {
                     let table_filter = engine.eval_table(model, arg, eval_filter, row_ctx, env)?;
                     match table_filter {
-                        TableResult::Physical { table, rows, .. } => {
-                            if !keep_filters {
-                                clear_tables.insert(table.clone());
+                        TableResult::Physical {
+                            table,
+                            rows,
+                            visible_cols,
+                        } => {
+                            // `VALUES(Table[Column])`-shaped physical tables are represented as
+                            // `(table, representative_row_indices, visible_cols=[col])`.
+                            //
+                            // When used as a CALCULATE table filter argument, those tables should
+                            // behave like a *column filter* (apply the set of visible values for
+                            // the visible column), not like a row filter on representative physical
+                            // rows.
+                            //
+                            // This ensures patterns like:
+                            //   CALCULATE([Measure], FILTER(VALUES(T[Col]), ...))
+                            // filter by the chosen column values rather than arbitrarily selecting
+                            // one physical row per distinct value.
+                            if let Some(visible_cols) = visible_cols {
+                                if visible_cols.len() != 1 {
+                                    return Err(DaxError::Eval(
+                                        "CALCULATE table filters for projected physical tables currently only support one column"
+                                            .into(),
+                                    ));
+                                }
+                                let col_idx = visible_cols[0];
+                                let table_ref = model
+                                    .table(&table)
+                                    .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                                let Some(column) = table_ref.columns().get(col_idx) else {
+                                    return Err(DaxError::Eval(format!(
+                                        "row context refers to out-of-bounds column index {col_idx} for table {table}"
+                                    )));
+                                };
+
+                                let mut values = HashSet::new();
+                                for row in rows {
+                                    let v = table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
+                                    values.insert(v);
+                                }
+
+                                let key = (table.clone(), column.clone());
+                                if !keep_filters {
+                                    clear_columns.insert(key.clone());
+                                }
+                                column_filters.push((key, values));
+                                Ok(())
+                            } else {
+                                if !keep_filters {
+                                    clear_tables.insert(table.clone());
+                                }
+                                row_filters.push((table, rows.into_iter().collect()));
+                                Ok(())
                             }
-                            row_filters.push((table, rows.into_iter().collect()));
-                            Ok(())
                         }
                         TableResult::Virtual { .. } => Err(DaxError::Eval(
                             "CALCULATE table filter must be a physical table expression".into(),

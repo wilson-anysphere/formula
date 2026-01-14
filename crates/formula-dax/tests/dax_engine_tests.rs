@@ -486,6 +486,27 @@ fn calculate_keepfilters_supports_values_and_distinct_column_forms() {
 }
 
 #[test]
+fn calculate_table_filter_over_values_column_filters_by_column_values() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    // `FILTER(VALUES(Customers[Region]), ...)` returns a one-column table. When used as a
+    // CALCULATE table filter argument, it should filter by the selected Region values (East),
+    // not by an arbitrary representative Customer row.
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "CALCULATE([Total Sales], FILTER(VALUES(Customers[Region]), Customers[Region] = \"East\"))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 38.0.into());
+}
+
+#[test]
 fn calculate_keepfilters_preserves_existing_filters_for_boolean_expressions() {
     let mut model = build_model();
     model
