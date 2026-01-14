@@ -11261,6 +11261,88 @@ fn build_shared_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_shared_formula_master_not_top_left_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Values in A1/A2.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
+    // Shared formula range is B1:B2, but both FORMULA records reference B2 as the PtgExp master.
+    // PtgExp payload: [ptg=0x01][rw:u16][col:u16] where rw/col are 0-based indices.
+    let ptgexp_master_b2: [u8; 5] = [0x01, 0x01, 0x00, 0x01, 0x00];
+
+    // B1 formula record (row=0,col=1) uses PtgExp.
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 1, xf_cell, 1.0, &ptgexp_master_b2),
+    );
+
+    // SHRFMLA definition for range B1:B2 (rwFirst=0,rwLast=1,colFirst=1,colLast=1) with an `rgce`
+    // that references the cell to the left (`PtgRefN` col_off=-1).
+    let rgce_ref_left: [u8; 5] = [0x2C, 0x00, 0x00, 0xFF, 0xFF]; // PtgRefN(row_off=0,col_off=-1)
+    let shrfmla = shrfmla_record(0, 1, 1, 1, &rgce_ref_left);
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla);
+
+    // B2 formula record (row=1,col=1) uses PtgExp.
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 2.0, &ptgexp_master_b2),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_master_not_top_left_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Shared");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    let sheet_offset = globals.len();
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_shared_formula_master_not_top_left_sheet_stream(xf_cell));
+
+    globals
+}
+
 fn build_calc_settings_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -12556,6 +12638,24 @@ pub fn build_formula_sheet_name_sanitization_fixture_xls() -> Vec<u8> {
 /// This is used to validate BIFF-decoded shared formula rendering after sheet-name sanitization.
 pub fn build_shared_formula_sheet_name_sanitization_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_sheet_name_sanitization_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a shared formula (`SHRFMLA`) whose follower `PtgExp`
+/// token references a master cell that is *not* the shared range's top-left cell.
+///
+/// This is used to validate our best-effort shared-formula association logic (range containment
+/// match rather than "key by range.start only").
+pub fn build_shared_formula_master_not_top_left_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_master_not_top_left_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");

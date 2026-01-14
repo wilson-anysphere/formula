@@ -67,6 +67,206 @@ pub(crate) struct SheetFormulaOverrides {
     pub(crate) formulas: HashMap<CellRef, String>,
 }
 
+#[derive(Clone, Copy)]
+struct RangeMatch<'a, T> {
+    anchor: CellRef,
+    range: (CellRef, CellRef),
+    record: &'a T,
+}
+
+fn format_range(range: (CellRef, CellRef)) -> String {
+    let (start, end) = range;
+    if start == end {
+        start.to_a1()
+    } else {
+        format!("{}:{}", start.to_a1(), end.to_a1())
+    }
+}
+
+fn format_cell_list(cells: &[CellRef]) -> String {
+    let mut out = String::new();
+    for (i, cell) in cells.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&cell.to_a1());
+    }
+    out
+}
+
+fn range_area(range: (CellRef, CellRef)) -> u64 {
+    let (start, end) = range;
+    let rows = end.row.saturating_sub(start.row).saturating_add(1) as u64;
+    let cols = end.col.saturating_sub(start.col).saturating_add(1) as u64;
+    rows.saturating_mul(cols)
+}
+
+fn manhattan_distance(a: CellRef, b: CellRef) -> u64 {
+    (a.row.abs_diff(b.row) as u64).saturating_add(a.col.abs_diff(b.col) as u64)
+}
+
+fn choose_best_range_match<'a, T>(
+    matches: &[RangeMatch<'a, T>],
+    current: CellRef,
+    master_candidates: &[CellRef],
+) -> usize {
+    // Deterministic tie-breaking:
+    // 1) smallest range area
+    // 2) closest range start to master candidate (or current cell if no master candidates)
+    // 3) range start/end ordering
+    let mut best_idx: Option<usize> = None;
+    let mut best_key: Option<(u64, u64, u32, u32, u32, u32)> = None;
+
+    for (i, m) in matches.iter().enumerate() {
+        let area = range_area(m.range);
+        let dist = if master_candidates.is_empty() {
+            manhattan_distance(m.range.0, current)
+        } else {
+            master_candidates
+                .iter()
+                .map(|&c| manhattan_distance(m.range.0, c))
+                .min()
+                .unwrap_or_else(|| manhattan_distance(m.range.0, current))
+        };
+        let key = (
+            area,
+            dist,
+            m.range.0.row,
+            m.range.0.col,
+            m.range.1.row,
+            m.range.1.col,
+        );
+
+        match best_key.as_ref() {
+            None => {
+                best_key = Some(key);
+                best_idx = Some(i);
+            }
+            Some(best) if key < *best => {
+                best_key = Some(key);
+                best_idx = Some(i);
+            }
+            _ => {}
+        }
+    }
+
+    best_idx.unwrap_or(0)
+}
+
+fn select_ptgexp_backing_record<'a, T>(
+    records: &'a HashMap<CellRef, T>,
+    current_cell: CellRef,
+    master_candidates: &[CellRef],
+    warnings: &mut Vec<String>,
+    kind: &str,
+    get_range: fn(&T) -> (CellRef, CellRef),
+) -> Option<RangeMatch<'a, T>> {
+    // (a) Exact-key match on master cell when the producer uses it as the record key.
+    let mut exact_matches: Vec<RangeMatch<'a, T>> = Vec::new();
+    for &master in master_candidates {
+        if let Some(record) = records.get(&master) {
+            let range = get_range(record);
+            if range_contains(range, current_cell) {
+                exact_matches.push(RangeMatch {
+                    anchor: master,
+                    range,
+                    record,
+                });
+            }
+        }
+    }
+    if !exact_matches.is_empty() {
+        let exact_len = exact_matches.len();
+        let best_idx = choose_best_range_match(&exact_matches, current_cell, master_candidates);
+        let selected = exact_matches.swap_remove(best_idx);
+        if exact_len > 1 {
+            push_warning_bounded(
+                warnings,
+                format!(
+                    "ambiguous {kind} match for PtgExp in {} (masters: {}): {} records keyed by master; chose range {}",
+                    current_cell.to_a1(),
+                    format_cell_list(master_candidates),
+                    exact_len,
+                    format_range(selected.range),
+                ),
+            );
+        }
+        return Some(selected);
+    }
+
+    // (b) Range containment match: current cell and referenced master are both inside the record's range.
+    if !master_candidates.is_empty() {
+        let mut matches: Vec<RangeMatch<'a, T>> = Vec::new();
+        for (&anchor, record) in records {
+            let range = get_range(record);
+            if !range_contains(range, current_cell) {
+                continue;
+            }
+            if master_candidates.iter().any(|&m| range_contains(range, m)) {
+                matches.push(RangeMatch {
+                    anchor,
+                    range,
+                    record,
+                });
+            }
+        }
+
+        if matches.len() == 1 {
+            return matches.pop();
+        }
+        if matches.len() > 1 {
+            let match_len = matches.len();
+            let best_idx = choose_best_range_match(&matches, current_cell, master_candidates);
+            let selected = matches.swap_remove(best_idx);
+            push_warning_bounded(
+                warnings,
+                format!(
+                    "ambiguous {kind} match for PtgExp in {} (masters: {}): matched {} ranges; chose range {}",
+                    current_cell.to_a1(),
+                    format_cell_list(master_candidates),
+                    match_len,
+                    format_range(selected.range),
+                ),
+            );
+            return Some(selected);
+        }
+    }
+
+    // (d) Fallback: ignore master cell; use current-cell containment only.
+    let mut matches: Vec<RangeMatch<'a, T>> = Vec::new();
+    for (&anchor, record) in records {
+        let range = get_range(record);
+        if range_contains(range, current_cell) {
+            matches.push(RangeMatch {
+                anchor,
+                range,
+                record,
+            });
+        }
+    }
+
+    if matches.is_empty() {
+        return None;
+    }
+    if matches.len() == 1 {
+        return matches.pop();
+    }
+
+    let match_len = matches.len();
+    let best_idx = choose_best_range_match(&matches, current_cell, master_candidates);
+    let selected = matches.swap_remove(best_idx);
+    push_warning_bounded(
+        warnings,
+        format!(
+            "ambiguous {kind} match for PtgExp in {}: {} ranges contain the cell (no usable master); chose range {}",
+            current_cell.to_a1(),
+            match_len,
+            format_range(selected.range),
+        ),
+    );
+    Some(selected)
+}
+
 /// Recover shared/array formulas referenced via `PtgExp` by resolving their corresponding
 /// `SHRFMLA`/`ARRAY` definition records.
 ///
@@ -84,12 +284,13 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
     let formula_cells: Vec<CellRef> = parsed.formula_cells.keys().copied().collect();
 
     // Track FORMULA cells whose `rgce` is `PtgExp`, so we can resolve them after scanning.
-    let mut ptgexp_cells: Vec<(CellRef, CellRef)> = Vec::new();
+    let mut ptgexp_cells: Vec<(CellRef, Vec<CellRef>)> = Vec::new();
     for (&cell_ref, cell) in &parsed.formula_cells {
-        let Some((base_row, base_col)) = parse_ptg_exp(&cell.rgce) else {
+        let Some((base_row, base_col, candidates)) = parse_ptg_exp_master_cell_candidates(&cell.rgce)
+        else {
             continue;
         };
-        if base_row >= EXCEL_MAX_ROWS || base_col >= EXCEL_MAX_COLS {
+        if candidates.is_empty() {
             push_warning_bounded(
                 &mut warnings,
                 format!(
@@ -99,7 +300,7 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
             );
             continue;
         }
-        ptgexp_cells.push((cell_ref, CellRef::new(base_row, base_col)));
+        ptgexp_cells.push((cell_ref, candidates));
     }
 
     let mut recovered: HashMap<CellRef, String> = HashMap::new();
@@ -108,24 +309,27 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
     let mut decoded_arrays: HashMap<CellRef, String> = HashMap::new();
     let mut applied_arrays: HashSet<CellRef> = HashSet::new();
 
-    for (cell, base) in ptgexp_cells {
-        // Shared formulas are stored once in SHRFMLA and referenced by follower cells via PtgExp.
-        // The rgce token stream can contain absolute 2D/3D references (PtgRef/PtgArea/etc) that
-        // carry relative flags; when the formula is applied to a different cell in the shared
-        // range, those coordinates must be shifted across the base->target delta (materialized).
-        if let Some(def) = parsed
-            .shrfmla
-            .get(&base)
-            .filter(|def| range_contains(def.range, cell))
-        {
-            let base_cell = rgce::CellCoord::new(base.row, base.col);
+    for (cell, base_candidates) in ptgexp_cells {
+        // Shared formulas are decoded relative to the *current* cell.
+        if let Some(selected) = select_ptgexp_backing_record(
+            &parsed.shrfmla,
+            cell,
+            &base_candidates,
+            &mut warnings,
+            "SHRFMLA",
+            |r| r.range,
+        ) {
+            let anchor = selected.anchor;
+            let def = selected.record;
+
+            let base_cell = rgce::CellCoord::new(anchor.row, anchor.col);
             let target_cell = rgce::CellCoord::new(cell.row, cell.col);
 
             let analysis = shrfmla_analysis_by_base
-                .entry(base)
+                .entry(anchor)
                 .or_insert_with(|| rgce::analyze_biff8_shared_formula_rgce(&def.rgce).ok());
 
-            let delta_is_zero = cell == base;
+            let delta_is_zero = cell == anchor;
             let needs_materialization = analysis
                 .as_ref()
                 .is_some_and(|analysis| {
@@ -144,9 +348,10 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                         push_warning_bounded(
                             &mut warnings,
                             format!(
-                                "failed to materialize shared formula at {} (base {}): {err}",
+                                "failed to materialize shared formula at {} (base {}, range {}): {err}",
                                 cell.to_a1(),
-                                base.to_a1()
+                                anchor.to_a1(),
+                                format_range(selected.range),
                             ),
                         );
                         Cow::Borrowed(&def.rgce)
@@ -161,9 +366,9 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                 push_warning_bounded(
                     &mut warnings,
                     format!(
-                        "failed to fully decode shared formula at {} (base {}): {w}",
+                        "failed to fully decode shared formula at {} (range {}): {w}",
                         cell.to_a1(),
-                        base.to_a1()
+                        format_range(selected.range),
                     ),
                 );
             }
@@ -175,24 +380,29 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
 
         // Array formulas are decoded relative to the *array base* cell, and the same formula text
         // is displayed for every cell in the group.
-        if let Some(def) = parsed
-            .array
-            .get(&base)
-            .filter(|def| range_contains(def.range, cell))
-        {
-            let text = if let Some(existing) = decoded_arrays.get(&base) {
+        if let Some(selected) = select_ptgexp_backing_record(
+            &parsed.array,
+            cell,
+            &base_candidates,
+            &mut warnings,
+            "ARRAY",
+            |r| r.range,
+        ) {
+            let anchor = selected.anchor;
+            let def = selected.record;
+            let text = if let Some(existing) = decoded_arrays.get(&anchor) {
                 existing.clone()
             } else {
-                let base_coord = rgce::CellCoord::new(base.row, base.col);
+                let base_coord = rgce::CellCoord::new(anchor.row, anchor.col);
                 let decoded = rgce::decode_biff8_rgce_with_base(&def.rgce, ctx, Some(base_coord));
                 for w in decoded.warnings {
                     push_warning_bounded(
                         &mut warnings,
-                        format!("failed to fully decode array formula base {}: {w}", base.to_a1()),
+                        format!("failed to fully decode array formula base {}: {w}", anchor.to_a1()),
                     );
                 }
                 let text = decoded.text;
-                decoded_arrays.insert(base, text.clone());
+                decoded_arrays.insert(anchor, text.clone());
                 text
             };
 
@@ -200,7 +410,7 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                 continue;
             }
 
-            if applied_arrays.insert(base) {
+            if applied_arrays.insert(anchor) {
                 for &target in &formula_cells {
                     if range_contains(def.range, target) {
                         recovered.insert(target, text.clone());
@@ -215,7 +425,7 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
             format!(
                 "unresolved PtgExp reference in {} -> {}",
                 cell.to_a1(),
-                base.to_a1()
+                format_cell_list(&base_candidates)
             ),
         );
     }
@@ -509,22 +719,30 @@ pub(crate) fn parse_biff8_sheet_formula_overrides(
     let parsed = worksheet_formulas::parse_biff8_worksheet_formulas(workbook_stream, start)?;
 
     let mut out = SheetFormulaOverrides::default();
+    let mut selection_warnings: Vec<String> = Vec::new();
 
     for (cell_ref, cell) in parsed.formula_cells {
         // Shared formula reference (PtgExp).
-        if let Some((base_row, base_col)) = parse_ptg_exp(&cell.rgce) {
-            let base_cell = CellRef::new(base_row, base_col);
-            let Some(shrfmla) = parsed.shrfmla.get(&base_cell) else {
+        if let Some((_base_row, _base_col, base_candidates)) =
+            parse_ptg_exp_master_cell_candidates(&cell.rgce)
+        {
+            selection_warnings.clear();
+            let Some(selected) = select_ptgexp_backing_record(
+                &parsed.shrfmla,
+                cell_ref,
+                &base_candidates,
+                &mut selection_warnings,
+                "SHRFMLA",
+                |r| r.range,
+            ) else {
                 continue;
             };
-            if !range_contains(shrfmla.range, cell_ref) {
-                continue;
-            }
+            let shrfmla = selected.record;
 
             let Some(materialized) = materialize_biff8_rgce(
                 &shrfmla.rgce,
-                base_row,
-                base_col,
+                selected.range.0.row,
+                selected.range.0.col,
                 cell_ref.row,
                 cell_ref.col,
             ) else {
@@ -710,6 +928,26 @@ fn parse_ptg_exp(rgce: &[u8]) -> Option<(u32, u32)> {
     let row = u16::from_le_bytes([rgce[1], rgce[2]]) as u32;
     let col = u16::from_le_bytes([rgce[3], rgce[4]]) as u32;
     Some((row, col))
+}
+
+fn parse_ptg_exp_master_cell_candidates(rgce: &[u8]) -> Option<(u32, u32, Vec<CellRef>)> {
+    let (row, col) = parse_ptg_exp(rgce)?;
+
+    let mut candidates: Vec<CellRef> = Vec::new();
+    if row < EXCEL_MAX_ROWS && col < EXCEL_MAX_COLS {
+        candidates.push(CellRef::new(row, col));
+    }
+
+    // Best-effort: some `.xls` producers appear to swap row/col ordering in the PtgExp payload.
+    // Keep a second candidate when it is in-bounds (for the model) and distinct.
+    if col < EXCEL_MAX_ROWS && row < EXCEL_MAX_COLS {
+        let swapped = CellRef::new(col, row);
+        if candidates.first().copied() != Some(swapped) {
+            candidates.push(swapped);
+        }
+    }
+
+    Some((row, col, candidates))
 }
 
 fn cell_in_bounds(row: i64, col: i64) -> bool {
@@ -1098,7 +1336,7 @@ fn biff8_short_unicode_string_len(input: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::materialize_biff8_rgce;
+    use super::*;
 
     #[test]
     fn materializes_ref3d_oob_to_referr3d_variants() {
@@ -1140,5 +1378,50 @@ mod tests {
             assert_eq!(out[0], ptg_area3d + 0x02, "ptg={ptg_area3d:02X}");
             assert_eq!(&out[1..], &base[1..], "payload should be preserved");
         }
+    }
+
+    #[test]
+    fn shrfmla_ptgexp_selection_uses_deterministic_tiebreak_and_warns() {
+        let a1 = CellRef::new(0, 0);
+        let b1 = CellRef::new(0, 1);
+        let b2 = CellRef::new(1, 1);
+        let c2 = CellRef::new(1, 2);
+
+        let mut shrfmla: HashMap<CellRef, worksheet_formulas::Biff8ShrFmlaRecord> = HashMap::new();
+        shrfmla.insert(
+            a1,
+            worksheet_formulas::Biff8ShrFmlaRecord {
+                range: (a1, b2),
+                rgce: Vec::new(),
+            },
+        );
+        shrfmla.insert(
+            b1,
+            worksheet_formulas::Biff8ShrFmlaRecord {
+                range: (b1, c2),
+                rgce: Vec::new(),
+            },
+        );
+
+        // Use a master cell that is inside both ranges but does not equal either range start, so
+        // the resolver must fall back to containment matching (and warn on ambiguity).
+        let masters = vec![b2];
+
+        let mut warnings = Vec::new();
+        let selected = select_ptgexp_backing_record(
+            &shrfmla,
+            b1,
+            &masters,
+            &mut warnings,
+            "SHRFMLA",
+            |r| r.range,
+        )
+        .expect("expected a match");
+
+        assert_eq!(selected.range, (b1, c2));
+        assert!(
+            warnings.iter().any(|w| w.contains("ambiguous")),
+            "expected ambiguity warning, got {warnings:?}"
+        );
     }
 }
