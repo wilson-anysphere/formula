@@ -193,6 +193,37 @@ fn canonicalize_accepts_thousands_grouping_in_es_es_but_localize_omits_grouping(
 }
 
 #[test]
+fn canonicalize_accepts_canonical_dot_decimals_and_disambiguates_dot_grouping_in_comma_decimal_locales(
+) {
+    // Users can paste canonical-form numbers (using `.` as decimal separator) into comma-decimal
+    // locales, as long as they use the locale argument separator (`;`).
+    for (src, loc) in [
+        ("=SUMME(1.23;4.56)", &locale::DE_DE),
+        ("=SOMME(1.23;4.56)", &locale::FR_FR),
+        ("=SUMA(1.23;4.56)", &locale::ES_ES),
+    ] {
+        let canonical = locale::canonicalize_formula(src, loc).unwrap();
+        assert_eq!(canonical, "=SUM(1.23,4.56)");
+    }
+
+    // When `.` is also the locale thousands separator (de-DE/es-ES), treat `1.234` as grouping,
+    // not a decimal point. In fr-FR, thousands grouping uses NBSP, so `1.234` is interpreted as a
+    // decimal.
+    assert_eq!(
+        locale::canonicalize_formula("=SUMME(1.234;1)", &locale::DE_DE).unwrap(),
+        "=SUM(1234,1)"
+    );
+    assert_eq!(
+        locale::canonicalize_formula("=SUMA(1.234;1)", &locale::ES_ES).unwrap(),
+        "=SUM(1234,1)"
+    );
+    assert_eq!(
+        locale::canonicalize_formula("=SOMME(1.234;1)", &locale::FR_FR).unwrap(),
+        "=SUM(1.234,1)"
+    );
+}
+
+#[test]
 fn localize_does_not_insert_thousands_separators_in_numeric_literals() {
     // Verified against Excel `FormulaLocal` via `tools/excel-oracle/extract-number-literal-formatting.ps1`.
     let canonical = "=SUM(1234567.89,0.5)";
