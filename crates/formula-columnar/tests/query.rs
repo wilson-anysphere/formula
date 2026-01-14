@@ -1105,6 +1105,47 @@ fn hash_join_multi_string_uses_dictionary_mapping() {
 }
 
 #[test]
+fn hash_join_multi_ignores_right_string_values_not_in_left_dictionary() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::DateTime,
+        },
+    ];
+
+    let left = build_table(
+        schema.clone(),
+        vec![vec![
+            Value::String(Arc::<str>::from("A")),
+            Value::DateTime(1),
+        ]],
+    );
+
+    // "B" does not appear in the left table, so it cannot match after dictionary mapping.
+    let right = build_table(
+        schema,
+        vec![
+            vec![Value::String(Arc::<str>::from("B")), Value::DateTime(1)],
+            vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+        ],
+    );
+
+    let inner = left.hash_join_multi(&right, &[0, 1], &[0, 1]).unwrap();
+    assert_eq!(inner.left_indices, vec![0]);
+    assert_eq!(inner.right_indices, vec![1]);
+
+    let full = left
+        .hash_full_outer_join_multi(&right, &[0, 1], &[0, 1])
+        .unwrap();
+    assert_eq!(full.left_indices, vec![Some(0), None]);
+    assert_eq!(full.right_indices, vec![Some(1), Some(0)]);
+}
+
+#[test]
 fn hash_join_multi_errors_on_mismatched_key_types() {
     let left_schema = vec![
         ColumnSchema {
