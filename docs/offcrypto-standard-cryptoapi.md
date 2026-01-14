@@ -448,8 +448,7 @@ Notes:
   OLE sector slack. **Always truncate** to the declared size after decrypting.
 * Some producers pad the ciphertext to a fixed size (e.g. to 4096 bytes for very small packages).
   Truncation handles this.
-* AES-ECB has no IV. If you see per-segment IV derivation in other code, that is for an alternative
-  (non-ECB) scheme (see §5.3 compatibility note).
+* AES-ECB has no IV. Per-segment IV derivation is for **Agile (4.4)** encryption, not Standard AES.
 
 #### 7.2.2) RC4 (`CALG_RC4`)
 
