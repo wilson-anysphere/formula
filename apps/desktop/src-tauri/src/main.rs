@@ -1753,6 +1753,10 @@ fn main() {
     await Promise.resolve();
     await raf();
 
+    // Record a "first render" mark after the first frame. This is best-effort (and in `--startup-bench`
+    // mode we use it as a proxy for "the minimal document has painted at least once").
+    await invoke("report_startup_first_render");
+
     await invoke("report_startup_tti");
 
     // Hard-exit after the `[startup] ...` line is printed. Add a tiny delay so stdout is
