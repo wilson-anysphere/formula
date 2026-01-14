@@ -19,6 +19,7 @@ use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
+use formula_office_crypto::{decrypt_encrypted_package_ole, is_encrypted_ooxml_ole};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use roxmltree::Document;
 use zip::write::FileOptions;
@@ -139,7 +140,8 @@ impl WorkbookArchive {
     }
 
     pub fn open_with_password(path: &Path, password: Option<&str>) -> Result<Self> {
-        let mut file = File::open(path).with_context(|| format!("open workbook {}", path.display()))?;
+        let mut file =
+            File::open(path).with_context(|| format!("open workbook {}", path.display()))?;
 
         let mut header = [0u8; 8];
         let n = file.read(&mut header).context("read workbook header")?;
@@ -150,7 +152,7 @@ impl WorkbookArchive {
             file.read_to_end(&mut bytes)
                 .with_context(|| format!("read workbook {}", path.display()))?;
 
-            if !is_ole_encrypted_ooxml(&bytes) {
+            if !is_encrypted_ooxml_ole(&bytes) {
                 return Err(anyhow!(
                     "workbook {} is an OLE compound file but not an Office EncryptedPackage container",
                     path.display()
@@ -164,8 +166,10 @@ impl WorkbookArchive {
                 )
             })?;
 
-            let decrypted = decrypt_ole_encrypted_ooxml_with_office_crypto(&bytes, password)
-                .with_context(|| format!("decrypt workbook {}", path.display()))?;
+            let decrypted =
+                decrypt_encrypted_package_ole(&bytes, password).map_err(|err| {
+                    anyhow!("failed to decrypt workbook {}: {err}", path.display())
+                })?;
 
             return WorkbookArchive::from_bytes(&decrypted);
         }
@@ -212,114 +216,6 @@ impl WorkbookArchive {
     pub fn get(&self, name: &str) -> Option<&[u8]> {
         self.parts.get(name).map(|v| v.as_slice())
     }
-}
-
-fn ole_stream_exists<R: std::io::Read + std::io::Seek>(ole: &mut cfb::CompoundFile<R>, name: &str) -> bool {
-    if ole.open_stream(name).is_ok() {
-        return true;
-    }
-    let with_leading_slash = format!("/{name}");
-    ole.open_stream(&with_leading_slash).is_ok()
-}
-
-fn is_ole_encrypted_ooxml(bytes: &[u8]) -> bool {
-    if bytes.len() < OLE_MAGIC.len() || bytes[..OLE_MAGIC.len()] != OLE_MAGIC {
-        return false;
-    }
-    let cursor = Cursor::new(bytes);
-    let Ok(mut ole) = cfb::CompoundFile::open(cursor) else {
-        return false;
-    };
-    ole_stream_exists(&mut ole, "EncryptionInfo") && ole_stream_exists(&mut ole, "EncryptedPackage")
-}
-
-fn decrypt_ole_encrypted_ooxml_with_office_crypto(bytes: &[u8], password: &str) -> Result<Vec<u8>> {
-    // `office-crypto` historically assumed the decrypted package size is at least one full
-    // 4096-byte segment when decrypting OOXML (`EncryptedPackage`). Some real-world workbooks (and
-    // especially small test fixtures) are smaller than that, which could trigger a panic inside
-    // the dependency.
-    //
-    // Work around this by:
-    // - parsing the real decrypted package size from the first 8 bytes of the `EncryptedPackage`
-    //   stream (u64 LE, per MS-OFFCRYPTO),
-    // - patching the first 4 bytes (u32 LE) to be at least 4096 so the dependency's segment loop
-    //   doesn't underflow,
-    // - decrypting, then truncating back to the real size.
-    //
-    // This keeps the decrypted bytes in-memory and avoids writing anything to disk.
-    const SEGMENT_LENGTH: usize = 4096;
-
-    fn read_encrypted_package_size(bytes: &[u8]) -> Result<usize> {
-        let cursor = Cursor::new(bytes);
-        let mut ole = cfb::CompoundFile::open(cursor).context("open OLE container")?;
-        let mut stream = ole
-            .open_stream("EncryptedPackage")
-            .or_else(|_| ole.open_stream("/EncryptedPackage"))
-            .context("open EncryptedPackage stream")?;
-        let mut hdr = [0u8; 8];
-        stream
-            .read_exact(&mut hdr)
-            .context("read EncryptedPackage header")?;
-        let size = u64::from_le_bytes(hdr);
-        usize::try_from(size).context("EncryptedPackage size too large")
-    }
-
-    fn patch_encrypted_package_size(bytes: &[u8], patched_size: u32) -> Result<Vec<u8>> {
-        use std::io::{Seek as _, SeekFrom, Write as _};
-
-        let cursor = Cursor::new(bytes.to_vec());
-        let mut ole = cfb::CompoundFile::open(cursor).context("open OLE container")?;
-        {
-            let mut stream = ole
-                .open_stream("EncryptedPackage")
-                .or_else(|_| ole.open_stream("/EncryptedPackage"))
-                .context("open EncryptedPackage stream")?;
-            stream
-                .seek(SeekFrom::Start(0))
-                .context("seek EncryptedPackage stream")?;
-            stream
-                .write_all(&patched_size.to_le_bytes())
-                .context("patch EncryptedPackage header")?;
-        }
-        ole.flush().context("flush OLE container")?;
-        Ok(ole.into_inner().into_inner())
-    }
-
-    fn decrypt_with_office_crypto(bytes: Vec<u8>, password: &str) -> Result<Vec<u8>> {
-        let res = std::panic::catch_unwind(|| office_crypto::decrypt_from_bytes(bytes, password));
-        match res {
-            Ok(Ok(v)) => Ok(v),
-            Ok(Err(e)) => Err(anyhow!("failed to decrypt workbook: {e}")),
-            Err(panic) => {
-                let msg = panic
-                    .downcast_ref::<&str>()
-                    .map(|s| (*s).to_string())
-                    .or_else(|| panic.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "unknown panic".to_string());
-                Err(anyhow!("failed to decrypt workbook (panic): {msg}"))
-            }
-        }
-    }
-
-    let real_size = read_encrypted_package_size(bytes)?;
-    let input = if real_size < SEGMENT_LENGTH {
-        patch_encrypted_package_size(bytes, SEGMENT_LENGTH as u32)?
-    } else {
-        bytes.to_vec()
-    };
-
-    let mut decrypted = decrypt_with_office_crypto(input, password)?;
-    if decrypted.len() > real_size {
-        decrypted.truncate(real_size);
-    }
-
-    if decrypted.len() < 2 || &decrypted[..2] != b"PK" {
-        return Err(anyhow!(
-            "decrypted payload does not look like a ZIP (missing PK signature); wrong password?"
-        ));
-    }
-
-    Ok(decrypted)
 }
 
 #[derive(Debug, Clone, Default)]
