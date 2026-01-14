@@ -24,6 +24,16 @@ const hasTauri = (() => {
     return false;
   }
 
+  // Packaged desktop builds typically run on the `tauri://` protocol, even before the JS bridge
+  // has finished injecting `__TAURI__`. Use that as a stable signal so we still bootstrap in
+  // production builds even if the user agent does not include "Tauri".
+  try {
+    const protocol = (globalThis as any).location?.protocol;
+    if (protocol === "tauri:" || protocol === "asset:") return true;
+  } catch {
+    // ignore
+  }
+
   // Fallback: some host environments can delay injecting `__TAURI__` until after the first JS tick.
   // Chromium-based Tauri WebViews typically include "Tauri" in the user agent; use that as a
   // low-risk heuristic so we can still retry listener installation without doing work in normal
