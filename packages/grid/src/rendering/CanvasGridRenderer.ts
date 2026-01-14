@@ -319,7 +319,7 @@ async function guardPngBlob(blob: Blob): Promise<void> {
 
   if (isJpeg && blob.size > initial.byteLength) {
     // JPEG dimensions can occur after variable-length metadata segments, so allow a larger sniff.
-    const MAX_JPEG_SNIFF_BYTES = 256 * 1024;
+    const MAX_JPEG_SNIFF_BYTES = 1024 * 1024;
     const toRead = Math.min(blob.size, MAX_JPEG_SNIFF_BYTES);
     if (toRead > initial.byteLength) {
       const larger = await readSlice(blob.slice(0, toRead));
