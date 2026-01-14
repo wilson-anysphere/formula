@@ -88,7 +88,12 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
         }
       }
       try {
-        await installStartupTimingsListeners();
+        // Only await listener installation once the runtime bindings exist. In environments where
+        // `__TAURI__` is injected after the first tick, awaiting here would postpone scheduling the
+        // retry timer (and can prevent fake-timer based tests from observing the retry loop).
+        if (hasTauriRuntime()) {
+          await installStartupTimingsListeners();
+        }
       } catch {
         // ignore
       }
