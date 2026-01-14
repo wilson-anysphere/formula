@@ -11404,8 +11404,11 @@ struct EngineBytecodeGrid<'a> {
 #[allow(dead_code)]
 #[derive(Debug)]
 struct ExternalSheetResolver {
+    #[allow(dead_code)]
     base_id: usize,
+    #[allow(dead_code)]
     ids_by_key: HashMap<Arc<str>, usize>,
+    #[allow(dead_code)]
     keys_by_id: Vec<Arc<str>>,
 }
 
@@ -11419,6 +11422,7 @@ impl ExternalSheetResolver {
         }
     }
 
+    #[allow(dead_code)]
     fn get_or_intern(&mut self, key: &str) -> usize {
         if let Some(&id) = self.ids_by_key.get(key) {
             return id;
@@ -11430,6 +11434,7 @@ impl ExternalSheetResolver {
         id
     }
 
+    #[allow(dead_code)]
     fn key_for_id(&self, id: usize) -> Option<Arc<str>> {
         let idx = id.checked_sub(self.base_id)?;
         self.keys_by_id.get(idx).cloned()
