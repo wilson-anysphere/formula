@@ -557,6 +557,11 @@ export class CanvasGridRenderer {
     content: new DirtyRegionTracker(),
     selection: new DirtyRegionTracker()
   };
+  private readonly dirtyRegionsScratch = {
+    background: [] as Rect[],
+    content: [] as Rect[],
+    selection: [] as Rect[]
+  };
   private readonly selectionDirtyRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
 
   private scheduled = false;
@@ -2474,9 +2479,9 @@ export class CanvasGridRenderer {
       perf.blitUsed = false;
     }
 
-    const backgroundRegions = this.dirty.background.drain();
-    const contentRegions = this.dirty.content.drain();
-    const selectionRegions = this.dirty.selection.drain();
+    const backgroundRegions = this.dirty.background.drainInto(this.dirtyRegionsScratch.background);
+    const contentRegions = this.dirty.content.drainInto(this.dirtyRegionsScratch.content);
+    const selectionRegions = this.dirty.selection.drainInto(this.dirtyRegionsScratch.selection);
 
     if (perfEnabled) {
       perf.dirtyRects.background = backgroundRegions.length;

@@ -52,6 +52,23 @@ export class DirtyRegionTracker {
     this.dirty.push(merged);
   }
 
+  /**
+   * Drain dirty regions into `out`, clearing the internal list without allocating a new array.
+   *
+   * This is useful for hot paths (e.g. per-frame render loops) that want to reuse a stable
+   * scratch array rather than allocating via {@link drain}.
+   *
+   * Note: `out` receives *references* to the rect objects stored by this tracker.
+   */
+  drainInto(out: Rect[]): Rect[] {
+    out.length = 0;
+    for (let i = 0; i < this.dirty.length; i++) {
+      out.push(this.dirty[i]!);
+    }
+    this.dirty.length = 0;
+    return out;
+  }
+
   drain(): Rect[] {
     const drained = this.dirty;
     this.dirty = [];
