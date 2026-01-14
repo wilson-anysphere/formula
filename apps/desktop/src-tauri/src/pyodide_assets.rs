@@ -408,8 +408,32 @@ pub async fn ensure_pyodide_assets_in_dir(
         return Ok(false);
     }
 
+    // Security: treat any redirects as untrusted. Only follow redirects within the same origin as
+    // `cdn_base_url` (scheme + host + port) so a compromised/malicious CDN cannot bounce us to an
+    // unexpected host.
+    let parsed_base = reqwest::Url::parse(cdn_base_url).map_err(|e| e.to_string())?;
+    let allowed_scheme = parsed_base.scheme().to_string();
+    let allowed_host = parsed_base
+        .host_str()
+        .ok_or_else(|| "Invalid Pyodide CDN base URL (missing host)".to_string())?
+        .to_string();
+    let allowed_port = parsed_base.port_or_known_default();
+
     let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 {
+                return attempt.stop();
+            }
+            let url = attempt.url();
+            let same_origin = url.scheme() == allowed_scheme
+                && url.host_str() == Some(allowed_host.as_str())
+                && url.port_or_known_default() == allowed_port;
+            if same_origin {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -636,6 +660,52 @@ mod tests {
         );
     }
 
+    async fn serve_redirect_once(target_base_url: String) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let mut remaining = 8usize;
+            while remaining > 0 {
+                remaining -= 1;
+                let Ok((mut socket, _peer)) = listener.accept().await else {
+                    return;
+                };
+
+                let mut req = Vec::new();
+                let mut buf = [0u8; 1024];
+                loop {
+                    match socket.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            req.extend_from_slice(&buf[..n]);
+                            if req.windows(4).any(|w| w == b"\r\n\r\n") || req.len() > 16 * 1024 {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+
+                let path = req
+                    .split(|b| *b == b' ')
+                    .nth(1)
+                    .and_then(|s| std::str::from_utf8(s).ok())
+                    .unwrap_or("/");
+                let name = path.trim_start_matches('/').to_string();
+                let location = format!("{target_base_url}{name}");
+
+                let headers = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: {location}\r\nConnection: close\r\n\r\n"
+                );
+                let _ = socket.write_all(headers.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+
+        format!("http://{addr}/")
+    }
+
     #[tokio::test]
     async fn directory_cached_assets_are_treated_as_missing_and_replaced() {
         let files = vec![("a.txt".to_string(), b"hello".to_vec())];
@@ -729,5 +799,26 @@ mod tests {
             !cache_dir.join("bad.txt").exists(),
             "expected corrupt file not to be cached"
         );
+    }
+
+    #[tokio::test]
+    async fn rejects_redirects_to_other_origins() {
+        let target = serve_files_once(vec![("a.txt".to_string(), b"hello".to_vec())]).await;
+        let redirect = serve_redirect_once(target.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().join("cache");
+
+        let sha = sha256_bytes(b"hello");
+        let specs = vec![PyodideAssetSpec {
+            file_name: "a.txt",
+            sha256: &sha,
+        }];
+
+        let err = ensure_pyodide_assets_in_dir(&cache_dir, &redirect, &specs, true, |_| {})
+            .await
+            .unwrap_err();
+        assert!(err.contains("HTTP 302"), "unexpected error: {err}");
+        assert!(!cache_dir.join("a.txt").exists());
     }
 }
