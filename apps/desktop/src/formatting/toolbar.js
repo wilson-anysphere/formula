@@ -832,6 +832,15 @@ export function applyOutsideBorders(doc, sheetId, range, { style = "thin", color
       if (okRight === false) applied = false;
     }
     return applied;
+  } catch (err) {
+    if (shouldBatch) {
+      try {
+        doc.cancelBatch();
+      } catch {
+        // ignore
+      }
+    }
+    throw err;
   } finally {
     if (shouldBatch) doc.endBatch();
   }
