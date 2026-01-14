@@ -249,6 +249,7 @@ fn detect_chart_kind(
         return chart_type;
     }
 
+    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("");
     let hints = collect_chart_ex_kind_hints(doc);
     let hint_list = if hints.is_empty() {
         "<none>".to_string()
@@ -257,7 +258,9 @@ fn detect_chart_kind(
     };
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: format!("ChartEx chart kind could not be inferred; hints: {hint_list}"),
+        message: format!(
+            "ChartEx chart kind could not be inferred (root ns={root_ns}); hints: {hint_list}"
+        ),
     });
 
     "unknown".to_string()
