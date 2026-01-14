@@ -7,16 +7,21 @@ cd "$repo_root"
 
 usage() {
   cat <<'EOF'
-usage: scripts/ci/check-appimage.sh [AppImage...]
+ usage: scripts/ci/check-appimage.sh [AppImage...]
 
 If no arguments are provided, this script searches for AppImages under the usual
 Cargo/Tauri output directories (e.g. <target>/release/bundle/appimage/*.AppImage or
 <target>/<triple>/release/bundle/appimage/*.AppImage).
 
-Environment overrides:
-  FORMULA_APPIMAGE_MAIN_BINARY
-    Expected basename of the main binary under squashfs-root/usr/bin/.
-    Defaults to `apps/desktop/src-tauri/tauri.conf.json` mainBinaryName when available.
+ Note: this smoke test only validates extraction + ELF/linker sanity. For desktop
+ integration metadata checks (`.desktop` MimeType/Exec, file associations from
+ `bundle.fileAssociations`, and `formula://` deep links), use:
+   bash scripts/validate-linux-appimage.sh
+
+ Environment overrides:
+   FORMULA_APPIMAGE_MAIN_BINARY
+     Expected basename of the main binary under squashfs-root/usr/bin/.
+     Defaults to `apps/desktop/src-tauri/tauri.conf.json` mainBinaryName when available.
 
   FORMULA_EXPECTED_ELF_MACHINE_SUBSTRING
     Expected substring from `readelf -h` "Machine:" line (defaults based on uname -m).
