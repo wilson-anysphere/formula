@@ -417,7 +417,8 @@ fn oddf_equation(
     // `PCD` derivation is surprisingly basis-dependent for month-stepping schedules that involve
     // clamping (e.g. `Aug 30 -> Feb 29 -> Aug 29`):
     // - For basis=4 (European 30E/360), Excel steps backwards from `first_coupon` to determine
-    //   `PCD` for the DAYS360_EU day-count used in `E`.
+    //   `PCD` for the DAYS360_EU day-count used in `E` (see
+    //   `tests/odd_coupon_oracle_regressions.rs`).
     // - For bases 1/2/3 (actual-day bases), Excel's behavior matches the maturity-anchored coupon
     //   schedule used for the cashflow dates.
     let prev_coupon = if basis == 4 {

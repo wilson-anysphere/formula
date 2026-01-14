@@ -64,8 +64,8 @@ impl formula_engine::eval::ValueResolver for TestResolver {
         &self,
         _ctx: EvalContext,
         _sref: &formula_engine::structured_refs::StructuredRef,
-    ) -> Option<Vec<(usize, CellAddr, CellAddr)>> {
-        None
+    ) -> Result<Vec<(usize, CellAddr, CellAddr)>, formula_engine::ErrorKind> {
+        Err(formula_engine::ErrorKind::Name)
     }
 }
 

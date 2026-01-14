@@ -120,8 +120,8 @@ impl ValueResolver for ConstResolver {
         &self,
         _ctx: EvalContext,
         _sref: &crate::structured_refs::StructuredRef,
-    ) -> Option<Vec<(usize, CellAddr, CellAddr)>> {
-        None
+    ) -> Result<Vec<(usize, CellAddr, CellAddr)>, crate::ErrorKind> {
+        Err(crate::ErrorKind::Name)
     }
 
     fn resolve_name(&self, _sheet_id: usize, _name: &str) -> Option<crate::eval::ResolvedName> {

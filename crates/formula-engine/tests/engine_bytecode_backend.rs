@@ -86,14 +86,15 @@ impl ValueResolver for EngineResolver<'_> {
         &self,
         _ctx: EvalContext,
         _sref: &formula_engine::structured_refs::StructuredRef,
-    ) -> Option<
+    ) -> Result<
         Vec<(
             usize,
             formula_engine::eval::CellAddr,
             formula_engine::eval::CellAddr,
         )>,
+        ErrorKind,
     > {
-        None
+        Err(ErrorKind::Name)
     }
 
     fn spill_origin(
@@ -1507,7 +1508,7 @@ fn bytecode_backend_sheet_qualified_defined_name_formula_uses_target_sheet_conte
 }
 
 #[test]
-fn bytecode_backend_does_not_inline_dynamic_defined_name_formulas() {
+fn bytecode_backend_inlines_dynamic_defined_name_formulas() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
     engine
@@ -1522,8 +1523,9 @@ fn bytecode_backend_does_not_inline_dynamic_defined_name_formulas() {
         .set_cell_formula("Sheet1", "B1", "=SUM(MyDyn)")
         .unwrap();
 
-    // The dynamic name definition should not be inlined, so the formula should stay on the AST backend.
-    assert_eq!(engine.bytecode_program_count(), 0);
+    // Defined-name formulas are inlined for bytecode compilation (bytecode does not resolve workbook
+    // names at runtime). Ensure INDIRECT-based definitions can still compile and evaluate.
+    assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
@@ -7635,7 +7637,7 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
 }
 
 #[test]
-fn bytecode_compile_diagnostics_reports_unsupported_function_reason_for_indirect() {
+fn bytecode_compile_diagnostics_accepts_indirect() {
     let mut engine = Engine::new();
     engine
         .set_cell_formula("Sheet1", "A1", "=INDIRECT(\"A1\")")
@@ -7643,29 +7645,14 @@ fn bytecode_compile_diagnostics_reports_unsupported_function_reason_for_indirect
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
-    assert_eq!(stats.compiled, 0);
-    assert_eq!(stats.fallback, 1);
-    assert_eq!(
-        stats
-            .fallback_reasons
-            .get(&BytecodeCompileReason::UnsupportedFunction(Arc::from("INDIRECT")))
-            .copied()
-            .unwrap_or(0),
-        1
-    );
-
     let report = engine.bytecode_compile_report(10);
-    assert_eq!(report.len(), 1);
-    assert_eq!(report[0].sheet, "Sheet1");
-    assert_eq!(report[0].addr, parse_a1("A1").unwrap());
-    assert_eq!(
-        report[0].reason,
-        BytecodeCompileReason::UnsupportedFunction(Arc::from("INDIRECT"))
-    );
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 0);
+    assert!(report.is_empty());
 }
 
 #[test]
-fn bytecode_compile_diagnostics_reports_unsupported_function_reason_for_offset() {
+fn bytecode_compile_diagnostics_accepts_offset() {
     let mut engine = Engine::new();
     engine
         .set_cell_formula("Sheet1", "A1", "=OFFSET(A2,0,0)")
@@ -7673,25 +7660,10 @@ fn bytecode_compile_diagnostics_reports_unsupported_function_reason_for_offset()
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
-    assert_eq!(stats.compiled, 0);
-    assert_eq!(stats.fallback, 1);
-    assert_eq!(
-        stats
-            .fallback_reasons
-            .get(&BytecodeCompileReason::UnsupportedFunction(Arc::from("OFFSET")))
-            .copied()
-            .unwrap_or(0),
-        1
-    );
-
     let report = engine.bytecode_compile_report(10);
-    assert_eq!(report.len(), 1);
-    assert_eq!(report[0].sheet, "Sheet1");
-    assert_eq!(report[0].addr, parse_a1("A1").unwrap());
-    assert_eq!(
-        report[0].reason,
-        BytecodeCompileReason::UnsupportedFunction(Arc::from("OFFSET"))
-    );
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 0);
+    assert!(report.is_empty());
 }
 
 #[test]

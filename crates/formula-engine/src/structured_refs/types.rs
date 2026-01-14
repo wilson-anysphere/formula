@@ -25,6 +25,9 @@ pub enum StructuredColumns {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuredRef {
     pub table_name: Option<String>,
-    pub item: Option<StructuredRefItem>,
+    /// Special table item specifiers like `#Headers`/`#Data`.
+    ///
+    /// An empty list means the default item selection (Excel's implicit `#Data`).
+    pub items: Vec<StructuredRefItem>,
     pub columns: StructuredColumns,
 }

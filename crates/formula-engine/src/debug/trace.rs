@@ -1386,9 +1386,9 @@ impl ParserImpl {
                 let field = match sref {
                     crate::structured_refs::StructuredRef {
                         table_name: None,
-                        item: None,
+                        items,
                         columns: crate::structured_refs::StructuredColumns::Single(name),
-                    } => parse_bracket_quoted_field_name(&name).map_err(|_| {
+                    } if items.is_empty() => parse_bracket_quoted_field_name(&name).map_err(|_| {
                         FormulaParseError::UnexpectedToken(
                             "expected bracket-quoted field selector".to_string(),
                         )
@@ -2325,7 +2325,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             },
             SpannedExprKind::StructuredRef(sref) => {
                 match self.resolver.resolve_structured_ref(self.ctx, sref) {
-                    Some(ranges)
+                    Ok(ranges)
                         if !ranges.is_empty()
                             && ranges
                                 .iter()
@@ -2364,8 +2364,21 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             },
                         )
                     }
-                    _ => {
-                        let value = Value::Error(ErrorKind::Name);
+                    Ok(_) => {
+                        let value = Value::Error(ErrorKind::Ref);
+                        (
+                            EvalValue::Scalar(value.clone()),
+                            TraceNode {
+                                kind: TraceKind::StructuredRef,
+                                span: expr.span,
+                                value,
+                                reference: None,
+                                children: Vec::new(),
+                            },
+                        )
+                    }
+                    Err(e) => {
+                        let value = Value::Error(e);
                         (
                             EvalValue::Scalar(value.clone()),
                             TraceNode {

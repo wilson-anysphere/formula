@@ -279,7 +279,7 @@ pub trait ValueResolver {
         &self,
         ctx: EvalContext,
         sref: &crate::structured_refs::StructuredRef,
-    ) -> Option<Vec<(usize, CellAddr, CellAddr)>>;
+    ) -> Result<Vec<(usize, CellAddr, CellAddr)>, ErrorKind>;
     fn resolve_name(&self, _sheet_id: usize, _name: &str) -> Option<ResolvedName> {
         None
     }
@@ -700,7 +700,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             },
             Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref)
             {
-                Some(ranges) if !ranges.is_empty() => {
+                Ok(ranges) if !ranges.is_empty() => {
                     if !ranges
                         .iter()
                         .all(|(sheet_id, _, _)| self.resolver.sheet_exists(*sheet_id))
@@ -729,7 +729,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                             .collect(),
                     )
                 }
-                _ => EvalValue::Scalar(Value::Error(ErrorKind::Name)),
+                Ok(_) => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                Err(e) => EvalValue::Scalar(Value::Error(e)),
             },
             Expr::NameRef(nref) => self.eval_name_ref(nref),
             Expr::FieldAccess { base, field } => {

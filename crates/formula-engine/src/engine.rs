@@ -7061,8 +7061,8 @@ fn rewrite_structured_refs_for_bytecode(
             // compiled bytecode program reusable across table rows, while still producing the
             // correct row-dependent behavior at runtime.
             if matches!(
-                sref.item,
-                Some(crate::structured_refs::StructuredRefItem::ThisRow)
+                sref.items.as_slice(),
+                [crate::structured_refs::StructuredRefItem::ThisRow]
             ) {
                 let mut parts = Vec::with_capacity(ranges.len());
                 for (sheet_id, start, end) in &ranges {
@@ -7617,14 +7617,13 @@ impl crate::eval::ValueResolver for Snapshot {
         &self,
         ctx: crate::eval::EvalContext,
         sref: &crate::structured_refs::StructuredRef,
-    ) -> Option<Vec<(usize, CellAddr, CellAddr)>> {
+    ) -> Result<Vec<(usize, CellAddr, CellAddr)>, ErrorKind> {
         crate::structured_refs::resolve_structured_ref(
             &self.tables,
             ctx.current_sheet,
             ctx.current_cell,
             sref,
         )
-        .ok()
     }
 
     fn resolve_name(&self, sheet_id: usize, name: &str) -> Option<crate::eval::ResolvedName> {
@@ -7634,7 +7633,34 @@ impl crate::eval::ValueResolver for Snapshot {
                 return Some(def.clone());
             }
         }
-        self.workbook_names.get(&key).cloned()
+        if let Some(def) = self.workbook_names.get(&key) {
+            return Some(def.clone());
+        }
+
+        // Excel allows referring to a table by name (e.g. `=Table1`) which resolves to the table's
+        // default data body area.
+        let name = name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        for tables in &self.tables {
+            for table in tables {
+                if crate::value::cmp_case_insensitive(&table.name, name) == Ordering::Equal
+                    || crate::value::cmp_case_insensitive(&table.display_name, name)
+                        == Ordering::Equal
+                {
+                    return Some(crate::eval::ResolvedName::Expr(Expr::StructuredRef(
+                        crate::structured_refs::StructuredRef {
+                            table_name: Some(name.to_string()),
+                            items: Vec::new(),
+                            columns: crate::structured_refs::StructuredColumns::All,
+                        },
+                    )));
+                }
+            }
+        }
+
+        None
     }
 
     fn spill_origin(&self, sheet_id: usize, addr: CellAddr) -> Option<CellAddr> {
@@ -8912,14 +8938,23 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     }
 
     fn resolve_sheet_name(&self, name: &str) -> Option<usize> {
+        // Excel resolves sheet names case-insensitively across Unicode using compatibility
+        // normalization (NFKC). Ensure bytecode runtime sheet-name lookups (e.g. INDIRECT, SHEET)
+        // match the engine's canonical sheet-key semantics.
         self.snapshot
             .sheet_names_by_id
             .iter()
-            .position(|candidate| match candidate.as_deref() {
-                Some(candidate) => {
-                    crate::value::cmp_case_insensitive(candidate, name) == Ordering::Equal
+            .enumerate()
+            .find_map(|(sheet_id, candidate)| {
+                if !self.snapshot.sheets.contains(&sheet_id) {
+                    return None;
                 }
-                None => false,
+                let candidate = candidate.as_deref()?;
+                if formula_model::sheet_name_eq_case_insensitive(candidate, name) {
+                    Some(sheet_id)
+                } else {
+                    None
+                }
             })
     }
 
@@ -10279,7 +10314,7 @@ fn bytecode_expr_is_eligible_inner(
 fn analyze_expr_flags(
     expr: &CompiledExpr,
     current_cell: CellKey,
-    _tables_by_sheet: &[Vec<Table>],
+    tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
 ) -> (HashSet<String>, bool, bool, bool) {
     let mut names = HashSet::new();
@@ -10291,6 +10326,7 @@ fn analyze_expr_flags(
     walk_expr_flags(
         expr,
         current_cell,
+        tables_by_sheet,
         workbook,
         &mut names,
         &mut volatile,
@@ -10305,6 +10341,7 @@ fn analyze_expr_flags(
 fn walk_expr_flags(
     expr: &CompiledExpr,
     current_cell: CellKey,
+    tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
     names: &mut HashSet<String>,
     volatile: &mut bool,
@@ -10345,6 +10382,21 @@ fn walk_expr_flags(
                 return;
             }
 
+            // Bare table names (e.g. `=Table1`) are treated as table references when no defined
+            // name exists. Do not register them as defined-name dependencies.
+            if resolve_defined_name(workbook, sheet, &name_key).is_none() {
+                let candidate = nref.name.trim();
+                if !candidate.is_empty()
+                    && tables_by_sheet.iter().flatten().any(|t| {
+                        crate::value::cmp_case_insensitive(&t.name, candidate) == Ordering::Equal
+                            || crate::value::cmp_case_insensitive(&t.display_name, candidate)
+                                == Ordering::Equal
+                    })
+                {
+                    return;
+                }
+            }
+
             names.insert(name_key.clone());
 
             let visit_key = (sheet, name_key.clone());
@@ -10362,6 +10414,7 @@ fn walk_expr_flags(
                             sheet,
                             addr: current_cell.addr,
                         },
+                        tables_by_sheet,
                         workbook,
                         names,
                         volatile,
@@ -10379,6 +10432,7 @@ fn walk_expr_flags(
             walk_expr_flags(
                 expr,
                 current_cell,
+                tables_by_sheet,
                 workbook,
                 names,
                 volatile,
@@ -10392,6 +10446,7 @@ fn walk_expr_flags(
             walk_expr_flags(
                 base,
                 current_cell,
+                tables_by_sheet,
                 workbook,
                 names,
                 volatile,
@@ -10405,6 +10460,7 @@ fn walk_expr_flags(
             walk_expr_flags(
                 left,
                 current_cell,
+                tables_by_sheet,
                 workbook,
                 names,
                 volatile,
@@ -10416,6 +10472,7 @@ fn walk_expr_flags(
             walk_expr_flags(
                 right,
                 current_cell,
+                tables_by_sheet,
                 workbook,
                 names,
                 volatile,
@@ -10469,6 +10526,7 @@ fn walk_expr_flags(
                             walk_expr_flags(
                                 &pair[1],
                                 current_cell,
+                                tables_by_sheet,
                                 workbook,
                                 names,
                                 volatile,
@@ -10486,6 +10544,7 @@ fn walk_expr_flags(
                         walk_expr_flags(
                             &args[args.len() - 1],
                             current_cell,
+                            tables_by_sheet,
                             workbook,
                             names,
                             volatile,
@@ -10516,6 +10575,7 @@ fn walk_expr_flags(
                         walk_expr_flags(
                             &args[args.len() - 1],
                             current_cell,
+                            tables_by_sheet,
                             workbook,
                             names,
                             volatile,
@@ -10548,6 +10608,7 @@ fn walk_expr_flags(
                                         sheet,
                                         addr: current_cell.addr,
                                     },
+                                    tables_by_sheet,
                                     workbook,
                                     names,
                                     volatile,
@@ -10571,6 +10632,7 @@ fn walk_expr_flags(
                 walk_expr_flags(
                     a,
                     current_cell,
+                    tables_by_sheet,
                     workbook,
                     names,
                     volatile,
@@ -10585,6 +10647,7 @@ fn walk_expr_flags(
             walk_expr_flags(
                 callee,
                 current_cell,
+                tables_by_sheet,
                 workbook,
                 names,
                 volatile,
@@ -10597,6 +10660,7 @@ fn walk_expr_flags(
                 walk_expr_flags(
                     a,
                     current_cell,
+                    tables_by_sheet,
                     workbook,
                     names,
                     volatile,
@@ -10612,6 +10676,7 @@ fn walk_expr_flags(
                 walk_expr_flags(
                     el,
                     current_cell,
+                    tables_by_sheet,
                     workbook,
                     names,
                     volatile,
@@ -10626,6 +10691,7 @@ fn walk_expr_flags(
             walk_expr_flags(
                 inner,
                 current_cell,
+                tables_by_sheet,
                 workbook,
                 names,
                 volatile,
@@ -11099,6 +11165,35 @@ fn walk_calc_expr(
                         visiting_names,
                         lexical_scopes,
                     );
+                }
+            } else {
+                // If there's no defined name, Excel allows a bare table name (e.g. `=Table1`) which
+                // resolves to the table's default data area. Treat those as structured references
+                // for dependency analysis so table edits mark dependent formulas dirty.
+                let candidate = nref.name.trim();
+                if !candidate.is_empty() {
+                    let sref = crate::structured_refs::StructuredRef {
+                        table_name: Some(candidate.to_string()),
+                        items: Vec::new(),
+                        columns: crate::structured_refs::StructuredColumns::All,
+                    };
+                    if let Ok(ranges) = crate::structured_refs::resolve_structured_ref(
+                        tables_by_sheet,
+                        current_cell.sheet,
+                        current_cell.addr,
+                        &sref,
+                    ) {
+                        for (sheet_id, start, end) in ranges {
+                            let range = Range::new(
+                                CellRef::new(start.row, start.col),
+                                CellRef::new(end.row, end.col),
+                            );
+                            precedents.insert(Precedent::Range(SheetRange::new(
+                                sheet_id_for_graph(sheet_id),
+                                range,
+                            )));
+                        }
+                    }
                 }
             }
             visiting_names.remove(&visit_key);

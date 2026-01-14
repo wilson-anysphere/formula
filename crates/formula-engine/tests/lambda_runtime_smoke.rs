@@ -27,8 +27,8 @@ impl ValueResolver for TestResolver {
         &self,
         _ctx: EvalContext,
         _sref: &formula_engine::structured_refs::StructuredRef,
-    ) -> Option<Vec<(usize, CellAddr, CellAddr)>> {
-        None
+    ) -> Result<Vec<(usize, CellAddr, CellAddr)>, ErrorKind> {
+        Err(ErrorKind::Name)
     }
 
     fn resolve_name(&self, sheet_id: usize, name: &str) -> Option<ResolvedName> {

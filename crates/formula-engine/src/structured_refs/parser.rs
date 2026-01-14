@@ -31,12 +31,12 @@ pub fn parse_structured_ref(input: &str, pos: usize) -> Option<(StructuredRef, u
     };
 
     let (inner, end_pos) = parse_bracketed(input, bracket_start)?;
-    let (item, columns) = parse_inner_spec(inner.trim())?;
+    let (items, columns) = parse_inner_spec(inner.trim())?;
 
     Some((
         StructuredRef {
             table_name,
-            item,
+            items,
             columns,
         },
         end_pos,
@@ -110,7 +110,7 @@ fn push_depth(states: &mut [Vec<u32>], pos: usize, depth: u32) {
     }
 }
 
-fn parse_inner_spec(inner: &str) -> Option<(Option<StructuredRefItem>, StructuredColumns)> {
+fn parse_inner_spec(inner: &str) -> Option<(Vec<StructuredRefItem>, StructuredColumns)> {
     if inner.is_empty() {
         return None;
     }
@@ -122,18 +122,13 @@ fn parse_inner_spec(inner: &str) -> Option<(Option<StructuredRefItem>, Structure
             return None;
         }
 
-        let mut item: Option<StructuredRefItem> = None;
+        let mut items: Vec<StructuredRefItem> = Vec::new();
         let mut columns: Vec<StructuredColumn> = Vec::new();
-        for (idx, part) in parts.iter().enumerate() {
+        for part in parts.iter() {
             let (maybe_item, cols) = parse_bracket_group_or_range(part)?;
             if let Some(it) = maybe_item {
-                // Excel allows an optional item (e.g. [#Headers]) followed by one or more column selectors.
-                if idx == 0 && item.is_none() && columns.is_empty() {
-                    item = Some(it);
-                    continue;
-                }
-                // Multiple items in a structured ref (e.g. [[#Headers],[#Data],[Col]]) are not supported.
-                return None;
+                items.push(it);
+                continue;
             }
 
             match cols {
@@ -160,33 +155,30 @@ fn parse_inner_spec(inner: &str) -> Option<(Option<StructuredRefItem>, Structure
             _ => StructuredColumns::Multi(columns),
         };
 
-        Some((item, cols))
+        Some((items, cols))
     } else {
         // Simple form: "@Col", "Col", "#Headers", etc.
         let trimmed = inner.trim();
         if let Some(stripped) = trimmed.strip_prefix('@') {
             let stripped = stripped.trim();
             if stripped.is_empty() {
-                return Some((Some(StructuredRefItem::ThisRow), StructuredColumns::All));
+                return Some((vec![StructuredRefItem::ThisRow], StructuredColumns::All));
             }
             if stripped.starts_with('[') {
                 let cols = parse_columns_only(stripped)?;
-                return Some((Some(StructuredRefItem::ThisRow), cols));
+                return Some((vec![StructuredRefItem::ThisRow], cols));
             }
             return Some((
-                Some(StructuredRefItem::ThisRow),
+                vec![StructuredRefItem::ThisRow],
                 StructuredColumns::Single(unescape_column_name(stripped)),
             ));
         }
 
         if let Some(item) = parse_item(trimmed) {
-            return Some((Some(item), StructuredColumns::All));
+            return Some((vec![item], StructuredColumns::All));
         }
 
-        Some((
-            None,
-            StructuredColumns::Single(unescape_column_name(trimmed)),
-        ))
+        Some((Vec::new(), StructuredColumns::Single(unescape_column_name(trimmed))))
     }
 }
 
@@ -357,7 +349,7 @@ mod tests {
         let (sref, end) = parse_structured_ref("Table1[Qty]", 0).unwrap();
         assert_eq!(end, "Table1[Qty]".len());
         assert_eq!(sref.table_name.as_deref(), Some("Table1"));
-        assert_eq!(sref.item, None);
+        assert_eq!(sref.items, Vec::<StructuredRefItem>::new());
         assert_eq!(sref.columns, StructuredColumns::Single("Qty".into()));
     }
 
@@ -365,14 +357,14 @@ mod tests {
     fn parses_this_row_ref() {
         let (sref, _) = parse_structured_ref("[@Qty]", 0).unwrap();
         assert_eq!(sref.table_name, None);
-        assert_eq!(sref.item, Some(StructuredRefItem::ThisRow));
+        assert_eq!(sref.items, vec![StructuredRefItem::ThisRow]);
         assert_eq!(sref.columns, StructuredColumns::Single("Qty".into()));
     }
 
     #[test]
     fn parses_headers_ref() {
         let (sref, _) = parse_structured_ref("Table1[[#Headers],[Qty]]", 0).unwrap();
-        assert_eq!(sref.item, Some(StructuredRefItem::Headers));
+        assert_eq!(sref.items, vec![StructuredRefItem::Headers]);
         assert_eq!(sref.columns, StructuredColumns::Single("Qty".into()));
     }
 
@@ -380,7 +372,7 @@ mod tests {
     fn parses_nested_column_name_with_escaped_bracket() {
         let (sref, _) = parse_structured_ref("Table1[[#Headers],[A]]B]]", 0).unwrap();
         assert_eq!(sref.table_name.as_deref(), Some("Table1"));
-        assert_eq!(sref.item, Some(StructuredRefItem::Headers));
+        assert_eq!(sref.items, vec![StructuredRefItem::Headers]);
         assert_eq!(sref.columns, StructuredColumns::Single("A]B".into()));
     }
 
@@ -392,14 +384,14 @@ mod tests {
         let (sref, end) = parse_structured_ref(input, 0).unwrap();
         assert_eq!(end, first.len());
         assert_eq!(sref.table_name.as_deref(), Some("Table1"));
-        assert_eq!(sref.item, Some(StructuredRefItem::Headers));
+        assert_eq!(sref.items, vec![StructuredRefItem::Headers]);
         assert_eq!(sref.columns, StructuredColumns::Single("Qty".into()));
     }
 
     #[test]
     fn parses_multi_column_ref() {
         let (sref, _) = parse_structured_ref("Table1[[Col1],[Col3]]", 0).unwrap();
-        assert_eq!(sref.item, None);
+        assert_eq!(sref.items, Vec::<StructuredRefItem>::new());
         assert_eq!(
             sref.columns,
             StructuredColumns::Multi(vec![
@@ -412,7 +404,7 @@ mod tests {
     #[test]
     fn parses_this_row_column_range_ref() {
         let (sref, _) = parse_structured_ref("[@[Col1]:[Col3]]", 0).unwrap();
-        assert_eq!(sref.item, Some(StructuredRefItem::ThisRow));
+        assert_eq!(sref.items, vec![StructuredRefItem::ThisRow]);
         assert_eq!(
             sref.columns,
             StructuredColumns::Range {

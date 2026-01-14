@@ -1,19 +1,12 @@
 use super::{StructuredColumn, StructuredColumns, StructuredRef, StructuredRefItem};
 use crate::eval::CellAddr;
-use crate::value::cmp_case_insensitive;
+use crate::value::{cmp_case_insensitive, ErrorKind};
 use formula_model::table::{Table, TableArea};
 use formula_model::{CellRef, Range};
 use std::cmp::Ordering;
 
 fn addr_to_model(addr: CellAddr) -> CellRef {
     CellRef::new(addr.row, addr.col)
-}
-
-fn model_to_addr(cell: CellRef) -> CellAddr {
-    CellAddr {
-        row: cell.row,
-        col: cell.col,
-    }
 }
 
 fn column_index_ci(table: &Table, name: &str) -> Option<u32> {
@@ -24,17 +17,11 @@ fn column_index_ci(table: &Table, name: &str) -> Option<u32> {
         .map(|idx| idx as u32)
 }
 
-fn base_range_for_area(table: &Table, area: TableArea) -> Result<Range, String> {
+fn base_range_for_area(table: &Table, area: TableArea) -> Result<Range, ErrorKind> {
     Ok(match area {
-        TableArea::Headers => table
-            .header_range()
-            .ok_or_else(|| "table has no header row".to_string())?,
-        TableArea::Totals => table
-            .totals_range()
-            .ok_or_else(|| "table has no totals row".to_string())?,
-        TableArea::Data => table
-            .data_range()
-            .ok_or_else(|| "table has no data rows".to_string())?,
+        TableArea::Headers => table.header_range().ok_or(ErrorKind::Ref)?,
+        TableArea::Totals => table.totals_range().ok_or(ErrorKind::Ref)?,
+        TableArea::Data => table.data_range().ok_or(ErrorKind::Ref)?,
         TableArea::All => table.range,
     })
 }
@@ -47,18 +34,15 @@ fn normalize_column_interval(start_idx: u32, end_idx: u32) -> (u32, u32) {
     }
 }
 
-fn column_interval_ci(table: &Table, col: &StructuredColumn) -> Result<(u32, u32), String> {
+fn column_interval_ci(table: &Table, col: &StructuredColumn) -> Result<(u32, u32), ErrorKind> {
     match col {
         StructuredColumn::Single(name) => {
-            let idx =
-                column_index_ci(table, name).ok_or_else(|| format!("unknown column '{name}'"))?;
+            let idx = column_index_ci(table, name).ok_or(ErrorKind::Ref)?;
             Ok((idx, idx))
         }
         StructuredColumn::Range { start, end } => {
-            let start_idx =
-                column_index_ci(table, start).ok_or_else(|| format!("unknown column '{start}'"))?;
-            let end_idx =
-                column_index_ci(table, end).ok_or_else(|| format!("unknown column '{end}'"))?;
+            let start_idx = column_index_ci(table, start).ok_or(ErrorKind::Ref)?;
+            let end_idx = column_index_ci(table, end).ok_or(ErrorKind::Ref)?;
             Ok(normalize_column_interval(start_idx, end_idx))
         }
     }
@@ -67,7 +51,7 @@ fn column_interval_ci(table: &Table, col: &StructuredColumn) -> Result<(u32, u32
 fn column_intervals_ci(
     table: &Table,
     columns: &StructuredColumns,
-) -> Result<Vec<(u32, u32)>, String> {
+) -> Result<Vec<(u32, u32)>, ErrorKind> {
     match columns {
         StructuredColumns::All => Ok(Vec::new()),
         StructuredColumns::Single(name) => {
@@ -92,7 +76,7 @@ fn column_intervals_ci(
     }
 }
 
-fn merge_column_intervals(mut intervals: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
+fn merge_intervals(mut intervals: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
     if intervals.is_empty() {
         return intervals;
     }
@@ -119,29 +103,96 @@ pub fn resolve_structured_ref(
     origin_sheet: usize,
     origin_cell: CellAddr,
     sref: &StructuredRef,
-) -> Result<Vec<(usize, CellAddr, CellAddr)>, String> {
+) -> Result<Vec<(usize, CellAddr, CellAddr)>, ErrorKind> {
     let (sheet_id, table) = find_table(tables_by_sheet, origin_sheet, origin_cell, sref)?;
 
-    let item = sref.item.clone().unwrap_or(StructuredRefItem::Data);
-    let ranges = match item {
-        StructuredRefItem::ThisRow => {
-            if sheet_id != origin_sheet {
-                return Err(
-                    "this-row structured reference used outside of table data row".to_string(),
-                );
-            }
-            resolve_this_row(table, origin_cell, &sref.columns)?
-        }
-        StructuredRefItem::Headers => resolve_area(table, TableArea::Headers, &sref.columns)?,
-        StructuredRefItem::Totals => resolve_area(table, TableArea::Totals, &sref.columns)?,
-        StructuredRefItem::All => resolve_area(table, TableArea::All, &sref.columns)?,
-        StructuredRefItem::Data => resolve_area(table, TableArea::Data, &sref.columns)?,
+    // Excel defaults to `#Data` when no item specifier is present.
+    let items: Vec<StructuredRefItem> = if sref.items.is_empty() {
+        vec![StructuredRefItem::Data]
+    } else {
+        sref.items.clone()
     };
 
-    Ok(ranges
-        .into_iter()
-        .map(|(start, end)| (sheet_id, start, end))
-        .collect())
+    // Resolve the column selection once. Column intervals are 0-based indices into the table's
+    // column set (relative to `table.range.start.col`).
+    let table_start = table.range.start;
+    let table_width = table
+        .range
+        .end
+        .col
+        .saturating_sub(table_start.col)
+        .saturating_add(1);
+    if table_width == 0 {
+        return Err(ErrorKind::Ref);
+    }
+
+    let col_intervals = if matches!(sref.columns, StructuredColumns::All) {
+        vec![(0, table_width.saturating_sub(1))]
+    } else {
+        merge_intervals(column_intervals_ci(table, &sref.columns)?)
+    };
+
+    let mut row_intervals: Vec<(u32, u32)> = Vec::new();
+    for item in items {
+        match item {
+            StructuredRefItem::ThisRow => {
+                if sheet_id != origin_sheet {
+                    return Err(ErrorKind::Name);
+                }
+                let data_range = table.data_range().ok_or(ErrorKind::Ref)?;
+                if !data_range.contains(addr_to_model(origin_cell)) {
+                    return Err(ErrorKind::Name);
+                }
+                row_intervals.push((origin_cell.row, origin_cell.row));
+            }
+            StructuredRefItem::Headers => {
+                let base = base_range_for_area(table, TableArea::Headers)?;
+                row_intervals.push((base.start.row, base.end.row));
+            }
+            StructuredRefItem::Totals => {
+                let base = base_range_for_area(table, TableArea::Totals)?;
+                row_intervals.push((base.start.row, base.end.row));
+            }
+            StructuredRefItem::All => {
+                let base = base_range_for_area(table, TableArea::All)?;
+                row_intervals.push((base.start.row, base.end.row));
+            }
+            StructuredRefItem::Data => {
+                let base = base_range_for_area(table, TableArea::Data)?;
+                row_intervals.push((base.start.row, base.end.row));
+            }
+        }
+    }
+
+    let row_intervals = merge_intervals(row_intervals);
+    let mut out: Vec<(usize, CellAddr, CellAddr)> =
+        Vec::with_capacity(row_intervals.len().saturating_mul(col_intervals.len()));
+    for (row_start, row_end) in row_intervals {
+        for (left_idx, right_idx) in &col_intervals {
+            out.push((
+                sheet_id,
+                CellAddr {
+                    row: row_start,
+                    col: table_start.col + *left_idx,
+                },
+                CellAddr {
+                    row: row_end,
+                    col: table_start.col + *right_idx,
+                },
+            ));
+        }
+    }
+
+    // Stable ordering for deterministic union behavior.
+    out.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.row.cmp(&b.1.row))
+            .then_with(|| a.1.col.cmp(&b.1.col))
+            .then_with(|| a.2.row.cmp(&b.2.row))
+            .then_with(|| a.2.col.cmp(&b.2.col))
+    });
+
+    Ok(out)
 }
 
 fn find_table<'a>(
@@ -149,7 +200,7 @@ fn find_table<'a>(
     origin_sheet: usize,
     origin_cell: CellAddr,
     sref: &StructuredRef,
-) -> Result<(usize, &'a Table), String> {
+) -> Result<(usize, &'a Table), ErrorKind> {
     if let Some(name) = &sref.table_name {
         for (sheet_id, tables) in tables_by_sheet.iter().enumerate() {
             if let Some(table) = tables.iter().find(|t| {
@@ -159,89 +210,20 @@ fn find_table<'a>(
                 return Ok((sheet_id, table));
             }
         }
-        return Err(format!("unknown table '{name}'"));
+        return Err(ErrorKind::Name);
     }
 
     let tables = tables_by_sheet
         .get(origin_sheet)
-        .ok_or_else(|| format!("sheet index {origin_sheet} out of bounds"))?;
+        .ok_or(ErrorKind::Ref)?;
 
     let origin_cell_model = addr_to_model(origin_cell);
     let table = tables
         .iter()
         .find(|t| t.range.contains(origin_cell_model))
-        .ok_or_else(|| {
-            "structured reference without table name used outside of a table".to_string()
-        })?;
+        .ok_or(ErrorKind::Name)?;
 
     Ok((origin_sheet, table))
-}
-
-fn resolve_area(
-    table: &Table,
-    area: TableArea,
-    columns: &StructuredColumns,
-) -> Result<Vec<(CellAddr, CellAddr)>, String> {
-    let base = base_range_for_area(table, area)?;
-    if matches!(columns, StructuredColumns::All) {
-        return Ok(vec![(model_to_addr(base.start), model_to_addr(base.end))]);
-    }
-
-    let intervals = merge_column_intervals(column_intervals_ci(table, columns)?);
-    let table_start = table.range.start;
-    let mut out = Vec::with_capacity(intervals.len());
-    for (left_idx, right_idx) in intervals {
-        let range = Range::new(
-            CellRef::new(base.start.row, table_start.col + left_idx),
-            CellRef::new(base.end.row, table_start.col + right_idx),
-        );
-        out.push((model_to_addr(range.start), model_to_addr(range.end)));
-    }
-    Ok(out)
-}
-
-fn resolve_this_row(
-    table: &Table,
-    origin_cell: CellAddr,
-    columns: &StructuredColumns,
-) -> Result<Vec<(CellAddr, CellAddr)>, String> {
-    let data_range = table
-        .data_range()
-        .ok_or_else(|| "table has no data rows".to_string())?;
-    if !data_range.contains(addr_to_model(origin_cell)) {
-        return Err("this-row structured reference used outside of table data row".to_string());
-    }
-    let row = origin_cell.row;
-
-    match columns {
-        StructuredColumns::All => Ok(vec![(
-            CellAddr {
-                row,
-                col: table.range.start.col,
-            },
-            CellAddr {
-                row,
-                col: table.range.end.col,
-            },
-        )]),
-        _ => {
-            let intervals = merge_column_intervals(column_intervals_ci(table, columns)?);
-            let mut out = Vec::with_capacity(intervals.len());
-            for (left_idx, right_idx) in intervals {
-                out.push((
-                    CellAddr {
-                        row,
-                        col: table.range.start.col + left_idx,
-                    },
-                    CellAddr {
-                        row,
-                        col: table.range.start.col + right_idx,
-                    },
-                ));
-            }
-            Ok(out)
-        }
-    }
 }
 
 #[cfg(test)]
@@ -290,7 +272,7 @@ mod tests {
         let tables = vec![vec![table_fixture()]];
         let sref = StructuredRef {
             table_name: Some("Table1".into()),
-            item: None,
+            items: Vec::new(),
             columns: StructuredColumns::Single("Col2".into()),
         };
         let ranges =

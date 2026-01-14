@@ -40,14 +40,15 @@ impl ValueResolver for EngineResolver<'_> {
         &self,
         _ctx: EvalContext,
         _sref: &formula_engine::structured_refs::StructuredRef,
-    ) -> Option<
+    ) -> Result<
         Vec<(
             usize,
             formula_engine::eval::CellAddr,
             formula_engine::eval::CellAddr,
         )>,
+        ErrorKind,
     > {
-        None
+        Err(ErrorKind::Name)
     }
 }
 
