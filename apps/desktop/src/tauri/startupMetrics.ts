@@ -242,6 +242,13 @@ export async function markStartupTimeToInteractive(options?: {
    * stable and interactive" (e.g. `app.whenIdle()`).
    */
   whenIdle?: PromiseLike<unknown> | (() => PromiseLike<unknown>);
+  /**
+   * Maximum time (ms) to wait for `whenIdle` before proceeding anyway.
+   *
+   * This is best-effort startup instrumentation; we cap the wait so a hung "idle" promise
+   * cannot prevent recording TTI forever (which would break the desktop startup perf harness).
+   */
+  whenIdleTimeoutMs?: number;
 }): Promise<StartupTimings> {
   const store = getStore();
   if (typeof store.ttiFrontendMs === "number") return { ...store };
@@ -249,7 +256,20 @@ export async function markStartupTimeToInteractive(options?: {
   if (options?.whenIdle) {
     try {
       const idle = typeof options.whenIdle === "function" ? options.whenIdle() : options.whenIdle;
-      await idle;
+      const timeoutMsRaw = options.whenIdleTimeoutMs;
+      const timeoutMs =
+        typeof timeoutMsRaw === "number" && Number.isFinite(timeoutMsRaw) && timeoutMsRaw >= 0 ? timeoutMsRaw : 10_000;
+      const idlePromise = Promise.resolve(idle).catch(() => {});
+      if (timeoutMs === 0) {
+        // Don't block on idle at all.
+      } else {
+        await Promise.race([
+          idlePromise,
+          new Promise<void>((resolve) => {
+            setTimeout(resolve, timeoutMs);
+          }),
+        ]);
+      }
     } catch {
       // Still record a mark even if the idle promise fails; this is best-effort
       // instrumentation and should never crash the app.

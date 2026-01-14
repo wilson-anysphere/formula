@@ -123,6 +123,29 @@ describe("startupMetrics", () => {
     }
   });
 
+  it("does not hang TTI instrumentation if whenIdle never resolves", async () => {
+    vi.useFakeTimers();
+    const originalRaf = (globalThis as any).requestAnimationFrame;
+    try {
+      const invoke = vi.fn().mockResolvedValue(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+      (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+
+      // Make `nextFrame()` fast so the test only waits on the idle timeout.
+      (globalThis as any).requestAnimationFrame = undefined;
+
+      const neverIdle = new Promise<void>(() => {});
+      const promise = markStartupTimeToInteractive({ whenIdle: neverIdle, whenIdleTimeoutMs: 1000 });
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(invoke).toHaveBeenCalledWith("report_startup_tti");
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRaf;
+      vi.useRealTimers();
+    }
+  });
+
   it("notifies the host that the webview is ready (when running under Tauri)", async () => {
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
     reportStartupWebviewLoaded();
