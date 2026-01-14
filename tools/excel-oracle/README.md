@@ -66,6 +66,7 @@ Notes / caveats:
 - The script prints the detected Excel UI locale and will warn if it does not match `-Locale`/`-LocaleId`.
 - For `de-DE`/`fr-FR`/`es-ES`, the script also does a small sanity-check on a few sentinel error
   translations (e.g. `#VALUE!`) and warns if Excel appears misconfigured.
+- Use `-Visible` and PowerShell's `-Verbose` switch for debugging.
 - Newer error kinds (e.g. `#SPILL!`) may not exist in older Excel versions; the script will fail
   rather than emitting a misleading mapping if Excel appears not to recognize an error literal.
 - After extracting/updating an upstream TSV, regenerate the committed exports:

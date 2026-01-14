@@ -352,6 +352,8 @@ try {
       }
     }
 
+    Write-Verbose ("{0} -> {1} (FormulaLocal={2}, Text={3})" -f $code, $localized, $formulaLocal, $displayText)
+
     $rows.Add([ordered]@{ canonical = $code; localized = $localized }) | Out-Null
   }
 
