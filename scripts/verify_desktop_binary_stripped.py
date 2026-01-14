@@ -91,10 +91,15 @@ def _candidate_target_dirs(repo_root: Path) -> list[Path]:
 def _iter_release_binary_candidates(target_dir: Path, exe_name: str) -> Iterable[Path]:
     # Typical: target/release/formula-desktop(.exe)
     # Also: target/<triple>/release/formula-desktop(.exe)
-    # Avoid scanning huge dirs; glob is fine here.
-    for p in target_dir.glob(f"**/release/{exe_name}"):
-        if p.is_file():
-            yield p
+    #
+    # Avoid scanning the entire Cargo target directory (which can be very large). Cargo only
+    # produces release binaries at:
+    # - <target_dir>/release/<exe>
+    # - <target_dir>/<triple>/release/<exe>
+    for pattern in (f"release/{exe_name}", f"*/release/{exe_name}"):
+        for p in target_dir.glob(pattern):
+            if p.is_file():
+                yield p
 
 
 def _find_desktop_binary(repo_root: Path) -> Path:
@@ -178,9 +183,16 @@ def _check_macos_no_dwarf_segment(binary: Path) -> None:
 def _bundle_dirs(repo_root: Path) -> list[Path]:
     bundle_dirs: list[Path] = []
     for target_dir in _candidate_target_dirs(repo_root):
-        for p in target_dir.glob("**/release/bundle"):
-            if p.is_dir():
-                bundle_dirs.append(p)
+        # Bundles are emitted at:
+        # - <target_dir>/release/bundle
+        # - <target_dir>/<triple>/release/bundle
+        #
+        # Avoid `**/release/bundle` here: Cargo target dirs can be huge and recursive globbing
+        # can be surprisingly slow in CI.
+        for pattern in ("release/bundle", "*/release/bundle"):
+            for p in target_dir.glob(pattern):
+                if p.is_dir():
+                    bundle_dirs.append(p)
     # De-dupe
     seen: set[Path] = set()
     uniq: list[Path] = []
