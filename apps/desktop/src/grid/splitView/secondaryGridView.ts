@@ -614,6 +614,12 @@ export class SecondaryGridView {
 
   private openEditor(request: { row: number; col: number; initialKey?: string }): void {
     if (this.editor.isOpen()) return;
+    // Avoid starting a new edit session from the secondary pane while the spreadsheet is already
+    // editing elsewhere (primary cell editor / formula bar / inline edit). The desktop shell sets
+    // a unified edit-mode flag on `globalThis` so split-view panes can coordinate.
+    if (((globalThis as any).__formulaSpreadsheetIsEditing as boolean | undefined) === true) {
+      return;
+    }
     if (request.row < this.headerRows || request.col < this.headerCols) return;
     const rect = this.grid.getCellRect(request.row, request.col);
     if (!rect) return;
@@ -822,6 +828,44 @@ export class SecondaryGridView {
   }
 
   private onAxisSizeChange(change: GridAxisSizeChange): void {
+    // Do not allow row/col resize/auto-fit to mutate the sheet while the user is actively editing
+    // text (cell editor / formula bar / inline edit) in *either* split-view pane.
+    //
+    // The desktop shell publishes a unified edit-mode signal via `globalThis.__formulaSpreadsheetIsEditing`.
+    // Fall back to this pane's editor state when the global is unavailable (unit tests / standalone use).
+    //
+    // Note: DesktopSharedGrid updates the renderer sizes interactively during the drag. When we no-op
+    // the document mutation, we must also restore the renderer to its previous size.
+    const spreadsheetEditing =
+      this.editor.isOpen() || ((globalThis as any).__formulaSpreadsheetIsEditing as boolean | undefined) === true;
+    if (spreadsheetEditing) {
+      const renderer = this.grid.renderer;
+      const EPS = 1e-6;
+      const prev = change.previousSize;
+      const wasDefault = Math.abs(prev - change.defaultSize) < EPS;
+      if (change.kind === "col") {
+        if (wasDefault) renderer.resetColWidth(change.index);
+        else renderer.setColWidth(change.index, prev);
+      } else {
+        if (wasDefault) renderer.resetRowHeight(change.index);
+        else renderer.setRowHeight(change.index, prev);
+      }
+
+      // Keep drawings aligned with the restored geometry.
+      this.drawingsOverlay.invalidateSpatialIndex();
+      this.rowsVersion = renderer.scroll.rows.getVersion();
+      this.colsVersion = renderer.scroll.cols.getVersion();
+      this.repositionEditor();
+      void this.renderDrawings();
+
+      // Restore focus to the active editing surface *within this pane* when applicable.
+      // (If another pane owns the active editor, it is responsible for focus management.)
+      if (this.editor.isOpen()) {
+        focusWithoutScroll(this.editor.element);
+      }
+      return;
+    }
+
     // The shared-grid renderer updates sizes interactively during resize drags; invalidate the
     // drawing spatial index so anchors recompute with the new geometry before re-rendering.
     this.drawingsOverlay.invalidateSpatialIndex();
@@ -887,6 +931,29 @@ export class SecondaryGridView {
     const source = toFillRange(sourceRange);
     const target = toFillRange(targetRange);
     if (!source || !target) return;
+
+    // Fill operations should never mutate the sheet while the user is actively editing text in
+    // either split-view pane (Excel-style safety; matches SpreadsheetApp primary pane guards).
+    const spreadsheetEditing =
+      this.editor.isOpen() || ((globalThis as any).__formulaSpreadsheetIsEditing as boolean | undefined) === true;
+    if (spreadsheetEditing) {
+      // DesktopSharedGrid will still expand selection to the dragged target range even if
+      // we skip applying edits. Suppress selection sync callbacks and restore the prior
+      // selection on the next microtask turn so split-view panes stay consistent.
+      this.suppressSelectionCallbacks = true;
+      queueMicrotask(() => {
+        try {
+          this.grid.setSelectionRanges(prevRanges, {
+            activeIndex: prevActiveIndex,
+            activeCell: prevSelection,
+            scrollIntoView: false,
+          });
+        } finally {
+          this.suppressSelectionCallbacks = false;
+        }
+      });
+      return;
+    }
 
     // In collab read-only roles (viewer/commenter), block fill operations in the secondary pane.
     // DocumentController silently filters disallowed cell deltas via `canEditCell`, so guard here

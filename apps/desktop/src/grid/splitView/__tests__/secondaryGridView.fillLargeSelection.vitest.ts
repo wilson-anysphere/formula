@@ -36,6 +36,7 @@ function createMockCanvasContext(): CanvasRenderingContext2D {
 
 describe("SecondaryGridView fill large selections", () => {
   afterEach(() => {
+    delete (globalThis as any).__formulaSpreadsheetIsEditing;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -101,6 +102,61 @@ describe("SecondaryGridView fill large selections", () => {
     (gridView as any).onFillCommit({
       sourceRange: { startRow: 1, endRow: 2, startCol: 1, endCol: 2 },
       targetRange: { startRow: 2, endRow: 200_003, startCol: 1, endCol: 2 },
+      mode: "formulas",
+    });
+
+    // Flush queued microtasks (selection restore).
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(beginBatch).not.toHaveBeenCalled();
+    expect(setCellInput).not.toHaveBeenCalled();
+    expect(selectionChange).not.toHaveBeenCalled();
+    expect((gridView as any).suppressSelectionCallbacks).toBe(false);
+
+    gridView.destroy();
+    container.remove();
+  });
+
+  it("does not apply fill commits while global spreadsheet editing is active", async () => {
+    const container = document.createElement("div");
+    // Keep viewport 0-sized so the renderer doesn't do any expensive work in jsdom.
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 0 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 0 });
+    document.body.appendChild(container);
+
+    const doc = new DocumentController();
+    const selectionChange = vi.fn();
+
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      rowCount: 100,
+      colCount: 50,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
+      onSelectionChange: selectionChange,
+      onSelectionRangeChange: selectionChange,
+    });
+
+    // Ensure a stable pre-fill selection exists.
+    gridView.grid.setSelectionRanges(
+      [{ startRow: 1, endRow: 2, startCol: 1, endCol: 2 }],
+      { activeIndex: 0, activeCell: { row: 1, col: 1 }, scrollIntoView: false },
+    );
+    selectionChange.mockClear();
+
+    const beginBatch = vi.spyOn(doc, "beginBatch");
+    const setCellInput = vi.spyOn(doc, "setCellInput");
+
+    // Simulate the desktop shell reporting that an edit session is already active (e.g. primary formula bar).
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+
+    (gridView as any).onFillCommit({
+      sourceRange: { startRow: 1, endRow: 2, startCol: 1, endCol: 2 },
+      targetRange: { startRow: 2, endRow: 3, startCol: 1, endCol: 2 },
       mode: "formulas",
     });
 

@@ -35,6 +35,7 @@ function createMockCanvasContext(): CanvasRenderingContext2D {
 
 describe("SecondaryGridView sheet view axis overrides", () => {
   afterEach(() => {
+    delete (globalThis as any).__formulaSpreadsheetIsEditing;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -154,6 +155,50 @@ describe("SecondaryGridView sheet view axis overrides", () => {
     });
 
     expect(batchSpy).not.toHaveBeenCalled();
+
+    gridView.destroy();
+    container.remove();
+  });
+
+  it("does not persist axis resize mutations while global spreadsheet editing is active", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 0 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 0 });
+    document.body.appendChild(container);
+
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => sheetId,
+      rowCount: 100,
+      colCount: 50,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
+    });
+
+    // Simulate an active edit session elsewhere (e.g. primary formula bar / editor).
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+
+    const setColWidth = vi.spyOn(doc, "setColWidth");
+    const resetColWidth = vi.spyOn(doc, "resetColWidth");
+
+    (gridView as any).onAxisSizeChange({
+      kind: "col",
+      index: 2,
+      size: 40,
+      previousSize: 24,
+      defaultSize: 24,
+      zoom: 1,
+      source: "resize",
+    });
+
+    expect(setColWidth).not.toHaveBeenCalled();
+    expect(resetColWidth).not.toHaveBeenCalled();
 
     gridView.destroy();
     container.remove();

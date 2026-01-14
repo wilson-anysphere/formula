@@ -36,6 +36,7 @@ function createMockCanvasContext(): CanvasRenderingContext2D {
 
 describe("SecondaryGridView edit commits", () => {
   afterEach(() => {
+    delete (globalThis as any).__formulaSpreadsheetIsEditing;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -97,6 +98,39 @@ describe("SecondaryGridView edit commits", () => {
     expect(editState).toHaveBeenLastCalledWith(false);
 
     expect(gridView.grid.renderer.getSelection()).toEqual({ row: 2, col: 1 }); // A2
+
+    gridView.destroy();
+    container.remove();
+  });
+
+  it("does not open a secondary cell editor while the spreadsheet is already editing (global edit mode)", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 400 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 300 });
+    document.body.appendChild(container);
+
+    const doc = new DocumentController();
+    const editState = vi.fn();
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      rowCount: 11,
+      colCount: 11,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
+      onEditStateChange: editState,
+    });
+
+    // Simulate the desktop shell reporting that an edit session is already active (e.g. the primary formula bar).
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+
+    (gridView as any).openEditor({ row: 1, col: 1, initialKey: "h" });
+
+    expect(editState).not.toHaveBeenCalled();
+    expect((gridView as any).editor.isOpen()).toBe(false);
 
     gridView.destroy();
     container.remove();
