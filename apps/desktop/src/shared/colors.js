@@ -93,6 +93,14 @@ export function normalizeExcelColorToCss(input) {
   return undefined;
 }
 
+// Normalize/parse of Excel color strings (ARGB/hex) is on hot render paths (grid, rich text).
+// Cache the output for repeated calls with the same token to avoid repeated parsing/formatting.
+//
+// Cap the cache so we don't grow unbounded when documents contain many unique colors.
+const COLOR_STRING_CACHE_MAX = 4096;
+/** @type {Map<string, string | null>} */
+const COLOR_STRING_CACHE = new Map();
+
 /**
  * @param {string} input
  * @returns {string | undefined}
@@ -101,26 +109,43 @@ function normalizeExcelColorStringToCss(input) {
   const trimmed = input.trim();
   if (!trimmed) return undefined;
 
+  const cached = COLOR_STRING_CACHE.get(trimmed);
+  if (cached !== undefined) return cached ?? undefined;
+
   const hasHash = trimmed.startsWith("#");
   const raw = hasHash ? trimmed.slice(1) : trimmed;
 
   // If the value doesn't look like a hex token, assume it's a CSS color string
   // (named colors, rgb()/rgba(), var(--foo), etc) and return it as-is.
-  if (!hasHash && !/^[0-9a-fA-F]+$/.test(raw)) return trimmed;
+  if (!hasHash && !/^[0-9a-fA-F]+$/.test(raw)) {
+    COLOR_STRING_CACHE.set(trimmed, trimmed);
+    if (COLOR_STRING_CACHE.size > COLOR_STRING_CACHE_MAX) COLOR_STRING_CACHE.clear();
+    return trimmed;
+  }
 
   // At this point the caller either used a `#` prefix or the token is hex-like.
   // Treat invalid hex chars as invalid input rather than passing through.
-  if (!/^[0-9a-fA-F]+$/.test(raw)) return undefined;
+  if (!/^[0-9a-fA-F]+$/.test(raw)) {
+    COLOR_STRING_CACHE.set(trimmed, null);
+    if (COLOR_STRING_CACHE.size > COLOR_STRING_CACHE_MAX) COLOR_STRING_CACHE.clear();
+    return undefined;
+  }
 
   // #RRGGBB / RRGGBB
   if (raw.length === 3) {
     // CSS shorthand hex: #RGB / RGB
     const [r, g, b] = raw.toLowerCase().split("");
-    return `#${r}${r}${g}${g}${b}${b}`;
+    const out = `#${r}${r}${g}${g}${b}${b}`;
+    COLOR_STRING_CACHE.set(trimmed, out);
+    if (COLOR_STRING_CACHE.size > COLOR_STRING_CACHE_MAX) COLOR_STRING_CACHE.clear();
+    return out;
   }
 
   if (raw.length === 6) {
-    return `#${raw.toLowerCase()}`;
+    const out = `#${raw.toLowerCase()}`;
+    COLOR_STRING_CACHE.set(trimmed, out);
+    if (COLOR_STRING_CACHE.size > COLOR_STRING_CACHE_MAX) COLOR_STRING_CACHE.clear();
+    return out;
   }
 
   // Excel/OOXML ARGB: #AARRGGBB / AARRGGBB
@@ -133,15 +158,23 @@ function normalizeExcelColorStringToCss(input) {
     if (![a, r, g, b].every((n) => Number.isFinite(n))) return undefined;
 
     if (a >= 255) {
-      return `#${raw.slice(2).toLowerCase()}`;
+      const out = `#${raw.slice(2).toLowerCase()}`;
+      COLOR_STRING_CACHE.set(trimmed, out);
+      if (COLOR_STRING_CACHE.size > COLOR_STRING_CACHE_MAX) COLOR_STRING_CACHE.clear();
+      return out;
     }
 
     const alpha = Math.max(0, Math.min(1, a / 255));
     const rounded = Math.round(alpha * 1000) / 1000;
     const alphaStr = rounded.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
-    return `rgba(${r},${g},${b},${alphaStr})`;
+    const out = `rgba(${r},${g},${b},${alphaStr})`;
+    COLOR_STRING_CACHE.set(trimmed, out);
+    if (COLOR_STRING_CACHE.size > COLOR_STRING_CACHE_MAX) COLOR_STRING_CACHE.clear();
+    return out;
   }
 
+  COLOR_STRING_CACHE.set(trimmed, null);
+  if (COLOR_STRING_CACHE.size > COLOR_STRING_CACHE_MAX) COLOR_STRING_CACHE.clear();
   return undefined;
 }
 
