@@ -522,6 +522,20 @@ describe("ImageBitmapCache", () => {
     expect(createImageBitmapMock).not.toHaveBeenCalled();
   });
 
+  it("rejects SVG images with huge dimensions specified via <style> block without invoking createImageBitmap", async () => {
+    const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    // The viewBox advertises a tiny size, but the internal `<style>` sets a huge viewport size.
+    // Include a `</style>` substring inside CDATA to ensure we don't accidentally treat it as the closing tag.
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><style><![CDATA[svg{width:10001px;height:1px} /* </style> */]]></style></svg>`;
+    const entry: ImageEntry = { id: "svg_style_block_bomb", bytes: createSvgBytes(svg), mimeType: "image/svg+xml" };
+
+    await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
   it("rejects SVG images with huge dimensions specified via calc() style without invoking createImageBitmap", async () => {
     const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
     vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);

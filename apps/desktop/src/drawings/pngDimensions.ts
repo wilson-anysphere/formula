@@ -324,7 +324,9 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
 
   const MAX_TAG_BYTES = 32 * 1024;
 
-  const findSvgTagBytesUtf8 = (): Uint8Array | null => {
+  type TagBounds = { start: number; end: number };
+
+  const findSvgTagBytesUtf8 = (): TagBounds | null => {
     const asciiLower = (b: number): number => (b >= 0x41 && b <= 0x5a ? b | 0x20 : b);
 
     const isSvgName = (start: number, end: number): boolean => {
@@ -472,7 +474,7 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
       if (end === -1) return null;
 
       if (nameEnd > nameStart && isSvgName(nameStart, nameEnd)) {
-        return bytes.subarray(i, end);
+        return { start: i, end };
       }
 
       i = end;
@@ -481,7 +483,7 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
     return null;
   };
 
-  const findSvgTagBytesUtf16 = (): Uint8Array | null => {
+  const findSvgTagBytesUtf16 = (): TagBounds | null => {
     const asciiLower = (cu: number): number => (cu >= 0x41 && cu <= 0x5a ? cu | 0x20 : cu);
     const isWhitespaceCu = (cu: number): boolean => cu === 0x20 || cu === 0x09 || cu === 0x0a || cu === 0x0d;
 
@@ -636,7 +638,7 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
       if (end === -1) return null;
 
       if (nameEnd > nameStart && isSvgName(nameStart, nameEnd)) {
-        return bytes.subarray(i, end);
+        return { start: i, end };
       }
 
       i = end;
@@ -645,8 +647,10 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
     return null;
   };
 
-  const tagBytes = utf16Bom ? findSvgTagBytesUtf16() : findSvgTagBytesUtf8();
-  if (!tagBytes) return null;
+  const tagBounds = utf16Bom ? findSvgTagBytesUtf16() : findSvgTagBytesUtf8();
+  if (!tagBounds) return null;
+  const tagBytes = bytes.subarray(tagBounds.start, tagBounds.end);
+  const tagEnd = tagBounds.end;
 
   const tag = utf16Bom ? decodeUtf16(tagBytes, utf16LittleEndian) : decodeUtf8(tagBytes);
   if (!tag) return null;
@@ -965,6 +969,666 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
       };
       if (width == null) width = getStyleProp("width");
       if (height == null) height = getStyleProp("height");
+    }
+  }
+
+  if (width == null || height == null) {
+    const svgId = getAttr("id");
+    const svgClasses = (() => {
+      const raw = getAttr("class");
+      if (!raw) return [] as string[];
+      return raw
+        .split(/\s+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+    })();
+
+    type Candidate = { spec: number; order: number; value: string };
+
+    const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const selectorMatchesRoot = (selector: string): boolean => {
+      const sel = selector.trim();
+      if (!sel) return false;
+      // Ignore combinators/descendant selectors; we only handle simple selectors that target the root element directly.
+      if (/[\s>+~]/.test(sel)) return false;
+
+      const typeMatch = /^[a-z][a-z0-9_-]*/i.exec(sel);
+      if (typeMatch && typeMatch[0].toLowerCase() !== "svg") {
+        // `rect:root { ... }` should not match.
+        return false;
+      }
+
+      const lower = sel.toLowerCase();
+      const hasSvgType = /^svg(?:$|[.#:\[])/i.test(sel);
+      const hasRootPseudo = lower.includes(":root");
+      const hasId =
+        svgId != null && svgId.length > 0
+          ? new RegExp(`#${escapeRegExp(svgId.toLowerCase())}(?:$|[.#:\\[])`).test(lower)
+          : false;
+      const hasClass =
+        svgClasses.length > 0
+          ? svgClasses.some((cls) => new RegExp(`\\.${escapeRegExp(cls.toLowerCase())}(?:$|[.#:\\[])`).test(lower))
+          : false;
+
+      return hasSvgType || hasRootPseudo || hasId || hasClass;
+    };
+
+    const computeSpecificity = (selector: string): number => {
+      // We only operate on simple selectors (no combinators), so a lightweight specificity estimate is sufficient:
+      // id selectors (#) > class/pseudo/attribute selectors (./:/[) > type selectors (svg).
+      let ids = 0;
+      let classes = 0;
+      let tags = 0;
+
+      for (let i = 0; i < selector.length; i += 1) {
+        const ch = selector[i]!;
+        if (ch === "#") ids += 1;
+        else if (ch === "." || ch === "[") classes += 1;
+        else if (ch === ":") {
+          // Treat pseudo-classes (but not pseudo-elements) as class specificity.
+          if (selector[i + 1] !== ":") classes += 1;
+        }
+      }
+
+      if (/^svg(?:$|[.#:\[])/i.test(selector)) tags = 1;
+      return ids * 100 + classes * 10 + tags;
+    };
+
+    const updateCandidate = (current: Candidate | null, next: Candidate): Candidate => {
+      if (!current) return next;
+      if (next.spec > current.spec) return next;
+      if (next.spec === current.spec && next.order > current.order) return next;
+      return current;
+    };
+
+    const stripXmlComments = (input: string): string => {
+      let out = "";
+      let idx = 0;
+      while (idx < input.length) {
+        const start = input.indexOf("<!--", idx);
+        if (start === -1) {
+          out += input.slice(idx);
+          break;
+        }
+        out += input.slice(idx, start);
+        const end = input.indexOf("-->", start + 4);
+        if (end === -1) break;
+        idx = end + 3;
+      }
+      return out;
+    };
+
+    const stripCssComments = (input: string): string => {
+      let out = "";
+      let idx = 0;
+      while (idx < input.length) {
+        const start = input.indexOf("/*", idx);
+        if (start === -1) {
+          out += input.slice(idx);
+          break;
+        }
+        out += input.slice(idx, start);
+        const end = input.indexOf("*/", start + 2);
+        if (end === -1) break;
+        idx = end + 2;
+      }
+      return out;
+    };
+
+    const resolveCssVars = (value: string, vars: Map<string, string>): string => {
+      let current = value;
+      for (let iter = 0; iter < 10; iter += 1) {
+        const lower = current.toLowerCase();
+        const first = lower.indexOf("var(");
+        if (first === -1) break;
+        let out = "";
+        let idx = 0;
+        while (idx < current.length) {
+          const start = lower.indexOf("var(", idx);
+          if (start === -1) {
+            out += current.slice(idx);
+            break;
+          }
+          out += current.slice(idx, start);
+          let i = start + 4;
+          let depth = 1;
+          while (i < current.length && depth > 0) {
+            const ch = current[i]!;
+            if (ch === "(") depth += 1;
+            else if (ch === ")") depth -= 1;
+            i += 1;
+          }
+          if (depth !== 0) {
+            // Unbalanced; keep the rest as-is.
+            out += current.slice(start);
+            idx = current.length;
+            break;
+          }
+          const inner = current.slice(start + 4, i - 1).trim();
+          // Split "name, fallback" by the first comma at depth 0.
+          let namePart = inner;
+          let fallback: string | null = null;
+          {
+            let j = 0;
+            let paren = 0;
+            for (; j < inner.length; j += 1) {
+              const ch = inner[j]!;
+              if (ch === "(") paren += 1;
+              else if (ch === ")") paren = Math.max(0, paren - 1);
+              else if (ch === "," && paren === 0) break;
+            }
+            if (j < inner.length) {
+              namePart = inner.slice(0, j);
+              fallback = inner.slice(j + 1);
+            }
+          }
+
+          const name = namePart.trim();
+          const replacement = vars.get(name) ?? (fallback != null ? fallback.trim() : "");
+          out += replacement;
+          idx = i;
+        }
+        if (out === current) break;
+        current = out;
+      }
+      return current;
+    };
+
+    const varCandidates = new Map<string, Candidate>();
+    let bestWidth: Candidate | null = null;
+    let bestHeight: Candidate | null = null;
+    let order = 0;
+
+    const ingestCss = (cssRaw: string): void => {
+      let css = cssRaw;
+      // Common SVG pattern: wrap CSS in CDATA so `<` characters remain valid XML.
+      css = css.split("<![CDATA[").join("").split("]]>").join("");
+      // Some SVGs still use XML comments inside `<style>` tags.
+      css = stripXmlComments(css);
+      css = stripCssComments(css);
+
+      const MAX_CSS_DEPTH = 5;
+      const MAX_CSS_RULES = 500;
+      let rulesSeen = 0;
+
+      const visitRules = (source: string, depth: number): void => {
+        if (depth > MAX_CSS_DEPTH) return;
+        if (rulesSeen >= MAX_CSS_RULES) return;
+
+        let i = 0;
+        let selectorStart = 0;
+        let braceDepth = 0;
+        let selector = "";
+        let bodyStart = 0;
+        let quote: string | null = null;
+
+        while (i < source.length && rulesSeen < MAX_CSS_RULES) {
+          const ch = source[i]!;
+          if (quote) {
+            if (ch === "\\" && i + 1 < source.length) {
+              i += 2;
+              continue;
+            }
+            if (ch === quote) quote = null;
+            i += 1;
+            continue;
+          }
+          if (ch === '"' || ch === "'") {
+            quote = ch;
+            i += 1;
+            continue;
+          }
+          if (ch === "{") {
+            if (braceDepth === 0) {
+              selector = source.slice(selectorStart, i).trim();
+              bodyStart = i + 1;
+            }
+            braceDepth += 1;
+            i += 1;
+            continue;
+          }
+          if (ch === "}") {
+            if (braceDepth > 0) braceDepth -= 1;
+            if (braceDepth === 0) {
+              const body = source.slice(bodyStart, i);
+              const sel = selector.trim();
+              selector = "";
+              selectorStart = i + 1;
+              if (sel) {
+                if (sel.startsWith("@")) {
+                  visitRules(body, depth + 1);
+                } else {
+                  let spec = -1;
+                  for (const part of sel.split(",")) {
+                    const trimmed = part.trim();
+                    if (!selectorMatchesRoot(trimmed)) continue;
+                    spec = Math.max(spec, computeSpecificity(trimmed));
+                  }
+                  if (spec >= 0) {
+                    rulesSeen += 1;
+                    for (const rawDecl of body.split(";")) {
+                      const decl = rawDecl.trim();
+                      if (!decl) continue;
+                      const colon = decl.indexOf(":");
+                      if (colon === -1) continue;
+                      const name = decl.slice(0, colon).trim();
+                      const value = decl.slice(colon + 1).replace(/!important\b/i, "").trim();
+                      if (!value) continue;
+                      const lowerName = name.toLowerCase();
+
+                      if (name.startsWith("--")) {
+                        order += 1;
+                        const next = { spec, order, value };
+                        const prev = varCandidates.get(name) ?? null;
+                        varCandidates.set(name, updateCandidate(prev, next));
+                        continue;
+                      }
+
+                      if (lowerName === "width") {
+                        order += 1;
+                        bestWidth = updateCandidate(bestWidth, { spec, order, value });
+                        continue;
+                      }
+                      if (lowerName === "height") {
+                        order += 1;
+                        bestHeight = updateCandidate(bestHeight, { spec, order, value });
+                        continue;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            i += 1;
+            continue;
+          }
+          i += 1;
+        }
+      };
+
+      visitRules(css, 0);
+    };
+
+    const decodeStyleBytes = (view: Uint8Array): string | null =>
+      utf16Bom ? decodeUtf16(view, utf16LittleEndian) : decodeUtf8(view);
+
+    const ingestStyleBytes = (view: Uint8Array): void => {
+      const css = decodeStyleBytes(view);
+      if (!css) return;
+      ingestCss(css);
+    };
+
+    const MAX_STYLE_TAGS = 8;
+    let styleTagsSeen = 0;
+
+    if (utf16Bom) {
+      const asciiLower = (cu: number): number => (cu >= 0x41 && cu <= 0x5a ? cu | 0x20 : cu);
+      const isWhitespaceCu = (cu: number): boolean => cu === 0x20 || cu === 0x09 || cu === 0x0a || cu === 0x0d;
+
+      const isStyleName = (start: number, end: number): boolean => {
+        const nameLen = (end - start) / 2;
+        if (nameLen === 5) {
+          return (
+            asciiLower(readUtf16CodeUnit(start)) === 0x73 &&
+            asciiLower(readUtf16CodeUnit(start + 2)) === 0x74 &&
+            asciiLower(readUtf16CodeUnit(start + 4)) === 0x79 &&
+            asciiLower(readUtf16CodeUnit(start + 6)) === 0x6c &&
+            asciiLower(readUtf16CodeUnit(start + 8)) === 0x65
+          );
+        }
+        if (nameLen > 6 && readUtf16CodeUnit(end - 12) === 0x3a) {
+          return (
+            asciiLower(readUtf16CodeUnit(end - 10)) === 0x73 &&
+            asciiLower(readUtf16CodeUnit(end - 8)) === 0x74 &&
+            asciiLower(readUtf16CodeUnit(end - 6)) === 0x79 &&
+            asciiLower(readUtf16CodeUnit(end - 4)) === 0x6c &&
+            asciiLower(readUtf16CodeUnit(end - 2)) === 0x65
+          );
+        }
+        return false;
+      };
+
+      const findTagEnd = (start: number): number => {
+        const limit = Math.min(len - (len % 2), start + MAX_TAG_BYTES);
+        let quote = 0;
+        for (let i = start + 2; i + 1 < limit; i += 2) {
+          const cu = readUtf16CodeUnit(i);
+          if (quote) {
+            if (cu === quote) quote = 0;
+            continue;
+          }
+          if (cu === 0x22 || cu === 0x27) {
+            quote = cu;
+            continue;
+          }
+          if (cu === 0x3e) return i + 2; // '>'
+        }
+        return -1;
+      };
+
+      const findStyleClose = (start: number): { contentEnd: number; afterEndTag: number } | null => {
+        let i = start;
+        while (i + 1 < len) {
+          while (i + 1 < len && readUtf16CodeUnit(i) !== 0x3c) i += 2; // '<'
+          if (i + 1 >= len || i + 3 >= len) return null;
+          const next = readUtf16CodeUnit(i + 2);
+
+          if (next === 0x21) {
+            // Comment / CDATA / declaration.
+            if (i + 7 < len && readUtf16CodeUnit(i + 4) === 0x2d && readUtf16CodeUnit(i + 6) === 0x2d) {
+              // <!-- ... -->
+              let j = i + 8;
+              while (j + 5 < len) {
+                if (
+                  readUtf16CodeUnit(j) === 0x2d &&
+                  readUtf16CodeUnit(j + 2) === 0x2d &&
+                  readUtf16CodeUnit(j + 4) === 0x3e
+                ) {
+                  i = j + 6;
+                  break;
+                }
+                j += 2;
+              }
+              if (j + 5 >= len) return null;
+              continue;
+            }
+
+            const cdataStart =
+              i + 17 < len &&
+              readUtf16CodeUnit(i + 4) === 0x5b &&
+              readUtf16CodeUnit(i + 6) === 0x43 &&
+              readUtf16CodeUnit(i + 8) === 0x44 &&
+              readUtf16CodeUnit(i + 10) === 0x41 &&
+              readUtf16CodeUnit(i + 12) === 0x54 &&
+              readUtf16CodeUnit(i + 14) === 0x41 &&
+              readUtf16CodeUnit(i + 16) === 0x5b;
+            if (cdataStart) {
+              let j = i + 18;
+              while (j + 5 < len) {
+                if (
+                  readUtf16CodeUnit(j) === 0x5d &&
+                  readUtf16CodeUnit(j + 2) === 0x5d &&
+                  readUtf16CodeUnit(j + 4) === 0x3e
+                ) {
+                  i = j + 6;
+                  break;
+                }
+                j += 2;
+              }
+              if (j + 5 >= len) return null;
+              continue;
+            }
+
+            const end = findTagEnd(i);
+            if (end === -1) return null;
+            i = end;
+            continue;
+          }
+
+          if (next === 0x3f) {
+            // Processing instruction.
+            let j = i + 4;
+            while (j + 3 < len) {
+              if (readUtf16CodeUnit(j) === 0x3f && readUtf16CodeUnit(j + 2) === 0x3e) {
+                i = j + 4;
+                break;
+              }
+              j += 2;
+            }
+            if (j + 3 >= len) return null;
+            continue;
+          }
+
+          if (next === 0x2f) {
+            // End tag.
+            const nameStart = i + 4;
+            let nameEnd = nameStart;
+            const maxNameEnd = Math.min(len - (len % 2), nameStart + 128);
+            while (nameEnd + 1 < maxNameEnd) {
+              const cu = readUtf16CodeUnit(nameEnd);
+              if (isWhitespaceCu(cu) || cu === 0x2f || cu === 0x3e || cu === 0x3f) break;
+              nameEnd += 2;
+            }
+            if (nameEnd > nameStart && isStyleName(nameStart, nameEnd)) {
+              const end = findTagEnd(i);
+              if (end === -1) return null;
+              return { contentEnd: i, afterEndTag: end };
+            }
+            const end = findTagEnd(i);
+            if (end === -1) return null;
+            i = end;
+            continue;
+          }
+
+          // Some other start tag inside style content; skip it.
+          const end = findTagEnd(i);
+          if (end === -1) return null;
+          i = end;
+        }
+        return null;
+      };
+
+      let i = tagEnd;
+      while (i + 1 < len && styleTagsSeen < MAX_STYLE_TAGS) {
+        while (i + 1 < len && readUtf16CodeUnit(i) !== 0x3c) i += 2; // '<'
+        if (i + 1 >= len || i + 3 >= len) break;
+
+        const next = readUtf16CodeUnit(i + 2);
+        if (next === 0x21 || next === 0x3f || next === 0x2f) {
+          const end = findTagEnd(i);
+          if (end === -1) break;
+          i = end;
+          continue;
+        }
+
+        const nameStart = i + 2;
+        let nameEnd = nameStart;
+        const maxNameEnd = Math.min(len - (len % 2), nameStart + 128);
+        while (nameEnd + 1 < maxNameEnd) {
+          const cu = readUtf16CodeUnit(nameEnd);
+          if (isWhitespaceCu(cu) || cu === 0x2f || cu === 0x3e || cu === 0x3f) break;
+          nameEnd += 2;
+        }
+
+        const startTagEnd = findTagEnd(i);
+        if (startTagEnd === -1) break;
+
+        if (nameEnd > nameStart && isStyleName(nameStart, nameEnd)) {
+          const close = findStyleClose(startTagEnd);
+          if (!close) {
+            i = startTagEnd;
+            continue;
+          }
+          ingestStyleBytes(bytes.subarray(startTagEnd, close.contentEnd));
+          styleTagsSeen += 1;
+          i = close.afterEndTag;
+          continue;
+        }
+
+        i = startTagEnd;
+      }
+    } else {
+      const asciiLower = (b: number): number => (b >= 0x41 && b <= 0x5a ? b | 0x20 : b);
+
+      const isStyleName = (start: number, end: number): boolean => {
+        const nameLen = end - start;
+        if (nameLen === 5) {
+          return (
+            asciiLower(bytes[start]!) === 0x73 &&
+            asciiLower(bytes[start + 1]!) === 0x74 &&
+            asciiLower(bytes[start + 2]!) === 0x79 &&
+            asciiLower(bytes[start + 3]!) === 0x6c &&
+            asciiLower(bytes[start + 4]!) === 0x65
+          );
+        }
+        if (nameLen > 6 && bytes[end - 6] === 0x3a) {
+          return (
+            asciiLower(bytes[end - 5]!) === 0x73 &&
+            asciiLower(bytes[end - 4]!) === 0x74 &&
+            asciiLower(bytes[end - 3]!) === 0x79 &&
+            asciiLower(bytes[end - 2]!) === 0x6c &&
+            asciiLower(bytes[end - 1]!) === 0x65
+          );
+        }
+        return false;
+      };
+
+      const findTagEnd = (start: number): number => {
+        const limit = Math.min(len, start + MAX_TAG_BYTES);
+        let quote = 0;
+        for (let i = start + 1; i < limit; i += 1) {
+          const b = bytes[i]!;
+          if (quote) {
+            if (b === quote) quote = 0;
+            continue;
+          }
+          if (b === 0x22 || b === 0x27) {
+            quote = b;
+            continue;
+          }
+          if (b === 0x3e) return i + 1; // '>'
+        }
+        return -1;
+      };
+
+      const findStyleClose = (start: number): { contentEnd: number; afterEndTag: number } | null => {
+        let i = start;
+        while (i < len) {
+          while (i < len && bytes[i] !== 0x3c) i += 1; // '<'
+          if (i >= len || i + 1 >= len) return null;
+          const next = bytes[i + 1]!;
+
+          if (next === 0x21) {
+            if (i + 3 < len && bytes[i + 2] === 0x2d && bytes[i + 3] === 0x2d) {
+              // <!-- ... -->
+              let j = i + 4;
+              while (j + 2 < len) {
+                if (bytes[j] === 0x2d && bytes[j + 1] === 0x2d && bytes[j + 2] === 0x3e) {
+                  i = j + 3;
+                  break;
+                }
+                j += 1;
+              }
+              if (j + 2 >= len) return null;
+              continue;
+            }
+
+            const cdataStart =
+              i + 8 < len &&
+              bytes[i + 2] === 0x5b &&
+              bytes[i + 3] === 0x43 &&
+              bytes[i + 4] === 0x44 &&
+              bytes[i + 5] === 0x41 &&
+              bytes[i + 6] === 0x54 &&
+              bytes[i + 7] === 0x41 &&
+              bytes[i + 8] === 0x5b;
+            if (cdataStart) {
+              let j = i + 9;
+              while (j + 2 < len) {
+                if (bytes[j] === 0x5d && bytes[j + 1] === 0x5d && bytes[j + 2] === 0x3e) {
+                  i = j + 3;
+                  break;
+                }
+                j += 1;
+              }
+              if (j + 2 >= len) return null;
+              continue;
+            }
+
+            const end = findTagEnd(i);
+            if (end === -1) return null;
+            i = end;
+            continue;
+          }
+
+          if (next === 0x3f) {
+            // <? ... ?>
+            let j = i + 2;
+            while (j + 1 < len) {
+              if (bytes[j] === 0x3f && bytes[j + 1] === 0x3e) {
+                i = j + 2;
+                break;
+              }
+              j += 1;
+            }
+            if (j + 1 >= len) return null;
+            continue;
+          }
+
+          if (next === 0x2f) {
+            const nameStart = i + 2;
+            let nameEnd = nameStart;
+            const maxNameEnd = Math.min(len, nameStart + 64);
+            while (nameEnd < maxNameEnd) {
+              const b = bytes[nameEnd]!;
+              if (isWhitespaceByte(b) || b === 0x2f || b === 0x3e || b === 0x3f) break;
+              nameEnd += 1;
+            }
+            if (nameEnd > nameStart && isStyleName(nameStart, nameEnd)) {
+              const end = findTagEnd(i);
+              if (end === -1) return null;
+              return { contentEnd: i, afterEndTag: end };
+            }
+            const end = findTagEnd(i);
+            if (end === -1) return null;
+            i = end;
+            continue;
+          }
+
+          const end = findTagEnd(i);
+          if (end === -1) return null;
+          i = end;
+        }
+        return null;
+      };
+
+      let i = tagEnd;
+      while (i < len && styleTagsSeen < MAX_STYLE_TAGS) {
+        while (i < len && bytes[i] !== 0x3c) i += 1; // '<'
+        if (i >= len || i + 1 >= len) break;
+
+        const next = bytes[i + 1]!;
+        if (next === 0x21 || next === 0x3f || next === 0x2f) {
+          const end = findTagEnd(i);
+          if (end === -1) break;
+          i = end;
+          continue;
+        }
+
+        const nameStart = i + 1;
+        let nameEnd = nameStart;
+        const maxNameEnd = Math.min(len, nameStart + 64);
+        while (nameEnd < maxNameEnd) {
+          const b = bytes[nameEnd]!;
+          if (isWhitespaceByte(b) || b === 0x2f || b === 0x3e || b === 0x3f) break;
+          nameEnd += 1;
+        }
+
+        const startTagEnd = findTagEnd(i);
+        if (startTagEnd === -1) break;
+
+        if (nameEnd > nameStart && isStyleName(nameStart, nameEnd)) {
+          const close = findStyleClose(startTagEnd);
+          if (!close) {
+            i = startTagEnd;
+            continue;
+          }
+          ingestStyleBytes(bytes.subarray(startTagEnd, close.contentEnd));
+          styleTagsSeen += 1;
+          i = close.afterEndTag;
+          continue;
+        }
+
+        i = startTagEnd;
+      }
+    }
+
+    if ((width == null || height == null) && (bestWidth || bestHeight)) {
+      const vars = new Map<string, string>();
+      for (const [name, cand] of varCandidates) vars.set(name, cand.value);
+      if (width == null && bestWidth) width = parseLength(resolveCssVars(bestWidth.value, vars));
+      if (height == null && bestHeight) height = parseLength(resolveCssVars(bestHeight.value, vars));
     }
   }
 
