@@ -58,8 +58,10 @@ When an entry is compacted, oversized fields like `input` and tool payloads are 
 Or explicitly:
 
 ```ts
-import { LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
+import { createDefaultAIAuditStore, LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
 ```
+
+Note: importing from `@formula/ai-audit` in Node will resolve the Node entrypoint (`@formula/ai-audit/node`) via package exports. If you want browser-like defaults in Node test environments (e.g. jsdom), import from `@formula/ai-audit/browser` instead.
 
 ### Utility stores
 

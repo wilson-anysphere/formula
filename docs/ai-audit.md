@@ -311,6 +311,8 @@ Default selection behavior:
   - Use the Node entrypoint (`@formula/ai-audit/node`) with `prefer: "sqlite"` to opt into persistence.
   - Note: `prefer: "sqlite"` is not supported in the default/browser entrypoint.
 
+Tip: in Node test environments that provide browser globals (e.g. jsdom), importing `@formula/ai-audit` will resolve the Node entrypoint via package exports. To force browser-like defaults, import from `@formula/ai-audit/browser` instead.
+
 ### Recording a run with `AIAuditRecorder`
 
 `AIAuditRecorder` builds an `AIAuditEntry` incrementally and writes it once at the end.
