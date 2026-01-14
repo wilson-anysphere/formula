@@ -126,9 +126,13 @@ def _append_step_summary(markdown: str) -> None:
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
         return
-    with open(summary_path, "a", encoding="utf-8", errors="replace") as f:
-        f.write(markdown)
-        f.write("\n")
+    try:
+        with open(summary_path, "a", encoding="utf-8", errors="replace") as f:
+            f.write(markdown)
+            f.write("\n")
+    except OSError:
+        # Don't fail the report if GitHub step summary can't be written.
+        return
 
 
 def _append_error_summary(message: str, *, hints: list[str] | None = None) -> None:

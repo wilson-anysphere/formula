@@ -289,3 +289,40 @@ class DesktopSizeReportJsonTests(unittest.TestCase):
                     continue
                 if dst.exists():
                     dst.rename(src)
+
+    def test_appends_markdown_to_github_step_summary(self) -> None:
+        repo_root = self._repo_root()
+        target_dir = repo_root / "target"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory(dir=target_dir) as tmp:
+            tmp_dir = Path(tmp)
+            binary_path = tmp_dir / "formula-desktop"
+            dist_dir = tmp_dir / "dist"
+            dist_dir.mkdir(parents=True, exist_ok=True)
+
+            with open(binary_path, "wb") as f:
+                f.truncate(10)
+            (dist_dir / "a.txt").write_bytes(b"hello\n")
+
+            json_path = tmp_dir / "desktop-size.json"
+            summary_path = tmp_dir / "step-summary.md"
+
+            proc = self._run(
+                repo_root,
+                [
+                    "--binary",
+                    binary_path.relative_to(repo_root).as_posix(),
+                    "--dist",
+                    dist_dir.relative_to(repo_root).as_posix(),
+                    "--no-gzip",
+                    "--json-out",
+                    str(json_path),
+                ],
+                extra_env={"GITHUB_STEP_SUMMARY": str(summary_path)},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(summary_path.is_file())
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertIn("## Desktop size report", summary)
+            self.assertIn(binary_path.relative_to(repo_root).as_posix(), summary)
