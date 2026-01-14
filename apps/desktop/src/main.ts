@@ -8341,8 +8341,9 @@ function handleRibbonCommand(commandId: string): void {
           const rowCount = range.end.row - range.start.row + 1;
           const colCount = range.end.col - range.start.col + 1;
           const cellCount = rowCount * colCount;
-          const maxRows = 2_000;
-          if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || rowCount > maxRows) {
+          const maxBandedRowOps = 5_000;
+          const bandedRowOps = Math.floor(Math.max(0, rowCount - 1) / 2);
+          if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > maxBandedRowOps) {
             try {
               showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
             } catch {
@@ -8372,8 +8373,9 @@ function handleRibbonCommand(commandId: string): void {
         const rowCount = range.end.row - range.start.row + 1;
         const colCount = range.end.col - range.start.col + 1;
         const cellCount = rowCount * colCount;
-        const maxRows = 2_000;
-        if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || rowCount > maxRows) {
+        const maxBandedRowOps = 5_000;
+        const bandedRowOps = Math.floor(Math.max(0, rowCount - 1) / 2);
+        if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > maxBandedRowOps) {
           showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
           app.focus();
           return;
