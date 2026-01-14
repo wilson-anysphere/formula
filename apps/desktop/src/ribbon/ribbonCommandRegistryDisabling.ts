@@ -189,54 +189,8 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "developer.code.recordMacro.stop",
 ]);
 
-function isExemptViaPattern(commandId: string): boolean {
-  // Fill color presets.
-  if (commandId.startsWith("home.font.fillColor.")) {
-    const preset = commandId.slice("home.font.fillColor.".length);
-    return (
-      preset === "none" ||
-      preset === "noFill" ||
-      preset === "lightGray" ||
-      preset === "yellow" ||
-      preset === "blue" ||
-      preset === "green" ||
-      preset === "red" ||
-      preset === "moreColors"
-    );
-  }
-
-  // Font color presets.
-  if (commandId.startsWith("home.font.fontColor.")) {
-    const preset = commandId.slice("home.font.fontColor.".length);
-    return preset === "automatic" || preset === "black" || preset === "blue" || preset === "green" || preset === "red" || preset === "moreColors";
-  }
-
-  // Clear formatting menu items.
-  if (commandId.startsWith("home.font.clearFormatting.")) {
-    const kind = commandId.slice("home.font.clearFormatting.".length);
-    return kind === "clearFormats" || kind === "clearContents" || kind === "clearAll";
-  }
-
-  // Borders menu items.
-  if (commandId.startsWith("home.font.borders.")) {
-    const kind = commandId.slice("home.font.borders.".length);
-    return (
-      kind === "none" ||
-      kind === "all" ||
-      kind === "outside" ||
-      kind === "thickBox" ||
-      kind === "bottom" ||
-      kind === "top" ||
-      kind === "left" ||
-      kind === "right"
-    );
-  }
-
-  return false;
-}
-
 function defaultIsExemptFromCommandRegistry(commandId: string): boolean {
-  return COMMAND_REGISTRY_EXEMPT_IDS.has(commandId) || isExemptViaPattern(commandId);
+  return COMMAND_REGISTRY_EXEMPT_IDS.has(commandId);
 }
 
 function isRegistered(commandRegistry: CommandRegistry, commandId: string): boolean {
