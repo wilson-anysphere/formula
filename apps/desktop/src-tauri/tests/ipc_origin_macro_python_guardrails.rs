@@ -225,10 +225,43 @@ fn function_body<'a>(source: &'a str, fn_name: &str) -> &'a str {
         .or_else(|| source.find(&sync_pat))
         .unwrap_or_else(|| panic!("commands.rs missing {fn_name}()"));
 
-    let open_brace = source[start..]
-        .find('{')
-        .map(|idx| start + idx)
-        .unwrap_or_else(|| panic!("commands.rs missing opening brace for {fn_name}()"));
+    // Find the function body opening brace. This can't use a naive `find('{')` because Rust
+    // signatures can contain const-generic arguments like `Foo<{ MAX }>` which include braces
+    // before the actual body.
+    let open_brace = {
+        let bytes = source.as_bytes();
+        let mut paren_depth: i32 = 0;
+        let mut angle_depth: i32 = 0;
+        let mut i = start;
+        let mut found = None;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'(' => paren_depth += 1,
+                b')' => paren_depth -= 1,
+                b'<' => angle_depth += 1,
+                b'>' => {
+                    if angle_depth > 0 {
+                        angle_depth -= 1;
+                    }
+                }
+                b'{' => {
+                    if paren_depth == 0 && angle_depth == 0 {
+                        found = Some(i);
+                        break;
+                    }
+                    // Skip over const-generic brace expressions like `{ MAX }` so we don't treat
+                    // them as the function body.
+                    if let Some(close) = find_matching_brace(source, i) {
+                        i = close + 1;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        found.unwrap_or_else(|| panic!("commands.rs missing opening brace for {fn_name}()"))
+    };
 
     let close_brace = find_matching_brace(source, open_brace)
         .unwrap_or_else(|| panic!("commands.rs missing closing brace for {fn_name}()"));
