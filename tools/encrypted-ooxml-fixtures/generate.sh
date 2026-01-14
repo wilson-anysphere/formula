@@ -50,6 +50,18 @@ CLASSES_DIR="${CACHE_DIR}/classes"
 
 mkdir -p "${JARS_DIR}" "${CLASSES_DIR}"
 
+require_cmd() {
+  local cmd="$1"
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    echo "ERROR: missing required command: ${cmd}" >&2
+    exit 2
+  fi
+}
+
+require_cmd curl
+require_cmd javac
+require_cmd java
+
 hash_cmd() {
   if command -v sha256sum >/dev/null 2>&1; then
     echo "sha256sum"
