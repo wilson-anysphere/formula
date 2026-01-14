@@ -712,6 +712,16 @@ fn merge_chart_models(
         });
     }
 
+    // Manual layout for text elements (title/legend) is often stored in the classic chartSpace
+    // part even when the ChartEx part provides the actual title/legend content. Preserve that
+    // layout information when ChartEx omits it so downstream rendering remains faithful.
+    if let (Some(title), Some(chart_space_title)) = (merged.title.as_mut(), chart_space.title.as_ref())
+    {
+        if title.layout.is_none() {
+            title.layout = chart_space_title.layout.clone();
+        }
+    }
+
     if merged.legend.is_none() && chart_space.legend.is_some() {
         diagnostics.push(ChartDiagnostic {
             severity: ChartDiagnosticSeverity::Info,
@@ -727,6 +737,14 @@ fn merge_chart_models(
             part: Some(chart_ex_part.to_string()),
             xpath: None,
         });
+    }
+
+    if let (Some(legend), Some(chart_space_legend)) =
+        (merged.legend.as_mut(), chart_space.legend.as_ref())
+    {
+        if legend.layout.is_none() {
+            legend.layout = chart_space_legend.layout.clone();
+        }
     }
 
     // Plot area: prefer chartSpace when ChartEx only provides an `Unknown` placeholder and the
@@ -871,7 +889,7 @@ fn merge_chart_models(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use formula_model::charts::PlotAreaModel;
+    use formula_model::charts::{LegendModel, LegendPosition, ManualLayoutModel, PlotAreaModel, TextModel};
 
     fn minimal_model(rel_id: Option<&str>, auto_update: Option<bool>) -> ChartModel {
         ChartModel {
@@ -901,6 +919,76 @@ mod tests {
             plot_area_ext_lst_xml: None,
             diagnostics: Vec::new(),
         }
+    }
+
+    #[test]
+    fn merge_chart_models_preserves_title_layout_from_chart_space_when_chart_ex_omits_it() {
+        let mut chart_space = minimal_model(None, None);
+        let mut chart_ex = minimal_model(None, None);
+
+        chart_space.chart_kind = ChartKind::Bar;
+        let mut chart_space_title = TextModel::plain("chartSpace title");
+        chart_space_title.layout = Some(ManualLayoutModel {
+            x: Some(0.25),
+            ..Default::default()
+        });
+        chart_space.title = Some(chart_space_title);
+
+        chart_ex.chart_kind = ChartKind::Unknown {
+            name: "ChartEx:histogram".to_string(),
+        };
+        chart_ex.title = Some(TextModel::plain("ChartEx title"));
+
+        let mut diagnostics = Vec::new();
+        let merged = merge_chart_models(
+            chart_space,
+            chart_ex,
+            "xl/charts/chart1.xml",
+            "xl/charts/chartEx1.xml",
+            &mut diagnostics,
+        );
+
+        let merged_title = merged.title.expect("title present");
+        assert_eq!(merged_title.rich_text.plain_text(), "ChartEx title");
+        assert_eq!(merged_title.layout.as_ref().and_then(|l| l.x), Some(0.25));
+    }
+
+    #[test]
+    fn merge_chart_models_preserves_legend_layout_from_chart_space_when_chart_ex_omits_it() {
+        let mut chart_space = minimal_model(None, None);
+        let mut chart_ex = minimal_model(None, None);
+
+        chart_space.legend = Some(LegendModel {
+            position: LegendPosition::Right,
+            overlay: false,
+            text_style: None,
+            style: None,
+            layout: Some(ManualLayoutModel {
+                y: Some(0.5),
+                ..Default::default()
+            }),
+        });
+
+        chart_ex.legend = Some(LegendModel {
+            position: LegendPosition::Left,
+            overlay: true,
+            text_style: None,
+            style: None,
+            layout: None,
+        });
+
+        let mut diagnostics = Vec::new();
+        let merged = merge_chart_models(
+            chart_space,
+            chart_ex,
+            "xl/charts/chart1.xml",
+            "xl/charts/chartEx1.xml",
+            &mut diagnostics,
+        );
+
+        let merged_legend = merged.legend.expect("legend present");
+        assert_eq!(merged_legend.position, LegendPosition::Left);
+        assert_eq!(merged_legend.layout.as_ref().and_then(|l| l.y), Some(0.5));
     }
 
     #[test]
