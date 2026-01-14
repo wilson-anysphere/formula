@@ -441,6 +441,10 @@ impl TableBackend for Table {
         self.backend().distinct_values_filtered(idx, rows)
     }
 
+    fn distinct_values_filtered_mask(&self, idx: usize, mask: Option<&BitVec>) -> Option<Vec<Value>> {
+        self.backend().distinct_values_filtered_mask(idx, mask)
+    }
+
     fn group_by_aggregations(
         &self,
         group_by: &[usize],

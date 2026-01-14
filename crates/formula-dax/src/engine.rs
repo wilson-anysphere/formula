@@ -1197,21 +1197,48 @@ impl DaxEngine {
 
                 // Scan visible rows under the current filter context and apply the search
                 // conditions.
-                let candidate_rows = resolve_table_rows(model, filter, result_table)?;
                 let mut matched_rows = Vec::new();
-                for row in candidate_rows {
-                    let mut matches = true;
-                    for (col_idx, search_value) in search_cols.iter().zip(search_values.iter()) {
-                        let cell_value = table_ref
-                            .value_by_idx(row, *col_idx)
-                            .unwrap_or(Value::Blank);
-                        if !compare_values(&BinaryOp::Equals, &cell_value, search_value)? {
-                            matches = false;
-                            break;
+                let row_sets = (!filter.is_empty())
+                    .then(|| resolve_row_sets(model, filter))
+                    .transpose()?;
+                if let Some(sets) = row_sets.as_ref() {
+                    let allowed = sets
+                        .get(&result_table_key)
+                        .ok_or_else(|| DaxError::UnknownTable(result_table.clone()))?;
+                    for row in allowed.iter_ones() {
+                        let mut matches = true;
+                        for (col_idx, search_value) in
+                            search_cols.iter().zip(search_values.iter())
+                        {
+                            let cell_value = table_ref
+                                .value_by_idx(row, *col_idx)
+                                .unwrap_or(Value::Blank);
+                            if !compare_values(&BinaryOp::Equals, &cell_value, search_value)? {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        if matches {
+                            matched_rows.push(row);
                         }
                     }
-                    if matches {
-                        matched_rows.push(row);
+                } else {
+                    for row in 0..table_ref.row_count() {
+                        let mut matches = true;
+                        for (col_idx, search_value) in
+                            search_cols.iter().zip(search_values.iter())
+                        {
+                            let cell_value = table_ref
+                                .value_by_idx(row, *col_idx)
+                                .unwrap_or(Value::Blank);
+                            if !compare_values(&BinaryOp::Equals, &cell_value, search_value)? {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        if matches {
+                            matched_rows.push(row);
+                        }
                     }
                 }
 
@@ -1612,13 +1639,28 @@ impl DaxEngine {
             }
         }
 
-        let rows = resolve_table_rows(model, filter, table)?;
         let mut sum = 0.0;
         let mut count = 0usize;
-        for row in rows {
-            if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
-                sum += n.0;
-                count += 1;
+        let row_sets = (!filter.is_empty())
+            .then(|| resolve_row_sets(model, filter))
+            .transpose()?;
+        let table_key = normalize_ident(table);
+        if let Some(sets) = row_sets.as_ref() {
+            let allowed = sets
+                .get(&table_key)
+                .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+            for row in allowed.iter_ones() {
+                if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
+                    sum += n.0;
+                    count += 1;
+                }
+            }
+        } else {
+            for row in 0..table_ref.row_count() {
+                if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
+                    sum += n.0;
+                    count += 1;
+                }
             }
         }
         if count == 0 {
@@ -1666,13 +1708,28 @@ impl DaxEngine {
             }
         }
 
-        let rows = resolve_table_rows(model, filter, table)?;
         let mut sum = 0.0;
         let mut count = 0usize;
-        for row in rows {
-            if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
-                sum += n.0;
-                count += 1;
+        let row_sets = (!filter.is_empty())
+            .then(|| resolve_row_sets(model, filter))
+            .transpose()?;
+        let table_key = normalize_ident(table);
+        if let Some(sets) = row_sets.as_ref() {
+            let allowed = sets
+                .get(&table_key)
+                .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+            for row in allowed.iter_ones() {
+                if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
+                    sum += n.0;
+                    count += 1;
+                }
+            }
+        } else {
+            for row in 0..table_ref.row_count() {
+                if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
+                    sum += n.0;
+                    count += 1;
+                }
             }
         }
         if count == 0 {
@@ -1708,11 +1765,25 @@ impl DaxEngine {
             }
         }
 
-        let rows = resolve_table_rows(model, filter, table)?;
         let mut best: Option<f64> = None;
-        for row in rows {
-            if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
-                best = Some(best.map_or(n.0, |current| current.max(n.0)));
+        let row_sets = (!filter.is_empty())
+            .then(|| resolve_row_sets(model, filter))
+            .transpose()?;
+        let table_key = normalize_ident(table);
+        if let Some(sets) = row_sets.as_ref() {
+            let allowed = sets
+                .get(&table_key)
+                .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+            for row in allowed.iter_ones() {
+                if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
+                    best = Some(best.map_or(n.0, |current| current.max(n.0)));
+                }
+            }
+        } else {
+            for row in 0..table_ref.row_count() {
+                if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
+                    best = Some(best.map_or(n.0, |current| current.max(n.0)));
+                }
             }
         }
         Ok(best.map(Value::from).unwrap_or(Value::Blank))
@@ -1744,11 +1815,25 @@ impl DaxEngine {
             }
         }
 
-        let rows = resolve_table_rows(model, filter, table)?;
         let mut best: Option<f64> = None;
-        for row in rows {
-            if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
-                best = Some(best.map_or(n.0, |current| current.min(n.0)));
+        let row_sets = (!filter.is_empty())
+            .then(|| resolve_row_sets(model, filter))
+            .transpose()?;
+        let table_key = normalize_ident(table);
+        if let Some(sets) = row_sets.as_ref() {
+            let allowed = sets
+                .get(&table_key)
+                .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+            for row in allowed.iter_ones() {
+                if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
+                    best = Some(best.map_or(n.0, |current| current.min(n.0)));
+                }
+            }
+        } else {
+            for row in 0..table_ref.row_count() {
+                if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
+                    best = Some(best.map_or(n.0, |current| current.min(n.0)));
+                }
             }
         }
         Ok(best.map(Value::from).unwrap_or(Value::Blank))
@@ -1790,15 +1875,21 @@ impl DaxEngine {
         }
 
         let mut count = 0usize;
-        if filter.is_empty() {
-            for row in 0..table_ref.row_count() {
+        let row_sets = (!filter.is_empty())
+            .then(|| resolve_row_sets(model, filter))
+            .transpose()?;
+        let table_key = normalize_ident(table);
+        if let Some(sets) = row_sets.as_ref() {
+            let allowed = sets
+                .get(&table_key)
+                .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+            for row in allowed.iter_ones() {
                 if matches!(table_ref.value_by_idx(row, idx), Some(Value::Number(_))) {
                     count += 1;
                 }
             }
         } else {
-            let rows = resolve_table_rows(model, filter, table)?;
-            for row in rows {
+            for row in 0..table_ref.row_count() {
                 if matches!(table_ref.value_by_idx(row, idx), Some(Value::Number(_))) {
                     count += 1;
                 }
@@ -1839,8 +1930,15 @@ impl DaxEngine {
         }
 
         let mut count = 0usize;
-        if filter.is_empty() {
-            for row in 0..table_ref.row_count() {
+        let row_sets = (!filter.is_empty())
+            .then(|| resolve_row_sets(model, filter))
+            .transpose()?;
+        let table_key = normalize_ident(table);
+        if let Some(sets) = row_sets.as_ref() {
+            let allowed = sets
+                .get(&table_key)
+                .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+            for row in allowed.iter_ones() {
                 if !table_ref
                     .value_by_idx(row, idx)
                     .unwrap_or(Value::Blank)
@@ -1850,8 +1948,7 @@ impl DaxEngine {
                 }
             }
         } else {
-            let rows = resolve_table_rows(model, filter, table)?;
-            for row in rows {
+            for row in 0..table_ref.row_count() {
                 if !table_ref
                     .value_by_idx(row, idx)
                     .unwrap_or(Value::Blank)
@@ -2088,19 +2185,41 @@ impl DaxEngine {
             }
         }
 
-        let rows = resolve_table_rows(model, filter, table)?;
-        if let Some(values) = table_ref.distinct_values_filtered(idx, Some(rows.as_slice())) {
+        let row_sets = (!filter.is_empty())
+            .then(|| resolve_row_sets(model, filter))
+            .transpose()?;
+        let table_key = normalize_ident(table);
+        let mask = if let Some(sets) = row_sets.as_ref() {
+            Some(
+                sets.get(&table_key)
+                    .ok_or_else(|| DaxError::UnknownTable(table.clone()))?,
+            )
+        } else {
+            None
+        };
+
+        if let Some(values) = table_ref.distinct_values_filtered_mask(idx, mask) {
             let count = values.iter().filter(|v| !v.is_blank()).count();
             return Ok(Value::from(count as i64));
         }
 
         let mut out = HashSet::new();
-        for row in rows {
-            let value = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
-            if !value.is_blank() {
-                out.insert(value);
+        if let Some(mask) = mask {
+            for row in mask.iter_ones() {
+                let value = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                if !value.is_blank() {
+                    out.insert(value);
+                }
+            }
+        } else {
+            for row in 0..table_ref.row_count() {
+                let value = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                if !value.is_blank() {
+                    out.insert(value);
+                }
             }
         }
+
         Ok(Value::from(out.len() as i64))
     }
 
@@ -2154,9 +2273,7 @@ impl DaxEngine {
         let include_virtual_blank = blank_row_allowed(filter, table)
             && virtual_blank_row_exists(model, filter, table, Some(&sets))?;
 
-        let rows: Vec<usize> = rows_set.iter_ones().collect();
-
-        if let Some(values) = table_ref.distinct_values_filtered(idx, Some(rows.as_slice())) {
+        if let Some(values) = table_ref.distinct_values_filtered_mask(idx, Some(rows_set)) {
             let mut out: HashSet<Value> = values.into_iter().collect();
             if include_virtual_blank {
                 out.insert(Value::Blank);
@@ -2165,7 +2282,7 @@ impl DaxEngine {
         }
 
         let mut out = HashSet::new();
-        for row in rows {
+        for row in rows_set.iter_ones() {
             let value = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
             out.insert(value);
         }
@@ -2458,14 +2575,33 @@ impl DaxEngine {
                 }
             }
 
-            let candidate_rows = resolve_table_rows(model, &base_filter, &table)?;
             let mut allowed_rows = HashSet::new();
-            for row in candidate_rows {
-                let mut inner_ctx = row_ctx.clone();
-                inner_ctx.push(&table, row);
-                let pred = engine.eval_scalar(model, expr, &base_filter, &inner_ctx, env)?;
-                if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
-                    allowed_rows.insert(row);
+            let row_sets = (!base_filter.is_empty())
+                .then(|| resolve_row_sets(model, &base_filter))
+                .transpose()?;
+            let table_ref = model
+                .table(&table)
+                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+            if let Some(sets) = row_sets.as_ref() {
+                let allowed = sets
+                    .get(&table)
+                    .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                for row in allowed.iter_ones() {
+                    let mut inner_ctx = row_ctx.clone();
+                    inner_ctx.push(&table, row);
+                    let pred = engine.eval_scalar(model, expr, &base_filter, &inner_ctx, env)?;
+                    if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
+                        allowed_rows.insert(row);
+                    }
+                }
+            } else {
+                for row in 0..table_ref.row_count() {
+                    let mut inner_ctx = row_ctx.clone();
+                    inner_ctx.push(&table, row);
+                    let pred = engine.eval_scalar(model, expr, &base_filter, &inner_ctx, env)?;
+                    if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
+                        allowed_rows.insert(row);
+                    }
                 }
             }
 
@@ -2694,7 +2830,6 @@ impl DaxEngine {
                                 engine.eval_scalar(model, right, eval_filter, row_ctx, env)?;
                             let mut base_filter = eval_filter.clone();
                             base_filter.column_filters.remove(&key);
-                            let candidate_rows = resolve_table_rows(model, &base_filter, table)?;
 
                             let table_ref = model
                                 .table(table)
@@ -2707,19 +2842,48 @@ impl DaxEngine {
                             })?;
 
                             let mut allowed = HashSet::new();
-                            for row in candidate_rows {
-                                let lhs = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
-                                let keep = match engine.eval_binary(op, lhs.clone(), rhs.clone())? {
-                                    Value::Boolean(b) => b,
-                                    other => {
-                                        return Err(DaxError::Type(format!(
-                                            "expected comparison to return boolean, got {other}"
-                                        )))
-                                    }
-                                };
+                            let row_sets = (!base_filter.is_empty())
+                                .then(|| resolve_row_sets(model, &base_filter))
+                                .transpose()?;
+                            let table_key = normalize_ident(table);
+                            if let Some(sets) = row_sets.as_ref() {
+                                let allowed_rows = sets
+                                    .get(&table_key)
+                                    .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                                for row in allowed_rows.iter_ones() {
+                                    let lhs =
+                                        table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                    let keep = match engine.eval_binary(op, lhs.clone(), rhs.clone())?
+                                    {
+                                        Value::Boolean(b) => b,
+                                        other => {
+                                            return Err(DaxError::Type(format!(
+                                                "expected comparison to return boolean, got {other}"
+                                            )))
+                                        }
+                                    };
 
-                                if keep {
-                                    allowed.insert(lhs);
+                                    if keep {
+                                        allowed.insert(lhs);
+                                    }
+                                }
+                            } else {
+                                for row in 0..table_ref.row_count() {
+                                    let lhs =
+                                        table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                    let keep = match engine.eval_binary(op, lhs.clone(), rhs.clone())?
+                                    {
+                                        Value::Boolean(b) => b,
+                                        other => {
+                                            return Err(DaxError::Type(format!(
+                                                "expected comparison to return boolean, got {other}"
+                                            )))
+                                        }
+                                    };
+
+                                    if keep {
+                                        allowed.insert(lhs);
+                                    }
                                 }
                             }
 
@@ -3301,25 +3465,30 @@ impl DaxEngine {
                                 }
                             })?;
 
-                            let (candidate_rows, sets) = if modified_filter.is_empty() {
-                                ((0..table_ref.row_count()).collect(), None)
-                            } else {
-                                let sets = resolve_row_sets(model, &modified_filter)?;
-                                let table_key = normalize_ident(table);
-                                let Some(rows_set) = sets.get(&table_key) else {
-                                    return Err(DaxError::UnknownTable(table.to_string()));
-                                };
-                                let rows: Vec<usize> = rows_set.iter_ones().collect();
-                                (rows, Some(sets))
-                            };
-
                             let mut seen = HashSet::new();
                             let mut rows = Vec::new();
-                            for row in candidate_rows {
-                                let value =
-                                    table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
-                                if seen.insert(value) {
-                                    rows.push(row);
+                            let sets = (!modified_filter.is_empty())
+                                .then(|| resolve_row_sets(model, &modified_filter))
+                                .transpose()?;
+                            let table_key = normalize_ident(table);
+                            if let Some(sets) = sets.as_ref() {
+                                let allowed = sets
+                                    .get(&table_key)
+                                    .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+                                for row in allowed.iter_ones() {
+                                    let value =
+                                        table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                    if seen.insert(value) {
+                                        rows.push(row);
+                                    }
+                                }
+                            } else {
+                                for row in 0..table_ref.row_count() {
+                                    let value =
+                                        table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                    if seen.insert(value) {
+                                        rows.push(row);
+                                    }
                                 }
                             }
                             // If the table participates as the one-side of a relationship and has
@@ -3382,18 +3551,37 @@ impl DaxEngine {
 
                             let mut modified_filter = filter.clone();
                             modified_filter.clear_column_filter(table, column);
-                            let rows_in_ctx = resolve_table_rows(model, &modified_filter, table)?;
 
                             let mut seen = HashSet::new();
                             let mut rows = Vec::new();
-                            for row in rows_in_ctx {
-                                let value =
-                                    table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
-                                if value.is_blank() {
-                                    continue;
+                            let row_sets = (!modified_filter.is_empty())
+                                .then(|| resolve_row_sets(model, &modified_filter))
+                                .transpose()?;
+                            let table_key = normalize_ident(table);
+                            if let Some(sets) = row_sets.as_ref() {
+                                let allowed = sets
+                                    .get(&table_key)
+                                    .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                                for row in allowed.iter_ones() {
+                                    let value =
+                                        table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                    if value.is_blank() {
+                                        continue;
+                                    }
+                                    if seen.insert(value) {
+                                        rows.push(row);
+                                    }
                                 }
-                                if seen.insert(value) {
-                                    rows.push(row);
+                            } else {
+                                for row in 0..table_ref.row_count() {
+                                    let value =
+                                        table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                    if value.is_blank() {
+                                        continue;
+                                    }
+                                    if seen.insert(value) {
+                                        rows.push(row);
+                                    }
                                 }
                             }
 
@@ -3424,25 +3612,30 @@ impl DaxEngine {
                                 }
                             })?;
 
-                            let (rows_in_ctx, sets) = if filter.is_empty() {
-                                ((0..table_ref.row_count()).collect(), None)
-                            } else {
-                                let sets = resolve_row_sets(model, filter)?;
-                                let table_key = normalize_ident(table);
-                                let Some(rows_set) = sets.get(&table_key) else {
-                                    return Err(DaxError::UnknownTable(table.to_string()));
-                                };
-                                let rows: Vec<usize> = rows_set.iter_ones().collect();
-                                (rows, Some(sets))
-                            };
-
                             let mut seen = HashSet::new();
                             let mut rows = Vec::new();
-                            for row in rows_in_ctx {
-                                let value =
-                                    table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
-                                if seen.insert(value) {
-                                    rows.push(row);
+                            let sets = (!filter.is_empty())
+                                .then(|| resolve_row_sets(model, filter))
+                                .transpose()?;
+                            let table_key = normalize_ident(table);
+                            if let Some(sets) = sets.as_ref() {
+                                let allowed = sets
+                                    .get(&table_key)
+                                    .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+                                for row in allowed.iter_ones() {
+                                    let value =
+                                        table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                    if seen.insert(value) {
+                                        rows.push(row);
+                                    }
+                                }
+                            } else {
+                                for row in 0..table_ref.row_count() {
+                                    let value =
+                                        table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                    if seen.insert(value) {
+                                        rows.push(row);
+                                    }
                                 }
                             }
                             if !seen.contains(&Value::Blank)
@@ -5047,23 +5240,22 @@ fn propagate_filter(
                         })
                 } else {
                     let physical_rows = to_table.row_count();
-                    let visible_rows: Vec<usize> = to_set
+                    let visible_count = to_set
                         .iter_ones()
-                        .filter(|&idx| idx < physical_rows)
-                        .collect();
-
-                    if visible_rows.is_empty() {
+                        .take_while(|&idx| idx < physical_rows)
+                        .count();
+                    if visible_count == 0 {
                         Vec::new()
-                    } else {
+                    } else if to_set.len() == physical_rows {
                         to_table
-                            .distinct_values_filtered(
-                                relationship.to_idx,
-                                Some(visible_rows.as_slice()),
-                            )
+                            .distinct_values_filtered_mask(relationship.to_idx, Some(to_set))
                             .unwrap_or_else(|| {
                                 let mut seen = HashSet::new();
                                 let mut out = Vec::new();
-                                for &row in &visible_rows {
+                                for row in to_set
+                                    .iter_ones()
+                                    .take_while(|&idx| idx < physical_rows)
+                                {
                                     let v = to_table
                                         .value_by_idx(row, relationship.to_idx)
                                         .unwrap_or(Value::Blank);
@@ -5073,6 +5265,20 @@ fn propagate_filter(
                                 }
                                 out
                             })
+                    } else {
+                        // Defensive fallback: if the mask includes any out-of-bounds rows (e.g. a
+                        // relationship-generated virtual row), ignore them when scanning.
+                        let mut seen = HashSet::new();
+                        let mut out = Vec::new();
+                        for row in to_set.iter_ones().take_while(|&idx| idx < physical_rows) {
+                            let v = to_table
+                                .value_by_idx(row, relationship.to_idx)
+                                .unwrap_or(Value::Blank);
+                            if seen.insert(v.clone()) {
+                                out.push(v);
+                            }
+                        }
+                        out
                     }
                 }
             };

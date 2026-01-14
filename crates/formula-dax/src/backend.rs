@@ -90,6 +90,20 @@ pub trait TableBackend: fmt::Debug + Send + Sync {
         None
     }
 
+    /// Enumerate distinct values for a column within a set of rows selected by a bit mask.
+    ///
+    /// When `mask` is `None`, the backend may assume all rows are included.
+    ///
+    /// This is primarily an optimization for columnar-backed tables: it avoids materializing a
+    /// potentially huge `Vec<usize>` of row indices for large filtered datasets.
+    fn distinct_values_filtered_mask(
+        &self,
+        _idx: usize,
+        _mask: Option<&formula_columnar::BitVec>,
+    ) -> Option<Vec<Value>> {
+        None
+    }
+
     /// Group the table by `group_by` column indices and compute aggregations for each group.
     ///
     /// The returned rows must contain `group_by.len()` key values followed by one value per
@@ -939,6 +953,173 @@ impl ColumnarTableBackend {
         }
         Some(out)
     }
+
+    fn distinct_values_filtered_selection(
+        &self,
+        idx: usize,
+        selection: RowSelection<'_>,
+    ) -> Option<Vec<Value>> {
+        let row_count = self.table.row_count();
+        if idx >= self.table.column_count() {
+            return None;
+        }
+        let column_type = self.table.schema().get(idx)?.column_type;
+
+        // If the mask is sparse, materializing row indices can be cheaper than scanning a full
+        // bitmask (same heuristic as `UnmatchedFactRowsBuilder`).
+        if let RowSelection::Mask(mask) = selection {
+            if mask.len() != row_count {
+                return None;
+            }
+            let visible = mask.count_ones();
+            if visible == 0 {
+                return Some(Vec::new());
+            }
+            let sparse_to_dense_threshold = row_count / 64;
+            if visible <= sparse_to_dense_threshold {
+                let rows: Vec<usize> = mask.iter_ones().collect();
+                return self.distinct_values_filtered_selection(idx, RowSelection::Rows(rows.as_slice()));
+            }
+        }
+
+        let selection = match selection {
+            RowSelection::Rows(rows)
+                if rows.len() == row_count
+                    && rows.first().copied() == Some(0)
+                    && rows.last().copied() == row_count.checked_sub(1) =>
+            {
+                RowSelection::All
+            }
+            RowSelection::Mask(mask) if mask.len() == row_count && mask.all_true() => RowSelection::All,
+            other => other,
+        };
+
+        match selection {
+            RowSelection::All => {
+                if let Some(values) = self.dictionary_values(idx) {
+                    let mut out: Vec<Value> = values;
+                    if self.stats_has_blank(idx).unwrap_or(false) {
+                        out.push(Value::Blank);
+                    }
+                    return Some(out);
+                }
+
+                if let Ok(result) = self.table.group_by(&[idx], &[]) {
+                    let values = result.to_values();
+                    let mut out = Vec::with_capacity(result.row_count());
+                    if let Some(col) = values.get(0) {
+                        for v in col {
+                            out.push(Self::dax_from_columnar_typed(v.clone(), column_type));
+                        }
+                    }
+                    return Some(out);
+                }
+            }
+            RowSelection::Rows(rows) => {
+                if rows.is_empty() {
+                    return Some(Vec::new());
+                }
+                if let Ok(result) = self.table.group_by_rows(&[idx], &[], rows) {
+                    let values = result.to_values();
+                    let mut out = Vec::with_capacity(result.row_count());
+                    if let Some(col) = values.get(0) {
+                        for v in col {
+                            out.push(Self::dax_from_columnar_typed(v.clone(), column_type));
+                        }
+                    }
+                    return Some(out);
+                }
+            }
+            RowSelection::Mask(mask) => {
+                if mask.len() != row_count {
+                    return None;
+                }
+                if mask.count_ones() == 0 {
+                    return Some(Vec::new());
+                }
+                if let Ok(result) = self.table.group_by_mask(&[idx], &[], mask) {
+                    let values = result.to_values();
+                    let mut out = Vec::with_capacity(result.row_count());
+                    if let Some(col) = values.get(0) {
+                        for v in col {
+                            out.push(Self::dax_from_columnar_typed(v.clone(), column_type));
+                        }
+                    }
+                    return Some(out);
+                }
+            }
+        }
+
+        // Fallback: decode selected pages and de-duplicate in memory.
+        use std::collections::HashSet;
+
+        let mut seen: HashSet<Value> = HashSet::new();
+        let mut out = Vec::new();
+
+        const CHUNK_ROWS: usize = 65_536;
+        let mut push_value = |value: Value| {
+            if seen.insert(value.clone()) {
+                out.push(value);
+            }
+        };
+
+        match selection {
+            RowSelection::All => {
+                let mut start = 0;
+                while start < row_count {
+                    let end = (start + CHUNK_ROWS).min(row_count);
+                    let range = self.table.get_range(start, end, idx, idx + 1);
+                    for v in range.columns.get(0).into_iter().flatten() {
+                        push_value(Self::dax_from_columnar_typed(v.clone(), column_type));
+                    }
+                    start = end;
+                }
+            }
+            RowSelection::Rows(rows) => {
+                let mut pos = 0;
+                while pos < rows.len() {
+                    let row = rows[pos];
+                    let chunk_start = (row / CHUNK_ROWS) * CHUNK_ROWS;
+                    let chunk_end = (chunk_start + CHUNK_ROWS).min(row_count);
+                    let range = self.table.get_range(chunk_start, chunk_end, idx, idx + 1);
+                    while pos < rows.len() {
+                        let row = rows[pos];
+                        if row >= chunk_end {
+                            break;
+                        }
+                        let in_chunk = row - chunk_start;
+                        if let Some(v) = range.columns.get(0).and_then(|c| c.get(in_chunk)) {
+                            push_value(Self::dax_from_columnar_typed(v.clone(), column_type));
+                        }
+                        pos += 1;
+                    }
+                }
+            }
+            RowSelection::Mask(mask) => {
+                if mask.len() != row_count {
+                    return None;
+                }
+                let mut rows = mask.iter_ones().peekable();
+                while let Some(&row) = rows.peek() {
+                    let chunk_start = (row / CHUNK_ROWS) * CHUNK_ROWS;
+                    let chunk_end = (chunk_start + CHUNK_ROWS).min(row_count);
+                    let range = self.table.get_range(chunk_start, chunk_end, idx, idx + 1);
+                    while let Some(&row) = rows.peek() {
+                        if row >= chunk_end {
+                            break;
+                        }
+                        let in_chunk = row - chunk_start;
+                        if let Some(v) = range.columns.get(0).and_then(|c| c.get(in_chunk)) {
+                            push_value(Self::dax_from_columnar_typed(v.clone(), column_type));
+                        }
+                        rows.next();
+                    }
+                }
+            }
+        }
+
+        Some(out)
+    }
 }
 
 impl TableBackend for ColumnarTableBackend {
@@ -1094,105 +1275,17 @@ impl TableBackend for ColumnarTableBackend {
     }
 
     fn distinct_values_filtered(&self, idx: usize, rows: Option<&[usize]>) -> Option<Vec<Value>> {
-        let row_count = self.table.row_count();
-        if idx >= self.table.column_count() {
-            return None;
-        }
-        let column_type = self.table.schema().get(idx)?.column_type;
+        let selection = rows.map_or(RowSelection::All, RowSelection::Rows);
+        self.distinct_values_filtered_selection(idx, selection)
+    }
 
-        let rows = match rows {
-            Some(rows)
-                if rows.len() == row_count
-                    && rows.first().copied() == Some(0)
-                    && rows.last().copied() == row_count.checked_sub(1) =>
-            {
-                None
-            }
-            other => other,
-        };
-
-        if rows.is_none() {
-            if let Some(values) = self.dictionary_values(idx) {
-                let mut out: Vec<Value> = values;
-                if self.stats_has_blank(idx).unwrap_or(false) {
-                    out.push(Value::Blank);
-                }
-                return Some(out);
-            }
-
-            if let Ok(result) = self.table.group_by(&[idx], &[]) {
-                let values = result.to_values();
-                let mut out = Vec::with_capacity(result.row_count());
-                if let Some(col) = values.get(0) {
-                    for v in col {
-                        out.push(Self::dax_from_columnar_typed(v.clone(), column_type));
-                    }
-                }
-                return Some(out);
-            }
-        }
-
-        if let Some(rows) = rows {
-            if let Ok(result) = self.table.group_by_rows(&[idx], &[], rows) {
-                let values = result.to_values();
-                let mut out = Vec::with_capacity(result.row_count());
-                if let Some(col) = values.get(0) {
-                    for v in col {
-                        out.push(Self::dax_from_columnar_typed(v.clone(), column_type));
-                    }
-                }
-                return Some(out);
-            }
-        }
-
-        // Fallback: decode selected pages and de-duplicate in memory.
-        use std::collections::HashSet;
-
-        let mut seen: HashSet<Value> = HashSet::new();
-        let mut out = Vec::new();
-
-        const CHUNK_ROWS: usize = 65_536;
-        let mut push_value = |value: Value| {
-            if seen.insert(value.clone()) {
-                out.push(value);
-            }
-        };
-
-        match rows {
-            None => {
-                let mut start = 0;
-                while start < row_count {
-                    let end = (start + CHUNK_ROWS).min(row_count);
-                    let range = self.table.get_range(start, end, idx, idx + 1);
-                    for v in range.columns.get(0).into_iter().flatten() {
-                        push_value(Self::dax_from_columnar_typed(v.clone(), column_type));
-                    }
-                    start = end;
-                }
-            }
-            Some(rows) => {
-                let mut pos = 0;
-                while pos < rows.len() {
-                    let row = rows[pos];
-                    let chunk_start = (row / CHUNK_ROWS) * CHUNK_ROWS;
-                    let chunk_end = (chunk_start + CHUNK_ROWS).min(row_count);
-                    let range = self.table.get_range(chunk_start, chunk_end, idx, idx + 1);
-                    while pos < rows.len() {
-                        let row = rows[pos];
-                        if row >= chunk_end {
-                            break;
-                        }
-                        let in_chunk = row - chunk_start;
-                        if let Some(v) = range.columns.get(0).and_then(|c| c.get(in_chunk)) {
-                            push_value(Self::dax_from_columnar_typed(v.clone(), column_type));
-                        }
-                        pos += 1;
-                    }
-                }
-            }
-        }
-
-        Some(out)
+    fn distinct_values_filtered_mask(
+        &self,
+        idx: usize,
+        mask: Option<&formula_columnar::BitVec>,
+    ) -> Option<Vec<Value>> {
+        let selection = mask.map_or(RowSelection::All, RowSelection::Mask);
+        self.distinct_values_filtered_selection(idx, selection)
     }
 
     fn group_by_aggregations(
