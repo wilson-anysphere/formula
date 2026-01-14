@@ -5066,6 +5066,15 @@ export class SpreadsheetApp {
     });
     if (!touched) return;
 
+    // Cancel any in-flight background decode before invalidating the ImageBitmap cache.
+    //
+    // This avoids a subtle leak: `ImageBitmapCache.invalidate()` drops the cache entry while the
+    // underlying `createImageBitmap` promise is still in-flight; if that promise later resolves
+    // while a waiter is still attached, the decoded ImageBitmap can escape the cache and never be
+    // closed. Aborting first ensures waiters are released so the stale decode result is closed.
+    this.activeSheetBackgroundAbort?.abort();
+    this.activeSheetBackgroundAbort = null;
+
     // Force a reload even when the background id itself is unchanged.
     this.workbookImageBitmaps.invalidate(desiredId);
     this.activeSheetBackgroundImageId = null;
