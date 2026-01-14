@@ -421,9 +421,8 @@ pub fn pivot_table_to_engine_config(
                         item,
                     )))
                 });
-            let source_field = PivotFieldRef::CacheFieldName(source_field_name);
             Some(ValueField {
-                source_field,
+                source_field: PivotFieldRef::CacheFieldName(source_field_name),
                 name,
                 aggregation,
                 number_format: None,

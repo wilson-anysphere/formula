@@ -905,9 +905,9 @@ mod tests {
                       encryptedVerifierHashInput="CQoLDA=="
                       encryptedVerifierHashValue="DQ4PEA=="
                       encryptedKeyValue="BQYHCA=="/>
-    </keyEncryptor>
-  </keyEncryptors>
-</encryption>
+      </keyEncryptor>
+    </keyEncryptors>
+  </encryption>
 "#
     }
 

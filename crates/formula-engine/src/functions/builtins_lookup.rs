@@ -1561,8 +1561,7 @@ fn getpivotdata_from_registry(
         .iter()
         .filter_map(|filter| {
             let allowed = filter.allowed.as_ref()?;
-            let source_field = filter.source_field.as_cache_field_name()?;
-            let key = crate::value::casefold(source_field);
+            let key = crate::value::casefold(&filter.source_field.display_string());
             let idx = entry.field_indices.get(&key).copied()?;
             Some((idx, allowed))
         })

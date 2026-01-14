@@ -77,11 +77,7 @@ impl PivotRegistryEntry {
         let mut field_indices: HashMap<String, usize> = HashMap::new();
 
         for (idx, f) in pivot.config.row_fields.iter().enumerate() {
-            let name = f
-                .source_field
-                .as_cache_field_name()
-                .ok_or_else(|| PivotRegistryError::MissingField(f.source_field.to_string()))?;
-            let key = crate::value::casefold(name);
+            let key = crate::value::casefold(&f.source_field.display_string());
             let cache_idx = cache_field_indices
                 .get(&key)
                 .copied()
@@ -97,11 +93,7 @@ impl PivotRegistryEntry {
         }
 
         for (idx, f) in pivot.config.column_fields.iter().enumerate() {
-            let name = f
-                .source_field
-                .as_cache_field_name()
-                .ok_or_else(|| PivotRegistryError::MissingField(f.source_field.to_string()))?;
-            let key = crate::value::casefold(name);
+            let key = crate::value::casefold(&f.source_field.display_string());
             let cache_idx = cache_field_indices
                 .get(&key)
                 .copied()
@@ -117,11 +109,7 @@ impl PivotRegistryEntry {
         }
 
         for (idx, f) in pivot.config.filter_fields.iter().enumerate() {
-            let name = f
-                .source_field
-                .as_cache_field_name()
-                .ok_or_else(|| PivotRegistryError::MissingField(f.source_field.to_string()))?;
-            let key = crate::value::casefold(name);
+            let key = crate::value::casefold(&f.source_field.display_string());
             let cache_idx = cache_field_indices
                 .get(&key)
                 .copied()
@@ -141,11 +129,7 @@ impl PivotRegistryEntry {
             Vec::with_capacity(pivot.config.value_fields.len());
         for (idx, vf) in pivot.config.value_fields.iter().enumerate() {
             value_field_indices.insert(crate::value::casefold(&vf.name), idx);
-            let name = vf
-                .source_field
-                .as_cache_field_name()
-                .ok_or_else(|| PivotRegistryError::MissingField(vf.source_field.to_string()))?;
-            let key = crate::value::casefold(name);
+            let key = crate::value::casefold(&vf.source_field.display_string());
             let cache_idx = cache_field_indices
                 .get(&key)
                 .copied()
