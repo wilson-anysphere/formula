@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { runOnce } from './desktopStartupRunnerShared.ts';
+import { runOnce } from './desktopStartupUtil.ts';
 
 function isPidAlive(pid: number): boolean {
   try {

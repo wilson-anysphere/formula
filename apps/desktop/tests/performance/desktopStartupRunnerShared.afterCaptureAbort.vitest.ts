@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { runOnce } from './desktopStartupRunnerShared.ts';
+import { runOnce } from './desktopStartupUtil.ts';
 
 describe('desktopStartupRunnerShared afterCapture abort', () => {
   it('aborts the afterCapture signal when afterCaptureTimeoutMs elapses', async () => {
