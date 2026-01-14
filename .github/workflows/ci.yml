@@ -58,6 +58,10 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+      - name: "Guard: locale function TSVs are up to date"
+        run: node scripts/generate-locale-function-tsv.js --check
+      - name: "Guard: locale error TSVs are up to date"
+        run: node scripts/generate-locale-error-tsvs.mjs --check
       - name: Run manifest unit tests (fast, dependency-free)
         run: node --test scripts/__tests__/release-manifest.test.mjs
       - name: Desktop URL scheme + file association preflight (tauri.conf.json/Info.plist)
