@@ -636,4 +636,98 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     app.dispose();
     root.remove();
   });
+
+  it("commitObjects fallback is id-safe for ensureDrawingInteractionController (shared grid)", () => {
+    process.env.DESKTOP_GRID_MODE = "shared";
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    // Disable drawing interactions initially so the controller is created via `ensureDrawingInteractionController`.
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
+    expect(app.getGridMode()).toBe("shared");
+
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+    // Ensure hit testing sees the latest document state immediately.
+    (app as any).drawingObjectsCache = null;
+    (app as any).drawingHitTestIndex = null;
+    (app as any).drawingHitTestIndexObjects = null;
+
+    // Force creation of the controller via `ensureDrawingInteractionController`.
+    (app as any).ensureDrawingInteractionController();
+
+    // Force DrawingInteractionController to fall back to commitObjects.
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit = () => {
+      throw new Error("boom");
+    };
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    selectionCanvas.getBoundingClientRect = root.getBoundingClientRect;
+
+    const viewport = app.getDrawingInteractionViewport();
+    const headerOffsetX = Number.isFinite((viewport as any).headerOffsetX) ? Math.max(0, (viewport as any).headerOffsetX) : 0;
+    const headerOffsetY = Number.isFinite((viewport as any).headerOffsetY) ? Math.max(0, (viewport as any).headerOffsetY) : 0;
+
+    const downX = headerOffsetX + 10;
+    const downY = headerOffsetY + 10;
+
+    selectionCanvas.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        clientX: downX,
+        clientY: downY,
+        pointerId: 1,
+        button: 0,
+        buttons: 1,
+        pointerType: "mouse",
+      }),
+    );
+    selectionCanvas.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        clientX: downX + 10,
+        clientY: downY,
+        pointerId: 1,
+        buttons: 1,
+        pointerType: "mouse",
+      }),
+    );
+    selectionCanvas.dispatchEvent(
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        cancelable: true,
+        clientX: downX + 10,
+        clientY: downY,
+        pointerId: 1,
+        pointerType: "mouse",
+      }),
+    );
+
+    const updated = doc.getSheetDrawings(sheetId)[0];
+    expect(updated.id).toBe("drawing_foo");
+    expect(updated.anchor.type).toBe("absolute");
+    expect(updated.anchor.pos.xEmu).toBe(pxToEmu(10));
+
+    app.dispose();
+    root.remove();
+  });
 });

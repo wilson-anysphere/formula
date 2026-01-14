@@ -10306,6 +10306,10 @@ export class SpreadsheetApp {
     const existing = this.drawingInteractionController;
     if (existing) return existing;
 
+    // Track the active interaction kind so the `commitObjects` fallback can preserve semantics
+    // (e.g. rotate commits can clear transforms).
+    let interactionCommitKind: "move" | "resize" | "rotate" | null = null;
+
     const callbacks: DrawingInteractionCallbacks = {
       getViewport: () => this.getDrawingInteractionViewportScratch(this.sharedGrid?.renderer.scroll.getViewportState()),
       getObjects: () => this.listDrawingObjectsForSheet(),
@@ -10335,6 +10339,51 @@ export class SpreadsheetApp {
           }
         }
         this.emitDrawingsChanged();
+      },
+      commitObjects: (next) => {
+        // Fallback only: should not be used when `onInteractionCommit` succeeds.
+        //
+        // Important: do *not* write UI objects back via `setSheetDrawings(next)` because
+        // that rewrites any non-numeric raw drawing ids (imported XLSX drawings) into the
+        // UI-layer stable hash numeric ids. Instead, commit via the same per-object mapping
+        // logic used by `onInteractionCommit`.
+        const selectedId = this.selectedDrawingId;
+        if (selectedId == null) return;
+        const after = Array.isArray(next) ? next.find((obj) => obj.id === selectedId) : null;
+        if (!after) return;
+        const kind = interactionCommitKind ?? "move";
+        try {
+          this.commitDrawingInteraction({ kind, id: selectedId, before: after, after, objects: next });
+        } catch {
+          // Best-effort: never throw from persistence fallbacks.
+        }
+      },
+      beginBatch: ({ label }) => {
+        interactionCommitKind =
+          label === "Move Picture"
+            ? "move"
+            : label === "Resize Picture"
+              ? "resize"
+              : label === "Rotate Picture"
+                ? "rotate"
+                : null;
+        const mapped =
+          label === "Move Picture"
+            ? "Move Drawing"
+            : label === "Resize Picture"
+              ? "Resize Drawing"
+              : label === "Rotate Picture"
+                ? "Rotate Drawing"
+                : label;
+        this.document.beginBatch({ label: mapped });
+      },
+      endBatch: () => {
+        interactionCommitKind = null;
+        this.document.endBatch();
+      },
+      cancelBatch: () => {
+        interactionCommitKind = null;
+        this.document.cancelBatch();
       },
       shouldHandlePointerDown: (e) => {
         if (this.formulaBar?.isFormulaEditing()) return false;
