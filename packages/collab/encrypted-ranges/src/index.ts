@@ -300,9 +300,11 @@ export class EncryptedRangeManager {
       const arr = this.ensureEncryptedRangesArrayForWrite();
 
       // Deduplicate identical ranges.
-      for (const existing of this.list()) {
-        if (isSameRange(existing, canonical)) {
-          outId = existing.id;
+      for (let i = 0; i < arr.length; i += 1) {
+        const parsed = yRangeToEncryptedRange(arr.get(i));
+        if (!parsed) continue;
+        if (isSameRange(parsed, canonical)) {
+          outId = parsed.id;
           return;
         }
       }
