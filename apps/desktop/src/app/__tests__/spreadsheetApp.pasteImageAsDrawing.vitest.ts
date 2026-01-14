@@ -283,6 +283,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
     };
 
     const app = new SpreadsheetApp(root, status);
+    const focusSpy = vi.spyOn(app, "focus");
     const doc: any = app.getDocument();
     const sheet1 = app.getCurrentSheetId();
 
@@ -304,6 +305,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
     // Switch sheets while paste is waiting on clipboard bytes.
     app.activateSheet("Sheet2");
     expect(app.getCurrentSheetId()).toBe("Sheet2");
+    focusSpy.mockClear();
 
     resolveRead?.({ imagePng: pngBytes });
     await pastePromise;
@@ -319,6 +321,7 @@ describe("SpreadsheetApp paste image clipboard", () => {
     expect(state.drawings).toHaveLength(0);
     expect(state.selectedId).toBe(null);
     expect(app.getSelectedDrawingId()).toBe(null);
+    expect(focusSpy).not.toHaveBeenCalled();
 
     app.destroy();
     root.remove();

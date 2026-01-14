@@ -9738,17 +9738,24 @@ export class SpreadsheetApp {
       }
     })();
     if (tauriDialogOpenAvailable && tauriInvokeAvailable) {
+      const startSheetId = this.sheetId;
       void (async () => {
         const files = await pickLocalImageFiles({ multiple: false });
         const file = files[0] ?? null;
         if (!file) {
-          this.focus();
+          if (this.sheetId === startSheetId) {
+            this.focus();
+          }
           return;
         }
         await this.insertImageFromPickedFile(file);
       })().catch((err) => {
         console.warn("Insert image failed", err);
-        this.focus();
+        // Best-effort: if the user navigated away while async file IO is in-flight, don't
+        // steal focus back to the grid. (Sheet switching is a good proxy for "user moved on".)
+        if (this.sheetId === startSheetId) {
+          this.focus();
+        }
       });
       return;
     }
@@ -9769,6 +9776,7 @@ export class SpreadsheetApp {
       if (settled) return;
       settled = true;
       cleanup();
+      const startSheetId = this.sheetId;
       if (!file) {
         this.focus();
         return;
@@ -9778,7 +9786,9 @@ export class SpreadsheetApp {
           console.warn("Insert image failed", err);
         })
         .finally(() => {
-          this.focus();
+          if (this.sheetId === startSheetId) {
+            this.focus();
+          }
         });
     };
     const onCancel = () => finish(null);
@@ -9858,6 +9868,11 @@ export class SpreadsheetApp {
   private async insertImageFromPickedFile(file: File): Promise<void> {
     if (this.isReadOnly()) return;
     const sheetId = this.sheetId;
+    const focusIfStillOnSheet = () => {
+      if (this.sheetId === sheetId) {
+        this.focus();
+      }
+    };
     const size = typeof (file as any)?.size === "number" ? (file as any).size : null;
     if (size == null || size > MAX_INSERT_IMAGE_BYTES) {
       const mb = Math.round(MAX_INSERT_IMAGE_BYTES / 1024 / 1024);
@@ -9866,7 +9881,7 @@ export class SpreadsheetApp {
       } catch {
         // `showToast` requires a #toast-root; unit tests don't always include it.
       }
-      this.focus();
+      focusIfStillOnSheet();
       return;
     }
 
@@ -9950,7 +9965,7 @@ export class SpreadsheetApp {
         } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
-        this.focus();
+        focusIfStillOnSheet();
         return;
       }
 
@@ -9969,7 +9984,7 @@ export class SpreadsheetApp {
           } catch {
             // `showToast` requires a #toast-root; unit tests don't always include it.
           }
-          this.focus();
+          focusIfStillOnSheet();
           return;
         }
       }
@@ -10077,8 +10092,11 @@ export class SpreadsheetApp {
         this.renderDrawings();
         this.renderSelection();
         this.dispatchDrawingsChanged();
+        // Only refocus the grid if the user hasn't navigated to a different sheet while
+        // async file decoding was in-flight. This avoids stealing focus away from the
+        // active sheet (e.g. formula bar editing) after a background insert completes.
+        focusIfStillOnSheet();
       }
-      this.focus();
     } catch (err) {
       throw err;
     }
@@ -20393,8 +20411,10 @@ export class SpreadsheetApp {
       }
       this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
       this.dispatchDrawingsChanged();
+      // Only refocus the grid if the user hasn't navigated to a different sheet while
+      // clipboard reads / image decoding were in-flight.
+      this.focus();
     }
-    this.focus();
     return true;
   }
 

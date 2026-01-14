@@ -192,6 +192,7 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     };
 
     const app = new SpreadsheetApp(root, status);
+    const focusSpy = vi.spyOn(app, "focus");
     const doc: any = app.getDocument();
     const sheet1 = app.getCurrentSheetId();
 
@@ -218,6 +219,10 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     // Switch sheets while `insertImageFromPickedFile` is awaiting the file bytes.
     app.activateSheet("Sheet2");
     expect(app.getCurrentSheetId()).toBe("Sheet2");
+    // Sheet switches shouldn't cause async insert completion to steal focus away from the
+    // new sheet (e.g. formula bar editing). Clear any incidental focus calls before
+    // the file bytes resolve.
+    focusSpy.mockClear();
 
     resolveBytes?.(new Uint8Array([1, 2, 3, 4]).buffer);
 
@@ -235,6 +240,7 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     expect(state.sheetId).toBe("Sheet2");
     expect(state.drawings).toHaveLength(0);
     expect(state.selectedId).toBe(null);
+    expect(focusSpy).not.toHaveBeenCalled();
 
     app.destroy();
     root.remove();
