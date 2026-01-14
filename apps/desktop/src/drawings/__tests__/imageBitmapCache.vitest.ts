@@ -527,7 +527,7 @@ describe("ImageBitmapCache", () => {
     vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
 
     const cache = new ImageBitmapCache({ maxEntries: 10 });
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" style="width: calc(10001px); height: 1px"></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" style="width: calc(1px - -10000px); height: 1px"></svg>`;
     const entry: ImageEntry = { id: "svg_calc_style_bomb", bytes: createSvgBytes(svg), mimeType: "image/svg+xml" };
 
     await expect(cache.get(entry)).rejects.toThrow(/Image dimensions too large/);

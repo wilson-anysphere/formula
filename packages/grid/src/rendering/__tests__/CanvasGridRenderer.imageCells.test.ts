@@ -1329,7 +1329,7 @@ describe("CanvasGridRenderer image cells", () => {
     const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
     vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
 
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" style="width: calc(10001px); height: 1px"></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" style="width: calc(1px - -10000px); height: 1px"></svg>`;
     const imageResolver = vi.fn(async () => createSvgBytes(svg));
 
     const gridCanvas = document.createElement("canvas");

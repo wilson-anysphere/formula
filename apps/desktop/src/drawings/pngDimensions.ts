@@ -662,45 +662,107 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
   const parseLength = (raw: string | null): number | null => {
     if (!raw) return null;
     let normalized = raw.trim();
-    // Support simple `calc(<length>)` wrappers used in some SVGs.
+    let hadCalcWrapper = false;
+    // Support simple `calc(...)` wrappers used in some SVGs.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const calc = /^\s*calc\(\s*(.+)\s*\)\s*$/i.exec(normalized);
       if (!calc) break;
+      hadCalcWrapper = true;
       normalized = String(calc[1] ?? "").trim();
     }
-    const m =
+
+    const convertToPx = (value: number, unitRaw: string): number | null => {
+      if (!Number.isFinite(value)) return null;
+      const unit = String(unitRaw ?? "").toLowerCase();
+      switch (unit) {
+        case "":
+        case "px":
+          return value;
+        case "%":
+          return null;
+        case "pt":
+          return (value * 96) / 72;
+        case "pc":
+          return value * 16;
+        case "in":
+          return value * 96;
+        case "cm":
+          return (value * 96) / 2.54;
+        case "mm":
+          return (value * 96) / 25.4;
+        case "q":
+          return (value * 96) / 101.6;
+        case "em":
+          return value * 16;
+        case "ex":
+          return value * 8;
+        default:
+          // Unknown units: treat as user units (best-effort). This is more conservative than returning
+          // null because it prevents bypassing dimension guards via unusual unit strings.
+          return value;
+      }
+    };
+
+    const direct =
       /^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\s*([a-z%]*)\s*$/i.exec(normalized);
-    if (!m) return null;
-    const value = Number(m[1]);
-    if (!Number.isFinite(value) || value <= 0) return null;
-    const unit = String(m[2] ?? "").toLowerCase();
-    switch (unit) {
-      case "":
-      case "px":
-        return value;
-      case "%":
-        return null;
-      case "pt":
-        return (value * 96) / 72;
-      case "pc":
-        return value * 16;
-      case "in":
-        return value * 96;
-      case "cm":
-        return (value * 96) / 2.54;
-      case "mm":
-        return (value * 96) / 25.4;
-      case "q":
-        return (value * 96) / 101.6;
-      case "em":
-        return value * 16;
-      case "ex":
-        return value * 8;
-      default:
-        // Unknown units: treat as user units (best-effort). This is more conservative than returning
-        // null because it prevents bypassing dimension guards via unusual unit strings.
-        return value;
+    if (direct) {
+      const value = Number(direct[1]);
+      if (!Number.isFinite(value) || value <= 0) return null;
+      const px = convertToPx(value, String(direct[2] ?? ""));
+      return px && px > 0 ? px : null;
     }
+
+    if (!hadCalcWrapper) return null;
+
+    // Support a limited subset of calc expressions so `calc(1px - -10000px)` cannot bypass guards.
+    const parseCalcSum = (expr: string): number | null => {
+      const source = expr.trim();
+      if (!source) return null;
+      // Support only + / - sequences (no multiplication, division, or nested parentheses).
+      if (/[*/()]/.test(source)) return null;
+
+      const tokenRe = /^\s*((?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\s*([a-z%]*)/i;
+      let idx = 0;
+      let total = 0;
+      while (idx < source.length) {
+        while (idx < source.length && /\s/.test(source[idx]!)) idx += 1;
+        if (idx >= source.length) break;
+
+        // Fold one or more leading +/− operators into a sign.
+        let sign = 1;
+        while (idx < source.length) {
+          const ch = source[idx]!;
+          if (ch === "+") {
+            idx += 1;
+          } else if (ch === "-") {
+            sign = -sign;
+            idx += 1;
+          } else {
+            break;
+          }
+          while (idx < source.length && /\s/.test(source[idx]!)) idx += 1;
+        }
+
+        const match = tokenRe.exec(source.slice(idx));
+        if (!match) return null;
+        const value = Number(match[1]);
+        if (!Number.isFinite(value)) return null;
+        const termPx = convertToPx(value, String(match[2] ?? ""));
+        if (termPx == null) return null;
+        total += sign * termPx;
+        idx += match[0].length;
+
+        while (idx < source.length && /\s/.test(source[idx]!)) idx += 1;
+        if (idx >= source.length) break;
+        const next = source[idx]!;
+        if (next !== "+" && next !== "-") return null;
+        // Leave `idx` pointing at the operator so the next loop iteration consumes it.
+      }
+
+      return Number.isFinite(total) && total > 0 ? total : null;
+    };
+
+    return parseCalcSum(normalized);
   };
 
   const widthAttr = parseLength(getAttr("width"));
