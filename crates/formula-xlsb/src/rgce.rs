@@ -4423,13 +4423,31 @@ fn extern_sheet_range_index_with_fallback(
 }
 
 fn split_external_workbook_prefix(raw: &str) -> Option<(&str, &str)> {
-    let rest = raw.strip_prefix('[')?;
-    let end = rest.find(']')?;
-    let prefix_len = end.saturating_add(2); // '[' + ... + ']'
-    if prefix_len > raw.len() {
+    // Workbook prefixes are *not* nesting; workbook names may contain `[` characters. Excel also
+    // escapes literal `]` characters by doubling them (`]]`).
+    let bytes = raw.as_bytes();
+    if bytes.first() != Some(&b'[') {
         return None;
     }
-    Some((&raw[..prefix_len], &raw[prefix_len..]))
+
+    let mut i = 1;
+    while i < bytes.len() {
+        if bytes[i] == b']' {
+            if bytes.get(i + 1) == Some(&b']') {
+                i += 2;
+                continue;
+            }
+            let prefix_len = i + 1; // include closing `]`
+            return Some((&raw[..prefix_len], &raw[prefix_len..]));
+        }
+
+        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
+        // inside multi-byte sequences as actual bracket characters.
+        let ch = raw[i..].chars().next()?;
+        i += ch.len_utf8();
+    }
+
+    None
 }
 
 fn emit_cell_ref_fields(cell: &CellRef, out: &mut Vec<u8>) {
@@ -5140,7 +5158,18 @@ impl<'a> FormulaParser<'a> {
         let mut book = String::new();
         loop {
             match self.next_char() {
-                Some(']') => break,
+                Some(']') => {
+                    // Excel escapes literal `]` characters inside workbook prefixes by doubling
+                    // them (`]]`). Workbook prefixes are not nested, so treat `[` characters as
+                    // plain text.
+                    if self.peek_char() == Some(']') {
+                        self.next_char();
+                        book.push(']');
+                        book.push(']');
+                        continue;
+                    }
+                    break;
+                }
                 Some(ch) => book.push(ch),
                 None => return Err("unterminated external workbook prefix".to_string()),
             }

@@ -128,6 +128,19 @@ pub struct NameDefinition {
     pub scope: NameScope,
 }
 
+fn escape_workbook_name_for_prefix(workbook: String) -> String {
+    // Excel escapes literal `]` characters inside workbook prefixes by doubling them (`]]`).
+    //
+    // We store external workbook sheet keys in the same canonical form used by `formula-engine`
+    // (e.g. `"[Book]].xlsx]Sheet1"`), so ensure any raw SupBook display names are made safe for
+    // embedding inside `[...]`.
+    if workbook.contains(']') {
+        workbook.replace(']', "]]")
+    } else {
+        workbook
+    }
+}
+
 impl WorkbookContext {
     /// Registers an ExternSheet table entry so formulas can encode/decode 3D references.
     pub fn add_extern_sheet(
@@ -169,7 +182,7 @@ impl WorkbookContext {
         last_sheet: impl Into<String>,
         ixti: u16,
     ) {
-        let workbook = workbook.into();
+        let workbook = escape_workbook_name_for_prefix(workbook.into());
         let first_sheet = first_sheet.into();
         let last_sheet = last_sheet.into();
 
@@ -335,7 +348,7 @@ impl WorkbookContext {
         let supbook = self.namex_supbooks.get(supbook_index as usize)?;
         match supbook.kind {
             SupBookKind::ExternalWorkbook => {
-                let book = display_supbook_name(&supbook.raw_name);
+                let book = escape_workbook_name_for_prefix(display_supbook_name(&supbook.raw_name));
 
                 if let Some(scope_sheet) = extern_name.scope_sheet {
                     let sheet_name = self
@@ -368,7 +381,8 @@ impl WorkbookContext {
                 // `'[Book]SheetA:SheetB'!Name` so the prefix is parseable as a single quoted token
                 // (mirrors `rgce`'s canonical 3D-ref formatting).
                 if extern_name.scope_sheet.is_none() {
-                    if let Some((Some(workbook), first_sheet, last_sheet)) = self.extern_sheet_target(ixti)
+                    if let Some((Some(workbook), first_sheet, last_sheet)) =
+                        self.extern_sheet_target(ixti)
                     {
                         if normalize_key(first_sheet) != normalize_key(last_sheet) {
                             let token = format!("[{workbook}]{first_sheet}:{last_sheet}");
@@ -413,7 +427,8 @@ impl WorkbookContext {
                 // Function extern names should render without qualification (handled above). For
                 // *non*-function extern names, include a workbook-like qualifier so the decoded
                 // formula text remains unambiguous and round-trippable.
-                let book = display_addin_supbook_name(&supbook.raw_name);
+                let book =
+                    escape_workbook_name_for_prefix(display_addin_supbook_name(&supbook.raw_name));
 
                 if let Some(scope_sheet) = extern_name.scope_sheet {
                     let sheet_name = self
@@ -548,13 +563,16 @@ impl WorkbookContext {
                 // not specify a workbook prefix.
                 (None, SupBookKind::ExternalWorkbook) => continue,
                 (Some(book), SupBookKind::ExternalWorkbook | SupBookKind::Unknown) => {
-                    let display = display_supbook_name(&supbook.raw_name);
+                    let display =
+                        escape_workbook_name_for_prefix(display_supbook_name(&supbook.raw_name));
                     if normalize_key(&display) != book {
                         continue;
                     }
                 }
                 (Some(book), SupBookKind::AddIn) => {
-                    let display = display_addin_supbook_name(&supbook.raw_name);
+                    let display = escape_workbook_name_for_prefix(display_addin_supbook_name(
+                        &supbook.raw_name,
+                    ));
                     if normalize_key(&display) != book {
                         continue;
                     }
@@ -682,7 +700,10 @@ impl WorkbookContext {
             if range.sheet_key != wanted_sheet {
                 continue;
             }
-            if row < range.min_row || row > range.max_row || col < range.min_col || col > range.max_col
+            if row < range.min_row
+                || row > range.max_row
+                || col < range.min_col
+                || col > range.max_col
             {
                 continue;
             }

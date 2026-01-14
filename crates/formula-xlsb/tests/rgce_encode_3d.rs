@@ -69,6 +69,57 @@ fn encodes_and_decodes_external_workbook_ref() {
 }
 
 #[test]
+fn encodes_and_decodes_external_workbook_ref_with_workbook_name_containing_lbracket() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("A1[Name.xlsb", "Sheet1", "Sheet1", 0);
+
+    let encoded =
+        encode_rgce_with_context("=[A1[Name.xlsb]Sheet1!A1+1", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "[A1[Name.xlsb]Sheet1!A1+1");
+    formula_engine::parse_formula(&format!("={decoded}"), Default::default())
+        .expect("should parse");
+}
+
+#[test]
+fn encodes_and_decodes_external_workbook_ref_with_workbook_name_containing_lbracket_and_escaped_rbracket(
+) {
+    let mut ctx = WorkbookContext::default();
+    // Workbook name contains a literal `]`. Excel escapes this as `]]` inside the `[...]` prefix.
+    ctx.add_extern_sheet_external_workbook("Book[Name].xlsb", "Sheet1", "Sheet1", 0);
+
+    let encoded =
+        encode_rgce_with_context("=[Book[Name]].xlsb]Sheet1!A1+1", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "[Book[Name]].xlsb]Sheet1!A1+1");
+    formula_engine::parse_formula(&format!("={decoded}"), Default::default())
+        .expect("should parse");
+}
+
+#[test]
+fn encodes_and_decodes_external_workbook_sheet_range_ref_with_escaped_workbook_rbracket() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book[Name].xlsb", "SheetA", "SheetB", 0);
+
+    // Excel writes external workbook 3D spans as `[Book]SheetA:SheetB!A1`, but the rgce decoder
+    // emits a single quoted identifier (`'[Book]SheetA:SheetB'!A1`) so the prefix is a single
+    // token for formula-engine.
+    let encoded = encode_rgce_with_context(
+        "=SUM([Book[Name]].xlsb]SheetA:SheetB!A1)",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('[Book[Name]].xlsb]SheetA:SheetB'!A1)");
+    formula_engine::parse_formula(&format!("={decoded}"), Default::default())
+        .expect("should parse");
+}
+
+#[test]
 fn encodes_and_decodes_workbook_name() {
     let mut ctx = WorkbookContext::default();
     ctx.add_workbook_name("MyNamedRange", 1);
@@ -178,7 +229,8 @@ fn encodes_and_decodes_modern_error_literals() {
         (0x31, "#UNKNOWN!"),
     ] {
         let formula = format!("={lit}");
-        let encoded = encode_rgce_with_context(&formula, &ctx, CellCoord::new(0, 0)).expect("encode");
+        let encoded =
+            encode_rgce_with_context(&formula, &ctx, CellCoord::new(0, 0)).expect("encode");
         assert_eq!(encoded.rgce, vec![0x1C, code], "encode {lit}");
         assert!(encoded.rgcb.is_empty(), "encode {lit} should not emit rgcb");
 
