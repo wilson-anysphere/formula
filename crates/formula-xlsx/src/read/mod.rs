@@ -818,6 +818,13 @@ fn load_sheet_drawings_from_parts(
         }
 
         let drawing_part = resolve_target(sheet_part, &rel.target);
+        // Relationship targets are URIs and may be percent-encoded differently than the underlying
+        // ZIP entry name (e.g. `drawing%201.xml` vs `drawing 1.xml`). Use the tolerant part-name
+        // lookup so we can still locate the drawing XML in `parts`.
+        let Some(drawing_part) = part_name_tolerant(parts, &drawing_part) else {
+            continue;
+        };
+
         if !seen_drawing_parts.insert(drawing_part.clone()) {
             continue;
         }
@@ -2569,8 +2576,7 @@ fn parse_workbook_metadata(
                     match key {
                         b"name" => name = Some(attr.unescape_value()?.into_owned()),
                         b"sheetId" => {
-                            sheet_id =
-                                Some(attr.unescape_value()?.trim().parse().unwrap_or(0))
+                            sheet_id = Some(attr.unescape_value()?.trim().parse().unwrap_or(0))
                         }
                         b"state" => state = Some(attr.unescape_value()?.into_owned()),
                         _ if crate::openxml::local_name(key) == b"id" => {
@@ -2605,8 +2611,7 @@ fn parse_workbook_metadata(
                     match attr.key.as_ref() {
                         b"name" => name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
-                            local_sheet_id =
-                                attr.unescape_value()?.trim().parse::<u32>().ok();
+                            local_sheet_id = attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         b"comment" => comment = Some(attr.unescape_value()?.into_owned()),
                         b"hidden" => {
@@ -2638,8 +2643,7 @@ fn parse_workbook_metadata(
                     match attr.key.as_ref() {
                         b"name" => name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
-                            local_sheet_id =
-                                attr.unescape_value()?.trim().parse::<u32>().ok();
+                            local_sheet_id = attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         b"comment" => comment = Some(attr.unescape_value()?.into_owned()),
                         b"hidden" => {
@@ -2792,12 +2796,8 @@ fn parse_worksheet_into_model(
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
-                        b"min" => {
-                            min = Some(attr.unescape_value()?.trim().parse().unwrap_or(0))
-                        }
-                        b"max" => {
-                            max = Some(attr.unescape_value()?.trim().parse().unwrap_or(0))
-                        }
+                        b"min" => min = Some(attr.unescape_value()?.trim().parse().unwrap_or(0)),
+                        b"max" => max = Some(attr.unescape_value()?.trim().parse().unwrap_or(0)),
                         b"width" => {
                             width = attr.unescape_value()?.trim().parse::<f32>().ok();
                         }
@@ -3056,8 +3056,7 @@ fn parse_worksheet_into_model(
                     let attr = attr?;
                     match attr.key.as_ref() {
                         b"r" => {
-                            row_1_based =
-                                Some(attr.unescape_value()?.trim().parse().unwrap_or(0));
+                            row_1_based = Some(attr.unescape_value()?.trim().parse().unwrap_or(0));
                         }
                         b"ht" => {
                             height = attr.unescape_value()?.trim().parse::<f32>().ok();
@@ -3132,9 +3131,7 @@ fn parse_worksheet_into_model(
                         }
                         b"t" => current_t = Some(attr.unescape_value()?.into_owned()),
                         b"s" => {
-                            if let Ok(xf_index) =
-                                attr.unescape_value()?.trim().parse::<u32>()
-                            {
+                            if let Ok(xf_index) = attr.unescape_value()?.trim().parse::<u32>() {
                                 current_style = styles_part.style_id_for_xf(xf_index);
                             }
                         }
@@ -3160,9 +3157,7 @@ fn parse_worksheet_into_model(
                             );
                         }
                         b"s" => {
-                            if let Ok(xf_index) =
-                                attr.unescape_value()?.trim().parse::<u32>()
-                            {
+                            if let Ok(xf_index) = attr.unescape_value()?.trim().parse::<u32>() {
                                 style_id = styles_part.style_id_for_xf(xf_index);
                             }
                         }
