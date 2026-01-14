@@ -916,6 +916,108 @@ fn relatedtable_from_virtual_blank_dimension_member_includes_unmatched_facts_m2m
 }
 
 #[test]
+fn relatedtable_from_virtual_blank_dimension_member_includes_unmatched_facts_m2m_for_columnar_dim_and_fact(
+) {
+    // Regression coverage: when *both* dimension and fact tables are columnar-backed, the virtual
+    // blank member created by a ManyToMany relationship with RI disabled should expose both
+    // unmatched fact keys and BLANK foreign keys.
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let dim_options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, dim_options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let fact_options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, fact_options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(7.0),
+    ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::Null,
+        formula_columnar::Value::Number(5.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let blank_row = model.table("Dim").unwrap().row_count();
+
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", blank_row);
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SUMX(RELATEDTABLE(Fact), Fact[Amount])",
+                &FilterContext::empty(),
+                &ctx,
+            )
+            .unwrap(),
+        12.0.into()
+    );
+}
+
+#[test]
 fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_facts_m2m() {
     // Regression: the relationship-generated blank member is distinct from a *physical* BLANK key
     // on the dimension side. RELATEDTABLE from a physical blank-key row should not return unmatched
@@ -1081,6 +1183,112 @@ fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_fac
         formula_columnar::Value::Number(999.0),
         formula_columnar::Value::Number(7.0),
     ]);
+    fact.append_row(&[
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::Null,
+        formula_columnar::Value::Number(5.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let physical_blank_row = 1;
+    let mut ctx = RowContext::default();
+    ctx.push("Dim", physical_blank_row);
+
+    assert_eq!(
+        DaxEngine::new()
+            .evaluate(
+                &model,
+                "SUMX(RELATEDTABLE(Fact), Fact[Amount])",
+                &FilterContext::empty(),
+                &ctx,
+            )
+            .unwrap(),
+        Value::Blank
+    );
+}
+
+#[test]
+fn relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_facts_m2m_for_columnar_dim_and_fact(
+) {
+    // Same regression as `relatedtable_from_physical_blank_dimension_key_does_not_include_unmatched_facts_m2m`,
+    // but with *both* the dimension and fact tables columnar-backed.
+    let mut model = DataModel::new();
+
+    let dim_schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let dim_options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(dim_schema, dim_options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    // Physical BLANK key row.
+    dim.append_row(&[
+        formula_columnar::Value::Null,
+        formula_columnar::Value::String("PhysicalBlank".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let fact_options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, fact_options);
+    fact.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    // Unmatched key (should map to virtual blank member, not the physical BLANK key row).
+    fact.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(7.0),
+    ]);
+    // BLANK FK (also belongs to virtual blank member).
     fact.append_row(&[
         formula_columnar::Value::Number(3.0),
         formula_columnar::Value::Null,
