@@ -743,6 +743,11 @@ export class FormulaBarView {
             }
             return;
           }
+          if (e.key === "Tab") {
+            // Allow standard focus traversal (Tab/Shift+Tab) while dismissing the dropdown.
+            this.#closeNameBoxDropdown({ restoreAddress: true, reason: "outside" });
+            return;
+          }
         }
 
         if (wantsMenuKey) {

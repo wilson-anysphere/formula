@@ -31,7 +31,7 @@ describe("FormulaBarView name box dropdown", () => {
       ],
     };
 
-    new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+    const view = new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
 
     const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
     const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]');
@@ -61,7 +61,10 @@ describe("FormulaBarView name box dropdown", () => {
 
     expect(onGoTo).toHaveBeenCalledTimes(1);
     expect(onGoTo).toHaveBeenCalledWith("Table1[#All]");
-    expect(address!.value).toBe("Table1");
+
+    // Simulate the app updating the selection after navigation.
+    view.setActiveCell({ address: "A1", input: "", value: "", nameBox: "A1:D10" });
+    expect(address!.value).toBe("A1:D10");
     expect(popup!.hidden).toBe(true);
     expect(address!.getAttribute("aria-expanded")).toBe("false");
 
@@ -101,6 +104,34 @@ describe("FormulaBarView name box dropdown", () => {
     // Escape should cancel the dropdown and restore the original address.
     address.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     expect(popup.hidden).toBe(true);
+    expect(address.value).toBe("A1");
+
+    host.remove();
+  });
+
+  it("closes on Tab without navigating", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onGoTo = vi.fn(() => true);
+    const provider: NameBoxDropdownProvider = {
+      getItems: () => [{ kind: "namedRange", key: "namedRange:SalesData", label: "SalesData", reference: "SalesData" }],
+    };
+
+    new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;
+    const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]')!;
+    const popup = host.querySelector<HTMLDivElement>('[data-testid="formula-name-box-popup"]')!;
+
+    address.value = "A1";
+    dropdown.click();
+    expect(popup.hidden).toBe(false);
+
+    // Tab should dismiss the dropdown but not trigger navigation.
+    address.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    expect(popup.hidden).toBe(true);
+    expect(onGoTo).not.toHaveBeenCalled();
     expect(address.value).toBe("A1");
 
     host.remove();
