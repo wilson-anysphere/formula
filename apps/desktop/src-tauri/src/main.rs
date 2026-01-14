@@ -12,6 +12,10 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use desktop::clipboard;
 use desktop::commands;
 use desktop::ed25519_verifier;
+use desktop::ipc_limits::{
+    LimitedString, MAX_IPC_NOTIFICATION_BODY_BYTES, MAX_IPC_NOTIFICATION_TITLE_BYTES,
+    MAX_IPC_URL_BYTES,
+};
 use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
 use desktop::macros::MacroExecutionOptions;
 use desktop::open_file;
@@ -752,8 +756,8 @@ fn cell_update_from_state(update: CellUpdateData) -> commands::CellUpdate {
 #[tauri::command]
 async fn show_system_notification(
     window: tauri::WebviewWindow,
-    title: String,
-    body: Option<String>,
+    title: LimitedString<MAX_IPC_NOTIFICATION_TITLE_BYTES>,
+    body: Option<LimitedString<MAX_IPC_NOTIFICATION_BODY_BYTES>>,
 ) -> Result<(), String> {
     desktop::ipc_origin::ensure_main_window_and_stable_origin(
         &window,
@@ -761,10 +765,14 @@ async fn show_system_notification(
         desktop::ipc_origin::Verb::Are,
     )?;
 
-    let mut builder = window.app_handle().notification().builder().title(title);
+    let mut builder = window
+        .app_handle()
+        .notification()
+        .builder()
+        .title(title.into_string());
 
     if let Some(body) = body {
-        builder = builder.body(body);
+        builder = builder.body(body.into_string());
     }
 
     builder.show().map_err(|err| err.to_string())?;
@@ -775,7 +783,7 @@ async fn show_system_notification(
 async fn oauth_loopback_listen(
     window: tauri::WebviewWindow,
     state: State<'_, SharedOauthLoopbackState>,
-    redirect_uri: String,
+    redirect_uri: LimitedString<MAX_IPC_URL_BYTES>,
 ) -> Result<(), String> {
     desktop::ipc_origin::ensure_main_window_and_stable_origin(
         &window,

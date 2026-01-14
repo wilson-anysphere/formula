@@ -1438,6 +1438,8 @@ use crate::file_io::read_workbook;
 #[cfg(feature = "desktop")]
 use crate::ipc_origin;
 #[cfg(feature = "desktop")]
+use crate::ipc_limits::{MAX_IPC_PATH_BYTES, MAX_IPC_URL_BYTES};
+#[cfg(feature = "desktop")]
 use crate::macro_trust::SharedMacroTrustStore;
 #[cfg(feature = "desktop")]
 use crate::persistence::{
@@ -1530,7 +1532,7 @@ fn cell_update_from_state(update: CellUpdateData) -> CellUpdate {
 #[tauri::command]
 pub async fn open_workbook(
     window: tauri::WebviewWindow,
-    path: String,
+    path: LimitedString<MAX_IPC_PATH_BYTES>,
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
     ipc_origin::ensure_main_window_and_stable_origin(
@@ -1539,6 +1541,7 @@ pub async fn open_workbook(
         ipc_origin::Verb::Is,
     )?;
 
+    let path = path.into_inner();
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
     let resolved =
         crate::fs_scope::canonicalize_in_allowed_roots(std::path::Path::new(&path), &allowed_roots)
@@ -1852,13 +1855,17 @@ fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
 /// depending on the optional Tauri FS plugin.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn read_text_file(window: tauri::WebviewWindow, path: String) -> Result<String, String> {
+pub async fn read_text_file(
+    window: tauri::WebviewWindow,
+    path: LimitedString<MAX_IPC_PATH_BYTES>,
+) -> Result<String, String> {
     ipc_origin::ensure_main_window_and_stable_origin(
         &window,
         "filesystem access",
         ipc_origin::Verb::Is,
     )?;
 
+    let path = path.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
         let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
@@ -1886,7 +1893,10 @@ pub struct FileStat {
 /// reused when reading local sources (CSV/JSON/Parquet).
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn stat_file(window: tauri::WebviewWindow, path: String) -> Result<FileStat, String> {
+pub async fn stat_file(
+    window: tauri::WebviewWindow,
+    path: LimitedString<MAX_IPC_PATH_BYTES>,
+) -> Result<FileStat, String> {
     use std::time::UNIX_EPOCH;
 
     ipc_origin::ensure_main_window_and_stable_origin(
@@ -1895,6 +1905,7 @@ pub async fn stat_file(window: tauri::WebviewWindow, path: String) -> Result<Fil
         ipc_origin::Verb::Is,
     )?;
 
+    let path = path.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
         let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
@@ -1924,7 +1935,7 @@ pub async fn stat_file(window: tauri::WebviewWindow, path: String) -> Result<Fil
 #[tauri::command]
 pub async fn read_binary_file(
     window: tauri::WebviewWindow,
-    path: String,
+    path: LimitedString<MAX_IPC_PATH_BYTES>,
 ) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
@@ -1934,6 +1945,7 @@ pub async fn read_binary_file(
         ipc_origin::Verb::Is,
     )?;
 
+    let path = path.into_inner();
     let bytes = tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
         let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
@@ -2006,7 +2018,7 @@ fn read_binary_file_range_blocking(
 #[tauri::command]
 pub async fn read_binary_file_range(
     window: tauri::WebviewWindow,
-    path: String,
+    path: LimitedString<MAX_IPC_PATH_BYTES>,
     offset: u64,
     length: u64,
 ) -> Result<String, String> {
@@ -2024,6 +2036,7 @@ pub async fn read_binary_file_range(
         return Ok(String::new());
     }
 
+    let path = path.into_inner();
     let bytes = tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
         let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
@@ -2147,7 +2160,7 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
 #[tauri::command]
 pub async fn list_dir(
     window: tauri::WebviewWindow,
-    path: String,
+    path: LimitedString<MAX_IPC_PATH_BYTES>,
     recursive: Option<bool>,
 ) -> Result<Vec<ListDirEntry>, String> {
     let recursive = recursive.unwrap_or(false);
@@ -2158,6 +2171,7 @@ pub async fn list_dir(
         ipc_origin::Verb::Is,
     )?;
 
+    let path = path.into_inner();
     tauri::async_runtime::spawn_blocking(move || list_dir_blocking(&path, recursive))
         .await
         .map_err(|e| e.to_string())?
@@ -3025,7 +3039,7 @@ pub async fn list_imported_sheet_background_images(
 #[tauri::command]
 pub async fn save_workbook(
     window: tauri::WebviewWindow,
-    path: Option<String>,
+    path: Option<LimitedString<MAX_IPC_PATH_BYTES>>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
     ipc_origin::ensure_main_window_and_stable_origin(
@@ -3034,6 +3048,7 @@ pub async fn save_workbook(
         ipc_origin::Verb::Is,
     )?;
 
+    let path = path.map(|p| p.into_inner());
     let (save_path, workbook, storage, memory, workbook_id, autosave) = {
         let state = state.inner().lock().unwrap();
         let workbook = state.get_workbook().map_err(app_error)?.clone();
@@ -6398,7 +6413,10 @@ pub fn check_for_updates(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(), String> {
+pub async fn open_external_url(
+    window: tauri::Window,
+    url: LimitedString<MAX_IPC_URL_BYTES>,
+) -> Result<(), String> {
     use tauri::Manager as _;
     ipc_origin::ensure_main_window(window.label(), "external URL opening", ipc_origin::Verb::Is)?;
     {

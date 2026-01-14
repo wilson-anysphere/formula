@@ -345,6 +345,12 @@ pub fn execute_invocation(
     options: MacroExecutionOptions,
 ) -> Result<(MacroExecutionOutcome, MacroRuntimeContext), MacroHostError> {
     let mut policy = formula_vba_runtime::VbaSandboxPolicy::default();
+    // `formula_vba_runtime::VbaSandboxPolicy` defaults to a very small execution time budget
+    // (currently 250ms). That is helpful as a conservative sandbox default, but typical workbook
+    // macros can legitimately take longer (especially in debug builds / under CI load).
+    //
+    // Prefer a modest, host-controlled default and allow callers to override via IPC.
+    policy.max_execution_time = Duration::from_secs(5);
     if let Some(timeout_ms) = options.timeout_ms {
         policy.max_execution_time = Duration::from_millis(timeout_ms);
     }
@@ -895,8 +901,9 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             while end > 0 && !message.is_char_boundary(end) {
                 end -= 1;
             }
-            // Build a new bounded-capacity string so we don't retain (or grow to) a very large
-            // allocation for a single macro log line.
+            // Allocate the truncated string with a hard cap to ensure we never retain a large
+            // `String` capacity in the output buffer (even after appending the truncation
+            // suffix).
             let mut truncated = String::with_capacity(max_line_bytes);
             truncated.push_str(&message[..end]);
             if truncated.len() + suffix_len <= max_line_bytes {

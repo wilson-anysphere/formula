@@ -4,7 +4,10 @@
 /// lead to excessive memory usage and slow processing (e.g. workbook cloning, script parsing, or
 /// spawning subprocesses).
 
+use serde::de;
+use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::fmt;
 
 /// Maximum size (in bytes) of a script `code` payload accepted over IPC.
 pub const MAX_SCRIPT_CODE_BYTES: usize = 1_000_000; // ~1MB
@@ -25,6 +28,119 @@ pub const MAX_SHEET_ID_BYTES: usize = 128;
 /// Print areas are typically a small number of disjoint ranges; this cap prevents allocating large
 /// vectors when deserializing untrusted IPC inputs.
 pub const MAX_PRINT_AREA_RANGES: usize = 1_000;
+/// Maximum size (in bytes) of filesystem path strings accepted over IPC.
+///
+/// Rationale:
+/// - Typical OS paths are far smaller than 8 KiB.
+/// - The backend treats IPC inputs as untrusted; capping the size prevents pathological allocations
+///   (OOM) and slow parsing on extremely large inputs.
+pub const MAX_IPC_PATH_BYTES: usize = 8_192;
+
+/// Maximum size (in bytes) of URL strings accepted over IPC.
+///
+/// Rationale:
+/// - Common browsers impose URL length limits well below this range.
+/// - We still defensively cap IPC URL payloads to avoid oversized JSON inputs.
+pub const MAX_IPC_URL_BYTES: usize = 8_192;
+
+/// Maximum size (in bytes) of system notification titles accepted over IPC.
+///
+/// Rationale: notification titles are short UI strings; anything larger is likely unintended or
+/// malicious.
+pub const MAX_IPC_NOTIFICATION_TITLE_BYTES: usize = 256;
+
+/// Maximum size (in bytes) of system notification bodies accepted over IPC.
+///
+/// Rationale: notification bodies can be longer than titles, but should still be bounded to avoid
+/// untrusted IPC inputs allocating excessive memory.
+pub const MAX_IPC_NOTIFICATION_BODY_BYTES: usize = 4_096;
+
+/// A `String` wrapper that enforces a maximum UTF-8 byte length during deserialization.
+///
+/// This is intended for high-risk IPC command arguments (paths/URLs/notification strings) so
+/// oversized payloads fail fast during deserialization, before any further parsing or processing.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LimitedString<const MAX_BYTES: usize>(String);
+
+impl<const MAX_BYTES: usize> LimitedString<MAX_BYTES> {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl<const MAX_BYTES: usize> std::ops::Deref for LimitedString<MAX_BYTES> {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl<const MAX_BYTES: usize> AsRef<str> for LimitedString<MAX_BYTES> {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl<const MAX_BYTES: usize> From<LimitedString<MAX_BYTES>> for String {
+    fn from(value: LimitedString<MAX_BYTES>) -> Self {
+        value.0
+    }
+}
+
+impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedString<MAX_BYTES> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct LimitedStringVisitor<const MAX_BYTES: usize>;
+
+        impl<'de, const MAX_BYTES: usize> de::Visitor<'de> for LimitedStringVisitor<MAX_BYTES> {
+            type Value = LimitedString<MAX_BYTES>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if value.len() > MAX_BYTES {
+                    return Err(E::custom(format!(
+                        "String is too large (max {MAX_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedString(value.to_owned()))
+            }
+
+            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(value)
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if value.len() > MAX_BYTES {
+                    return Err(E::custom(format!(
+                        "String is too large (max {MAX_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedString(value))
+            }
+        }
+
+        deserializer.deserialize_str(LimitedStringVisitor::<MAX_BYTES>)
+    }
+}
 
 pub fn enforce_script_code_size(code: &str) -> Result<(), String> {
     if code.len() > MAX_SCRIPT_CODE_BYTES {
@@ -142,6 +258,46 @@ mod tests {
         assert!(
             err.contains("exceeds MAX"),
             "expected error to mention the limit name, got: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_string_rejects_oversized_payloads_during_deserialization() {
+        let oversized = "x".repeat(MAX_IPC_PATH_BYTES + 1);
+        let json = format!("\"{oversized}\"");
+        let err = serde_json::from_str::<LimitedString<MAX_IPC_PATH_BYTES>>(&json)
+            .expect_err("expected LimitedString deserialization to fail");
+        assert!(
+            err.to_string().contains(&MAX_IPC_PATH_BYTES.to_string()),
+            "expected error to mention limit, got: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_string_allows_payloads_at_or_under_the_limit() {
+        let ok = "x".repeat(MAX_IPC_PATH_BYTES);
+        let json = format!("\"{ok}\"");
+        let parsed = serde_json::from_str::<LimitedString<MAX_IPC_PATH_BYTES>>(&json)
+            .expect("expected LimitedString to deserialize");
+        assert_eq!(parsed.as_str(), ok);
+    }
+
+    #[test]
+    fn source_guardrail_commands_use_limited_string_for_paths() {
+        let src = include_str!("commands.rs");
+        assert!(
+            src.contains("pub async fn open_workbook")
+                && src.contains("path: LimitedString<MAX_IPC_PATH_BYTES>"),
+            "expected `open_workbook` to use `LimitedString<MAX_IPC_PATH_BYTES>` for `path`"
+        );
+    }
+
+    #[test]
+    fn source_guardrail_main_use_limited_string_for_oauth_redirect_uri() {
+        let src = include_str!("main.rs");
+        assert!(
+            src.contains("redirect_uri: LimitedString<MAX_IPC_URL_BYTES>"),
+            "expected `oauth_loopback_listen` to use `LimitedString<MAX_IPC_URL_BYTES>` for `redirect_uri`"
         );
     }
 }

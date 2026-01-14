@@ -285,16 +285,6 @@ fn sheet_metadata_restores_from_on_disk_autosave_db() {
         workbook.add_sheet("Sheet2".to_string());
         workbook.add_sheet("Sheet3".to_string());
 
-        // Simulate an imported tab color that the desktop UI/host APIs don't currently allow
-        // setting directly (theme/tint-based colors can still be loaded and round-tripped).
-        if let Some(sheet3) = workbook.sheet_mut("Sheet3") {
-            sheet3.tab_color = Some(TabColor {
-                theme: Some(1),
-                tint: Some(0.5),
-                ..Default::default()
-            });
-        }
-
         state
             .load_workbook_persistent(workbook, location.clone())
             .expect("load workbook");
@@ -311,6 +301,18 @@ fn sheet_metadata_restores_from_on_disk_autosave_db() {
         state
             .set_sheet_visibility("Sheet3", SheetVisibility::VeryHidden)
             .expect("set sheet3 veryHidden");
+        // Theme/indexed colors are not directly settable via the desktop UI, but the backend should
+        // still be able to persist + restore them (e.g. for crash recovery / round-tripping).
+        state
+            .set_sheet_tab_color(
+                "Sheet3",
+                Some(TabColor {
+                    theme: Some(1),
+                    tint: Some(0.5),
+                    ..Default::default()
+                }),
+            )
+            .expect("set sheet3 theme tab color");
     }
 
     // Second session: load the same workbook against the existing autosave DB and verify the

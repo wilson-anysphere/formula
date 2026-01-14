@@ -31,18 +31,23 @@ fn verify_ed25519_signature_command_has_ipc_origin_checks() {
         .find("fn verify_ed25519_signature")
         .expect("expected verify_ed25519_signature command to exist");
     let body = &src[start..];
-    let has_main = body.contains("ensure_main_window(")
-        || body.contains("ensure_main_window_and_stable_origin(")
-        || body.contains("ensure_main_window_and_trusted_origin(");
-    let has_origin = body.contains("ensure_stable_origin(")
-        || body.contains("ensure_main_window_and_stable_origin(")
-        || body.contains("ensure_main_window_and_stable_origin (");
+    let contains_call = |haystack: &str, fn_name: &str| {
+        haystack.contains(&format!("{fn_name}(")) || haystack.contains(&format!("{fn_name} ("))
+    };
+
+    let has_combined = contains_call(body, "ensure_main_window_and_stable_origin")
+        || contains_call(body, "ensure_main_window_and_trusted_origin");
+    let has_main_window_check = has_combined || contains_call(body, "ensure_main_window");
+    let has_origin_check = has_combined
+        || contains_call(body, "ensure_stable_origin")
+        || contains_call(body, "ensure_trusted_origin");
+
     assert!(
-        has_main,
+        has_main_window_check,
         "expected verify_ed25519_signature to enforce main-window checks"
     );
     assert!(
-        has_origin,
-        "expected verify_ed25519_signature to enforce stable-origin checks"
+        has_origin_check,
+        "expected verify_ed25519_signature to enforce origin checks"
     );
 }
