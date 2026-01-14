@@ -20,6 +20,7 @@ import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./re
 import { registerRibbonMacroCommands, type RibbonMacroCommandHandlers } from "./registerRibbonMacroCommands.js";
 import { registerWorkbenchFileCommands, type WorkbenchFileCommandHandlers } from "./registerWorkbenchFileCommands.js";
 import { registerSortFilterCommands } from "./registerSortFilterCommands.js";
+import { registerHomeStylesCommands } from "./registerHomeStylesCommands.js";
 
 export type ApplyFormattingToSelection = (
   label: string,
@@ -245,6 +246,15 @@ export function registerDesktopCommands(params: {
         focusAlignmentSection();
       }
     },
+  });
+
+  registerHomeStylesCommands({
+    commandRegistry,
+    app,
+    category: commandCategoryFormat,
+    applyFormattingToSelection,
+    showQuickPick,
+    isEditing,
   });
 
   // Page Layout → Arrange drawing order commands. These are desktop-only (drawing overlay)

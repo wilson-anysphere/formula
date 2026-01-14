@@ -91,11 +91,6 @@ import { installUnsavedChangesPrompt } from "./document/index.js";
 import type { DocumentController } from "./document/documentController.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "./formatting/selectionSizeGuard.js";
-import {
-  applyGoodBadNeutralCellStyle,
-  getGoodBadNeutralCellStyleQuickPickItems,
-  GOOD_BAD_NEUTRAL_CELL_STYLE_PRESETS,
-} from "./formatting/cellStyles.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { t, tWithVars } from "./i18n/index.js";
 import { getOpenFileFilters } from "./file_dialog_filters.js";
@@ -200,11 +195,6 @@ import {
   toggleWrap,
   type CellRange,
 } from "./formatting/toolbar.js";
-import {
-  applyFormatAsTablePreset,
-  FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS,
-  estimateFormatAsTableBandedRowOps,
-} from "./formatting/formatAsTablePresets.js";
 import { computeFilterHiddenRows, RibbonAutoFilterStore } from "./sort-filter/ribbonAutoFilter.js";
 import { PageSetupDialog, PrintPreviewDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
 import { AutoFilterDropdown, type TableViewRow } from "./table/index.js";
@@ -8755,172 +8745,37 @@ function handleRibbonCommand(commandId: string): void {
       return;
     }
 
-    const cellStylesPrefix = "home.styles.cellStyles.";
-    if (commandId.startsWith(cellStylesPrefix)) {
-      // Keep these ids explicitly referenced so ribbon wiring coverage can validate that
-      // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
-      if (
-        commandId === "home.styles.cellStyles.dataModel" ||
-        commandId === "home.styles.cellStyles.titlesHeadings" ||
-        commandId === "home.styles.cellStyles.numberFormat" ||
-        commandId === "home.styles.cellStyles.newStyle"
-      ) {
-        showToast("Cell Styles are not implemented yet.");
-        app.focus();
-        return;
-      }
-      if (commandId !== "home.styles.cellStyles.goodBadNeutral") {
-        showToast("Cell Styles are not implemented yet.");
-        app.focus();
+    // Merge commands are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
+    // but keep these ids explicitly referenced here so ribbon wiring coverage can validate that
+    // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
+    if (
+      commandId === "home.alignment.mergeCenter.mergeCenter" ||
+      commandId === "home.alignment.mergeCenter.mergeAcross" ||
+      commandId === "home.alignment.mergeCenter.mergeCells" ||
+      commandId === "home.alignment.mergeCenter.unmergeCells"
+    ) {
+      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
         return;
       }
     }
 
-    if (commandId === "home.styles.cellStyles.goodBadNeutral") {
-      void (async () => {
-        // Formatting actions should never run while the user is editing (primary or split-view secondary editor).
-        if (isSpreadsheetEditing()) return;
-
-        // Guard before prompting so users don't pick a style only to hit the size cap on apply.
-        const selection = app.getSelectionRanges();
-        const limits = getGridLimitsForFormatting();
-        const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
-        if (!decision.allowed) {
-          showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
-          app.focus();
-          return;
-        }
-
-        const presetId = await showQuickPick(getGoodBadNeutralCellStyleQuickPickItems(), {
-          placeHolder: "Good, Bad, and Neutral",
-        });
-        if (!presetId) {
-          app.focus();
-          return;
-        }
-
-        const presetLabel = GOOD_BAD_NEUTRAL_CELL_STYLE_PRESETS[presetId]?.label ?? "Cell style";
-        applyFormattingToSelection(`Cell style: ${presetLabel}`, (doc, sheetId, ranges) =>
-          applyGoodBadNeutralCellStyle(doc, sheetId, ranges, presetId),
-        );
-      })();
-      return;
+    // Sort/filter commands are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
+    // but keep these ids explicitly referenced here so ribbon wiring coverage can validate that
+    // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
+    if (commandId === "home.editing.sortFilter.customSort" || commandId === "data.sortFilter.sort.customSort") {
+      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
+        return;
+      }
     }
 
-    const applyFormatAsTable = (presetId: "light" | "medium" | "dark") => {
-      // Formatting actions should never run while the user is editing (including split-view secondary editor).
-      if (isSpreadsheetEditing()) return;
-
-      applyFormattingToSelection(
-        "Format as Table",
-        (doc, sheetId, ranges) => {
-          if (ranges.length !== 1) {
-            try {
-              showToast("Format as Table currently supports a single rectangular selection.", "warning");
-            } catch {
-              // ignore (e.g. toast root missing in tests)
-            }
-            return true;
-          }
-
-          // `applyFormattingToSelection` allows full row/column band selections (Excel-scale) because
-          // many formatting operations are scalable via layered formats. Format-as-table banding
-          // requires per-row formatting and would be O(rows), so impose a stricter cap here.
-          const range = ranges[0];
-          const rowCount = range.end.row - range.start.row + 1;
-          const colCount = range.end.col - range.start.col + 1;
-          const cellCount = rowCount * colCount;
-          const bandedRowOps = estimateFormatAsTableBandedRowOps(rowCount);
-          if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS) {
-            try {
-              showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
-            } catch {
-              // ignore (e.g. toast root missing in tests)
-            }
-            return true;
-          }
-
-          return applyFormatAsTablePreset(doc, sheetId, range, presetId);
-        },
-        { forceBatch: true },
-      );
-    };
-
-    if (commandId === "home.styles.formatAsTable") {
-      void (async () => {
-        if (isSpreadsheetEditing()) return;
-
-        // Guard before prompting so users don't pick a style only to hit size caps on apply.
-        const selection = app.getSelectionRanges();
-        const limits = getGridLimitsForFormatting();
-        const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
-        if (!decision.allowed) {
-          showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
-          app.focus();
-          return;
-        }
-
-        const ranges = selectionRangesForFormatting();
-        if (ranges.length !== 1) {
-          showToast("Format as Table currently supports a single rectangular selection.", "warning");
-          app.focus();
-          return;
-        }
-        const range = ranges[0]!;
-        const rowCount = range.end.row - range.start.row + 1;
-        const colCount = range.end.col - range.start.col + 1;
-        const cellCount = rowCount * colCount;
-        const bandedRowOps = estimateFormatAsTableBandedRowOps(rowCount);
-        if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > FORMAT_AS_TABLE_MAX_BANDED_ROW_OPS) {
-          showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
-          app.focus();
-          return;
-        }
-
-        const picked = await showQuickPick(
-          [
-            { label: "Light", value: "light" as const },
-            { label: "Medium", value: "medium" as const },
-            { label: "Dark", value: "dark" as const },
-          ],
-          { placeHolder: "Format as Table" },
-        );
-        if (!picked) {
-          app.focus();
-          return;
-        }
-
-        applyFormatAsTable(picked);
-      })();
-      return;
+    // Custom number formats are handled by `handleRibbonFormattingCommand` (see `ribbon/commandHandlers.ts`),
+    // but keep this id explicitly referenced here so ribbon wiring coverage can validate that
+    // enabled-but-unregistered ribbon ids are intentionally handled by the desktop shell.
+    if (commandId === "home.number.moreFormats.custom") {
+      if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
+        return;
+      }
     }
-
-    const formatAsTablePrefix = "home.styles.formatAsTable.";
-    // Explicitly match these ids (vs prefix parsing) so ribbon command wiring coverage can
-    // validate that every enabled-but-unregistered ribbon id is intentionally handled here.
-    if (commandId === "home.styles.formatAsTable.light") {
-      applyFormatAsTable("light");
-      return;
-    }
-    if (commandId === "home.styles.formatAsTable.medium") {
-      applyFormatAsTable("medium");
-      return;
-    }
-    if (commandId === "home.styles.formatAsTable.dark") {
-      applyFormatAsTable("dark");
-      return;
-    }
-    if (commandId === "home.styles.formatAsTable.newStyle") {
-      showToast("New Table Style is not implemented yet.");
-      app.focus();
-      return;
-    }
-    if (commandId.startsWith(formatAsTablePrefix)) {
-      showToast(`Unknown table style: ${commandId}`);
-      app.focus();
-      return;
-    }
-
     if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
       return;
     }

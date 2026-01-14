@@ -81,16 +81,8 @@ export const COMMAND_REGISTRY_EXEMPT_IDS: ReadonlySet<string> = new Set<string>(
   "data.sortFilter.reapply",
   "data.sortFilter.advanced.clearFilter",
 
-  // Home → Styles.
-  "home.styles.formatAsTable.light",
-  "home.styles.formatAsTable.medium",
-  "home.styles.formatAsTable.dark",
-  "home.styles.formatAsTable.newStyle",
-  "home.styles.cellStyles.goodBadNeutral",
-  "home.styles.cellStyles.dataModel",
-  "home.styles.cellStyles.titlesHeadings",
-  "home.styles.cellStyles.numberFormat",
-  "home.styles.cellStyles.newStyle",
+  // (Removed: Home → Styles items are either registered via CommandRegistry or intentionally disabled;
+  // What-If Analysis + Solver are registered commands and do not require exemptions.)
 
   // Insert → Pictures.
   "insert.illustrations.pictures.thisDevice",
