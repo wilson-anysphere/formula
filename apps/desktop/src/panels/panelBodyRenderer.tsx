@@ -749,7 +749,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderReactPanel(
         panelId,
         body,
-        <React.Suspense fallback={<div className="collab-panel__message">Loading…</div>}>
+        <React.Suspense fallback={<div className="collab-panel__message">{t("versionHistory.panel.loading")}</div>}>
           <LazyCollabVersionHistoryPanel
             session={session}
             sheetNameResolver={options.sheetNameResolver ?? null}
