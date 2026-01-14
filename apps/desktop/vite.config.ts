@@ -250,6 +250,7 @@ export default defineConfig({
       // desktop package's unit suite. Include them directly so they don't need wrapper
       // `*.vitest.ts` entrypoints.
       "src/grid/shared/**/*.test.ts",
+      "src/grid/auditing-overlays/__tests__/**/*.test.ts",
       "src/layout/__tests__/**/*.test.ts",
       "src/ai/tools/**/*.test.ts",
       "src/ai/dlp/__tests__/**/*.test.ts",
