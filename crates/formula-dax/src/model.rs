@@ -76,6 +76,11 @@ pub enum CrossFilterDirection {
 /// Tabular models treat fact-side rows whose key is BLANK (or has no match in the related table) as
 /// belonging to a virtual "(blank)" / "unknown" member on the `to_table` side.
 ///
+/// **Important:** fact-side BLANK values always belong to this relationship-generated blank member,
+/// even if a *physical* row exists on the `to_table` side whose key is BLANK. In other words, BLANK
+/// is treated as an *unmatchable* relationship key during join/filter propagation and row-context
+/// navigation.
+///
 /// When [`enforce_referential_integrity`](Relationship::enforce_referential_integrity) is `true`,
 /// `formula-dax` rejects non-BLANK values on the `from_*` side that have no match on the `to_*`
 /// side. This prevents *unmatched* keys from contributing to the virtual blank member, but BLANK
