@@ -60,7 +60,7 @@ that `formula-io` can decrypt and open **real-world** password-protected Excel f
 | `encrypted_agile.xlsx` | XLSX | ECMA-376 Agile (OOXML-in-OLE) | Sourced from `msoffcrypto-tool` test corpus | Password: `Password1234_` • `Sheet1!A1="lorem"`, `Sheet1!B1="ipsum"` |
 | `encrypted_standard.xlsx` | XLSX | ECMA-376 Standard/CryptoAPI (OOXML-in-OLE) | Apache POI output (copied from `fixtures/encrypted/ooxml/standard-4.2.xlsx`) | Password: `password` • `Sheet1!A1=1`, `Sheet1!B1="Hello"` |
 | `encrypted.xlsb` | XLSB | ECMA-376 Agile (OOXML-in-OLE) | Sourced from Apache POI test corpus (`protected_passtika.xlsb`) | Password: `tika` • `Sheet1!A1="You can't see me"` |
-| `encrypted.xls` | XLS | BIFF8 `FILEPASS` RC4 CryptoAPI | Copied from this repo’s `formula-xls` test fixtures | Password: `correct horse battery staple` • `Sheet1!A1=42` |
+| `encrypted.xls` | XLS | BIFF8 `FILEPASS` RC4 CryptoAPI | Microsoft Excel-generated file; crosses the 1024-byte RC4 re-key boundary | Password: `password` • `Sheet1!A400=399`, `Sheet1!B400="RC4_BOUNDARY_OK"` |
 
 ### Provenance
 
@@ -76,9 +76,9 @@ that `formula-io` can decrypt and open **real-world** password-protected Excel f
 
 - https://github.com/apache/poi
 
-`encrypted.xls` is copied from the `formula-xls` test fixture corpus:
+`encrypted.xls` is copied from the Excel-generated RC4 CryptoAPI boundary fixture in this repo:
 
-- `crates/formula-xls/tests/fixtures/encrypted/biff8_rc4_cryptoapi_pw_open.xls`
+- `fixtures/encryption/biff8_rc4_cryptoapi_boundary_pw_open.xls`
 
 ### Regenerating `encrypted.xlsb`
 

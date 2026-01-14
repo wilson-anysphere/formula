@@ -18,8 +18,8 @@ fn fixture_password(name: &str) -> &'static str {
         "encrypted_standard.xlsx" => "password",
         // Sourced from Apache POI test corpus (`protected_passtika.xlsb`).
         "encrypted.xlsb" => "tika",
-        // Sourced from `crates/formula-xls/tests/fixtures/encrypted/biff8_rc4_cryptoapi_pw_open.xls`.
-        "encrypted.xls" => "correct horse battery staple",
+        // Sourced from the Excel-generated RC4 CryptoAPI boundary fixture.
+        "encrypted.xls" => "password",
         _ => panic!("unknown fixture {name}"),
     }
 }
@@ -113,7 +113,11 @@ fn opens_encrypted_legacy_xls_fixture() {
     let workbook = open_workbook_model_with_password(&path, Some(pw)).expect("decrypt + open");
 
     let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
-    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
+    assert_eq!(sheet.value_a1("A400").unwrap(), CellValue::Number(399.0));
+    assert_eq!(
+        sheet.value_a1("B400").unwrap(),
+        CellValue::String("RC4_BOUNDARY_OK".to_string())
+    );
 }
 
 #[test]
