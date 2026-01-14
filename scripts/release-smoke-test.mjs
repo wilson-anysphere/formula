@@ -43,7 +43,7 @@ Options:
   --repo           GitHub repo in owner/name form. Defaults to:
                      - $GITHUB_REPOSITORY (if set)
                      - or inferred from git remote "origin" (if possible)
-  --token          GitHub token. Defaults to $GITHUB_TOKEN (if set).
+  --token          GitHub token. Defaults to $GITHUB_TOKEN / $GH_TOKEN (if set).
   --local-bundles  Also run any platform-specific local bundle validators (if present).
 
 Expectations (forwarded to scripts/verify-desktop-release-assets.mjs; optional):
@@ -529,11 +529,11 @@ async function main() {
   const token =
     typeof args.token === "string" && args.token.trim().length > 0
       ? args.token.trim()
-      : (process.env.GITHUB_TOKEN ?? "").trim();
+      : (process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? "").trim();
 
   if (!token) {
     console.warn(
-      "Warning: no GitHub token provided (use --token or set GITHUB_TOKEN). Public releases may work without a token, but you may hit rate limits."
+      "Warning: no GitHub token provided. scripts/verify-desktop-release-assets.mjs requires GITHUB_TOKEN/GH_TOKEN; the GitHub release asset verification step will fail.\nSet GITHUB_TOKEN=... (recommended) or pass --token ... to run the full smoke test."
     );
   }
 
@@ -567,7 +567,7 @@ async function main() {
           ? args.expectFlags.map((v) => String(v)).filter((v) => v.startsWith("--"))
           : []),
       ],
-      env: token ? { ...process.env, GITHUB_TOKEN: token } : process.env,
+      env: token ? { ...process.env, GITHUB_TOKEN: token, GH_TOKEN: token } : process.env,
       skipIfMissing: false,
     },
   ]);
