@@ -514,6 +514,17 @@ def main() -> int:
             "inputs": {
                 "corpusSummaryPath": _fmt_path(repo_root, corpus.path) if corpus else None,
                 "oracleReportPath": _fmt_path(repo_root, oracle.path) if oracle else None,
+                "corpus": {
+                    "label": corpus_label,
+                    "timestamp": corpus.timestamp if corpus else None,
+                    "commit": corpus.commit if corpus else None,
+                    "runUrl": corpus.run_url if corpus else None,
+                },
+                "oracle": {
+                    "includeTags": oracle.include_tags if oracle else None,
+                    "excludeTags": oracle.exclude_tags if oracle else None,
+                    "maxCases": oracle.max_cases if oracle else None,
+                },
             },
             "metrics": {
                 "l1Read": {
@@ -525,6 +536,7 @@ def main() -> int:
                 "l2Calculate": {
                     "passRate": calc_pass_rate,
                     "mismatchRate": calc_mismatch_rate_output,
+                    "maxMismatchRate": oracle.max_mismatch_rate if oracle else None,
                     "passes": calc_passes,
                     "mismatches": calc_mismatches,
                     "total": calc_total,

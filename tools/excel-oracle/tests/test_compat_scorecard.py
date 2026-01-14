@@ -44,6 +44,9 @@ class CompatScorecardTests(unittest.TestCase):
                     "mismatches": 1,
                     "mismatchRate": 0.001,
                     "maxMismatchRate": 0.01,
+                    "includeTags": ["add", "sub"],
+                    "excludeTags": [],
+                    "maxCases": 0,
                 },
             }
             oracle_path.write_text(
@@ -85,8 +88,12 @@ class CompatScorecardTests(unittest.TestCase):
             self.assertEqual(payload.get("schemaVersion"), 1)
             self.assertAlmostEqual(payload["metrics"]["l2Calculate"]["passRate"], 0.999)
             self.assertAlmostEqual(payload["metrics"]["l2Calculate"]["mismatchRate"], 0.001)
+            self.assertAlmostEqual(payload["metrics"]["l2Calculate"]["maxMismatchRate"], 0.01)
             self.assertEqual(payload["metrics"]["l2Calculate"]["passes"], 999)
             self.assertEqual(payload["metrics"]["l2Calculate"]["mismatches"], 1)
+            self.assertEqual(payload["inputs"]["oracle"]["includeTags"], ["add", "sub"])
+            self.assertEqual(payload["inputs"]["oracle"]["excludeTags"], [])
+            self.assertEqual(payload["inputs"]["oracle"]["maxCases"], 0)
 
     def test_falls_back_to_counts_when_rates_are_missing(self) -> None:
         scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
@@ -194,6 +201,7 @@ class CompatScorecardTests(unittest.TestCase):
                 newline="\n",
             )
 
+            out_json = tmp_path / "scorecard.json"
             proc = subprocess.run(
                 [
                     sys.executable,
@@ -204,6 +212,8 @@ class CompatScorecardTests(unittest.TestCase):
                     str(oracle_path),
                     "--out-md",
                     str(out_md),
+                    "--out-json",
+                    str(out_json),
                 ],
                 capture_output=True,
                 text=True,
@@ -220,6 +230,10 @@ class CompatScorecardTests(unittest.TestCase):
             self.assertIn("| L4 | Round-trip (corpus) | MISSING |", md)
             self.assertIn("no cases", md)
             self.assertIn("no workbooks", md)
+
+            payload = json.loads(out_json.read_text(encoding="utf-8"))
+            self.assertIsNone(payload["metrics"]["l2Calculate"]["mismatchRate"])
+            self.assertIsNone(payload["metrics"]["l2Calculate"]["passRate"])
 
     def test_missing_inputs_exits_nonzero(self) -> None:
         scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
