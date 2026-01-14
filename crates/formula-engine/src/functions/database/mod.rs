@@ -282,6 +282,9 @@ fn parse_criteria_range(
                         if let crate::functions::SheetId::External(key) = &db_ref.sheet_id {
                             let (workbook, sheet) =
                                 split_external_sheet_key(key).ok_or(ErrorKind::Value)?;
+                            if sheet.contains(':') {
+                                return Err(ErrorKind::Value);
+                            }
                             expr = qualify_unprefixed_sheet_references(&expr, workbook, sheet);
                         }
                         computed.push(ComputedCriteria { expr });
