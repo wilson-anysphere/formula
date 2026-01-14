@@ -1574,7 +1574,7 @@ installers remain stripped.
 Optional: to also attach symbol archives to the **draft GitHub Release** (for longer-term retention),
 set the GitHub Actions repository variable:
 
-- `FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE=1`
+- `FORMULA_UPLOAD_DEBUG_SYMBOLS_TO_RELEASE=1` (or `true`)
 
 Local note: `scripts/cargo_agent.sh` sets `CARGO_PROFILE_RELEASE_CODEGEN_UNITS` by default for
 stability on multi-agent hosts. If you want local builds to match CI's `codegen-units = 1`, run:
