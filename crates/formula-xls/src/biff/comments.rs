@@ -51,6 +51,13 @@ const TXO_RUNS_LEN_OFFSET: usize = 12;
 const TXO_TEXT_LEN_OFFSETS: [usize; 4] = [TXO_TEXT_LEN_OFFSET, 4, 8, 10];
 const TXO_MAX_TEXT_CHARS: usize = 32 * 1024;
 
+/// Hard cap on the number of BIFF records scanned while searching for legacy NOTE comments.
+///
+/// The `.xls` importer performs multiple best-effort passes over each worksheet substream. Without
+/// a cap, a crafted workbook with millions of cell records can force excessive work even when a
+/// particular feature (like comments) is absent.
+const MAX_RECORDS_SCANNED_PER_SHEET_NOTES_SCAN: usize = 500_000;
+
 /// Maximum number of legacy NOTE/OBJ/TXO note groups to parse per worksheet.
 ///
 /// This bounds memory usage for malicious `.xls` files that contain extremely large numbers of
@@ -200,6 +207,22 @@ pub(crate) fn parse_biff_sheet_notes(
     biff: BiffVersion,
     codepage: u16,
 ) -> Result<ParsedSheetNotes, String> {
+    parse_biff_sheet_notes_with_record_cap(
+        workbook_stream,
+        start,
+        biff,
+        codepage,
+        MAX_RECORDS_SCANNED_PER_SHEET_NOTES_SCAN,
+    )
+}
+
+fn parse_biff_sheet_notes_with_record_cap(
+    workbook_stream: &[u8],
+    start: usize,
+    biff: BiffVersion,
+    codepage: u16,
+    record_cap: usize,
+) -> Result<ParsedSheetNotes, String> {
     let allows_continuation = |record_id: u16| record_id == RECORD_TXO;
     let iter =
         records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
@@ -211,6 +234,7 @@ pub(crate) fn parse_biff_sheet_notes(
     let mut warnings: Vec<String> = Vec::new();
     let mut notes_truncated = false;
     let mut texts_truncated = false;
+    let mut scanned = 0usize;
 
     for record in iter {
         let record = match record {
@@ -224,6 +248,17 @@ pub(crate) fn parse_biff_sheet_notes(
         };
 
         if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        scanned = scanned.saturating_add(1);
+        if scanned > record_cap {
+            push_warning_force(
+                &mut warnings,
+                format!(
+                    "too many BIFF records while scanning worksheet notes (cap={record_cap}); stopping early"
+                ),
+            );
             break;
         }
 
@@ -367,6 +402,15 @@ fn push_warning(warnings: &mut Vec<String>, warning: impl Into<String>) {
         return;
     }
     warnings.push(warning.into());
+}
+
+fn push_warning_force(warnings: &mut Vec<String>, warning: impl Into<String>) {
+    let warning = warning.into();
+    if warnings.len() < MAX_WARNINGS_PER_SHEET {
+        warnings.push(warning);
+    } else if let Some(last) = warnings.last_mut() {
+        *last = warning;
+    }
 }
 
 fn parse_note_record(
@@ -2911,6 +2955,72 @@ mod tests {
                 .iter()
                 .any(|w| w.contains("capped") && w.contains("NOTE")),
             "expected truncation warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
+    fn sheet_notes_scan_stops_after_record_cap() {
+        let record_cap = 10usize;
+
+        let stream = [
+            bof(),
+            // Exceed the record-scan cap with junk records.
+            (0..(record_cap + 10))
+                .flat_map(|_| record(0x1234, &[]))
+                .collect::<Vec<u8>>(),
+            // This note would be parsed if we scanned further.
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_text("Hello"),
+            continue_text_ascii("Hello"),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes_with_record_cap(&stream, 0, BiffVersion::Biff8, 1252, record_cap)
+                .expect("parse");
+        assert!(notes.is_empty(), "expected no notes, got {notes:?}");
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("worksheet notes")),
+            "expected record-cap warning, got {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn sheet_notes_record_cap_warning_is_emitted_even_when_warning_buffer_is_full() {
+        let record_cap = MAX_WARNINGS_PER_SHEET + 10;
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&bof());
+
+        // Fill the warning buffer with TXO records missing preceding OBJ ids.
+        for _ in 0..(MAX_WARNINGS_PER_SHEET + 10) {
+            stream.extend_from_slice(&record(RECORD_TXO, &[]));
+        }
+
+        // Exceed the record-scan cap.
+        for _ in 0..(record_cap + 10) {
+            stream.extend_from_slice(&record(0x1234, &[]));
+        }
+        stream.extend_from_slice(&eof());
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes_with_record_cap(&stream, 0, BiffVersion::Biff8, 1252, record_cap)
+                .expect("parse");
+        assert!(notes.is_empty());
+        assert_eq!(
+            warnings.len(),
+            MAX_WARNINGS_PER_SHEET,
+            "warnings should remain capped; warnings={warnings:?}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("too many BIFF records") && w.contains("worksheet notes")),
+            "expected forced record-cap warning, got {warnings:?}"
         );
     }
 }
