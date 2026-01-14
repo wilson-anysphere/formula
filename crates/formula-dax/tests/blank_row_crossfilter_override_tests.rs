@@ -219,6 +219,10 @@ fn assert_crossfilter_override_enables_bidirectional_blank_member(model: &DataMo
     let expr_values = "CALCULATE(COUNTROWS(VALUES(Customers[Region])), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], \"BOTH\"))";
     let expr_selected =
         "CALCULATE(SELECTEDVALUE(Customers[Region]), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], \"BOTH\"))";
+    let expr_countblank =
+        "CALCULATE(COUNTBLANK(Customers[Region]), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], \"BOTH\"))";
+    let expr_allnoblankrow =
+        "CALCULATE(COUNTROWS(ALLNOBLANKROW(Customers[Region])), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], \"BOTH\"))";
 
     // Without any extra filters, the unknown member exists due to the unmatched fact key.
     assert_eq!(
@@ -227,12 +231,41 @@ fn assert_crossfilter_override_enables_bidirectional_blank_member(model: &DataMo
             .unwrap(),
         3.into()
     );
+    assert_eq!(
+        engine
+            .evaluate(model, expr_countblank, &FilterContext::empty(), &RowContext::default())
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                model,
+                expr_allnoblankrow,
+                &FilterContext::empty(),
+                &RowContext::default()
+            )
+            .unwrap(),
+        2.into()
+    );
 
     // Fact filtered to a matched key: dimension should be restricted to that value (no BLANK).
     let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
     assert_eq!(
         engine
             .evaluate(model, expr_values, &matched_filter, &RowContext::default())
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(model, expr_countblank, &matched_filter, &RowContext::default())
+            .unwrap(),
+        0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(model, expr_allnoblankrow, &matched_filter, &RowContext::default())
             .unwrap(),
         1.into()
     );
@@ -251,6 +284,18 @@ fn assert_crossfilter_override_enables_bidirectional_blank_member(model: &DataMo
             .evaluate(model, expr_values, &unmatched_filter, &RowContext::default())
             .unwrap(),
         1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(model, expr_countblank, &unmatched_filter, &RowContext::default())
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(model, expr_allnoblankrow, &unmatched_filter, &RowContext::default())
+            .unwrap(),
+        0.into()
     );
     assert_eq!(
         engine
@@ -283,4 +328,3 @@ fn crossfilter_override_enables_bidirectional_blank_member_visibility_for_column
     let model = build_model_blank_row_single_direction_columnar_dim_and_fact();
     assert_crossfilter_override_enables_bidirectional_blank_member(&model);
 }
-
