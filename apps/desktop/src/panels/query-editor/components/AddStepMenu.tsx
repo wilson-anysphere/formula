@@ -140,6 +140,25 @@ export function AddStepMenu(props: {
               aggregations: [{ column: secondColumnName, op: "count", as: t("queryEditor.addStep.op.groupBy.count") }],
             }),
           }),
+          schemaItem({
+            id: "fillDown",
+            label: t("queryEditor.addStep.op.fillDown"),
+            create: () => ({ type: "fillDown", columns: [firstColumnName] }),
+          }),
+          schemaItem({
+            id: "replaceValues",
+            label: t("queryEditor.addStep.op.replaceValues"),
+            create: () => ({ type: "replaceValues", column: firstColumnName, find: "", replace: "" }),
+          }),
+          schemaItem({
+            id: "addColumn",
+            label: t("queryEditor.addStep.op.addColumn"),
+            create: () => ({
+              type: "addColumn",
+              name: "Custom",
+              formula: firstColumnName ? `[${firstColumnName}]` : "0",
+            }),
+          }),
         ] satisfies MenuItem[],
       },
     ];

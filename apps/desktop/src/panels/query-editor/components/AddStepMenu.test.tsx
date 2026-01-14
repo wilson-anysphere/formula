@@ -84,6 +84,9 @@ describe("AddStepMenu", () => {
       "Change Type",
       "Split Column",
       "Group By",
+      "Fill Down",
+      "Replace Values",
+      "Add Column",
     ]) {
       expect(host?.textContent).toContain(label);
     }

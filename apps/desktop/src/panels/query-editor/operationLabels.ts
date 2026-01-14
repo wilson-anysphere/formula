@@ -29,7 +29,7 @@ export function formatQueryOperationLabel(op: QueryOperation): string {
   switch (op.type) {
     case "addColumn": {
       const name = typeof op.name === "string" ? op.name : null;
-      return `${humanizeOperationType(op.type)}${formatDetails(name)}`;
+      return `${t("queryEditor.addStep.op.addColumn")}${formatDetails(name)}`;
     }
     case "take": {
       const count = typeof op.count === "number" && Number.isFinite(op.count) ? String(op.count) : null;
@@ -70,11 +70,11 @@ export function formatQueryOperationLabel(op: QueryOperation): string {
     }
     case "fillDown": {
       const cols = joinNames(op.columns);
-      return `${humanizeOperationType(op.type)}${formatDetails(cols)}`;
+      return `${t("queryEditor.addStep.op.fillDown")}${formatDetails(cols)}`;
     }
     case "replaceValues": {
       const col = typeof op.column === "string" ? op.column : null;
-      return `${humanizeOperationType(op.type)}${formatDetails(col)}`;
+      return `${t("queryEditor.addStep.op.replaceValues")}${formatDetails(col)}`;
     }
     case "distinctRows": {
       const cols = joinNames(op.columns ?? null);
