@@ -14673,6 +14673,35 @@ fn walk_calc_expr(
         }
         Expr::FunctionCall { name, args, .. } => {
             if let Some(spec) = crate::functions::lookup_function(name) {
+                // `CELL("width", ref)` depends on per-column metadata, not on the referenced
+                // cell's value. Treating the reference argument as a calc precedent can create
+                // spurious circular references (e.g. `=CELL("width", A1)` in A1) and can also
+                // cause unnecessary dirty propagation when the referenced cell's value changes.
+                //
+                // Note: `CELL(...)` is volatile, and column metadata changes already mark all
+                // compiled cells dirty (`Engine::set_col_width`/`set_col_hidden`), so omitting this
+                // edge preserves correctness.
+                if spec.name == "CELL"
+                    && matches!(args.get(0), Some(Expr::Text(t)) if t.trim().eq_ignore_ascii_case("width"))
+                {
+                    // Skip the reference argument (index 1) for calc precedents.
+                    for (idx, a) in args.iter().enumerate() {
+                        if idx == 1 {
+                            continue;
+                        }
+                        walk_calc_expr(
+                            a,
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                    }
+                    return;
+                }
                 match spec.name {
                     "LET" => {
                         if args.len() < 3 || args.len() % 2 == 0 {
