@@ -1480,9 +1480,9 @@ export class SpreadsheetApp {
   private outlineLayer: HTMLDivElement;
   private readonly outlineButtons = new Map<string, HTMLButtonElement>();
   private readonly outlineButtonsKeepScratch = new Set<string>();
-  private lastSyncedHiddenColsKey: string | null = null;
+  private readonly lastSyncedHiddenColsKeyBySheetId = new Map<string, string>();
   private lastSyncedHiddenColsEngine: EngineClient | null = null;
-  private lastSyncedHiddenCols: number[] | null = null;
+  private readonly lastSyncedHiddenColsBySheetId = new Map<string, number[]>();
 
   private dpr = 1;
   private width = 0;
@@ -8114,7 +8114,12 @@ export class SpreadsheetApp {
       // Full hydration replaces workbook state in the WASM engine (which clears view metadata).
       // Clear the per-sheet origin cache so we always re-send the active sheet origin.
       this.wasmSheetOriginA1BySheetId.clear();
+      // Engine hydration also resets sheet-local view metadata such as hidden columns. Clear our
+      // per-sheet hidden-column cache so we re-send outline-based hidden flags for the active sheet.
+      this.lastSyncedHiddenColsKeyBySheetId.clear();
+      this.lastSyncedHiddenColsBySheetId.clear();
       this.syncWasmSheetOrigin();
+      this.syncHiddenColsToWasmEngine();
     }
   }
 
@@ -8257,7 +8262,10 @@ export class SpreadsheetApp {
                 this.applyComputedChanges(changes);
               });
               this.wasmSheetOriginA1BySheetId.clear();
+              this.lastSyncedHiddenColsKeyBySheetId.clear();
+              this.lastSyncedHiddenColsBySheetId.clear();
               this.syncWasmSheetOrigin();
+              this.syncHiddenColsToWasmEngine();
               return;
             }
 
@@ -8281,7 +8289,10 @@ export class SpreadsheetApp {
                 this.applyComputedChanges(changes);
               });
               this.wasmSheetOriginA1BySheetId.clear();
+              this.lastSyncedHiddenColsKeyBySheetId.clear();
+              this.lastSyncedHiddenColsBySheetId.clear();
               this.syncWasmSheetOrigin();
+              this.syncHiddenColsToWasmEngine();
               return;
             }
 
@@ -8340,7 +8351,12 @@ export class SpreadsheetApp {
   
             // The worker is now hydrated; sync the active sheet origin so `INFO("origin")` matches the UI view.
             this.wasmSheetOriginA1BySheetId.clear();
+            // Engine hydration resets view metadata (including hidden columns). Clear the hidden-col
+            // sync cache so `CELL("width")` reflects outline-based hidden state once the worker is ready.
+            this.lastSyncedHiddenColsKeyBySheetId.clear();
+            this.lastSyncedHiddenColsBySheetId.clear();
             this.syncWasmSheetOrigin();
+            this.syncHiddenColsToWasmEngine();
         } catch {
           // Ignore initialization failures (e.g. missing WASM bundle).
           engine?.terminate();
@@ -8623,6 +8639,9 @@ export class SpreadsheetApp {
     this.dispatchDrawingsChanged();
     this.dispatchDrawingSelectionChanged();
     this.syncWasmSheetOrigin();
+    // Row/col visibility is sheet-local in the legacy renderer. Ensure the formula engine sees the
+    // newly active sheet's hidden columns so `CELL("width")` reflects the correct sheet state.
+    this.syncHiddenColsToWasmEngine();
   }
 
   /**
@@ -8701,6 +8720,9 @@ export class SpreadsheetApp {
       this.refresh("scroll");
     }
     this.syncWasmSheetOrigin();
+    if (sheetChanged) {
+      this.syncHiddenColsToWasmEngine();
+    }
     if (focus) this.focus();
   }
 
@@ -8787,6 +8809,9 @@ export class SpreadsheetApp {
       this.refresh("scroll");
     }
     this.syncWasmSheetOrigin();
+    if (sheetChanged) {
+      this.syncHiddenColsToWasmEngine();
+    }
     if (focus) this.focus();
   }
 
@@ -20100,10 +20125,11 @@ export class SpreadsheetApp {
     // appears unchanged.
     if (this.lastSyncedHiddenColsEngine !== this.wasmEngine) {
       this.lastSyncedHiddenColsEngine = this.wasmEngine;
-      this.lastSyncedHiddenColsKey = null;
-      this.lastSyncedHiddenCols = null;
+      this.lastSyncedHiddenColsKeyBySheetId.clear();
+      this.lastSyncedHiddenColsBySheetId.clear();
     }
 
+    const outline = this.getOutlineForSheet(this.sheetId);
     const hiddenCols: number[] = [];
     for (const [summaryIndex, entry] of outline.cols.entries) {
       if (!isHidden(entry.hidden)) continue;
@@ -20114,12 +20140,12 @@ export class SpreadsheetApp {
     }
     hiddenCols.sort((a, b) => a - b);
 
-    const key = `${this.sheetId}:${hiddenCols.join(",")}`;
-    if (key === this.lastSyncedHiddenColsKey) return;
-    this.lastSyncedHiddenColsKey = key;
+    const key = hiddenCols.join(",");
+    if (key === this.lastSyncedHiddenColsKeyBySheetId.get(this.sheetId)) return;
+    this.lastSyncedHiddenColsKeyBySheetId.set(this.sheetId, key);
 
-    const prevHiddenCols = this.lastSyncedHiddenCols ?? [];
-    this.lastSyncedHiddenCols = hiddenCols;
+    const prevHiddenCols = this.lastSyncedHiddenColsBySheetId.get(this.sheetId) ?? [];
+    this.lastSyncedHiddenColsBySheetId.set(this.sheetId, hiddenCols);
 
     void this.enqueueWasmSync(async (engine) => {
       const prevSet = new Set(prevHiddenCols);
@@ -20127,6 +20153,8 @@ export class SpreadsheetApp {
 
       const colsToHide = hiddenCols.filter((col) => !prevSet.has(col));
       const colsToShow = prevHiddenCols.filter((col) => !nextSet.has(col));
+
+      if (colsToHide.length === 0 && colsToShow.length === 0) return;
 
       await Promise.all([
         ...colsToHide.map(async (col) => await engine.setColHidden(col, true, this.sheetId)),
