@@ -188,7 +188,7 @@ describe("SpreadsheetApp computed-value cache", () => {
     root.remove();
   });
 
-  it("evaluates #This Row / @ structured references in fallback computed values", () => {
+  it("evaluates structured references in fallback computed values", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -203,7 +203,7 @@ describe("SpreadsheetApp computed-value cache", () => {
     // Force the app into multi-sheet mode so it uses the in-process evaluator for computed values.
     doc.setCellValue("Sheet2", { row: 0, col: 0 }, 1);
 
-    // Table range includes header row at A1:C1 and data rows at A2:C4.
+    // Table range includes header row at A1:C1 and data rows at A2:C8.
     doc.setCellValue(sheetId, { row: 0, col: 0 }, "Amount");
     doc.setCellValue(sheetId, { row: 0, col: 1 }, "Total Amount");
     doc.setCellValue(sheetId, { row: 0, col: 2 }, "Calc");
@@ -224,12 +224,28 @@ describe("SpreadsheetApp computed-value cache", () => {
       "=TableThisRow[[#This Row],[Amount]] + TableThisRow[[#This Row],[Total Amount]]",
     );
 
+    doc.setCellValue(sheetId, { row: 4, col: 0 }, 40);
+    doc.setCellValue(sheetId, { row: 4, col: 1 }, 400);
+    doc.setCellFormula(sheetId, { row: 4, col: 2 }, "=SUM(TableThisRow[[#This Row],[Amount],[Total Amount]])");
+
+    doc.setCellValue(sheetId, { row: 5, col: 0 }, 50);
+    doc.setCellValue(sheetId, { row: 5, col: 1 }, 500);
+    doc.setCellFormula(sheetId, { row: 5, col: 2 }, "=SUM([@[Amount]:[Total Amount]])");
+
+    doc.setCellValue(sheetId, { row: 6, col: 0 }, 60);
+    doc.setCellValue(sheetId, { row: 6, col: 1 }, 600);
+    doc.setCellFormula(sheetId, { row: 6, col: 2 }, "=SUM([[#All],[Amount]])");
+
+    doc.setCellValue(sheetId, { row: 7, col: 0 }, 70);
+    doc.setCellValue(sheetId, { row: 7, col: 1 }, 700);
+    doc.setCellFormula(sheetId, { row: 7, col: 2 }, "=SUM([@])");
+
     app.getSearchWorkbook().addTable({
       name: "TableThisRow",
       sheetName: sheetId,
       startRow: 0,
       startCol: 0,
-      endRow: 3,
+      endRow: 7,
       endCol: 2,
       columns: ["Amount", "Total Amount", "Calc"],
     });
@@ -237,6 +253,10 @@ describe("SpreadsheetApp computed-value cache", () => {
     expect(app.getCellComputedValueForSheet(sheetId, { row: 1, col: 2 })).toBe(110);
     expect(app.getCellComputedValueForSheet(sheetId, { row: 2, col: 2 })).toBe(220);
     expect(app.getCellComputedValueForSheet(sheetId, { row: 3, col: 2 })).toBe(330);
+    expect(app.getCellComputedValueForSheet(sheetId, { row: 4, col: 2 })).toBe(440);
+    expect(app.getCellComputedValueForSheet(sheetId, { row: 5, col: 2 })).toBe(550);
+    expect(app.getCellComputedValueForSheet(sheetId, { row: 6, col: 2 })).toBe(280);
+    expect(app.getCellComputedValueForSheet(sheetId, { row: 7, col: 2 })).toBe("#REF!");
 
     app.destroy();
     root.remove();

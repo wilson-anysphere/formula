@@ -24350,6 +24350,27 @@ export class SpreadsheetApp {
       const unescapeStructuredRefItem = (value: string): string => value.replaceAll("]]", "]");
       const normalizeSelector = (value: string): string => value.trim().replace(/\s+/g, " ").toLowerCase();
 
+      // Excel supports bracketed this-row shorthand forms like:
+      //   [@[Col1]:[Col3]]
+      //   Table1[@[Col1]:[Col3]]
+      // Rewrite these to selector-qualified `#This Row` syntax so the existing multi-column
+      // resolver can handle them.
+      const rewriteBracketedThisRowColumnExpr = (value: string): string | null => {
+        const candidate = String(value ?? "").trim();
+        const firstBracket = candidate.indexOf("[");
+        if (firstBracket < 0) return null;
+        const prefix = candidate.slice(0, firstBracket);
+        const suffix = candidate.slice(firstBracket);
+        if (!suffix.startsWith("[@[") || !suffix.endsWith("]]") || suffix.length <= 5) return null;
+        const columnExpr = suffix.slice(3, -2);
+        return `${prefix}[[#This Row],[${columnExpr}]]`;
+      };
+
+      const bracketedRewrite = rewriteBracketedThisRowColumnExpr(trimmed);
+      if (bracketedRewrite) {
+        return resolveStructuredRefToReference(bracketedRewrite);
+      }
+
       const findColumnIndex = (columns: unknown, columnName: string): number | null => {
         if (!Array.isArray(columns)) return null;
         const target = String(columnName ?? "").trim().toUpperCase();
@@ -24366,7 +24387,6 @@ export class SpreadsheetApp {
         const name = String(tableName ?? "").trim();
         if (!name) return null;
         const colName = String(columnName ?? "").trim();
-        if (!colName) return null;
         const table: any = this.searchWorkbook.getTable(name);
         if (!table) return null;
 
@@ -24381,11 +24401,6 @@ export class SpreadsheetApp {
         const baseEndRow = Math.max(startRow, endRow);
         const baseStartCol = Math.min(startCol, endCol);
         const baseEndCol = Math.max(startCol, endCol);
-
-        const colIdx = findColumnIndex(table.columns, colName);
-        if (colIdx == null) return null;
-        const targetCol = baseStartCol + colIdx;
-        if (targetCol < baseStartCol || targetCol > baseEndCol) return null;
 
         const tableSheet =
           typeof table.sheetName === "string" && table.sheetName.trim()
@@ -24402,6 +24417,15 @@ export class SpreadsheetApp {
         const dataStartRow = baseStartRow + 1;
         if (row < dataStartRow || row > baseEndRow) return null;
         if (col < baseStartCol || col > baseEndCol) return null;
+
+        if (!colName) {
+          return rangeToA1({ startRow: row, endRow: row, startCol: baseStartCol, endCol: baseEndCol });
+        }
+
+        const colIdx = findColumnIndex(table.columns, colName);
+        if (colIdx == null) return null;
+        const targetCol = baseStartCol + colIdx;
+        if (targetCol < baseStartCol || targetCol > baseEndCol) return null;
 
         return cellToA1({ row, col: targetCol });
       };
@@ -24444,6 +24468,15 @@ export class SpreadsheetApp {
         return null;
       };
 
+      // Implicit nested `[[...]]` structured refs (no table prefix) are only valid inside a table
+      // context. Infer the containing table and delegate back to the table-qualified resolver
+      // so non-this-row forms like `[[#All],[Amount]]` can still be evaluated.
+      if (trimmed.startsWith("[[")) {
+        const tableName = findContainingTableName();
+        if (!tableName) return null;
+        return resolveStructuredRefToReference(`${tableName}${trimmed}`);
+      }
+
       const escapedItem = "((?:[^\\]]|\\]\\])+)"; // match non-] or escaped `]]`
       const qualifiedThisRowRe = new RegExp(
         `^([A-Za-z_][A-Za-z0-9_.]*)\\[\\[\\s*${escapedItem}\\s*\\]\\s*,\\s*\\[\\s*${escapedItem}\\s*\\]\\]$`,
@@ -24454,6 +24487,7 @@ export class SpreadsheetApp {
       const atNestedRe = new RegExp(`^([A-Za-z_][A-Za-z0-9_.]*)\\[\\s*@\\s*\\[\\s*${escapedItem}\\s*\\]\\s*\\]$`, "i");
       const implicitAtRe = new RegExp(`^\\[\\s*@\\s*${escapedItem}\\s*\\]$`, "i");
       const implicitAtNestedRe = new RegExp(`^\\[\\s*@\\s*\\[\\s*${escapedItem}\\s*\\]\\s*\\]$`, "i");
+      const implicitAtRowRe = new RegExp(`^\\[\\s*@\\s*\\]$`, "i");
 
       const qualified = qualifiedThisRowRe.exec(trimmed);
       if (qualified) {
@@ -24516,6 +24550,44 @@ export class SpreadsheetApp {
         const resolved = resolveThisRowStructuredRef(tableName, columnName);
         if (resolved) return resolved;
         return null;
+      }
+
+      const implicitAtRow = implicitAtRowRe.exec(trimmed);
+      if (implicitAtRow) {
+        const tableName = findContainingTableName();
+        if (!tableName) return null;
+        const resolved = resolveThisRowStructuredRef(tableName, "");
+        if (resolved) return resolved;
+        return null;
+      }
+
+      // Multi-column `#This Row` structured refs (`Table1[[#This Row],[Col1],[Col2]]`, etc).
+      // Resolve the column span using the shared structured-ref resolver by rewriting
+      // `#This Row` -> `#All`, then clamp the result to the current formula row.
+      const thisRowSelectorBracketRe = /\[\s*#\s*this\s+row\s*\]/i;
+      if (thisRowSelectorBracketRe.test(trimmed)) {
+        const firstBracket = trimmed.indexOf("[");
+        if (firstBracket >= 0) {
+          const suffix = trimmed.slice(firstBracket).trimStart();
+          if (suffix.startsWith("[[")) {
+            const explicitTableName = trimmed.slice(0, firstBracket).trim();
+            const tableName = explicitTableName || findContainingTableName();
+            if (!tableName) return null;
+
+            // Ensure the formula cell is inside the referenced table and resolve its column bounds.
+            if (!resolveThisRowStructuredRef(tableName, "")) return null;
+
+            const fullRef = explicitTableName ? trimmed : `${tableName}${trimmed}`;
+            const rewritten = fullRef.replace(/\[\s*#\s*this\s+row\s*\]/gi, "[#All]");
+            const { references } = extractFormulaReferences(rewritten, undefined, undefined, { tables: this.searchWorkbook.tables as any });
+            const first = references[0];
+            if (!first) return null;
+            if (first.start !== 0 || first.end !== rewritten.length) return null;
+            const r = first.range;
+
+            return rangeToA1({ startRow: cell.row, endRow: cell.row, startCol: r.startCol, endCol: r.endCol });
+          }
+        }
       }
 
       const { references } = extractFormulaReferences(trimmed, undefined, undefined, { tables: this.searchWorkbook.tables as any });
