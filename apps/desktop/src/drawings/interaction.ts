@@ -30,6 +30,14 @@ export type DrawingInteractionCommit = {
   before: DrawingObject;
   /** Final drawing state at gesture commit time (after any DrawingML patching). */
   after: DrawingObject;
+  /**
+   * Optional full object list after the commit.
+   *
+   * When `DrawingInteractionController` calls this callback during a gesture, it
+   * will include the full post-commit object list so integrations can persist
+   * without re-reading `getObjects()`.
+   */
+  objects?: DrawingObject[];
 };
 
 export interface DrawingInteractionCallbacks {
@@ -67,20 +75,6 @@ export interface DrawingInteractionCallbacks {
    * keep keyboard focus on the grid root (so Delete/Ctrl+D shortcuts work).
    */
   requestFocus?(): void;
-  /**
-   * Fires once on pointerup/cancel after a move/resize/rotate interaction has been committed.
-   *
-   * This is intended for persistence layers that want to write edits at the end of an interaction
-   * (not on every pointermove). The payload's `objects` list reflects the final state after any
-   * commit-time DrawingML patching has been applied.
-   */
-  onInteractionCommit?: (payload: {
-    kind: "move" | "resize" | "rotate";
-    id: number;
-    before: DrawingObject;
-    after: DrawingObject;
-    objects: DrawingObject[];
-  }) => void;
   /**
    * Return false to skip handling the pointer down entirely.
    *
@@ -676,21 +670,6 @@ export class DrawingInteractionController {
       }
     }
 
-    const finalObj = finalObjects.find((o) => o.id === active.id);
-    if (startObj && finalObj) {
-      try {
-        this.callbacks.onInteractionCommit?.({
-          kind,
-          id: active.id,
-          before: startObj,
-          after: finalObj,
-          objects: finalObjects,
-        });
-      } catch {
-        // Best-effort; persistence hooks should not break interaction cleanup.
-      }
-    }
-
     const rect = this.activeRect ?? this.element.getBoundingClientRect();
     const { x, y } = this.getLocalPoint(e, rect);
 
@@ -703,11 +682,10 @@ export class DrawingInteractionController {
     this.updateCursor(x, y);
 
     try {
-      const commit = this.callbacks.onInteractionCommit;
+      const onCommit = this.callbacks.onInteractionCommit;
       const afterObj = finalObjects.find((obj) => obj.id === active.id);
-      if (typeof commit === "function" && startObj && afterObj) {
-        const kind: DrawingInteractionCommitKind = rotating ? "rotate" : resizing ? "resize" : "move";
-        commit({ kind, id: active.id, before: startObj, after: afterObj });
+      if (typeof onCommit === "function" && startObj && afterObj) {
+        onCommit({ kind, id: active.id, before: startObj, after: afterObj, objects: finalObjects });
       } else {
         this.callbacks.commitObjects?.(finalObjects);
       }
@@ -721,16 +699,14 @@ export class DrawingInteractionController {
     if (!active) return;
     if (e.pointerId !== active.pointerId) return;
     this.stopPointerEvent(e);
-    this.cancelActiveGesture(true);
+    this.cancelActiveGesture();
   };
 
-  private cancelActiveGesture(emitCommit: boolean = false): void {
+  private cancelActiveGesture(): void {
     const active = this.dragging ?? this.resizing ?? this.rotating;
     if (!active) return;
 
-    const kind: "move" | "resize" | "rotate" = this.dragging ? "move" : this.resizing ? "resize" : "rotate";
     const startObjects = active.startObjects;
-    const startObj = startObjects.find((o) => o.id === active.id);
     const pointerId = active.pointerId;
 
     this.dragging = null;
@@ -745,20 +721,6 @@ export class DrawingInteractionController {
       this.callbacks.setObjects(startObjects);
     } finally {
       this.callbacks.cancelBatch?.();
-    }
-
-    if (emitCommit && startObj) {
-      try {
-        this.callbacks.onInteractionCommit?.({
-          kind,
-          id: active.id,
-          before: startObj,
-          after: startObj,
-          objects: startObjects,
-        });
-      } catch {
-        // Best-effort; persistence hooks should not break cancellation cleanup.
-      }
     }
 
     // Cursor best-effort: we may not have a meaningful point after cancel.
