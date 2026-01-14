@@ -22,6 +22,25 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects reads absolute anchors stor
   assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 123, yEmu: 456 }, size: { cx: 789, cy: 321 } });
 });
 
+test("convertDocumentSheetDrawingsToUiDrawingObjects tolerates mixed size encodings (cx null, widthEmu present)", () => {
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 123, yEmu: 456 },
+        size: { cx: null, cy: null, widthEmu: 789, heightEmu: 321 },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.deepEqual(ui[0]?.anchor, { type: "absolute", pos: { xEmu: 123, yEmu: 456 }, size: { cx: 789, cy: 321 } });
+});
+
 test("convertDocumentSheetDrawingsToUiDrawingObjects reads absolute anchors stored with root xEmu/yEmu keys", () => {
   const drawings = [
     {

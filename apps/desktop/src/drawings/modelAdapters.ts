@@ -660,15 +660,24 @@ export function convertModelWorksheetDrawingsToUiDrawingObjects(modelWorksheetJs
 
 function convertDocumentDrawingSizeToEmu(sizeJson: unknown): EmuSize | undefined {
   if (!isRecord(sizeJson)) return undefined;
+  const record = sizeJson as JsonRecord;
+
+  const readFirstNumeric = (keys: string[]): number | undefined => {
+    for (const key of keys) {
+      const candidate = readOptionalNumber((record as any)[key]);
+      if (candidate != null) return candidate;
+    }
+    return undefined;
+  };
 
   // Explicit EMU payloads (future-proof).
-  const cxEmu = readOptionalNumber(pick(sizeJson, ["cx", "cxEmu", "widthEmu", "width_emu", "wEmu"]));
-  const cyEmu = readOptionalNumber(pick(sizeJson, ["cy", "cyEmu", "heightEmu", "height_emu", "hEmu"]));
+  const cxEmu = readFirstNumeric(["cx", "cxEmu", "widthEmu", "width_emu", "wEmu"]);
+  const cyEmu = readFirstNumeric(["cy", "cyEmu", "heightEmu", "height_emu", "hEmu"]);
   if (cxEmu != null && cyEmu != null) return { cx: cxEmu, cy: cyEmu };
 
   // Pixel payloads (DocumentController schema).
-  const widthPx = readOptionalNumber(pick(sizeJson, ["width", "w", "widthPx", "width_px"]));
-  const heightPx = readOptionalNumber(pick(sizeJson, ["height", "h", "heightPx", "height_px"]));
+  const widthPx = readFirstNumeric(["width", "w", "widthPx", "width_px"]);
+  const heightPx = readFirstNumeric(["height", "h", "heightPx", "height_px"]);
   if (widthPx != null && heightPx != null) {
     return { cx: pxToEmu(widthPx), cy: pxToEmu(heightPx) };
   }
