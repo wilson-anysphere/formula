@@ -2540,13 +2540,7 @@ pub fn decrypt_ooxml_standard(
 }
 
 fn hash_output_len(algo: HashAlgorithm) -> usize {
-    match algo {
-        HashAlgorithm::Md5 => 16,
-        HashAlgorithm::Sha1 => 20,
-        HashAlgorithm::Sha256 => 32,
-        HashAlgorithm::Sha384 => 48,
-        HashAlgorithm::Sha512 => 64,
-    }
+    algo.digest_len()
 }
 
 fn derive_iv_from_salt_and_block_key(
