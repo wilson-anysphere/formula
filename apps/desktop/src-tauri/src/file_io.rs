@@ -765,9 +765,18 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
 }
 
 fn read_xls_blocking(path: &Path) -> anyhow::Result<Workbook> {
-    let imported = formula_xls::import_xls_path(path)
-        .map_err(|e| anyhow::anyhow!(e))
-        .with_context(|| format!("import xls {:?}", path))?;
+    let imported = match formula_xls::import_xls_path(path) {
+        Ok(imported) => imported,
+        // Keep the desktop-facing error message user-actionable (the UI can prompt for a
+        // password) without exposing internal Rust API names.
+        Err(formula_xls::ImportError::EncryptedWorkbook) => anyhow::bail!(
+            "password required: workbook `{}` is password-protected/encrypted; provide the password to open it",
+            path.display()
+        ),
+        Err(other) => {
+            return Err(anyhow::anyhow!(other)).with_context(|| format!("import xls {:?}", path));
+        }
+    };
     let workbook_model = imported.workbook;
 
     let mut out = Workbook {
@@ -2979,6 +2988,58 @@ mod tests {
                 "expected error message to mention encryption/password protection, got: {msg}"
             );
         }
+    }
+
+    #[test]
+    fn read_xls_blocking_errors_on_encrypted_filepass_container() {
+        // Minimal OLE/CFB container with a BIFF workbook stream containing FILEPASS.
+        //
+        // The desktop app does not yet implement `.xls` password prompting, but it should surface
+        // an actionable "password required" error rather than leaking internal Rust API guidance.
+        let tmp = tempfile::tempdir().expect("temp dir");
+
+        fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
+            let mut out = Vec::with_capacity(4 + payload.len());
+            out.extend_from_slice(&record_id.to_le_bytes());
+            out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+            out.extend_from_slice(payload);
+            out
+        }
+
+        const RECORD_BOF_BIFF8: u16 = 0x0809;
+        const RECORD_FILEPASS: u16 = 0x002F;
+        const RECORD_EOF: u16 = 0x000A;
+
+        let workbook_stream = [
+            record(RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_FILEPASS, &[]),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        {
+            let mut stream = ole.create_stream("Workbook").expect("create Workbook stream");
+            stream
+                .write_all(&workbook_stream)
+                .expect("write Workbook stream bytes");
+        }
+        let bytes = ole.into_inner().into_inner();
+
+        let path = tmp.path().join("encrypted.xls");
+        std::fs::write(&path, &bytes).expect("write encrypted fixture");
+
+        let err = read_xls_blocking(&path).expect_err("expected encrypted workbook to error");
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("password required"),
+            "expected error to mention password required, got: {msg}"
+        );
+        assert!(
+            !msg.contains("import_xls_path_with_password"),
+            "desktop error should not mention internal Rust APIs, got: {msg}"
+        );
     }
 
     fn find_xlsb_cell_record(

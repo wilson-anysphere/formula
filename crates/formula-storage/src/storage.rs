@@ -3699,7 +3699,6 @@ fn stream_cells_into_model_sheet(
             formula,
             phonetic: None,
             style_id,
-            phonetic: None,
         };
 
         sheet.set_cell(
