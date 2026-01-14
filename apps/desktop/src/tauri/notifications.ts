@@ -18,17 +18,41 @@ function getTauriGlobalOrNull(): any | null {
   }
 }
 
+function safeGetProp(obj: any, prop: string): any | undefined {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
 function getTauriDirectNotify(): TauriNotify | null {
   const tauri = getTauriGlobalOrNull();
-  const direct =
-    (tauri?.notification?.notify as TauriNotify | undefined) ??
-    (tauri?.notification?.sendNotification as TauriNotify | undefined) ??
-    (tauri?.plugin?.notification?.notify as TauriNotify | undefined) ??
-    (tauri?.plugin?.notification?.sendNotification as TauriNotify | undefined) ??
-    (tauri?.plugins?.notification?.notify as TauriNotify | undefined) ??
-    (tauri?.plugins?.notification?.sendNotification as TauriNotify | undefined) ??
-    null;
-  return typeof direct === "function" ? direct : null;
+  const plugin = safeGetProp(tauri, "plugin");
+  const plugins = safeGetProp(tauri, "plugins");
+  const notification = safeGetProp(tauri, "notification");
+  const pluginNotification = safeGetProp(plugin, "notification");
+  const pluginsNotification = safeGetProp(plugins, "notification");
+
+  const candidates: Array<{ owner: any; fn: unknown }> = [
+    { owner: notification, fn: safeGetProp(notification, "notify") },
+    { owner: notification, fn: safeGetProp(notification, "sendNotification") },
+    { owner: pluginNotification, fn: safeGetProp(pluginNotification, "notify") },
+    { owner: pluginNotification, fn: safeGetProp(pluginNotification, "sendNotification") },
+    { owner: pluginsNotification, fn: safeGetProp(pluginsNotification, "notify") },
+    { owner: pluginsNotification, fn: safeGetProp(pluginsNotification, "sendNotification") },
+  ];
+
+  for (const { owner, fn } of candidates) {
+    if (typeof fn !== "function") continue;
+    const notify = fn as TauriNotify;
+    return async (payload) => {
+      await notify.call(owner, payload);
+    };
+  }
+
+  return null;
 }
 
 async function notifyWeb(payload: { title: string; body?: string }): Promise<void> {

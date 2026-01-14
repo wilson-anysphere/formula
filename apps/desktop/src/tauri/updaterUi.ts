@@ -25,6 +25,15 @@ function getTauriGlobalOrNull(): any | null {
   }
 }
 
+function safeGetProp(obj: any, prop: string): any | undefined {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
 type UpdaterEventName =
   | "update-check-already-running"
   | "update-check-started"
@@ -342,10 +351,12 @@ function getUpdaterUpdateOrNull(raw: unknown): UpdaterUpdate | null {
 
 function getUpdaterApiOrNull(): { check: () => Promise<UpdaterUpdate | null> } | null {
   const tauri = getTauriGlobalOrNull();
-  const updater = tauri?.updater ?? tauri?.plugin?.updater ?? tauri?.plugins?.updater ?? null;
+  const plugin = safeGetProp(tauri, "plugin");
+  const plugins = safeGetProp(tauri, "plugins");
+  const updater = safeGetProp(tauri, "updater") ?? safeGetProp(plugin, "updater") ?? safeGetProp(plugins, "updater") ?? null;
   if (!updater) return null;
 
-  const check = updater?.check as (() => Promise<unknown>) | undefined;
+  const check = safeGetProp(updater, "check") as (() => Promise<unknown>) | undefined;
   if (typeof check !== "function") return null;
 
   return {

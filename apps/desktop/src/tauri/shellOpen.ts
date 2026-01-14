@@ -13,6 +13,15 @@ function getTauriGlobalOrNull(): any | null {
   }
 }
 
+function safeGetProp(obj: any, prop: string): any | undefined {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
 function parseUrlOrThrow(url: string): URL {
   try {
     return new URL(url);
@@ -25,21 +34,25 @@ type TauriShellOpen = (url: string, options?: Record<string, unknown>) => Promis
 
 function getTauriShellOpenOrNull(): ((url: string) => Promise<void>) | null {
   const tauri = getTauriGlobalOrNull();
-  const candidates: unknown[] = [
+  const plugin = safeGetProp(tauri, "plugin");
+  const plugins = safeGetProp(tauri, "plugins");
+  const shell = safeGetProp(tauri, "shell");
+  const pluginShell = safeGetProp(plugin, "shell");
+  const pluginsShell = safeGetProp(plugins, "shell");
+  const candidates: Array<{ owner: any; fn: unknown }> = [
     // Tauri v1 style
-    tauri?.shell?.open,
+    { owner: shell, fn: safeGetProp(shell, "open") },
     // Tauri v2 plugin style
-    tauri?.plugin?.shell?.open,
+    { owner: pluginShell, fn: safeGetProp(pluginShell, "open") },
     // Alternate namespaces seen in some builds/tests.
-    tauri?.plugins?.shell?.open,
+    { owner: pluginsShell, fn: safeGetProp(pluginsShell, "open") },
   ];
-  for (const candidate of candidates) {
-    if (typeof candidate === "function") {
-      const fn = candidate as TauriShellOpen;
-      return async (url: string) => {
-        await fn(url);
-      };
-    }
+  for (const { owner, fn } of candidates) {
+    if (typeof fn !== "function") continue;
+    const open = fn as TauriShellOpen;
+    return async (url: string) => {
+      await open.call(owner, url);
+    };
   }
   return null;
 }

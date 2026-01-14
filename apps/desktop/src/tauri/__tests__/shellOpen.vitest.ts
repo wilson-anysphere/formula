@@ -48,6 +48,26 @@ describe("shellOpen", () => {
     expect(winOpen).toHaveBeenCalledWith("https://example.com", "_blank", "noopener,noreferrer");
   });
 
+  it("does not crash when __TAURI__.shell access throws and the shell plugin is available", async () => {
+    const tauriOpen = vi.fn().mockResolvedValue(undefined);
+    const tauri: any = { plugin: { shell: { open: tauriOpen } } };
+    Object.defineProperty(tauri, "shell", {
+      configurable: true,
+      get() {
+        throw new Error("Blocked shell access");
+      },
+    });
+    (globalThis as any).__TAURI__ = tauri;
+    const winOpen = vi.fn();
+    (globalThis as any).window = { open: winOpen };
+
+    await shellOpen("https://example.com");
+
+    expect(tauriOpen).toHaveBeenCalledTimes(1);
+    expect(tauriOpen).toHaveBeenCalledWith("https://example.com");
+    expect(winOpen).not.toHaveBeenCalled();
+  });
+
   it("blocks javascript: URLs even when the Tauri API is available", async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     (globalThis as any).__TAURI__ = { core: { invoke } };

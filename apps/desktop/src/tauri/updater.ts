@@ -16,6 +16,15 @@ function getTauriGlobalOrNull(): any | null {
   }
 }
 
+function safeGetProp(obj: any, prop: string): any | undefined {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Thin wrapper around Tauri's updater plugin so the UI can trigger installation/restart
  * without importing `@tauri-apps/*` directly.
@@ -40,7 +49,9 @@ export async function installUpdateAndRestart(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tauri = getTauriGlobalOrNull();
   // Tauri's global API shape can vary across versions/builds.
-  const updater = tauri?.updater ?? tauri?.plugin?.updater ?? tauri?.plugins?.updater;
+  const plugin = safeGetProp(tauri, "plugin");
+  const plugins = safeGetProp(tauri, "plugins");
+  const updater = safeGetProp(tauri, "updater") ?? safeGetProp(plugin, "updater") ?? safeGetProp(plugins, "updater") ?? null;
 
   if (!updater) {
     throw new Error(t("updater.unavailable"));
@@ -53,12 +64,16 @@ export async function installUpdateAndRestart(): Promise<void> {
   //
   // We intentionally avoid `Update.downloadAndInstall()` so we don't need to grant the
   // extra `updater:allow-download-and-install` capability permission.
-  const check = updater.check ?? updater.checkUpdate ?? updater.checkForUpdate ?? null;
+  const check =
+    (safeGetProp(updater, "check") ??
+      safeGetProp(updater, "checkUpdate") ??
+      safeGetProp(updater, "checkForUpdate") ??
+      null) as unknown;
   if (typeof check !== "function") {
     throw new Error(t("updater.unavailable"));
   }
 
-  const result = await check.call(updater);
+  const result = await (check as any).call(updater);
   if (!result) {
     throw new Error(t("updater.updateNoLongerAvailable"));
   }
@@ -70,14 +85,14 @@ export async function installUpdateAndRestart(): Promise<void> {
     throw new Error(t("updater.updateNoLongerAvailable"));
   }
 
-  const download = (update as any).download ?? null;
-  const install = (update as any).install ?? (update as any).installUpdate ?? null;
+  const download = safeGetProp(update, "download") ?? null;
+  const install = (safeGetProp(update, "install") ?? safeGetProp(update, "installUpdate") ?? null) as unknown;
   if (typeof download !== "function" || typeof install !== "function") {
     throw new Error(t("updater.unavailable"));
   }
 
-  await download.call(update);
-  await install.call(update);
+  await (download as any).call(update);
+  await (install as any).call(update);
 }
 
 /**

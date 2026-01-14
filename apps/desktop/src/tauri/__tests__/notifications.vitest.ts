@@ -32,6 +32,35 @@ describe("tauri/notifications", () => {
     expect(tauriNotify).toHaveBeenCalledWith({ title: "Hello", body: "World" });
   });
 
+  it("treats throwing nested notification getters as unavailable and falls back to invoke", async () => {
+    const invoke = vi.fn().mockResolvedValue(null);
+    const tauri: any = { core: { invoke } };
+    Object.defineProperty(tauri, "notification", {
+      configurable: true,
+      get() {
+        throw new Error("Blocked notification access");
+      },
+    });
+    (globalThis as any).__TAURI__ = tauri;
+
+    const created: Array<{ title: string; options?: NotificationOptions }> = [];
+    class MockNotification {
+      static permission = "granted";
+
+      constructor(title: string, options?: NotificationOptions) {
+        created.push({ title, options });
+      }
+    }
+    (globalThis as any).Notification = MockNotification;
+
+    await notify({ title: "Hello", body: "World" });
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("show_system_notification", { title: "Hello", body: "World" });
+    // Ensure we did not fall back to the Web Notification API when running under Tauri.
+    expect(created).toEqual([]);
+  });
+
   it("falls back to invoke(show_system_notification) when direct Tauri notify fails", async () => {
     const tauriNotify = vi.fn().mockRejectedValue(new Error("permission denied"));
     const invoke = vi.fn().mockResolvedValue(null);
