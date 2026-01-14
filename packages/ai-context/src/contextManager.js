@@ -1172,14 +1172,18 @@ export class ContextManager {
     const dlp = normalizeDlpOptions(params.dlp);
     const includeRestrictedContent = dlp?.includeRestrictedContent ?? false;
     const policyAllowsRestrictedContent = Boolean(dlp?.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
-    // Restricted content can be allowed in two ways:
-    // - the policy's maxAllowed threshold is >= Restricted (then it's allowed without overrides)
-    // - the caller opts into includeRestrictedContent and the policy explicitly allows that override
     const maxAllowed = dlp?.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.maxAllowed ?? null;
     const maxAllowedRank = maxAllowed === null ? null : classificationRank(maxAllowed);
-    const thresholdAllowsRestricted = maxAllowedRank !== null && maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK;
-    const overrideAllowsRestricted = includeRestrictedContent && policyAllowsRestrictedContent && maxAllowedRank !== null;
-    const restrictedAllowed = thresholdAllowsRestricted || overrideAllowsRestricted;
+    // In `evaluatePolicy()`, `includeRestrictedContent=true` triggers a special-case path for
+    // Restricted classifications:
+    // - policy must set `allowRestrictedContent=true`, otherwise the decision is BLOCK even if
+    //   `maxAllowed` is already Restricted.
+    //
+    // Keep our defense-in-depth redaction gates aligned with those semantics so we never treat
+    // restricted content as allowed when policy would block it.
+    const restrictedAllowed =
+      maxAllowedRank !== null &&
+      (includeRestrictedContent ? policyAllowsRestrictedContent : maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK);
     const classificationRecords =
       dlp?.classificationRecords ?? dlp?.classificationStore?.list?.(dlp.documentId) ?? [];
 

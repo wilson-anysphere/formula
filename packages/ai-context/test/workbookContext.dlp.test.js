@@ -702,6 +702,52 @@ test("buildWorkbookContext: redacts sensitive query before embedding even when i
   assert.match(embedder.seen[1], /\[REDACTED_EMAIL\]/);
 });
 
+test("buildWorkbookContext: includeRestrictedContent can block even when maxAllowed=Restricted (no-op redactor does not leak metadata)", async () => {
+  const workbook = {
+    id: "wb-dlp-include-restricted-block",
+    sheets: [
+      {
+        // Heuristic-sensitive sheet name.
+        name: "alice@example.com",
+        cells: [[{ v: "X" }]],
+      },
+    ],
+    tables: [{ name: "T", sheetName: "alice@example.com", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } }],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 500,
+    redactor: (t) => t, // no-op redactor: rely on ContextManager defense-in-depth
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  await assert.rejects(
+    () =>
+      cm.buildWorkbookContext({
+        workbook,
+        query: "ignore",
+        topK: 0,
+        dlp: {
+          documentId: workbook.id,
+          // maxAllowed=Restricted (threshold allows), but includeRestrictedContent=true requires allowRestrictedContent=true.
+          policy: makePolicy({ maxAllowed: "Restricted", redactDisallowed: false }),
+          includeRestrictedContent: true,
+        },
+      }),
+    (err) => {
+      assert.ok(err instanceof DlpViolationError);
+      return true;
+    },
+  );
+
+  const joined = embedder.seen.join("\n");
+  assert.doesNotMatch(joined, /alice@example\.com/);
+  assert.match(joined, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: structured Restricted classifications fully redact retrieved chunks", async () => {
   const workbook = makeSensitiveWorkbook();
   // Add a value that isn't handled by the regex redactor but should still be suppressed by
