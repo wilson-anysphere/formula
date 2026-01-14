@@ -138,6 +138,7 @@ import {
   type EncryptedRangeManager
 } from "@formula/collab-encrypted-ranges";
 import { loadCollabConnectionForWorkbook, saveCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
+import { reservedRootGuardUiMessage, subscribeToReservedRootGuardDisconnect } from "../panels/collabReservedRootGuard.js";
 import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
 import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import { ImageBitmapCache } from "../drawings/imageBitmapCache";
@@ -1053,6 +1054,7 @@ export class SpreadsheetApp {
   private collabBinderOrigin: object | null = null;
   private imageBytesBinder: ImageBytesBinder | null = null;
   private collabEncryptionKeyStore: CollabEncryptionKeyStore | null = null;
+  private reservedRootGuardToastUnsubscribe: (() => void) | null = null;
   private readOnly = false;
   private readOnlyRole: string | null = null;
   private collabPermissionsUnsubscribe: (() => void) | null = null;
@@ -1313,6 +1315,34 @@ export class SpreadsheetApp {
         },
       });
       encryptionPolicy = createEncryptionPolicyFromDoc(this.collabSession.doc);
+
+      // If the sync-server reserved root guard is enabled, writing to in-doc versioning /
+      // branching roots will cause the server to close the websocket (1008 "reserved root
+      // mutation"). Surface this as an actionable toast even if the relevant panels are
+      // not currently open.
+      this.reservedRootGuardToastUnsubscribe?.();
+      this.reservedRootGuardToastUnsubscribe = null;
+      try {
+        let toastShown = false;
+        this.reservedRootGuardToastUnsubscribe = subscribeToReservedRootGuardDisconnect(
+          this.collabSession.provider as any,
+          (detected) => {
+            if (!detected) {
+              toastShown = false;
+              return;
+            }
+            if (toastShown) return;
+            toastShown = true;
+            try {
+              showToast(reservedRootGuardUiMessage(), "error", { timeoutMs: 15_000 });
+            } catch {
+              // Best-effort; `showToast` requires a DOM #toast-root and should never block startup.
+            }
+          },
+        );
+      } catch {
+        // ignore (defensive: never block collab startup on toast wiring)
+      }
       if (devEncryption && typeof window !== "undefined") {
         try {
           const params = new URL(window.location.href).searchParams;
@@ -3107,6 +3137,8 @@ export class SpreadsheetApp {
     this.chartDragAbort = null;
     this.chartDragState = null;
     this.setCollabUndoService(null);
+    this.reservedRootGuardToastUnsubscribe?.();
+    this.reservedRootGuardToastUnsubscribe = null;
     this.collabPermissionsUnsubscribe?.();
     this.collabPermissionsUnsubscribe = null;
     this.collabSelectionUnsubscribe?.();

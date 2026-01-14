@@ -6,6 +6,7 @@ import * as Y from "yjs";
 
 import { CollabVersionHistoryPanel } from "../version-history/CollabVersionHistoryPanel.js";
 import { CollabBranchManagerPanel } from "../branch-manager/CollabBranchManagerPanel.js";
+import { subscribeToReservedRootGuardDisconnect } from "../collabReservedRootGuard.js";
 
 function flushPromises() {
   return new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -420,6 +421,45 @@ describe("sync-server reserved root guard disconnect UX", () => {
         },
         5_000,
       );
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("can install the reserved-root-guard monitor outside of React (e.g. global toasts)", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const ws = new FakeBrowserWebSocket();
+    const provider = new FakeProvider(ws);
+    const session = { doc: new Y.Doc({ guid: "doc-8" }), provider, presence: null } as any;
+
+    let detected = false;
+    const unsubscribe = subscribeToReservedRootGuardDisconnect(provider, (next) => {
+      detected = next;
+    });
+
+    await act(async () => {
+      ws.emitClose(1008, "reserved root mutation");
+      await flushPromises();
+    });
+
+    expect(detected).toBe(true);
+
+    // Even if the subscriber goes away, the cached detection should remain so panels
+    // opened later can show an actionable banner.
+    unsubscribe();
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<CollabVersionHistoryPanel session={session} />);
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false);
     });
 
     await act(async () => {

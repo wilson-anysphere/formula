@@ -27,6 +27,33 @@ export function reservedRootGuardUiMessage(): string {
 const providerReservedRootGuardDetected = new WeakSet<object>();
 const providerReservedRootGuardMonitors = new WeakMap<object, { subscribers: Set<(detected: boolean) => void> }>();
 
+function ensureReservedRootGuardMonitor(provider: any): {
+  key: object;
+  monitor: { subscribers: Set<(detected: boolean) => void> };
+} | null {
+  if (!provider || (typeof provider !== "object" && typeof provider !== "function")) return null;
+  const key = provider as object;
+  let monitor = providerReservedRootGuardMonitors.get(key);
+  if (!monitor) {
+    monitor = { subscribers: new Set() };
+    providerReservedRootGuardMonitors.set(key, monitor);
+    // Install a single long-lived listener per provider so we can surface the
+    // error even when panels are not mounted.
+    listenForProviderCloseEvents(provider, (info) => {
+      if (!isReservedRootGuardDisconnect(info)) return;
+      providerReservedRootGuardDetected.add(key);
+      for (const cb of Array.from(monitor!.subscribers)) {
+        try {
+          cb(true);
+        } catch {
+          // ignore
+        }
+      }
+    });
+  }
+  return { key, monitor };
+}
+
 function coerceReason(reason: unknown): string {
   if (typeof reason === "string") return reason;
   if (reason == null) return "";
@@ -234,41 +261,42 @@ export function useReservedRootGuardError(provider: any | null): string | null {
   const [detected, setDetected] = useState(false);
 
   useEffect(() => {
-    if (!provider || (typeof provider !== "object" && typeof provider !== "function")) {
+    const ensured = ensureReservedRootGuardMonitor(provider);
+    if (!ensured) {
       setDetected(false);
       return;
     }
 
-    const key = provider as object;
+    const { key, monitor } = ensured;
     setDetected(providerReservedRootGuardDetected.has(key));
-
-    let monitor = providerReservedRootGuardMonitors.get(key);
-    if (!monitor) {
-      monitor = { subscribers: new Set() };
-      providerReservedRootGuardMonitors.set(key, monitor);
-      // Install a single long-lived listener per provider so we can surface the
-      // error even when panels are not mounted.
-      listenForProviderCloseEvents(provider, (info) => {
-        if (!isReservedRootGuardDisconnect(info)) return;
-        providerReservedRootGuardDetected.add(key);
-        for (const cb of Array.from(monitor!.subscribers)) {
-          try {
-            cb(true);
-          } catch {
-            // ignore
-          }
-        }
-      });
-    }
 
     const subscriber = (nextDetected: boolean) => setDetected(nextDetected);
     monitor.subscribers.add(subscriber);
     return () => {
-      monitor?.subscribers.delete(subscriber);
+      monitor.subscribers.delete(subscriber);
     };
   }, [provider]);
 
   return detected ? reservedRootGuardUiMessage() : null;
+}
+
+export function subscribeToReservedRootGuardDisconnect(
+  provider: any | null,
+  cb: (detected: boolean) => void,
+): () => void {
+  const ensured = ensureReservedRootGuardMonitor(provider);
+  if (!ensured) return () => {};
+
+  const { key, monitor } = ensured;
+  monitor.subscribers.add(cb);
+  try {
+    cb(providerReservedRootGuardDetected.has(key));
+  } catch {
+    // ignore
+  }
+  return () => {
+    monitor.subscribers.delete(cb);
+  };
 }
 
 export function clearReservedRootGuardError(provider: any | null): void {
