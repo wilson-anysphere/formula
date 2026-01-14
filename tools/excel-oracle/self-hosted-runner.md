@@ -81,7 +81,8 @@ From repo root on the runner:
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
   -LocaleId de-DE `
-  -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
+  -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json `
+  -FailOnSkipped
 
 node scripts/normalize-locale-function-sources.js
 node scripts/generate-locale-function-tsv.js
@@ -97,7 +98,8 @@ For `es-ES`, use:
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
   -LocaleId es-ES `
-  -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json
+  -OutPath crates/formula-engine/src/locale/data/sources/es-ES.json `
+  -FailOnSkipped
 
 node scripts/normalize-locale-function-sources.js
 node scripts/generate-locale-function-tsv.js
