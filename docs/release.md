@@ -27,6 +27,14 @@ early:
 See `scripts/ci/check-appimage.sh`.
 See also `scripts/validate-linux-appimage.sh`.
 
+Tip: `scripts/validate-linux-appimage.sh` supports an optional exec sanity check that runs the
+extracted `AppRun` entrypoint in a quick-exit mode:
+
+```bash
+# Runs squashfs-root/AppRun --startup-bench under a short timeout (uses Xvfb when needed).
+bash scripts/validate-linux-appimage.sh --exec-check --exec-timeout 30
+```
+
 For Linux RPM bundles, see `scripts/validate-linux-rpm.sh` (host `rpm -qp` metadata checks + optional Fedora container install smoke test).
 
 For the **exact** `latest.json.platforms` key names (and which asset each key should point to),
