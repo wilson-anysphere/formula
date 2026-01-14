@@ -9,15 +9,15 @@ use crate::drawings::ImageStore;
 use crate::names::{
     validate_defined_name, DefinedName, DefinedNameError, DefinedNameId, DefinedNameScope,
 };
+use crate::pivots::PivotTableModel;
 use crate::sheet_name::{validate_sheet_name, SheetNameError};
+use crate::table::{validate_table_name, TableError, TableIdentifier};
 use crate::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
     rewrite_table_names_in_formula, CalcSettings, DateSystem, ManualPageBreaks, PageSetup,
     PrintTitles, Range, SheetPrintSettings, SheetVisibility, Style, StyleTable, TabColor, Table,
     ThemePalette, WorkbookPrintSettings, WorkbookProtection, WorkbookView, Worksheet, WorksheetId,
 };
-use crate::pivots::PivotTableModel;
-use crate::table::{validate_table_name, TableError, TableIdentifier};
 
 /// Identifier for a workbook.
 pub type WorkbookId = u32;
@@ -415,11 +415,12 @@ impl Workbook {
             let Some(formula) = cell.formula.as_mut() else {
                 continue;
             };
-            let rewritten = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
-                formula,
-                &source_name,
-                &target_name,
-            );
+            let rewritten =
+                crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                    formula,
+                    &source_name,
+                    &target_name,
+                );
             *formula = rewrite_table_names_in_formula(&rewritten, &table_renames);
         }
 
@@ -461,11 +462,12 @@ impl Workbook {
                 next_id = next_id.wrapping_add(1);
                 name.scope = DefinedNameScope::Sheet(new_sheet_id);
                 name.xlsx_local_sheet_id = None;
-                name.refers_to = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
-                    &name.refers_to,
-                    &source_name,
-                    &target_name,
-                );
+                name.refers_to =
+                    crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                        &name.refers_to,
+                        &source_name,
+                        &target_name,
+                    );
                 name.refers_to = rewrite_table_names_in_formula(&name.refers_to, &table_renames);
                 duplicated.push(name);
             }
@@ -531,11 +533,19 @@ impl Workbook {
             name.refers_to = rewrite_sheet_names_in_formula(&name.refers_to, &old_name, new_name);
         }
 
+        for pivot in &mut self.pivot_tables {
+            pivot.source.rewrite_sheet_name(&old_name, new_name);
+            pivot.destination.rewrite_sheet_name(&old_name, new_name);
+        }
+
         self.sheets[sheet_index].name = new_name.to_string();
 
         // Keep print settings aligned with the sheet name (XLSX print settings are keyed by name).
         for settings in &mut self.print_settings.sheets {
-            if crate::formula_rewrite::sheet_name_eq_case_insensitive(&settings.sheet_name, &old_name) {
+            if crate::formula_rewrite::sheet_name_eq_case_insensitive(
+                &settings.sheet_name,
+                &old_name,
+            ) {
                 settings.sheet_name = new_name.to_string();
             }
         }
@@ -586,9 +596,9 @@ impl Workbook {
             .retain(|name| name.scope != DefinedNameScope::Sheet(id));
 
         // Drop print settings for the deleted worksheet.
-        self.print_settings
-            .sheets
-            .retain(|s| !crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, &deleted_name));
+        self.print_settings.sheets.retain(|s| {
+            !crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, &deleted_name)
+        });
         self.sort_print_settings_by_sheet_order();
 
         for sheet in &mut self.sheets {
@@ -706,7 +716,9 @@ impl Workbook {
         validate_table_name(&table.display_name)?;
 
         if self.find_table_case_insensitive(&table.name).is_some()
-            || self.find_table_case_insensitive(&table.display_name).is_some()
+            || self
+                .find_table_case_insensitive(&table.display_name)
+                .is_some()
         {
             return Err(TableError::DuplicateName);
         }
@@ -774,7 +786,9 @@ impl Workbook {
             .ok_or(TableError::TableNotFound)?;
 
         let actual_old_name = self.sheets[sheet_idx].tables[table_idx].name.clone();
-        let actual_old_display_name = self.sheets[sheet_idx].tables[table_idx].display_name.clone();
+        let actual_old_display_name = self.sheets[sheet_idx].tables[table_idx]
+            .display_name
+            .clone();
 
         for (si, sheet) in self.sheets.iter().enumerate() {
             for (ti, table) in sheet.tables.iter().enumerate() {
@@ -816,6 +830,12 @@ impl Workbook {
 
         for name in &mut self.defined_names {
             name.refers_to = rewrite_table_names_in_formula(&name.refers_to, &renames);
+        }
+
+        for pivot in &mut self.pivot_tables {
+            for (old, new) in &renames {
+                pivot.source.rewrite_table_name(old, new);
+            }
         }
 
         let renamed = &mut self.sheets[sheet_idx].tables[table_idx];
@@ -898,6 +918,7 @@ impl Workbook {
             return Err(DefinedNameError::DefinedNameNotFound(id));
         };
 
+        let old_name = self.defined_names[idx].name.clone();
         let scope = self.defined_names[idx].scope;
         if self
             .defined_names
@@ -908,6 +929,13 @@ impl Workbook {
         }
 
         self.defined_names[idx].name = new_name;
+
+        for pivot in &mut self.pivot_tables {
+            pivot
+                .source
+                .rewrite_defined_name(&old_name, &self.defined_names[idx].name);
+        }
+
         Ok(())
     }
 
@@ -957,7 +985,11 @@ impl Workbook {
     }
 
     /// Set (or clear) the print area for a sheet.
-    pub fn set_sheet_print_area(&mut self, id: WorksheetId, print_area: Option<Vec<Range>>) -> bool {
+    pub fn set_sheet_print_area(
+        &mut self,
+        id: WorksheetId,
+        print_area: Option<Vec<Range>>,
+    ) -> bool {
         let Some(sheet_name) = self.sheet(id).map(|s| s.name.clone()) else {
             return false;
         };
@@ -1014,7 +1046,9 @@ impl Workbook {
             repeat_cols: t.repeat_cols.map(|c| c.normalized()),
         });
 
-        self.update_sheet_print_settings(&sheet_name, |settings| settings.print_titles = print_titles);
+        self.update_sheet_print_settings(&sheet_name, |settings| {
+            settings.print_titles = print_titles
+        });
         true
     }
 
@@ -1027,7 +1061,11 @@ impl Workbook {
     }
 
     /// Set the page setup for a sheet by name.
-    pub fn set_sheet_page_setup_by_name(&mut self, sheet_name: &str, page_setup: PageSetup) -> bool {
+    pub fn set_sheet_page_setup_by_name(
+        &mut self,
+        sheet_name: &str,
+        page_setup: PageSetup,
+    ) -> bool {
         let Some(sheet_name) = self.sheet_by_name(sheet_name).map(|s| s.name.clone()) else {
             return false;
         };
@@ -1104,9 +1142,12 @@ impl Workbook {
             .map(|(idx, s)| (s.name.as_str(), idx))
             .collect();
 
-        self.print_settings
-            .sheets
-            .sort_by_key(|s| order.get(s.sheet_name.as_str()).copied().unwrap_or(usize::MAX));
+        self.print_settings.sheets.sort_by_key(|s| {
+            order
+                .get(s.sheet_name.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
     }
 }
 
@@ -1243,7 +1284,10 @@ impl<'de> Deserialize<'de> for Workbook {
         let mut print_settings = helper.print_settings;
         for sheet_settings in &mut print_settings.sheets {
             if let Some(sheet) = sheets.iter().find(|s| {
-                crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.name, &sheet_settings.sheet_name)
+                crate::formula_rewrite::sheet_name_eq_case_insensitive(
+                    &s.name,
+                    &sheet_settings.sheet_name,
+                )
             }) {
                 sheet_settings.sheet_name = sheet.name.clone();
             }

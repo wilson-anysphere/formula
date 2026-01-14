@@ -112,3 +112,54 @@ fn pivot_key_part_display_string_matches_excel_like_expectations() {
         "0"
     );
 }
+
+#[test]
+fn pivot_reference_rewrite_helpers_are_case_insensitive() {
+    let mut source = PivotSource::Table {
+        table: crate::table::TableIdentifier::Name("TABLE1".to_string()),
+    };
+    assert!(source.rewrite_table_name("table1", "Renamed"));
+    assert_eq!(
+        source,
+        PivotSource::Table {
+            table: crate::table::TableIdentifier::Name("Renamed".to_string())
+        }
+    );
+
+    let mut source = PivotSource::NamedRange {
+        name: DefinedNameIdentifier::Name("MyRange".to_string()),
+    };
+    assert!(source.rewrite_defined_name("MYRANGE", "RenamedRange"));
+    assert_eq!(
+        source,
+        PivotSource::NamedRange {
+            name: DefinedNameIdentifier::Name("RenamedRange".to_string())
+        }
+    );
+
+    let mut source = PivotSource::RangeName {
+        sheet_name: "Data".to_string(),
+        range: crate::Range::from_a1("A1:B2").unwrap(),
+    };
+    assert!(source.rewrite_sheet_name("DATA", "RenamedSheet"));
+    assert_eq!(
+        source,
+        PivotSource::RangeName {
+            sheet_name: "RenamedSheet".to_string(),
+            range: crate::Range::from_a1("A1:B2").unwrap(),
+        }
+    );
+
+    let mut dest = PivotDestination::CellName {
+        sheet_name: "Data".to_string(),
+        cell: crate::CellRef::new(0, 0),
+    };
+    assert!(dest.rewrite_sheet_name("data", "RenamedSheet"));
+    assert_eq!(
+        dest,
+        PivotDestination::CellName {
+            sheet_name: "RenamedSheet".to_string(),
+            cell: crate::CellRef::new(0, 0),
+        }
+    );
+}

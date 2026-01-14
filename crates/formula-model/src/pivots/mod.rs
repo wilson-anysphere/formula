@@ -10,8 +10,8 @@ mod schema;
 pub mod slicers;
 
 pub use model::{
-    FilterField, GrandTotals, Layout, PivotCacheId, PivotConfig, PivotDestination, PivotSource,
-    PivotTableModel, SubtotalPosition,
+    DefinedNameIdentifier, FilterField, GrandTotals, Layout, PivotCacheId, PivotConfig,
+    PivotDestination, PivotSource, PivotTableModel, SubtotalPosition,
 };
 pub use schema::{CalculatedField, CalculatedItem};
 

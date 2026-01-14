@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::table::TableIdentifier;
-use crate::{CellRef, Range, WorksheetId};
+use crate::{CellRef, DefinedNameId, Range, WorksheetId};
 
 use super::{
     CalculatedField, CalculatedItem, PivotField, PivotKeyPart, PivotTableId, ValueField,
@@ -105,6 +105,35 @@ impl Default for PivotConfig {
     }
 }
 
+/// Identifier for a workbook defined name (named range) when used as a pivot source.
+///
+/// We prefer stable ids, but allow string references for backward-compat / imported metadata
+/// that has not been resolved.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DefinedNameIdentifier {
+    Name(String),
+    Id(DefinedNameId),
+}
+
+impl From<DefinedNameId> for DefinedNameIdentifier {
+    fn from(value: DefinedNameId) -> Self {
+        Self::Id(value)
+    }
+}
+
+impl From<String> for DefinedNameIdentifier {
+    fn from(value: String) -> Self {
+        Self::Name(value)
+    }
+}
+
+impl From<&str> for DefinedNameIdentifier {
+    fn from(value: &str) -> Self {
+        Self::Name(value.to_string())
+    }
+}
+
 /// Canonical (IPC/persistence-friendly) pivot table definition stored in a [`crate::Workbook`].
 ///
 /// This is intentionally distinct from the legacy in-memory [`super::PivotTable`] runtime type.
@@ -127,9 +156,78 @@ pub struct PivotTableModel {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PivotSource {
-    Range { sheet_id: WorksheetId, range: Range },
-    Table { table: TableIdentifier },
-    DataModel { table: String },
+    Range {
+        sheet_id: WorksheetId,
+        range: Range,
+    },
+    /// Legacy / unresolved range reference keyed by sheet name.
+    ///
+    /// Prefer [`PivotSource::Range`] when possible.
+    RangeName {
+        sheet_name: String,
+        range: Range,
+    },
+    /// Named range / defined name.
+    NamedRange {
+        name: DefinedNameIdentifier,
+    },
+    Table {
+        table: TableIdentifier,
+    },
+    DataModel {
+        table: String,
+    },
+}
+
+impl PivotSource {
+    /// Rewrite any string-based sheet reference from `old_name` to `new_name`.
+    pub fn rewrite_sheet_name(&mut self, old_name: &str, new_name: &str) -> bool {
+        match self {
+            PivotSource::RangeName { sheet_name, .. } => {
+                if crate::formula_rewrite::sheet_name_eq_case_insensitive(sheet_name, old_name) {
+                    *sheet_name = new_name.to_string();
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Rewrite any string-based table reference from `old_name` to `new_name`.
+    pub fn rewrite_table_name(&mut self, old_name: &str, new_name: &str) -> bool {
+        match self {
+            PivotSource::Table {
+                table: TableIdentifier::Name(name),
+            } => {
+                if name.eq_ignore_ascii_case(old_name) {
+                    *name = new_name.to_string();
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Rewrite any string-based defined-name reference from `old_name` to `new_name`.
+    pub fn rewrite_defined_name(&mut self, old_name: &str, new_name: &str) -> bool {
+        match self {
+            PivotSource::NamedRange {
+                name: DefinedNameIdentifier::Name(name),
+            } => {
+                if name.eq_ignore_ascii_case(old_name) {
+                    *name = new_name.to_string();
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Where pivot output is rendered.
@@ -141,6 +239,32 @@ pub enum PivotDestination {
         sheet_id: WorksheetId,
         cell: CellRef,
     },
+    /// Legacy / unresolved destination keyed by sheet name.
+    ///
+    /// Prefer [`PivotDestination::Cell`] when possible.
+    CellName { sheet_name: String, cell: CellRef },
     /// Anchor the pivot to a range (typically the existing pivot output range).
     Range { sheet_id: WorksheetId, range: Range },
+    /// Legacy / unresolved destination keyed by sheet name.
+    ///
+    /// Prefer [`PivotDestination::Range`] when possible.
+    RangeName { sheet_name: String, range: Range },
+}
+
+impl PivotDestination {
+    /// Rewrite any string-based sheet reference from `old_name` to `new_name`.
+    pub fn rewrite_sheet_name(&mut self, old_name: &str, new_name: &str) -> bool {
+        match self {
+            PivotDestination::CellName { sheet_name, .. }
+            | PivotDestination::RangeName { sheet_name, .. } => {
+                if crate::formula_rewrite::sheet_name_eq_case_insensitive(sheet_name, old_name) {
+                    *sheet_name = new_name.to_string();
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
 }
