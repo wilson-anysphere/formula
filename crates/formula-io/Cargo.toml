@@ -26,7 +26,6 @@ formula-fs = { path = "../formula-fs" }
 formula-format = { path = "../formula-format" }
 formula-model = { path = "../formula-model" }
 formula-offcrypto = { path = "../formula-offcrypto" }
-md-5 = "0.10"
 # Disable `formula-xlsx` default features so `formula-io` stays lightweight by
 # default. Consumers that need `formula_xlsx::vba` can opt in via the
 # `formula-io/vba` feature.
@@ -38,6 +37,7 @@ sha2 = "0.10"
 tempfile = "3.10"
 thiserror = "1.0"
 sha1 = "0.10"
+md-5 = "0.10"
 zip = { version = "2.1", default-features = false }
 
 [dev-dependencies]

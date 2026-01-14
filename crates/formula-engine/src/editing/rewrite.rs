@@ -1,11 +1,12 @@
 use std::cmp::{max, min};
 
+use formula_model::sheet_name_eq_case_insensitive;
+
 use crate::{
     parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CallExpr, CellAddr,
     CellRef as AstCellRef, ColRef as AstColRef, Coord, Expr, FieldAccessExpr, FunctionCall,
     ParseOptions, PostfixExpr, RowRef as AstRowRef, SerializeOptions, SheetRef, UnaryExpr,
 };
-use formula_model::sheet_name_eq_case_insensitive;
 
 const REF_ERROR: &str = "#REF!";
 
