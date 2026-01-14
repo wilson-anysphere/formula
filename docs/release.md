@@ -1080,8 +1080,8 @@ wired to the correct **updater-consumed** artifacts:
    - Specific tag (useful for draft QA; may require auth if the release is still a draft):
      - `curl -L -o latest.json https://github.com/OWNER/REPO/releases/download/vX.Y.Z/latest.json`
      - `curl -L -o latest.json.sig https://github.com/OWNER/REPO/releases/download/vX.Y.Z/latest.json.sig`
-   - Then inspect:
-   - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
+   - Inspect:
+     - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
 3. Confirm each `platforms[*].url` points at the expected **updater** asset type (not a manual-only installer):
    - macOS: `*.app.tar.gz` (**not** `.dmg`)
    - Windows: `*.msi` (CI expects the manifest to reference the MSI; the `.exe` is for manual install)
