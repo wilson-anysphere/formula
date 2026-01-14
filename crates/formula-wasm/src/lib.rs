@@ -5026,7 +5026,11 @@ impl WasmWorkbook {
             )
         };
 
-        // Preserve explicit-recalc semantics even when the workbook's calcMode is automatic.
+        // Prevent automatic recalculation when the workbook calc mode is `Automatic`.
+        //
+        // The WASM worker protocol expects callers to invoke `recalculate()` explicitly so value
+        // change deltas can be surfaced over RPC; if we allow an automatic recalc here, JS would
+        // miss those notifications.
         self.inner.with_manual_calc_mode(|this| {
             this.engine
                 .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
