@@ -2165,8 +2165,8 @@ const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
 
   // Formatting defaults (row/col/sheet band selections) should be allowed in read-only, so
   // keep these formatting commands conditionally enabled based on the current selection.
-  delete out["home.font.subscript"];
-  delete out["home.font.superscript"];
+  delete out["format.toggleSubscript"];
+  delete out["format.toggleSuperscript"];
   delete out["home.number.moreFormats.custom"];
   delete out["format.clearFormats"];
 
@@ -2207,8 +2207,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "format.toggleItalic": formatState.italic,
       "format.toggleUnderline": formatState.underline,
       "format.toggleStrikethrough": formatState.strikethrough,
-      "home.font.subscript": formatState.fontVariantPosition === "subscript",
-      "home.font.superscript": formatState.fontVariantPosition === "superscript",
+      "format.toggleSubscript": formatState.fontVariantPosition === "subscript",
+      "format.toggleSuperscript": formatState.fontVariantPosition === "superscript",
       "format.toggleWrapText": formatState.wrapText,
       "format.alignTop": formatState.verticalAlign === "top",
       "format.alignMiddle": formatState.verticalAlign === "center",
@@ -2320,8 +2320,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "format.toggleItalic": true,
             "format.toggleUnderline": true,
             "format.toggleStrikethrough": true,
-            "home.font.subscript": true,
-            "home.font.superscript": true,
+            "format.toggleSubscript": true,
+            "format.toggleSuperscript": true,
             "home.font.fontName": true,
             "home.font.fontSize": true,
             ...RIBBON_DISABLED_FONT_COMMANDS_WHILE_EDITING,

@@ -89,12 +89,12 @@ describe("defaultRibbonSchema", () => {
     expect(fontGroup, "Expected Home → Font group to exist").toBeTruthy();
     if (!fontGroup) return;
 
-    const subscript = fontGroup.buttons.find((button) => button.id === "home.font.subscript");
+    const subscript = fontGroup.buttons.find((button) => button.id === "format.toggleSubscript");
     expect(subscript, "Expected Home → Font → Subscript button to exist").toBeTruthy();
     expect(subscript?.kind).toBe("toggle");
     expect(subscript?.disabled).not.toBe(true);
 
-    const superscript = fontGroup.buttons.find((button) => button.id === "home.font.superscript");
+    const superscript = fontGroup.buttons.find((button) => button.id === "format.toggleSuperscript");
     expect(superscript, "Expected Home → Font → Superscript button to exist").toBeTruthy();
     expect(superscript?.kind).toBe("toggle");
     expect(superscript?.disabled).not.toBe(true);

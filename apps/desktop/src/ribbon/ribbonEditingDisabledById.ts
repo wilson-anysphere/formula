@@ -1,7 +1,7 @@
 export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   // --- Formatting ------------------------------------------------------------
-  "home.font.subscript": true,
-  "home.font.superscript": true,
+  "format.toggleSubscript": true,
+  "format.toggleSuperscript": true,
   "home.alignment.mergeCenter": true,
   "home.alignment.mergeCenter.mergeCenter": true,
   "home.alignment.mergeCenter.mergeAcross": true,

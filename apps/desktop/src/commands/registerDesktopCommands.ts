@@ -190,11 +190,9 @@ export function registerDesktopCommands(params: {
     { category: commandCategoryFormat },
   );
 
-  // Ribbon-only formatting toggles that are not yet part of the canonical `format.*` command namespace.
-  // These are still registered in the CommandRegistry so the ribbon does not auto-disable them and
-  // so other UI surfaces (command palette/keybindings) can invoke them consistently.
+  // Formatting toggles that are wired to the ribbon but are not registered in `registerBuiltinCommands`.
   commandRegistry.registerBuiltinCommand(
-    "home.font.subscript",
+    "format.toggleSubscript",
     "Subscript",
     (next?: boolean) =>
       applyFormattingToSelection("Subscript", (doc, sheetId, ranges) => toggleSubscript(doc, sheetId, ranges, { next }), {
@@ -204,7 +202,7 @@ export function registerDesktopCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
-    "home.font.superscript",
+    "format.toggleSuperscript",
     "Superscript",
     (next?: boolean) =>
       applyFormattingToSelection(
