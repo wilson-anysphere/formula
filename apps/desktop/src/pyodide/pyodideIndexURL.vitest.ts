@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   getExplicitPyodideIndexURL,
@@ -11,7 +11,6 @@ describe("pyodideIndexURL helpers", () => {
   afterEach(() => {
     delete (globalThis as any).__pyodideIndexURL;
     delete (globalThis as any).__TAURI__;
-    vi.unstubAllGlobals();
   });
 
   it("normalizes trailing slashes", () => {
