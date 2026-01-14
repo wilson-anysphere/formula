@@ -27,7 +27,7 @@ test("shell.css should not hardcode border-radius values (except 0)", () => {
     const valueStart = declMatch.index + declMatch[0].length - value.length;
 
     const unitRegex =
-      /(-?\d+(?:\.\d+)?)(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;
+      /([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|%|rem|em|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ch|ex)(?![A-Za-z0-9_])/gi;
     let unitMatch;
     while ((unitMatch = unitRegex.exec(value))) {
       const numeric = unitMatch[1];
