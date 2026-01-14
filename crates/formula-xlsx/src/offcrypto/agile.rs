@@ -690,11 +690,28 @@ pub fn decrypt_agile_keys(info: &AgileEncryptionInfo, password: &str) -> Result<
                     })?;
             let mut raw_val = di.encrypted_hmac_value.clone();
             decrypt_aes_cbc_no_padding_in_place(&package_key, &iv_val, &mut raw_val)?;
-
             let hmac_len = info.key_data.hash_size as usize;
             (
-                Some(raw_key.get(..hmac_len).unwrap_or(&raw_key).to_vec()),
-                Some(raw_val.get(..hmac_len).unwrap_or(&raw_val).to_vec()),
+                Some(
+                    raw_key
+                        .get(..hmac_len)
+                        .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                            element: "dataIntegrity".to_string(),
+                            attr: "encryptedHmacKey".to_string(),
+                            reason: "decrypted HMAC key shorter than keyData.hashSize".to_string(),
+                        })?
+                        .to_vec(),
+                ),
+                Some(
+                    raw_val
+                        .get(..hmac_len)
+                        .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                            element: "dataIntegrity".to_string(),
+                            attr: "encryptedHmacValue".to_string(),
+                            reason: "decrypted HMAC value shorter than keyData.hashSize".to_string(),
+                        })?
+                        .to_vec(),
+                ),
             )
         }
         None => (None, None),
@@ -1251,7 +1268,7 @@ mod tests {
             // MS-OFFCRYPTO: password key encryptor blobs use `saltValue` directly as the IV.
             let iv = ke_salt.get(..iv_len).unwrap();
             let padded = zero_pad(plaintext.to_vec());
-            encrypt_aes_cbc_no_padding(&key, &iv, &padded)
+            encrypt_aes_cbc_no_padding(&key, iv, &padded)
         }
 
         let encrypted_verifier_hash_input = encrypt_ke_blob(
@@ -1361,6 +1378,106 @@ mod tests {
         assert!(
             matches!(err, OffCryptoError::WrongPassword),
             "expected WrongPassword, got {err:?}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn agile_decrypts_ms_offcrypto_writer_output_and_decrypts_hmac() {
+        use std::io::{Cursor, Read as _, Write as _};
+
+        use cfb::CompoundFile;
+        use hmac::{Hmac, Mac as _};
+        use ms_offcrypto_writer::Ecma376AgileWriter;
+        use rand::{rngs::StdRng, SeedableRng as _};
+        use zip::write::FileOptions;
+
+        fn build_tiny_zip() -> Vec<u8> {
+            let cursor = Cursor::new(Vec::new());
+            let mut writer = zip::ZipWriter::new(cursor);
+            writer
+                .start_file("hello.txt", FileOptions::<()>::default())
+                .expect("start zip file");
+            writer.write_all(b"hello").expect("write zip contents");
+            writer.finish().expect("finish zip").into_inner()
+        }
+
+        fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
+            let mut cursor = Cursor::new(Vec::new());
+            let mut rng = StdRng::from_seed([0u8; 32]);
+            let mut agile =
+                Ecma376AgileWriter::create(&mut rng, password, &mut cursor).expect("create agile");
+            agile
+                .write_all(plain_zip)
+                .expect("write plaintext zip to agile writer");
+            agile.finalize().expect("finalize agile writer");
+            cursor.into_inner()
+        }
+
+        fn extract_stream_bytes(cfb_bytes: &[u8], stream_name: &str) -> Vec<u8> {
+            let mut ole = CompoundFile::open(Cursor::new(cfb_bytes)).expect("open cfb");
+            let mut stream = ole.open_stream(stream_name).expect("open stream");
+            let mut buf = Vec::new();
+            stream.read_to_end(&mut buf).expect("read stream");
+            buf
+        }
+
+        fn compute_hmac(hash_alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
+            match hash_alg {
+                HashAlgorithm::Sha1 => {
+                    let mut mac: Hmac<sha1::Sha1> = Hmac::new_from_slice(key).expect("HMAC key");
+                    mac.update(data);
+                    mac.finalize().into_bytes().to_vec()
+                }
+                HashAlgorithm::Sha256 => {
+                    let mut mac: Hmac<sha2::Sha256> = Hmac::new_from_slice(key).expect("HMAC key");
+                    mac.update(data);
+                    mac.finalize().into_bytes().to_vec()
+                }
+                HashAlgorithm::Sha384 => {
+                    let mut mac: Hmac<sha2::Sha384> = Hmac::new_from_slice(key).expect("HMAC key");
+                    mac.update(data);
+                    mac.finalize().into_bytes().to_vec()
+                }
+                HashAlgorithm::Sha512 => {
+                    let mut mac: Hmac<sha2::Sha512> = Hmac::new_from_slice(key).expect("HMAC key");
+                    mac.update(data);
+                    mac.finalize().into_bytes().to_vec()
+                }
+            }
+        }
+
+        let password = "correct horse battery staple";
+        let plain_zip = build_tiny_zip();
+
+        let encrypted_cfb = encrypt_zip_with_password(&plain_zip, password);
+        let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+        let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+        // High-level stream decryption should roundtrip.
+        let decrypted = decrypt_agile_encrypted_package_stream(&encryption_info, &encrypted_package, password)
+            .expect("decrypt_agile_encrypted_package_stream should succeed");
+        assert_eq!(decrypted, plain_zip);
+
+        // Key/hmac extraction should match `dataIntegrity` semantics used by real Office writers.
+        let info = parse_agile_encryption_info_stream(&encryption_info).expect("parse agile encryption info");
+        let keys = decrypt_agile_keys(&info, password).expect("decrypt agile keys");
+
+        let hmac_key = keys.hmac_key.as_ref().expect("expected decrypted hmac key");
+        let expected_hmac = keys.hmac_value.as_ref().expect("expected decrypted hmac value");
+        let hash_size = info.key_data.hash_size as usize;
+        assert_eq!(hmac_key.len(), hash_size);
+        assert_eq!(expected_hmac.len(), hash_size);
+
+        // MS-OFFCRYPTO describes `dataIntegrity` as an HMAC over the *EncryptedPackage stream bytes*
+        // (length prefix + ciphertext). However, some producers appear to HMAC the plaintext
+        // package instead; accept either to keep this test robust.
+        let actual_ciphertext = compute_hmac(info.key_data.hash_algorithm, hmac_key, &encrypted_package);
+        let actual_plaintext = compute_hmac(info.key_data.hash_algorithm, hmac_key, &decrypted);
+        assert!(
+            actual_ciphertext.get(..hash_size) == Some(expected_hmac.as_slice())
+                || actual_plaintext.get(..hash_size) == Some(expected_hmac.as_slice()),
+            "HMAC mismatch"
         );
     }
 
