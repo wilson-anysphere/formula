@@ -67,4 +67,49 @@ describe("Ribbon UI state overrides (dropdown menu items)", () => {
 
     act(() => root.unmount());
   });
+
+  it("does not allow disabledById to re-enable schema-disabled menu items", async () => {
+    const { container, root } = renderRibbon();
+
+    const insertTab = container.querySelector<HTMLButtonElement>('[data-testid="ribbon-tab-insert"]');
+    expect(insertTab).toBeInstanceOf(HTMLButtonElement);
+
+    act(() => {
+      insertTab?.click();
+    });
+
+    const pivotTable = container.querySelector<HTMLButtonElement>('[data-command-id="view.insertPivotTable"]');
+    expect(pivotTable).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      pivotTable?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    const menu = container.querySelector<HTMLElement>(".ribbon-dropdown__menu");
+    expect(menu).toBeInstanceOf(HTMLElement);
+    if (!menu) throw new Error("Missing dropdown menu");
+
+    const schemaDisabledId = "insert.tables.pivotTable.fromExternal";
+    const schemaDisabledItem = menu.querySelector<HTMLButtonElement>(`[data-command-id="${schemaDisabledId}"]`);
+    expect(schemaDisabledItem).toBeInstanceOf(HTMLButtonElement);
+    expect(schemaDisabledItem?.disabled).toBe(true);
+
+    act(() => {
+      setRibbonUiState({
+        pressedById: Object.create(null),
+        labelById: Object.create(null),
+        disabledById: { [schemaDisabledId]: false },
+        shortcutById: Object.create(null),
+        ariaKeyShortcutsById: Object.create(null),
+      });
+    });
+
+    const updated = menu.querySelector<HTMLButtonElement>(`[data-command-id="${schemaDisabledId}"]`);
+    expect(updated).toBeInstanceOf(HTMLButtonElement);
+    expect(updated?.disabled).toBe(true);
+    expect(menu.querySelector(`.ribbon-dropdown__menuitem:not(:disabled)[data-command-id="${schemaDisabledId}"]`)).toBeNull();
+
+    act(() => root.unmount());
+  });
 });
