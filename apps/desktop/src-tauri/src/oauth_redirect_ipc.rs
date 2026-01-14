@@ -11,10 +11,12 @@
 const MAX_PENDING_URLS: usize = 50;
 const MAX_PENDING_BYTES: usize = 128 * 1024;
 
+use std::collections::VecDeque;
+
 #[derive(Debug, Default)]
 pub struct OauthRedirectState {
     ready: bool,
-    pending_urls: Vec<String>,
+    pending_urls: VecDeque<String>,
     pending_bytes: usize,
     overflow_warned: bool,
 }
@@ -38,9 +40,9 @@ impl OauthRedirectState {
         } else {
             for url in urls {
                 self.pending_bytes = self.pending_bytes.saturating_add(url.len());
-                self.pending_urls.push(url);
+                self.pending_urls.push_back(url);
+                self.enforce_pending_limits();
             }
-            self.enforce_pending_limits();
             None
         }
     }
@@ -55,41 +57,24 @@ impl OauthRedirectState {
             self.ready = true;
             self.pending_bytes = 0;
             std::mem::take(&mut self.pending_urls)
+                .into_iter()
+                .collect::<Vec<_>>()
         }
     }
 
     fn enforce_pending_limits(&mut self) {
         let mut dropped_any = false;
 
-        if self.pending_urls.len() > MAX_PENDING_URLS {
-            let overflow = self.pending_urls.len() - MAX_PENDING_URLS;
-            for removed in self.pending_urls.drain(0..overflow) {
-                self.pending_bytes = self.pending_bytes.saturating_sub(removed.len());
-            }
-            dropped_any = true;
-        }
-
-        if self.pending_bytes > MAX_PENDING_BYTES {
-            let mut bytes = self.pending_bytes;
-            let mut drop_count = 0;
-            for s in &self.pending_urls {
-                if bytes <= MAX_PENDING_BYTES {
-                    break;
-                }
-                bytes = bytes.saturating_sub(s.len());
-                drop_count += 1;
-            }
-
-            if drop_count > 0 {
-                for removed in self.pending_urls.drain(0..drop_count) {
-                    self.pending_bytes = self.pending_bytes.saturating_sub(removed.len());
-                }
-                dropped_any = true;
-            }
-
-            if self.pending_urls.is_empty() {
+        // Drop oldest entries until we satisfy *both* caps. Enforce on every push so we never
+        // allocate an unbounded backing buffer for `pending_urls` when a malicious sender provides
+        // huge argv/single-instance payloads.
+        while self.pending_urls.len() > MAX_PENDING_URLS || self.pending_bytes > MAX_PENDING_BYTES {
+            let Some(removed) = self.pending_urls.pop_front() else {
                 self.pending_bytes = 0;
-            }
+                break;
+            };
+            self.pending_bytes = self.pending_bytes.saturating_sub(removed.len());
+            dropped_any = true;
         }
 
         if dropped_any && !self.overflow_warned {
@@ -151,6 +136,23 @@ mod tests {
             .map(|idx| format!("formula://u{idx}"))
             .collect();
         assert_eq!(flushed, expected);
+    }
+
+    #[test]
+    fn does_not_grow_pending_capacity_unbounded_when_queueing_huge_vectors() {
+        let mut state = OauthRedirectState::default();
+
+        let urls: Vec<String> = (0..(MAX_PENDING_URLS * 200))
+            .map(|idx| format!("formula://u{idx}"))
+            .collect();
+        assert!(state.queue_or_emit(urls).is_none());
+        assert_eq!(state.pending_len(), MAX_PENDING_URLS);
+
+        assert!(
+            state.pending_urls.capacity() <= MAX_PENDING_URLS * 8,
+            "pending_urls capacity grew unexpectedly large: {}",
+            state.pending_urls.capacity()
+        );
     }
 
     #[test]
