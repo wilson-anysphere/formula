@@ -1904,34 +1904,34 @@ impl DataModel {
 
         fn dfs<F>(
             model: &DataModel,
-            start_display: &str,
-            current_table: &str,
-            target_table: &str,
-            target_display: &str,
+            start_table_display: &str,
+            current_table_key: &str,
+            target_table_key: &str,
+            target_table_display: &str,
             direction: RelationshipPathDirection,
             is_relationship_active: &F,
             visited: &mut HashSet<String>,
             path: &mut Vec<usize>,
-            table_path: &mut Vec<String>,
+            table_path_display: &mut Vec<String>,
             found_path: &mut Option<Vec<usize>>,
-            found_table_path: &mut Option<Vec<String>>,
+            found_table_path_display: &mut Option<Vec<String>>,
         ) -> DaxResult<()>
         where
             F: Fn(usize, &RelationshipInfo) -> bool,
         {
-            if current_table == target_table {
+            if current_table_key == target_table_key {
                 if found_path.is_some() {
-                    let first = found_table_path
+                    let first = found_table_path_display
                         .as_ref()
                         .map(|p| p.join(" -> "))
                         .unwrap_or_else(|| "<unknown>".to_string());
-                    let second = table_path.join(" -> ");
+                    let second = table_path_display.join(" -> ");
                     return Err(DaxError::Eval(format!(
-                        "ambiguous active relationship path between {start_display} and {target_display}: {first}; {second}"
+                        "ambiguous active relationship path between {start_table_display} and {target_table_display}: {first}; {second}"
                     )));
                 }
                 *found_path = Some(path.clone());
-                *found_table_path = Some(table_path.clone());
+                *found_table_path_display = Some(table_path_display.clone());
                 return Ok(());
             }
 
@@ -1942,13 +1942,13 @@ impl DataModel {
 
                 let next_table = match direction {
                     RelationshipPathDirection::ManyToOne => {
-                        if rel.from_table_key != current_table {
+                        if rel.from_table_key != current_table_key {
                             continue;
                         }
                         rel.to_table_key.as_str()
                     }
                     RelationshipPathDirection::OneToMany => {
-                        if rel.to_table_key != current_table {
+                        if rel.to_table_key != current_table_key {
                             continue;
                         }
                         rel.from_table_key.as_str()
@@ -1961,30 +1961,29 @@ impl DataModel {
 
                 visited.insert(next_table.to_string());
                 path.push(idx);
-                table_path.push(
-                    model
-                        .tables
-                        .get(next_table)
-                        .map(|t| t.name().to_string())
-                        .unwrap_or_else(|| next_table.to_string()),
-                );
+                let next_display = model
+                    .tables
+                    .get(next_table)
+                    .map(|t| t.name().to_string())
+                    .unwrap_or_else(|| next_table.to_string());
+                table_path_display.push(next_display);
 
                 dfs(
                     model,
-                    start_display,
+                    start_table_display,
                     next_table,
-                    target_table,
-                    target_display,
+                    target_table_key,
+                    target_table_display,
                     direction,
                     is_relationship_active,
                     visited,
                     path,
-                    table_path,
+                    table_path_display,
                     found_path,
-                    found_table_path,
+                    found_table_path_display,
                 )?;
 
-                table_path.pop();
+                table_path_display.pop();
                 path.pop();
                 visited.remove(next_table);
             }
@@ -1995,9 +1994,9 @@ impl DataModel {
         let mut visited = HashSet::new();
         visited.insert(from_key.clone());
         let mut path = Vec::new();
-        let mut table_path = vec![from_display.clone()];
+        let mut table_path_display = vec![from_display.clone()];
         let mut found_path = None;
-        let mut found_table_path = None;
+        let mut found_table_path_display = None;
 
         dfs(
             self,
@@ -2009,9 +2008,9 @@ impl DataModel {
             &is_relationship_active,
             &mut visited,
             &mut path,
-            &mut table_path,
+            &mut table_path_display,
             &mut found_path,
-            &mut found_table_path,
+            &mut found_table_path_display,
         )?;
 
         Ok(found_path)

@@ -1407,17 +1407,6 @@ impl DaxEngine {
                 }
                 let (table_expr, value_exprs) = args.split_first().expect("checked above");
 
-                // MVP: only support one-column tables.
-                // `CONTAINSROW` is commonly used with one-column tables like:
-                //   - table constructors: {1, 2, 3}
-                //   - VALUES(Table[Column])
-                if value_exprs.len() != 1 {
-                    return Err(DaxError::Eval(
-                        "CONTAINSROW currently only supports one-column tables".into(),
-                    ));
-                }
-                let needle = self.eval_scalar(model, &value_exprs[0], filter, row_ctx, env)?;
-
                 let table_result = self.eval_table(model, table_expr, filter, row_ctx, env)?;
                 match table_result {
                     TableResult::Physical {
@@ -1447,6 +1436,8 @@ impl DaxEngine {
                             ));
                         }
 
+                        let needle =
+                            self.eval_scalar(model, &value_exprs[0], filter, row_ctx, env)?;
                         let col_idx = visible_cols[0];
                         for row in rows {
                             let value =
@@ -1471,6 +1462,8 @@ impl DaxEngine {
                             ));
                         }
 
+                        let needle =
+                            self.eval_scalar(model, &value_exprs[0], filter, row_ctx, env)?;
                         for row_values in rows {
                             let value = row_values.get(0).cloned().unwrap_or(Value::Blank);
                             if compare_values(&BinaryOp::Equals, &value, &needle)? {
