@@ -539,14 +539,10 @@ export class DrawingOverlay {
         if (obj.kind.type === "image") {
           let entry = this.images.get(obj.kind.imageId);
           if (!entry && typeof this.images.getAsync === "function") {
-            // Best-effort: hydrate missing bytes from a persistent store (e.g. IndexedDB).
-            try {
-              entry = await this.images.getAsync(obj.kind.imageId);
-            } catch {
-              entry = undefined;
-            }
-            if (signal?.aborted) return;
-            if (seq !== this.renderSeq) return;
+            // Best-effort: kick off async hydration (e.g. IndexedDB) but do not await here.
+            // SpreadsheetApp's render pipeline intentionally fire-and-forgets `render()`, and
+            // unit tests expect placeholder draws to be synchronous.
+            void this.images.getAsync(obj.kind.imageId).catch(() => {});
           }
 
           if (!entry) {
