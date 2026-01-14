@@ -72,11 +72,11 @@ function writeInfoPlist(
   writeFileSync(plistPath, content, { encoding: "utf8" });
 }
 
-function writeComplianceResources(contentsDir) {
+function writeComplianceResources(contentsDir, { includeLicense = true, includeNotice = true } = {}) {
   const resourcesDir = join(contentsDir, "Resources");
   mkdirSync(resourcesDir, { recursive: true });
-  writeFileSync(join(resourcesDir, "LICENSE"), "stub", { encoding: "utf8" });
-  writeFileSync(join(resourcesDir, "NOTICE"), "stub", { encoding: "utf8" });
+  if (includeLicense) writeFileSync(join(resourcesDir, "LICENSE"), "stub", { encoding: "utf8" });
+  if (includeNotice) writeFileSync(join(resourcesDir, "NOTICE"), "stub", { encoding: "utf8" });
 }
 
 function runValidator({ dmgPath, binDir, env = {} }) {
@@ -148,10 +148,7 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "stub", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "stub", { encoding: "utf8" });
+    writeComplianceResources(appRoot);
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
@@ -186,10 +183,7 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
+    writeComplianceResources(appRoot);
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
@@ -290,10 +284,8 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
     // Intentionally omit LICENSE (required).
-    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
+    writeComplianceResources(appRoot, { includeLicense: false });
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
@@ -328,10 +320,7 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
+    writeComplianceResources(appRoot);
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
@@ -448,10 +437,7 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
+    writeComplianceResources(appRoot);
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
@@ -506,10 +492,7 @@ test(
     mkdirSync(macosDir, { recursive: true });
     writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
     chmodSync(join(macosDir, "formula-desktop"), 0o755);
-    const resourcesDir = join(appRoot, "Resources");
-    mkdirSync(resourcesDir, { recursive: true });
-    writeFileSync(join(resourcesDir, "LICENSE"), "license", { encoding: "utf8" });
-    writeFileSync(join(resourcesDir, "NOTICE"), "notice", { encoding: "utf8" });
+    writeComplianceResources(appRoot);
 
     writeInfoPlist(join(appRoot, "Info.plist"), {
       identifier: expectedIdentifier,
