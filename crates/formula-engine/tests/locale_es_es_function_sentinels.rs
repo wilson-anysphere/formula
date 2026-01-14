@@ -13,6 +13,9 @@ fn locale_parsing_es_es_financial_function_spellings_match_excel() {
         ("FV", "VF"),
         ("PMT", "PAGO"),
         ("RATE", "TASA"),
+        // High-signal non-periodic variants.
+        ("XIRR", "TIR.NO.PER"),
+        ("XNPV", "VNA.NO.PER"),
     ];
 
     for (canonical, localized) in mappings {
