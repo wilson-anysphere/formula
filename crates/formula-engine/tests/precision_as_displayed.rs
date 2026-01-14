@@ -1,7 +1,7 @@
 use formula_engine::calc_settings::CalcSettings;
 use formula_engine::metadata::FormatRun;
 use formula_engine::{Engine, Value};
-use formula_model::{Font, Style};
+use formula_model::{CellRef, Font, Range, Style};
 
 #[test]
 fn precision_as_displayed_rounds_numeric_literals_fixed_decimals() {
@@ -109,6 +109,34 @@ fn precision_as_displayed_rounds_numeric_literals_using_row_col_style_fallback()
     // For other rows, fall back to column styles.
     engine.set_cell_value("Sheet1", "A2", 1.239).unwrap();
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.2));
+}
+
+#[test]
+fn precision_as_displayed_rounds_range_values_using_effective_style_format() {
+    let mut engine = Engine::new();
+    let mut settings: CalcSettings = engine.calc_settings().clone();
+    settings.full_precision = false;
+    engine.set_calc_settings(settings);
+
+    // Apply a number format via a row style so cells without explicit style ids still pick it up.
+    let row_style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    engine.set_row_style_id("Sheet1", 0, Some(row_style_id));
+
+    let values = vec![vec![Value::Number(1.239), Value::Number(2.345)]];
+    engine
+        .set_range_values(
+            "Sheet1",
+            Range::new(CellRef::new(0, 0), CellRef::new(0, 1)),
+            &values,
+            false,
+        )
+        .unwrap();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.24));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.35));
 }
 
 #[test]
