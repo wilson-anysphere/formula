@@ -249,7 +249,7 @@ jobs:
           }
           
           // Convert the runner summary into `benchmark-action` customSmallerIsBetter format.
-          // Keep the metric name stable for historical tracking in gh-pages.
+          // Keep the metric names stable for historical tracking in gh-pages.
           const results = [
             {
               name: "desktop.memory.idle_rss_mb.p95",
@@ -257,6 +257,13 @@ jobs:
               value: p95,
             },
           ];
+          if (typeof p50 === "number" && Number.isFinite(p50)) {
+            results.push({
+              name: "desktop.memory.idle_rss_mb.p50",
+              unit: "mb",
+              value: p50,
+            });
+          }
           fs.writeFileSync(outputPath, JSON.stringify(results, null, 2), "utf8");
           
           appendSummary([

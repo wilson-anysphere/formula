@@ -181,6 +181,7 @@ part of the app’s steady-state memory footprint).
 The CI performance suite (`pnpm benchmark`) also reports this as a tracked benchmark metric:
 
 - `desktop.memory.idle_rss_mb.p95` (unit: `mb`)
+- `desktop.memory.idle_rss_mb.p50` (unit: `mb`, informational)
 
 CI uses `FORMULA_DESKTOP_IDLE_RSS_TARGET_MB` (alias: `FORMULA_DESKTOP_MEMORY_TARGET_MB`) as an absolute budget for this metric
 (default: 100MB; override via a GitHub Actions repository variable if needed).
