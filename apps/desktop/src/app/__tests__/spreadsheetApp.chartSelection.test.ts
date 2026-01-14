@@ -367,6 +367,106 @@ describe("SpreadsheetApp chart selection + drag", () => {
     root.remove();
   });
 
+  it("while formula bar is editing a formula, clicking a chart does not select it", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+    const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
+    expect(chart).toBeTruthy();
+
+    const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
+    expect(rect).not.toBeNull();
+
+    const layout = (app as any).chartOverlayLayout();
+    const originX = layout.originX as number;
+    const originY = layout.originY as number;
+
+    // Force formula-bar state to "formula editing" so SpreadsheetApp should ignore chart pointerdowns.
+    const fb = (app as any).formulaBar as { model: { updateDraft: (draft: string, start: number, end: number) => void }; isFormulaEditing: () => boolean };
+    fb.model.updateDraft("=A1", 3, 3);
+    expect(fb.isFormulaEditing()).toBe(true);
+
+    const clickX = originX + rect.left + 2;
+    const clickY = originY + rect.top + 2;
+
+    const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    expect(selectionCanvas).not.toBeNull();
+
+    dispatchPointerEvent(selectionCanvas!, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 100 });
+    dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 100 });
+
+    expect(app.getSelectedChartId()).toBe(null);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
+  it("canvas charts mode: while formula bar is editing a formula, clicking a chart does not select it", () => {
+    const prior = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "1";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const formulaBar = document.createElement("div");
+      document.body.appendChild(formulaBar);
+
+      const app = new SpreadsheetApp(root, status, { formulaBar });
+      expect((app as any).useCanvasCharts).toBe(true);
+
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Formula Editing Canvas Chart",
+        position: "A1:H10",
+      });
+      const chart = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(chart).toBeTruthy();
+
+      const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
+      expect(rect).not.toBeNull();
+
+      const layout = (app as any).chartOverlayLayout();
+      const originX = layout.originX as number;
+      const originY = layout.originY as number;
+
+      const fb = (app as any).formulaBar as { model: { updateDraft: (draft: string, start: number, end: number) => void }; isFormulaEditing: () => boolean };
+      fb.model.updateDraft("=A1", 3, 3);
+      expect(fb.isFormulaEditing()).toBe(true);
+
+      const clickX = originX + rect.left + 2;
+      const clickY = originY + rect.top + 2;
+
+      const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+      expect(selectionCanvas).not.toBeNull();
+
+      dispatchPointerEvent(selectionCanvas!, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 101 });
+      dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 101 });
+
+      expect(app.getSelectedChartId()).toBe(null);
+
+      app.destroy();
+      root.remove();
+      formulaBar.remove();
+    } finally {
+      if (prior === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = prior;
+    }
+  });
+
   it("dragging a chart updates its twoCell anchor", () => {
     const root = createRoot();
     const status = {

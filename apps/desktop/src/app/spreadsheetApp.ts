@@ -12250,6 +12250,9 @@ export class SpreadsheetApp {
 
   private onChartPointerDownCapture(e: PointerEvent): void {
     if (this.disposed) return;
+    // When the formula bar is in range-selection mode, chart hits should not steal the
+    // pointerdown; let normal grid range selection continue.
+    if (this.formulaBar?.isFormulaEditing()) return;
     const pointerType = (e as any).pointerType ?? "mouse";
     const button = typeof (e as any).button === "number" ? (e as any).button : 0;
     const isMouse = pointerType === "mouse";
