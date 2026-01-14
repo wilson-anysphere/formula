@@ -960,8 +960,15 @@ export function bindYjsToDocumentController(options) {
     function sheetViewJsonFromRawView(rawView) {
       const viewMap = getYMap(rawView);
       if (viewMap) {
+        /** @type {Record<string, any>} */
+        const out = {};
+
         const frozenRows = viewMap.get("frozenRows");
+        if (frozenRows !== undefined) out.frozenRows = yjsValueToJson(frozenRows);
+
         const frozenCols = viewMap.get("frozenCols");
+        if (frozenCols !== undefined) out.frozenCols = yjsValueToJson(frozenCols);
+
         // Legacy/alternate keys: some clients stored the background image id under
         // `backgroundImage` / `background_image`. Treat those as aliases.
         //
@@ -975,172 +982,269 @@ export function bindYjsToDocumentController(options) {
               : viewMap.get("backgroundImage") !== undefined
                 ? viewMap.get("backgroundImage")
                 : viewMap.get("background_image");
-        const colWidths = viewMap.get("colWidths");
-        const rowHeights = viewMap.get("rowHeights");
-        const defaultFormat = viewMap.get("defaultFormat");
-        const rowFormats = viewMap.get("rowFormats");
-        const colFormats = viewMap.get("colFormats");
+        if (backgroundImageId !== undefined) out.backgroundImageId = yjsValueToJson(backgroundImageId);
 
-        if (
-          frozenRows !== undefined ||
-          frozenCols !== undefined ||
-          backgroundImageId !== undefined ||
-          colWidths !== undefined ||
-          rowHeights !== undefined ||
-          defaultFormat !== undefined ||
-          rowFormats !== undefined ||
-          colFormats !== undefined
-        ) {
-          return {
-            frozenRows: yjsValueToJson(frozenRows) ?? 0,
-            frozenCols: yjsValueToJson(frozenCols) ?? 0,
-            backgroundImageId: yjsValueToJson(backgroundImageId),
-            colWidths: yjsValueToJson(colWidths),
-            rowHeights: yjsValueToJson(rowHeights),
-            defaultFormat: yjsValueToJson(defaultFormat),
-            rowFormats: yjsValueToJson(rowFormats),
-            colFormats: yjsValueToJson(colFormats),
-          };
-        }
-        return {};
+        const colWidths = viewMap.get("colWidths");
+        if (colWidths !== undefined) out.colWidths = yjsValueToJson(colWidths);
+
+        const rowHeights = viewMap.get("rowHeights");
+        if (rowHeights !== undefined) out.rowHeights = yjsValueToJson(rowHeights);
+
+        const defaultFormat = viewMap.get("defaultFormat");
+        if (defaultFormat !== undefined) out.defaultFormat = yjsValueToJson(defaultFormat);
+
+        const rowFormats = viewMap.get("rowFormats");
+        if (rowFormats !== undefined) out.rowFormats = yjsValueToJson(rowFormats);
+
+        const colFormats = viewMap.get("colFormats");
+        if (colFormats !== undefined) out.colFormats = yjsValueToJson(colFormats);
+
+        return Object.keys(out).length > 0 ? out : null;
       }
 
       if (isRecord(rawView)) {
-        const frozenRows = rawView.frozenRows;
-        const frozenCols = rawView.frozenCols;
-        const backgroundImageId =
-          rawView.backgroundImageId !== undefined
-            ? rawView.backgroundImageId
-            : rawView.background_image_id !== undefined
-              ? rawView.background_image_id
-              : rawView.backgroundImage !== undefined
-                ? rawView.backgroundImage
-                : rawView.background_image;
-        const colWidths = rawView.colWidths;
-        const rowHeights = rawView.rowHeights;
-        const defaultFormat = rawView.defaultFormat;
-        const rowFormats = rawView.rowFormats;
-        const colFormats = rawView.colFormats;
+        /** @type {Record<string, any>} */
+        const out = {};
 
-        if (
-          frozenRows !== undefined ||
-          frozenCols !== undefined ||
-          backgroundImageId !== undefined ||
-          colWidths !== undefined ||
-          rowHeights !== undefined ||
-          defaultFormat !== undefined ||
-          rowFormats !== undefined ||
-          colFormats !== undefined
-        ) {
-          return {
-            frozenRows: yjsValueToJson(frozenRows) ?? 0,
-            frozenCols: yjsValueToJson(frozenCols) ?? 0,
-            backgroundImageId: yjsValueToJson(backgroundImageId),
-            colWidths: yjsValueToJson(colWidths),
-            rowHeights: yjsValueToJson(rowHeights),
-            defaultFormat: yjsValueToJson(defaultFormat),
-            rowFormats: yjsValueToJson(rowFormats),
-            colFormats: yjsValueToJson(colFormats),
-          };
-        }
-        return {};
+        const has = (key) => Object.prototype.hasOwnProperty.call(rawView, key);
+
+        if (has("frozenRows")) out.frozenRows = yjsValueToJson(rawView.frozenRows);
+        if (has("frozenCols")) out.frozenCols = yjsValueToJson(rawView.frozenCols);
+
+        // Legacy/alternate keys: some clients stored the background image id under
+        // `backgroundImage` / `background_image`. Treat those as aliases.
+        //
+        // Use `hasOwnProperty` checks (not `??`) so explicit `null` clears do not fall
+        // back to a stale legacy value.
+        const hasBackground =
+          has("backgroundImageId") || has("background_image_id") || has("backgroundImage") || has("background_image");
+        const backgroundImageId = has("backgroundImageId")
+          ? rawView.backgroundImageId
+          : has("background_image_id")
+            ? rawView.background_image_id
+            : has("backgroundImage")
+              ? rawView.backgroundImage
+              : has("background_image")
+                ? rawView.background_image
+                : undefined;
+        if (hasBackground) out.backgroundImageId = yjsValueToJson(backgroundImageId);
+
+        if (has("colWidths")) out.colWidths = yjsValueToJson(rawView.colWidths);
+        if (has("rowHeights")) out.rowHeights = yjsValueToJson(rawView.rowHeights);
+        if (has("defaultFormat")) out.defaultFormat = yjsValueToJson(rawView.defaultFormat);
+        if (has("rowFormats")) out.rowFormats = yjsValueToJson(rawView.rowFormats);
+        if (has("colFormats")) out.colFormats = yjsValueToJson(rawView.colFormats);
+
+        return Object.keys(out).length > 0 ? out : null;
       }
 
-      // Unknown/invalid view type. Treat as empty instead of materializing it:
-      // callers only care about a small subset of keys, and converting arbitrary
-      // values (e.g. huge Y.Text) can be expensive.
-      return {};
+      // Unknown/invalid view type. Avoid materializing it (e.g. huge Y.Text). Treat as absent
+      // so we can still fall back to legacy top-level view fields when present.
+      return null;
     }
 
     const sheetMap = getYMap(sheetEntry);
     if (sheetMap) {
+      const readTopLevel = () => {
+        // Back-compat: legacy top-level sheet view fields.
+        //
+        // Officially only `frozenRows`/`frozenCols` were used outside `view`, but be generous
+        // and also accept `colWidths`/`rowHeights` in case older clients stored them similarly.
+        const frozenRows = sheetMap.get("frozenRows");
+        const frozenCols = sheetMap.get("frozenCols");
+        const backgroundImageId =
+          sheetMap.get("backgroundImageId") !== undefined
+            ? sheetMap.get("backgroundImageId")
+            : sheetMap.get("background_image_id") !== undefined
+              ? sheetMap.get("background_image_id")
+              : sheetMap.get("backgroundImage") !== undefined
+                ? sheetMap.get("backgroundImage")
+                : sheetMap.get("background_image");
+        const colWidths = sheetMap.get("colWidths");
+        const rowHeights = sheetMap.get("rowHeights");
+        const defaultFormat = sheetMap.get("defaultFormat");
+        const rowFormats = sheetMap.get("rowFormats");
+        const colFormats = sheetMap.get("colFormats");
+        if (
+          frozenRows !== undefined ||
+          frozenCols !== undefined ||
+          backgroundImageId !== undefined ||
+          colWidths !== undefined ||
+          rowHeights !== undefined ||
+          defaultFormat !== undefined ||
+          rowFormats !== undefined ||
+          colFormats !== undefined
+        ) {
+          return {
+            frozenRows: yjsValueToJson(frozenRows) ?? 0,
+            frozenCols: yjsValueToJson(frozenCols) ?? 0,
+            backgroundImageId: yjsValueToJson(backgroundImageId),
+            colWidths: yjsValueToJson(colWidths),
+            rowHeights: yjsValueToJson(rowHeights),
+            defaultFormat: yjsValueToJson(defaultFormat),
+            rowFormats: yjsValueToJson(rowFormats),
+            colFormats: yjsValueToJson(colFormats),
+          };
+        }
+        return null;
+      };
+
       // Canonical format (BranchService):
       //   sheetMap.set("view", { frozenRows, frozenCols, colWidths?, rowHeights? })
       const rawView = sheetMap.get("view");
       if (rawView !== undefined) {
-        return sheetViewJsonFromRawView(rawView);
-      }
+        const viewJson = sheetViewJsonFromRawView(rawView);
+        if (viewJson && typeof viewJson === "object") {
+          /** @type {Record<string, any>} */
+          const out = { ...viewJson };
 
-      // Back-compat: legacy top-level sheet view fields.
-      //
-      // Officially only `frozenRows`/`frozenCols` were used outside `view`, but be generous
-      // and also accept `colWidths`/`rowHeights` in case older clients stored them similarly.
-      const frozenRows = sheetMap.get("frozenRows");
-      const frozenCols = sheetMap.get("frozenCols");
-      const backgroundImageId =
-        sheetMap.get("backgroundImageId") !== undefined
-          ? sheetMap.get("backgroundImageId")
-          : sheetMap.get("background_image_id") !== undefined
-            ? sheetMap.get("background_image_id")
-            : sheetMap.get("backgroundImage") !== undefined
-              ? sheetMap.get("backgroundImage")
-              : sheetMap.get("background_image");
-      const colWidths = sheetMap.get("colWidths");
-      const rowHeights = sheetMap.get("rowHeights");
-      const defaultFormat = sheetMap.get("defaultFormat");
-      const rowFormats = sheetMap.get("rowFormats");
-      const colFormats = sheetMap.get("colFormats");
-      if (
-        frozenRows !== undefined ||
-        frozenCols !== undefined ||
-        backgroundImageId !== undefined ||
-        colWidths !== undefined ||
-        rowHeights !== undefined ||
-        defaultFormat !== undefined ||
-        rowFormats !== undefined ||
-        colFormats !== undefined
-      ) {
-        return {
-          frozenRows: yjsValueToJson(frozenRows) ?? 0,
-          frozenCols: yjsValueToJson(frozenCols) ?? 0,
-          backgroundImageId: yjsValueToJson(backgroundImageId),
-          colWidths: yjsValueToJson(colWidths),
-          rowHeights: yjsValueToJson(rowHeights),
-          defaultFormat: yjsValueToJson(defaultFormat),
-          rowFormats: yjsValueToJson(rowFormats),
-          colFormats: yjsValueToJson(colFormats),
-        };
-      }
+          // If the view object exists but is missing some keys (common during partial migrations),
+          // fall back to legacy top-level sheet fields.
+          if (!Object.prototype.hasOwnProperty.call(out, "frozenRows")) {
+            const frozenRows = sheetMap.get("frozenRows");
+            if (frozenRows !== undefined) out.frozenRows = yjsValueToJson(frozenRows);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "frozenCols")) {
+            const frozenCols = sheetMap.get("frozenCols");
+            if (frozenCols !== undefined) out.frozenCols = yjsValueToJson(frozenCols);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "backgroundImageId")) {
+            const backgroundImageId =
+              sheetMap.get("backgroundImageId") !== undefined
+                ? sheetMap.get("backgroundImageId")
+                : sheetMap.get("background_image_id") !== undefined
+                  ? sheetMap.get("background_image_id")
+                  : sheetMap.get("backgroundImage") !== undefined
+                    ? sheetMap.get("backgroundImage")
+                    : sheetMap.get("background_image");
+            if (backgroundImageId !== undefined) out.backgroundImageId = yjsValueToJson(backgroundImageId);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "colWidths")) {
+            const colWidths = sheetMap.get("colWidths");
+            if (colWidths !== undefined) out.colWidths = yjsValueToJson(colWidths);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "rowHeights")) {
+            const rowHeights = sheetMap.get("rowHeights");
+            if (rowHeights !== undefined) out.rowHeights = yjsValueToJson(rowHeights);
+          }
+          // Include these keys for BranchService-style snapshots that embed format defaults in `view`.
+          if (!Object.prototype.hasOwnProperty.call(out, "defaultFormat")) {
+            const defaultFormat = sheetMap.get("defaultFormat");
+            if (defaultFormat !== undefined) out.defaultFormat = yjsValueToJson(defaultFormat);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "rowFormats")) {
+            const rowFormats = sheetMap.get("rowFormats");
+            if (rowFormats !== undefined) out.rowFormats = yjsValueToJson(rowFormats);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "colFormats")) {
+            const colFormats = sheetMap.get("colFormats");
+            if (colFormats !== undefined) out.colFormats = yjsValueToJson(colFormats);
+          }
 
-      return null;
+          return out;
+        }
+        // View exists but has no known keys (or is an invalid type). Fall back to top-level fields.
+        return readTopLevel();
+      }
+      return readTopLevel();
     }
 
     // Some workflows/tests (and some historical docs) may store sheet entries as
     // plain objects inside the Y.Array rather than Y.Maps. Treat those as
     // read-only metadata and hydrate view state from them.
     if (isRecord(sheetEntry)) {
+      const readTopLevel = () => {
+        const frozenRows = sheetEntry.frozenRows;
+        const frozenCols = sheetEntry.frozenCols;
+        const backgroundImageId =
+          sheetEntry.backgroundImageId !== undefined
+            ? sheetEntry.backgroundImageId
+            : sheetEntry.background_image_id !== undefined
+              ? sheetEntry.background_image_id
+              : sheetEntry.backgroundImage !== undefined
+                ? sheetEntry.backgroundImage
+                : sheetEntry.background_image;
+        const colWidths = sheetEntry.colWidths;
+        const rowHeights = sheetEntry.rowHeights;
+        const defaultFormat = sheetEntry.defaultFormat;
+        const rowFormats = sheetEntry.rowFormats;
+        const colFormats = sheetEntry.colFormats;
+        if (
+          frozenRows !== undefined ||
+          frozenCols !== undefined ||
+          backgroundImageId !== undefined ||
+          colWidths !== undefined ||
+          rowHeights !== undefined ||
+          defaultFormat !== undefined ||
+          rowFormats !== undefined ||
+          colFormats !== undefined
+        ) {
+          return {
+            frozenRows: yjsValueToJson(frozenRows) ?? 0,
+            frozenCols: yjsValueToJson(frozenCols) ?? 0,
+            backgroundImageId: yjsValueToJson(backgroundImageId),
+            colWidths: yjsValueToJson(colWidths),
+            rowHeights: yjsValueToJson(rowHeights),
+            defaultFormat: yjsValueToJson(defaultFormat),
+            rowFormats: yjsValueToJson(rowFormats),
+            colFormats: yjsValueToJson(colFormats),
+          };
+        }
+        return null;
+      };
+
       const rawView = sheetEntry.view;
       if (rawView !== undefined) {
-        return sheetViewJsonFromRawView(rawView);
-      }
+        const viewJson = sheetViewJsonFromRawView(rawView);
+        if (viewJson && typeof viewJson === "object") {
+          /** @type {Record<string, any>} */
+          const out = { ...viewJson };
 
-      const frozenRows = sheetEntry.frozenRows;
-      const frozenCols = sheetEntry.frozenCols;
-      const backgroundImageId =
-        sheetEntry.backgroundImageId !== undefined
-          ? sheetEntry.backgroundImageId
-          : sheetEntry.background_image_id !== undefined
-            ? sheetEntry.background_image_id
-            : sheetEntry.backgroundImage !== undefined
-              ? sheetEntry.backgroundImage
-              : sheetEntry.background_image;
-      const colWidths = sheetEntry.colWidths;
-      const rowHeights = sheetEntry.rowHeights;
-      const defaultFormat = sheetEntry.defaultFormat;
-      const rowFormats = sheetEntry.rowFormats;
-      const colFormats = sheetEntry.colFormats;
-      if (
-        frozenRows !== undefined ||
-        frozenCols !== undefined ||
-        backgroundImageId !== undefined ||
-        colWidths !== undefined ||
-        rowHeights !== undefined ||
-        defaultFormat !== undefined ||
-        rowFormats !== undefined ||
-        colFormats !== undefined
-      ) {
-        return { frozenRows, frozenCols, backgroundImageId, colWidths, rowHeights, defaultFormat, rowFormats, colFormats };
+          if (!Object.prototype.hasOwnProperty.call(out, "frozenRows")) {
+            const frozenRows = sheetEntry.frozenRows;
+            if (frozenRows !== undefined) out.frozenRows = yjsValueToJson(frozenRows);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "frozenCols")) {
+            const frozenCols = sheetEntry.frozenCols;
+            if (frozenCols !== undefined) out.frozenCols = yjsValueToJson(frozenCols);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "backgroundImageId")) {
+            const backgroundImageId =
+              sheetEntry.backgroundImageId !== undefined
+                ? sheetEntry.backgroundImageId
+                : sheetEntry.background_image_id !== undefined
+                  ? sheetEntry.background_image_id
+                  : sheetEntry.backgroundImage !== undefined
+                    ? sheetEntry.backgroundImage
+                    : sheetEntry.background_image;
+            if (backgroundImageId !== undefined) out.backgroundImageId = yjsValueToJson(backgroundImageId);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "colWidths")) {
+            const colWidths = sheetEntry.colWidths;
+            if (colWidths !== undefined) out.colWidths = yjsValueToJson(colWidths);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "rowHeights")) {
+            const rowHeights = sheetEntry.rowHeights;
+            if (rowHeights !== undefined) out.rowHeights = yjsValueToJson(rowHeights);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "defaultFormat")) {
+            const defaultFormat = sheetEntry.defaultFormat;
+            if (defaultFormat !== undefined) out.defaultFormat = yjsValueToJson(defaultFormat);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "rowFormats")) {
+            const rowFormats = sheetEntry.rowFormats;
+            if (rowFormats !== undefined) out.rowFormats = yjsValueToJson(rowFormats);
+          }
+          if (!Object.prototype.hasOwnProperty.call(out, "colFormats")) {
+            const colFormats = sheetEntry.colFormats;
+            if (colFormats !== undefined) out.colFormats = yjsValueToJson(colFormats);
+          }
+
+          return out;
+        }
+        return readTopLevel();
       }
+      return readTopLevel();
     }
 
     return null;
@@ -2002,7 +2106,7 @@ export function bindYjsToDocumentController(options) {
     if (!deltas || deltas.length === 0) return;
     if (!canWriteSharedState()) return;
 
-    /** @type {Array<{ sheetId: string, view: any }>} */
+    /** @type {Array<{ sheetId: string, before: any, after: any }>} */
     const prepared = [];
 
     for (const delta of deltas) {
@@ -2019,7 +2123,7 @@ export function bindYjsToDocumentController(options) {
       const normalizedAfter = normalizeSheetViewState(after);
       if (sheetViewStateEquals(normalizedBefore, normalizedAfter)) continue;
 
-      prepared.push({ sheetId, view: normalizedAfter });
+      prepared.push({ sheetId, before: normalizedBefore, after: normalizedAfter });
     }
 
     if (prepared.length === 0) return;
@@ -2058,7 +2162,8 @@ export function bindYjsToDocumentController(options) {
 
     const apply = () => {
       for (const item of prepared) {
-        const { sheetId, view } = item;
+        const { sheetId, before, after } = item;
+        const view = after;
 
         // If the doc temporarily contains duplicate sheet entries for the same id,
         // apply the view update to *all* matching entries. This avoids losing view
@@ -2173,6 +2278,26 @@ export function bindYjsToDocumentController(options) {
               existingViewMap.delete("rowHeights");
             }
 
+            // Converge legacy top-level view keys to the canonical nested `view` representation.
+            //
+            // This keeps the Yjs document schema stable (BranchService compatible) and avoids stale
+            // legacy fields "resurrecting" when other parts of the stack fall back to top-level
+            // keys during partial migrations.
+            sheetMap.delete("frozenRows");
+            sheetMap.delete("frozenCols");
+            if (view.backgroundImageId != null || before.backgroundImageId != null) {
+              sheetMap.delete("backgroundImageId");
+              sheetMap.delete("background_image_id");
+              sheetMap.delete("backgroundImage");
+              sheetMap.delete("background_image");
+            }
+            if (view.colWidths || before.colWidths) {
+              sheetMap.delete("colWidths");
+            }
+            if (view.rowHeights || before.rowHeights) {
+              sheetMap.delete("rowHeights");
+            }
+
             continue;
           }
 
@@ -2209,6 +2334,22 @@ export function bindYjsToDocumentController(options) {
           }
 
           sheetMap.set("view", nextView);
+
+          // See comment above: converge legacy top-level keys.
+          sheetMap.delete("frozenRows");
+          sheetMap.delete("frozenCols");
+          if (view.backgroundImageId != null || before.backgroundImageId != null) {
+            sheetMap.delete("backgroundImageId");
+            sheetMap.delete("background_image_id");
+            sheetMap.delete("backgroundImage");
+            sheetMap.delete("background_image");
+          }
+          if (view.colWidths || before.colWidths) {
+            sheetMap.delete("colWidths");
+          }
+          if (view.rowHeights || before.rowHeights) {
+            sheetMap.delete("rowHeights");
+          }
         }
       }
     };
