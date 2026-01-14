@@ -225,7 +225,17 @@ mod tests {
     use super::*;
     use crate::test_alloc::MAX_ALLOC;
     use crate::OffcryptoError;
+    use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+    use aes::Aes128;
     use std::sync::atomic::Ordering;
+
+    fn aes128_ecb_encrypt_in_place(key: &[u8; 16], buf: &mut [u8]) {
+        assert_eq!(buf.len() % 16, 0);
+        let cipher = Aes128::new_from_slice(key).expect("valid AES-128 key");
+        for block in buf.chunks_mut(16) {
+            cipher.encrypt_block(GenericArray::from_mut_slice(block));
+        }
+    }
 
     #[test]
     fn encrypted_package_shorter_than_header_returns_truncated() {
@@ -305,6 +315,36 @@ mod tests {
         .expect("decrypt");
 
         assert_eq!(out, b"0123456789");
+    }
+
+    #[test]
+    fn decrypt_standard_encrypted_package_round_trip_truncates_to_total_size() {
+        let key = [0x42u8; 16];
+        let plaintext: Vec<u8> = (0u8..37).collect();
+        let total_size = plaintext.len() as u64;
+
+        let padded_len = ((plaintext.len() + 15) / 16) * 16;
+        let mut ciphertext = plaintext.clone();
+        ciphertext.resize(padded_len, 0);
+        aes128_ecb_encrypt_in_place(&key, &mut ciphertext);
+
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&total_size.to_le_bytes());
+        encrypted_package.extend_from_slice(&ciphertext);
+
+        let out = decrypt_standard_encrypted_package(&key, &encrypted_package).expect("decrypt");
+        assert_eq!(out, plaintext);
+    }
+
+    #[test]
+    fn decrypt_standard_encrypted_package_rejects_non_block_aligned_ciphertext() {
+        let key = [0u8; 16];
+        let mut encrypted_package = 0u64.to_le_bytes().to_vec();
+        encrypted_package.extend_from_slice(&[0u8; 15]);
+
+        let err =
+            decrypt_standard_encrypted_package(&key, &encrypted_package).expect_err("expected error");
+        assert_eq!(err, OffcryptoError::InvalidCiphertextLength { len: 15 });
     }
 
     #[test]
