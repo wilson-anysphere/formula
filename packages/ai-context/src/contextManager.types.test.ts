@@ -178,18 +178,28 @@ await cm.buildWorkbookContextFromSpreadsheetApi({
 });
 
 // DLP-safe cheap path: caller asserts the workbook is already indexed with DLP applied.
-await cm.buildWorkbookContextFromSpreadsheetApi({
-  spreadsheet: { listSheets: () => [] },
-  workbookId: "wb-1",
-  query: "hi",
-  skipIndexing: true,
-  skipIndexingWithDlp: true,
-  dlp: { documentId: "doc-1", policy: {} },
-});
+ await cm.buildWorkbookContextFromSpreadsheetApi({
+   spreadsheet: { listSheets: () => [] },
+   workbookId: "wb-1",
+   query: "hi",
+   skipIndexing: true,
+   includeFormulaValues: true,
+   skipIndexingWithDlp: true,
+   dlp: { documentId: "doc-1", policy: {} },
+ });
 
-// Default path requires listNonEmptyCells.
-// @ts-expect-error - spreadsheet.listNonEmptyCells is required when skipIndexing is not true.
-await cm.buildWorkbookContextFromSpreadsheetApi({
+ // Snake_case flag also supported.
+ await cm.buildWorkbookContextFromSpreadsheetApi({
+   spreadsheet: { listSheets: () => [] },
+   workbookId: "wb-1",
+   query: "hi",
+   skipIndexing: true,
+   include_formula_values: true,
+ });
+ 
+ // Default path requires listNonEmptyCells.
+ // @ts-expect-error - spreadsheet.listNonEmptyCells is required when skipIndexing is not true.
+ await cm.buildWorkbookContextFromSpreadsheetApi({
   spreadsheet: { listSheets: () => [] },
   workbookId: "wb-1",
   query: "hi",
