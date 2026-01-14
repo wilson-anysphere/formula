@@ -259,4 +259,37 @@ describe("handleRibbonCommand", () => {
     expect(handleRibbonCommand(ctx, "data.sortFilter.reapply")).toBe(true);
     expect(ctx.reapplyAutoFilter).toHaveBeenCalledTimes(1);
   });
+
+  it("treats dropdown trigger ids as no-op fallbacks and delegates where appropriate", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+
+    const executeCommand = vi.fn();
+    ctx.executeCommand = executeCommand;
+
+    // Dropdown triggers with menu items should not execute formatting directly when invoked.
+    expect(handleRibbonCommand(ctx, "home.font.fontName")).toBe(true);
+    expect(doc.getCellFormat("Sheet1", { row: 0, col: 0 })).toEqual({});
+    expect(executeCommand).not.toHaveBeenCalled();
+
+    expect(handleRibbonCommand(ctx, "home.font.clearFormatting")).toBe(true);
+    expect(executeCommand).not.toHaveBeenCalled();
+
+    expect(handleRibbonCommand(ctx, "home.alignment.orientation")).toBe(true);
+    expect(executeCommand).not.toHaveBeenCalled();
+
+    expect(handleRibbonCommand(ctx, "home.number.numberFormat")).toBe(true);
+    expect(handleRibbonCommand(ctx, "home.number.moreFormats")).toBe(true);
+    expect(executeCommand).not.toHaveBeenCalled();
+
+    // Some legacy trigger ids route to canonical commands for opening pickers.
+    expect(handleRibbonCommand(ctx, "home.font.fillColor")).toBe(true);
+    expect(executeCommand).toHaveBeenLastCalledWith("format.fillColor");
+
+    expect(handleRibbonCommand(ctx, "home.font.fontColor")).toBe(true);
+    expect(executeCommand).toHaveBeenLastCalledWith("format.fontColor");
+
+    expect(handleRibbonCommand(ctx, "home.font.fontSize")).toBe(true);
+    expect(executeCommand).toHaveBeenLastCalledWith("format.fontSize.set");
+  });
 });

@@ -617,6 +617,9 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
   }
 
   switch (commandId) {
+    case "home.font.fontName":
+      // Dropdown container id; its menu items execute `format.fontName.*` commands.
+      return true;
     case "home.font.borders":
       // This command is a dropdown with menu items; the top-level command is not expected
       // to fire when the menu is present. Keep this as a fallback.
@@ -630,6 +633,12 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       return true;
     case "home.font.fontSize":
       ctx.executeCommand?.("format.fontSize.set");
+      return true;
+    case "home.font.clearFormatting":
+      // Dropdown container id; its menu items execute `format.clear*` commands.
+      return true;
+    case "home.alignment.orientation":
+      // Dropdown container id; its menu items execute `format.textRotation.*` commands.
       return true;
     case "home.alignment.alignLeft":
       ctx.applyFormattingToSelection("Align left", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "left"));
@@ -919,6 +928,12 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
     case "format.openFormatCells":
       ctx.executeCommand?.("format.openFormatCells");
       ctx.openFormatCells?.();
+      return true;
+    case "home.number.numberFormat":
+      // Dropdown container id; its menu items execute `format.numberFormat.*` commands.
+      return true;
+    case "home.number.moreFormats":
+      // Dropdown container id; its menu items execute `format.openFormatCells` / custom format prompts.
       return true;
 
     case "home.editing.sortFilter.sortAtoZ":
