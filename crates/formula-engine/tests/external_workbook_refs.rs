@@ -378,10 +378,6 @@ fn precedents_include_dynamic_external_precedents_from_indirect() {
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
-    // The bytecode backend currently rejects external workbook references produced by INDIRECT.
-    // Disable bytecode so we exercise the AST evaluator's external-reference behavior (and ensure
-    // precedents are tracked for invalidation).
-    engine.set_bytecode_enabled(false);
     engine.set_external_value_provider(Some(provider));
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
@@ -680,8 +676,6 @@ fn external_sheet_invalidation_dirties_dynamic_external_indirect_dependents() {
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
 
     let mut engine = Engine::new();
-    // Bytecode INDIRECT rejects external workbook refs, so use the AST backend here.
-    engine.set_bytecode_enabled(false);
     engine.set_external_value_provider(Some(provider));
     engine.set_external_refs_volatile(false);
     engine
@@ -806,8 +800,6 @@ fn external_sheet_invalidation_dirties_dynamic_external_dependents_from_indirect
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
 
     let mut engine = Engine::new();
-    // Bytecode INDIRECT rejects external workbook refs, so use the AST backend here.
-    engine.set_bytecode_enabled(false);
     engine.set_external_value_provider(Some(provider.clone()));
     engine.set_calc_settings(CalcSettings {
         calculation_mode: CalculationMode::Automatic,
