@@ -590,6 +590,33 @@ mod tests {
     }
 
     #[test]
+    fn pivot_field_ref_from_unstructured_matches_serde_string_rules() {
+        for (raw, expected) in [
+            (
+                "Region",
+                PivotFieldRef::CacheFieldName("Region".to_string()),
+            ),
+            (
+                "Sales[Amount]",
+                PivotFieldRef::DataModelColumn {
+                    table: "Sales".to_string(),
+                    column: "Amount".to_string(),
+                },
+            ),
+            (
+                "[Total Sales]",
+                PivotFieldRef::DataModelMeasure("Total Sales".to_string()),
+            ),
+        ] {
+            assert_eq!(PivotFieldRef::from_unstructured(raw), expected);
+
+            // Ensure the helper stays in sync with the serde string behavior.
+            let decoded: PivotFieldRef = serde_json::from_value(serde_json::json!(raw)).unwrap();
+            assert_eq!(decoded, expected);
+        }
+    }
+
+    #[test]
     fn pivot_field_struct_accepts_legacy_string_source_field() {
         let raw = serde_json::json!({
             "sourceField": "Region",
