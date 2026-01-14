@@ -143,6 +143,35 @@ describe("FormulaBarView fx function picker", () => {
     }
   });
 
+  it("uses getLocaleId() to localize results (even if document.lang differs)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "en-US";
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    try {
+      const view = new FormulaBarView(host, { onCommit: () => {} }, { getLocaleId: () => "de-DE" });
+      view.setActiveCell({ address: "A1", input: "", value: null });
+
+      const fxButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-fx-button"]')!;
+      fxButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      // Empty-query list is localized (default/common functions).
+      expect(host.querySelector<HTMLElement>('[data-testid="formula-function-picker-item-SUMME"]')).toBeTruthy();
+
+      // Non-empty search also uses the override locale.
+      const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+      pickerInput.value = "zähl";
+      pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+      expect(host.querySelector<HTMLElement>('[data-testid="formula-function-picker-item-ZÄHLENWENN"]')).toBeTruthy();
+    } finally {
+      host.remove();
+      document.documentElement.lang = prevLang;
+    }
+  });
+
   it("navigates function results with arrow keys", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

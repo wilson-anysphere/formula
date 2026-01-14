@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildCommandPaletteSections } from "./commandPaletteSearch.js";
+import { buildCommandPaletteSections, searchFunctionResults } from "./commandPaletteSearch.js";
 
 describe("command palette function search (localized function names)", () => {
   it("returns localized function names when document.lang is a supported formula locale (de-DE SUMME)", () => {
@@ -44,5 +44,16 @@ describe("command palette function search (localized function names)", () => {
       document.documentElement.lang = prevLang;
     }
   });
-});
 
+  it("respects the explicit localeId override (even when document.lang differs)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "en-US";
+
+    try {
+      const results = searchFunctionResults("zähl", { limit: 50, localeId: "de-DE" });
+      expect(results.map((r) => r.name)).toContain("ZÄHLENWENN");
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
+});
