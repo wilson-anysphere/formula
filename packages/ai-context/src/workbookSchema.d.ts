@@ -7,6 +7,11 @@ export interface WorkbookSchemaRect {
   c1: number;
 }
 
+export type WorkbookSchemaRectInput =
+  | WorkbookSchemaRect
+  | { startRow: number; startCol: number; endRow: number; endCol: number }
+  | { start: { row: number; col: number }; end: { row: number; col: number } };
+
 export interface WorkbookSchemaSheet {
   name: string;
 }
@@ -47,8 +52,8 @@ export function extractWorkbookSchema(
       origin?: { row: number; col: number };
       getCell?: (row: number, col: number) => unknown;
     }>;
-    tables?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRect }>;
-    namedRanges?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRect }>;
+    tables?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRectInput }>;
+    namedRanges?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRectInput }>;
   },
   options?: { maxAnalyzeRows?: number; maxAnalyzeCols?: number; signal?: AbortSignal },
 ): WorkbookSchemaSummary;
