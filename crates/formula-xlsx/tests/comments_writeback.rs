@@ -309,3 +309,50 @@ fn comments_writeback_updates_threaded_comment_when_rels_type_is_noncanonical() 
         );
     }
 }
+
+#[test]
+fn comments_writeback_works_when_worksheet_ids_change_after_load() {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/comments.xlsx");
+    let bytes = fs::read(fixture_path).expect("fixture workbook should be readable");
+
+    let mut doc = load_from_bytes(&bytes).expect("load_from_bytes");
+
+    // Simulate a caller reconstructing the workbook model and ending up with different internal
+    // WorksheetId values while keeping the stable XLSX identity fields (`xlsx_rel_id` / `xlsx_sheet_id`)
+    // intact. The writer should map back to the preserved metadata using those XLSX identity fields.
+    let old_sheet_id = doc.workbook.sheets[0].id;
+    let new_sheet_id = old_sheet_id.saturating_add(1000);
+    doc.workbook.sheets[0].id = new_sheet_id;
+
+    let sheet = doc
+        .workbook
+        .sheet_mut(new_sheet_id)
+        .expect("fixture sheet should exist");
+
+    let note_id = sheet
+        .iter_comments()
+        .find(|(_, c)| c.kind == CommentKind::Note)
+        .map(|(_, c)| c.id.clone())
+        .expect("fixture should contain legacy note");
+    sheet
+        .update_comment(
+            &note_id,
+            CommentPatch {
+                content: Some("Updated after sheet id change".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("update legacy note");
+
+    let saved = doc.save_to_vec().expect("save_to_vec");
+
+    let pkg = XlsxPackage::from_bytes(&saved).expect("roundtrip should parse as xlsx package");
+    let legacy = pkg
+        .part("xl/comments1.xml")
+        .expect("legacy comments part should exist");
+    let legacy = std::str::from_utf8(legacy).expect("comments xml should be utf-8");
+    assert!(
+        legacy.contains("Updated after sheet id change"),
+        "expected updated legacy note content, got:\n{legacy}"
+    );
+}
