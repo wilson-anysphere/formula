@@ -385,3 +385,57 @@ fn rels_id_renumbering_with_removed_relationship_does_not_emit_attribute_noise_f
         report.differences
     );
 }
+
+#[test]
+fn cli_output_for_rels_id_reuse_does_not_emit_attribute_noise() {
+    let expected_zip = zip_bytes(&[(
+        "xl/_rels/workbook.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#,
+    )]);
+
+    let actual_zip = zip_bytes(&[(
+        "xl/_rels/workbook.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#,
+    )]);
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let original_path = tempdir.path().join("original.xlsx");
+    let modified_path = tempdir.path().join("modified.xlsx");
+    std::fs::write(&original_path, expected_zip).unwrap();
+    std::fs::write(&modified_path, actual_zip).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&original_path)
+        .arg(&modified_path)
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit due to CRITICAL diffs\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("kind: relationship_id_changed"),
+        "expected CLI output to include relationship_id_changed, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("child_missing") && !stdout.contains("child_added"),
+        "expected no child_* relationship noise, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("attribute_changed")
+            && !stdout.contains("attribute_missing")
+            && !stdout.contains("attribute_added"),
+        "expected no attribute_* relationship noise, got:\n{stdout}"
+    );
+}
