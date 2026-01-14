@@ -138,3 +138,32 @@ fn noop_save_preserves_cols_when_style_xf_is_zero() -> Result<(), Box<dyn std::e
 
     Ok(())
 }
+
+#[test]
+fn noop_save_preserves_cols_when_style_is_zero_default() -> Result<(), Box<dyn std::error::Error>> {
+    // Excel's default xf is typically stored at index 0. Some producers still emit
+    // `customFormat="1" style="0"` in `<col>` elements even though it has no semantic effect.
+    //
+    // Ensure we treat that as equivalent to "no style override" so no-op saves preserve the
+    // original sheet XML bytes.
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="2" max="2" customFormat="1" style="0"/>
+  </cols>
+  <sheetData/>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(sheet_xml, STYLES_XML);
+    let doc = load_from_bytes(&bytes)?;
+    let saved = doc.save_to_vec()?;
+
+    let orig_sheet = zip_part(&bytes, "xl/worksheets/sheet1.xml");
+    let saved_sheet = zip_part(&saved, "xl/worksheets/sheet1.xml");
+    assert_eq!(
+        saved_sheet, orig_sheet,
+        "expected no-op save to preserve sheet XML bytes"
+    );
+
+    Ok(())
+}

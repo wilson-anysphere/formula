@@ -907,7 +907,7 @@ fn build_parts(
             let orig_xml = std::str::from_utf8(orig).map_err(|e| {
                 WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             })?;
-            let original_cols = parse_cols_xml_props(orig_xml)?;
+            let original_cols = parse_cols_xml_props(orig_xml, &styles_editor)?;
             desired != original_cols
         } else {
             false
@@ -2971,7 +2971,10 @@ fn parse_col_properties(
     Ok(map)
 }
 
-fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteError> {
+fn parse_cols_xml_props(
+    xml: &str,
+    styles_editor: &XlsxStylesEditor,
+) -> Result<BTreeMap<u32, ColXmlProps>, WriteError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -3027,7 +3030,19 @@ fn parse_cols_xml_props(xml: &str) -> Result<BTreeMap<u32, ColXmlProps>, WriteEr
                     width
                 };
 
-                let style_xf = if custom_format == Some(false) { None } else { style };
+                let style_xf = if custom_format == Some(false) {
+                    None
+                } else {
+                    style.and_then(|xf| {
+                        // Treat references to the default style as "no override" so no-op saves do
+                        // not spuriously rewrite `<cols>` when a producer emits redundant
+                        // `style="0"` (or any other xf index that maps to the default style).
+                        //
+                        // NOTE: Some producers place custom xfs at index 0; in that case
+                        // `style_id_for_xf(0)` will be non-zero and we preserve `style="0"`.
+                        (styles_editor.style_id_for_xf(xf) != 0).then_some(xf)
+                    })
+                };
 
                 if width.is_none() && !hidden && outline_level == 0 && !collapsed && style_xf.is_none()
                 {
