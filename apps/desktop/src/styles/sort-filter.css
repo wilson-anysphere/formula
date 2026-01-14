@@ -10,7 +10,7 @@
 .formula-sort-filter__input,
 .formula-sort-filter__select {
   width: 100%;
-  padding: 6px 10px;
+  padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   background: var(--bg-primary);
   color: var(--text-primary);
   border: 1px solid var(--border);
@@ -36,7 +36,7 @@
 
 .formula-sort-filter__checkbox {
   accent-color: var(--accent);
-  margin: 0;
+  margin: var(--space-0);
 }
 
 .formula-sort-filter__checkbox:focus-visible {
@@ -47,7 +47,7 @@
 .formula-sort-filter__button {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 6px 10px;
+  padding: var(--space-3) calc(var(--space-4) + var(--space-1));
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
@@ -94,14 +94,14 @@
 .formula-sort-filter__controls {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .formula-sort-filter__row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-primary);
@@ -135,63 +135,63 @@
 
 .formula-filter-dropdown {
   width: 280px;
-  padding: 8px;
+  padding: var(--space-4);
   background: var(--bg-primary);
   color: var(--text-primary);
 }
 
 .formula-filter-dropdown__title {
   font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-4);
 }
 
 .formula-filter-dropdown__search {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-4);
 }
 
 .formula-filter-dropdown__values {
   max-height: 220px;
   overflow: auto;
-  padding: 4px;
+  padding: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
 }
 
 .formula-filter-dropdown__controls {
-  margin-top: 8px;
+  margin-top: var(--space-4);
 }
 
 /* --- SortDialog ----------------------------------------------------------- */
 
 .formula-sort-dialog {
   width: 420px;
-  padding: 12px;
+  padding: var(--space-5);
   background: var(--bg-primary);
   color: var(--text-primary);
 }
 
 .formula-sort-dialog__title {
   font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-4);
 }
 
 .formula-sort-dialog__header-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
   cursor: pointer;
 }
 
 .formula-sort-dialog__levels {
   display: grid;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .formula-sort-dialog__level {
   display: flex;
-  gap: 8px;
+  gap: var(--space-4);
   align-items: center;
 }
 
@@ -201,7 +201,7 @@
 }
 
 .formula-sort-dialog__controls {
-  margin-top: 16px;
+  margin-top: var(--space-6);
 }
 
 /* --- AutoFilterDropdown --------------------------------------------------- */
@@ -216,7 +216,7 @@
 }
 
 .formula-table-filter-dropdown__search {
-  padding: 6px;
+  padding: var(--space-3);
   border-bottom: 1px solid var(--formula-grid-line, var(--border));
 }
 
@@ -229,20 +229,20 @@
 .formula-table-filter-dropdown__list {
   max-height: 240px;
   overflow: auto;
-  padding: 6px;
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .formula-table-filter-dropdown__empty {
-  padding: 8px;
+  padding: var(--space-4);
   color: var(--formula-grid-header-text, var(--text-secondary));
   font-size: 12px;
 }
 
 .formula-table-filter-dropdown__controls {
-  padding: 6px;
+  padding: var(--space-3);
   border-top: 1px solid var(--formula-grid-line, var(--border));
 }
 
