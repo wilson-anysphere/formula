@@ -47,6 +47,11 @@ fn privileged_ipc_commands_have_string_length_caps() {
     );
     assert_fn_has_ipc_string_cap(
         commands_src,
+        "pub fn inspect_workbook_encryption",
+        &["MAX_IPC_PATH_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
         "pub async fn save_workbook",
         &["MAX_IPC_PATH_BYTES"],
     );

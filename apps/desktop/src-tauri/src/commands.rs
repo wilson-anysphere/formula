@@ -1763,6 +1763,7 @@ impl<'de> Deserialize<'de> for IpcPivotFieldRef {
         deserializer.deserialize_any(PivotFieldRefVisitor)
     }
 }
+
 impl From<IpcPivotFieldRef> for PivotFieldRef {
     fn from(value: IpcPivotFieldRef) -> Self {
         match value {
@@ -2010,8 +2011,10 @@ pub struct PivotTableSummary {
 use crate::file_io::read_workbook;
 #[cfg(feature = "desktop")]
 use crate::ipc_origin;
+#[cfg(any(feature = "desktop", test))]
+use crate::ipc_limits::MAX_IPC_PATH_BYTES;
 #[cfg(feature = "desktop")]
-use crate::ipc_limits::{MAX_IPC_PATH_BYTES, MAX_IPC_URL_BYTES};
+use crate::ipc_limits::MAX_IPC_URL_BYTES;
 #[cfg(feature = "desktop")]
 use crate::macro_trust::SharedMacroTrustStore;
 #[cfg(feature = "desktop")]
@@ -2261,11 +2264,14 @@ fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, Str
 /// - `Err(...)` on I/O failures or unsupported/invalid encryption info formats.
 #[cfg(any(feature = "desktop", test))]
 #[cfg_attr(feature = "desktop", tauri::command)]
-pub fn inspect_workbook_encryption(path: String) -> Result<Option<EncryptionSummaryDto>, String> {
+pub fn inspect_workbook_encryption(
+    path: LimitedString<MAX_IPC_PATH_BYTES>,
+) -> Result<Option<EncryptionSummaryDto>, String> {
     use std::io::{Read, Seek};
 
     const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
+    let path = path.into_inner();
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
     let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
         std::path::Path::new(&path),
@@ -9586,7 +9592,9 @@ mod tests {
 
         std::fs::write(&path, &ole_bytes).expect("write encrypted workbook");
 
-        let summary = inspect_workbook_encryption(path.to_string_lossy().to_string())
+        let summary = inspect_workbook_encryption(LimitedString::<MAX_IPC_PATH_BYTES>(
+            path.to_string_lossy().to_string(),
+        ))
             .expect("inspect_workbook_encryption should succeed")
             .expect("expected encryption summary");
 
@@ -9637,7 +9645,9 @@ mod tests {
 
         std::fs::write(&path, &ole_bytes).expect("write encrypted workbook");
 
-        let summary = inspect_workbook_encryption(path.to_string_lossy().to_string())
+        let summary = inspect_workbook_encryption(LimitedString::<MAX_IPC_PATH_BYTES>(
+            path.to_string_lossy().to_string(),
+        ))
             .expect("inspect_workbook_encryption should succeed")
             .expect("expected encryption summary");
 
