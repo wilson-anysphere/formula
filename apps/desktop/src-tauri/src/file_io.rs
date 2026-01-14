@@ -990,6 +990,20 @@ fn read_encrypted_ooxml_workbook_blocking(
     read_xlsx_or_xlsm_from_bytes(path, origin_xlsx_bytes)
 }
 
+fn validate_workbook_open_size(path: &Path) -> anyhow::Result<u64> {
+    let size = std::fs::metadata(path)
+        .with_context(|| format!("stat workbook {:?}", path))?
+        .len();
+    let max = crate::resource_limits::max_workbook_open_bytes();
+    if size > max {
+        anyhow::bail!(
+            "File size {size} exceeds maximum allowed workbook open size ({max} bytes): `{}`",
+            path.display()
+        );
+    }
+    Ok(size)
+}
+
 pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
     read_workbook_blocking_with_password(path, None)
 }
@@ -1024,6 +1038,8 @@ pub fn read_workbook_blocking_with_password(
         }
         suspicious <= buf.len() / 50
     }
+
+    validate_workbook_open_size(path)?;
 
     let mut file =
         std::fs::File::open(path).with_context(|| format!("open workbook {:?}", path))?;
@@ -1095,6 +1111,7 @@ pub fn read_xlsx_blocking_with_password(
     path: &Path,
     password: Option<&str>,
 ) -> anyhow::Result<Workbook> {
+    validate_workbook_open_size(path)?;
     if let Ok(true) = is_encrypted_ooxml_workbook(path) {
         return read_encrypted_ooxml_workbook_blocking(path, password);
     }
@@ -1382,6 +1399,8 @@ fn rich_model_cell_value_to_scalar(value: &ModelCellValue) -> Option<CellScalar>
 }
 
 pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    validate_workbook_open_size(path)?;
+
     let file = std::fs::File::open(path).with_context(|| format!("open csv {:?}", path))?;
     let reader = BufReader::new(file);
     // Default to Excel-like behavior: attempt UTF-8 first, then fall back to Windows-1252.
@@ -1429,6 +1448,8 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
 
 #[cfg(feature = "parquet")]
 pub fn read_parquet_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    validate_workbook_open_size(path)?;
+
     let table = formula_columnar::parquet::read_parquet_to_columnar(path)
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .with_context(|| format!("import parquet {:?}", path))?;

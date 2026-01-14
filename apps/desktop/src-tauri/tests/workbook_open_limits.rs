@@ -1,6 +1,13 @@
 use desktop::file_io::read_xlsx_blocking;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+static ENV_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn env_mutex() -> &'static Mutex<()> {
+    ENV_MUTEX.get_or_init(|| Mutex::new(()))
+}
 
 struct EnvVarGuard {
     key: &'static str,
@@ -26,6 +33,7 @@ impl Drop for EnvVarGuard {
 
 #[test]
 fn xlsx_open_skips_origin_bytes_when_over_limit() {
+    let _lock = env_mutex().lock().unwrap();
     let _guard = EnvVarGuard::set("FORMULA_MAX_ORIGIN_XLSX_BYTES", "1");
 
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -42,3 +50,17 @@ fn xlsx_open_skips_origin_bytes_when_over_limit() {
     );
 }
 
+#[test]
+fn xlsx_open_rejects_when_over_open_bytes_limit() {
+    let _lock = env_mutex().lock().unwrap();
+    let _guard = EnvVarGuard::set("FORMULA_MAX_WORKBOOK_OPEN_BYTES", "1");
+
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../fixtures/xlsx/basic/basic.xlsx");
+    let err = read_xlsx_blocking(&fixture).expect_err("expected size limit error");
+    assert!(
+        err.to_string()
+            .contains("maximum allowed workbook open size"),
+        "expected error to mention open size limit, got: {err}"
+    );
+}

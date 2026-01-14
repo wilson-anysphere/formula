@@ -71,6 +71,13 @@ pub const MAX_MARKETPLACE_PACKAGE_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
 /// allocations.
 pub const MAX_MARKETPLACE_HEADER_BYTES: usize = 4 * 1024; // 4 KiB
 
+/// Maximum on-disk workbook size (in bytes) allowed for `open_workbook`.
+///
+/// Large spreadsheet files can lead to unbounded memory/CPU usage during parsing (even when the
+/// package itself is streamed) due to decompression and intermediate allocations. This serves as a
+/// coarse backstop against accidental opens and malicious inputs.
+pub const MAX_WORKBOOK_OPEN_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
+
 /// Maximum size (in bytes) of the XLSX/XLSM package we will retain in
 /// [`crate::file_io::Workbook::origin_xlsx_bytes`].
 ///
@@ -81,6 +88,26 @@ pub const MAX_MARKETPLACE_HEADER_BYTES: usize = 4 * 1024; // 4 KiB
 /// When a workbook exceeds this limit we still open it, but we *do not* keep the raw bytes.
 /// Subsequent saves fall back to the regeneration-based code path.
 pub const MAX_ORIGIN_XLSX_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
+
+/// Maximum number of bytes allowed for `open_workbook`.
+///
+/// This reads the `FORMULA_MAX_WORKBOOK_OPEN_BYTES` environment variable.
+/// - In debug builds we allow any value (so developers can test both branches).
+/// - In release builds we only honor stricter values (tightening); relaxing the limit is ignored.
+pub fn max_workbook_open_bytes() -> u64 {
+    let default = MAX_WORKBOOK_OPEN_BYTES;
+    let Some(value) = std::env::var("FORMULA_MAX_WORKBOOK_OPEN_BYTES")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    else {
+        return default;
+    };
+    if cfg!(debug_assertions) {
+        value
+    } else {
+        value.min(default)
+    }
+}
 
 /// Maximum number of bytes allowed for `Workbook::origin_xlsx_bytes`.
 ///
