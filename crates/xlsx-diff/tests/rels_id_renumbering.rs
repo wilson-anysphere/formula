@@ -380,6 +380,15 @@ fn rels_id_renumbering_with_removed_relationship_does_not_emit_attribute_noise_f
         report.differences
     );
     assert!(
+        report.differences.iter().any(|d| {
+            d.kind == "relationship_missing"
+                && d.path.contains("relationships/calcChain")
+                && d.path.contains("xl/calcChain.xml")
+        }),
+        "expected a relationship_missing diff for the calcChain relationship, got {:#?}",
+        report.differences
+    );
+    assert!(
         !report.differences.iter().any(|d| d.kind.starts_with("attribute_")),
         "did not expect attribute diffs for reused relationship ids, got {:#?}",
         report.differences
