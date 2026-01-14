@@ -1852,16 +1852,18 @@ pub enum StandardAlgId {
     Aes128,
     Aes192,
     Aes256,
+    Rc4,
     Unknown(u32),
 }
 
 impl StandardAlgId {
-    /// Canonical display name for known AES variants (e.g. `AES-256`).
+    /// Canonical display name for known Standard cipher variants (e.g. `AES-256`).
     pub fn as_display_name(&self) -> Option<&'static str> {
         match self {
             StandardAlgId::Aes128 => Some("AES-128"),
             StandardAlgId::Aes192 => Some("AES-192"),
             StandardAlgId::Aes256 => Some("AES-256"),
+            StandardAlgId::Rc4 => Some("RC4"),
             StandardAlgId::Unknown(_) => None,
         }
     }
@@ -1873,6 +1875,7 @@ impl StandardAlgId {
             0x0000_660E => Self::Aes128,
             0x0000_660F => Self::Aes192,
             0x0000_6610 => Self::Aes256,
+            0x0000_6801 => Self::Rc4,
             other => Self::Unknown(other),
         }
     }
@@ -1881,8 +1884,8 @@ impl StandardAlgId {
 impl fmt::Display for StandardAlgId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            StandardAlgId::Aes128 | StandardAlgId::Aes192 | StandardAlgId::Aes256 => {
-                f.write_str(self.as_display_name().expect("known AES variant"))
+            StandardAlgId::Aes128 | StandardAlgId::Aes192 | StandardAlgId::Aes256 | StandardAlgId::Rc4 => {
+                f.write_str(self.as_display_name().expect("known Standard cipher variant"))
             }
             StandardAlgId::Unknown(raw) => write!(f, "0x{raw:08X}"),
         }
@@ -1972,7 +1975,7 @@ fn round_up_to_multiple(n: usize, multiple: usize) -> Option<usize> {
     n.checked_add(multiple - rem)
 }
 
-/// Validate an MS-OFFCRYPTO `EncryptedPackage` stream for Standard (CryptoAPI) encryption.
+/// Validate an MS-OFFCRYPTO `EncryptedPackage` stream for **Standard AES** (CryptoAPI) encryption.
 ///
 /// This is intentionally lightweight and only checks framing invariants:
 /// - the 8-byte `original_size` prefix is present
@@ -2214,7 +2217,7 @@ pub fn decrypt_encrypted_package_ecb(
 }
 
 /// Decrypt a password-protected ECMA-376 (OOXML) file which uses MS-OFFCRYPTO "Standard"
-/// (CryptoAPI / AES) encryption.
+/// (CryptoAPI) encryption.
 ///
 /// `data` must be an OLE Compound File containing the `EncryptionInfo` and `EncryptedPackage`
 /// streams.
@@ -2273,21 +2276,29 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
     // Ensure `EncryptedPackage` exists before doing expensive password key derivation.
     ensure_stream_exists(&mut ole, "EncryptedPackage")?;
 
-    // Derived keys are sensitive; keep them in a `Zeroizing` buffer so failed password attempts
-    // don't leave key material lingering in heap allocations.
-    let key = Zeroizing::new(make_key_from_password(
-        password,
-        &verifier.salt,
-        header.key_size_bits,
-    )?);
-    verify_password(
-        key.as_slice(),
-        &verifier.encrypted_verifier,
-        &verifier.encrypted_verifier_hash,
-    )?;
+    let info = StandardEncryptionInfo { header, verifier };
 
-    let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
-    decrypt_encrypted_package_ecb(key.as_slice(), &encrypted_package)
+    match info.header.alg_id {
+        CALG_RC4 => {
+            let h = standard_rc4::verify_password(&info, password)?;
+            let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
+            standard_rc4::decrypt_encrypted_package_with_h(
+                &info,
+                &encrypted_package,
+                h.as_slice(),
+            )
+        }
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            let key = standard_derive_key_zeroizing(&info, password)?;
+            standard_verify_key(&info, key.as_slice())?;
+
+            let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
+            encrypted_package::decrypt_standard_encrypted_package(key.as_slice(), &encrypted_package)
+        }
+        other => Err(OffcryptoError::UnsupportedAlgorithm(format!(
+            "algId=0x{other:08x}"
+        ))),
+    }
 }
 
 /// ECMA-376 Standard Encryption password→key derivation.
@@ -2475,13 +2486,29 @@ fn decrypt_standard_encrypted_package_with_password(
     encrypted_package: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
-    validate_standard_encryption_info(info)?;
-    validate_standard_encrypted_package_stream(encrypted_package)?;
+    let out = match info.header.alg_id {
+        CALG_RC4 => {
+            // Standard/CryptoAPI RC4 uses a different key derivation and stream decryption mode
+            // than Standard AES. Delegate to the dedicated RC4 implementation.
+            standard_rc4::decrypt_encrypted_package(info, encrypted_package, password)?
+        }
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            validate_standard_encryption_info(info)?;
+            validate_standard_encrypted_package_stream(encrypted_package)?;
 
-    let key = standard_derive_key(info, password)?;
-    standard_verify_key(info, &key)?;
+            // Derived keys are sensitive; keep them in a `Zeroizing` buffer so failed password
+            // attempts don't leave key material lingering in heap allocations.
+            let key = standard_derive_key_zeroizing(info, password)?;
+            standard_verify_key(info, key.as_slice())?;
 
-    let out = encrypted_package::decrypt_standard_encrypted_package(&key, encrypted_package)?;
+            encrypted_package::decrypt_standard_encrypted_package(key.as_slice(), encrypted_package)?
+        }
+        other => {
+            return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+                "algId=0x{other:08x}"
+            )))
+        }
+    };
 
     if looks_like_zip_container(&out) {
         Ok(out)
@@ -2534,18 +2561,7 @@ pub fn decrypt_ooxml_standard(
     };
 
     let info = StandardEncryptionInfo { header, verifier };
-    let key = standard_derive_key_zeroizing(&info, password)?;
-    standard_verify_key(&info, key.as_slice())?;
-    let decrypted = decrypt_standard_encrypted_package(key.as_slice(), encrypted_package)?;
-
-    // Standard encryption verifier checks protect against wrong passwords, but in practice we see
-    // files in the wild that require additional validation (e.g. different schemes). The decrypted
-    // output should be an OOXML ZIP/OPC package beginning with `PK`.
-    if decrypted.len() < 2 || &decrypted[..2] != b"PK" {
-        return Err(OffcryptoError::InvalidPassword);
-    }
-
-    Ok(decrypted)
+    decrypt_standard_encrypted_package_with_password(&info, encrypted_package, password)
 }
 
 fn hash_output_len(algo: HashAlgorithm) -> usize {
@@ -3194,9 +3210,7 @@ fn decrypt_standard_stream(
     encrypted_package: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
-    let key = standard_derive_key(&info, password)?;
-    standard_verify_key(&info, &key)?;
-    decrypt_encrypted_package_ecb(&key, encrypted_package)
+    decrypt_standard_encrypted_package_with_password(&info, encrypted_package, password)
 }
 
 /// Decrypt an MS-OFFCRYPTO `EncryptedPackage` stream using the provided `EncryptionInfo` bytes.
@@ -4104,6 +4118,7 @@ mod tests {
     fn display_helpers_use_canonical_names() {
         assert_eq!(HashAlgorithm::Sha512.to_string(), "SHA512");
         assert_eq!(StandardAlgId::Aes256.to_string(), "AES-256");
+        assert_eq!(StandardAlgId::Rc4.to_string(), "RC4");
         assert_eq!(StandardAlgId::Unknown(0xDEAD_BEEF).to_string(), "0xDEADBEEF");
     }
 }

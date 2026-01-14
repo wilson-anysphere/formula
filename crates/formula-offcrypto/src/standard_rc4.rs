@@ -73,13 +73,20 @@ pub fn verify_password(
     Ok(h)
 }
 
-/// Decrypt an `EncryptedPackage` stream for Standard RC4 encryption.
-pub fn decrypt_encrypted_package(
+/// Decrypt an `EncryptedPackage` stream for Standard RC4 encryption using a precomputed base hash.
+///
+/// `h` must be the CryptoAPI base hash returned by [`verify_password`].
+pub(crate) fn decrypt_encrypted_package_with_h(
     info: &StandardEncryptionInfo,
     encrypted_package_stream: &[u8],
-    password: &str,
+    h: &[u8],
 ) -> Result<Vec<u8>, OffcryptoError> {
-    let h = verify_password(info, password)?;
+    if info.header.alg_id != CALG_RC4 {
+        return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+            "algId=0x{:08x}",
+            info.header.alg_id
+        )));
+    }
     let hash_alg = hash_algorithm_from_alg_id_hash(info.header.alg_id_hash)?;
 
     let header = parse_encrypted_package_header(encrypted_package_stream)?;
@@ -112,8 +119,7 @@ pub fn decrypt_encrypted_package(
         out[out_offset..out_offset + chunk_len]
             .copy_from_slice(&encrypted_package_stream[in_offset..end]);
 
-        let key =
-            cryptoapi::rc4_key_for_block(&h, block_index, info.header.key_size_bits, hash_alg)?;
+        let key = cryptoapi::rc4_key_for_block(h, block_index, info.header.key_size_bits, hash_alg)?;
         let mut rc4 = Rc4::new(key.as_slice());
         rc4.apply_keystream(&mut out[out_offset..out_offset + chunk_len]);
 
@@ -126,4 +132,14 @@ pub fn decrypt_encrypted_package(
     }
 
     Ok(out)
+}
+
+/// Decrypt an `EncryptedPackage` stream for Standard RC4 encryption.
+pub fn decrypt_encrypted_package(
+    info: &StandardEncryptionInfo,
+    encrypted_package_stream: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let h = verify_password(info, password)?;
+    decrypt_encrypted_package_with_h(info, encrypted_package_stream, h.as_slice())
 }
