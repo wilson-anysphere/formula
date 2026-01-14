@@ -291,6 +291,10 @@ default to keep installer size down. The first time the user runs a Pyodide-back
 desktop backend downloads + verifies the pinned Pyodide distribution into the app cache directory
 and serves it via the `pyodide://` protocol.
 
+Security note: in packaged desktop builds, `__pyodideIndexURL` overrides are ignored unless they
+point at a local origin (`pyodide://...` or `/pyodide/...`). This avoids loading an arbitrary Python
+runtime from the network.
+
 If you need to bundle Pyodide into `dist/` (for offline development/CI/preview), set
 `FORMULA_BUNDLE_PYODIDE_ASSETS=1` when running `pnpm -C apps/desktop build` (this runs
 `scripts/ensure-pyodide-assets.mjs` and copies the assets into `dist/`).

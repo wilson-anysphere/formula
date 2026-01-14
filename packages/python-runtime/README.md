@@ -108,6 +108,8 @@ For the `apps/desktop` Vite webview in this repository:
 - Packaged desktop builds download Pyodide assets on-demand into an app-data
   cache and serve them via the `pyodide://` protocol (so they can be embedded
   under COEP).
+- Security note: in packaged desktop builds, `__pyodideIndexURL` overrides are
+  ignored unless they point at a local origin (`pyodide://...` or `/pyodide/...`).
 - To bundle Pyodide into `dist/` for offline development/CI, run desktop builds
   with `FORMULA_BUNDLE_PYODIDE_ASSETS=1` (this runs
   `apps/desktop/scripts/ensure-pyodide-assets.mjs` and copies the assets into
