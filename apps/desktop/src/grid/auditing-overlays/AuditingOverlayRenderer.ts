@@ -83,16 +83,23 @@ export class AuditingOverlayRenderer {
     const { getCellRect } = options ?? {};
     if (typeof getCellRect !== "function") return;
 
+    const precedentOptions = {
+      fill: withAlpha(this.precedentFill, this.fillAlpha),
+      stroke: withAlpha(this.precedentStroke, this.strokeAlpha),
+      strokeWidth: this.strokeWidth,
+    };
+    const dependentOptions = {
+      fill: withAlpha(this.dependentFill, this.fillAlpha),
+      stroke: withAlpha(this.dependentStroke, this.strokeAlpha),
+      strokeWidth: this.strokeWidth,
+    };
+
     for (const addr of highlights.precedents) {
       const parsed = parseCellAddress(addr);
       if (!parsed) continue;
       const rect = getCellRect(parsed.row, parsed.col);
       if (!rect) continue;
-      drawCellHighlight(ctx, rect, {
-        fill: withAlpha(this.precedentFill, this.fillAlpha),
-        stroke: withAlpha(this.precedentStroke, this.strokeAlpha),
-        strokeWidth: this.strokeWidth,
-      });
+      drawCellHighlight(ctx, rect, precedentOptions);
     }
 
     for (const addr of highlights.dependents) {
@@ -100,11 +107,7 @@ export class AuditingOverlayRenderer {
       if (!parsed) continue;
       const rect = getCellRect(parsed.row, parsed.col);
       if (!rect) continue;
-      drawCellHighlight(ctx, rect, {
-        fill: withAlpha(this.dependentFill, this.fillAlpha),
-        stroke: withAlpha(this.dependentStroke, this.strokeAlpha),
-        strokeWidth: this.strokeWidth,
-      });
+      drawCellHighlight(ctx, rect, dependentOptions);
     }
   }
 }

@@ -126,6 +126,9 @@ export class PresenceRenderer {
     ctx.lineWidth = this.cursorStrokeWidth;
     ctx.textBaseline = "top";
 
+    /** @type {Array<{ x: number; y: number; width: number; height: number }>} */
+    const rects = [];
+
     for (const presence of presences) {
       const color = presence.color ?? "#4c8bf5";
 
@@ -133,8 +136,7 @@ export class PresenceRenderer {
         ctx.fillStyle = color;
         ctx.strokeStyle = color;
 
-        /** @type {Array<{ x: number; y: number; width: number; height: number }>} */
-        const rects = [];
+        rects.length = 0;
         for (const selection of presence.selections) {
           const rect = rectForRange(getCellRect, selection);
           if (!rect) continue;
