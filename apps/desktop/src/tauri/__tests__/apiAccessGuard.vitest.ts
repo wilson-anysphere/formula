@@ -694,6 +694,10 @@ describe("tauri/api guardrails", () => {
 
       // Strip comments so commented-out `__TAURI__` API access cannot satisfy or fail this guardrail.
       const raw = await readFile(absPath, "utf8");
+      // Fast-path: avoid stripping comments (and running the regex-heavy scanners below) when the
+      // file never references the Tauri global at all. This keeps the guardrail cheap even as the
+      // desktop renderer codebase grows.
+      if (!raw.includes("__TAURI__")) continue;
       const content = stripComments(raw);
       // Fast-path: if the file doesn't mention the Tauri globals at all, none of the banned
       // patterns can match (including the alias-based checks in this guard).
