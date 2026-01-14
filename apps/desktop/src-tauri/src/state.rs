@@ -7333,7 +7333,7 @@ mod tests {
             apply_sheet_formatting_deltas_inner, ApplySheetFormattingDeltasRequest,
             LimitedSheetCellFormatDeltas, SheetCellFormatDelta,
         };
-        use formula_model::Protection;
+        use formula_model::{Protection, Style};
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let db_path = tmp.path().join("autosave.sqlite");
