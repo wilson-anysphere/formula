@@ -334,6 +334,65 @@ class CompatScorecardTests(unittest.TestCase):
             expected = hashlib.sha256(run_url.encode("utf-8")).hexdigest()
             self.assertIn(f"- Run: sha256={expected}", md)
 
+    def test_inconsistent_rates_fail_fast(self) -> None:
+        scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
+        self.assertTrue(scorecard_py.is_file(), f"compat_scorecard.py not found at {scorecard_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            corpus_path = tmp_path / "corpus-summary.json"
+            oracle_path = tmp_path / "mismatch-report.json"
+            out_md = tmp_path / "scorecard.md"
+
+            # open_ok/total = 0.5, but we claim open rate is 0.6 -> should fail.
+            corpus_payload = {
+                "timestamp": "unit-test",
+                "counts": {
+                    "total": 10,
+                    "open_ok": 5,
+                    "calculate_ok": 10,
+                    "render_ok": 10,
+                    "round_trip_ok": 5,
+                },
+                "rates": {"open": 0.6, "round_trip": 0.5},
+            }
+            corpus_path.write_text(
+                json.dumps(corpus_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            oracle_payload = {
+                "schemaVersion": 1,
+                "summary": {
+                    "totalCases": 100,
+                    "mismatches": 0,
+                    "mismatchRate": 0.0,
+                },
+            }
+            oracle_path.write_text(
+                json.dumps(oracle_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(scorecard_py),
+                    "--corpus-summary",
+                    str(corpus_path),
+                    "--oracle-report",
+                    str(oracle_path),
+                    "--out-md",
+                    str(out_md),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("inconsistent open rate", proc.stderr)
+
     def test_missing_inputs_exits_nonzero(self) -> None:
         scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
         self.assertTrue(scorecard_py.is_file(), f"compat_scorecard.py not found at {scorecard_py}")
