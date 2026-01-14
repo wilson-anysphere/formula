@@ -706,8 +706,9 @@ impl Engine {
         }
 
         let before_order = self.workbook.sheet_order.clone();
-        let moved = self.workbook.sheet_order.remove(current);
-        self.workbook.sheet_order.insert(new_index, moved);
+        if !self.workbook.reorder_sheet(sheet_id, new_index) {
+            return false;
+        }
 
         if self.rebuild_graph().is_err() {
             // Reordering should not introduce new parse errors (formulas are unchanged), but if
