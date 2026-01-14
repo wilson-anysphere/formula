@@ -3272,6 +3272,47 @@ mod timeline_selection_write_tests {
         assert!(updated_str.contains("startDate=\"2024-02-01\""));
         assert!(updated_str.contains("endDate=\"2024-02-29\""));
     }
+
+    #[test]
+    fn set_timeline_selection_patches_timeline_even_if_timeline_rels_is_malformed() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+        let timeline_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timeline xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+          name="Timeline1" uid="{00000000-0000-0000-0000-000000000001}">
+  <timelineCache r:id="rId1"/>
+</timeline>"#;
+
+        // Malformed relationship part: the `<Relationship>` start tag is never closed.
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.microsoft.com/office/2007/relationships/timelineCacheDefinition"
+                Target="../timelineCaches/timelineCacheDefinition1.xml">
+</Relationships>"#;
+
+        let mut pkg = build_package(&[
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/timelines/timeline1.xml", timeline_xml),
+            ("xl/timelines/_rels/timeline1.xml.rels", rels_xml),
+        ]);
+
+        let selection = TimelineSelectionState {
+            start: Some("2024-02-01".to_string()),
+            end: Some("2024-02-29".to_string()),
+        };
+
+        pkg.set_timeline_selection("xl/timelines/timeline1.xml", &selection)
+            .expect("set selection should patch the timeline even if rels is malformed");
+
+        let updated = pkg.part("xl/timelines/timeline1.xml").expect("timeline part");
+        let parsed =
+            parse_timeline_selection(updated, DateSystem::V1900.to_engine_date_system()).unwrap();
+        assert_eq!(parsed.start.as_deref(), Some("2024-02-01"));
+        assert_eq!(parsed.end.as_deref(), Some("2024-02-29"));
+    }
 }
 
 #[cfg(test)]
