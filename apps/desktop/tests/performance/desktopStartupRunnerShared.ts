@@ -14,7 +14,7 @@ export type StartupMetrics = {
 };
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 function resolvePerfHome(): string {
   const fromEnv = process.env.FORMULA_PERF_HOME;

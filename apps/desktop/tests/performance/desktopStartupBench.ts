@@ -46,12 +46,10 @@
  * RSS measurement is best-effort; if we can't sample RSS, we skip the memory metric rather than
  * failing the timing benchmarks.
  */
-
 import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { readFile, readlink, readdir } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 import { type BenchmarkResult } from './benchmark.ts';
 import {
@@ -59,6 +57,7 @@ import {
   mean,
   median,
   percentile,
+  repoRoot,
   runOnce,
   stdDev,
   type StartupMetrics,
@@ -72,10 +71,6 @@ import {
 
 type StartupMode = 'cold' | 'warm';
 type StartupBenchKind = 'full' | 'shell';
-
-// Ensure paths are rooted at repo root even when invoked from elsewhere.
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-
 function buildResult(
   name: string,
   values: number[],
