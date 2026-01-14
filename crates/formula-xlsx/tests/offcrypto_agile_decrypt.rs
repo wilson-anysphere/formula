@@ -78,20 +78,35 @@ fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
 
 fn extract_stream_bytes(cfb_bytes: &[u8], stream_name: &str) -> Vec<u8> {
     let mut ole = CompoundFile::open(Cursor::new(cfb_bytes)).expect("open cfb");
-    // `cfb` stream names can be addressed with or without a leading `/` depending on context.
-    // Be tolerant so these tests work with both shapes (and match Formula's best-effort stream
-    // resolution in production code).
-    let mut stream = match ole.open_stream(stream_name) {
-        Ok(stream) => stream,
-        Err(_) => {
-            let alternate = if let Some(name) = stream_name.strip_prefix('/') {
-                name.to_string()
-            } else {
-                format!("/{stream_name}")
+    // `cfb` stream names can be addressed with or without a leading `/` depending on context, and
+    // some producers vary casing. Mirror Formula's best-effort stream resolution so these tests are
+    // robust across fixture sources.
+    let trimmed = stream_name.trim_start_matches('/');
+    let mut stream = ole
+        .open_stream(stream_name)
+        .or_else(|_| ole.open_stream(trimmed))
+        .or_else(|_| ole.open_stream(&format!("/{trimmed}")))
+        .or_else(|_| {
+            let mut found_path: Option<String> = None;
+            for entry in ole.walk() {
+                if !entry.is_stream() {
+                    continue;
+                }
+                let path = entry.path().to_string_lossy();
+                let normalized = path.as_ref().strip_prefix('/').unwrap_or(path.as_ref());
+                if normalized.eq_ignore_ascii_case(trimmed) {
+                    found_path = Some(path.into_owned());
+                    break;
+                }
+            }
+            let Some(found_path) = found_path else {
+                return ole.open_stream(stream_name);
             };
-            ole.open_stream(&alternate).expect("open stream")
-        }
-    };
+            ole.open_stream(&found_path)
+                .or_else(|_| ole.open_stream(found_path.trim_start_matches('/')))
+                .or_else(|_| ole.open_stream(&format!("/{trimmed}")))
+        })
+        .expect("open stream");
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).expect("read stream");
     buf
