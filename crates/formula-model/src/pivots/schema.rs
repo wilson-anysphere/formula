@@ -276,7 +276,6 @@ fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
 }
-
 fn unescape_dax_bracket_identifier(raw: &str) -> String {
     // Best-effort: convert DAX-style `]]` escapes back to `]`.
     //
@@ -301,7 +300,6 @@ fn unescape_dax_bracket_identifier(raw: &str) -> String {
     }
     out
 }
-
 /// Parse a DAX column reference of the form `Table[Column]` or `'Table Name'[Column]`.
 ///
 /// Parsing is best-effort:
