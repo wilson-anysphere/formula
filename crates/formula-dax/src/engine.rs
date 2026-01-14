@@ -3250,10 +3250,24 @@ impl DaxEngine {
                         }
                     }
 
+                    // Restrict the iterator row context to only the base-table grouping columns.
+                    // This prevents implicit measure context transition from filtering the base
+                    // table on non-grouping columns (which would otherwise produce incorrect
+                    // results, e.g. SUMX(SUMMARIZE(...), [Measure])).
+                    let mut visible_cols: Vec<usize> = Vec::new();
+                    let mut visible_set: HashSet<usize> = HashSet::new();
+                    for accessor in &accessors {
+                        if let GroupAccessor::BaseColumn(idx) = accessor {
+                            if visible_set.insert(*idx) {
+                                visible_cols.push(*idx);
+                            }
+                        }
+                    }
+
                     Ok(TableResult {
                         table: base.table,
                         rows,
-                        visible_cols: None,
+                        visible_cols: Some(visible_cols),
                     })
                 }
                 "SUMMARIZECOLUMNS" => {
@@ -3577,10 +3591,25 @@ impl DaxEngine {
                         }
                     }
 
+                    // Restrict the iterator row context to only grouping columns that come from
+                    // the chosen base table. When grouping entirely by related tables, this will
+                    // be empty, which is preferable to exposing all base-table columns (which
+                    // would cause measures to context-transition into a single representative fact
+                    // row rather than the intended group).
+                    let mut visible_cols: Vec<usize> = Vec::new();
+                    let mut visible_set: HashSet<usize> = HashSet::new();
+                    for accessor in &accessors {
+                        if let GroupAccessor::BaseColumn(idx) = accessor {
+                            if visible_set.insert(*idx) {
+                                visible_cols.push(*idx);
+                            }
+                        }
+                    }
+
                     Ok(TableResult {
                         table: base_table,
                         rows,
-                        visible_cols: None,
+                        visible_cols: Some(visible_cols),
                     })
                 }
                 "RELATEDTABLE" => {

@@ -2421,6 +2421,63 @@ fn sumx_values_column_measure_context_transition_filters_only_that_column() {
 }
 
 #[test]
+fn sumx_summarize_grouping_column_measure_context_transition_filters_only_group_columns() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "SUMX(SUMMARIZE(Orders, Orders[CustomerId]), [Total Sales])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, 43.0.into());
+}
+
+#[test]
+fn sumx_summarizecolumns_grouping_column_measure_context_transition_filters_only_group_columns() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "SUMX(SUMMARIZECOLUMNS(Orders[CustomerId]), [Total Sales])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, 43.0.into());
+}
+
+#[test]
+fn sumx_summarizecolumns_dimension_group_measure_context_transition_filters_only_group_columns() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "SUMX(SUMMARIZECOLUMNS(Customers[Region]), [Total Sales])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, 43.0.into());
+}
+
+#[test]
 fn sumx_values_column_iterates_distinct_values() {
     let model = build_model();
     let value = DaxEngine::new()
