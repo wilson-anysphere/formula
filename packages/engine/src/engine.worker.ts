@@ -35,7 +35,7 @@ type WasmWorkbookInstance = {
   setSheetDimensions?: (sheet: string, rows: number, cols: number) => void;
   getSheetDimensions?: (sheet: string) => { rows: number; cols: number };
   setWorkbookFileMetadata?: (directory: string | null, filename: string | null) => void;
-  setCellStyleId?: (sheet: string, address: string, styleId: number) => void;
+  setCellStyleId?: (address: string, styleId: number, sheet?: string) => void;
   setColWidth?: (sheet: string, col: number, width: number | null) => void;
   setColHidden?: (sheet: string, col: number, hidden: boolean) => void;
   internStyle?: (style: unknown) => number;
@@ -582,7 +582,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setCellStyleId !== "function") {
                 throw new Error("setCellStyleId: WasmWorkbook.setCellStyleId is not available in this WASM build");
               }
-              (wb as any).setCellStyleId(params.sheet ?? "Sheet1", params.address, params.styleId);
+              (wb as any).setCellStyleId(params.address, params.styleId, params.sheet ?? "Sheet1");
               result = null;
               break;
             case "setColWidth":

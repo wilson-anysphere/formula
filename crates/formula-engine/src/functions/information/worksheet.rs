@@ -361,24 +361,19 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
         CellInfoType::Width => {
             // `CELL("width")` consults column metadata but should avoid recording an implicit
             // self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
-            let _cell_ref = record_explicit_cell(ctx);
+            let cell_ref = record_explicit_cell(ctx);
 
             // Excel's default column width is 8.43 "character" units.
             const DEFAULT_WIDTH: f64 = 8.43;
 
-            let Some(props) = ctx.col_properties(&reference.sheet_id, addr.col) else {
+            let Some(props) = ctx.col_properties(&cell_ref.sheet_id, addr.col) else {
                 return Value::Number(DEFAULT_WIDTH);
             };
             if props.hidden {
                 return Value::Number(0.0);
             }
 
-            Value::Number(
-                props
-                    .width
-                    .map(|w| w as f64)
-                    .unwrap_or(DEFAULT_WIDTH),
-            )
+            Value::Number(props.width.map(|w| w as f64).unwrap_or(DEFAULT_WIDTH))
         }
         CellInfoType::Protect => {
             // `CELL("protect")` consults cell protection metadata but should avoid recording an

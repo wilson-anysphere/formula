@@ -290,7 +290,6 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             if raw.is_empty() {
                 continue;
             }
-
             let value = normalize_chart_ex_kind_hint(raw).unwrap_or_else(|| raw.to_string());
             let hint = format!("{attr}={value}");
             if seen.insert(hint.clone()) {
@@ -301,22 +300,7 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
             }
         }
 
-        // Collect element names that look like chart type containers. This helps debug cases where
-        // producers omit explicit attributes but still include type-like nodes.
-        let name = node.tag_name().name();
-        let lower = name.to_ascii_lowercase();
-        if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {
-            let hint = format!("node={name}");
-            if seen.insert(hint.clone()) {
-                out.push(hint);
-                if out.len() >= MAX_HINTS {
-                    return out;
-                }
-            }
-        }
-
-        // Collect element names that look like chart type containers. This helps debug cases where
-        // producers omit explicit attributes but still include type-like nodes.
+        // Collect element names that look like chart type containers.
         let name = node.tag_name().name();
         let lower = name.to_ascii_lowercase();
         if lower.ends_with("chart") && lower != "chart" && lower != "chartspace" {

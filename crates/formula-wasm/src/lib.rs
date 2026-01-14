@@ -14,8 +14,8 @@ use formula_engine::{
     RecalcMode, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
 use formula_model::{
-    display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range, EXCEL_MAX_COLS,
-    EXCEL_MAX_ROWS,
+    display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range, Style,
+    EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
@@ -1413,7 +1413,21 @@ impl WorkbookState {
         if col >= EXCEL_MAX_COLS {
             return Err(js_err(format!("col out of Excel bounds: {col}")));
         }
+
+        if let Some(width) = width_chars {
+            if !width.is_finite() || width < 0.0 {
+                return Err(js_err(
+                    "width must be a non-negative finite number".to_string(),
+                ));
+            }
+        }
+
         let sheet = self.ensure_sheet(name);
+
+        // Mirror widths into the calc engine so worksheet metadata functions like `CELL("width")`
+        // observe the latest values.
+        self.engine.set_col_width(&sheet, col, width_chars);
+
         match width_chars {
             Some(width) => {
                 self.col_widths_chars
@@ -3086,6 +3100,13 @@ impl WasmWorkbook {
         Ok(obj.into())
     }
 
+    #[wasm_bindgen(js_name = "internStyle")]
+    pub fn intern_style(&mut self, style: JsValue) -> Result<u32, JsValue> {
+        let style: Style =
+            serde_wasm_bindgen::from_value(style).map_err(|err| js_err(err.to_string()))?;
+        Ok(self.inner.engine.intern_style(style))
+    }
+
     /// Set (or clear) a per-column width override for a sheet.
     ///
     /// `width` is expressed in Excel "character" units (OOXML `col/@width`), **not pixels**.
@@ -3098,8 +3119,22 @@ impl WasmWorkbook {
         &mut self,
         sheet_name: String,
         col: u32,
-        width: Option<f32>,
+        width: JsValue,
     ) -> Result<(), JsValue> {
+        let width = if width.is_null() || width.is_undefined() {
+            None
+        } else {
+            let raw = width
+                .as_f64()
+                .ok_or_else(|| js_err("width must be a number or null".to_string()))?;
+            if !raw.is_finite() || raw < 0.0 {
+                return Err(js_err(
+                    "width must be a non-negative finite number".to_string(),
+                ));
+            }
+            Some(raw as f32)
+        };
+
         self.inner
             .set_col_width_chars_internal(&sheet_name, col, width)
     }
@@ -3114,10 +3149,68 @@ impl WasmWorkbook {
         &mut self,
         sheet_name: String,
         col: u32,
-        width_chars: Option<f32>,
+        width_chars: JsValue,
     ) -> Result<(), JsValue> {
+        let width_chars = if width_chars.is_null() || width_chars.is_undefined() {
+            None
+        } else {
+            let raw = width_chars
+                .as_f64()
+                .ok_or_else(|| js_err("widthChars must be a number or null".to_string()))?;
+            if !raw.is_finite() || raw < 0.0 {
+                return Err(js_err(
+                    "widthChars must be a non-negative finite number".to_string(),
+                ));
+            }
+            Some(raw as f32)
+        };
+
         self.inner
             .set_col_width_chars_internal(&sheet_name, col, width_chars)
+    }
+
+    #[wasm_bindgen(js_name = "setColHidden")]
+    pub fn set_col_hidden(
+        &mut self,
+        sheet_name: String,
+        col: u32,
+        hidden: bool,
+    ) -> Result<(), JsValue> {
+        let sheet = self.inner.ensure_sheet(&sheet_name);
+        self.inner.engine.set_col_hidden(&sheet, col, hidden);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "setWorkbookFileMetadata")]
+    pub fn set_workbook_file_metadata(
+        &mut self,
+        directory: JsValue,
+        filename: JsValue,
+    ) -> Result<(), JsValue> {
+        let directory = if directory.is_null() || directory.is_undefined() {
+            None
+        } else {
+            Some(
+                directory
+                    .as_string()
+                    .ok_or_else(|| js_err("directory must be a string or null".to_string()))?,
+            )
+        };
+
+        let filename = if filename.is_null() || filename.is_undefined() {
+            None
+        } else {
+            Some(
+                filename
+                    .as_string()
+                    .ok_or_else(|| js_err("filename must be a string or null".to_string()))?,
+            )
+        };
+
+        self.inner
+            .engine
+            .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = "toJson")]

@@ -877,6 +877,8 @@ impl Engine {
         let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
             return;
         };
+
+        let before = sheet.col_properties.get(&col_0based).and_then(|p| p.width);
         sheet
             .col_properties
             .entry(col_0based)
@@ -891,6 +893,17 @@ impl Engine {
         if let Some(props) = sheet.col_properties.get(&col_0based) {
             if props.width.is_none() && !props.hidden && props.style_id.is_none() {
                 sheet.col_properties.remove(&col_0based);
+            }
+        }
+
+        let after = sheet.col_properties.get(&col_0based).and_then(|p| p.width);
+
+        // `CELL("width")` consults column metadata; ensure any compiled formulas that depend on
+        // metadata are re-evaluated on the next recalc.
+        if before != after {
+            self.mark_all_compiled_cells_dirty();
+            if self.calc_settings.calculation_mode != CalculationMode::Manual {
+                self.recalculate();
             }
         }
     }

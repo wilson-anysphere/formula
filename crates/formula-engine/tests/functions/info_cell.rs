@@ -165,6 +165,24 @@ fn cell_format_classifies_thousands_separated_numbers_as_n() {
 }
 
 #[test]
+fn cell_width_reflects_column_width_metadata() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        // Put the formula in a different cell to avoid creating a self-reference cycle.
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"width\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.43);
+
+    // Update the column width metadata and ensure the formula result updates on recalc.
+    engine.set_col_width("Sheet1", 0, Some(16.42578125));
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 16.42578125);
+}
+
+#[test]
 fn info_recalc_defaults_to_manual_and_unknown_keys() {
     let mut sheet = TestSheet::new();
 
@@ -300,14 +318,38 @@ fn info_exposes_host_provided_metadata() {
         engine.get_cell_value("Sheet1", "A1"),
         Value::Text("pcdos".to_string())
     );
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::NA));
-    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Error(ErrorKind::NA));
-    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Error(ErrorKind::NA));
-    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Error(ErrorKind::NA));
-    assert_eq!(engine.get_cell_value("Sheet1", "A6"), Value::Error(ErrorKind::NA));
-    assert_eq!(engine.get_cell_value("Sheet1", "A7"), Value::Error(ErrorKind::NA));
-    assert_eq!(engine.get_cell_value("Sheet1", "A8"), Value::Error(ErrorKind::NA));
-    assert_eq!(engine.get_cell_value("Sheet2", "A8"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A3"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A5"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A6"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A7"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A8"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet2", "A8"),
+        Value::Error(ErrorKind::NA)
+    );
 
     engine.set_engine_info(EngineInfo {
         system: Some("unix".to_string()),
@@ -339,7 +381,10 @@ fn info_exposes_host_provided_metadata() {
         engine.get_cell_value("Sheet1", "A4"),
         Value::Text("release-x".to_string())
     );
-    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Text("v1".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A5"),
+        Value::Text("v1".to_string())
+    );
     assert_number(&engine.get_cell_value("Sheet1", "A6"), 1234.0);
     assert_number(&engine.get_cell_value("Sheet1", "A7"), 5678.0);
     assert_eq!(
@@ -862,11 +907,17 @@ fn cell_format_classifies_currency_formats() {
     });
 
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
-    engine.set_cell_style_id("Sheet1", "A1", style_currency_bracket).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_currency_bracket)
+        .unwrap();
     engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
-    engine.set_cell_style_id("Sheet1", "A2", style_currency_plain).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A2", style_currency_plain)
+        .unwrap();
     engine.set_cell_value("Sheet1", "A3", 1.0).unwrap();
-    engine.set_cell_style_id("Sheet1", "A3", style_locale_only).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A3", style_locale_only)
+        .unwrap();
 
     engine
         .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
@@ -1139,13 +1190,17 @@ fn cell_format_color_and_parentheses_reflect_number_format_strings() {
         number_format: Some("[Red]0".to_string()),
         ..Style::default()
     });
-    engine.set_cell_style_id("Sheet1", "A2", one_section_red).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A2", one_section_red)
+        .unwrap();
 
     let one_section_paren = engine.intern_style(Style {
         number_format: Some("(0)".to_string()),
         ..Style::default()
     });
-    engine.set_cell_style_id("Sheet1", "A3", one_section_paren).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A3", one_section_paren)
+        .unwrap();
 
     engine
         .set_cell_formula("Sheet1", "B1", "=CELL(\"color\",A1)")

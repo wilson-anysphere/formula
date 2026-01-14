@@ -17,12 +17,11 @@ As of today:
 - `INFO("system")` is implemented but currently hard-coded to `"pcdos"`.
 - Other `INFO()` keys listed below currently return `#N/A` (recognized but not available).
 - `CELL("filename")` returns `""` (empty string) until the host supplies workbook file metadata, matching Excel’s “unsaved workbook” behavior.
-- `CELL("protect")`, `CELL("prefix")`, and `CELL("width")` are recognized and return **best-effort defaults** today:
+- `CELL("protect")` and `CELL("prefix")` return best-effort defaults:
   - `protect`: `1` (locked)
   - `prefix`: `""` (no prefix)
-  - `width`: `8.43` (Excel default column width)
-
-  These are not yet fully Excel-compatible (they do not consult effective formatting / column metadata).
+- `CELL("width")` returns the referenced column's width metadata (OOXML "character" units) when available,
+  defaulting to `8.43` when unset. Hidden columns currently return `0` (Excel's exact hidden-width encoding is not implemented yet).
 
 Tracking implementation: `crates/formula-engine/src/functions/information/worksheet.rs`.
 
@@ -87,9 +86,9 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 | `contents` | value/text | cell formula/value | implemented |
 | `type` | text | cell formula/value | implemented |
 | `filename` | text | workbook file metadata + sheet name | implemented (returns `""` until metadata is set) |
-| `protect` | number | **effective style** (`protection.locked`) | best-effort (currently always returns `1`) |
-| `prefix` | text | **effective style** (`alignment.horizontal`) | best-effort (currently always returns `""`) |
-| `width` | number | column width + column hidden state | best-effort (currently always returns `8.43`) |
+| `protect` | number | **effective style** (`protection.locked`) | **partially implemented** (currently always returns `1`) |
+| `prefix` | text | **effective style** (`alignment.horizontal`) | **partially implemented** (currently always returns `""`) |
+| `width` | number | column width + column hidden state | **partially implemented** (currently uses column width metadata) |
 
 Other Excel-valid `CELL()` keys (`color`, `format`, `parentheses`, …) are currently recognized but return `#N/A` in this engine.
 
@@ -175,7 +174,8 @@ This must use the cell’s **effective alignment** (layered style merge), not ju
 
 Current behavior:
 
-- Returns `8.43` (default column width) for all references.
+- Returns the referenced column's width metadata (Excel/OOXML "character" units) when available, defaulting to `8.43` when unset.
+- Hidden columns currently return `0` (Excel's exact hidden-width encoding is not implemented yet).
 
 Planned behavior:
 
