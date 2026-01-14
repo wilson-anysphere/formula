@@ -957,7 +957,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "CARGO_PROFILE_RELEASE_DEBUG=1" >> "$GITHUB_ENV"
+          # Use full debug info in the sidecar dSYM for reliable crash symbolication.
+          echo "CARGO_PROFILE_RELEASE_DEBUG=2" >> "$GITHUB_ENV"
           echo "CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=packed" >> "$GITHUB_ENV"
 
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
@@ -1321,7 +1322,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          "CARGO_PROFILE_RELEASE_DEBUG=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # Use full debug info in the PDB for reliable crash symbolication.
+          "CARGO_PROFILE_RELEASE_DEBUG=2" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build and upload release assets
         id: tauri_release_non_macos

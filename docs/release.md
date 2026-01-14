@@ -1568,6 +1568,10 @@ For post-release crash symbolication, the release workflow packages platform deb
 These are uploaded as **workflow run artifacts** (so they are downloadable by maintainers without
 bloating installer bundles).
 
+Note: the release workflow explicitly enables full Cargo debuginfo (`CARGO_PROFILE_RELEASE_DEBUG=2`)
+on macOS/Windows so symbol archives contain enough information for symbolication, while shipped
+installers remain stripped.
+
 Optional: to also attach symbol archives to the **draft GitHub Release** (for longer-term retention),
 set the GitHub Actions repository variable:
 
