@@ -401,20 +401,16 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OffcryptoEr
     let reserved1 = r.read_u32_le("EncryptionHeader.reserved1")?;
     let reserved2 = r.read_u32_le("EncryptionHeader.reserved2")?;
 
-    // Validate `EncryptionHeader.flags` semantics. This is conservative and reduces false positives
-    // when parsing arbitrary OLE streams as Standard encryption.
+    // Validate `EncryptionHeader.flags` semantics.
+    //
+    // MS-OFFCRYPTO specifies that Standard/CryptoAPI encryption sets `fCryptoAPI` and (for AES)
+    // `fAES`. In practice, some real-world producers omit these bits even though they still use
+    // the CryptoAPI algorithms declared in `algId` / `algIdHash`.
+    //
+    // We keep rejecting `fExternal` (external encryption), but otherwise treat the flag bits as
+    // best-effort hints rather than hard requirements.
     if flags.f_external {
         return Err(OffcryptoError::UnsupportedExternalEncryption);
-    }
-    if !flags.f_cryptoapi {
-        return Err(OffcryptoError::UnsupportedNonCryptoApiStandardEncryption);
-    }
-    let alg_is_aes = matches!(alg_id, CALG_AES_128 | CALG_AES_192 | CALG_AES_256);
-    if flags.f_aes != alg_is_aes {
-        return Err(OffcryptoError::InvalidFlags {
-            flags: flags_raw,
-            alg_id,
-        });
     }
 
     let csp_name_bytes = r.read_bytes(r.remaining(), "EncryptionHeader.CSPName")?;
@@ -1322,6 +1318,21 @@ mod tests {
         out.extend_from_slice(&0u32.to_le_bytes()); // reserved1
         out.extend_from_slice(&0u32.to_le_bytes()); // reserved2
 
+        // Minimal EncryptionVerifier (salt/verifier/verifierHash). The parser requires this
+        // structure to be present even when we're only interested in header flag compatibility.
+        const SALT_LEN: u32 = 16;
+        out.extend_from_slice(&SALT_LEN.to_le_bytes()); // saltSize
+        out.extend_from_slice(&[0u8; SALT_LEN as usize]); // salt
+        out.extend_from_slice(&[0u8; 16]); // encryptedVerifier
+        let verifier_hash_size: u32 = 20; // SHA-1 digest length
+        out.extend_from_slice(&verifier_hash_size.to_le_bytes()); // verifierHashSize
+
+        let encrypted_hash_len = match alg_id {
+            CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => 32usize, // padded to AES block
+            _ => verifier_hash_size as usize,                      // RC4 uses exact length
+        };
+        out.extend_from_slice(&vec![0u8; encrypted_hash_len]); // encryptedVerifierHash
+
         out
     }
 
@@ -1335,36 +1346,32 @@ mod tests {
     }
 
     #[test]
-    fn rejects_standard_without_cryptoapi_flag() {
+    fn parses_standard_without_cryptoapi_flag_for_compatibility() {
         let flags = EncryptionHeaderFlags::F_AES;
         let bytes = minimal_encryption_info_header(flags, CALG_AES_128);
-        let err = parse_encryption_info_standard(&bytes).expect_err("expected error");
-        assert!(matches!(
-            err,
-            OffcryptoError::UnsupportedNonCryptoApiStandardEncryption
-        ));
+        let parsed = parse_encryption_info_standard(&bytes).expect("parse");
+        assert!(!parsed.header.flags.f_cryptoapi);
+        assert_eq!(parsed.header.alg_id, CALG_AES_128);
     }
 
     #[test]
-    fn rejects_aes_algid_without_faes_flag() {
+    fn parses_aes_algid_without_faes_flag_for_compatibility() {
         let flags = EncryptionHeaderFlags::F_CRYPTOAPI;
         let bytes = minimal_encryption_info_header(flags, CALG_AES_128);
-        let err = parse_encryption_info_standard(&bytes).expect_err("expected error");
-        assert!(matches!(
-            err,
-            OffcryptoError::InvalidFlags { flags: _, alg_id: _ }
-        ));
+        let parsed = parse_encryption_info_standard(&bytes).expect("parse");
+        assert!(parsed.header.flags.f_cryptoapi);
+        assert!(!parsed.header.flags.f_aes);
+        assert_eq!(parsed.header.alg_id, CALG_AES_128);
     }
 
     #[test]
-    fn rejects_faes_flag_with_non_aes_algid() {
+    fn parses_faes_flag_with_non_aes_algid_for_compatibility() {
         let flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES;
         let bytes = minimal_encryption_info_header(flags, CALG_RC4);
-        let err = parse_encryption_info_standard(&bytes).expect_err("expected error");
-        assert!(matches!(
-            err,
-            OffcryptoError::InvalidFlags { flags: _, alg_id: _ }
-        ));
+        let parsed = parse_encryption_info_standard(&bytes).expect("parse");
+        assert!(parsed.header.flags.f_cryptoapi);
+        assert!(parsed.header.flags.f_aes);
+        assert_eq!(parsed.header.alg_id, CALG_RC4);
     }
 
     #[test]

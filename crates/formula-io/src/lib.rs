@@ -2079,33 +2079,65 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             | Err(formula_offcrypto::OffcryptoError::InvalidFlags { .. })
             | Err(formula_offcrypto::OffcryptoError::UnsupportedExternalEncryption)
             | Err(formula_offcrypto::OffcryptoError::UnsupportedAlgorithm(_)) => {
-                // Fall back to `formula-xlsx`'s more permissive Standard decryptor.
-                match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
+                // Fall back to a more permissive Standard decryptor for non-standard/malformed
+                // `EncryptionInfo` headers (e.g. some producers omit `fCryptoAPI` / `fAES` flags).
+                //
+                // Prefer the internal decryptor first because it supports additional Standard
+                // variants (including alternative key derivations + CBC framing differences).
+                match encrypted_ooxml::decrypt_encrypted_package(
                     &encryption_info,
                     &encrypted_package,
                     password,
                 ) {
                     Ok(bytes) => bytes,
                     Err(err) => match err {
-                        xlsx::OffCryptoError::WrongPassword
-                        | xlsx::OffCryptoError::IntegrityMismatch => {
+                        encrypted_ooxml::DecryptError::InvalidPassword => {
                             return Err(Error::InvalidPassword {
                                 path: path.to_path_buf(),
                             })
                         }
-                        xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {
+                        encrypted_ooxml::DecryptError::UnsupportedVersion { major, minor } => {
                             return Err(Error::UnsupportedOoxmlEncryption {
                                 path: path.to_path_buf(),
                                 version_major: major,
                                 version_minor: minor,
                             })
                         }
-                        _ => {
-                            return Err(Error::UnsupportedOoxmlEncryption {
-                                path: path.to_path_buf(),
-                                version_major,
-                                version_minor,
-                            })
+                        encrypted_ooxml::DecryptError::InvalidInfo(_)
+                        | encrypted_ooxml::DecryptError::Io(_) => {
+                            // As a last resort, fall back to `formula-xlsx`'s legacy Standard decryptor.
+                            match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
+                                &encryption_info,
+                                &encrypted_package,
+                                password,
+                            ) {
+                                Ok(bytes) => bytes,
+                                Err(err) => match err {
+                                    xlsx::OffCryptoError::WrongPassword
+                                    | xlsx::OffCryptoError::IntegrityMismatch => {
+                                        return Err(Error::InvalidPassword {
+                                            path: path.to_path_buf(),
+                                        })
+                                    }
+                                    xlsx::OffCryptoError::UnsupportedEncryptionVersion {
+                                        major,
+                                        minor,
+                                    } => {
+                                        return Err(Error::UnsupportedOoxmlEncryption {
+                                            path: path.to_path_buf(),
+                                            version_major: major,
+                                            version_minor: minor,
+                                        })
+                                    }
+                                    _ => {
+                                        return Err(Error::UnsupportedOoxmlEncryption {
+                                            path: path.to_path_buf(),
+                                            version_major,
+                                            version_minor,
+                                        })
+                                    }
+                                },
+                            }
                         }
                     },
                 }

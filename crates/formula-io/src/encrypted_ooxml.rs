@@ -266,25 +266,52 @@ fn decrypt_encrypted_package_standard(
                 Ok(None)
             };
 
+            let mut verified_any = false;
+
             let key0 = derive_file_key_standard(&info, password).map_err(|err| {
                 DecryptError::InvalidInfo(format!("failed to derive Standard key: {err}"))
             })?;
-            if let Some(out) = try_with_key0(&key0)? {
-                return Ok(out);
+            match verify_password_standard_with_key(&info, &key0).map_err(|err| {
+                DecryptError::InvalidInfo(format!("failed to verify Standard password: {err}"))
+            })? {
+                true => {
+                    verified_any = true;
+                    if let Some(out) = try_with_key0(&key0)? {
+                        return Ok(out);
+                    }
+                }
+                false => {}
             }
 
             // AES-128 truncation fallback.
             if info.header.key_size == 128 {
                 if let Ok(key_trunc) = derive_standard_aes_key_truncate(&info, password) {
                     if key_trunc != key0 {
-                        if let Some(out) = try_with_key0(&key_trunc)? {
-                            return Ok(out);
+                        match verify_password_standard_with_key(&info, &key_trunc).map_err(|err| {
+                            DecryptError::InvalidInfo(format!(
+                                "failed to verify Standard password (truncation key): {err}"
+                            ))
+                        })? {
+                            true => {
+                                verified_any = true;
+                                if let Some(out) = try_with_key0(&key_trunc)? {
+                                    return Ok(out);
+                                }
+                            }
+                            false => {}
                         }
                     }
                 }
             }
 
-            Err(DecryptError::InvalidPassword)
+            if verified_any {
+                Err(DecryptError::InvalidInfo(
+                    "verified Standard password but failed to decrypt EncryptedPackage (unsupported scheme)"
+                        .to_string(),
+                ))
+            } else {
+                Err(DecryptError::InvalidPassword)
+            }
         }
         other => Err(DecryptError::InvalidInfo(format!(
             "unsupported Standard CryptoAPI algorithm algId=0x{other:08x}"
@@ -503,10 +530,9 @@ fn derive_standard_aes_key_truncate(
     let h_block0 = final_hash(&h_final, 0, hash_alg);
 
     let key_len = (info.header.key_size / 8) as usize;
-    if key_len > h_block0.len() {
+    if key_len == 0 || key_len > h_block0.len() {
         return Err(DecryptError::InvalidInfo(format!(
-            "invalid keySize {} bits for truncation-based Standard AES derivation: key_len={key_len} > digest_len={}",
-            info.header.key_size,
+            "Standard AES truncation key derivation requires key_len <= hash_len (key_len={key_len}, hash_len={})",
             h_block0.len()
         )));
     }
