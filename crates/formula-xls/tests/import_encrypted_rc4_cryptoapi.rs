@@ -270,9 +270,11 @@ fn decrypts_rc4_cryptoapi_biff8_xls_with_unicode_emoji_password() {
 
 #[test]
 fn rc4_cryptoapi_unicode_emoji_password_wrong_password_errors() {
-    let err =
-        formula_xls::import_xls_path_with_password(unicode_emoji_fixture_path(), Some("wrong password"))
-            .expect_err("expected wrong password error");
+    let err = formula_xls::import_xls_path_with_password(
+        unicode_emoji_fixture_path(),
+        Some("wrong password"),
+    )
+    .expect_err("expected wrong password error");
     assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
 
