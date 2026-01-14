@@ -811,6 +811,7 @@ type DrawingGestureState =
       pointerId: number;
       mode: "drag";
       objectId: number;
+      objectIndex: number;
       startSheetX: number;
       startSheetY: number;
       startAnchor: DrawingAnchor;
@@ -819,6 +820,7 @@ type DrawingGestureState =
       pointerId: number;
       mode: "resize";
       objectId: number;
+      objectIndex: number;
       handle: ResizeHandle;
       startSheetX: number;
       startSheetY: number;
@@ -16154,10 +16156,18 @@ export class SpreadsheetApp {
 
               const startSheetX = x - headerOffsetX + scroll.scrollX;
               const startSheetY = y - headerOffsetY + scroll.scrollY;
+              let objectIndex = -1;
+              for (let i = 0; i < drawings.length; i += 1) {
+                if (drawings[i]!.id === selected.id) {
+                  objectIndex = i;
+                  break;
+                }
+              }
               this.drawingGesture = {
                 pointerId: e.pointerId,
                 mode: "resize",
                 objectId: selected.id,
+                objectIndex,
                 handle,
                 startSheetX,
                 startSheetY,
@@ -16223,11 +16233,19 @@ export class SpreadsheetApp {
             : 0;
           const startSheetX = x - headerOffsetX + scroll.scrollX;
           const startSheetY = y - headerOffsetY + scroll.scrollY;
+          let objectIndex = -1;
+          for (let i = 0; i < drawings.length; i += 1) {
+            if (drawings[i]!.id === hit.id) {
+              objectIndex = i;
+              break;
+            }
+          }
           this.drawingGesture = handle
             ? {
                 pointerId: e.pointerId,
                 mode: "resize",
                 objectId: hit.id,
+                objectIndex,
                 handle,
                 startSheetX,
                 startSheetY,
@@ -16244,6 +16262,7 @@ export class SpreadsheetApp {
                 pointerId: e.pointerId,
                 mode: "drag",
                 objectId: hit.id,
+                objectIndex,
                 startSheetX,
                 startSheetY,
                 startAnchor: hit.anchor,
@@ -16503,7 +16522,39 @@ export class SpreadsheetApp {
     })();
 
     const objects = this.listDrawingObjectsForSheet();
-    const nextObjects = objects.map((obj) => (obj.id === gesture.objectId ? { ...obj, anchor: nextAnchor } : obj));
+    const targetId = gesture.objectId;
+    let targetIndex = gesture.objectIndex;
+    const hasCachedIndex =
+      typeof targetIndex === "number" &&
+      targetIndex >= 0 &&
+      targetIndex < objects.length &&
+      objects[targetIndex]?.id === targetId;
+    if (!hasCachedIndex) {
+      targetIndex = -1;
+      for (let i = 0; i < objects.length; i += 1) {
+        if (objects[i]!.id === targetId) {
+          targetIndex = i;
+          break;
+        }
+      }
+      gesture.objectIndex = targetIndex;
+    }
+    if (targetIndex < 0) {
+      // If the target drawing is removed mid-gesture, abort without applying.
+      this.drawingGesture = null;
+      this.stopDrawingGestureAutoScroll();
+      this.drawingGesturePointerPos = null;
+      try {
+        this.root.releasePointerCapture(gesture.pointerId);
+      } catch {
+        // ignore
+      }
+      this.renderSelection();
+      return;
+    }
+    const base = objects[targetIndex]!;
+    const nextObjects = objects.slice();
+    nextObjects[targetIndex] = { ...base, anchor: nextAnchor };
     const doc = this.document as any;
     const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
     this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
@@ -16786,7 +16837,24 @@ export class SpreadsheetApp {
       })();
 
       const objects = this.listDrawingObjectsForSheet();
-      const base = objects.find((obj) => obj.id === gesture.objectId) ?? null;
+      const targetId = gesture.objectId;
+      let targetIndex = gesture.objectIndex;
+      const hasCachedIndex =
+        typeof targetIndex === "number" &&
+        targetIndex >= 0 &&
+        targetIndex < objects.length &&
+        objects[targetIndex]?.id === targetId;
+      if (!hasCachedIndex) {
+        targetIndex = -1;
+        for (let i = 0; i < objects.length; i += 1) {
+          if (objects[i]!.id === targetId) {
+            targetIndex = i;
+            break;
+          }
+        }
+        gesture.objectIndex = targetIndex;
+      }
+      const base = targetIndex >= 0 && targetIndex < objects.length ? objects[targetIndex] ?? null : null;
       if (!base) {
         this.drawingGesture = null;
         try {
@@ -16858,7 +16926,8 @@ export class SpreadsheetApp {
         after = patchDrawingXmlForMove(after, dxEmu, dyEmu);
       }
 
-      const finalObjects = objects.map((obj) => (obj.id === gesture.objectId ? after : obj));
+      const finalObjects = objects.slice();
+      finalObjects[targetIndex] = after;
 
       this.drawingGesture = null;
       try {
