@@ -578,15 +578,13 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
    Implementation note: `KEEPFILTERS` is supported only inside `CALCULATE` / `CALCULATETABLE`. It affects
    whether the engine clears existing table/column filters before applying the new filter.
 
-5. Column comparisons / membership: `<lhs> <op> <rhs>` where `<lhs>` is either a column reference
-   (`Table[Column]`) or a row constructor (`(Table[Col1], Table[Col2], ...)`), and `<op>` is:
-   - `=` (direct value filter)
-   - `<>`, `<`, `<=`, `>`, `>=` (implemented by scanning rows to compute the set of allowed values)
-   - `IN` (value membership) with a one-column table expression, e.g. `Fact[Category] IN { \"A\", \"B\" }` or `Fact[Category] IN VALUES(Dim[Category])`
- 
-   Multi-column membership is also supported via a row constructor on the LHS:
-  
-   - `(T[Col1], T[Col2], ...) IN tableExpr`
+5. Column comparisons / membership:
+   - Column comparisons: `Table[Column] <op> <rhs>` where `<op>` is:
+     - `=` (direct value filter)
+     - `<>`, `<`, `<=`, `>`, `>=` (implemented by scanning rows to compute the set of allowed values)
+   - Membership (`IN`):
+     - scalar: `Table[Column] IN tableExpr`, e.g. `Fact[Category] IN { \"A\", \"B\" }` or `Fact[Category] IN VALUES(Dim[Category])`
+     - row constructor: `(T[Col1], T[Col2], ...) IN tableExpr`
   
    In `CALCULATE`, row-constructor `IN` filters are applied as a **row filter** (not decomposed into
    independent per-column value filters) to preserve correlation across columns, e.g.:
