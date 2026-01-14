@@ -154,6 +154,40 @@ function expectOverlayZOrder(root: HTMLElement): void {
   }
 }
 
+function expectPresenceOverlayZOrder(root: HTMLElement): void {
+  const drawingLayer = root.querySelector(".drawing-layer");
+  const chartLayer = root.querySelector(".grid-canvas--chart");
+  const presenceLayer = root.querySelector(".grid-canvas--presence");
+  const selectionLayer = root.querySelector(".grid-canvas--selection");
+
+  expect(drawingLayer).toBeTruthy();
+  expect(chartLayer).toBeTruthy();
+  expect(presenceLayer).toBeTruthy();
+  expect(selectionLayer).toBeTruthy();
+
+  const drawingZ = zIndexNumber(getComputedStyle(drawingLayer as Element).zIndex);
+  const chartZ = zIndexNumber(getComputedStyle(chartLayer as Element).zIndex);
+  const presenceZ = zIndexNumber(getComputedStyle(presenceLayer as Element).zIndex);
+  const selectionZ = zIndexNumber(getComputedStyle(selectionLayer as Element).zIndex);
+
+  expect(chartZ).toBe(2);
+  expect(drawingZ).toBe(3);
+  expect(presenceZ).toBe(4);
+  expect(selectionZ).toBe(4);
+
+  expect(chartZ).toBeLessThan(drawingZ);
+  expect(drawingZ).toBeLessThan(presenceZ);
+  expect(presenceZ).toBeLessThanOrEqual(selectionZ);
+  expect(getComputedStyle(presenceLayer as Element).pointerEvents).toBe("none");
+
+  // Presence and selection share the same z-index so ensure DOM insertion order preserves
+  // selection above presence highlights.
+  if (presenceZ === selectionZ) {
+    const children = Array.from(root.children);
+    expect(children.indexOf(selectionLayer!)).toBeGreaterThan(children.indexOf(presenceLayer!));
+  }
+}
+
 describe("SpreadsheetApp overlay stacking", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -242,6 +276,41 @@ describe("SpreadsheetApp overlay stacking", () => {
       expect(selection?.classList.contains("grid-canvas--shared-selection")).toBe(true);
 
       expectOverlayZOrder(root);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("keeps collab presence overlay above charts/drawings but below selection via z-index ties", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("legacy");
+
+      // SpreadsheetApp only mounts presenceCanvas when collaboration is enabled. For stacking
+      // coverage, simulate the collab canvas with the same class so CSS + DOM order assertions
+      // can execute without a full collab session.
+      const selectionLayer = root.querySelector(".grid-canvas--selection");
+      expect(selectionLayer).toBeTruthy();
+      const presenceCanvas = document.createElement("canvas");
+      presenceCanvas.className = "grid-canvas grid-canvas--presence";
+      presenceCanvas.setAttribute("aria-hidden", "true");
+      root.insertBefore(presenceCanvas, selectionLayer!);
+
+      expectOverlayZOrder(root);
+      expectPresenceOverlayZOrder(root);
 
       app.destroy();
       root.remove();
