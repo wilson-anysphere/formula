@@ -86,3 +86,44 @@ test("ensureWorkbookSchema: preserves array-encoded axis overrides inside `view`
   doc.destroy();
 });
 
+test("ensureWorkbookSchema: preserves array-encoded axis overrides inside plain-object `view` when merging duplicate sheets", () => {
+  const doc = new Y.Doc();
+  const { sheets } = getWorkbookRoots(doc);
+
+  doc.transact(() => {
+    const loser = new Y.Map();
+    loser.set("id", "Sheet1");
+    loser.set("name", "Sheet1");
+    loser.set("view", { colWidths: { "1": 111 } });
+
+    const winner = new Y.Map();
+    winner.set("id", "Sheet1");
+    winner.set("name", "Sheet1");
+    // Winner uses plain-object view with the legacy/alternate array encoding.
+    winner.set("view", {
+      colWidths: [
+        [1, 100],
+        [2, 200],
+      ],
+    });
+
+    sheets.push([loser]);
+    sheets.push([winner]);
+  });
+
+  ensureWorkbookSchema(doc);
+
+  assert.equal(sheets.length, 1);
+  const sheet = sheets.get(0);
+  assert.ok(sheet);
+
+  const view = sheet.get("view");
+  assert.ok(view && typeof view === "object" && !(view instanceof Y.AbstractType));
+
+  assert.deepEqual(view.colWidths, [
+    [1, 100],
+    [2, 200],
+  ]);
+
+  doc.destroy();
+});
