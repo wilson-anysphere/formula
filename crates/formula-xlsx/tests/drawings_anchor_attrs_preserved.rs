@@ -11,9 +11,8 @@ fn drawings_roundtrip_preserves_anchor_and_client_data_attributes() {
            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
            xmlns:dup1="urn:example"
            xmlns:dup2="urn:example"
-           dup2:rootAttr="abc"
-           xmlns:xdr14="http://schemas.microsoft.com/office/drawing/2010/spreadsheetDrawing">
-   <xdr:twoCellAnchor editAs="oneCell" xdr14:anchorId="123">
+           dup2:rootAttr="abc">
+   <xdr:twoCellAnchor xmlns:xdr14="http://schemas.microsoft.com/office/drawing/2010/spreadsheetDrawing" editAs="oneCell" xdr14:anchorId="123">
      <xdr:from>
        <xdr:col>0</xdr:col>
        <xdr:colOff>0</xdr:colOff>
@@ -74,6 +73,10 @@ fn drawings_roundtrip_preserves_anchor_and_client_data_attributes() {
         .get("xlsx.anchor_attrs")
         .expect("anchor attrs preserved");
     let attrs: BTreeMap<String, String> = serde_json::from_str(attrs_json).expect("parse attrs json");
+    assert_eq!(
+        attrs.get("xmlns:xdr14").map(|s| s.as_str()),
+        Some("http://schemas.microsoft.com/office/drawing/2010/spreadsheetDrawing")
+    );
     assert_eq!(attrs.get("xdr14:anchorId").map(|s| s.as_str()), Some("123"));
     assert!(shape
         .preserved
