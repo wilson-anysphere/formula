@@ -214,7 +214,7 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
     }
   });
 
-  it("dragging a drawing updates anchor offsets (EMU)", () => {
+  it("dragging a drawing commits anchor offsets (EMU) in legacy mode when DrawingInteractionController is disabled", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     try {
@@ -224,10 +224,11 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
         selectionRange: document.createElement("div"),
         activeValue: document.createElement("div"),
       };
-
-      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+ 
+      // Disable the dedicated controller so SpreadsheetApp's legacy drawing gesture logic owns the drag.
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
       const sheetId = app.getCurrentSheetId();
-
+ 
       (app as any).document.setSheetDrawings(sheetId, [
         {
           id: "drawing1",
@@ -240,62 +241,56 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
           },
         },
       ]);
+      // Ensure listDrawingObjectsForSheet reflects the newly inserted drawings (it caches results).
       (app as any).drawingObjectsCache = null;
+ 
+      const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+      expect(selectionCanvas).not.toBeNull();
+ 
       const objects = (app as any).listDrawingObjectsForSheet();
       const object = objects[0];
+      expect(object).toBeTruthy();
       expect(object.anchor.type).toBe("oneCell");
       const startAnchor = object.anchor as any;
       const startFromX = startAnchor.from.offset.xEmu;
       const startFromY = startAnchor.from.offset.yEmu;
-
+ 
       const viewport = (app as any).getDrawingInteractionViewport();
       const geom = (app as any).drawingGeom;
       const rect = drawingObjectToViewportRect(object, viewport, geom);
       const startClientX = rect.x + rect.width / 2;
       const startClientY = rect.y + rect.height / 2;
-
-      (app as any).onPointerDown(
-        createPointerEvent({
-          type: "pointerdown",
-          pointerId: 1,
-          clientX: startClientX,
-          clientY: startClientY,
-          pointerType: "mouse",
-          button: 0,
-        }),
-      );
-
+ 
       const dxPx = 10;
       const dyPx = 5;
-      (app as any).onPointerMove(
-        createPointerEvent({
-          type: "pointermove",
-          pointerId: 1,
-          clientX: startClientX + dxPx,
-          clientY: startClientY + dyPx,
-          pointerType: "mouse",
-          button: 0,
-        }),
-      );
-
-      (app as any).onPointerUp(
-        createPointerEvent({
-          type: "pointerup",
-          pointerId: 1,
-          clientX: startClientX + dxPx,
-          clientY: startClientY + dyPx,
-          pointerType: "mouse",
-          button: 0,
-        }),
-      );
-
-      const updatedObjects = (app as any).listDrawingObjectsForSheet();
-      const updatedObject = updatedObjects.find((o: any) => o.id === object.id);
-      const updatedAnchor = updatedObject.anchor as any;
-
-      expect(updatedAnchor.from.offset.xEmu).toBe(startFromX + pxToEmu(dxPx));
-      expect(updatedAnchor.from.offset.yEmu).toBe(startFromY + pxToEmu(dyPx));
-
+ 
+      dispatchPointerEvent(selectionCanvas!, "pointerdown", {
+        clientX: startClientX,
+        clientY: startClientY,
+        pointerId: 1,
+        button: 0,
+        pointerType: "mouse",
+      });
+      dispatchPointerEvent(selectionCanvas!, "pointermove", {
+        clientX: startClientX + dxPx,
+        clientY: startClientY + dyPx,
+        pointerId: 1,
+        button: 0,
+        pointerType: "mouse",
+      });
+      dispatchPointerEvent(selectionCanvas!, "pointerup", {
+        clientX: startClientX + dxPx,
+        clientY: startClientY + dyPx,
+        pointerId: 1,
+        button: 0,
+        pointerType: "mouse",
+      });
+ 
+      const committed = (app.getDocument() as any).getSheetDrawings(sheetId)[0];
+      expect(committed.anchor.type).toBe("oneCell");
+      expect(committed.anchor.from.offset.xEmu).toBe(startFromX + pxToEmu(dxPx));
+      expect(committed.anchor.from.offset.yEmu).toBe(startFromY + pxToEmu(dyPx));
+ 
       app.destroy();
       root.remove();
     } finally {
@@ -303,7 +298,7 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
-
+ 
   it("dragging a drawing via pointer events works in legacy mode (capture handlers do not block)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
