@@ -1301,8 +1301,6 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 //
                 // Note: This is test-only; production `.xls` decryption is implemented by
                 // `crate::biff::encryption` (see `cryptoapi` submodule).
-                const CALG_RC4: u32 = 0x0000_6801;
-                const SPIN_COUNT: u32 = 50_000;
 
                 // Minimal EncryptionInfo payload sizes:
                 // - Header: 32 bytes (no CSP name)
@@ -1338,7 +1336,7 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                     cryptoapi::CALG_SHA1,
                     password,
                     &salt,
-                    SPIN_COUNT,
+                    cryptoapi::BIFF8_CRYPTOAPI_SPIN_COUNT,
                     0,
                     key_len,
                 )?;
@@ -1357,7 +1355,7 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 let mut enc_header = Vec::<u8>::new();
                 enc_header.extend_from_slice(&0u32.to_le_bytes()); // Flags
                 enc_header.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
-                enc_header.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgID
+                enc_header.extend_from_slice(&cryptoapi::CALG_RC4.to_le_bytes()); // AlgID
                 enc_header.extend_from_slice(&cryptoapi::CALG_SHA1.to_le_bytes()); // AlgIDHash
                 enc_header.extend_from_slice(&key_size_bits.to_le_bytes()); // KeySize bits
                 enc_header.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
@@ -1406,7 +1404,7 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                         cryptoapi::CALG_SHA1,
                         password,
                         &salt,
-                        SPIN_COUNT,
+                        cryptoapi::BIFF8_CRYPTOAPI_SPIN_COUNT,
                         b as u32,
                         key_len,
                     )?;

@@ -55,36 +55,6 @@ impl CryptoApiHashAlg {
     }
 }
 
-fn cryptoapi_hash2(
-    alg_id_hash: u32,
-    a: &[u8],
-    b: &[u8],
-) -> Result<Zeroizing<Vec<u8>>, DecryptError> {
-    match alg_id_hash {
-        CALG_MD5 => {
-            let mut h = Md5::new();
-            h.update(a);
-            h.update(b);
-            let mut digest = h.finalize();
-            let out = digest.to_vec();
-            digest.as_mut_slice().zeroize();
-            Ok(Zeroizing::new(out))
-        }
-        CALG_SHA1 => {
-            let mut h = Sha1::new();
-            h.update(a);
-            h.update(b);
-            let mut digest = h.finalize();
-            let out = digest.to_vec();
-            digest.as_mut_slice().zeroize();
-            Ok(Zeroizing::new(out))
-        }
-        other => Err(DecryptError::UnsupportedEncryption(format!(
-            "unsupported CryptoAPI hash alg_id_hash=0x{other:08X}"
-        ))),
-    }
-}
-
 fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, DecryptError> {
     let b = bytes.get(offset..offset + 2).ok_or_else(|| {
         DecryptError::InvalidFilePass(format!(
@@ -304,36 +274,30 @@ pub(crate) fn derive_biff8_cryptoapi_key(
         ));
     }
 
-    let pw_bytes: Zeroizing<Vec<u8>> = Zeroizing::new(
-        password
-            .encode_utf16()
-            .flat_map(|c| c.to_le_bytes())
-            .collect(),
-    );
+    let Some(hash_alg) = CryptoApiHashAlg::from_alg_id_hash(alg_id_hash) else {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "unsupported CryptoAPI hash alg_id_hash=0x{alg_id_hash:08X}"
+        )));
+    };
 
-    // Initial hash: H0 = Hash(salt || password_utf16le)
-    let mut hash = cryptoapi_hash2(alg_id_hash, salt, &pw_bytes[..])?;
-    drop(pw_bytes);
+    // Derive base key material (Hspin) and then the per-block key.
+    let key_material = derive_key_material(hash_alg, password, salt, spin_count);
 
-    // Spin: Hi+1 = Hash(i_le || Hi)
-    for i in 0..spin_count {
-        let i_bytes = i.to_le_bytes();
-        hash = cryptoapi_hash2(alg_id_hash, &i_bytes, &hash[..])?;
-    }
+    // Preserve historical behavior: if the caller asks for more bytes than the hash digest
+    // provides, clamp to the digest length rather than panicking.
+    let effective_key_len = if key_len == 5 {
+        5
+    } else {
+        key_len.min(hash_alg.digest_len())
+    };
 
-    // Final block key hash: H = Hash(Hspin || block_index_le)
-    let block_bytes = block_index.to_le_bytes();
-    let block_hash = cryptoapi_hash2(alg_id_hash, &hash[..], &block_bytes)?;
-    drop(hash);
-
-    let mut key = block_hash[..key_len.min(block_hash.len())].to_vec();
-    // CryptoAPI "40-bit" RC4 keys are represented as a 16-byte RC4 key where the remaining bytes
-    // are zero (the effective key strength is still 40 bits).
-    if key_len == 5 {
-        key.resize(16, 0);
-    }
-    drop(block_hash);
-    Ok(Zeroizing::new(key))
+    Ok(derive_block_key(
+        hash_alg,
+        key_material.as_slice(),
+        block_index,
+        effective_key_len,
+        true,
+    ))
 }
 
 /// Decrypt the CryptoAPI verifier and verifier hash.
