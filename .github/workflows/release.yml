@@ -372,7 +372,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/check-tag-ci-status.mjs --sha "${{ github.sha }}" --workflow "CI"
 
-  build: &build_job
+  build:
     name: Build (${{ matrix.label }})
     needs:
       - preflight
@@ -382,7 +382,7 @@ jobs:
       id-token: write
       attestations: write
     if: needs.preflight.outputs.upload == 'true'
-    strategy:
+    strategy: &build_strategy
       fail-fast: false
       # NOTE: `tauri-apps/tauri-action` updates shared GitHub Release assets (notably `latest.json`)
       # for the updater. Matrix jobs remain parallel for fast releases; we publish a single combined
@@ -427,7 +427,7 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
 
-    steps:
+    steps: &build_steps
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -2316,12 +2316,14 @@ jobs:
           if-no-files-found: warn
 
   build-dry-run:
-    <<: *build_job
     name: Build (dry run) (${{ matrix.label }})
     needs: preflight
     if: needs.preflight.outputs.upload != 'true'
     permissions:
       contents: read
+    strategy: *build_strategy
+    runs-on: ${{ matrix.platform }}
+    steps: *build_steps
 
   publish-updater-manifest:
     name: Publish combined updater manifest (latest.json)
