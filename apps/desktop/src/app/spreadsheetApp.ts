@@ -8134,6 +8134,23 @@ export class SpreadsheetApp {
         else if ("preserved" in next) delete next.preserved;
       }
 
+      // Persist any preserved raw DrawingML fragments (e.g. patched `<a:xfrm>` stored under `kind.rawXml`).
+      // DrawingInteractionController updates these at commit-time; keep DocumentController in sync so
+      // export/roundtrip remains faithful.
+      const afterKindAny = after.kind as any;
+      const afterRawXml: unknown = afterKindAny?.rawXml ?? afterKindAny?.raw_xml;
+      if (typeof afterRawXml === "string") {
+        const kindAny: any = (drawing as any).kind;
+        if (kindAny && typeof kindAny === "object") {
+          const nextKind: any = { ...kindAny };
+          const rawXml = typeof afterKindAny?.rawXml === "string" ? afterKindAny.rawXml : afterRawXml;
+          const raw_xml = typeof afterKindAny?.raw_xml === "string" ? afterKindAny.raw_xml : afterRawXml;
+          nextKind.rawXml = rawXml;
+          nextKind.raw_xml = raw_xml;
+          next.kind = nextKind;
+        }
+      }
+
       // Keep the extracted `size` field (when present) aligned with the anchor size.
       //
       // `convertDocumentSheetDrawingsToUiDrawingObjects` prefers the top-level `size` field when

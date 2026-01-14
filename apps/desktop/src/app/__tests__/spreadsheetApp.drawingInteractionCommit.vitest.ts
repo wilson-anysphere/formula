@@ -134,7 +134,7 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     const rawDrawing = {
       id: "drawing_foo",
       zOrder: 0,
-      kind: { type: "shape", label: "Box" },
+      kind: { type: "shape", label: "Box", rawXml: "<before/>", raw_xml: "<before/>" },
       anchor: {
         type: "absolute",
         pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
@@ -156,6 +156,7 @@ describe("SpreadsheetApp drawing interaction commits", () => {
         // Move it slightly and keep the same size.
         pos: { xEmu: pxToEmu(20), yEmu: pxToEmu(10) },
       },
+      kind: { ...(before.kind as any), rawXml: "<after/>", raw_xml: "<after/>" },
       transform: { rotationDeg: 45, flipH: false, flipV: false },
       preserved: { foo: "after" },
     };
@@ -169,6 +170,8 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     expect(updated?.id).toBe("drawing_foo");
     expect(updated?.zOrder).toBe(0);
     expect(updated?.anchor).toEqual(after.anchor);
+    expect(updated?.kind?.rawXml).toBe("<after/>");
+    expect(updated?.kind?.raw_xml).toBe("<after/>");
     expect(updated?.transform).toEqual(after.transform);
     expect(updated?.preserved).toEqual(after.preserved);
 
@@ -176,6 +179,8 @@ describe("SpreadsheetApp drawing interaction commits", () => {
       expect(doc.undo()).toBe(true);
       const reverted = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
       expect(reverted?.anchor).toEqual(rawDrawing.anchor);
+      expect(reverted?.kind?.rawXml).toBe("<before/>");
+      expect(reverted?.kind?.raw_xml).toBe("<before/>");
       expect(reverted?.transform).toBeUndefined();
       expect(reverted?.preserved).toEqual(rawDrawing.preserved);
     }
