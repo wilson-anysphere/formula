@@ -110,6 +110,25 @@ describe("registerBuiltinCommands: panel toggles", () => {
     expect(layoutController.layout.docks.left.collapsed).toBe(false);
   });
 
+  it("activates an already-open docked panel when executing open-panel commands", async () => {
+    const { commandRegistry, layoutController } = createHarness();
+
+    // Open the Selection Pane first.
+    await commandRegistry.executeCommand("pageLayout.arrange.selectionPane");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SELECTION_PANE)).toEqual({ kind: "docked", side: "right" });
+    expect(layoutController.layout.docks.right.active).toBe(PanelIds.SELECTION_PANE);
+
+    // Open another panel in the same dock, making Selection Pane inactive.
+    await commandRegistry.executeCommand("view.togglePanel.aiChat");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.AI_CHAT)).toEqual({ kind: "docked", side: "right" });
+    expect(layoutController.layout.docks.right.active).toBe(PanelIds.AI_CHAT);
+
+    // Re-executing the open-panel command should activate Selection Pane (not no-op).
+    await commandRegistry.executeCommand("pageLayout.arrange.selectionPane");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.SELECTION_PANE)).toEqual({ kind: "docked", side: "right" });
+    expect(layoutController.layout.docks.right.active).toBe(PanelIds.SELECTION_PANE);
+  });
+
   it("restores minimized floating Pivot Builder panel when inserting a pivot table", async () => {
     const { commandRegistry, layoutController } = createHarness();
 
