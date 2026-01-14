@@ -212,4 +212,114 @@ describe("SpreadsheetApp drawings debug state", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("respects frozen panes when computing drawing rects (shared grid)", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+      const app = new SpreadsheetApp(root, status);
+
+      // Freeze first row/col (sheet space).
+      const doc = app.getDocument();
+      doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
+
+      const file1 = new File([new Uint8Array([1, 2, 3])], "a.png", { type: "image/png" });
+      const file2 = new File([new Uint8Array([4, 5, 6])], "b.png", { type: "image/png" });
+
+      // Insert one picture in the frozen top-left pane and one in the scrollable pane.
+      await app.insertPicturesFromFiles([file1], { placeAt: { row: 0, col: 0 } }); // A1 (frozen)
+      const frozenId = app.getSelectedDrawingId();
+      expect(frozenId).not.toBeNull();
+
+      await app.insertPicturesFromFiles([file2], { placeAt: { row: 1, col: 1 } }); // B2 (scrollable)
+      const scrollableId = app.getSelectedDrawingId();
+      expect(scrollableId).not.toBeNull();
+      expect(scrollableId).not.toBe(frozenId);
+
+      const frozenBefore = app.getDrawingRectPx(frozenId!);
+      const scrollableBefore = app.getDrawingRectPx(scrollableId!);
+      expect(frozenBefore).not.toBeNull();
+      expect(scrollableBefore).not.toBeNull();
+
+      app.setScroll(100, 100);
+
+      const frozenAfter = app.getDrawingRectPx(frozenId!);
+      const scrollableAfter = app.getDrawingRectPx(scrollableId!);
+      expect(frozenAfter).not.toBeNull();
+      expect(scrollableAfter).not.toBeNull();
+
+      // Frozen-pane object should not move when the sheet scrolls.
+      expect(frozenAfter!.x).toBeCloseTo(frozenBefore!.x, 6);
+      expect(frozenAfter!.y).toBeCloseTo(frozenBefore!.y, 6);
+
+      // Scrollable object should move with the scroll position.
+      expect(scrollableAfter!.x).toBeLessThan(scrollableBefore!.x);
+      expect(scrollableAfter!.y).toBeLessThan(scrollableBefore!.y);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("respects frozen panes when computing drawing rects (legacy grid)", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+      const app = new SpreadsheetApp(root, status);
+
+      const doc = app.getDocument();
+      doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
+
+      const file1 = new File([new Uint8Array([1, 2, 3])], "a.png", { type: "image/png" });
+      const file2 = new File([new Uint8Array([4, 5, 6])], "b.png", { type: "image/png" });
+
+      await app.insertPicturesFromFiles([file1], { placeAt: { row: 0, col: 0 } }); // A1 (frozen)
+      const frozenId = app.getSelectedDrawingId();
+      expect(frozenId).not.toBeNull();
+
+      await app.insertPicturesFromFiles([file2], { placeAt: { row: 1, col: 1 } }); // B2 (scrollable)
+      const scrollableId = app.getSelectedDrawingId();
+      expect(scrollableId).not.toBeNull();
+      expect(scrollableId).not.toBe(frozenId);
+
+      const frozenBefore = app.getDrawingRectPx(frozenId!);
+      const scrollableBefore = app.getDrawingRectPx(scrollableId!);
+      expect(frozenBefore).not.toBeNull();
+      expect(scrollableBefore).not.toBeNull();
+
+      app.setScroll(100, 100);
+
+      const frozenAfter = app.getDrawingRectPx(frozenId!);
+      const scrollableAfter = app.getDrawingRectPx(scrollableId!);
+      expect(frozenAfter).not.toBeNull();
+      expect(scrollableAfter).not.toBeNull();
+
+      expect(frozenAfter!.x).toBeCloseTo(frozenBefore!.x, 6);
+      expect(frozenAfter!.y).toBeCloseTo(frozenBefore!.y, 6);
+
+      expect(scrollableAfter!.x).toBeLessThan(scrollableBefore!.x);
+      expect(scrollableAfter!.y).toBeLessThan(scrollableBefore!.y);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
