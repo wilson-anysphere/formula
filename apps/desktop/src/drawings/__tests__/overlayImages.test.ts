@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DrawingOverlay, pxToEmu, type GridGeometry, type Viewport } from "../overlay";
 import type { DrawingObject, ImageEntry, ImageStore } from "../types";
@@ -83,6 +83,21 @@ const geom: GridGeometry = {
 const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 100, height: 100, dpr: 1 };
 
 describe("DrawingOverlay images", () => {
+  beforeEach(() => {
+    // `DrawingOverlay` guards decode/prefetch behind a `typeof createImageBitmap === "function"` check.
+    // These tests stub `bitmapCache.get` directly, but still need a defined `createImageBitmap` so the
+    // overlay takes the decode path.
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(() => Promise.resolve({} as ImageBitmap)) as unknown as typeof createImageBitmap,
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it("prefetches visible image bitmaps concurrently and draws in z-order", async () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
