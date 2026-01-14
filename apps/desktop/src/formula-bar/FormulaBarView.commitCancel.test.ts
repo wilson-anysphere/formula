@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FormulaBarView } from "./FormulaBarView.js";
 import { parseA1Range } from "../spreadsheet/a1.js";
@@ -32,6 +32,13 @@ function queryFunctionAutocomplete(host: HTMLElement): HTMLElement {
 }
 
 describe("FormulaBarView commit/cancel UX", () => {
+  afterEach(() => {
+    // Ensure no stray DOM nodes (context menus, hosts, etc.) leak between tests.
+    // Each test should clean up its own host, but this keeps the suite resilient
+    // when a failing assertion short-circuits the test body.
+    document.body.innerHTML = "";
+  });
+
   it("is resilient if onCommit throws (edit mode still exits first)", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
