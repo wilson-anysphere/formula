@@ -121,6 +121,22 @@ describe("createDefaultAIAuditStore", () => {
     expect((store as LocalStorageAIAuditStore).maxEntries).toBe(7);
   });
 
+  it('prefer: "localstorage" falls back to MemoryAIAuditStore when localStorage is unavailable (even if indexedDB exists)', async () => {
+    const win: any = {};
+    Object.defineProperty(win, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("no localStorage");
+      }
+    });
+    Object.defineProperty(globalThis, "window", { value: win, configurable: true });
+    (globalThis as any).indexedDB = indexedDB;
+    (globalThis as any).IDBKeyRange = IDBKeyRange;
+
+    const store = await createDefaultAIAuditStore({ prefer: "localstorage", bounded: false });
+    expect(store).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
   it("falls back to LocalStorageAIAuditStore when IndexedDB is unavailable", async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
