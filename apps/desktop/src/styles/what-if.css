@@ -296,7 +296,8 @@
   background: transparent;
 }
 
-.what-if-table tr:last-child td {
+.what-if-table tr:last-child td,
+.what-if-table tr:last-child th {
   border-bottom: none;
 }
 
