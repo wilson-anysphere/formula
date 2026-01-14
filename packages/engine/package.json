@@ -8,7 +8,8 @@
   },
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
-    "smoke:wasm": "node scripts/smoke-wasm.mjs"
+    "smoke:wasm": "node scripts/smoke-wasm.mjs",
+    "test": "cd ../.. && node scripts/run-vitest.mjs packages/engine/src/**/*.test.ts"
   },
   "exports": {
     ".": "./src/index.ts",

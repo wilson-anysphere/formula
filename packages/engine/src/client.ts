@@ -6,6 +6,7 @@ import type {
   CellDataRich,
   CellScalar,
   CellValueRich,
+  EngineInfoDto,
   WorkbookStyleDto,
   EditOp,
   EditResult,
@@ -154,6 +155,18 @@ export interface EngineClient {
    * Replace the workbook calculation settings (`calcPr`).
    */
   setCalcSettings(settings: CalcSettings, options?: RpcOptions): Promise<void>;
+  /**
+   * Set host-provided system/environment metadata surfaced via Excel `INFO()` keys.
+   */
+  setEngineInfo(info: EngineInfoDto, options?: RpcOptions): Promise<void>;
+  /**
+   * Set (or clear) the workbook-level default for `INFO("origin")`.
+   */
+  setInfoOrigin(origin: string | null, options?: RpcOptions): Promise<void>;
+  /**
+   * Set (or clear) the per-sheet override for `INFO("origin")`.
+   */
+  setInfoOriginForSheet(sheet: string, origin: string | null, options?: RpcOptions): Promise<void>;
   /**
    * Recalculate the workbook and return value-change deltas.
    *
@@ -438,6 +451,10 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     getCalcSettings: async (rpcOptions) => await withEngine((connected) => connected.getCalcSettings(rpcOptions)),
     setCalcSettings: async (settings, rpcOptions) =>
       await withEngine((connected) => connected.setCalcSettings(settings, rpcOptions)),
+    setEngineInfo: async (info, rpcOptions) => await withEngine((connected) => connected.setEngineInfo(info, rpcOptions)),
+    setInfoOrigin: async (origin, rpcOptions) => await withEngine((connected) => connected.setInfoOrigin(origin, rpcOptions)),
+    setInfoOriginForSheet: async (sheet, origin, rpcOptions) =>
+      await withEngine((connected) => connected.setInfoOriginForSheet(sheet, origin, rpcOptions)),
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
     getPivotSchema: async (sheet, sourceRangeA1, sampleSize, rpcOptions) =>
       await withEngine((connected) => connected.getPivotSchema(sheet, sourceRangeA1, sampleSize, rpcOptions)),

@@ -40,6 +40,7 @@ export type {
   FormulaSpan,
   FormulaToken,
   FunctionContext,
+  EngineInfoDto,
   RpcMethod,
   WorkbookStyleDto,
   RewriteFormulaForCopyDeltaRequest,

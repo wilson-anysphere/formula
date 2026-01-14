@@ -6,6 +6,7 @@ import type {
   CellDataRich,
   CellScalar,
   CellValueRich,
+  EngineInfoDto,
   EditOp,
   EditResult,
   GoalSeekRequest,
@@ -121,6 +122,15 @@ function pruneNullsDeep(value: unknown): unknown {
     out[key] = pruneNullsDeep(raw);
   }
   return out;
+}
+
+function pruneUndefinedShallow<T extends Record<string, unknown>>(value: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (raw === undefined) continue;
+    out[key] = raw;
+  }
+  return out as T;
 }
 
 /**
@@ -321,6 +331,34 @@ export class EngineWorker {
   async setCalcSettings(settings: CalcSettings, options?: RpcOptions): Promise<void> {
     await this.flush();
     await this.invoke("setCalcSettings", { settings }, options);
+  }
+
+  async setEngineInfo(info: EngineInfoDto, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    const normalized = pruneUndefinedShallow(info as unknown as Record<string, unknown>) as EngineInfoDto;
+    const memavail = (normalized as any).memavail as unknown;
+    if (memavail !== undefined && memavail !== null) {
+      if (typeof memavail !== "number" || !Number.isFinite(memavail)) {
+        throw new Error("memavail must be a finite number");
+      }
+    }
+    const totmem = (normalized as any).totmem as unknown;
+    if (totmem !== undefined && totmem !== null) {
+      if (typeof totmem !== "number" || !Number.isFinite(totmem)) {
+        throw new Error("totmem must be a finite number");
+      }
+    }
+    await this.invoke("setEngineInfo", { info: normalized }, options);
+  }
+
+  async setInfoOrigin(origin: string | null, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setInfoOrigin", { origin }, options);
+  }
+
+  async setInfoOriginForSheet(sheet: string, origin: string | null, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("setInfoOriginForSheet", { sheet, origin }, options);
   }
 
   async setWorkbookFileMetadata(

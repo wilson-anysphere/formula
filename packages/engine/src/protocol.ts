@@ -199,6 +199,23 @@ export interface WorkbookInfoDto {
   sheets: WorkbookSheetInfoDto[];
 }
 
+/**
+ * Host-provided system/environment metadata surfaced via Excel-compatible `INFO()` keys.
+ *
+ * All fields are optional; `null`/empty string clears the value.
+ *
+ * Note: `memavail` and `totmem` must be finite numbers.
+ */
+export interface EngineInfoDto {
+  system?: string | null;
+  directory?: string | null;
+  osversion?: string | null;
+  release?: string | null;
+  version?: string | null;
+  memavail?: number | null;
+  totmem?: number | null;
+}
+
 // Pivots
 
 export type PivotValue =
@@ -552,6 +569,9 @@ export type RpcMethod =
   | "setLocale"
   | "getCalcSettings"
   | "setCalcSettings"
+  | "setEngineInfo"
+  | "setInfoOrigin"
+  | "setInfoOriginForSheet"
   | "recalculate"
   | "applyOperation"
   | "goalSeek"

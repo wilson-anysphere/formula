@@ -11,8 +11,8 @@ use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams};
 use formula_engine::what_if::EngineWhatIfModel;
 use formula_engine::{
     CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
-    EditResult as EngineEditResult, Engine, ErrorKind, NameDefinition, NameScope, ParseOptions,
-    RecalcMode, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
+    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, NameDefinition, NameScope,
+    ParseOptions, RecalcMode, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
 use formula_model::{
     display_formula_text, Alignment, CellRef, CellValue, DateSystem, DefinedNameScope, Font,
@@ -3364,7 +3364,105 @@ impl WasmWorkbook {
             full_precision: dto.full_precision,
             full_calc_on_load: dto.full_calc_on_load,
         });
+        Ok(())
+    }
 
+    #[wasm_bindgen(js_name = "setEngineInfo")]
+    pub fn set_engine_info(&mut self, info: JsValue) -> Result<(), JsValue> {
+        if info.is_null() || info.is_undefined() {
+            return Err(js_err("setEngineInfo: info must be an object"));
+        }
+
+        let obj = info
+            .dyn_into::<Object>()
+            .map_err(|_| js_err("setEngineInfo: info must be an object"))?;
+
+        let mut next: EngineInfo = self.inner.engine.engine_info().clone();
+
+        fn update_string(
+            obj: &Object,
+            key: &str,
+            out: &mut Option<String>,
+        ) -> Result<(), JsValue> {
+            let has = Reflect::has(obj, &JsValue::from_str(key)).unwrap_or(false);
+            if !has {
+                return Ok(());
+            }
+            let raw = Reflect::get(obj, &JsValue::from_str(key))
+                .map_err(|_| js_err(format!("setEngineInfo: failed to read {key}")))?;
+            if raw.is_null() || raw.is_undefined() {
+                *out = None;
+                return Ok(());
+            }
+            let s = raw
+                .as_string()
+                .ok_or_else(|| js_err(format!("setEngineInfo: {key} must be a string")))?;
+            let trimmed = s.trim();
+            *out = (!trimmed.is_empty()).then_some(trimmed.to_string());
+            Ok(())
+        }
+
+        fn update_number(obj: &Object, key: &str, out: &mut Option<f64>) -> Result<(), JsValue> {
+            let has = Reflect::has(obj, &JsValue::from_str(key)).unwrap_or(false);
+            if !has {
+                return Ok(());
+            }
+            let raw = Reflect::get(obj, &JsValue::from_str(key))
+                .map_err(|_| js_err(format!("setEngineInfo: failed to read {key}")))?;
+            if raw.is_null() || raw.is_undefined() {
+                *out = None;
+                return Ok(());
+            }
+            let n = raw
+                .as_f64()
+                .ok_or_else(|| js_err(format!("setEngineInfo: {key} must be a finite number")))?;
+            if !n.is_finite() {
+                return Err(js_err(format!(
+                    "setEngineInfo: {key} must be a finite number"
+                )));
+            }
+            *out = Some(n);
+            Ok(())
+        }
+
+        update_string(&obj, "system", &mut next.system)?;
+        update_string(&obj, "directory", &mut next.directory)?;
+        update_string(&obj, "osversion", &mut next.osversion)?;
+        update_string(&obj, "release", &mut next.release)?;
+        update_string(&obj, "version", &mut next.version)?;
+        update_number(&obj, "memavail", &mut next.memavail)?;
+        update_number(&obj, "totmem", &mut next.totmem)?;
+
+        self.inner.engine.set_engine_info(next);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "setInfoOrigin")]
+    pub fn set_info_origin(&mut self, origin: Option<String>) -> Result<(), JsValue> {
+        let origin = origin.and_then(|s| {
+            let s = s.trim();
+            (!s.is_empty()).then_some(s.to_string())
+        });
+        self.inner.engine.set_info_origin(origin);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "setInfoOriginForSheet")]
+    pub fn set_info_origin_for_sheet(
+        &mut self,
+        sheet_name: String,
+        origin: Option<String>,
+    ) -> Result<(), JsValue> {
+        let sheet_name = sheet_name.trim();
+        if sheet_name.is_empty() {
+            return Err(js_err("sheet must be a non-empty string"));
+        }
+        let sheet = self.inner.ensure_sheet(sheet_name);
+        let origin = origin.and_then(|s| {
+            let s = s.trim();
+            (!s.is_empty()).then_some(s.to_string())
+        });
+        self.inner.engine.set_info_origin_for_sheet(&sheet, origin);
         Ok(())
     }
 

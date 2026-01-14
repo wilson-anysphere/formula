@@ -34,6 +34,9 @@ type WasmWorkbookInstance = {
   getRangeCompact?: (range: string, sheet?: string) => unknown;
   setRange(range: string, values: CellScalar[][], sheet?: string): void;
   recalculate(sheet?: string): unknown;
+  setEngineInfo?: (info: unknown) => void;
+  setInfoOrigin?: (origin: string | null) => void;
+  setInfoOriginForSheet?: (sheet: string, origin: string | null) => void;
   applyOperation?: (op: unknown) => unknown;
   setSheetDimensions?: (sheet: string, rows: number, cols: number) => void;
   getSheetDimensions?: (sheet: string) => { rows: number; cols: number };
@@ -637,6 +640,29 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setCalcSettings: WasmWorkbook.setCalcSettings is not available in this WASM build");
               }
               (wb as any).setCalcSettings(params.settings);
+              result = null;
+              break;
+            case "setEngineInfo":
+              if (typeof (wb as any).setEngineInfo !== "function") {
+                throw new Error("setEngineInfo: WasmWorkbook.setEngineInfo is not available in this WASM build");
+              }
+              (wb as any).setEngineInfo(params.info);
+              result = null;
+              break;
+            case "setInfoOrigin":
+              if (typeof (wb as any).setInfoOrigin !== "function") {
+                throw new Error("setInfoOrigin: WasmWorkbook.setInfoOrigin is not available in this WASM build");
+              }
+              (wb as any).setInfoOrigin(params.origin ?? null);
+              result = null;
+              break;
+            case "setInfoOriginForSheet":
+              if (typeof (wb as any).setInfoOriginForSheet !== "function") {
+                throw new Error(
+                  "setInfoOriginForSheet: WasmWorkbook.setInfoOriginForSheet is not available in this WASM build"
+                );
+              }
+              (wb as any).setInfoOriginForSheet(params.sheet, params.origin ?? null);
               result = null;
               break;
             case "setWorkbookFileMetadata":
