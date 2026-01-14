@@ -190,6 +190,49 @@ class DocumentSheetAdapter {
     return null;
   }
 
+  /**
+   * Merged-cell regions for this sheet (inclusive coordinates).
+   *
+   * `packages/search` uses this to expand selection scopes and to avoid double-indexing
+   * merged regions (Excel-style: only the top-left anchor cell is searchable).
+   */
+  getMergedRanges() {
+    const doc = /** @type {any} */ (this.document);
+    if (typeof doc.getMergedRanges === "function") {
+      return doc.getMergedRanges(this.sheetId) ?? [];
+    }
+    // Fallback: read from sheet view state if the controller does not expose a helper.
+    if (typeof doc.getSheetView === "function") {
+      const view = doc.getSheetView(this.sheetId);
+      const ranges = view?.mergedRanges ?? view?.mergedCells;
+      return Array.isArray(ranges) ? ranges : [];
+    }
+    return [];
+  }
+
+  /**
+   * Resolve a cell inside a merged region to its anchor (top-left).
+   *
+   * @param {number} row
+   * @param {number} col
+   * @returns {{ row: number, col: number } | null}
+   */
+  getMergedMasterCell(row, col) {
+    const doc = /** @type {any} */ (this.document);
+    if (typeof doc.getMergedMasterCell === "function") {
+      return doc.getMergedMasterCell(this.sheetId, { row, col });
+    }
+    const ranges = this.getMergedRanges();
+    if (!ranges || ranges.length === 0) return null;
+    for (const r of ranges) {
+      if (!r) continue;
+      if (row < r.startRow || row > r.endRow) continue;
+      if (col < r.startCol || col > r.endCol) continue;
+      return { row: r.startRow, col: r.startCol };
+    }
+    return null;
+  }
+
   getCell(row, col) {
     const state = this.document.getCell(this.sheetId, { row, col });
     const formula = normalizeFormula(state.formula);

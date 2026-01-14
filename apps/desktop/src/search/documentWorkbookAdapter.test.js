@@ -240,3 +240,16 @@ test("DocumentWorkbookAdapter resolves DocumentController sheet meta names with 
   assert.equal(sheet.sheetId, "Sheet1");
   assert.equal(sheet.name, "Å");
 });
+
+test("DocumentWorkbookAdapter exposes merged-cell metadata for search semantics", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "hello");
+  doc.setMergedRanges("Sheet1", [{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }], { label: "Merge Cells" }); // A1:B1
+
+  const workbook = new DocumentWorkbookAdapter({ document: doc });
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.deepEqual(sheet.getMergedRanges(), [{ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }]);
+  assert.deepEqual(sheet.getMergedMasterCell(0, 1), { row: 0, col: 0 });
+  assert.equal(sheet.getMergedMasterCell(5, 5), null);
+});
