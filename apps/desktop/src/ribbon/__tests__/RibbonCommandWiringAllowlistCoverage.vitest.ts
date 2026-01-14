@@ -61,8 +61,6 @@ const implementedCommandIds: string[] = [
   "data.queriesConnections.refreshAll.refresh",
   "data.queriesConnections.refreshAll.refreshAllConnections",
   "data.queriesConnections.refreshAll.refreshAllQueries",
-  "data.forecast.whatIfAnalysis.goalSeek",
-  "data.forecast.whatIfAnalysis.scenarioManager",
   "data.sortFilter.advanced.clearFilter",
   "data.sortFilter.clear",
   "data.sortFilter.filter",
