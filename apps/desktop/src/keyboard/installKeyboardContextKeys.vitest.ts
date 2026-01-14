@@ -202,4 +202,41 @@ describe("installKeyboardContextKeys", () => {
 
     dispose();
   });
+
+  it("falls back to the desktop global editing flag when split-view secondary hook is unavailable", async () => {
+    const gridRoot = document.createElement("div");
+    gridRoot.tabIndex = 0;
+    document.body.appendChild(gridRoot);
+
+    const formulaBarRoot = document.createElement("div");
+    document.body.appendChild(formulaBarRoot);
+
+    const sheetTabsRoot = document.createElement("div");
+    document.body.appendChild(sheetTabsRoot);
+
+    const contextKeys = new ContextKeyService();
+    const app = new FakeSpreadsheetApp();
+
+    const dispose = installKeyboardContextKeys({
+      contextKeys,
+      app,
+      formulaBarRoot,
+      sheetTabsRoot,
+      gridRoot,
+      // Intentionally omit `isSplitViewSecondaryEditing`.
+    });
+
+    await flushMicrotasks();
+    expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetIsEditing)).toBe(false);
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    try {
+      dispose.recompute();
+      await flushMicrotasks();
+      expect(contextKeys.get(KeyboardContextKeyIds.spreadsheetIsEditing)).toBe(true);
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+      dispose();
+    }
+  });
 });

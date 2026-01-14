@@ -118,7 +118,8 @@ export function installKeyboardContextKeys(params: KeyboardContextKeysParams): K
     })();
 
     const secondaryEditing = isSplitViewSecondaryEditing?.() === true;
-    const isEditing = Boolean(app.isEditing() || secondaryEditing);
+    const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+    const isEditing = Boolean(app.isEditing() || secondaryEditing || globalEditing === true);
 
     contextKeys.batch({
       [KeyboardContextKeyIds.focusInTextInput]: inTextInput,
