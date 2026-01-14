@@ -395,7 +395,10 @@ find_debs() {
 
     if [[ ${#debs[@]} -eq 0 ]]; then
       for root in "${roots[@]}"; do
-        while IFS= read -r -d '' f; do debs+=("$(abs_path "$f")"); done < <(find "${root}" -type f -path '*/release/bundle/deb/*.deb' -print0 2>/dev/null || true)
+        # Avoid an unbounded scan of the Cargo target directory: the bundle layout we care about is
+        # shallow (<target>/<triple>/release/bundle/deb/*.deb). Keep a conservative maxdepth so
+        # unexpected layouts still work, but we don't traverse the full build tree on failures.
+        while IFS= read -r -d '' f; do debs+=("$(abs_path "$f")"); done < <(find "${root}" -maxdepth 6 -type f -path '*/release/bundle/deb/*.deb' -print0 2>/dev/null || true)
       done
     fi
   fi

@@ -1096,13 +1096,17 @@ main() {
       if [ "${#dmgs[@]}" -eq 0 ]; then
         while IFS= read -r -d '' path; do
           dmgs+=("$path")
-        done < <(find "$root" -type f -path "*/release/bundle/dmg/*.dmg" -print0 2>/dev/null || true)
+        # Avoid scanning the full Cargo target tree: the bundle layout is shallow
+        # (<target>/<triple>/release/bundle/dmg/*.dmg).
+        done < <(find "$root" -maxdepth 6 -type f -path "*/release/bundle/dmg/*.dmg" -print0 2>/dev/null || true)
       fi
 
       if [ "${#app_tars[@]}" -eq 0 ]; then
         while IFS= read -r -d '' path; do
           app_tars+=("$path")
-        done < <(find "$root" -type f \( -path "*/release/bundle/macos/*.tar.gz" -o -path "*/release/bundle/macos/*.tgz" \) -print0 2>/dev/null || true)
+        # Avoid scanning the full Cargo target tree: the bundle layout is shallow
+        # (<target>/<triple>/release/bundle/macos/*.tar.gz|*.tgz).
+        done < <(find "$root" -maxdepth 6 -type f \( -path "*/release/bundle/macos/*.tar.gz" -o -path "*/release/bundle/macos/*.tgz" \) -print0 2>/dev/null || true)
       fi
     done
   fi

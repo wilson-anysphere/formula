@@ -740,7 +740,10 @@ find_rpms() {
     if [[ ${#rpms[@]} -eq 0 ]]; then
       # Fallback: traverse the expected roots to locate RPM bundles.
       for root in "${roots[@]}"; do
-        while IFS= read -r -d '' f; do rpms+=("$(abs_path "$f")"); done < <(find "${root}" -type f -path '*/release/bundle/rpm/*.rpm' -print0 2>/dev/null || true)
+        # Avoid an unbounded scan of the Cargo target directory: the bundle layout we care about is
+        # shallow (<target>/<triple>/release/bundle/rpm/*.rpm). Keep a conservative maxdepth so
+        # unexpected layouts still work, but we don't traverse the full build tree on failures.
+        while IFS= read -r -d '' f; do rpms+=("$(abs_path "$f")"); done < <(find "${root}" -maxdepth 6 -type f -path '*/release/bundle/rpm/*.rpm' -print0 2>/dev/null || true)
       done
     fi
   fi
