@@ -602,7 +602,7 @@ function main() {
   if (bundleDirs.length === 0) {
     const targetDirs = candidateTargetDirs();
     dieBlock("No Tauri bundle directories found.", [
-      `Expected at least one: target/**/release/bundle`,
+      `Expected at least one bundle dir like: target/release/bundle or target/<triple>/release/bundle`,
       `Repo root: ${repoRoot}`,
       `Candidate target dirs: ${targetDirs.length ? targetDirs.map(relPath).join(", ") : "(none found)"}`,
       `Tip: run this script after a Tauri release build, or pass --bundle-dir <dir>.`,

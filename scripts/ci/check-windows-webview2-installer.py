@@ -7,8 +7,13 @@ Formula's Windows build uses the Microsoft Edge WebView2 runtime. On machines wh
 not already installed, the installer must ensure the runtime is available (either by bundling a
 bootstrapper/offline installer, or by shipping a fixed runtime in the app bundle).
 
-This script inspects the *produced* Windows installers under `**/target/**/release/bundle/**`
-and asserts that they contain a reference to:
+This script inspects the *produced* Windows installers under the standard Cargo/Tauri bundle
+output directories:
+  - `<target>/release/bundle/**`
+  - `<target>/<target-triple>/release/bundle/**`
+(across common target roots like `apps/desktop/src-tauri/target`, `apps/desktop/target`, `target`,
+and any configured `CARGO_TARGET_DIR` override),
+and asserts that the installers contain a reference to:
   - the WebView2 Evergreen bootstrapper (`MicrosoftEdgeWebView2Setup.exe`), or
   - an offline runtime installer, or
   - a fixed runtime payload (detected via well-known runtime file names, e.g. `msedgewebview2.exe`).
