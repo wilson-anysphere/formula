@@ -24,6 +24,27 @@ test("chunkWorkbook: packed coord keys handle large row indices for Map-backed s
   assert.equal(dataRegions[0].cells[0][1].v, "B");
 });
 
+test("chunkWorkbook: Number-packed keys handle very large rows (>2^31) without overflow", () => {
+  const row = 3_000_000_000;
+  const cells = new Map();
+  cells.set(`${row},0`, { value: "A" });
+  cells.set(`${row},1`, { value: "B" });
+
+  const workbook = {
+    id: "wb-packed-keys-large-number",
+    sheets: [{ name: "Sheet1", cells }],
+    tables: [],
+    namedRanges: [],
+  };
+
+  const chunks = chunkWorkbook(workbook);
+  const dataRegions = chunks.filter((c) => c.kind === "dataRegion");
+  assert.equal(dataRegions.length, 1);
+  assert.deepEqual(dataRegions[0].rect, { r0: row, c0: 0, r1: row, c1: 1 });
+  assert.equal(dataRegions[0].cells[0][0].v, "A");
+  assert.equal(dataRegions[0].cells[0][1].v, "B");
+});
+
 test("chunkWorkbook: coord packing works for very large rows (BigInt/string fallback)", () => {
   // Exceeds the Number packing limit (row * 2^20 must stay within MAX_SAFE_INTEGER).
   const row = 9_000_000_000;
@@ -104,7 +125,8 @@ test("chunkWorkbook: detectRegions connects across BigInt/string coord key bound
 test("chunkWorkbook: detectRegions connects across Number/BigInt row packing boundary", () => {
   // This crosses the row packing boundary where `packCoordKey` switches from Number
   // keys to BigInt keys (row*2^20 must stay within MAX_SAFE_INTEGER).
-  const rowNum = 8_589_934; // MAX_SAFE_PACKED_ROW
+  const packColFactor = 1 << 20;
+  const rowNum = Math.floor(Number.MAX_SAFE_INTEGER / packColFactor);
   const rowBig = rowNum + 1;
   const col = 0;
 
