@@ -106,6 +106,21 @@ fn privileged_ipc_commands_have_string_length_caps() {
         "pub async fn network_fetch",
         &["MAX_IPC_URL_BYTES"],
     );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn sql_query",
+        &["MAX_SQL_QUERY_TEXT_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn sql_get_schema",
+        &["MAX_SQL_QUERY_TEXT_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn write_clipboard",
+        &["MAX_RICH_TEXT_BYTES", "MAX_IMAGE_PNG_BASE64_BYTES"],
+    );
     assert_marker_has_ipc_string_cap(
         commands_src,
         "pub struct MarketplaceSearchArgs",
@@ -279,5 +294,28 @@ fn privileged_ipc_commands_have_string_length_caps() {
         tray_src,
         "pub fn set_tray_status",
         &["MAX_IPC_TRAY_STATUS_BYTES"],
+    );
+
+    let clipboard_src = include_str!("../src/clipboard/mod.rs");
+    assert_marker_has_ipc_string_cap(
+        clipboard_src,
+        "pub struct ClipboardWritePayloadIpc",
+        &["MAX_RICH_TEXT_BYTES", "MAX_IMAGE_PNG_BASE64_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        clipboard_src,
+        "pub async fn clipboard_write_text",
+        &["MAX_PLAINTEXT_WRITE_BYTES"],
+    );
+
+    let ed25519_src = include_str!("../src/ed25519_verifier.rs");
+    assert_fn_has_ipc_string_cap(
+        ed25519_src,
+        "pub fn verify_ed25519_signature",
+        &[
+            "MAX_SIGNATURE_PAYLOAD_BYTES",
+            "MAX_SIGNATURE_BASE64_BYTES",
+            "MAX_PUBLIC_KEY_PEM_BYTES",
+        ],
     );
 }
