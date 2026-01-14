@@ -415,10 +415,46 @@ validate_desktop_mime_associations_extracted() {
   fi
 
   if [ "${#desktop_files[@]}" -eq 0 ]; then
+    # Some packaging layouts place desktop entries under `share/applications` (or
+    # `usr/local/share/applications`). Check those predictable locations before
+    # resorting to a broader filesystem scan.
+    local alt_dir
+    for alt_dir in "$tmpdir/usr/local/share/applications" "$tmpdir/share/applications"; do
+      if [ -d "$alt_dir" ]; then
+        while IFS= read -r -d '' desktop_file; do
+          desktop_files+=("$desktop_file")
+        done < <(find "$alt_dir" -type f -name '*.desktop' -print0 2>/dev/null || true)
+      fi
+    done
+  fi
+
+  if [ "${#desktop_files[@]}" -eq 0 ]; then
     # Fallback: accept any desktop file in the payload to aid debugging.
+    #
+    # Keep this scan bounded: extracted packages can contain large `usr/lib` trees, and an
+    # unbounded recursive `find "$tmpdir"` can be slow in CI.
     while IFS= read -r -d '' desktop_file; do
       desktop_files+=("$desktop_file")
-    done < <(find "$tmpdir" -type f -name '*.desktop' -print0 2>/dev/null || true)
+    done < <(
+      find "$tmpdir" \
+        -maxdepth 8 \
+        \( \
+          -path "$tmpdir/usr/lib*" -o \
+          -path "$tmpdir/usr/bin*" -o \
+          -path "$tmpdir/usr/sbin*" -o \
+          -path "$tmpdir/bin*" -o \
+          -path "$tmpdir/lib*" -o \
+          -path "$tmpdir/lib64*" -o \
+          -path "$tmpdir/usr/share/doc*" -o \
+          -path "$tmpdir/usr/share/icons*" -o \
+          -path "$tmpdir/usr/share/locale*" -o \
+          -path "$tmpdir/usr/share/man*" -o \
+          -path "$tmpdir/usr/share/mime*" \
+        \) -prune -o \
+        -type f \
+        -name '*.desktop' \
+        -print0 2>/dev/null || true
+    )
   fi
 
   if [ "${#desktop_files[@]}" -eq 0 ]; then

@@ -7,6 +7,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const validatorScriptPath = join(repoRoot, "scripts", "validate-linux-rpm.sh");
+const validatorScriptContents = readFileSync(validatorScriptPath, "utf8");
 const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"));
 const expectedVersion = String(tauriConf?.version ?? "").trim();
 const expectedMainBinary = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
@@ -53,6 +55,23 @@ function collectDeepLinkSchemes(config) {
 
 const expectedDeepLinkSchemes = collectDeepLinkSchemes(tauriConf);
 const expectedSchemeMimes = expectedDeepLinkSchemes.map((scheme) => `x-scheme-handler/${scheme}`);
+
+test("validate-linux-rpm.sh bounds fallback desktop file scans (perf guardrail)", () => {
+  const lines = validatorScriptContents.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (!raw.includes('find "$tmpdir"')) continue;
+
+    const snippet = lines.slice(i, i + 12).join("\n");
+    assert.match(
+      snippet,
+      /-maxdepth\s+\d+/,
+      `Expected find \"$tmpdir\" fallback scan to be bounded with -maxdepth.\nSaw snippet:\n${snippet}`,
+    );
+  }
+});
 
 function buildSharedMimeInfoXml({ omitGlobsForExts = new Set() } = {}) {
   const groups = new Map();
