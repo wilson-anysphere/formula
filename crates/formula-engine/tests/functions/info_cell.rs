@@ -467,3 +467,145 @@ fn cell_and_info_make_formulas_recalculate_each_tick() {
     let second = engine.get_cell_value("Sheet1", "A1");
     assert_ne!(first, second);
 }
+
+#[test]
+fn cell_format_color_and_parentheses_reflect_number_format_strings() {
+    use formula_engine::Engine;
+    use formula_model::Style;
+
+    let mut engine = Engine::new();
+
+    // Two-section format with explicit red parentheses for negatives.
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0;[Red](0)".to_string()),
+        ..Style::default()
+    });
+    engine.set_cell_style_id("Sheet1", "A1", style_id).unwrap();
+
+    // One-section formats should report 0/0 even if the section contains red/parentheses literals.
+    let one_section_red = engine.intern_style(Style {
+        number_format: Some("[Red]0".to_string()),
+        ..Style::default()
+    });
+    engine.set_cell_style_id("Sheet1", "A2", one_section_red).unwrap();
+
+    let one_section_paren = engine.intern_style(Style {
+        number_format: Some("(0)".to_string()),
+        ..Style::default()
+    });
+    engine.set_cell_style_id("Sheet1", "A3", one_section_paren).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"color\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"parentheses\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"color\",A2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=CELL(\"parentheses\",A3)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B3"), 0.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B4"), 0.0);
+}
+
+#[test]
+fn cell_format_classifies_locale_variant_datetime_formats() {
+    use formula_engine::Engine;
+    use formula_model::Style;
+
+    let mut engine = Engine::new();
+
+    let mdy = engine.intern_style(Style {
+        number_format: Some("m/d/yyyy".to_string()),
+        ..Style::default()
+    });
+    let dmy = engine.intern_style(Style {
+        number_format: Some("dd/mm/yyyy".to_string()),
+        ..Style::default()
+    });
+    let iso = engine.intern_style(Style {
+        number_format: Some("yyyy-mm-dd".to_string()),
+        ..Style::default()
+    });
+    let h = engine.intern_style(Style {
+        number_format: Some("h:mm".to_string()),
+        ..Style::default()
+    });
+    let hh = engine.intern_style(Style {
+        number_format: Some("hh:mm".to_string()),
+        ..Style::default()
+    });
+    let hh_ss = engine.intern_style(Style {
+        number_format: Some("hh:mm:ss".to_string()),
+        ..Style::default()
+    });
+    let system_long_date = engine.intern_style(Style {
+        number_format: Some("[$-F800]dddd, mmmm dd, yyyy".to_string()),
+        ..Style::default()
+    });
+
+    engine.set_cell_style_id("Sheet1", "A1", mdy).unwrap();
+    engine.set_cell_style_id("Sheet1", "A2", dmy).unwrap();
+    engine.set_cell_style_id("Sheet1", "A3", iso).unwrap();
+    engine.set_cell_style_id("Sheet1", "A4", h).unwrap();
+    engine.set_cell_style_id("Sheet1", "A5", hh).unwrap();
+    engine.set_cell_style_id("Sheet1", "A6", hh_ss).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A7", system_long_date)
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"format\",A2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"format\",A3)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=CELL(\"format\",A4)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B5", "=CELL(\"format\",A5)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B6", "=CELL(\"format\",A6)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B7", "=CELL(\"format\",A7)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    // Day-first dates + ISO-ish year-first dates should classify like the canonical short date.
+    let b1 = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(b1, Value::Text("D1".to_string()));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), b1);
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), b1);
+
+    // hh:mm should classify like h:mm.
+    let b4 = engine.get_cell_value("Sheet1", "B4");
+    assert_eq!(b4, Value::Text("T3".to_string()));
+    assert_eq!(engine.get_cell_value("Sheet1", "B5"), b4);
+
+    // hh:mm:ss should classify as a time-with-seconds.
+    assert_eq!(engine.get_cell_value("Sheet1", "B6"), Value::Text("T4".to_string()));
+
+    // System long date tokens should classify as some date code (not currency).
+    match engine.get_cell_value("Sheet1", "B7") {
+        Value::Text(s) => assert!(
+            s.starts_with('D'),
+            "expected date classification for system long date, got {s:?}"
+        ),
+        other => panic!("expected text for CELL(\"format\"), got {other:?}"),
+    }
+}

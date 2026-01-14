@@ -92,12 +92,13 @@ enum CellInfoType {
     Row,
     Contents,
     Type,
+    Format,
+    Color,
+    Parentheses,
     Width,
     Protect,
     Prefix,
-    Format,
     Filename,
-    Unsupported,
 }
 
 fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
@@ -107,15 +108,20 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
         "row" => Some(CellInfoType::Row),
         "contents" => Some(CellInfoType::Contents),
         "type" => Some(CellInfoType::Type),
+        "format" => Some(CellInfoType::Format),
+        "color" => Some(CellInfoType::Color),
+        "parentheses" => Some(CellInfoType::Parentheses),
         "width" => Some(CellInfoType::Width),
         "protect" => Some(CellInfoType::Protect),
         "prefix" => Some(CellInfoType::Prefix),
-        "format" => Some(CellInfoType::Format),
         // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
         // This engine does not currently track workbook file metadata, so always return "".
         "filename" => Some(CellInfoType::Filename),
-        // Valid Excel keys that are not implemented yet.
-        "color" | "parentheses" => Some(CellInfoType::Unsupported),
+        // Notes:
+        // - `CELL("width")`/`CELL("protect")`/`CELL("prefix")` return best-effort defaults because
+        //   this engine does not currently track those properties.
+        // - `CELL("color")`/`CELL("parentheses")`/`CELL("format")` are implemented based on the
+        //   cell number format string, but do not consider conditional formatting rules.
         _ => None,
     }
 }
@@ -173,6 +179,30 @@ fn abs_a1(addr: CellAddr) -> String {
     format!("${col}${row}")
 }
 
+fn cell_number_format<'a>(
+    ctx: &'a dyn FunctionContext,
+    sheet_id: &SheetId,
+    addr: CellAddr,
+) -> Option<&'a str> {
+    let style_id = effective_style_id(ctx, sheet_id, addr);
+    ctx.style_table()
+        .and_then(|styles| styles.get(style_id))
+        .and_then(|style| style.number_format.as_deref())
+}
+
+fn format_options_for_cell(ctx: &dyn FunctionContext) -> formula_format::FormatOptions {
+    use crate::date::ExcelDateSystem;
+    use formula_format::DateSystem;
+
+    formula_format::FormatOptions {
+        locale: ctx.value_locale().separators,
+        date_system: match ctx.date_system() {
+            ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
+            ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
+        },
+    }
+}
+
 /// Excel CELL(info_type, [reference]) worksheet information function.
 pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Reference>) -> Value {
     let info_type = info_type.trim();
@@ -183,9 +213,6 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
     let Some(info_type) = parse_cell_info_type(info_type) else {
         return Value::Error(ErrorKind::Value);
     };
-    if matches!(info_type, CellInfoType::Unsupported) {
-        return Value::Error(ErrorKind::NA);
-    }
 
     // Track whether the caller explicitly provided a reference argument.
     //
@@ -270,6 +297,25 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             };
             Value::Text(code.to_string())
         }
+        CellInfoType::Format => {
+            let cell_ref = record_explicit_cell(ctx);
+            let fmt = cell_number_format(ctx, &cell_ref.sheet_id, addr);
+            Value::Text(cell_format_code(fmt))
+        }
+        CellInfoType::Color => {
+            let cell_ref = record_explicit_cell(ctx);
+            let format_code = cell_number_format(ctx, &cell_ref.sheet_id, addr);
+            let options = format_options_for_cell(ctx);
+            let info = formula_format::cell_format_info(format_code, &options);
+            Value::Number(info.color as f64)
+        }
+        CellInfoType::Parentheses => {
+            let cell_ref = record_explicit_cell(ctx);
+            let format_code = cell_number_format(ctx, &cell_ref.sheet_id, addr);
+            let options = format_options_for_cell(ctx);
+            let info = formula_format::cell_format_info(format_code, &options);
+            Value::Number(info.parentheses as f64)
+        }
         CellInfoType::Width => {
             // `CELL("width")` consults column metadata but should avoid recording an implicit
             // self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
@@ -292,20 +338,10 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let _cell_ref = record_explicit_cell(ctx);
 
-            // This engine does not currently track per-cell alignment/prefix formatting, so return
-            // the empty string.
-            Value::Text(String::new())
-        }
-        CellInfoType::Format => {
-            let cell_ref = record_explicit_cell(ctx);
-            let style_id = effective_style_id(ctx, &cell_ref.sheet_id, addr);
-            let fmt = ctx
-                .style_table()
-                .and_then(|styles| styles.get(style_id))
-                .and_then(|style| style.number_format.as_deref());
-            Value::Text(cell_format_code(fmt))
-        }
+             // This engine does not currently track per-cell alignment/prefix formatting, so return
+             // the empty string.
+             Value::Text(String::new())
+         }
         CellInfoType::Filename => Value::Text(String::new()),
-        CellInfoType::Unsupported => Value::Error(ErrorKind::NA),
     }
 }
