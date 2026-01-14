@@ -3694,7 +3694,6 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
         path: path.to_path_buf(),
         source,
     })?;
-
     let Ok(mut ole) = cfb::CompoundFile::open(file) else {
         // Malformed OLE container; let the normal open path surface errors.
         return Ok(None);
@@ -3731,22 +3730,16 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
     }
 
     // Parse Standard header to detect RC4 vs AES.
-    let info = crate::offcrypto::parse_encryption_info_standard(&encryption_info).map_err(|err| {
-        match err {
-            crate::offcrypto::OffcryptoError::UnsupportedEncryptionInfoVersion { major, minor, .. } => {
-                Error::UnsupportedOoxmlEncryption {
-                    path: path.to_path_buf(),
-                    version_major: major,
-                    version_minor: minor,
-                }
-            }
-            _ => Error::UnsupportedOoxmlEncryption {
-                path: path.to_path_buf(),
-                version_major,
-                version_minor,
-            },
+    //
+    // Be conservative: if parsing fails, fall back to the general in-memory decrypt path (which
+    // has additional compatibility shims).
+    let info = match crate::offcrypto::parse_encryption_info_standard(&encryption_info) {
+        Ok(info) => info,
+        Err(crate::offcrypto::OffcryptoError::UnsupportedEncryptionInfoVersion { .. }) => {
+            return Ok(None)
         }
-    })?;
+        Err(_) => return Ok(None),
+    };
 
     if info.header.alg_id == crate::offcrypto::CALG_RC4 {
         // Standard/CryptoAPI RC4 is still opened as a preserved ZIP package via the in-memory
@@ -3756,13 +3749,11 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
 
     if !matches!(
         info.header.alg_id,
-        crate::offcrypto::CALG_AES_128 | crate::offcrypto::CALG_AES_192 | crate::offcrypto::CALG_AES_256
+        crate::offcrypto::CALG_AES_128
+            | crate::offcrypto::CALG_AES_192
+            | crate::offcrypto::CALG_AES_256
     ) {
-        return Err(Error::UnsupportedOoxmlEncryption {
-            path: path.to_path_buf(),
-            version_major,
-            version_minor,
-        });
+        return Ok(None);
     }
 
     let Some(password) = password else {
@@ -3783,6 +3774,49 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
             })
         }
     };
+
+    // Some synthetic fixtures (and some pipelines) may already contain a plaintext OOXML ZIP payload
+    // in `EncryptedPackage`. When that happens, skip this decrypt path and let the plaintext open
+    // path handle it.
+    {
+        use std::io::Cursor;
+
+        let mut prefix = [0u8; 10];
+        let prefix_len = encrypted_package_stream
+            .read(&mut prefix)
+            .map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+
+        let looks_like_zip_direct = prefix_len >= 2 && prefix[..2] == *b"PK";
+        let looks_like_zip_after_len = prefix_len >= 10 && prefix[8..10] == *b"PK";
+        if looks_like_zip_direct || looks_like_zip_after_len {
+            let mut encrypted_package = Vec::new();
+            encrypted_package.extend_from_slice(&prefix[..prefix_len]);
+            encrypted_package_stream
+                .read_to_end(&mut encrypted_package)
+                .map_err(|source| Error::OpenIo {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+
+            if let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) {
+                // Validate ZIP structure to avoid false positives on ciphertext that happens to
+                // begin with `PK`.
+                if zip::ZipArchive::new(Cursor::new(package_bytes)).is_ok() {
+                    return Ok(None);
+                }
+            }
+        }
+
+        encrypted_package_stream
+            .seek(SeekFrom::Start(0))
+            .map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+    }
 
     // The `EncryptedPackage` stream begins with an 8-byte plaintext length prefix.
     let mut len_bytes = [0u8; 8];
