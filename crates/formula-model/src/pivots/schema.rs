@@ -228,7 +228,7 @@ impl fmt::Display for PivotFieldRef {
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
     // DAX table identifiers can be written without quotes when they are identifier-like tokens.
     //
-    // Use Unicode-aware character classes so names like `Straße` can remain unquoted.
+    // Use Unicode-aware checks so common non-ASCII names (e.g. `Straße`) can remain unquoted.
     // Keep this conservative—quoting is always accepted by DAX.
     let raw = raw.trim();
     let mut chars = raw.chars();
@@ -243,7 +243,6 @@ fn dax_identifier_requires_quotes(raw: &str) -> bool {
         return true;
     }
 
-    // DAX identifiers are Unicode-aware; allow non-ASCII letters/digits without quoting.
     if !(first.is_alphabetic() || first == '_') {
         return true;
     }
