@@ -1111,6 +1111,11 @@
   font-size: 12px;
 }
 
+.branch-merge__manual-cell-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .branch-merge__conflict-move-base {
   min-width: 0;
 }

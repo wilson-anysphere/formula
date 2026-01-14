@@ -166,6 +166,7 @@ export const enUS = {
   "branchMerge.manualCell.encrypted.useOursWithKeyId": "Use ours (keyId: {keyId})",
   "branchMerge.manualCell.encrypted.useTheirs": "Use theirs",
   "branchMerge.manualCell.encrypted.useTheirsWithKeyId": "Use theirs (keyId: {keyId})",
+  "branchMerge.manualCell.encrypted.lockedHint": "Encrypted content cannot be edited. Choose Custom (unencrypted) to edit formula/value.",
   "branchMerge.manualCell.formula": "Formula",
   "branchMerge.manualCell.value": "Value",
   "branchMerge.manualCell.formatJson": "Format (JSON)",

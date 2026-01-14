@@ -812,6 +812,7 @@ export function MergeBranchPanel({
                     const contentLocked = hasEnc && draft.encSource !== "custom";
                     const contentDisabled = mutationsDisabled || draft.deleteCell || contentLocked;
                     const formatDisabled = mutationsDisabled || draft.deleteCell;
+                    const formulaActive = draft.formulaText.trim().length > 0;
 
                     return (
                       <div className="branch-merge__manual-cell-editor">
@@ -820,20 +821,22 @@ export function MergeBranchPanel({
                             type="checkbox"
                             disabled={mutationsDisabled}
                             checked={draft.deleteCell}
+                            aria-label={t("branchMerge.manualCell.deleteCell")}
                             onChange={(e) => updateManualDraft({ ...draft, deleteCell: e.target.checked }, c)}
                           />
                           {t("branchMerge.manualCell.deleteCell")}
                         </label>
 
                         {hasEnc ? (
-                          <div className="branch-merge__manual-cell-row">
-                            <div className="branch-merge__manual-cell-label">{t("branchMerge.manualCell.encrypted")}</div>
-                            <select
-                              value={draft.encSource}
-                              disabled={mutationsDisabled || draft.deleteCell}
-                              onChange={(e) => {
-                                const encSource = e.target.value as ManualCellDraft["encSource"];
-                                let next: ManualCellDraft = { ...draft, deleteCell: false, encSource };
+                            <div className="branch-merge__manual-cell-row">
+                              <div className="branch-merge__manual-cell-label">{t("branchMerge.manualCell.encrypted")}</div>
+                              <select
+                                value={draft.encSource}
+                                disabled={mutationsDisabled || draft.deleteCell}
+                                aria-label={t("branchMerge.manualCell.encrypted")}
+                                onChange={(e) => {
+                                  const encSource = e.target.value as ManualCellDraft["encSource"];
+                                  let next: ManualCellDraft = { ...draft, deleteCell: false, encSource };
 
                                 if (encSource !== "custom") {
                                   const chosen =
@@ -847,10 +850,10 @@ export function MergeBranchPanel({
                                   };
                                 }
 
-                                updateManualDraft(next, c);
-                              }}
-                            >
-                              <option value="custom">{t("branchMerge.manualCell.encrypted.customUnencrypted")}</option>
+                                  updateManualDraft(next, c);
+                                }}
+                              >
+                                <option value="custom">{t("branchMerge.manualCell.encrypted.customUnencrypted")}</option>
                               {cellHasEnc(c.base) ? (
                                 <option value="base">
                                   {(() => {
@@ -885,12 +888,19 @@ export function MergeBranchPanel({
                           </div>
                         ) : null}
 
+                        {contentLocked ? (
+                          <div className="branch-merge__manual-cell-hint">
+                            {t("branchMerge.manualCell.encrypted.lockedHint")}
+                          </div>
+                        ) : null}
+
                         <div className="branch-merge__manual-cell-row">
                           <div className="branch-merge__manual-cell-label">{t("branchMerge.manualCell.formula")}</div>
                           <input
                             value={draft.formulaText}
                             disabled={contentDisabled}
                             placeholder="=SUM(A1:A10)"
+                            aria-label={t("branchMerge.manualCell.formula")}
                             onChange={(e) => updateManualDraft({ ...draft, formulaText: e.target.value }, c)}
                           />
                         </div>
@@ -899,8 +909,9 @@ export function MergeBranchPanel({
                           <div className="branch-merge__manual-cell-label">{t("branchMerge.manualCell.value")}</div>
                           <input
                             value={draft.valueText}
-                            disabled={contentDisabled || draft.formulaText.trim().length > 0}
+                            disabled={contentDisabled || formulaActive}
                             placeholder="123"
+                            aria-label={t("branchMerge.manualCell.value")}
                             onChange={(e) => updateManualDraft({ ...draft, valueText: e.target.value }, c)}
                           />
                         </div>
@@ -910,6 +921,7 @@ export function MergeBranchPanel({
                           <textarea
                             value={draft.formatText}
                             disabled={formatDisabled}
+                            aria-label={t("branchMerge.manualCell.formatJson")}
                             onChange={(e) => updateManualDraft({ ...draft, formatText: e.target.value }, c)}
                           />
                         </div>
