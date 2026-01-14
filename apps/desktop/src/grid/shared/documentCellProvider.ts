@@ -163,6 +163,43 @@ export class DocumentCellProvider implements CellProvider {
   >();
   private disposed = false;
 
+  /**
+   * DocumentController lazily materializes sheets (calling `getCell()` / `getSheetView()` will
+   * create missing sheet ids). The shared grid provider is frequently asked for cell contents
+   * while the UI is transitioning between sheets (e.g. sheet deletion/undo) and should never
+   * recreate a deleted sheet as a side-effect of rendering.
+   *
+   * We treat a sheet as "known missing" when the workbook already has *some* sheets, but the
+   * requested `sheetId` is present in neither the underlying `model.sheets` map nor the
+   * `sheetMeta` map. When the workbook is still empty (no materialized sheets yet), we treat
+   * the sheet id as "unknown" and allow the normal lazy materialization behavior.
+   */
+  private isSheetKnownMissing(sheetId: string): boolean {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return true;
+
+    const docAny: any = this.options.document as any;
+    const sheets: any = docAny?.model?.sheets;
+    const sheetMeta: any = docAny?.sheetMeta;
+
+    if (
+      sheets &&
+      typeof sheets.has === "function" &&
+      typeof sheets.size === "number" &&
+      sheetMeta &&
+      typeof sheetMeta.has === "function" &&
+      typeof sheetMeta.size === "number"
+    ) {
+      const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+      if (!workbookHasAnySheets) return false;
+      return !sheets.has(id) && !sheetMeta.has(id);
+    }
+
+    // If we can't introspect the document internals (e.g. unit tests with a fake document),
+    // conservatively assume the sheet exists so we preserve the previous behavior.
+    return false;
+  }
+
   constructor(options: {
     document: DocumentController;
     /**
@@ -917,6 +954,12 @@ export class DocumentCellProvider implements CellProvider {
       return cell;
     }
 
+    // Avoid resurrecting deleted sheets: only render cells when the sheet is known to exist.
+    if (this.isSheetKnownMissing(sheetId)) {
+      cache.set(key, null);
+      return null;
+    }
+
     const docRow = row - headerRows;
     const docCol = col - headerCols;
 
@@ -1086,6 +1129,14 @@ export class DocumentCellProvider implements CellProvider {
     const epoch = this.mergedEpochBySheet.get(sheetId) ?? 0;
     const cached = this.mergedRangesBySheet.get(sheetId);
     if (cached && cached.epoch === epoch) return cached.ranges;
+
+    // Avoid resurrecting deleted sheets by calling `DocumentController.getMergedRanges()` which
+    // internally materializes sheets via `getSheetView()`.
+    if (this.isSheetKnownMissing(sheetId)) {
+      const ranges: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> = [];
+      this.mergedRangesBySheet.set(sheetId, { epoch, ranges });
+      return ranges;
+    }
 
     const anyDoc: any = this.options.document as any;
     const raw = typeof anyDoc.getMergedRanges === "function" ? anyDoc.getMergedRanges(sheetId) : [];
