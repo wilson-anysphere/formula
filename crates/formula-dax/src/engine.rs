@@ -116,10 +116,23 @@ enum RelationshipOverride {
     Disabled,
 }
 
+#[derive(Clone, Debug)]
+enum RowFilter {
+    /// All physical rows of the table are included.
+    ///
+    /// This is primarily used to avoid allocating a huge `HashSet<usize>` for filters like
+    /// `ALLNOBLANKROW(Table)` when used as a CALCULATE filter argument. Even though this does not
+    /// restrict physical rows, the *presence* of a row filter still suppresses the
+    /// relationship-generated blank/unknown member (see `blank_row_allowed`).
+    All,
+    /// An explicit set of physical row indices.
+    Rows(HashSet<usize>),
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct FilterContext {
     column_filters: HashMap<(String, String), HashSet<Value>>,
-    row_filters: HashMap<String, HashSet<usize>>,
+    row_filters: HashMap<String, RowFilter>,
     active_relationship_overrides: HashSet<usize>,
     cross_filter_overrides: HashMap<usize, RelationshipOverride>,
     suppress_implicit_measure_context_transition: bool,
@@ -212,7 +225,7 @@ impl FilterContext {
         self.column_filters.remove(&key);
     }
 
-    fn set_row_filter(&mut self, table: &str, rows: HashSet<usize>) {
+    fn set_row_filter(&mut self, table: &str, rows: RowFilter) {
         let table = normalize_ident(table);
         self.row_filters.insert(table, rows);
     }
@@ -2545,7 +2558,7 @@ impl DaxEngine {
 
         let mut clear_tables: HashSet<String> = HashSet::new();
         let mut clear_columns: HashSet<(String, String)> = HashSet::new();
-        let mut row_filters: Vec<(String, HashSet<usize>)> = Vec::new();
+        let mut row_filters: Vec<(String, RowFilter)> = Vec::new();
         let mut column_filters: Vec<((String, String), HashSet<Value>)> = Vec::new();
 
         fn collect_column_refs(
@@ -2594,7 +2607,7 @@ impl DaxEngine {
             env: &mut VarEnv,
             keep_filters: bool,
             clear_columns: &mut HashSet<(String, String)>,
-            row_filters: &mut Vec<(String, HashSet<usize>)>,
+            row_filters: &mut Vec<(String, RowFilter)>,
         ) -> DaxResult<()> {
             let mut referenced_tables: HashSet<String> = HashSet::new();
             let mut referenced_columns: HashSet<(String, String)> = HashSet::new();
@@ -2647,10 +2660,12 @@ impl DaxEngine {
             let table_ref = model
                 .table(&table)
                 .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+            let candidate_count: usize;
             if let Some(sets) = row_sets.as_ref() {
                 let allowed = sets
                     .get(&table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                candidate_count = allowed.count_ones();
                 for row in allowed.iter_ones() {
                     let mut inner_ctx = row_ctx.clone();
                     inner_ctx.push(&table, row);
@@ -2660,6 +2675,7 @@ impl DaxEngine {
                     }
                 }
             } else {
+                candidate_count = table_ref.row_count();
                 for row in 0..table_ref.row_count() {
                     let mut inner_ctx = row_ctx.clone();
                     inner_ctx.push(&table, row);
@@ -2670,7 +2686,11 @@ impl DaxEngine {
                 }
             }
 
-            row_filters.push((table, allowed_rows));
+            if allowed_rows.len() == candidate_count {
+                row_filters.push((table, RowFilter::All));
+            } else {
+                row_filters.push((table, RowFilter::Rows(allowed_rows)));
+            }
             Ok(())
         }
 
@@ -2684,7 +2704,7 @@ impl DaxEngine {
             keep_filters: bool,
             clear_tables: &mut HashSet<String>,
             clear_columns: &mut HashSet<(String, String)>,
-            row_filters: &mut Vec<(String, HashSet<usize>)>,
+            row_filters: &mut Vec<(String, RowFilter)>,
             column_filters: &mut Vec<((String, String), HashSet<Value>)>,
         ) -> DaxResult<()> {
             // `KEEPFILTERS` wraps a normal filter argument, but changes its semantics from
@@ -2789,17 +2809,11 @@ impl DaxEngine {
                             if !keep_filters {
                                 clear_tables.insert(table_key.clone());
                             }
-                            let table_ref = model
-                                .table(table)
-                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
                             // Apply an explicit row filter containing all physical rows. This
                             // matches `ALL(Table)` while ensuring the relationship-generated blank
                             // member is excluded (`blank_row_allowed` is false when a row filter is
                             // present).
-                            row_filters.push((
-                                table_key,
-                                (0..table_ref.row_count()).collect::<HashSet<_>>(),
-                            ));
+                            row_filters.push((table_key, RowFilter::All));
                             Ok(())
                         }
                         Expr::ColumnRef { table, column } => {
@@ -3077,7 +3091,7 @@ impl DaxEngine {
                                 if !keep_filters {
                                     clear_tables.insert(table_key.clone());
                                 }
-                                row_filters.push((table_key, rows.into_iter().collect()));
+                                row_filters.push((table_key, RowFilter::Rows(rows.into_iter().collect())));
                                 Ok(())
                             }
                         }
@@ -3123,7 +3137,7 @@ impl DaxEngine {
                                 if !keep_filters {
                                     clear_tables.insert(table_key.clone());
                                 }
-                                row_filters.push((table_key, (0..row_count).collect()));
+                                row_filters.push((table_key, RowFilter::All));
                                 Ok(())
                             }
                         }
@@ -3163,7 +3177,27 @@ impl DaxEngine {
 
         for (table, rows) in row_filters {
             match filter.row_filters.get_mut(&table) {
-                Some(existing) => existing.retain(|row| rows.contains(row)),
+                Some(existing) => match rows {
+                    RowFilter::All => {
+                        // Intersecting with "all rows" does not change the existing restriction.
+                    }
+                    RowFilter::Rows(rows) => match existing {
+                        RowFilter::All => {
+                            *existing = RowFilter::Rows(rows);
+                        }
+                        RowFilter::Rows(existing_rows) => {
+                            // Intersect row sets. Prefer retaining the smaller set to minimize
+                            // hash lookups.
+                            if rows.len() < existing_rows.len() {
+                                let mut next = rows;
+                                next.retain(|row| existing_rows.contains(row));
+                                *existing_rows = next;
+                            } else {
+                                existing_rows.retain(|row| rows.contains(row));
+                            }
+                        }
+                    },
+                },
                 None => filter.set_row_filter(&table, rows),
             }
         }
@@ -5231,10 +5265,17 @@ pub(crate) fn resolve_row_sets(
         let row_count = table.row_count();
         let mut allowed = BitVec::with_len_all_true(row_count);
         if let Some(row_filter) = filter.row_filters.get(name) {
-            allowed = BitVec::with_len_all_false(row_count);
-            for &row in row_filter {
-                if row < row_count {
-                    allowed.set(row, true);
+            match row_filter {
+                RowFilter::All => {
+                    // Keep `allowed` as all-true: all physical rows are permitted.
+                }
+                RowFilter::Rows(rows) => {
+                    allowed = BitVec::with_len_all_false(row_count);
+                    for &row in rows {
+                        if row < row_count {
+                            allowed.set(row, true);
+                        }
+                    }
                 }
             }
         }
