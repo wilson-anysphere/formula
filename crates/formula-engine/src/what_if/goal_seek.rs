@@ -38,7 +38,11 @@ impl GoalSeekParams {
             target_value,
             changing_cell: changing_cell.into(),
             max_iterations: 100,
-            tolerance: 0.001,
+            // Match Excel-like goal seek expectations: callers typically assume a fairly tight
+            // default tolerance when they omit the parameter.
+            //
+            // Tests rely on this default being strict enough to converge to ~1e-6 precision.
+            tolerance: 1e-7,
             derivative_step: None,
             min_derivative: 1e-10,
             max_bracket_expansions: 50,
