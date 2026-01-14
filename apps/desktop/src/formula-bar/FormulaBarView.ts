@@ -228,10 +228,22 @@ function buildFunctionPickerItems(query: string, limit: number, localeId: string
   if (cappedLimit === 0) return [];
 
   if (!trimmed) {
-    return DEFAULT_FUNCTION_NAMES.slice(0, cappedLimit).map((name) => functionPickerItemFromName(name, localeId));
+    const tables = getFunctionTranslationTables(localeId);
+    const out: FunctionPickerItem[] = [];
+    const seen = new Set<string>();
+    for (const canonicalName of DEFAULT_FUNCTION_NAMES) {
+      if (out.length >= cappedLimit) break;
+      const upper = canonicalName.toUpperCase();
+      const localized = tables?.canonicalToLocalized.get(upper) ?? canonicalName;
+      const key = localized.toUpperCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(functionPickerItemFromName(localized, localeId));
+    }
+    return out;
   }
 
-  return searchFunctionResults(trimmed, { limit: cappedLimit }).map((res) => functionPickerItemFromName(res.name, localeId));
+  return searchFunctionResults(trimmed, { limit: cappedLimit, localeId }).map((res) => functionPickerItemFromName(res.name, localeId));
 }
 
 function renderFunctionPickerList(opts: {
@@ -310,20 +322,12 @@ function renderFunctionPickerList(opts: {
 
 function functionPickerItemFromName(name: string, localeId: string): FunctionPickerItem {
   const sig = getFunctionSignature(name, { localeId });
-  const signature = sig ? formatSignature(sig) : undefined;
+  const signature = sig ? formatSignature(sig, localeId) : undefined;
   const summary = sig?.summary?.trim?.() ? sig.summary.trim() : undefined;
   return { name, signature, summary };
 }
 
-function formatSignature(sig: FunctionSignature): string {
-  const localeId = (() => {
-    try {
-      const raw = typeof document !== "undefined" ? document.documentElement?.lang : "";
-      return String(raw ?? "").trim() || "en-US";
-    } catch {
-      return "en-US";
-    }
-  })();
+function formatSignature(sig: FunctionSignature, localeId: string): string {
   const parts = signatureParts(sig, null, { argSeparator: inferArgSeparator(localeId) });
   return parts.map((p) => p.text).join("");
 }

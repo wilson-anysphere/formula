@@ -185,7 +185,7 @@ export function buildCommandPaletteSections(opts: {
  *
  * This is used by the command palette UI to surface spreadsheet functions alongside commands.
  */
-export function searchFunctionResults(query: string, opts: { limit: number }): CommandPaletteFunctionResult[] {
+export function searchFunctionResults(query: string, opts: { limit: number; localeId?: string }): CommandPaletteFunctionResult[] {
   const normalized = normalizeFunctionSearchToken(
     String(query ?? "")
       .trim()
@@ -194,7 +194,7 @@ export function searchFunctionResults(query: string, opts: { limit: number }): C
       .replace(/\s+/g, ""),
   );
   const limit = Math.max(0, Math.floor(opts.limit));
-  return scoreFunctionResults(normalized.toLowerCase(), limit);
+  return scoreFunctionResults(normalized.toLowerCase(), limit, opts.localeId);
 }
 
 function normalizeQuery(query: string): string {
@@ -343,7 +343,7 @@ function scoreCommandResults(
 
 type FunctionMatch = { name: string; score: number; matchRanges: MatchRange[] };
 
-function scoreFunctionResults(queryLower: string, limit: number): CommandPaletteFunctionResult[] {
+function scoreFunctionResults(queryLower: string, limit: number, localeIdOverride?: string): CommandPaletteFunctionResult[] {
   const trimmed = queryLower.trim();
   const cappedLimit = Math.max(0, Math.floor(limit));
   if (!trimmed || cappedLimit === 0) return [];
@@ -351,9 +351,12 @@ function scoreFunctionResults(queryLower: string, limit: number): CommandPalette
   if (!normalizedQuery) return [];
 
   const localeId = (() => {
+    const raw = typeof localeIdOverride === "string" ? localeIdOverride : "";
+    const trimmed = raw.trim();
+    if (trimmed) return trimmed;
     try {
-      const raw = typeof document !== "undefined" ? document.documentElement?.lang : "";
-      return String(raw ?? "").trim() || "en-US";
+      const docLang = typeof document !== "undefined" ? document.documentElement?.lang : "";
+      return String(docLang ?? "").trim() || "en-US";
     } catch {
       return "en-US";
     }
