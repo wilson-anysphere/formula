@@ -43,6 +43,18 @@ type OverlayColorTokens = {
   selectionHandleFill: string;
 };
 
+type ShapeTextCacheEntry = {
+  rawXml: string;
+  parsed: ShapeTextLayout | null;
+  hasText: boolean;
+  // Cached line layout to avoid re-measuring/wrapping on every render.
+  lines: RenderedLine[] | null;
+  linesMaxWidth: number;
+  linesWrap: boolean;
+  linesZoom: number;
+  linesDefaultColor: string;
+};
+
 const DEFAULT_OVERLAY_COLOR_TOKENS: OverlayColorTokens = {
   placeholderChartStroke: "blue",
   placeholderOtherStroke: "cyan",
@@ -335,7 +347,7 @@ export function effectiveScrollForAnchor(
 export class DrawingOverlay {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly bitmapCache = new ImageBitmapCache({ negativeCacheMs: 250 });
-  private readonly shapeTextCache = new Map<number, { rawXml: string; parsed: ShapeTextLayout | null; hasText: boolean }>();
+  private readonly shapeTextCache = new Map<number, ShapeTextCacheEntry>();
   private shapeTextCachePruneSource: DrawingObject[] | null = null;
   private shapeTextCachePruneLength = 0;
   private readonly spatialIndex = new DrawingSpatialIndex();
@@ -958,7 +970,16 @@ export class DrawingOverlay {
                 const text = run.text;
                 return typeof text === "string" && /\S/.test(text);
               });
-            cachedText = { rawXml: rawXmlText, parsed, hasText };
+            cachedText = {
+              rawXml: rawXmlText,
+              parsed,
+              hasText,
+              lines: null,
+              linesMaxWidth: Number.NaN,
+              linesWrap: true,
+              linesZoom: Number.NaN,
+              linesDefaultColor: "",
+            };
             this.shapeTextCache.set(obj.id, cachedText);
           }
           const textLayout = cachedText.parsed;
@@ -983,7 +1004,7 @@ export class DrawingOverlay {
                   try {
                     drawShape(ctx, localRectScratch, spec, colors, cssVarStyle, zoom, this.dashPatternScratch, canRenderText ? null : undefined);
                     if (canRenderText) {
-                      renderShapeText(ctx, localRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+                      renderShapeText(ctx, localRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom }, cachedText);
                     }
                   } finally {
                     ctx.restore();
@@ -991,7 +1012,7 @@ export class DrawingOverlay {
                 } else {
                   drawShape(ctx, screenRectScratch, spec, colors, cssVarStyle, zoom, this.dashPatternScratch, canRenderText ? null : undefined);
                   if (canRenderText) {
-                    renderShapeText(ctx, screenRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+                    renderShapeText(ctx, screenRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom }, cachedText);
                   }
                 }
                 rendered = true;
@@ -1015,7 +1036,7 @@ export class DrawingOverlay {
                   ctx.beginPath();
                   ctx.rect(localRectScratch.x, localRectScratch.y, localRectScratch.width, localRectScratch.height);
                   ctx.clip();
-                  renderShapeText(ctx, localRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+                  renderShapeText(ctx, localRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom }, cachedText);
                 } finally {
                   ctx.restore();
                 }
@@ -1023,7 +1044,7 @@ export class DrawingOverlay {
                 ctx.beginPath();
                 ctx.rect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
                 ctx.clip();
-                renderShapeText(ctx, screenRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+                renderShapeText(ctx, screenRectScratch, textLayout!, { defaultColor: colors.placeholderLabel, zoom }, cachedText);
               }
             } finally {
               ctx.restore();
@@ -1951,6 +1972,7 @@ function renderShapeText(
   bounds: Rect,
   layout: ShapeTextLayout,
   opts: { defaultColor: string; zoom: number },
+  cache?: ShapeTextCacheEntry,
 ): void {
   const scale = Number.isFinite(opts.zoom) && opts.zoom > 0 ? opts.zoom : 1;
   const padding = 4 * scale;
@@ -1964,10 +1986,30 @@ function renderShapeText(
   if (layout.textRuns.length === 0) return;
 
   const wrap = layout.wrap ?? true;
-  const lines = layoutShapeTextLines(ctx, layout.textRuns, inner.width, { wrap, defaultColor: opts.defaultColor, zoom: scale });
+  let lines = cache?.lines;
+  const cacheValid =
+    cache != null &&
+    lines != null &&
+    cache.linesMaxWidth === inner.width &&
+    cache.linesWrap === wrap &&
+    cache.linesZoom === scale &&
+    cache.linesDefaultColor === opts.defaultColor;
+  if (!cacheValid) {
+    lines = layoutShapeTextLines(ctx, layout.textRuns, inner.width, { wrap, defaultColor: opts.defaultColor, zoom: scale });
+    if (cache) {
+      cache.lines = lines;
+      cache.linesMaxWidth = inner.width;
+      cache.linesWrap = wrap;
+      cache.linesZoom = scale;
+      cache.linesDefaultColor = opts.defaultColor;
+    }
+  }
   if (lines.length === 0) return;
 
-  const totalHeight = lines.reduce((sum, line) => sum + line.height, 0);
+  let totalHeight = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    totalHeight += lines[i]!.height;
+  }
   const vertical = layout.vertical ?? "top";
   let y = inner.y;
   if (vertical === "middle") {
@@ -1984,7 +2026,8 @@ function renderShapeText(
   ctx.setLineDash(LINE_DASH_NONE);
 
   const alignment = layout.alignment ?? "left";
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
     let x = inner.x;
     if (alignment === "center") {
       x = inner.x + (inner.width - line.width) / 2;
@@ -1992,7 +2035,8 @@ function renderShapeText(
       x = inner.x + (inner.width - line.width);
     }
 
-    for (const seg of line.segments) {
+    for (let j = 0; j < line.segments.length; j += 1) {
+      const seg = line.segments[j]!;
       if (!seg.text) continue;
       ctx.font = seg.font;
       ctx.fillStyle = seg.color;
