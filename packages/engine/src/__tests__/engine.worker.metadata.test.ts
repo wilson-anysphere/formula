@@ -149,7 +149,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 9,
+        id: 4,
         method: "setRowStyleId",
         // Clear semantics: `null` should be treated as "reset" (worker forwards `0` to wasm).
         params: { sheet: "Sheet1", row: 6, styleId: null }
@@ -158,7 +158,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 4,
+        id: 5,
         method: "setColStyleId",
         params: { sheet: "Sheet1", col: 2, styleId: 11 }
       });
@@ -166,7 +166,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 10,
+        id: 6,
         method: "setColStyleId",
         // Clear semantics: `null` should be treated as "reset" (worker forwards `0` to wasm).
         params: { sheet: "Sheet1", col: 3, styleId: null }
@@ -175,7 +175,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 5,
+        id: 7,
         method: "setSheetDefaultStyleId",
         params: { sheet: "Sheet1", styleId: 13 }
       });
@@ -183,7 +183,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 11,
+        id: 8,
         method: "setSheetDefaultStyleId",
         // Clear semantics: `null` should be treated as "reset" (worker forwards `0` to wasm).
         params: { sheet: "Sheet1", styleId: null }
@@ -192,7 +192,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 6,
+        id: 9,
         method: "setFormatRunsByCol",
         params: { sheet: "Sheet1", col: 2, runs: [{ startRow: 0, endRowExclusive: 10, styleId: 17 }] }
       });
@@ -200,7 +200,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 7,
+        id: 10,
         method: "setColWidth",
         params: { sheet: "Sheet1", col: 2, width: 120 }
       });
@@ -208,7 +208,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 8,
+        id: 11,
         method: "setColHidden",
         params: { sheet: "Sheet1", col: 2, hidden: true }
       });
@@ -216,7 +216,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 9,
+        id: 12,
         method: "internStyle",
         params: { style: { font: { bold: true } } }
       });
@@ -225,7 +225,7 @@ describe("engine.worker workbook metadata RPCs", () => {
 
       resp = await sendRequest(port, {
         type: "request",
-        id: 9,
+        id: 13,
         method: "setRowStyleId",
         params: { row: 0, styleId: null }
       });
