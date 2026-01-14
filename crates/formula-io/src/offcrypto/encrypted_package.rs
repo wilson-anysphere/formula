@@ -795,18 +795,23 @@ mod tests {
         encrypted.extend_from_slice(&vec![0u8; 4096 + 15]);
 
         let err = decrypt_standard_encrypted_package_stream(&encrypted, &key, &[]).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                EncryptedPackageDecryptError::TruncatedSegment {
-                    segment: 1,
-                    expected: 16,
-                    got: 15,
-                    ..
-                }
-            ),
-            "unexpected error: {err:?}"
-        );
+        match err {
+            EncryptedPackageDecryptError::TruncatedSegment {
+                segment,
+                offset,
+                expected,
+                got,
+            } => {
+                assert_eq!(segment, 1);
+                assert_eq!(
+                    offset,
+                    ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + ENCRYPTED_PACKAGE_SEGMENT_LEN
+                );
+                assert_eq!(expected, 16);
+                assert_eq!(got, 15);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
@@ -869,17 +874,21 @@ mod tests {
         encrypted.extend_from_slice(&vec![0u8; 4096 + 17]);
 
         let err = decrypt_standard_encrypted_package_stream(&encrypted, &key, &[]).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                EncryptedPackageDecryptError::CiphertextNotBlockAligned {
-                    segment: 1,
-                    len: 17,
-                    ..
-                }
-            ),
-            "unexpected error: {err:?}"
-        );
+        match err {
+            EncryptedPackageDecryptError::CiphertextNotBlockAligned {
+                segment,
+                offset,
+                len,
+            } => {
+                assert_eq!(segment, 1);
+                assert_eq!(
+                    offset,
+                    ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN + ENCRYPTED_PACKAGE_SEGMENT_LEN
+                );
+                assert_eq!(len, 17);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     struct TestRc4 {

@@ -209,11 +209,12 @@ fn decrypt_encrypted_package_standard(
             }
 
             let key_len = (info.header.key_size / 8) as usize;
-            let out = offcrypto::decrypt_standard_cryptoapi_rc4_encrypted_package_stream(
+            let out = offcrypto::decrypt_standard_cryptoapi_rc4_encrypted_package_stream_with_hash(
                 encrypted_package,
                 password,
                 &info.verifier.salt,
                 key_len,
+                info.header.alg_id_hash,
             )
             .map_err(|err| {
                 DecryptError::InvalidInfo(format!(
