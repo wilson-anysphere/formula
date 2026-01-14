@@ -179,12 +179,20 @@ describe("SpreadsheetApp drawings teardown", () => {
     const setObjectsSpy = vi.spyOn(callbacks, "setObjects");
     selectSpy.mockClear();
 
+    // In shared-grid mode the DrawingInteractionController listens on the selection canvas
+    // (the element that receives pointer events in the real UI).
+    const selectionCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    expect(selectionCanvas).toBeTruthy();
+    const interactionTarget = selectionCanvas!;
+
     // Drag the object slightly: should call `setObjects`.
-    dispatchPointerEvent(root, "pointerdown", { clientX: 60, clientY: 40, pointerId: 1, button: 0 });
+    dispatchPointerEvent(interactionTarget, "pointerdown", { clientX: 60, clientY: 40, pointerId: 1, button: 0 });
     // The pointerdown should also select the drawing (and not be immediately cleared by a redraw).
     expect(selectSpy.mock.calls.at(-1)?.[0]).toBe(1);
-    dispatchPointerEvent(root, "pointermove", { clientX: 80, clientY: 55, pointerId: 1 });
+    dispatchPointerEvent(interactionTarget, "pointermove", { clientX: 80, clientY: 55, pointerId: 1 });
     expect(setObjectsSpy).toHaveBeenCalled();
+    // End the gesture before disposing so teardown doesn't have to handle an in-flight drag.
+    dispatchPointerEvent(interactionTarget, "pointerup", { clientX: 80, clientY: 55, pointerId: 1 });
 
     setObjectsSpy.mockClear();
     clearSpy.mockClear();
@@ -200,8 +208,8 @@ describe("SpreadsheetApp drawings teardown", () => {
     }
 
     // Pointer events on the old root should not invoke drawing callbacks once disposed.
-    dispatchPointerEvent(root, "pointerdown", { clientX: 60, clientY: 40, pointerId: 2, button: 0 });
-    dispatchPointerEvent(root, "pointermove", { clientX: 100, clientY: 70, pointerId: 2 });
+    dispatchPointerEvent(interactionTarget, "pointerdown", { clientX: 60, clientY: 40, pointerId: 2, button: 0 });
+    dispatchPointerEvent(interactionTarget, "pointermove", { clientX: 100, clientY: 70, pointerId: 2 });
     expect(setObjectsSpy).not.toHaveBeenCalled();
 
     root.remove();
