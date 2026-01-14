@@ -39,7 +39,10 @@ describe('desktopStartupBench cold vs warm', () => {
 
         // Keep the benchmark fast for unit tests.
         FORMULA_DESKTOP_STARTUP_RUNS: '3',
-        FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: '2000',
+        // Under full vitest runs (many tests + child process churn), spawning the fake desktop
+        // process can occasionally take >2s on CI. Keep the overall benchmark fast while
+        // allowing some headroom to avoid flakes.
+        FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: '5000',
         FORMULA_DESKTOP_RSS_IDLE_DELAY_MS: '0',
         FORMULA_DESKTOP_STARTUP_MODE: 'cold',
         FORMULA_DESKTOP_STARTUP_BENCH_KIND: 'full',
@@ -87,7 +90,7 @@ describe('desktopStartupBench cold vs warm', () => {
         NODE_OPTIONS: `--require ${modulePath}`,
 
         FORMULA_DESKTOP_STARTUP_RUNS: '3',
-        FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: '2000',
+        FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: '5000',
         FORMULA_DESKTOP_RSS_IDLE_DELAY_MS: '0',
         FORMULA_DESKTOP_STARTUP_MODE: 'warm',
         FORMULA_DESKTOP_STARTUP_BENCH_KIND: 'full',
@@ -118,4 +121,3 @@ describe('desktopStartupBench cold vs warm', () => {
     );
   });
 });
-

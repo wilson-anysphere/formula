@@ -193,6 +193,9 @@ describe("tauri capability event permissions", () => {
 
       // Deep links
       "oauth-redirect",
+
+      // Pyodide (Python runtime download/install)
+      "pyodide-download-progress",
     ];
 
     for (const event of requiredListen) {
