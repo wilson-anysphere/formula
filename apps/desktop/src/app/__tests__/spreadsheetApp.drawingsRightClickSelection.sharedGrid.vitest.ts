@@ -174,10 +174,16 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
 
     // Right-click within the picture bounds. This should select the drawing but *not* move the active cell.
     const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
-    selectionCanvas.dispatchEvent(createPointerLikeMouseEvent("pointerdown", { clientX: 60, clientY: 30, button: 2 }));
+    const bubbled = vi.fn();
+    root.addEventListener("pointerdown", bubbled);
+
+    const down = createPointerLikeMouseEvent("pointerdown", { clientX: 60, clientY: 30, button: 2 });
+    selectionCanvas.dispatchEvent(down);
 
     expect(app.getSelectedDrawingId()).toBe(1);
     expect(app.getActiveCell()).toEqual(beforeActive);
+    expect(down.defaultPrevented).toBe(false);
+    expect(bubbled).toHaveBeenCalledTimes(1);
 
     app.destroy();
     root.remove();
@@ -217,10 +223,16 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     // Right-click within the picture bounds. This should select the drawing but *not* move the active
     // cell (Excel-like behavior in shared-grid mode).
     const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
-    selectionCanvas.dispatchEvent(createPointerLikeMouseEvent("pointerdown", { clientX: 60, clientY: 30, button: 2 }));
+    const bubbled = vi.fn();
+    root.addEventListener("pointerdown", bubbled);
+
+    const down = createPointerLikeMouseEvent("pointerdown", { clientX: 60, clientY: 30, button: 2 });
+    selectionCanvas.dispatchEvent(down);
 
     expect(app.getSelectedDrawingId()).toBe(1);
     expect(app.getActiveCell()).toEqual(beforeActive);
+    expect(down.defaultPrevented).toBe(false);
+    expect(bubbled).toHaveBeenCalledTimes(1);
 
     app.destroy();
     root.remove();
