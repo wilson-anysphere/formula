@@ -82,10 +82,11 @@ export function registerRibbonAutoFilterCommands(params: {
     when: "spreadsheet.hasAutoFilter == true",
   });
 
+  // Ribbon-only alias for the canonical Clear command. Keep it registered so the ribbon isn't
+  // auto-disabled, but hide it from the command palette to avoid duplicate entries.
   registerIfMissing(commandRegistry, "data.sortFilter.advanced.clearFilter", "Clear Filter", () => commandRegistry.executeCommand("data.sortFilter.clear"), {
     category,
     icon: null,
-    // Ribbon-only alias for the canonical Clear command.
     when: "false",
   });
 } 
