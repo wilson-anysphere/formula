@@ -299,7 +299,7 @@ impl BitVec {
     pub fn from_words(words: Vec<u64>, len: usize) -> Self {
         if len == 0 {
             return Self {
-                words,
+                words: Vec::new(),
                 len: 0,
                 ones: 0,
             };
@@ -307,6 +307,17 @@ impl BitVec {
 
         let full_words = len / 64;
         let rem_bits = len % 64;
+        let required_words = (len + 63) / 64;
+        let mut words = if words.len() == required_words {
+            words
+        } else if words.len() > required_words {
+            words.into_iter().take(required_words).collect()
+        } else {
+            // If the persistence layer stored a shorter buffer, treat missing bits as 0.
+            let mut out = words;
+            out.resize(required_words, 0);
+            out
+        };
         let mut ones: usize = 0;
 
         for w in words.iter().take(full_words) {
@@ -314,13 +325,10 @@ impl BitVec {
         }
 
         if rem_bits > 0 {
-            if let Some(last) = words.get(full_words) {
-                let mask = if rem_bits == 64 {
-                    u64::MAX
-                } else {
-                    (1u64 << rem_bits) - 1
-                };
-                ones = ones.saturating_add((last & mask).count_ones() as usize);
+            let mask = (1u64 << rem_bits) - 1;
+            if let Some(last) = words.get_mut(full_words) {
+                *last &= mask;
+                ones = ones.saturating_add(last.count_ones() as usize);
             }
         }
 
@@ -358,5 +366,21 @@ mod tests {
 
         assert_eq!(a, b);
         assert_eq!(b.count_ones(), 70);
+    }
+
+    #[test]
+    fn from_words_masks_out_unused_bits() {
+        // BitVec length is 3, but the stored word has extra bits set.
+        let mut v = BitVec::from_words(vec![0xFFFF_FFFF_FFFF_FFFFu64], 3);
+        assert_eq!(v.len(), 3);
+        assert_eq!(v.count_ones(), 3);
+
+        // Extending with false should not "inherit" the previously set trailing bits.
+        v.extend_constant(false, 5); // len = 8
+        assert_eq!(v.len(), 8);
+        assert_eq!(v.count_ones(), 3);
+
+        let bits: Vec<bool> = (0..v.len()).map(|i| v.get(i)).collect();
+        assert_eq!(bits, vec![true, true, true, false, false, false, false, false]);
     }
 }
