@@ -2499,6 +2499,20 @@ export class SpreadsheetApp {
           {
             getViewport: () => this.getDrawingInteractionViewport(),
             getObjects: () => this.listCanvasChartDrawingObjectsForSheet(this.sheetId, 0),
+            shouldHandlePointerDown: (e) => {
+              const target = e.target as HTMLElement | null;
+              // Only treat pointerdown events originating from the grid surface (canvases/root) as
+              // chart selection/drags. This avoids interfering with interactive DOM overlays
+              // (scrollbars, outline buttons, comments panel, etc) even when a chart extends underneath them.
+              return (
+                target === this.root ||
+                target === this.selectionCanvas ||
+                target === this.gridCanvas ||
+                target === this.referenceCanvas ||
+                target === this.auditingCanvas ||
+                target === this.presenceCanvas
+              );
+            },
             setObjects: (next) => {
               const current = this.listCanvasChartDrawingObjectsForSheet(this.sheetId, 0);
               const prevById = new Map<number, DrawingObject>();
