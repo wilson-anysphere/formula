@@ -1,6 +1,7 @@
 use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, STANDARD_NO_PAD as BASE64_STANDARD_NO_PAD};
 use base64::Engine;
 use hmac::{Hmac, Mac};
+use md5::Md5;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use rand::rngs::OsRng;

@@ -4,6 +4,7 @@ use cbc::Decryptor;
 use cbc::Encryptor;
 use cipher::block_padding::NoPadding;
 use cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use md5::Md5;
 use sha2::Digest;
 use zeroize::Zeroizing;
 
@@ -46,7 +47,7 @@ impl HashAlgorithm {
         );
         match self {
             HashAlgorithm::Md5 => {
-                let mut hasher = md5::Md5::new();
+                let mut hasher = Md5::new();
                 hasher.update(a);
                 hasher.update(b);
                 out[..16].copy_from_slice(&hasher.finalize());
@@ -80,7 +81,7 @@ impl HashAlgorithm {
 
     pub(crate) fn from_name(name: &str) -> Result<Self, OfficeCryptoError> {
         match name {
-            "MD5" => Ok(HashAlgorithm::Md5),
+            "MD5" | "MD-5" => Ok(HashAlgorithm::Md5),
             "SHA1" | "SHA-1" => Ok(HashAlgorithm::Sha1),
             "SHA256" | "SHA-256" => Ok(HashAlgorithm::Sha256),
             "SHA384" | "SHA-384" => Ok(HashAlgorithm::Sha384),
@@ -108,7 +109,7 @@ impl HashAlgorithm {
     pub(crate) fn digest(&self, data: &[u8]) -> Vec<u8> {
         match self {
             HashAlgorithm::Md5 => {
-                let mut hasher = md5::Md5::new();
+                let mut hasher = Md5::new();
                 hasher.update(data);
                 hasher.finalize().to_vec()
             }
@@ -161,7 +162,7 @@ pub(crate) fn hash_password(
     match hash_alg {
         HashAlgorithm::Md5 => {
             for i in 0..spin_count {
-                let mut hasher = md5::Md5::new();
+                let mut hasher = Md5::new();
                 hasher.update(i.to_le_bytes());
                 hasher.update(&h_buf[..digest_len]);
                 h_buf[..digest_len].copy_from_slice(&hasher.finalize());
@@ -484,6 +485,78 @@ fn crypt_derive_key(hash_alg: HashAlgorithm, hash: &[u8], key_len: usize) -> Zer
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn md5_digest_len_is_16() {
+        assert_eq!(HashAlgorithm::Md5.digest_len(), 16);
+    }
+
+    #[test]
+    fn hash_password_md5_spin_10_matches_vector() {
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+        let pw = password_to_utf16le("password");
+        let h = hash_password(HashAlgorithm::Md5, &salt, &pw, 10);
+        assert_eq!(
+            h.as_slice(),
+            &[
+                0x2B, 0x39, 0xE1, 0x55, 0x98, 0x6F, 0x47, 0x22, 0x96, 0x14, 0xE2, 0xBA, 0xED,
+                0x8F, 0xB6, 0x0A
+            ],
+            "hash_password MD5 output mismatch"
+        );
+    }
+
+    #[test]
+    fn standard_key_derivation_md5_matches_vector() {
+        // Test vectors match `formula-xls`'s CryptoAPI key derivation tests.
+        let password = "password";
+        let salt: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+
+        let expected: &[(u32, [u8; 16])] = &[
+            (
+                0,
+                [
+                    0x69, 0xBA, 0xDC, 0xAE, 0x24, 0x48, 0x68, 0xE2, 0x09, 0xD4, 0xE0, 0x53,
+                    0xCC, 0xD2, 0xA3, 0xBC,
+                ],
+            ),
+            (
+                1,
+                [
+                    0x6F, 0x4D, 0x50, 0x2A, 0xB3, 0x77, 0x00, 0xFF, 0xDA, 0xB5, 0x70, 0x41,
+                    0x60, 0x45, 0x5B, 0x47,
+                ],
+            ),
+            (
+                2,
+                [
+                    0xAC, 0x69, 0x02, 0x2E, 0x39, 0x6C, 0x77, 0x50, 0x87, 0x21, 0x33, 0xF3,
+                    0x7E, 0x2C, 0x7A, 0xFC,
+                ],
+            ),
+            (
+                3,
+                [
+                    0x1B, 0x05, 0x6E, 0x71, 0x18, 0xAB, 0x8D, 0x35, 0xE9, 0xD6, 0x7A, 0xDE,
+                    0xE8, 0xB1, 0x11, 0x04,
+                ],
+            ),
+        ];
+
+        let deriver = StandardKeyDeriver::new(HashAlgorithm::Md5, 128, &salt, password);
+        for (block, expected_key) in expected {
+            let key = deriver
+                .derive_key_for_block(*block)
+                .unwrap_or_else(|_| panic!("derive block key {block}"));
+            assert_eq!(key.as_slice(), expected_key, "block={block}");
+        }
+    }
 
     #[test]
     fn hash_password_perf_guard_spin_10k() {
