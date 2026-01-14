@@ -65,6 +65,18 @@ describe("ribbonShortcuts", () => {
     expect(shortcutById["view.appearance.theme.highContrast"]).toBe("Ctrl+Alt+Shift+H");
   });
 
+  it("maps formulas.formulaAuditing.* ribbon ids to audit.toggle* keybindings", () => {
+    const displayIndex = new Map<string, string[]>([
+      ["audit.togglePrecedents", ["Ctrl+["]],
+      ["audit.toggleDependents", ["Ctrl+]"]],
+    ]);
+
+    const shortcutById = deriveRibbonShortcutById(displayIndex);
+
+    expect(shortcutById["formulas.formulaAuditing.tracePrecedents"]).toBe("Ctrl+[");
+    expect(shortcutById["formulas.formulaAuditing.traceDependents"]).toBe("Ctrl+]");
+  });
+
   it("maps view.appearance.theme.* ribbon ids to view.theme.* aria-keyshortcuts", () => {
     const ariaIndex = new Map<string, string[]>([
       ["view.theme.dark", ["Control+Alt+Shift+D"]],
@@ -79,5 +91,17 @@ describe("ribbonShortcuts", () => {
     expect(ariaById["view.appearance.theme.light"]).toBe("Control+Alt+Shift+L");
     expect(ariaById["view.appearance.theme.system"]).toBe("Control+Alt+Shift+S");
     expect(ariaById["view.appearance.theme.highContrast"]).toBe("Control+Alt+Shift+H");
+  });
+
+  it("maps formulas.formulaAuditing.* ribbon ids to audit.toggle* aria-keyshortcuts", () => {
+    const ariaIndex = new Map<string, string[]>([
+      ["audit.togglePrecedents", ["Control+["]],
+      ["audit.toggleDependents", ["Control+]"]],
+    ]);
+
+    const ariaById = deriveRibbonAriaKeyShortcutsById(ariaIndex);
+
+    expect(ariaById["formulas.formulaAuditing.tracePrecedents"]).toBe("Control+[");
+    expect(ariaById["formulas.formulaAuditing.traceDependents"]).toBe("Control+]");
   });
 });

@@ -36,6 +36,12 @@ const KEYBINDING_COMMAND_BY_RIBBON_ID: Record<string, string> = {
   "edit.replace": "edit.replace",
   "navigation.goTo": "navigation.goTo",
 
+  // --- Formula Auditing -------------------------------------------------------
+  // Hint mapping: Formula Auditing buttons use ribbon-specific ids, but the
+  // keyboard shortcuts are registered against the canonical `audit.*` commands.
+  "formulas.formulaAuditing.tracePrecedents": "audit.togglePrecedents",
+  "formulas.formulaAuditing.traceDependents": "audit.toggleDependents",
+
   // --- Formatting -------------------------------------------------------------
   // (Most formatting buttons use built-in ids directly, so they are picked up by
   // the identity mapping in `deriveRibbonShortcutById` below.)
