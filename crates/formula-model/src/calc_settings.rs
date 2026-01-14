@@ -61,7 +61,7 @@ pub enum CalculationMode {
     Automatic,
     /// Excel: `autoNoTable`.
     ///
-    /// Treated like [`Automatic`] by the current engine implementation but preserved
+    /// Treated like [`Self::Automatic`] by the current engine implementation but preserved
     /// when round-tripping XLSX.
     AutomaticNoTable,
     /// Excel: `manual`.
