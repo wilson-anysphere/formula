@@ -132,6 +132,17 @@ describe("handleRibbonCommand", () => {
     expect(style.numberFormat).toBe("@");
   });
 
+  it("adjusts decimals using snake_case number_format as the source format", () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { number_format: "0%" });
+    const ctx = createCtx(doc);
+
+    handleRibbonCommand(ctx, "format.numberFormat.increaseDecimal");
+
+    const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 });
+    expect(style.numberFormat).toBe("0.0%");
+  });
+
   it("increases/decreases font size", () => {
     const doc = new DocumentController();
     const ctx = createCtx(doc);

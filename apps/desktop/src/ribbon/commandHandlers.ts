@@ -15,6 +15,7 @@ import {
   type CellRange,
 } from "../formatting/toolbar.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT } from "../formatting/selectionSizeGuard.js";
+import { getStyleNumberFormat } from "../formatting/styleFieldAccess.js";
 
 export type RibbonFormattingApplyFn = (
   doc: DocumentController,
@@ -96,8 +97,8 @@ function activeCellNumberFormat(ctx: RibbonCommandHandlerContext): string | null
   const cell = ctx.app.getActiveCell();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const docAny = ctx.app.getDocument() as any;
-  const format = docAny.getCellFormat?.(sheetId, cell)?.numberFormat;
-  return typeof format === "string" && format.trim() ? format : null;
+  const style = docAny.getCellFormat?.(sheetId, cell);
+  return getStyleNumberFormat(style);
 }
 
 function activeCellIndentLevel(ctx: RibbonCommandHandlerContext): number {
