@@ -130,4 +130,47 @@ describe("DesktopSharedGrid a11y", () => {
 
     grid.destroy();
   });
+
+  it("does not interfere with focus management when updating aria-activedescendant", () => {
+    const container = document.createElement("div");
+    container.tabIndex = 0;
+    document.body.appendChild(container);
+
+    const provider = new MockCellProvider({ rowCount: 10, colCount: 10 });
+
+    const canvases = {
+      grid: document.createElement("canvas"),
+      content: document.createElement("canvas"),
+      selection: document.createElement("canvas")
+    };
+
+    const scrollbars = {
+      vTrack: document.createElement("div"),
+      vThumb: document.createElement("div"),
+      hTrack: document.createElement("div"),
+      hThumb: document.createElement("div")
+    };
+
+    const grid = new DesktopSharedGrid({
+      container,
+      provider,
+      rowCount: 10,
+      colCount: 10,
+      canvases,
+      scrollbars
+    });
+
+    container.focus();
+    expect(document.activeElement).toBe(container);
+
+    grid.setSelectionRanges([{ startRow: 1, endRow: 2, startCol: 1, endCol: 2 }], { activeCell: { row: 1, col: 1 } });
+    expect(document.activeElement).toBe(container);
+    expect(container.getAttribute("aria-activedescendant")).toBeTruthy();
+
+    grid.setSelectionRanges(null);
+    expect(document.activeElement).toBe(container);
+    expect(container.getAttribute("aria-activedescendant")).toBeNull();
+
+    grid.destroy();
+  });
 });
