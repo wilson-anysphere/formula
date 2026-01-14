@@ -185,7 +185,9 @@ fn indirect_external_cell_ref_is_ref_error() {
         .unwrap();
     engine.recalculate();
 
-    // Excel's INDIRECT cannot resolve references into external workbooks.
+    // Excel-compatible behavior: INDIRECT cannot resolve external workbook references. This also
+    // avoids introducing dynamic external dependencies that are not represented in the dependency
+    // graph / precedents API.
     assert_eq!(
         engine.get_cell_value("Sheet1", "A1"),
         Value::Error(formula_engine::ErrorKind::Ref)
