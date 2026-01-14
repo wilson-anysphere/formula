@@ -446,14 +446,14 @@ impl Workbook {
     /// Reorder a worksheet id within the workbook's tab order.
     ///
     /// This only affects `sheet_order` (sheet ids are stable and do not change).
-    fn reorder_sheet(&mut self, sheet: SheetId, new_index: usize) -> bool {
-        if !self.sheet_exists(sheet) {
+    fn reorder_sheet(&mut self, sheet_id: SheetId, new_index: usize) -> bool {
+        if !self.sheet_exists(sheet_id) {
             return false;
         }
         if new_index >= self.sheet_order.len() {
             return false;
         }
-        let Some(current) = self.sheet_order_index(sheet) else {
+        let Some(current) = self.sheet_order_index(sheet_id) else {
             return false;
         };
         if current == new_index {
