@@ -69,7 +69,11 @@ export class ScriptRuntime {
 
     // Default to a more forgiving timeout since script execution includes worker
     // startup + TypeScript transpilation (which can vary depending on load).
-    const timeoutMs = options.timeoutMs ?? 20_000;
+    //
+    // Note: CI/vitest runs can be heavily parallelized, so worker startup can occasionally
+    // exceed a 20s budget even for small scripts. Prefer a slightly larger default and let
+    // callers opt into stricter limits via `options.timeoutMs`.
+    const timeoutMs = options.timeoutMs ?? 40_000;
     const memoryMb = options.memoryMb ?? 64;
     const principal = options.principal ?? { type: "script", id: "anonymous" };
     const permissions =

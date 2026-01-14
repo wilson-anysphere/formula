@@ -292,9 +292,9 @@ describe("SpreadsheetApp overlay stacking", () => {
 
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("legacy");
-      // Default canvas charts mode should not mount the legacy chart canvases.
-      expect(root.querySelector(".grid-canvas--chart")).toBeNull();
-      expect(root.querySelector(".chart-selection-canvas")).toBeNull();
+      // Legacy charts mode mounts the chart + chart-selection canvases.
+      expect(root.querySelector(".grid-canvas--chart")).not.toBeNull();
+      expect(root.querySelector(".chart-selection-canvas")).not.toBeNull();
 
       expectOverlayZOrder(root);
 
@@ -325,9 +325,10 @@ describe("SpreadsheetApp overlay stacking", () => {
        const chart = root.querySelector(".grid-canvas--chart");
        const selection = root.querySelector(".grid-canvas--selection");
        expect(drawing?.classList.contains("drawing-layer--shared")).toBe(true);
-       // Canvas charts mode should not mount the legacy chart canvas.
-       expect(chart).toBeNull();
-       expect(selection?.classList.contains("grid-canvas--shared-selection")).toBe(true);
+        // Legacy charts mode mounts the chart canvas (with shared-grid modifier class).
+        expect(chart).not.toBeNull();
+        expect(chart?.classList.contains("grid-canvas--shared-chart")).toBe(true);
+        expect(selection?.classList.contains("grid-canvas--shared-selection")).toBe(true);
 
        expectOverlayZOrder(root);
 

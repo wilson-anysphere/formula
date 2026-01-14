@@ -193,6 +193,9 @@ describe("tauri capability event permissions", () => {
       "startup:tti",
       "startup:metrics",
 
+      // Pyodide asset download
+      "pyodide-download-progress",
+
       // Deep links
       "oauth-redirect",
     ];

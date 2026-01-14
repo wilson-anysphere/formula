@@ -995,8 +995,7 @@ export async function engineApplyDocumentChange(
   // ignore formatting/view metadata entirely (backwards compatibility).
   const didApplyAnyFormattingMetadata =
     didApplyCellStyles || didApplyAnyLayerStyles || didApplyAnyRangeRuns || didApplyAnyColWidths;
-  const didApplyAnyMetadataDeltas =
-    didApplyAnyFormattingMetadata || didApplyAnySheetDisplayNames || didRenameAnySheets;
+  const didApplyAnyMetadataDeltas = didApplyAnyFormattingMetadata || didApplyAnySheetDisplayNames || didRenameAnySheets;
 
   if (didApplyAnyMetadataDeltas && options.recalculate !== false) {
     shouldRecalculate = true;

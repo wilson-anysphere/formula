@@ -151,7 +151,8 @@ describe("SpreadsheetApp chart selection + drag", () => {
     };
 
     const app = new SpreadsheetApp(root, status);
-    const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
+    const { chart_id: chartId } = app.addChart({ chart_type: "bar", data_range: "A2:B5", title: "Test Chart" });
+    const chart = app.listCharts().find((c) => c.id === chartId);
     expect(chart).toBeTruthy();
 
     const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
@@ -181,7 +182,8 @@ describe("SpreadsheetApp chart selection + drag", () => {
     };
 
     const app = new SpreadsheetApp(root, status);
-    const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
+    const { chart_id: chartId } = app.addChart({ chart_type: "bar", data_range: "A2:B5", title: "Test Chart" });
+    const chart = app.listCharts().find((c) => c.id === chartId);
     expect(chart).toBeTruthy();
 
     const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
@@ -217,7 +219,8 @@ describe("SpreadsheetApp chart selection + drag", () => {
 
       const app = new SpreadsheetApp(root, status);
       expect((app as any).useCanvasCharts).toBe(false);
-      const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
+      const { chart_id: chartId } = app.addChart({ chart_type: "bar", data_range: "A2:B5", title: "Test Chart" });
+      const chart = app.listCharts().find((c) => c.id === chartId);
       expect(chart).toBeTruthy();
 
       const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
@@ -873,7 +876,8 @@ describe("SpreadsheetApp chart selection + drag", () => {
     document.body.appendChild(formulaBar);
 
     const app = new SpreadsheetApp(root, status, { formulaBar });
-    const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
+    const { chart_id: chartId } = app.addChart({ chart_type: "bar", data_range: "A2:B5", title: "Test Chart" });
+    const chart = app.listCharts().find((c) => c.id === chartId);
     expect(chart).toBeTruthy();
 
     const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
@@ -1615,7 +1619,8 @@ describe("SpreadsheetApp chart selection + drag (legacy grid)", () => {
 
     try {
       const app = new SpreadsheetApp(root, status);
-      const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
+      const { chart_id: chartId } = app.addChart({ chart_type: "bar", data_range: "A2:B5", title: "Test Chart" });
+      const chart = app.listCharts().find((c) => c.id === chartId);
       expect(chart).toBeTruthy();
 
       const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);

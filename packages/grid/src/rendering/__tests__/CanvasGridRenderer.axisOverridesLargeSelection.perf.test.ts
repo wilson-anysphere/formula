@@ -179,6 +179,10 @@ function withAllocationGuards<T>(fn: () => T): {
 
 describe("CanvasGridRenderer axis overrides large-selection perf characteristics", () => {
   beforeEach(() => {
+    // Some other tests use fake timers and do not always restore them. This perf regression
+    // suite relies on real `performance.now()` measurements, so force real timers here to
+    // avoid time-skew flakes when running the full Vitest suite in parallel.
+    vi.useRealTimers();
     // Avoid scheduling real animation frames in the unit test environment.
     // (Render cost is not part of this perf regression coverage.)
     vi.stubGlobal("requestAnimationFrame", () => 0);

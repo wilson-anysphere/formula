@@ -350,9 +350,7 @@ describe("SpreadsheetApp collab repaint", () => {
     const app = new SpreadsheetApp(root, status);
     expect(app.getGridMode()).toBe("legacy");
 
-    const charts = app.listCharts();
-    expect(charts.length).toBeGreaterThan(0);
-    const chartId = charts[0]!.id;
+    const { chart_id: chartId } = app.addChart({ chart_type: "bar", data_range: "A2:B5", title: "Test Chart" });
 
     const beforeModel = getChartModel(app, chartId);
     expect(beforeModel).toBeTruthy();
@@ -360,7 +358,7 @@ describe("SpreadsheetApp collab repaint", () => {
 
     const doc = app.getDocument();
     const sheetId = app.getCurrentSheetId();
-    // Mutate one of the demo chart's value cells (B2 is part of Sheet1!A2:B5).
+    // Mutate one of the chart's value cells (B2 is part of Sheet1!A2:B5).
     const before = doc.getCell(sheetId, { row: 1, col: 1 }) as any;
 
     doc.applyExternalDeltas(

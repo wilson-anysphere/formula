@@ -113,7 +113,7 @@ describe("SpreadsheetApp canvas charts (default)", () => {
     };
   });
 
-  it("defaults to canvas charts and renders ChartStore charts via the drawings overlay", () => {
+  it("renders ChartStore charts via the drawings overlay when canvas charts are enabled", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -121,6 +121,8 @@ describe("SpreadsheetApp canvas charts (default)", () => {
       activeValue: document.createElement("div"),
     };
 
+    // Canvas charts are opt-in (disabled by default in unit tests).
+    process.env.CANVAS_CHARTS = "1";
     const app = new SpreadsheetApp(root, status);
     expect((app as any).useCanvasCharts).toBe(true);
 
@@ -128,21 +130,21 @@ describe("SpreadsheetApp canvas charts (default)", () => {
     expect(root.querySelector(".grid-canvas--chart")).toBeNull();
     expect(root.querySelector(".chart-selection-canvas")).toBeNull();
 
-    const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
-    expect(chart).toBeTruthy();
+    const { chart_id: chartId } = app.addChart({ chart_type: "bar", data_range: "A2:B5", title: "Test Chart" });
+    const chart = app.listCharts().find((c) => c.id === chartId) ?? null;
+    expect(chart).not.toBeNull();
 
     const drawingObjects = app.getDrawingObjects();
-    const chartDrawingId = chartIdToDrawingId(chart!.id);
+    const chartDrawingId = chartIdToDrawingId(chartId);
     const chartObj = drawingObjects.find((obj) => obj.kind.type === "chart" && obj.id === chartDrawingId) ?? null;
     expect(chartObj).not.toBeNull();
 
     // Selection should still work through the unified drawing selection stack.
     app.selectDrawingById(chartDrawingId);
-    expect(app.getSelectedChartId()).toBe(chart!.id);
+    expect(app.getSelectedChartId()).toBe(chartId);
     expect(app.getDrawingHandlePointsPx(chartDrawingId)).not.toBeNull();
 
     app.destroy();
     root.remove();
   });
 });
-

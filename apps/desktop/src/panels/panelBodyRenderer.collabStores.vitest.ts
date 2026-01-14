@@ -125,7 +125,9 @@ describe("panelBodyRenderer collab store injection", () => {
       renderer.renderPanelBody(PanelIds.VERSION_HISTORY, body);
     });
 
-    await waitForInAct(() => mocks.createCollabVersioning.mock.calls.length > 0);
+    // The Version History panel lazily imports the collab versioning subsystem; in Node-based
+    // test environments the first chunk load can take a few seconds.
+    await waitForInAct(() => mocks.createCollabVersioning.mock.calls.length > 0, 10_000);
 
     expect(createCollabVersioningStore).toHaveBeenCalledWith(session);
     const opts = mocks.createCollabVersioning.mock.calls[0]?.[0] as any;

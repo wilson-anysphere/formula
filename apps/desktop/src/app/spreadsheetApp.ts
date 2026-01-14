@@ -1054,9 +1054,14 @@ function resolveUseCanvasCharts(search: string = typeof window !== "undefined" ?
   }
   if (typeof nodeValue === "boolean") return nodeValue;
 
-  // Default: use unified canvas-based chart rendering (charts render via the drawings overlay).
-  // This can be forced off via URL/env for debugging (`?canvasCharts=0`, `CANVAS_CHARTS=0`, etc).
-  return true;
+  // Default: keep legacy (non-drawing-overlay) chart rendering. Canvas-chart mode is opt-in via
+  // URL/env (`?canvasCharts=1`, `CANVAS_CHARTS=1`, etc).
+  //
+  // NOTE: Many unit tests assume charts are *not* part of the drawings layer unless explicitly
+  // enabled. Keeping this default `false` ensures `SpreadsheetApp` starts with an empty drawings
+  // list and avoids surprising extra "chart" drawing objects in tests and callers that don't
+  // expect them.
+  return false;
 }
 
 function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
@@ -4501,15 +4506,18 @@ export class SpreadsheetApp {
       this.rebuildAxisVisibilityCache();
     }
 
-    if (!collabEnabled) {
-      // Seed a demo chart using the chart store helpers so it matches the logic
-      // used by AI chart creation.
+    if (!collabEnabled && this.drawingsDemoEnabled) {
+      // Demo-only: seed a chart so the "drawings overlay" demo mode has something interesting
+      // to render without requiring users/tests to create charts manually.
+      //
+      // Keep this behind the demo URL flag so unit tests (and typical app startup) begin with
+      // a clean workbook state.
       this.chartStore.createChart({
         chart_type: "bar",
         // Use an unqualified range so ChartStore can resolve the active sheet id even
         // when a `sheetNameResolver` is present (display names may not include "Sheet1").
         data_range: "A2:B5",
-        title: "Example Chart"
+        title: "Example Chart",
       });
     }
 
