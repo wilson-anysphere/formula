@@ -12,10 +12,20 @@ type VersionManagerLike = {
   getVersion(versionId: string): Promise<{ snapshot: Uint8Array } | null>;
 };
 
+type AddedSheet = { id: string; name: string | null; afterIndex: number };
+type RemovedSheet = { id: string; name: string | null; beforeIndex: number };
+type RenamedSheet = { id: string; beforeName: string | null; afterName: string | null };
+type MovedSheet = { id: string; beforeIndex: number; afterIndex: number };
 type SheetMetaChange = { id: string; field: string; before: unknown; after: unknown };
 
 type WorkbookDiff = {
-  sheets: { added: unknown[]; removed: unknown[]; renamed: unknown[]; moved: unknown[]; metaChanged?: SheetMetaChange[] };
+  sheets: {
+    added: AddedSheet[];
+    removed: RemovedSheet[];
+    renamed: RenamedSheet[];
+    moved: MovedSheet[];
+    metaChanged?: SheetMetaChange[];
+  };
   cellsBySheet: Array<{
     sheetId: string;
     sheetName: string | null;
@@ -168,10 +178,16 @@ export function VersionHistoryCompareSection({
       return;
     }
 
-    const metaChangedIds = new Set((diff.sheets?.metaChanged ?? []).map((c) => c.id));
+    const sheetChangedIds = new Set([
+      ...(diff.sheets?.added ?? []).map((s) => s.id),
+      ...(diff.sheets?.removed ?? []).map((s) => s.id),
+      ...(diff.sheets?.renamed ?? []).map((s) => s.id),
+      ...(diff.sheets?.moved ?? []).map((s) => s.id),
+      ...(diff.sheets?.metaChanged ?? []).map((c) => c.id),
+    ]);
     setSelectedSheetId((prev) => {
       if (prev && entries.some((e) => e.sheetId === prev)) return prev;
-      const preferred = entries.find((e) => hasAnyCellChanges(e.diff) || metaChangedIds.has(e.sheetId)) ?? entries[0];
+      const preferred = entries.find((e) => hasAnyCellChanges(e.diff) || sheetChangedIds.has(e.sheetId)) ?? entries[0];
       return preferred?.sheetId ?? null;
     });
   }, [diff]);
@@ -219,11 +235,26 @@ export function VersionHistoryCompareSection({
     for (const change of diff.sheets?.metaChanged ?? []) {
       metaCounts.set(change.id, (metaCounts.get(change.id) ?? 0) + 1);
     }
+
+    const changeLabels = new Map<string, string[]>();
+    const addLabel = (id: string, label: string) => {
+      const labels = changeLabels.get(id) ?? [];
+      labels.push(label);
+      changeLabels.set(id, labels);
+    };
+    for (const sheet of diff.sheets?.added ?? []) addLabel(sheet.id, "added");
+    for (const sheet of diff.sheets?.removed ?? []) addLabel(sheet.id, "removed");
+    for (const sheet of diff.sheets?.renamed ?? []) addLabel(sheet.id, "renamed");
+    for (const sheet of diff.sheets?.moved ?? []) addLabel(sheet.id, "reordered");
+    for (const [id, count] of metaCounts) {
+      addLabel(id, `meta: ${count}`);
+    }
+
     return (diff.cellsBySheet ?? []).map((entry) => {
       const name = sheetDisplayName(entry.sheetId, entry.sheetName, sheetNameResolver);
-      const metaCount = metaCounts.get(entry.sheetId) ?? 0;
       const cellChanges = hasAnyCellChanges(entry.diff);
-      const suffix = cellChanges || metaCount > 0 ? (metaCount > 0 && !cellChanges ? ` (meta: ${metaCount})` : "") : " (no changes)";
+      const labels = changeLabels.get(entry.sheetId) ?? [];
+      const suffix = cellChanges ? "" : labels.length > 0 ? ` (${labels.join(", ")})` : " (no changes)";
       return { sheetId: entry.sheetId, displayName: `${name}${suffix}`, rawName: name };
     });
   }, [diff, sheetNameResolver]);
@@ -379,6 +410,100 @@ export function VersionHistoryCompareSection({
 
                  return (
                    <>
+                     {(() => {
+                       const added = diff.sheets?.added?.find((s) => s.id === selectedSheet.sheetId) ?? null;
+                       const removed = diff.sheets?.removed?.find((s) => s.id === selectedSheet.sheetId) ?? null;
+                       const renamed = diff.sheets?.renamed?.find((s) => s.id === selectedSheet.sheetId) ?? null;
+                       const moved = diff.sheets?.moved?.find((s) => s.id === selectedSheet.sheetId) ?? null;
+                       if (!added && !removed && !renamed && !moved) return null;
+                       return (
+                         <div className="collab-version-history__diff-group">
+                           <div className="collab-version-history__diff-group-title">Sheet</div>
+                           <div className="collab-version-history__diff-group-list">
+                             {added ? (
+                               <div className="collab-version-history__diff-row collab-version-history__diff-row--added">
+                                 <div className="collab-version-history__diff-row-header">
+                                   <span className="collab-version-history__diff-cell-ref">Added</span>
+                                 </div>
+                                 <div className="collab-version-history__diff-row-body">
+                                   <div className="collab-version-history__diff-row-values">
+                                     <div className="collab-version-history__diff-row-value">
+                                       <span className="collab-version-history__diff-row-label">Name:</span>{" "}
+                                       <span className="collab-version-history__diff-value">{summarizeJson(added.name)}</span>
+                                     </div>
+                                     <div className="collab-version-history__diff-row-value">
+                                       <span className="collab-version-history__diff-row-label">Index:</span>{" "}
+                                       <span className="collab-version-history__diff-value">{summarizeJson(added.afterIndex)}</span>
+                                     </div>
+                                   </div>
+                                 </div>
+                               </div>
+                             ) : null}
+
+                             {removed ? (
+                               <div className="collab-version-history__diff-row collab-version-history__diff-row--removed">
+                                 <div className="collab-version-history__diff-row-header">
+                                   <span className="collab-version-history__diff-cell-ref">Removed</span>
+                                 </div>
+                                 <div className="collab-version-history__diff-row-body">
+                                   <div className="collab-version-history__diff-row-values">
+                                     <div className="collab-version-history__diff-row-value">
+                                       <span className="collab-version-history__diff-row-label">Name:</span>{" "}
+                                       <span className="collab-version-history__diff-value">{summarizeJson(removed.name)}</span>
+                                     </div>
+                                     <div className="collab-version-history__diff-row-value">
+                                       <span className="collab-version-history__diff-row-label">Index:</span>{" "}
+                                       <span className="collab-version-history__diff-value">{summarizeJson(removed.beforeIndex)}</span>
+                                     </div>
+                                   </div>
+                                 </div>
+                               </div>
+                             ) : null}
+
+                             {renamed ? (
+                               <div className="collab-version-history__diff-row collab-version-history__diff-row--modified">
+                                 <div className="collab-version-history__diff-row-header">
+                                   <span className="collab-version-history__diff-cell-ref">Renamed</span>
+                                 </div>
+                                 <div className="collab-version-history__diff-row-body">
+                                   <div className="collab-version-history__diff-row-values">
+                                     <div className="collab-version-history__diff-row-value">
+                                       <span className="collab-version-history__diff-row-label">Before:</span>{" "}
+                                       <span className="collab-version-history__diff-value">{summarizeJson(renamed.beforeName)}</span>
+                                     </div>
+                                     <div className="collab-version-history__diff-row-value">
+                                       <span className="collab-version-history__diff-row-label">After:</span>{" "}
+                                       <span className="collab-version-history__diff-value">{summarizeJson(renamed.afterName)}</span>
+                                     </div>
+                                   </div>
+                                 </div>
+                               </div>
+                             ) : null}
+
+                             {moved ? (
+                               <div className="collab-version-history__diff-row collab-version-history__diff-row--moved">
+                                 <div className="collab-version-history__diff-row-header">
+                                   <span className="collab-version-history__diff-cell-ref">Reordered</span>
+                                 </div>
+                                 <div className="collab-version-history__diff-row-body">
+                                   <div className="collab-version-history__diff-row-values">
+                                     <div className="collab-version-history__diff-row-value">
+                                       <span className="collab-version-history__diff-row-label">Before index:</span>{" "}
+                                       <span className="collab-version-history__diff-value">{summarizeJson(moved.beforeIndex)}</span>
+                                     </div>
+                                     <div className="collab-version-history__diff-row-value">
+                                       <span className="collab-version-history__diff-row-label">After index:</span>{" "}
+                                       <span className="collab-version-history__diff-value">{summarizeJson(moved.afterIndex)}</span>
+                                     </div>
+                                   </div>
+                                 </div>
+                               </div>
+                             ) : null}
+                           </div>
+                         </div>
+                       );
+                     })()}
+
                      {(() => {
                        const meta = (diff.sheets?.metaChanged ?? []).filter((c) => c.id === selectedSheet.sheetId);
                        if (meta.length === 0) return null;
