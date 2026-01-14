@@ -16,6 +16,28 @@ fn normalize_scheme(raw: &str) -> String {
         .to_string()
 }
 
+fn is_reserved_scheme(normalized: &str) -> bool {
+    // These schemes are not valid deep-link candidates for our desktop app. Treating them as
+    // deep-link schemes would break other pipelines:
+    // - `http`/`https`: would bypass the OAuth loopback security checks and accept arbitrary URLs.
+    // - `file`: would cause file-open URLs to be misclassified as OAuth redirects.
+    matches!(normalized, "http" | "https" | "file")
+}
+
+fn normalize_and_validate_scheme(raw: &str) -> Option<String> {
+    let normalized = normalize_scheme(raw);
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized.contains(':') || normalized.contains('/') {
+        return None;
+    }
+    if is_reserved_scheme(&normalized) {
+        return None;
+    }
+    Some(normalized)
+}
+
 fn schemes_from_tauri_config() -> Vec<String> {
     let config_str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tauri.conf.json"));
     let config: Value = match serde_json::from_str(config_str) {
@@ -36,16 +58,14 @@ fn schemes_from_tauri_config() -> Vec<String> {
         };
         match schemes {
             Value::String(s) => {
-                let normalized = normalize_scheme(s);
-                if !normalized.is_empty() && !(normalized.contains(':') || normalized.contains('/')) {
+                if let Some(normalized) = normalize_and_validate_scheme(s) {
                     out.push(normalized);
                 }
             }
             Value::Array(items) => {
                 for item in items {
                     let Some(s) = item.as_str() else { continue };
-                    let normalized = normalize_scheme(s);
-                    if !normalized.is_empty() && !(normalized.contains(':') || normalized.contains('/')) {
+                    if let Some(normalized) = normalize_and_validate_scheme(s) {
                         out.push(normalized);
                     }
                 }
@@ -129,6 +149,18 @@ mod tests {
         assert_eq!(normalize_scheme(" formula: "), "formula");
         assert_eq!(normalize_scheme("formula/"), "formula");
         assert_eq!(normalize_scheme("FORMULA://"), "formula");
+    }
+
+    #[test]
+    fn normalize_and_validate_scheme_filters_invalid_and_reserved_schemes() {
+        assert_eq!(normalize_and_validate_scheme("formula://evil"), None);
+        assert_eq!(normalize_and_validate_scheme("http"), None);
+        assert_eq!(normalize_and_validate_scheme("https:"), None);
+        assert_eq!(normalize_and_validate_scheme("file://"), None);
+        assert_eq!(
+            normalize_and_validate_scheme("Formula-Extra://"),
+            Some("formula-extra".to_string())
+        );
     }
 
     #[test]

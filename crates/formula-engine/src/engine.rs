@@ -3368,25 +3368,35 @@ impl Engine {
     /// `workbook` should match the workbook component of an external sheet key, e.g. `"Book.xlsx"`
     /// for the sheet key `"[Book.xlsx]Sheet1"`.
     pub fn mark_external_workbook_dirty(&mut self, workbook: &str) {
-        let mut workbook = workbook.trim();
+        let workbook = workbook.trim();
 
         // Normalize a few common caller-provided forms:
         // - the workbook component itself: `Book.xlsx`
         // - a bracket-wrapped workbook id: `[Book.xlsx]` (strip wrapper brackets)
         //
-        // Workbook names can contain literal `[` characters and escape literal `]` characters as
-        // `]]`. Avoid naïvely stripping leading/trailing brackets when the brackets are part of the
-        // workbook id itself (e.g. a filename like `[Book]` yields a workbook id of `"[Book]]"`).
+        // Canonical external workbook ids may legitimately start/end with `[` / `]` (e.g. a
+        // filename like `[Book]`). Prefer an exact match first, then fall back to stripping a
+        // wrapper *only if* it looks like a wrapped id. This avoids misclassifying literal
+        // brackets in workbook ids.
+        let mut workbook_keys: [&str; 2] = ["", ""];
+        let mut key_count = 0usize;
+        workbook_keys[key_count] = workbook;
+        key_count += 1;
         if let Some(inner) = Self::strip_wrapping_workbook_brackets(workbook) {
-            workbook = inner;
+            if inner != workbook {
+                workbook_keys[key_count] = inner;
+                key_count += 1;
+            }
         }
 
         let mut cells: HashSet<CellKey> = HashSet::new();
-        if let Some(static_cells) = self.external_workbook_dependents.get(workbook) {
-            cells.extend(static_cells.iter().copied());
-        }
-        if let Some(dynamic_cells) = self.dynamic_external_workbook_dependents.get(workbook) {
-            cells.extend(dynamic_cells.iter().copied());
+        for workbook in workbook_keys.into_iter().take(key_count) {
+            if let Some(static_cells) = self.external_workbook_dependents.get(workbook) {
+                cells.extend(static_cells.iter().copied());
+            }
+            if let Some(dynamic_cells) = self.dynamic_external_workbook_dependents.get(workbook) {
+                cells.extend(dynamic_cells.iter().copied());
+            }
         }
         if cells.is_empty() {
             return;
