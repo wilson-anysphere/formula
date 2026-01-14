@@ -552,7 +552,7 @@ function reportSize({ env }) {
     if (binaryTargetMb != null && binStatus === "FAIL") failed = true;
     // eslint-disable-next-line no-console
     console.log(
-      `\n[desktop-size] binary: ${humanBytes(size)} (${formatMb(sizeMb)})  (${path.relative(repoRoot, binPath)})` +
+      `\n[desktop-size] binary: ${humanBytes(size)} (${formatMb(sizeMb)})  (${formatLogPath(binPath)})` +
         (binaryTargetMb == null ? "" : `  ${binStatus} target=${formatMb(binaryTargetMb)}`),
     );
   } else {
