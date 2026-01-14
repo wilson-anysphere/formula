@@ -47,24 +47,26 @@ fn parse_locale_tsv(locale_id: &str, path: &Path, raw_tsv: &str) -> ParsedLocale
     let mut duplicate_canon: Vec<String> = Vec::new();
     let mut duplicate_localized: Vec<String> = Vec::new();
 
-    for (idx, line) in raw_tsv.lines().enumerate() {
+    for (idx, raw_line) in raw_tsv.lines().enumerate() {
         let line_no = idx + 1;
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
 
-        let mut parts = line.split('\t');
+        // Parse the raw line (not the trimmed line) so trailing empty columns like
+        // `SUM\tSUMME\t` are not silently accepted.
+        let mut parts = raw_line.split('\t');
         let canon = parts.next().unwrap_or("");
         let loc = parts.next().unwrap_or_else(|| {
             panic!(
-                "invalid locale TSV entry in {locale_id} ({path}) (expected `Canonical<TAB>Localized`) at line {line_no}: {line:?}",
+                "invalid locale TSV entry in {locale_id} ({path}) (expected `Canonical<TAB>Localized`) at line {line_no}: {raw_line:?}",
                 path = path.display()
             )
         });
         if parts.next().is_some() {
             panic!(
-                "invalid locale TSV entry in {locale_id} ({path}) (too many columns) at line {line_no}: {line:?}",
+                "invalid locale TSV entry in {locale_id} ({path}) (too many columns) at line {line_no}: {raw_line:?}",
                 path = path.display()
             );
         }
@@ -72,7 +74,7 @@ fn parse_locale_tsv(locale_id: &str, path: &Path, raw_tsv: &str) -> ParsedLocale
         let loc = loc.trim();
         if canon.is_empty() || loc.is_empty() {
             panic!(
-                "invalid locale TSV entry in {locale_id} ({path}) (empty key/value) at line {line_no}: {line:?}",
+                "invalid locale TSV entry in {locale_id} ({path}) (empty key/value) at line {line_no}: {raw_line:?}",
                 path = path.display()
             );
         }
@@ -424,10 +426,13 @@ fn de_de_locale_function_tsv_is_not_mostly_identity_mappings() {
     let mut identity = 0usize;
 
     for line in tsv.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
+
+        // Parse the raw line (not the trimmed line) so trailing empty columns like
+        // `SUM\tSUMME\t` are not silently accepted.
         let mut parts = line.split('\t');
         let canon = parts.next().unwrap_or("");
         let loc = parts.next().unwrap_or_else(|| {
@@ -437,6 +442,11 @@ fn de_de_locale_function_tsv_is_not_mostly_identity_mappings() {
             panic!("invalid TSV line in de-DE.tsv (too many columns): {line:?}");
         }
         total += 1;
+        let canon = canon.trim();
+        let loc = loc.trim();
+        if canon.is_empty() || loc.is_empty() {
+            panic!("invalid TSV line in de-DE.tsv (empty field): {line:?}");
+        }
         if canon == loc {
             identity += 1;
         }
@@ -469,10 +479,13 @@ fn es_es_locale_function_tsv_is_not_mostly_identity_mappings() {
     let mut identity = 0usize;
 
     for line in tsv.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
+
+        // Parse the raw line (not the trimmed line) so trailing empty columns like
+        // `SUM\tSUMA\t` are not silently accepted.
         let mut parts = line.split('\t');
         let canon = parts.next().unwrap_or("");
         let loc = parts.next().unwrap_or_else(|| {
@@ -482,6 +495,11 @@ fn es_es_locale_function_tsv_is_not_mostly_identity_mappings() {
             panic!("invalid TSV line in es-ES.tsv (too many columns): {line:?}");
         }
         total += 1;
+        let canon = canon.trim();
+        let loc = loc.trim();
+        if canon.is_empty() || loc.is_empty() {
+            panic!("invalid TSV line in es-ES.tsv (empty field): {line:?}");
+        }
         if canon == loc {
             identity += 1;
         }
