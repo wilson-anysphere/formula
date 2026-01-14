@@ -563,6 +563,18 @@ fn agile_decrypt_matches_office_crypto_reference() {
     assert_eq!(decrypted_from_cfb, plain_zip);
     assert_eq!(decrypted_from_cfb, decrypted);
 
+    let decrypted_from_ole_bytes =
+        formula_xlsx::decrypt_ooxml_from_ole_bytes(encrypted_cfb.as_slice(), password)
+            .expect("decrypt from ole bytes");
+    assert_eq!(decrypted_from_ole_bytes, plain_zip);
+    assert_eq!(decrypted_from_ole_bytes, decrypted);
+
+    let decrypted_from_ole_reader =
+        formula_xlsx::decrypt_ooxml_from_ole_reader(Cursor::new(encrypted_cfb.as_slice()), password)
+            .expect("decrypt from ole reader");
+    assert_eq!(decrypted_from_ole_reader, plain_zip);
+    assert_eq!(decrypted_from_ole_reader, decrypted);
+
     let office_crypto_decrypted =
         office_crypto::decrypt_from_bytes(encrypted_cfb, password).unwrap();
     assert_eq!(office_crypto_decrypted, plain_zip);
@@ -587,6 +599,18 @@ fn agile_decrypt_empty_password_matches_office_crypto_reference() {
         formula_xlsx::decrypt_ooxml_from_cfb(&mut ole, password).expect("decrypt from cfb");
     assert_eq!(decrypted_from_cfb, plain_zip);
     assert_eq!(decrypted_from_cfb, decrypted);
+
+    let decrypted_from_ole_bytes =
+        formula_xlsx::decrypt_ooxml_from_ole_bytes(encrypted_cfb.as_slice(), password)
+            .expect("decrypt from ole bytes");
+    assert_eq!(decrypted_from_ole_bytes, plain_zip);
+    assert_eq!(decrypted_from_ole_bytes, decrypted);
+
+    let decrypted_from_ole_reader =
+        formula_xlsx::decrypt_ooxml_from_ole_reader(Cursor::new(encrypted_cfb.as_slice()), password)
+            .expect("decrypt from ole reader");
+    assert_eq!(decrypted_from_ole_reader, plain_zip);
+    assert_eq!(decrypted_from_ole_reader, decrypted);
 
     let office_crypto_decrypted = office_crypto::decrypt_from_bytes(encrypted_cfb, password).unwrap();
     assert_eq!(office_crypto_decrypted, plain_zip);
