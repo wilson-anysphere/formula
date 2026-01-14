@@ -2616,9 +2616,15 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
 
     let mut ptg_tbl_cells: Vec<PendingPtgTbl> = Vec::new();
 
-    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
-    while let Some(next) = iter.next() {
-        let record = match next {
+    // FORMULA and TABLE records can legally be split across one or more `CONTINUE` records if the
+    // payload exceeds the BIFF record size limit. Use the logical iterator so we can reassemble
+    // those fragments before parsing PtgTbl references.
+    let allows_continuation = |record_id: u16| matches!(record_id, RECORD_FORMULA | RECORD_TABLE);
+    let iter =
+        records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+
+    for record in iter {
+        let record = match record {
             Ok(r) => r,
             Err(err) => {
                 push_warning_bounded(
@@ -2635,7 +2641,7 @@ pub(crate) fn parse_biff8_sheet_table_formulas(
             break;
         }
 
-        let data = record.data;
+        let data = record.data.as_ref();
         match record.record_id {
             RECORD_TABLE => {
                 // TABLE record payload (BIFF8) [MS-XLS 2.4.313].
@@ -3690,6 +3696,149 @@ mod tests {
         );
 
         // Ensure the synthesized formula is parseable by our formula lexer/parser.
+        parse_formula("TABLE(A1,B2)", ParseOptions::default()).expect("parseable");
+    }
+
+    #[test]
+    fn parses_table_formula_when_formula_record_is_continued() {
+        // TABLE record anchored at F11 (row=10, col=5), with two input cells: A1 (row input) and
+        // B2 (col input).
+        let base_row: u16 = 10;
+        let base_col: u16 = 5;
+        let grbit: u16 = 0x0003; // best-effort: both inputs present
+
+        let mut table_payload = Vec::new();
+        table_payload.extend_from_slice(&base_row.to_le_bytes());
+        table_payload.extend_from_slice(&base_col.to_le_bytes());
+        table_payload.extend_from_slice(&grbit.to_le_bytes());
+        // row input: A1
+        table_payload.extend_from_slice(&0u16.to_le_bytes()); // rwInpRow
+        table_payload.extend_from_slice(&0u16.to_le_bytes()); // colInpRow
+        // col input: B2
+        table_payload.extend_from_slice(&1u16.to_le_bytes()); // rwInpCol
+        table_payload.extend_from_slice(&1u16.to_le_bytes()); // colInpCol
+
+        // FORMULA record at D21 whose rgce is a single PtgTbl referencing the TABLE base cell.
+        // Split across CONTINUE boundaries such that cce and rgce both cross fragment boundaries.
+        let cell_row: u16 = 20;
+        let cell_col: u16 = 3;
+        let rgce = [
+            0x02u8, // PtgTbl
+            base_row.to_le_bytes()[0],
+            base_row.to_le_bytes()[1],
+            base_col.to_le_bytes()[0],
+            base_col.to_le_bytes()[1],
+        ];
+        let cce_bytes = (rgce.len() as u16).to_le_bytes();
+
+        // FORMULA header: row (2) + col (2) + xf (2) + cached result (8) + grbit (2) + chn (4) +
+        // cce (2) + rgce...
+        let mut formula_prefix = Vec::new();
+        formula_prefix.extend_from_slice(&cell_row.to_le_bytes());
+        formula_prefix.extend_from_slice(&cell_col.to_le_bytes());
+        formula_prefix.extend_from_slice(&0u16.to_le_bytes()); // xf
+        formula_prefix.extend_from_slice(&0f64.to_le_bytes()); // cached result
+        formula_prefix.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        formula_prefix.extend_from_slice(&0u32.to_le_bytes()); // chn
+
+        // Split so that the first CONTINUE boundary occurs after the first byte of cce (so cce
+        // crosses), and the second CONTINUE boundary splits the rgce bytes.
+        let formula_frag1 = [formula_prefix, vec![cce_bytes[0]]].concat();
+        let cont1 = vec![cce_bytes[1], rgce[0], rgce[1]];
+        let cont2 = rgce[2..].to_vec();
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_TABLE, &table_payload),
+            record(RECORD_FORMULA, &formula_frag1),
+            record(records::RECORD_CONTINUE, &cont1),
+            record(records::RECORD_CONTINUE, &cont2),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_sheet_table_formulas(&stream, 0).expect("parse");
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+
+        let expected_cell = CellRef::new(cell_row as u32, cell_col as u32);
+        assert_eq!(
+            parsed.formulas.get(&expected_cell).map(String::as_str),
+            Some("TABLE(A1,B2)")
+        );
+
+        parse_formula("TABLE(A1,B2)", ParseOptions::default()).expect("parseable");
+    }
+
+    #[test]
+    fn parses_table_formula_when_table_record_is_continued() {
+        // TABLE record anchored at F11 (row=10, col=5), with two input cells: A1 (row input) and
+        // B2 (col input). Split across a CONTINUE boundary.
+        let base_row: u16 = 10;
+        let base_col: u16 = 5;
+        let grbit: u16 = 0x0003; // best-effort: both inputs present
+
+        // First fragment contains only base_row/base_col.
+        let mut table_frag1 = Vec::new();
+        table_frag1.extend_from_slice(&base_row.to_le_bytes());
+        table_frag1.extend_from_slice(&base_col.to_le_bytes());
+
+        // Second fragment contains grbit + input refs.
+        let mut table_cont = Vec::new();
+        table_cont.extend_from_slice(&grbit.to_le_bytes());
+        // row input: A1
+        table_cont.extend_from_slice(&0u16.to_le_bytes()); // rwInpRow
+        table_cont.extend_from_slice(&0u16.to_le_bytes()); // colInpRow
+        // col input: B2
+        table_cont.extend_from_slice(&1u16.to_le_bytes()); // rwInpCol
+        table_cont.extend_from_slice(&1u16.to_le_bytes()); // colInpCol
+
+        // FORMULA record at D21 whose rgce is a single PtgTbl referencing the TABLE base cell.
+        let cell_row: u16 = 20;
+        let cell_col: u16 = 3;
+        let rgce = [
+            0x02u8, // PtgTbl
+            base_row.to_le_bytes()[0],
+            base_row.to_le_bytes()[1],
+            base_col.to_le_bytes()[0],
+            base_col.to_le_bytes()[1],
+        ];
+
+        let mut formula_payload = Vec::new();
+        formula_payload.extend_from_slice(&cell_row.to_le_bytes());
+        formula_payload.extend_from_slice(&cell_col.to_le_bytes());
+        formula_payload.extend_from_slice(&0u16.to_le_bytes()); // xf
+        formula_payload.extend_from_slice(&0f64.to_le_bytes()); // cached result
+        formula_payload.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        formula_payload.extend_from_slice(&0u32.to_le_bytes()); // chn
+        formula_payload.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        formula_payload.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_TABLE, &table_frag1),
+            record(records::RECORD_CONTINUE, &table_cont),
+            record(RECORD_FORMULA, &formula_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_sheet_table_formulas(&stream, 0).expect("parse");
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+
+        let expected_cell = CellRef::new(cell_row as u32, cell_col as u32);
+        assert_eq!(
+            parsed.formulas.get(&expected_cell).map(String::as_str),
+            Some("TABLE(A1,B2)")
+        );
+
         parse_formula("TABLE(A1,B2)", ParseOptions::default()).expect("parseable");
     }
 
