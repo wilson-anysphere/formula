@@ -271,6 +271,7 @@ pub enum AggregationType {
     Var,
     VarP,
 }
+
 /// Excel-style "Show Values As" transformations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

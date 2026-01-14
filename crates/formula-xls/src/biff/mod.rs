@@ -31,13 +31,12 @@ pub(crate) mod strings;
 pub(crate) mod worksheet_formulas;
 
 pub(crate) use comments::parse_biff_sheet_notes;
+pub(crate) use defined_names::parse_biff_defined_names;
 pub(crate) use autofilter::{parse_biff_filter_database_ranges, ParsedFilterDatabaseRanges};
 pub(crate) use autofilter_criteria::parse_biff_sheet_autofilter_criteria;
 pub(crate) use globals::{
     parse_biff_bound_sheets, parse_biff_codepage, parse_biff_workbook_globals, BoundSheetInfo,
 };
-pub(crate) use print_settings::parse_biff_sheet_print_settings;
-pub(crate) use defined_names::parse_biff_defined_names;
 pub(crate) use print_settings::parse_biff_sheet_print_settings;
 pub(crate) use sheet::{
     parse_biff8_sheet_formulas,

@@ -2,6 +2,56 @@ use formula_model::{ManualPageBreaks, Orientation, PageSetup, Scaling};
 
 use super::records;
 
+/// Cap warnings collected by best-effort worksheet print-settings scans.
+///
+/// These scans run on untrusted input (legacy BIFF streams) and should not allow a crafted file to
+/// allocate an unbounded number of warning strings.
+const MAX_WARNINGS_PER_SHEET_PRINT_SETTINGS: usize = 50;
+const PRINT_SETTINGS_WARNINGS_SUPPRESSED_MESSAGE: &str =
+    "additional print settings warnings suppressed";
+
+fn push_warning_bounded(warnings: &mut Vec<String>, warning: impl Into<String>) {
+    if warnings.len() < MAX_WARNINGS_PER_SHEET_PRINT_SETTINGS {
+        warnings.push(warning.into());
+        return;
+    }
+    if warnings.len() == MAX_WARNINGS_PER_SHEET_PRINT_SETTINGS {
+        warnings.push(PRINT_SETTINGS_WARNINGS_SUPPRESSED_MESSAGE.to_string());
+    }
+}
+
+/// Push a warning but ensure it is present even if the warning buffer is already full.
+///
+/// This is used for "critical" warnings (e.g. hardening caps) where we want to surface the
+/// condition even if earlier best-effort parsing already exhausted the warning budget.
+fn push_warning_bounded_force(warnings: &mut Vec<String>, warning: impl Into<String>) {
+    let warning = warning.into();
+
+    if warnings.len() < MAX_WARNINGS_PER_SHEET_PRINT_SETTINGS {
+        warnings.push(warning);
+        return;
+    }
+
+    // Keep the warning buffer size bounded. Prefer preserving the terminal suppression marker (when
+    // present) and replace the last "real" warning.
+    let replace_idx = if warnings.len() == MAX_WARNINGS_PER_SHEET_PRINT_SETTINGS + 1
+        && warnings
+            .last()
+            .is_some_and(|w| w == PRINT_SETTINGS_WARNINGS_SUPPRESSED_MESSAGE)
+    {
+        MAX_WARNINGS_PER_SHEET_PRINT_SETTINGS.saturating_sub(1)
+    } else {
+        warnings.len().saturating_sub(1)
+    };
+
+    if let Some(slot) = warnings.get_mut(replace_idx) {
+        *slot = warning;
+    } else {
+        // Should be unreachable, but fall back to the bounded helper for safety.
+        push_warning_bounded(warnings, warning);
+    }
+}
+
 // Worksheet print/page setup related record ids.
 // See [MS-XLS] sections:
 // - SETUP: 2.4.257
@@ -73,7 +123,7 @@ pub(crate) fn parse_biff_sheet_print_settings(
         let record = match next {
             Ok(r) => r,
             Err(err) => {
-                out.warnings.push(format!("malformed BIFF record: {err}"));
+                push_warning_bounded(&mut out.warnings, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -124,11 +174,14 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 // WSBOOL [MS-XLS 2.4.376]
                 // fFitToPage: bit8 (mask 0x0100)
                 if data.len() < 2 {
-                    out.warnings.push(format!(
-                        "truncated WSBOOL record at offset {} (expected >=2 bytes, got {})",
-                        record.offset,
-                        data.len()
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "truncated WSBOOL record at offset {} (expected >=2 bytes, got {})",
+                            record.offset,
+                            data.len()
+                        ),
+                    );
                     continue;
                 }
                 let grbit = u16::from_le_bytes([data[0], data[1]]);
@@ -170,11 +223,14 @@ pub(crate) fn parse_biff_sheet_print_settings(
     match super::sheet::parse_biff_sheet_manual_page_breaks(workbook_stream, start) {
         Ok(mut breaks) => {
             out.manual_page_breaks = breaks.manual_page_breaks;
-            out.warnings.extend(breaks.warnings.drain(..));
+            for warning in breaks.warnings.drain(..) {
+                push_warning_bounded_force(&mut out.warnings, warning);
+            }
         }
-        Err(err) => out
-            .warnings
-            .push(format!("failed to parse manual page breaks: {err}")),
+        Err(err) => push_warning_bounded_force(
+            &mut out.warnings,
+            format!("failed to parse manual page breaks: {err}"),
+        ),
     }
 
     Ok(out)
@@ -204,10 +260,13 @@ fn parse_setup_record(
     //
     // We parse fields opportunistically to stay best-effort on truncated records.
     if data.len() < 34 {
-        warnings.push(format!(
-            "truncated SETUP record at offset {offset} (len={}, expected 34)",
-            data.len()
-        ));
+        push_warning_bounded(
+            warnings,
+            format!(
+                "truncated SETUP record at offset {offset} (len={}, expected 34)",
+                data.len()
+            ),
+        );
     }
 
     let paper_size = parse_u16_at(data, 0);
@@ -223,9 +282,12 @@ fn parse_setup_record(
         // These values do not map cleanly onto OpenXML `ST_PaperSize` numeric codes and are not
         // representable in the model. Ignore them and keep the default paper size.
         if code == 0 || code >= 256 {
-            warnings.push(format!(
+            push_warning_bounded(
+                warnings,
+                format!(
                 "ignoring custom/invalid paper size code {code} in SETUP record at offset {offset}"
-            ));
+            ),
+            );
         } else {
             page_setup.paper_size.code = code;
         }
@@ -238,23 +300,24 @@ fn parse_setup_record(
             Orientation::Landscape
         };
     }
-
     if let Some(v) = header_margin {
         if v.is_finite() {
             page_setup.margins.header = v;
         } else {
-            warnings.push(format!(
-                "invalid SETUP header margin value {v:?} at offset {offset}"
-            ));
+            push_warning_bounded(
+                warnings,
+                format!("invalid SETUP header margin value {v:?} at offset {offset}"),
+            );
         }
     }
     if let Some(v) = footer_margin {
         if v.is_finite() {
             page_setup.margins.footer = v;
         } else {
-            warnings.push(format!(
-                "invalid SETUP footer margin value {v:?} at offset {offset}"
-            ));
+            push_warning_bounded(
+                warnings,
+                format!("invalid SETUP footer margin value {v:?} at offset {offset}"),
+            );
         }
     }
 
@@ -269,16 +332,81 @@ fn parse_margin_record(
     warnings: &mut Vec<String>,
 ) {
     if data.len() < 8 {
-        warnings.push(format!(
-            "truncated {name} record at offset {offset} (len={}, expected 8)",
-            data.len()
-        ));
+        push_warning_bounded(
+            warnings,
+            format!(
+                "truncated {name} record at offset {offset} (len={}, expected 8)",
+                data.len()
+            ),
+        );
         return;
     }
     let value = parse_f64_at(data, 0).expect("len check");
     if !value.is_finite() {
-        warnings.push(format!("invalid {name} value {value:?} at offset {offset}"));
+        push_warning_bounded(
+            warnings,
+            format!("invalid {name} value {value:?} at offset {offset}"),
+        );
         return;
     }
     *out = value;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(id: u16, data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 + data.len());
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        out.extend_from_slice(data);
+        out
+    }
+
+    #[test]
+    fn print_settings_warnings_are_bounded_and_preserve_page_break_cap_warning() {
+        // Fill the print-settings warning buffer with many truncated WSBOOL records.
+        let mut stream = Vec::new();
+        for _ in 0..(MAX_WARNINGS_PER_SHEET_PRINT_SETTINGS + 25) {
+            stream.extend_from_slice(&record(RECORD_WSBOOL, &[]));
+        }
+
+        // Add a malformed HorizontalPageBreaks record that triggers a `cbrk` cap warning.
+        let mut page_breaks = Vec::new();
+        page_breaks.extend_from_slice(&u16::MAX.to_le_bytes()); // cbrk
+        page_breaks.extend_from_slice(&2u16.to_le_bytes()); // row
+        page_breaks.extend_from_slice(&0u16.to_le_bytes()); // colStart
+        page_breaks.extend_from_slice(&0u16.to_le_bytes()); // colEnd
+        stream.extend_from_slice(&record(0x001B, &page_breaks));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_print_settings(&stream, 0).expect("parse");
+
+        assert!(
+            parsed.warnings.len() <= MAX_WARNINGS_PER_SHEET_PRINT_SETTINGS + 1,
+            "warnings should be bounded, got len={} warnings={:?}",
+            parsed.warnings.len(),
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("HorizontalPageBreaks") && w.contains("cbrk=")),
+            "expected page-break cap warning to be preserved, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(
+            parsed.warnings.last().map(String::as_str),
+            Some(PRINT_SETTINGS_WARNINGS_SUPPRESSED_MESSAGE),
+            "suppression marker should be preserved, got {:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed.manual_page_breaks.row_breaks_after.contains(&1),
+            "expected page break after row 1, got {:?}",
+            parsed.manual_page_breaks.row_breaks_after
+        );
+    }
 }
