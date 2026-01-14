@@ -2383,6 +2383,10 @@ fn main() {
                     eprintln!(
                         "[formula][startup-bench] timed out after {TIMEOUT_SECS}s (webview did not report)"
                     );
+                    // `std::process::exit` does not guarantee flushing buffered stderr. Be explicit
+                    // so harnesses reliably capture the timeout diagnostic when output is piped.
+                    use std::io::Write as _;
+                    let _ = std::io::stderr().flush();
                     std::process::exit(2);
                 });
 

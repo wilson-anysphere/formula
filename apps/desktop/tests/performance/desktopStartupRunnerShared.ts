@@ -585,6 +585,22 @@ export async function runOnce({
     let rlOut: Interface | null = null;
     let rlErr: Interface | null = null;
 
+    // Keep a small ring buffer of recent output so timeouts/crashes include useful context
+    // (especially important when `--startup-bench` fails and only emits debug info on stderr).
+    const outputLines: string[] = [];
+    const MAX_OUTPUT_LINES = 200;
+    const recordOutputLine = (stream: 'stdout' | 'stderr', line: string) => {
+      const entry = `[${stream}] ${line}`;
+      outputLines.push(entry);
+      if (outputLines.length > MAX_OUTPUT_LINES) {
+        outputLines.splice(0, outputLines.length - MAX_OUTPUT_LINES);
+      }
+    };
+    const formatOutputForError = () => {
+      if (outputLines.length === 0) return '';
+      return `\n--- desktop process output (last ${outputLines.length} lines) ---\n${outputLines.join('\n')}\n--- end output ---`;
+    };
+
     let settled = false;
     let captured: StartupMetrics | null = null;
     let startupTimeout: NodeJS.Timeout | null = null;
@@ -657,7 +673,7 @@ export async function runOnce({
           reason === 'captured'
             ? 'Timed out waiting for desktop process to exit after capturing metrics'
             : 'Timed out waiting for desktop process to exit after timing out waiting for metrics';
-        settle('reject', new Error(msg));
+        settle('reject', new Error(`${msg}${formatOutputForError()}`));
       }, 5000);
     };
 
@@ -706,11 +722,17 @@ export async function runOnce({
 
     if (child.stdout) {
       rlOut = createInterface({ input: child.stdout });
-      rlOut.on('line', onLine);
+      rlOut.on('line', (line) => {
+        recordOutputLine('stdout', line);
+        onLine(line);
+      });
     }
     if (child.stderr) {
       rlErr = createInterface({ input: child.stderr });
-      rlErr.on('line', onLine);
+      rlErr.on('line', (line) => {
+        recordOutputLine('stderr', line);
+        onLine(line);
+      });
     }
 
     startupTimeout = setTimeout(() => {
@@ -729,7 +751,10 @@ export async function runOnce({
       if (settled) return;
 
       if (timedOutWaitingForMetrics) {
-        settle('reject', new Error(`Timed out after ${timeoutMs}ms waiting for startup metrics`));
+        settle(
+          'reject',
+          new Error(`Timed out after ${timeoutMs}ms waiting for startup metrics${formatOutputForError()}`),
+        );
         return;
       }
 
@@ -750,7 +775,9 @@ export async function runOnce({
 
       settle(
         'reject',
-        new Error(`Desktop process exited before reporting metrics (code=${code}, signal=${signal})`),
+        new Error(
+          `Desktop process exited before reporting metrics (code=${code}, signal=${signal})${formatOutputForError()}`,
+        ),
       );
     });
   });
