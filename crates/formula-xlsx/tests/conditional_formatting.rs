@@ -1,5 +1,5 @@
 use formula_model::{
-    format_render_plan, parse_range_a1, CellRef, CellValue, CellValueProvider,
+    format_render_plan, parse_range_a1, CellRef, CellValue, CellValueProvider, DataBarDirection,
     ConditionalFormattingEngine,
 };
 use formula_xlsx::{parse_worksheet_conditional_formatting, DxfProvider, Styles, XlsxPackage};
@@ -82,7 +82,6 @@ fn parses_x14_and_merges_extensions() {
             assert_eq!(db.min_length, Some(0));
             assert_eq!(db.max_length, Some(100));
             assert_eq!(db.gradient, Some(false));
-            assert_eq!(db.direction, Some(formula_model::DataBarDirection::LeftToRight));
             assert_eq!(
                 format!("{:08X}", db.negative_fill_color.unwrap().argb().unwrap_or(0)),
                 "FFFF0000"
@@ -91,6 +90,7 @@ fn parses_x14_and_merges_extensions() {
                 format!("{:08X}", db.axis_color.unwrap().argb().unwrap_or(0)),
                 "FF000000"
             );
+            assert_eq!(db.direction, Some(DataBarDirection::LeftToRight));
         }
         other => panic!("expected DataBar rule, got {other:?}"),
     }

@@ -3754,8 +3754,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     // Additionally, when patching incomplete workbook packages (see `drop_vm_on_value_change`),
     // drop `vm` whenever the cached value semantics change (unless the caller explicitly overrides
     // `vm`).
-    let patch_is_rich_value_placeholder =
-        matches!(&patch.value, CellValue::Error(ErrorValue::Value));
+    let patch_is_rich_value_placeholder = matches!(&patch.value, CellValue::Error(ErrorValue::Value));
     let existing_is_rich_value_placeholder = if original_has_vm {
         let t_is_error = match existing_t.as_deref() {
             None => true,
@@ -3782,7 +3781,6 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     } else {
         true
     };
-
     let drop_vm = if patch.vm.is_none() {
         (existing_is_rich_value_placeholder && !patch_is_rich_value_placeholder)
             || (drop_vm_on_value_change && (clear_cached_value || !value_eq))

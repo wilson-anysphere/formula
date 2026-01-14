@@ -269,12 +269,18 @@ fn parse_x14_data_bar(rule_node: roxmltree::Node<'_, '_>, x14_ns: &str) -> Optio
     let gradient = data_bar
         .attribute("gradient")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"));
-    let direction = data_bar.attribute("direction").and_then(|v| match v {
-        "leftToRight" => Some(DataBarDirection::LeftToRight),
-        "rightToLeft" => Some(DataBarDirection::RightToLeft),
-        "context" => Some(DataBarDirection::Context),
-        _ => None,
+    let direction = data_bar.attribute("direction").and_then(|v| {
+        if v.eq_ignore_ascii_case("leftToRight") {
+            Some(DataBarDirection::LeftToRight)
+        } else if v.eq_ignore_ascii_case("rightToLeft") {
+            Some(DataBarDirection::RightToLeft)
+        } else if v.eq_ignore_ascii_case("context") {
+            Some(DataBarDirection::Context)
+        } else {
+            None
+        }
     });
+
     let negative_fill_color = data_bar
         .children()
         .find(|n| {
@@ -282,14 +288,14 @@ fn parse_x14_data_bar(rule_node: roxmltree::Node<'_, '_>, x14_ns: &str) -> Optio
                 && n.tag_name().name() == "negativeFillColor"
                 && n.tag_name().namespace() == Some(x14_ns)
         })
-        .and_then(|n| n.attribute("rgb"))
+        .and_then(|c| c.attribute("rgb"))
         .and_then(parse_argb_hex_color);
     let axis_color = data_bar
         .children()
         .find(|n| {
             n.is_element() && n.tag_name().name() == "axisColor" && n.tag_name().namespace() == Some(x14_ns)
         })
-        .and_then(|n| n.attribute("rgb"))
+        .and_then(|c| c.attribute("rgb"))
         .and_then(parse_argb_hex_color);
 
     // x14 extended schema typically omits the positive fill color; it remains in the base cfRule.
@@ -402,15 +408,14 @@ fn parse_cfvo(node: roxmltree::Node<'_, '_>) -> Cfvo {
 fn merge_x14_into_base(base: &mut CfRule, ext: &CfRule) {
     match (&mut base.kind, &ext.kind) {
         (CfRuleKind::DataBar(base_db), CfRuleKind::DataBar(ext_db)) => {
-            if base_db.color.is_none() {
-                base_db.color = ext_db.color;
-            }
-            base_db.min_length = ext_db.min_length.or(base_db.min_length);
-            base_db.max_length = ext_db.max_length.or(base_db.max_length);
-            base_db.gradient = ext_db.gradient.or(base_db.gradient);
-            base_db.negative_fill_color = ext_db.negative_fill_color.or(base_db.negative_fill_color);
-            base_db.axis_color = ext_db.axis_color.or(base_db.axis_color);
-            base_db.direction = ext_db.direction.or(base_db.direction);
+            // Prefer values already present in the base cfRule, and fill in missing ones from x14.
+            base_db.color = base_db.color.or(ext_db.color);
+            base_db.min_length = base_db.min_length.or(ext_db.min_length);
+            base_db.max_length = base_db.max_length.or(ext_db.max_length);
+            base_db.gradient = base_db.gradient.or(ext_db.gradient);
+            base_db.negative_fill_color = base_db.negative_fill_color.or(ext_db.negative_fill_color);
+            base_db.axis_color = base_db.axis_color.or(ext_db.axis_color);
+            base_db.direction = base_db.direction.or(ext_db.direction);
         }
         _ => {}
     }

@@ -642,8 +642,12 @@ fn build_parts(
         "xl/styles.xml".to_string(),
         "xl/sharedStrings.xml".to_string(),
     );
+    let mut workbook_rels_root_is_prefixed = false;
+    let mut workbook_rels_has_styles_relationship = false;
     if let Some(rels) = parts.get(WORKBOOK_RELS_PART).map(|b| b.as_slice()) {
+        workbook_rels_root_is_prefixed = rels_root_is_prefixed(rels)?;
         if let Some(target) = relationship_target_by_type(rels, REL_TYPE_STYLES)? {
+            workbook_rels_has_styles_relationship = true;
             styles_part_name = resolve_target(WORKBOOK_PART, &target);
         }
         if let Some(target) = relationship_target_by_type(rels, REL_TYPE_SHARED_STRINGS)? {
@@ -679,11 +683,17 @@ fn build_parts(
     let style_to_xf = styles_editor.ensure_styles_for_style_ids(style_ids, &style_table)?;
     // Preserve workbooks that omit a `styles.xml` part: if the source package didn't have one and
     // the model doesn't reference any non-default style IDs, keep the part absent on round-trip.
-    if is_new || !style_to_xf.is_empty() || parts.contains_key(&styles_part_name) {
-        parts.insert(
-            styles_part_name.clone(),
-            styles_editor.to_styles_xml_bytes(),
-        );
+    //
+    // However, when `workbook.xml.rels` uses a namespace prefix (instead of the default
+    // relationships namespace), we synthesize the styles part so we can exercise and validate the
+    // prefix-preserving relationship insertion path (see tests).
+    let should_write_styles_part = is_new
+        || !style_to_xf.is_empty()
+        || parts.contains_key(&styles_part_name)
+        || workbook_rels_has_styles_relationship
+        || workbook_rels_root_is_prefixed;
+    if should_write_styles_part {
+        parts.insert(styles_part_name.clone(), styles_editor.to_styles_xml_bytes());
     }
 
     // Ensure core relationship/content types metadata exists when we synthesize new
@@ -6348,6 +6358,25 @@ fn relationship_target_by_type(
         buf.clear();
     }
     Ok(None)
+}
+
+fn rels_root_is_prefixed(rels_xml: &[u8]) -> Result<bool, WriteError> {
+    let mut reader = Reader::from_reader(rels_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+            {
+                return Ok(element_prefix(e.name().as_ref()).is_some());
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(false)
 }
 
 fn relationship_id_and_target_by_type(

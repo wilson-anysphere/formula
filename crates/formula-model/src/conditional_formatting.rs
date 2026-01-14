@@ -141,6 +141,7 @@ pub struct CfStyleOverride {
     pub italic: Option<bool>,
 }
 
+/// Direction that data bars are drawn in (x14 extension).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DataBarDirection {
     LeftToRight,
