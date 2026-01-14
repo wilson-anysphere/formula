@@ -215,8 +215,8 @@ if ! [[ "$ci_node_major" =~ ^[0-9]+$ ]]; then
   echo "Expected NODE_VERSION in ${ci_workflow} to be a Node major (e.g. 22); got ${ci_node_major}" >&2
   exit 1
 fi
-# Discover all workflows that configure Node via actions/setup-node and ensure they
-# follow the same pinning rules as CI/release.
+# Discover workflows that depend on Node (setup-node, pnpm, or direct `node` invocation)
+# and ensure they follow the same pinning rules as CI/release.
 mapfile -t node_workflows < <(
   {
     # `git grep` exits 1 when there are no matches. We always include CI + release workflows
@@ -228,7 +228,7 @@ mapfile -t node_workflows < <(
   } | sort -u
 )
 if [ "${#node_workflows[@]}" -eq 0 ]; then
-  echo "Node workflow pin check failed: no workflows use actions/setup-node." >&2
+  echo "Node workflow pin check failed: no workflows appear to use Node tooling." >&2
   exit 1
 fi
 
