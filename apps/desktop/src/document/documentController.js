@@ -1432,7 +1432,8 @@ function normalizeDrawings(raw) {
   const MAX_DRAWING_ID_STRING_CHARS = 4096;
   /** @type {any[]} */
   const out = [];
-  for (const entry of raw) {
+  for (const rawEntry of raw) {
+    const entry = unwrapSingletonObjectWrapper(rawEntry);
     if (!isJsonObject(entry)) continue;
     // Normalize ids: accept strings (trimmed) and safe integers. Preserve numeric ids as-is
     // so formula-model snapshots can round-trip without schema transforms.

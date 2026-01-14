@@ -462,6 +462,42 @@ test("applyState accepts drawings with singleton-wrapped z_order (interop)", () 
   assert.equal(drawings[0].zOrder, 3);
 });
 
+test("applyState accepts drawings entries wrapped as singleton objects (interop)", () => {
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+          drawings: [
+            {
+              0: {
+                id: "d1",
+                zOrder: 1,
+                anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+                kind: { type: "image", imageId: "img1" },
+              },
+            },
+          ],
+        },
+      ],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  const drawings = doc.getSheetDrawings("Sheet1");
+  assert.equal(drawings.length, 1);
+  assert.equal(drawings[0].id, "d1");
+  assert.equal(drawings[0].zOrder, 1);
+});
+
 test("applyState accepts images array entries with singleton-wrapped ids (interop)", () => {
   const snapshot = new TextEncoder().encode(
     JSON.stringify({
@@ -873,6 +909,20 @@ test("applyExternalDrawingDeltas accepts singleton object-wrapped drawings array
   };
 
   doc.applyExternalDrawingDeltas([{ sheetId: "Sheet1", before: [], after: { 0: [drawing] } }], { source: "collab" });
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
+});
+
+test("applyExternalDrawingDeltas accepts singleton-wrapped drawing entries (interop)", () => {
+  const doc = new DocumentController();
+
+  const drawing = {
+    id: "d_external",
+    zOrder: 0,
+    kind: { type: "image", imageId: "img_external.png" },
+    anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+  };
+
+  doc.applyExternalDrawingDeltas([{ sheetId: "Sheet1", before: [], after: [{ 0: drawing }] }], { source: "collab" });
   assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
 });
 
