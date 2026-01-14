@@ -23,6 +23,9 @@ fn parses_title_and_legend_shape_properties() {
               <c:overlay val="0"/>
               <c:spPr>
                 <a:solidFill><a:srgbClr val="0000FF"/></a:solidFill>
+                <a:ln w="38100">
+                  <a:solidFill><a:srgbClr val="00FFFF"/></a:solidFill>
+                </a:ln>
               </c:spPr>
             </c:legend>
             <c:plotArea>
@@ -64,7 +67,9 @@ fn parses_title_and_legend_shape_properties() {
         panic!("expected legend fill to be solidFill, got {legend_fill:?}");
     };
     assert_eq!(legend_fill.color, Color::Argb(0xFF0000FF));
-    assert!(legend_style.line.is_none());
+    let legend_line = legend_style.line.as_ref().expect("legend ln parsed");
+    assert_eq!(legend_line.width_100pt, Some(300));
+    assert_eq!(legend_line.color, Some(Color::Argb(0xFF00FFFF)));
 
     let axis = model
         .axes
