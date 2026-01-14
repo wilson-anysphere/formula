@@ -303,7 +303,14 @@ async function main() {
   /** @type {Record<string, { url: string; signature: string }>} */
   const mergedPlatforms = {};
 
-  for (const file of jsonFiles) {
+  // Use the first manifest (deterministically: lexicographic file order) as the source of
+  // ancillary metadata like notes/pub_date. This avoids depending on matrix job completion order.
+  /** @type {any | null} */
+  let baseManifest = null;
+  /** @type {string | null} */
+  let baseManifestPath = null;
+
+  for (const [index, file] of jsonFiles.entries()) {
     /** @type {any} */
     let manifest;
     try {
@@ -323,6 +330,11 @@ async function main() {
     const platforms = manifest?.platforms;
     if (!platforms || typeof platforms !== "object" || Array.isArray(platforms)) {
       throw new Error(`Manifest ${file} missing "platforms" object`);
+    }
+
+    if (index === 0) {
+      baseManifest = manifest;
+      baseManifestPath = file;
     }
 
     for (const [target, entry] of Object.entries(platforms)) {
@@ -348,6 +360,19 @@ async function main() {
     }
   }
 
+  const baseNotesRaw =
+    typeof baseManifest?.notes === "string" ? baseManifest.notes.replace(/\r\n/g, "\n") : "";
+  const notes = baseNotesRaw.trim().length > 0 ? baseNotesRaw : `Automated build for ${tag}.`;
+
+  const basePubDateRaw = typeof baseManifest?.pub_date === "string" ? baseManifest.pub_date.trim() : "";
+  const pubDate = basePubDateRaw && !Number.isNaN(Date.parse(basePubDateRaw))
+    ? basePubDateRaw
+    : new Date().toISOString();
+
+  if (baseManifestPath) {
+    console.log(`publish-updater-manifest: notes/pub_date sourced from ${baseManifestPath}`);
+  }
+
   // Deterministic output: sort platform keys so the merged `latest.json` is stable even when
   // the input manifests contain multiple targets or are discovered in different orders.
   const sortedPlatforms = Object.fromEntries(
@@ -358,8 +383,8 @@ async function main() {
 
   const combined = {
     version: expectedVersion,
-    notes: `Automated build for ${tag}.`,
-    pub_date: new Date().toISOString(),
+    notes,
+    pub_date: pubDate,
     platforms: sortedPlatforms,
   };
 
