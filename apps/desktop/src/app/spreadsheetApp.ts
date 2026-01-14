@@ -8639,9 +8639,13 @@ export class SpreadsheetApp {
   /**
    * Best-effort cleanup for the persistent drawings image store (IndexedDB).
    *
-   * This scans the current workbook drawings for referenced `imageId`s and deletes any
-   * unreferenced records from IndexedDB. This helps keep local persistence bounded after
-   * users delete/reinsert pictures.
+   * This scans the workbook for image ids referenced by:
+   * - drawing-layer objects (pictures)
+   * - in-cell images (Excel "place in cell" pictures / IMAGE() rich value caches)
+   * - sheet background images
+   *
+   * and deletes any unreferenced records from IndexedDB. This helps keep local persistence
+   * bounded after users delete/reinsert pictures.
    */
   async garbageCollectDrawingImages(): Promise<void> {
     const gc = (this.drawingImages as any)?.garbageCollectAsync as ((keep: Iterable<string>) => Promise<void>) | undefined;
