@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  extractYamlRunSteps,
   stripComments,
   stripCssComments,
   stripHashComments,
@@ -145,6 +146,38 @@ describe("sourceTextUtils.stripYamlBlockScalarBodies", () => {
     expect(out).not.toContain("echo a");
     expect(out).not.toContain("echo b");
     expect(out).toContain("name: After");
+  });
+});
+
+describe("sourceTextUtils.extractYamlRunSteps", () => {
+  it("extracts inline + block scalar run scripts and ignores non-run scalars", () => {
+    const input = [
+      "jobs:",
+      "  build:",
+      "    env:",
+      "      NOTES: |",
+      "        run: echo should not match",
+      "    steps:",
+      "      - run: echo hello",
+      "      - name: block run",
+      "        run: |2-",
+      "          # comment-only script line should not count",
+      "          echo ok",
+      "          run: echo yaml-ish text",
+    ].join("\n");
+
+    const runs = extractYamlRunSteps(input);
+    expect(runs).toHaveLength(2);
+    expect(runs[0]?.script.trim()).toEqual("echo hello");
+    expect(runs[1]?.script).toContain("echo ok");
+    expect(runs[1]?.script).toContain("run: echo yaml-ish text");
+    expect(runs[1]?.script).not.toContain("comment-only script line should not count");
+  });
+
+  it("ignores commented-out run steps", () => {
+    const input = ["steps:", "  # - run: echo no", "  - run: echo yes"].join("\n");
+    const runs = extractYamlRunSteps(input);
+    expect(runs.map((r) => r.script.trim())).toEqual(["echo yes"]);
   });
 });
 
