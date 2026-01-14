@@ -1550,6 +1550,8 @@ describe("Pivot Tables", () => {
 
 describe("Monte Carlo Simulation", () => {
   it("produces expected distribution", async () => {
+    // Note: Monte Carlo is not yet exposed via `formula-wasm`; this is an example
+    // of the *intended* JS/WASM-facing API.
     const result = workbook.runMonteCarloSimulation({
       iterations: 10000,
       inputDistributions: [
