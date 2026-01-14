@@ -269,6 +269,50 @@ export function bindImageBytesToCollabSession(options: {
   // metadata keys change.
   const hydratedRawValues = new Map<string, unknown>();
 
+  const currentImagesIdsCapped = (): string[] => {
+    const limit = Math.max(0, Math.trunc(maxImages));
+    if (limit === 0) return [];
+    const imagesMap = getImagesMap();
+    if (imagesMap) {
+      const out: string[] = [];
+      try {
+        for (const key of imagesMap.keys()) {
+          if (out.length >= limit) break;
+          if (typeof key === "string") out.push(key);
+        }
+      } catch {
+        // ignore
+      }
+      return out;
+    }
+    const record = getImagesRecord();
+    if (record) {
+      try {
+        return Object.keys(record).slice(0, limit);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
+  const pruneHydratedRawValues = (): void => {
+    // Keep this map bounded to avoid retaining large base64 strings for images that were
+    // later evicted/deleted from the shared store.
+    try {
+      const keepIds = new Set(currentImagesIdsCapped());
+      if (keepIds.size === 0) {
+        hydratedRawValues.clear();
+        return;
+      }
+      for (const key of Array.from(hydratedRawValues.keys())) {
+        if (!keepIds.has(key)) hydratedRawValues.delete(key);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   const getImagesContainerRaw = (): unknown => {
     try {
       return metadata.get(DRAWING_IMAGES_KEY);
@@ -407,12 +451,17 @@ export function bindImageBytesToCollabSession(options: {
 
     if (shouldHydrateAll) {
       hydrateAll();
+      pruneHydratedRawValues();
       return;
     }
 
     if (changedIds.size > 0) {
       hydrateImageIds(changedIds);
     }
+
+    // Even when only a subset of ids changed, prune any cached raw values for ids that may have
+    // been deleted/evicted from the Yjs map so we don't retain large base64 strings indefinitely.
+    pruneHydratedRawValues();
   };
 
   try {
