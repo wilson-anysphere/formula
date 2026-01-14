@@ -1029,7 +1029,10 @@ mod tests {
 }
 
 fn normalize_relationship_target(target: &str) -> String {
+    // Relationship targets are URIs. For in-package parts, the `#fragment` and `?query` portions
+    // are not part of the OPC part name and must be ignored when mapping to ZIP entry names.
     let target = target.split_once('#').map(|(t, _)| t).unwrap_or(target);
+    let target = target.split_once('?').map(|(t, _)| t).unwrap_or(target);
     let mut out = if target.contains('\\') {
         target.replace('\\', "/")
     } else {

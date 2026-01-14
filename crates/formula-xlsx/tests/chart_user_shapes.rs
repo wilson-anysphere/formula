@@ -215,6 +215,54 @@ fn detects_chart_user_shapes_part_via_drawing_target_heuristic_when_type_missing
 }
 
 #[test]
+fn detects_chart_user_shapes_part_when_target_has_query_string_and_type_missing() {
+    let bytes = build_workbook_with_chart();
+    let mut package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_part = package
+        .part_names()
+        .find(|p| p.starts_with("xl/charts/chart") && p.ends_with(".xml"))
+        .expect("chart part present")
+        .to_string();
+    let chart_rels_part = rels_for_part(&chart_part);
+
+    // Some producers include URI query strings in relationship targets. These are not part of the
+    // actual OPC part name, so we should ignore them when applying filename heuristics.
+    let mut updated_rels = package
+        .part(&chart_rels_part)
+        .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap())
+        .unwrap_or_else(|| {
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#.to_string()
+        });
+    let insert_idx = updated_rels
+        .rfind("</Relationships>")
+        .expect("closing Relationships tag");
+    updated_rels.insert_str(
+        insert_idx,
+        r#"  <Relationship Id="rId999" Type="" Target="../drawings/drawing99.xml?foo=bar"/>"#,
+    );
+    package.set_part(chart_rels_part.clone(), updated_rels.into_bytes());
+
+    let user_shapes_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cdr:wsDr xmlns:cdr="http://schemas.openxmlformats.org/drawingml/2006/chartDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"></cdr:wsDr>"#.to_vec();
+    package.set_part("xl/drawings/drawing99.xml", user_shapes_xml.clone());
+
+    let bytes = package.write_to_bytes().unwrap();
+    let package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_objects = package.extract_chart_objects().unwrap();
+    assert_eq!(chart_objects.len(), 1);
+
+    let chart_object = &chart_objects[0];
+    let user_shapes = chart_object
+        .parts
+        .user_shapes
+        .as_ref()
+        .expect("chart userShapes part detected");
+    assert_eq!(user_shapes.path, "xl/drawings/drawing99.xml");
+    assert_eq!(user_shapes.bytes, user_shapes_xml);
+}
+
+#[test]
 fn extracts_chart_user_shapes_part_from_fixture_and_preserves_bytes() {
     let pkg = XlsxPackage::from_bytes(FIXTURE).expect("open xlsx fixture");
     let charts = pkg.extract_chart_objects().expect("extract chart objects");
@@ -309,4 +357,3 @@ fn extracts_chart_user_shapes_part_from_fixture_and_preserves_bytes() {
         "expected merged workbook to preserve chartUserShapes rels bytes"
     );
 }
-
