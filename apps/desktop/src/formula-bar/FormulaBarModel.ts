@@ -67,6 +67,12 @@ export class FormulaBarModel {
   #isEditing = false;
   #cursorStart = 0;
   #cursorEnd = 0;
+  #activeArgumentSpanCache:
+    | { draft: string; cursor: number; result: ReturnType<typeof getActiveArgumentSpan> }
+    | null = null;
+  #activeArgumentSpanCache2:
+    | { draft: string; cursor: number; result: ReturnType<typeof getActiveArgumentSpan> }
+    | null = null;
   #extractFormulaReferencesOptions: ExtractFormulaReferencesOptions | null = null;
   #extractFormulaReferencesOptionsVersion = 0;
   #referenceExtractionCache:
@@ -110,6 +116,7 @@ export class FormulaBarModel {
     this.#isEditing = false;
     this.#cursorStart = this.#draft.length;
     this.#cursorEnd = this.#draft.length;
+    this.#clearActiveArgumentSpanCache();
     this.#rangeInsertion = null;
     this.#hoveredReference = null;
     this.#hoveredReferenceText = null;
@@ -215,6 +222,7 @@ export class FormulaBarModel {
   beginEdit(): void {
     this.#isEditing = true;
     this.#clearEditorTooling();
+    this.#clearActiveArgumentSpanCache();
     this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
   }
@@ -234,6 +242,7 @@ export class FormulaBarModel {
     if (draftChanged) {
       // Draft text changed; any cached engine tokens/spans are now stale.
       this.#clearEditorTooling();
+      this.#clearActiveArgumentSpanCache();
     } else if (cursorChanged) {
       // Cursor moved within the same draft; keep lex-based highlights/syntax errors but
       // clear cursor-dependent parse context so hint rendering can refresh.
@@ -250,6 +259,7 @@ export class FormulaBarModel {
     this.#activeCell = { ...this.#activeCell, input: this.#draft };
     this.#rangeInsertion = null;
     this.#clearEditorTooling();
+    this.#clearActiveArgumentSpanCache();
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
@@ -267,6 +277,7 @@ export class FormulaBarModel {
     this.#cursorEnd = this.#draft.length;
     this.#rangeInsertion = null;
     this.#clearEditorTooling();
+    this.#clearActiveArgumentSpanCache();
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
@@ -308,7 +319,7 @@ export class FormulaBarModel {
       };
     }
 
-    let active = getActiveArgumentSpan(this.#draft, this.#cursorStart);
+    let active = this.activeArgumentSpan(this.#cursorStart);
     let context = active ? { name: active.fnName, argIndex: active.argIndex } : null;
 
     // Excel UX: keep showing the innermost function hint when the caret is just
@@ -321,7 +332,7 @@ export class FormulaBarModel {
       this.#cursorStart > 0 &&
       this.#draft[this.#cursorStart - 1] === ")"
     ) {
-      active = getActiveArgumentSpan(this.#draft, this.#cursorStart - 1);
+      active = this.activeArgumentSpan(this.#cursorStart - 1);
       context = active ? { name: active.fnName, argIndex: active.argIndex } : null;
     }
 
@@ -565,7 +576,7 @@ export class FormulaBarModel {
   }
 
   #updateHoverFromCursor(): void {
-    if (!this.#isEditing || !this.#draft.trim().startsWith("=")) {
+    if (!this.#isEditing || !this.#draft.trimStart().startsWith("=")) {
       this.#hoveredReference = null;
       this.#hoveredReferenceText = null;
       return;
@@ -599,7 +610,7 @@ export class FormulaBarModel {
   }
 
   #updateReferenceHighlights(): void {
-    if (!this.#isEditing || !this.#draft.trim().startsWith("=")) {
+    if (!this.#isEditing || !this.#draft.trimStart().startsWith("=")) {
       this.#coloredReferences = [];
       this.#activeReferenceIndex = null;
       return;
@@ -646,6 +657,31 @@ export class FormulaBarModel {
     this.#engineSyntaxError = null;
     this.#engineToolingFormula = null;
   }
+
+  activeArgumentSpan(cursorIndex: number = this.#cursorStart): ReturnType<typeof getActiveArgumentSpan> {
+    const draft = this.#draft;
+    const cursor = Math.max(0, Math.min(cursorIndex, draft.length));
+
+    const c1 = this.#activeArgumentSpanCache;
+    if (c1 && c1.draft === draft && c1.cursor === cursor) return c1.result;
+    const c2 = this.#activeArgumentSpanCache2;
+    if (c2 && c2.draft === draft && c2.cursor === cursor) {
+      // Promote to the front of the small LRU.
+      this.#activeArgumentSpanCache2 = c1;
+      this.#activeArgumentSpanCache = c2;
+      return c2.result;
+    }
+
+    const result = getActiveArgumentSpan(draft, cursor);
+    this.#activeArgumentSpanCache2 = c1;
+    this.#activeArgumentSpanCache = { draft, cursor, result };
+    return result;
+  }
+
+  #clearActiveArgumentSpanCache(): void {
+    this.#activeArgumentSpanCache = null;
+    this.#activeArgumentSpanCache2 = null;
+  }
 }
 
 function findActiveReferenceIndex(
@@ -656,11 +692,33 @@ function findActiveReferenceIndex(
   const start = Math.min(cursorStart, cursorEnd);
   const end = Math.max(cursorStart, cursorEnd);
 
+  const findContainingReference = (needleStart: number, needleEnd: number): number | null => {
+    if (references.length === 0) return null;
+    // `extractFormulaReferences` returns references ordered by appearance in the formula,
+    // so we can locate the active ref in O(log n) time using binary search.
+    let lo = 0;
+    let hi = references.length - 1;
+    let candidate = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const ref = references[mid]!;
+      if (ref.start <= needleStart) {
+        candidate = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (candidate < 0) return null;
+    const ref = references[candidate]!;
+    if (ref.start <= needleStart && needleEnd <= ref.end) return ref.index;
+    return null;
+  };
+
   // If text is selected, treat a reference as active only when the selection is contained
   // within that reference token.
   if (start !== end) {
-    const active = references.find((ref) => start >= ref.start && end <= ref.end);
-    return active ? active.index : null;
+    return findContainingReference(start, end);
   }
 
   // Caret: treat the reference containing either the character at the caret or
@@ -668,8 +726,8 @@ function findActiveReferenceIndex(
   // being at the end of a token still counts as "in" the token.
   const positions = start === 0 ? [0] : [start, start - 1];
   for (const pos of positions) {
-    const active = references.find((ref) => ref.start <= pos && pos < ref.end);
-    if (active) return active.index;
+    const active = findContainingReference(pos, pos + 1);
+    if (active != null) return active;
   }
   return null;
 }

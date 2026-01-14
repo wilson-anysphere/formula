@@ -11,7 +11,6 @@ import {
 } from "@formula/spreadsheet-frontend";
 import type { EngineClient, FormulaParseOptions } from "@formula/engine";
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
-import { getActiveArgumentSpan } from "./highlight/activeArgument.js";
 import { getFunctionSignature } from "./highlight/functionSignatures.js";
 import { FormulaBarFunctionAutocompleteController } from "./completion/functionAutocomplete.js";
 
@@ -1386,7 +1385,7 @@ export class FormulaBarView {
   }
 
   isFormulaEditing(): boolean {
-    return this.model.isEditing && this.model.draft.trim().startsWith("=");
+    return this.model.isEditing && this.model.draft.trimStart().startsWith("=");
   }
 
   beginRangeSelection(range: RangeAddress, sheetId?: string): void {
@@ -1484,7 +1483,7 @@ export class FormulaBarView {
     this.model.updateDraft(value, start, end);
     this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
 
-    const isFormulaEditing = this.model.draft.trim().startsWith("=");
+    const isFormulaEditing = this.model.draft.trimStart().startsWith("=");
     if (isFormulaEditing && start === end) {
       const activeIndex = this.model.activeReferenceIndex();
       const active = activeIndex == null ? null : this.model.coloredReferences()[activeIndex] ?? null;
@@ -1567,7 +1566,7 @@ export class FormulaBarView {
     // Only ask the engine to lex/parse when the draft is actually a formula.
     // This avoids surfacing parse errors while editing plain text values.
     const draft = this.model.draft;
-    if (!draft.trim().startsWith("=")) {
+    if (!draft.trimStart().startsWith("=")) {
       this.#cancelPendingTooling();
       return;
     }
@@ -1619,7 +1618,7 @@ export class FormulaBarView {
     if (this.model.draft !== pending.draft) return;
     const engine = this.#tooling?.getWasmEngine?.() ?? null;
     if (!engine) return;
-    if (!pending.draft.trim().startsWith("=")) return;
+    if (!pending.draft.trimStart().startsWith("=")) return;
 
     try {
       const options: FormulaParseOptions = { localeId: pending.localeId, referenceStyle: pending.referenceStyle };
@@ -1658,7 +1657,7 @@ export class FormulaBarView {
       if (pending.requestId !== this.#toolingRequestId) return;
       if (!this.model.isEditing) return;
       if (this.model.draft !== pending.draft) return;
-      if (!this.model.draft.trim().startsWith("=")) return;
+    if (!this.model.draft.trimStart().startsWith("=")) return;
 
       this.model.applyEngineToolingResult({ formula: pending.draft, localeId: pending.localeId, lexResult, parseResult });
       this.#requestRender({ preserveTextareaValue: true });
@@ -1709,7 +1708,7 @@ export class FormulaBarView {
 
     if (this.#functionAutocomplete.handleKeyDown(e)) return;
 
-    if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && this.model.draft.trim().startsWith("=")) {
+    if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && this.model.draft.trimStart().startsWith("=")) {
       e.preventDefault();
 
       const prevText = this.textarea.value;
@@ -2103,7 +2102,7 @@ export class FormulaBarView {
     const previewText = ghost && previewRaw != null ? formatPreview(previewRaw) : "";
     const draft = this.model.draft;
 
-    const isFormulaEditing = this.model.isEditing && draft.trim().startsWith("=");
+    const isFormulaEditing = this.model.isEditing && draft.trimStart().startsWith("=");
     const coloredReferences = isFormulaEditing ? this.model.coloredReferences() : [];
     const activeReferenceIndex = isFormulaEditing ? this.model.activeReferenceIndex() : null;
     const highlightedSpans = this.model.highlightedSpans();
@@ -2311,7 +2310,7 @@ export class FormulaBarView {
         this.#clearArgumentPreviewState();
       } else {
         const provider = this.#argumentPreviewProvider;
-        const activeArg = getActiveArgumentSpan(this.model.draft, this.model.cursorStart);
+        const activeArg = this.model.activeArgumentSpan();
         const wantsArgPreview = Boolean(
           activeArg &&
             typeof provider === "function" &&
@@ -2401,7 +2400,7 @@ export class FormulaBarView {
     }
   }
 
-  #scheduleArgumentPreviewEvaluation(activeArg: ReturnType<typeof getActiveArgumentSpan>, key: string): void {
+  #scheduleArgumentPreviewEvaluation(activeArg: ReturnType<FormulaBarModel["activeArgumentSpan"]>, key: string): void {
     if (!activeArg) return;
     const provider = this.#argumentPreviewProvider;
     if (typeof provider !== "function") return;
@@ -2580,7 +2579,7 @@ export class FormulaBarView {
 
     // Reference highlight overlay updates can be costly (e.g. SpreadsheetApp recomputes/filters highlights).
     // Only emit when the underlying highlights actually changed.
-    const isFormula = this.model.draft.trim().startsWith("=");
+    const isFormula = this.model.draft.trimStart().startsWith("=");
     const nextMode: ReferenceHighlightMode =
       this.model.isEditing && isFormula ? "editing" : this.#errorPanelReferenceHighlights ? "errorPanel" : "none";
     let highlightsChanged = nextMode !== this.#lastEmittedReferenceHighlightsMode;
@@ -2739,7 +2738,7 @@ export class FormulaBarView {
   }
 
   #inferSelectedReferenceIndex(start: number, end: number): number | null {
-    if (!this.model.isEditing || !this.model.draft.trim().startsWith("=")) return null;
+    if (!this.model.isEditing || !this.model.draft.trimStart().startsWith("=")) return null;
     if (start === end) return null;
     for (const ref of this.model.coloredReferences()) {
       if (ref.start === start && ref.end === end) return ref.index;
@@ -2781,7 +2780,7 @@ export class FormulaBarView {
     const canFix = Boolean(explanation) && typeof this.#callbacks.onFixFormulaErrorWithAi === "function";
     this.#errorFixAiButton.disabled = !canFix;
 
-    const isFormula = this.model.draft.trim().startsWith("=");
+    const isFormula = this.model.draft.trimStart().startsWith("=");
     const isShowingRanges = this.#errorPanelReferenceHighlights != null;
     this.#errorShowRangesButton.disabled = !isFormula;
     this.#errorShowRangesButton.setAttribute("aria-pressed", isShowingRanges ? "true" : "false");
@@ -2789,7 +2788,7 @@ export class FormulaBarView {
   }
 
   #currentReferenceHighlights(): FormulaReferenceHighlight[] {
-    const isFormula = this.model.draft.trim().startsWith("=");
+    const isFormula = this.model.draft.trimStart().startsWith("=");
     if (this.model.isEditing && isFormula) {
       return this.model.referenceHighlights();
     }
@@ -3331,7 +3330,7 @@ function computeReferenceHighlights(
   text: string,
   opts: ExtractFormulaReferencesOptions | null
 ): FormulaReferenceHighlight[] {
-  if (!text.trim().startsWith("=")) return [];
+  if (!text.trimStart().startsWith("=")) return [];
   const { references } = extractFormulaReferences(text, undefined, undefined, opts ?? undefined);
   if (references.length === 0) return [];
   const { colored } = assignFormulaReferenceColors(references, null);
