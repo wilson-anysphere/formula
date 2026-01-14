@@ -2812,6 +2812,30 @@ test("XMATCH search_mode suggests 1, -1, 2, -2", async () => {
   );
 });
 
+test("SORT sort_index suggests 1, 2, 3 (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SORT(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["1", "2", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected SORT to suggest sort_index=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+
+  assert.ok(
+    !suggestions.some((s) => s.text === `${currentInput}0`),
+    `Did not expect SORT to suggest sort_index=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("SORT sort_order suggests 1 and -1", async () => {
   const engine = new TabCompletionEngine();
 

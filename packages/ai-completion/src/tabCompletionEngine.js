@@ -1369,6 +1369,12 @@ const CHOOSE_INDEX_NUM_ENUM_1_2_3 = [
   { replacement: "3", displayText: "3 (value3)", confidence: 0.64 },
 ];
 
+const SORT_INDEX_ENUM_1_2_3 = [
+  { replacement: "1", displayText: "1 (1st column/row)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (2nd column/row)", confidence: 0.65 },
+  { replacement: "3", displayText: "3 (3rd column/row)", confidence: 0.64 },
+];
+
 const VLOOKUP_COL_INDEX_NUM_ENUM_1_2_3 = [
   { replacement: "2", displayText: "2 (2nd column)", confidence: 0.66 },
   { replacement: "1", displayText: "1 (1st column)", confidence: 0.65 },
@@ -1467,6 +1473,8 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     ],
   },
   SORT: {
+    // sort_index
+    1: SORT_INDEX_ENUM_1_2_3,
     // sort_order
     2: [
       { replacement: "1", displayText: "1 (ascending)", confidence: 0.66 },
