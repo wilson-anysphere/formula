@@ -25,6 +25,15 @@ export type DesktopStartupProgress = {
   profileDir: string;
 };
 
+/**
+ * Minimum fraction of runs that must report an optional metric (e.g. RSS, webview_loaded_ms) for
+ * us to publish/gate on it.
+ *
+ * This avoids computing p95 on a tiny, biased subset when older binaries or regressions stop
+ * reporting a metric.
+ */
+export const DESKTOP_STARTUP_OPTIONAL_METRIC_MIN_VALID_FRACTION = 0.8;
+
 export type DesktopStartupTargets = {
   windowVisibleTargetMs: number;
   webviewLoadedTargetMs: number;

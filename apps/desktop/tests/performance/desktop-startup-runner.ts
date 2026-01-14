@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 
 import {
   buildBenchmarkResultFromValues,
+  DESKTOP_STARTUP_OPTIONAL_METRIC_MIN_VALID_FRACTION,
   defaultDesktopBinPath,
   buildDesktopStartupProfileRoot,
   installEpipeHandler,
@@ -295,7 +296,7 @@ async function main(): Promise<void> {
   // `webview_loaded_ms` is recorded by the Rust host (via a native page-load callback) and should
   // generally be available for every run. Keep this best-effort skip policy anyway so the runner
   // can still work against older binaries and so we don't compute p95 over a biased tiny sample.
-  const minWebviewLoadedFraction = 0.8;
+  const minWebviewLoadedFraction = DESKTOP_STARTUP_OPTIONAL_METRIC_MIN_VALID_FRACTION;
   const minWebviewLoadedRuns = Math.ceil(results.length * minWebviewLoadedFraction);
 
   if (includeWebviewLoaded) {

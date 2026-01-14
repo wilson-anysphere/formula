@@ -50,6 +50,7 @@ import { existsSync } from 'node:fs';
 
 import {
   buildBenchmarkResultFromValues,
+  DESKTOP_STARTUP_OPTIONAL_METRIC_MIN_VALID_FRACTION,
   type BenchmarkResult,
   defaultDesktopBinPath,
   findPidForExecutableLinux,
@@ -250,7 +251,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
     buildBenchmarkResultFromValues(`${metricPrefix}.${startupMode}.tti_ms.p95`, tti, ttiTarget, 'ms'),
   );
 
-  const minRssValidFraction = 0.8;
+  const minRssValidFraction = DESKTOP_STARTUP_OPTIONAL_METRIC_MIN_VALID_FRACTION;
   const minRssValidRuns = Math.ceil(runs * minRssValidFraction);
   if (rssSamples.length >= minRssValidRuns) {
     results.push(
@@ -323,7 +324,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   // small and comparable over time), matching the historical behavior.
   if (startupMode === 'cold') {
     const webviewLoadedTarget = targets.webviewLoadedTargetMs;
-    const minValidFraction = 0.8;
+    const minValidFraction = DESKTOP_STARTUP_OPTIONAL_METRIC_MIN_VALID_FRACTION;
     const minValidRuns = Math.ceil(runs * minValidFraction);
     if (webviewLoaded.length === 0) {
       // eslint-disable-next-line no-console
