@@ -563,13 +563,22 @@ fn derive_standard_aes_key_truncate(
     let h_block0 = final_hash(&h_final, 0, hash_alg);
 
     let key_len = (info.header.key_size / 8) as usize;
-    if key_len == 0 || key_len > h_block0.len() {
-        return Err(DecryptError::InvalidInfo(format!(
-            "Standard AES truncation key derivation requires key_len <= hash_len (key_len={key_len}, hash_len={})",
-            h_block0.len()
-        )));
+    if key_len == 0 {
+        return Err(DecryptError::InvalidInfo(
+            "invalid Standard key_size (0)".to_string(),
+        ));
     }
-    Ok(h_block0[..key_len].to_vec())
+    let key = h_block0
+        .get(..key_len)
+        .ok_or_else(|| {
+            DecryptError::InvalidInfo(format!(
+                "invalid Standard key_size {bits} bits for hash digest length {digest_len}",
+                bits = info.header.key_size,
+                digest_len = h_block0.len()
+            ))
+        })?
+        .to_vec();
+    Ok(key)
 }
 
 fn is_valid_zip(bytes: &[u8]) -> bool {
@@ -737,7 +746,7 @@ fn round_up_to_multiple(value: usize, multiple: usize) -> usize {
 }
 
 fn decrypted_package_reader_standard<R: Read + Seek>(
-    mut ciphertext_reader: R,
+    ciphertext_reader: R,
     plaintext_len: u64,
     encryption_info: &[u8],
     password: &str,
@@ -768,68 +777,89 @@ fn decrypted_package_reader_standard<R: Read + Seek>(
         }
     }
 
-    let key = Zeroizing::new(derive_file_key_standard(&info, password).map_err(|err| {
+    fn reader_for_key<R: Read + Seek>(
+        mut ciphertext_reader: R,
+        plaintext_len: u64,
+        info: &crate::offcrypto::StandardEncryptionInfo,
+        key: Zeroizing<Vec<u8>>,
+    ) -> Result<DecryptedPackageReader<R>, DecryptError> {
+        if plaintext_len == 0 {
+            return Ok(DecryptedPackageReader::new(
+                ciphertext_reader,
+                EncryptionMethod::StandardAesEcb { key },
+                plaintext_len,
+            ));
+        }
+
+        // Detect whether the Standard `EncryptedPackage` payload uses AES-ECB or a CBC-per-segment
+        // framing by decrypting the first ciphertext block and checking for the `PK` ZIP signature.
+        let cipher_pos = ciphertext_reader.seek(io::SeekFrom::Current(0))?;
+        let mut first_block = [0u8; 16];
+        ciphertext_reader.read_exact(&mut first_block)?;
+        ciphertext_reader.seek(io::SeekFrom::Start(cipher_pos))?;
+
+        let ecb_ok = {
+            let mut block = first_block;
+            aes_ecb_decrypt_in_place(key.as_slice(), &mut block).is_ok() && block.starts_with(b"PK")
+        };
+
+        if ecb_ok {
+            return Ok(DecryptedPackageReader::new(
+                ciphertext_reader,
+                EncryptionMethod::StandardAesEcb { key },
+                plaintext_len,
+            ));
+        }
+
+        let salt = info.verifier.salt.clone();
+        let cbc_ok = {
+            let mut block = first_block;
+            let iv = derive_standard_segment_iv(info.header.alg_id_hash, &salt, 0)?;
+            decrypt_aes_cbc_no_padding_in_place(key.as_slice(), &iv, &mut block).is_ok()
+                && block.starts_with(b"PK")
+        };
+
+        if cbc_ok {
+            return Ok(DecryptedPackageReader::new(
+                ciphertext_reader,
+                EncryptionMethod::StandardCryptoApi { key, salt },
+                plaintext_len,
+            ));
+        }
+
+        Err(DecryptError::InvalidInfo(
+            "unable to detect Standard EncryptedPackage cipher mode (expected ZIP magic)".into(),
+        ))
+    }
+
+    let key0 = Zeroizing::new(derive_file_key_standard(&info, password).map_err(|err| {
         DecryptError::InvalidInfo(format!("failed to derive Standard key: {err}"))
     })?);
 
-    let ok = verify_password_standard_with_key(&info, key.as_slice()).map_err(|err| {
+    let ok0 = verify_password_standard_with_key(&info, key0.as_slice()).map_err(|err| {
         DecryptError::InvalidInfo(format!("failed to verify Standard password: {err}"))
     })?;
-    if !ok {
-        return Err(DecryptError::InvalidPassword);
+    if ok0 {
+        return reader_for_key(ciphertext_reader, plaintext_len, &info, key0);
     }
 
-    if plaintext_len == 0 {
-        return Ok(DecryptedPackageReader::new(
-            ciphertext_reader,
-            EncryptionMethod::StandardAesEcb { key },
-            plaintext_len,
-        ));
+    // AES-128 truncation fallback: some producers derive the AES key by truncating the block-0
+    // digest instead of applying CryptoAPI `CryptDeriveKey`'s ipad/opad expansion.
+    if info.header.key_size == 128 {
+        if let Ok(key_trunc_vec) = derive_standard_aes_key_truncate(&info, password) {
+            if key_trunc_vec.as_slice() != key0.as_slice() {
+                let key_trunc = Zeroizing::new(key_trunc_vec);
+                let ok = verify_password_standard_with_key(&info, key_trunc.as_slice()).map_err(|err| {
+                    DecryptError::InvalidInfo(format!("failed to verify Standard password: {err}"))
+                })?;
+                if ok {
+                    return reader_for_key(ciphertext_reader, plaintext_len, &info, key_trunc);
+                }
+            }
+        }
     }
 
-    fn derive_standard_segment_iv(salt: &[u8], segment_index: u32) -> [u8; 16] {
-        use sha1::{Digest as _, Sha1};
-        let mut hasher = Sha1::new();
-        hasher.update(salt);
-        hasher.update(segment_index.to_le_bytes());
-        let digest = hasher.finalize();
-        let mut iv = [0u8; 16];
-        iv.copy_from_slice(&digest[..16]);
-        iv
-    }
-
-    // Detect whether the Standard `EncryptedPackage` payload uses AES-ECB or a CBC-per-segment
-    // framing by decrypting the first ciphertext block and checking for the `PK` ZIP signature.
-    let cipher_pos = ciphertext_reader.seek(io::SeekFrom::Current(0))?;
-    let mut first_block = [0u8; 16];
-    ciphertext_reader.read_exact(&mut first_block)?;
-    ciphertext_reader.seek(io::SeekFrom::Start(cipher_pos))?;
-
-    let salt = info.verifier.salt.clone();
-
-    let ecb_ok = {
-        let mut block = first_block;
-        aes_ecb_decrypt_in_place(&key, &mut block).is_ok() && block.starts_with(b"PK")
-    };
-
-    let cbc_ok = {
-        let mut block = first_block;
-        let iv = derive_standard_segment_iv(&salt, 0);
-        decrypt_aes_cbc_no_padding_in_place(&key, &iv, &mut block).is_ok()
-            && block.starts_with(b"PK")
-    };
-
-    let method = if ecb_ok {
-        EncryptionMethod::StandardAesEcb { key }
-    } else if cbc_ok {
-        EncryptionMethod::StandardCryptoApi { key, salt }
-    } else {
-        return Err(DecryptError::InvalidInfo(
-            "unable to detect Standard EncryptedPackage cipher mode (expected ZIP magic)".into(),
-        ));
-    };
-
-    Ok(DecryptedPackageReader::new(ciphertext_reader, method, plaintext_len))
+    Err(DecryptError::InvalidPassword)
 }
 
 #[derive(Debug, Clone)]

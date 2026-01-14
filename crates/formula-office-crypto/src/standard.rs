@@ -504,7 +504,7 @@ fn verify_password_standard_with_key_and_mode(
                     ))
                 })?;
 
-            let verifier_hash = hash_alg.digest(verifier_plain);
+            let verifier_hash = hash_alg.digest(&verifier_plain);
             let verifier_hash = verifier_hash.get(..expected_hash_len).ok_or_else(|| {
                 OfficeCryptoError::InvalidFormat(format!(
                     "hash output shorter than verifierHashSize (got {}, need {})",
@@ -551,18 +551,25 @@ fn verify_password_standard_with_key_and_mode(
             // Compatibility fallback: some producers appear to use AES-CBC for the verifier fields
             // even though the canonical Standard/CryptoAPI fixture in this repo uses AES-ECB.
             //
-            // Try a small set of plausible IVs (all-zero, or derived from the verifier salt) and
-            // accept whichever yields a matching verifier hash.
+            // Try a small set of plausible IVs and accept whichever yields a matching verifier
+            // hash.
             let salt_iv = {
                 let mut iv = [0u8; 16];
                 let n = verifier.salt.len().min(16);
                 iv[..n].copy_from_slice(&verifier.salt[..n]);
                 iv
             };
+            let derived_iv_vec =
+                crate::crypto::derive_iv(hash_alg, &verifier.salt, &0u32.to_le_bytes(), 16);
+            let mut derived_iv = [0u8; 16];
+            derived_iv.copy_from_slice(&derived_iv_vec[..16]);
             let mut iv_candidates: Vec<[u8; 16]> = Vec::new();
             iv_candidates.push([0u8; 16]);
             if salt_iv != [0u8; 16] {
                 iv_candidates.push(salt_iv);
+            }
+            if derived_iv != [0u8; 16] && derived_iv != salt_iv {
+                iv_candidates.push(derived_iv);
             }
             for iv in iv_candidates.iter() {
                 // 1) Attempt decrypting each field independently with the same IV.

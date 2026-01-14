@@ -540,7 +540,8 @@ pub(crate) fn rc4_xor_in_place(key: &[u8], data: &mut [u8]) -> Result<(), Office
 /// We keep this in a dedicated struct so we can reuse the expensive password hash across blocks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StandardKeyDerivation {
-    /// AES-based Standard encryption uses CryptoAPI `CryptDeriveKey` semantics (ipad/opad expansion).
+    /// AES-based Standard encryption often uses CryptoAPI `CryptDeriveKey` semantics (ipad/opad
+    /// expansion).
     Aes,
     /// Compatibility AES derivation used by some producers: apply MS-OFFCRYPTO `TruncateHash`
     /// semantics to the per-block hash output.
