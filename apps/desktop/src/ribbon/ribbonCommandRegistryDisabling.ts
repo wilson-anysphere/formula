@@ -135,9 +135,9 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   // Data → Sort & Filter (same implementations as Home tab).
   "data.sortFilter.sortAtoZ",
   "data.sortFilter.sortZtoA",
+  "data.sortFilter.sort.customSort",
   "data.sortFilter.sort.sortAtoZ",
   "data.sortFilter.sort.sortZtoA",
-  "data.sortFilter.sort.customSort",
 
   // --- Home → Styles ----------------------------------------------------------
   // Cell Styles are currently handled via `main.ts` (not CommandRegistry yet). Only the
@@ -152,6 +152,10 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.styles.formatAsTable.medium",
   "home.styles.formatAsTable.dark",
   "home.styles.formatAsTable.newStyle",
+
+  // --- Comments ---------------------------------------------------------------
+  "review.comments.newComment",
+  "review.comments.showComments",
 
   // --- Formula auditing -------------------------------------------------------
   "formulas.formulaAuditing.tracePrecedents",

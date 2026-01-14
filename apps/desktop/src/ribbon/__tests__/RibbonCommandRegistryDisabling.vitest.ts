@@ -70,7 +70,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     act(() => root.unmount());
   });
 
-  it("keeps implemented ribbon-only Fill Up/Left commands enabled even though they are not registered", () => {
+  it("keeps implemented ribbon-only commands enabled even though they are not registered", () => {
     const commandRegistry = new CommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
 
@@ -79,14 +79,18 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(baselineDisabledById["home.editing.fill.up"]).toBeUndefined();
     expect(baselineDisabledById["home.editing.fill.left"]).toBeUndefined();
     expect(baselineDisabledById["home.editing.fill.series"]).toBeUndefined();
+    expect(baselineDisabledById["home.editing.sortFilter.customSort"]).toBeUndefined();
+    expect(baselineDisabledById["data.sortFilter.sort.customSort"]).toBeUndefined();
 
     // Home → Cells structural edit commands are also handled directly in `main.ts`.
     expect(baselineDisabledById["home.cells.insert.insertCells"]).toBeUndefined();
     expect(baselineDisabledById["home.cells.insert.insertSheetRows"]).toBeUndefined();
     expect(baselineDisabledById["home.cells.insert.insertSheetColumns"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.insert.insertSheet"]).toBeUndefined();
     expect(baselineDisabledById["home.cells.delete.deleteCells"]).toBeUndefined();
     expect(baselineDisabledById["home.cells.delete.deleteSheetRows"]).toBeUndefined();
     expect(baselineDisabledById["home.cells.delete.deleteSheetColumns"]).toBeUndefined();
+    expect(baselineDisabledById["home.cells.delete.deleteSheet"]).toBeUndefined();
   });
 
   it("keeps AutoSum dropdown variants enabled even though they are not registered", () => {
