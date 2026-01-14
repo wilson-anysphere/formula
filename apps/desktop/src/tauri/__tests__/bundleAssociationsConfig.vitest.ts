@@ -95,6 +95,10 @@ describe("tauri.conf.json bundle association guardrails", () => {
     const schemes = collectDeepLinkSchemes(config);
     expect(schemes.length, "expected plugins[\"deep-link\"].desktop.schemes to be configured").toBeGreaterThan(0);
     expect(schemes).toContain("formula");
+    const invalid = schemes.filter((scheme) => /[:/]/.test(scheme));
+    expect(invalid, `invalid deep-link scheme(s) (must be scheme names, no ':' or '/'): ${invalid.join(", ")}`).toEqual(
+      [],
+    );
   });
 
   it("ships a shared-mime-info Parquet definition when .parquet file association is configured", () => {

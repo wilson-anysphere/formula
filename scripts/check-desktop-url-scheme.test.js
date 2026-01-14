@@ -188,6 +188,15 @@ test("passes when deep-link schemes includes 'formula://' (normalized)", () => {
   assert.match(proc.stdout, /preflight passed/i);
 });
 
+test("fails when tauri.conf.json deep-link schemes include an invalid scheme value like 'formula://evil'", () => {
+  const config = baseConfig();
+  config.plugins["deep-link"].desktop.schemes = ["formula", "formula://evil"];
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Invalid desktop deep-link scheme configuration/i);
+  assert.match(proc.stderr, /formula:\/\//i);
+});
+
 test("fails when macOS Info.plist declares an invalid URL scheme value like 'formula://'", () => {
   const config = baseConfig();
   const plist = basePlistWithFormulaScheme().replace("<string>formula</string>", "<string>formula://</string>");

@@ -243,6 +243,14 @@ def main() -> int:
         if not expected_scheme:
             raise SystemExit("--url-scheme must be non-empty")
         expected_schemes = {expected_scheme}
+    invalid_expected_schemes = {s for s in expected_schemes if ":" in s or "/" in s}
+    if invalid_expected_schemes:
+        print(
+            "[macos] ERROR: invalid deep-link scheme(s) configured in tauri.conf.json (expected scheme names only, no ':' or '/')",
+            file=sys.stderr,
+        )
+        print(f"[macos] Invalid scheme value(s): {_format_set(invalid_expected_schemes)}", file=sys.stderr)
+        return 1
 
     with args.info_plist.open("rb") as f:
         plist = plistlib.load(f)

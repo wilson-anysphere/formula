@@ -239,6 +239,51 @@ test(
 );
 
 test(
+  "verify_linux_desktop_integration fails when tauri.conf.json deep-link schemes include an invalid value like formula://evil",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const configPath = path.join(tmp, "tauri.conf.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          identifier: "app.formula.desktop",
+          mainBinaryName: "formula-desktop",
+          plugins: {
+            "deep-link": {
+              desktop: {
+                schemes: ["formula", "formula://evil"],
+              },
+            },
+          },
+          bundle: {
+            fileAssociations: [
+              {
+                ext: ["xlsx"],
+                mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;x-scheme-handler/formula;",
+    });
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /invalid deep-link scheme/i);
+    assert.match(proc.stderr, /formula:\/\//i);
+  },
+);
+
+test(
   "verify_linux_desktop_integration fails when a configured deep-link scheme is missing from the app .desktop MimeType=",
   { skip: !hasPython3 },
   () => {

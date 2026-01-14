@@ -435,6 +435,14 @@ def main() -> int:
         if not expected_scheme:
             raise SystemExit("--url-scheme must be non-empty")
         expected_schemes = {expected_scheme}
+    invalid_schemes = {s for s in expected_schemes if ":" in s or "/" in s}
+    if invalid_schemes:
+        print(
+            "[linux] ERROR: invalid deep-link scheme(s) configured in tauri.conf.json (expected scheme names only, no ':' or '/')",
+            file=sys.stderr,
+        )
+        print(f"[linux] Invalid scheme value(s): {_format_set(invalid_schemes)}", file=sys.stderr)
+        return 1
     expected_scheme_mimes = {f"x-scheme-handler/{scheme}" for scheme in expected_schemes}
     desktop_files = find_desktop_files(args.package_root)
     if not desktop_files:

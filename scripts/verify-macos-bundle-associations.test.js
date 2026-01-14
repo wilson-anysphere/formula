@@ -243,6 +243,42 @@ test(
 );
 
 test(
+  "verify_macos_bundle_associations fails when tauri.conf.json deep-link schemes include an invalid value like formula://evil",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-macos-assoc-test-"));
+    const configPath = path.join(tmp, "tauri.conf.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        bundle: {
+          fileAssociations: [
+            {
+              ext: ["xlsx"],
+              mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            },
+          ],
+        },
+        plugins: {
+          "deep-link": {
+            desktop: {
+              schemes: ["formula", "formula://evil"],
+            },
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const infoPlistPath = writeInfoPlist(tmp, { includeXlsxDocumentType: true, includeUrlScheme: true });
+    const proc = runValidator({ configPath, infoPlistPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /invalid deep-link scheme/i);
+    assert.match(proc.stderr, /formula:\/\//i);
+  },
+);
+
+test(
   "verify_macos_bundle_associations fails when Info.plist declares an invalid scheme value like formula://",
   { skip: !hasPython3 },
   () => {

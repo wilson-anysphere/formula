@@ -751,6 +751,16 @@ function main() {
     .map((s) => String(s).trim().replace(/[:/]+$/, "").toLowerCase())
     .filter(Boolean);
 
+  const invalidSchemeConfig = Array.from(new Set(normalizedSchemes.filter((s) => /[:/]/.test(s)))).sort();
+  if (invalidSchemeConfig.length > 0) {
+    errBlock("Invalid desktop deep-link scheme configuration (tauri.conf.json)", [
+      "Expected plugins[\"deep-link\"].desktop.schemes entries to normalize to scheme names (no ':' or '/' characters).",
+      "We accept values like \"formula://\" and normalize them to \"formula\", but embedded characters are invalid (e.g. \"formula://evil\").",
+      `Invalid scheme value(s): ${invalidSchemeConfig.join(", ")}`,
+      "Fix: update apps/desktop/src-tauri/tauri.conf.json plugins[\"deep-link\"].desktop.schemes.",
+    ]);
+  }
+
   if (!normalizedSchemes.includes(REQUIRED_SCHEME)) {
     const found = normalizedSchemes.length > 0 ? normalizedSchemes.join(", ") : "(none)";
     errBlock("Missing desktop deep-link scheme configuration (tauri.conf.json)", [
