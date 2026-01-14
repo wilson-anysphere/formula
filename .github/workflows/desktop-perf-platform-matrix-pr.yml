@@ -1,0 +1,635 @@
+name: Desktop performance (platform matrix, on-demand PR)
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Avoid stacking expensive 3xOS runs if the label is re-applied.
+  group: desktop-perf-platform-matrix-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # Keep these in sync with ci.yml/release.yml/desktop-perf-platform-matrix.yml to reduce drift.
+  NODE_VERSION: 22
+  WASM_PACK_VERSION: 0.13.1
+
+  # Optional: enable gating by setting the repository/organization variable
+  # `FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX=1`.
+  FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX: ${{ vars.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX }}
+
+  # Optional: tighten targets via GitHub Actions variables (the runners also have defaults).
+  FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS: ${{ vars.FORMULA_DESKTOP_COLD_WINDOW_VISIBLE_TARGET_MS }}
+  FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS: ${{ vars.FORMULA_DESKTOP_WARM_WINDOW_VISIBLE_TARGET_MS }}
+  FORMULA_DESKTOP_COLD_TTI_TARGET_MS: ${{ vars.FORMULA_DESKTOP_COLD_TTI_TARGET_MS }}
+  FORMULA_DESKTOP_WARM_TTI_TARGET_MS: ${{ vars.FORMULA_DESKTOP_WARM_TTI_TARGET_MS }}
+  FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS: ${{ vars.FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS }}
+  FORMULA_DESKTOP_IDLE_RSS_TARGET_MB: ${{ vars.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB }}
+
+jobs:
+  guard:
+    name: Guard (label + same-repo PR)
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.guard.outputs.should_run }}
+      head_sha: ${{ steps.guard.outputs.head_sha }}
+      pr_number: ${{ steps.guard.outputs.pr_number }}
+      label: ${{ steps.guard.outputs.label }}
+    steps:
+      - name: Decide whether to run the desktop perf platform matrix
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          label="${{ github.event.label.name }}"
+          pr_repo="${{ github.event.pull_request.head.repo.full_name }}"
+          base_repo="${{ github.repository }}"
+
+          echo "Received label event: ${label}"
+          echo "PR head repo: ${pr_repo}"
+          echo "Base repo: ${base_repo}"
+
+          # Only run when explicitly requested.
+          if [[ "${label}" != "desktop-perf-matrix" && "${label}" != "run-desktop-perf" ]]; then
+            echo "::notice::Skipping desktop perf platform matrix (label ${label} is not a trigger label)."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "label=${label}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Safety: do not execute untrusted fork code.
+          if [[ "${pr_repo}" != "${base_repo}" ]]; then
+            echo "::notice::Skipping desktop perf platform matrix for fork PRs (head repo ${pr_repo} != ${base_repo})."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "label=${label}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          echo "label=${label}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Desktop perf platform matrix (on-demand)"
+            echo ""
+            echo "- Trigger label: \`${label}\`"
+            echo "- PR: #${{ github.event.pull_request.number }}"
+            echo "- Head SHA: \`${{ github.event.pull_request.head.sha }}\`"
+            echo ""
+            echo "Running the desktop startup (cold+warm) + idle-memory benchmarks on Linux/Windows/macOS."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  desktop-perf:
+    name: Desktop perf (${{ matrix.os }})
+    needs: guard
+    if: needs.guard.outputs.should_run == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    env:
+      # The runners gate on these env vars; map the platform-matrix toggle to the existing
+      # enforcement knobs (defaults off).
+      FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH: ${{ vars.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX == '1' && '1' || '0' }}
+      FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH: ${{ vars.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX == '1' && '1' || '0' }}
+
+    steps:
+      - name: Checkout PR head (not merge commit)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.guard.outputs.head_sha }}
+
+      - name: Initialize perf artifact directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p perf-artifacts
+          node - <<'NODE'
+          const fs = require("node:fs");
+          fs.writeFileSync(
+            "perf-artifacts/metadata.json",
+            JSON.stringify(
+              {
+                generatedAt: new Date().toISOString(),
+                pr: {
+                  number: Number(process.env.PR_NUMBER ?? "") || null,
+                  label: process.env.PR_LABEL ?? null,
+                },
+                git: { sha: process.env.PR_HEAD_SHA ?? null },
+                runner: {
+                  os: process.env.RUNNER_OS ?? null,
+                  arch: process.env.RUNNER_ARCH ?? null,
+                  name: process.env.RUNNER_NAME ?? null,
+                },
+                enforcePlatformMatrix: process.env.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX ?? null,
+              },
+              null,
+              2,
+            ),
+            "utf8",
+          );
+          NODE
+        env:
+          PR_NUMBER: ${{ needs.guard.outputs.pr_number }}
+          PR_LABEL: ${{ needs.guard.outputs.label }}
+          PR_HEAD_SHA: ${{ needs.guard.outputs.head_sha }}
+
+      - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
+        shell: bash
+        run: bash scripts/ci/check-rust-toolchain-pins.sh
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+        with:
+          version: 9.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: "Guard: Windows Authenticode timestamp URL uses HTTPS"
+        run: node scripts/ci/check-windows-timestamp-url.mjs
+
+      - name: Setup Rust toolchain (pinned + wasm32)
+        uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
+      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
+      # CARGO_HOME so cargo installs/builds share the same cache.
+      - name: Use shared Cargo home for CI caching (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $cargoHome = Join-Path $env:USERPROFILE ".cargo"
+          "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Use shared Cargo home for CI caching (Unix)
+        if: matrix.os != 'windows-latest'
+        run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - name: Install Linux dependencies (Tauri/WebView + headless display)
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache wasm-pack binary
+        id: wasm-pack-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/wasm-pack*
+          # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.WASM_PACK_VERSION }}
+          restore-keys: |
+            wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - name: Install wasm-pack (required for @formula/engine WASM build)
+        if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
+        run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
+
+      - name: Verify wasm-pack version
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${WASM_PACK_VERSION}"
+          actual="$(wasm-pack --version | tr -d '\r' | awk '{print $2}')"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "Expected wasm-pack ${expected}, but found ${actual}." >&2
+            exit 1
+          fi
+
+      - name: Detect Pyodide version (for caching)
+        id: pyodide
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p 'const fs=require("fs");const src=fs.readFileSync("apps/desktop/scripts/ensure-pyodide-assets.mjs","utf8");const m=src.match(/const\s+PYODIDE_VERSION\s*=\s*[\"\\x27]([^\"\\x27]+)[\"\\x27]/);if(!m){throw new Error("PYODIDE_VERSION not found in ensure-pyodide-assets.mjs");}m[1];')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Pyodide asset cache
+        id: pyodide-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
+          key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+
+      - name: Ensure Pyodide assets are present (populate cache on miss)
+        shell: bash
+        run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
+
+      - name: Save Pyodide asset cache
+        if: steps.pyodide-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
+          key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+
+      - name: Build desktop frontend (Vite + WASM)
+        run: pnpm build:desktop
+
+      - name: Desktop dist asset report
+        # Size regressions are useful context, but this workflow is primarily about
+        # startup + memory. Keep size checks non-blocking so we still get perf data.
+        continue-on-error: true
+        run: node scripts/desktop_dist_asset_report.mjs --json-out perf-artifacts/desktop-dist-assets-report.json
+        env:
+          # Optional: set as GitHub Actions variables to enable gating.
+          FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
+          FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
+
+      - name: Build desktop binary (release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if cargo metadata --no-deps --format-version=1 | grep -q '"name":"formula-desktop-tauri"'; then
+            cargo build -p formula-desktop-tauri --bin formula-desktop --features desktop --release --locked
+          else
+            cargo build -p desktop --bin formula-desktop --features desktop --release --locked
+          fi
+
+      - name: Run desktop startup benchmark (cold, 5 runs)
+        id: startup-cold
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p perf-artifacts
+          node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts \
+            --mode cold \
+            --full \
+            --runs 5 \
+            --timeout-ms 20000 \
+            --json perf-artifacts/desktop-startup-metrics-cold.json \
+            --allow-ci 2>&1 | tee perf-artifacts/desktop-startup-cold.log
+
+      - name: Run desktop startup benchmark (warm, 5 runs)
+        id: startup-warm
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p perf-artifacts
+          node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts \
+            --mode warm \
+            --full \
+            --runs 5 \
+            --timeout-ms 20000 \
+            --json perf-artifacts/desktop-startup-metrics-warm.json \
+            --allow-ci 2>&1 | tee perf-artifacts/desktop-startup-warm.log
+
+      - name: Run idle memory benchmark (3 runs)
+        id: memory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p perf-artifacts
+          node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-memory-runner.ts \
+            --runs 3 \
+            --timeout-ms 30000 \
+            --settle-ms 5000 \
+            --json perf-artifacts/desktop-memory-metrics.json \
+            --allow-ci 2>&1 | tee perf-artifacts/desktop-memory.log
+
+      - name: Summarize + merge perf artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p perf-artifacts
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const { execSync } = require("node:child_process");
+          
+          function readJsonMaybe(p) {
+            try {
+              return JSON.parse(fs.readFileSync(p, "utf8"));
+            } catch {
+              return null;
+            }
+          }
+          
+          function tryExec(command) {
+            try {
+              return execSync(command, { encoding: "utf8" }).trim();
+            } catch {
+              return null;
+            }
+          }
+          
+          const startupColdPath = path.resolve("perf-artifacts/desktop-startup-metrics-cold.json");
+          const startupWarmPath = path.resolve("perf-artifacts/desktop-startup-metrics-warm.json");
+          const memoryPath = path.resolve("perf-artifacts/desktop-memory-metrics.json");
+          const startupCold = readJsonMaybe(startupColdPath);
+          const startupWarm = readJsonMaybe(startupWarmPath);
+          const idleMemory = readJsonMaybe(memoryPath);
+          
+          const sha = tryExec("git rev-parse HEAD");
+          const ref = tryExec("git rev-parse --abbrev-ref HEAD");
+          
+          const merged = {
+            generatedAt: new Date().toISOString(),
+            ci: {
+              workflow: process.env.GITHUB_WORKFLOW || null,
+              runId: process.env.GITHUB_RUN_ID || null,
+              runNumber: process.env.GITHUB_RUN_NUMBER || null,
+              attempt: process.env.GITHUB_RUN_ATTEMPT || null,
+              job: process.env.GITHUB_JOB || null,
+            },
+            git: { sha, ref },
+            runner: {
+              os: process.env.RUNNER_OS || null,
+              arch: process.env.RUNNER_ARCH || null,
+              name: process.env.RUNNER_NAME || null,
+            },
+            image: {
+              os: process.env.ImageOS || null,
+              version: process.env.ImageVersion || null,
+              name: process.env.ImageName || null,
+            },
+            toolchain: {
+              node: process.version,
+              pnpm: tryExec("pnpm --version"),
+              rustc: tryExec("rustc --version"),
+              cargo: tryExec("cargo --version"),
+              wasmPack: tryExec("wasm-pack --version"),
+            },
+            startupCold,
+            startupWarm,
+            idleMemory,
+          };
+          
+          fs.writeFileSync(
+            path.resolve("perf-artifacts/desktop-perf-metrics.json"),
+            JSON.stringify(merged, null, 2),
+            "utf8",
+          );
+          
+          const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+          if (!summaryPath) process.exit(0);
+          
+          function fmt(n, digits = 1) {
+            if (typeof n !== "number" || !Number.isFinite(n)) return "n/a";
+            return n.toFixed(digits);
+          }
+          
+          const lines = [];
+          lines.push(`## Desktop perf summary (${process.env.RUNNER_OS ?? "unknown"})`);
+          lines.push(`Commit: \`${sha ?? "n/a"}\``);
+          if (process.env.ImageOS || process.env.ImageVersion) {
+            lines.push(`Runner image: \`${process.env.ImageOS ?? "n/a"}\` \`${process.env.ImageVersion ?? ""}\``);
+          }
+          lines.push("");
+          lines.push("| Metric | p50 | p95 | Notes |");
+          lines.push("|---|---:|---:|---|");
+          
+          if (startupCold?.summary) {
+            const s = startupCold.summary;
+            lines.push(
+              `| startup.cold.windowVisible (ms) | ${fmt(s.windowVisible?.p50)} | ${fmt(s.windowVisible?.p95)} | target=${s.windowVisible?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
+            );
+            lines.push(
+              `| startup.cold.firstRender (ms) | ${fmt(s.firstRender?.p50)} | ${fmt(s.firstRender?.p95)} | |`,
+            );
+            lines.push(
+              `| startup.cold.webviewLoaded (ms) | ${fmt(s.webviewLoaded?.p50)} | ${fmt(s.webviewLoaded?.p95)} | target=${s.webviewLoaded?.targetMs ?? "n/a"} |`,
+            );
+            lines.push(
+              `| startup.cold.tti (ms) | ${fmt(s.tti?.p50)} | ${fmt(s.tti?.p95)} | target=${s.tti?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
+            );
+          } else {
+            lines.push("| startup.cold | n/a | n/a | missing desktop-startup-metrics-cold.json |");
+          }
+          
+          if (startupWarm?.summary) {
+            const s = startupWarm.summary;
+            lines.push(
+              `| startup.warm.windowVisible (ms) | ${fmt(s.windowVisible?.p50)} | ${fmt(s.windowVisible?.p95)} | target=${s.windowVisible?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
+            );
+            lines.push(
+              `| startup.warm.firstRender (ms) | ${fmt(s.firstRender?.p50)} | ${fmt(s.firstRender?.p95)} | |`,
+            );
+            lines.push(
+              `| startup.warm.webviewLoaded (ms) | ${fmt(s.webviewLoaded?.p50)} | ${fmt(s.webviewLoaded?.p95)} | target=${s.webviewLoaded?.targetMs ?? "n/a"} |`,
+            );
+            lines.push(
+              `| startup.warm.tti (ms) | ${fmt(s.tti?.p50)} | ${fmt(s.tti?.p95)} | target=${s.tti?.targetMs ?? "n/a"} enforced=${s.enforce ? 1 : 0} |`,
+            );
+          } else {
+            lines.push("| startup.warm | n/a | n/a | missing desktop-startup-metrics-warm.json |");
+          }
+          
+          if (idleMemory?.summary) {
+            const m = idleMemory.summary;
+            lines.push(
+              `| idleMemory.rss (mb) | ${fmt(m.rssMb?.p50, 1)} | ${fmt(m.rssMb?.p95, 1)} | settleMs=${idleMemory.settleMs ?? "n/a"} kind=${idleMemory.measurement ?? "rss"} |`,
+            );
+          } else {
+            lines.push("| idleMemory | n/a | n/a | missing desktop-memory-metrics.json |");
+          }
+          
+          lines.push("");
+          fs.appendFileSync(summaryPath, lines.join("\n") + "\n", "utf8");
+          NODE
+
+      - name: Upload desktop perf artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-perf-${{ matrix.os }}
+          if-no-files-found: warn
+          path: |
+            perf-artifacts/*.json
+            perf-artifacts/*.log
+
+      - name: Fail job if perf runners failed
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          if [ "${{ steps.startup-cold.outcome }}" != "success" ]; then
+            echo "::error::desktop startup cold runner failed (outcome=${{ steps.startup-cold.outcome }})"
+            failed=1
+          fi
+          if [ "${{ steps.startup-warm.outcome }}" != "success" ]; then
+            echo "::error::desktop startup warm runner failed (outcome=${{ steps.startup-warm.outcome }})"
+            failed=1
+          fi
+          if [ "${{ steps.memory.outcome }}" != "success" ]; then
+            echo "::error::desktop memory runner failed (outcome=${{ steps.memory.outcome }})"
+            failed=1
+          fi
+          exit "$failed"
+
+  pr-comment:
+    name: PR comment (desktop perf summary)
+    needs: [guard, desktop-perf]
+    if: always() && needs.guard.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - name: Download perf artifacts
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: desktop-perf-*
+          path: artifacts/desktop-perf
+
+      - name: Create/update PR comment
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const path = require("node:path");
+            
+            const marker = "<!-- FORMULA_DESKTOP_PERF_PLATFORM_MATRIX -->";
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const headSha = "${{ needs.guard.outputs.head_sha }}";
+            const label = "${{ needs.guard.outputs.label }}";
+            const enforce = (process.env.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX ?? "").trim() === "1";
+            
+            function readJsonMaybe(p) {
+              try {
+                return JSON.parse(fs.readFileSync(p, "utf8"));
+              } catch {
+                return null;
+              }
+            }
+            
+            function fmt(n, digits = 0) {
+              if (typeof n !== "number" || !Number.isFinite(n)) return "n/a";
+              return n.toFixed(digits);
+            }
+            
+            function fmtMetric(value, target, digits = 0) {
+              const v = typeof value === "number" && Number.isFinite(value) ? value : null;
+              const t = typeof target === "number" && Number.isFinite(target) ? target : null;
+              if (v == null && t == null) return "n/a";
+              if (v == null) return `n/a (target=${fmt(t, digits)})`;
+              if (t == null) return `${fmt(v, digits)}`;
+              const ok = v <= t;
+              return `${fmt(v, digits)} / ${fmt(t, digits)} ${ok ? "PASS" : "FAIL"}`;
+            }
+            
+            function loadOsMetrics(artifactName) {
+              const base = path.join("artifacts", "desktop-perf", artifactName, "perf-artifacts", "desktop-perf-metrics.json");
+              const data = readJsonMaybe(base);
+              return data;
+            }
+            
+            const byOs = [
+              { label: "Linux", artifact: "desktop-perf-ubuntu-24.04" },
+              { label: "Windows", artifact: "desktop-perf-windows-latest" },
+              { label: "macOS", artifact: "desktop-perf-macos-latest" },
+            ].map((row) => {
+              const data = loadOsMetrics(row.artifact);
+              return { ...row, data };
+            });
+            
+            const lines = [];
+            lines.push(marker);
+            lines.push("### Desktop perf platform matrix (on-demand)");
+            lines.push("");
+            lines.push(`- Trigger label: \`${label}\``);
+            lines.push(`- Commit: \`${headSha}\``);
+            lines.push(`- Enforcement: \`${enforce ? "on" : "off"}\` (\`FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX=${process.env.FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX || ""}\`)`);
+            lines.push(`- Run: ${runUrl}`);
+            lines.push("");
+            lines.push("#### Startup (p95 / target, ms)");
+            lines.push("");
+            lines.push("| OS | cold windowVisible | cold tti | cold webviewLoaded | warm windowVisible | warm tti | warm webviewLoaded |");
+            lines.push("|---|---:|---:|---:|---:|---:|---:|");
+            
+            for (const row of byOs) {
+              const cold = row.data?.startupCold?.summary ?? null;
+              const warm = row.data?.startupWarm?.summary ?? null;
+              const coldWv = fmtMetric(cold?.windowVisible?.p95, cold?.windowVisible?.targetMs, 0);
+              const coldTti = fmtMetric(cold?.tti?.p95, cold?.tti?.targetMs, 0);
+              const coldWeb = fmtMetric(cold?.webviewLoaded?.p95, cold?.webviewLoaded?.targetMs, 0);
+              const warmWv = fmtMetric(warm?.windowVisible?.p95, warm?.windowVisible?.targetMs, 0);
+              const warmTti = fmtMetric(warm?.tti?.p95, warm?.tti?.targetMs, 0);
+              const warmWeb = fmtMetric(warm?.webviewLoaded?.p95, warm?.webviewLoaded?.targetMs, 0);
+              lines.push(`| ${row.label} | ${coldWv} | ${coldTti} | ${coldWeb} | ${warmWv} | ${warmTti} | ${warmWeb} |`);
+            }
+            
+            lines.push("");
+            lines.push("#### Idle memory (p95 / target, MB)");
+            lines.push("");
+            lines.push("| OS | kind | idle memory |");
+            lines.push("|---|---|---:|");
+            
+            for (const row of byOs) {
+              const mem = row.data?.idleMemory ?? null;
+              const kind = mem?.measurement ?? "rss";
+              const summary = mem?.summary ?? null;
+              const val = summary?.rssMb?.p95;
+              const tgt = summary?.rssMb?.targetMb;
+              const cell = fmtMetric(val, tgt, 1);
+              lines.push(`| ${row.label} | \`${kind}\` | ${cell} |`);
+            }
+            
+            lines.push("");
+            lines.push("_Artifacts: see the workflow run's **Artifacts** section (one per OS)._");
+            
+            const body = lines.join("\n");
+            const issue_number = context.payload.pull_request.number;
+            
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100,
+            });
+            
+            const existing = comments.find(
+              (c) => c?.user?.login === "github-actions[bot]" && typeof c.body === "string" && c.body.includes(marker),
+            );
+            
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated existing desktop perf matrix comment (id=${existing.id}).`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body,
+              });
+              core.info("Created new desktop perf matrix comment.");
+            }
+
