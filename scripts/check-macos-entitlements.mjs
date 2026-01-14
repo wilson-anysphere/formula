@@ -237,6 +237,7 @@ function main() {
   //
   // We also require outbound network entitlement so that if/when we enable the App Sandbox,
   // core app functionality (updater, HTTPS fetches) doesn't break silently.
+  /** @type {{ key: string; reason: string }[]} */
   const required = [
     {
       key: "com.apple.security.cs.allow-jit",
@@ -252,6 +253,16 @@ function main() {
         "Outbound network access (required for updater/HTTPS when sandboxing is enabled).",
     },
   ];
+
+  // If someone opts into the App Sandbox, ensure we include the additional sandbox entitlements
+  // required by Formula's runtime features (notably the OAuth loopback redirect listener).
+  if (hasTrueEntitlement(xmlForScan, "com.apple.security.app-sandbox")) {
+    required.push({
+      key: "com.apple.security.network.server",
+      reason:
+        "Incoming network access (required when sandboxing is enabled because Formula runs a loopback HTTP listener for OAuth redirects).",
+    });
+  }
 
   const missing = required.filter(({ key }) => !hasTrueEntitlement(xmlForScan, key));
   if (missing.length > 0) {
