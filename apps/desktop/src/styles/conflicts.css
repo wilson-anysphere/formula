@@ -7,11 +7,11 @@
 
 .conflict-ui-overlay {
   /* Local spacing tokens (kept in sync with tightened shell/workspace density). */
-  --conflict-ui-inset: 12px;
-  --conflict-ui-padding: 10px;
-  --conflict-ui-gap: 12px;
-  --conflict-ui-gap-sm: 8px;
-  --conflict-ui-gap-xs: 6px;
+  --conflict-ui-inset: var(--space-5);
+  --conflict-ui-padding: calc(var(--space-4) + var(--space-1));
+  --conflict-ui-gap: var(--space-5);
+  --conflict-ui-gap-sm: var(--space-4);
+  --conflict-ui-gap-xs: var(--space-3);
 
   position: absolute;
   inset: 0;
