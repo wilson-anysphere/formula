@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js";
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -65,7 +65,7 @@ test("Solver panel React components avoid inline styles (use solver.css classes)
   }
 
   assert.equal(fs.existsSync(cssPath), true, "Expected apps/desktop/src/styles/solver.css to exist");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
   const strippedCss = stripCssNonSemanticText(css);
   for (const className of requiredClasses) {
     assert.ok(css.includes(`.${className}`), `Expected solver.css to define .${className}`);

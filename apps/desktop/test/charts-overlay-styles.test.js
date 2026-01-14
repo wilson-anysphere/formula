@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, "..");
@@ -68,7 +68,7 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
   assert.match(main, /^\s*import\s+["']\.\/styles\/charts-overlay\.css["']\s*;?/m);
 
   const cssPath = path.join(desktopRoot, "src/styles/charts-overlay.css");
-  const css = await readFile(cssPath, "utf8");
+  const css = stripCssComments(await readFile(cssPath, "utf8"));
 
   // Charts are rendered on a dedicated canvas layer.
   assert.match(css, /\.grid-canvas--chart\s*\{/);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments, stripHtmlComments } from "./sourceTextUtils.js";
 
 test("stripComments strips line/block comments but preserves string literals", () => {
   const input = [
@@ -61,4 +61,33 @@ test("stripComments recognizes regex literals preceded by division operators", (
     `expected stripped source to preserve the regex literal; got:\n${out}`,
   );
   assert.doesNotMatch(out, /\bcomment\b/);
+});
+
+test("stripCssComments strips block comments but preserves strings", () => {
+  const input = [
+    `.a { content: "/* not a comment */"; }`,
+    `/* commented-out selector should not count: .b { color: red; } */`,
+    `.c { color: var(--text-primary); }`,
+    `.d[data-theme="high-contrast"] { outline: 1px solid var(--border); }`,
+  ].join("\n");
+
+  const out = stripCssComments(input);
+  assert.match(out, /\.a\s*\{/);
+  assert.match(out, /"\/\* not a comment \*\/"/);
+  assert.doesNotMatch(out, /\.b\s*\{/);
+  assert.match(out, /\.c\s*\{/);
+  assert.match(out, /\.d\[data-theme="high-contrast"\]/);
+});
+
+test("stripHtmlComments strips HTML comments", () => {
+  const input = [
+    `<div id="app"></div>`,
+    `<!-- <div id="commented"></div> -->`,
+    `<div data-testid="live"></div>`,
+  ].join("\n");
+
+  const out = stripHtmlComments(input);
+  assert.match(out, /\bid="app"/);
+  assert.doesNotMatch(out, /\bid="commented"/);
+  assert.match(out, /data-testid="live"/);
 });

@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("formula range preview tooltip prefers --formula-grid-* tokens", () => {
   const cssPath = path.join(__dirname, "..", "src", "styles", "ui.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   assert.match(
     css,
@@ -28,4 +30,3 @@ test("formula range preview tooltip prefers --formula-grid-* tokens", () => {
     "Expected tooltip surface text color to use --formula-grid-cell-text",
   );
 });
-

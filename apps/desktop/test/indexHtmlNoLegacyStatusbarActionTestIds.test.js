@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripHtmlComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -119,7 +119,7 @@ function collectNonRibbonDesktopTestIds() {
 
 test("desktop index.html does not hardcode ribbon action testids (avoid Playwright strict locator collisions)", () => {
   const htmlPath = path.join(__dirname, "..", "index.html");
-  const html = fs.readFileSync(htmlPath, "utf8");
+  const html = stripHtmlComments(fs.readFileSync(htmlPath, "utf8"));
 
   const indexDuplicates = findDuplicateTestIdsInIndexHtml(html);
   assert.deepEqual(

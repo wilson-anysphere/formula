@@ -216,3 +216,104 @@ export function stripComments(source) {
   return out;
 }
 
+export function stripCssComments(css) {
+  // Strip CSS block comments while preserving string literals and newlines.
+  //
+  // This keeps "source scanning" guardrail tests high-signal:
+  // - commented-out selectors/declarations should not satisfy or fail assertions
+  // - we avoid joining tokens across comments by preserving whitespace/newlines
+  const text = String(css);
+  let out = "";
+  /** @type {"code" | "single" | "double" | "comment"} */
+  let state = "code";
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = i + 1 < text.length ? text[i + 1] : "";
+
+    if (state === "comment") {
+      if (ch === "*" && next === "/") {
+        out += "  ";
+        i += 1;
+        state = "code";
+        continue;
+      }
+      out += ch === "\n" ? "\n" : " ";
+      continue;
+    }
+
+    if (state === "code") {
+      if (ch === "/" && next === "*") {
+        out += "  ";
+        i += 1;
+        state = "comment";
+        continue;
+      }
+
+      if (ch === "'") {
+        state = "single";
+        out += ch;
+        continue;
+      }
+
+      if (ch === '"') {
+        state = "double";
+        out += ch;
+        continue;
+      }
+
+      out += ch;
+      continue;
+    }
+
+    // String literal (single/double quote): preserve content and escapes.
+    out += ch;
+    if (ch === "\\") {
+      if (next) {
+        out += next;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (state === "single" && ch === "'") {
+      state = "code";
+    } else if (state === "double" && ch === '"') {
+      state = "code";
+    }
+  }
+
+  return out;
+}
+
+export function stripHtmlComments(html) {
+  // Strip HTML comments (`<!-- ... -->`) while preserving newlines.
+  //
+  // HTML in this repo should not rely on comment blocks to define required markup,
+  // and guardrail tests should treat commented-out markup as non-existent.
+  const text = String(html);
+  let out = "";
+
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.startsWith("<!--", i)) {
+      out += "    "; // `<!--`
+      i += 4;
+      while (i < text.length && !text.startsWith("-->", i)) {
+        out += text[i] === "\n" ? "\n" : " ";
+        i += 1;
+      }
+      if (i < text.length) {
+        out += "   "; // `-->`
+        i += 2;
+      } else {
+        // Unterminated comment; stop scanning.
+        break;
+      }
+      continue;
+    }
+
+    out += text[i];
+  }
+
+  return out;
+}

@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,7 +36,7 @@ test("AI chat React panels avoid inline styles (use ai-chat.css classes)", () =>
   }
 
   assert.equal(fs.existsSync(cssPath), true, "Expected apps/desktop/src/styles/ai-chat.css to exist");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
   for (const selector of [".ai-chat-runtime", ".ai-chat-panel", ".ai-chat-approval-modal"]) {
     assert.ok(css.includes(selector), `Expected ai-chat.css to define ${selector}`);
   }

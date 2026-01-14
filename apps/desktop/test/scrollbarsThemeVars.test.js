@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("grid scrollbars are styled via --formula-grid-* tokens", () => {
   const cssPath = path.join(__dirname, "..", "src", "styles", "scrollbars.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   assert.match(
     css,
@@ -34,4 +36,3 @@ test("grid scrollbars are styled via --formula-grid-* tokens", () => {
     "Expected scrollbar focus-visible to use --formula-grid-selection-border",
   );
 });
-

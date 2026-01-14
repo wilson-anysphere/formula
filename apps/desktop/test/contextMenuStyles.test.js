@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -31,7 +31,7 @@ test("ContextMenu is styled via CSS classes (no inline style.* except positionin
   // when shadows/subtle hover colors are neutralized to system colors.
   const cssPath = path.join(__dirname, "..", "src", "styles", "context-menu.css");
   assert.equal(fs.existsSync(cssPath), true, "Expected apps/desktop/src/styles/context-menu.css to exist");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   assert.match(css, /border-radius:\s*var\(--radius\)/, "Context menu container should use --radius token");
   assert.match(css, /border-radius:\s*var\(--radius-sm\)/, "Context menu items should use --radius-sm token");

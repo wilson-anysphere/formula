@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,7 +43,7 @@ test("renderMacroRunner is class-driven (no inline style assignments)", () => {
     true,
     "Expected apps/desktop/src/styles/macros-runner.css to exist (macro runner styling should live in a dedicated stylesheet)",
   );
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
   assert.match(css, /\.macros-runner\b/, "Expected macros-runner.css to define a .macros-runner selector");
   assert.match(
     css,

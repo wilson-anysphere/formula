@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("tokens.css forced-colors overrides apply even when data-theme is set", () => {
   const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
-  const css = fs.readFileSync(tokensPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(tokensPath, "utf8"));
 
   const mediaIndex = css.indexOf("@media (forced-colors: active), (prefers-contrast: more)");
   assert.ok(mediaIndex >= 0, "Expected tokens.css to define a forced-colors/prefers-contrast media query block");

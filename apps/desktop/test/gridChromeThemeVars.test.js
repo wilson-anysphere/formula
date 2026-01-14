@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function extractRule(css, selector) {
@@ -15,7 +17,7 @@ function extractRule(css, selector) {
 
 test("grid root + chrome use --formula-grid-* theme tokens", () => {
   const cssPath = path.join(__dirname, "..", "src", "styles", "shell.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   const gridRoot = extractRule(css, String.raw`\.grid-root`);
   assert.ok(gridRoot, "Expected shell.css to define a .grid-root rule");

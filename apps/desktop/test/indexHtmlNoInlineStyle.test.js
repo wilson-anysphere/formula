@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripHtmlComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("desktop index.html is style-free (no inline <style> or style=\"\" attrs)", () => {
   const htmlPath = path.join(__dirname, "..", "index.html");
-  const html = fs.readFileSync(htmlPath, "utf8");
+  const html = stripHtmlComments(fs.readFileSync(htmlPath, "utf8"));
 
   const styleTags = [...html.matchAll(/<style\b[^>]*>[\s\S]*?<\/style>/gi)];
   assert.equal(
@@ -27,4 +29,3 @@ test("desktop index.html is style-free (no inline <style> or style=\"\" attrs)",
     "apps/desktop/index.html should not include inline style=\"...\" attributes; move styling into src/styles/*.css",
   );
 });
-

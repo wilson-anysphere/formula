@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,7 +33,7 @@ test("TableHeaderCell avoids inline style blocks (use CSS classes)", () => {
 
 test("TableHeaderCell header + filter button styles are defined in ui.css", () => {
   const cssPath = path.join(__dirname, "..", "src", "styles", "ui.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   for (const selector of [
     /\.formula-table-header-cell\s*\{/,

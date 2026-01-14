@@ -64,7 +64,7 @@ function collectSourceFiles(dirPath) {
 }
 
 test("Reduced motion overrides set motion tokens to 0ms", () => {
-  const css = readDesktopFile("src", "styles", "tokens.css");
+  const css = stripCssComments(readDesktopFile("src", "styles", "tokens.css"));
 
   // Token-based transitions: used throughout the UI so reduced motion can zero them out.
   assert.match(

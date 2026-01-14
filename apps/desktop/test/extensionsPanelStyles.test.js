@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, "..");
@@ -43,7 +43,7 @@ test("extensions.css is imported and defines required classes", async () => {
   assert.match(main, /^\s*import\s+["']\.\/styles\/extensions\.css["']\s*;?/m);
 
   const cssPath = path.join(desktopRoot, "src", "styles", "extensions.css");
-  const css = await readFile(cssPath, "utf8");
+  const css = stripCssComments(await readFile(cssPath, "utf8"));
   assert.match(css, /\.extensions-panel\s*\{/);
   assert.match(css, /\.extension-webview\s*\{/);
 });

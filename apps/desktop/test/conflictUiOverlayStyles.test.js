@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(__dirname, "..");
@@ -73,7 +73,7 @@ test("spreadsheet conflict UI overlay uses CSS classes (no static inline styles)
 
 test("conflict overlay classes are defined in conflicts.css", async () => {
   const cssPath = path.join(desktopRoot, "src/styles/conflicts.css");
-  const css = await readFile(cssPath, "utf8");
+  const css = stripCssComments(await readFile(cssPath, "utf8"));
 
   assert.match(css, /\.conflict-ui-overlay\s*\{/);
   assert.match(css, /position:\s*absolute\s*;/);

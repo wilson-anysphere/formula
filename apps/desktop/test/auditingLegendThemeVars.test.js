@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("auditing legend overlay uses grid theme bridge tokens", () => {
   const cssPath = path.join(__dirname, "..", "src", "styles", "auditing.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   assert.match(
     css,
@@ -26,4 +28,3 @@ test("auditing legend overlay uses grid theme bridge tokens", () => {
     "Expected auditing legend text to use --formula-grid-cell-text",
   );
 });
-

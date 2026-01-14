@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function parseVarsFromBlock(blockBody) {
@@ -17,7 +19,7 @@ function parseVarsFromBlock(blockBody) {
 
 function loadThemeVars(theme) {
   const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
-  const css = fs.readFileSync(tokensPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(tokensPath, "utf8"));
 
   const rootMatch = css.match(/:root\s*\{([\s\S]*?)\}/);
   if (!rootMatch) throw new Error("tokens.css missing :root block");
@@ -100,4 +102,3 @@ export function renderAppShell(theme) {
     ``,
   ].join("\n");
 }
-

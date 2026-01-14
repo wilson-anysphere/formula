@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripHtmlComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function escapeRegExp(value) {
@@ -12,7 +14,7 @@ function escapeRegExp(value) {
 
 test("desktop index.html exposes required shell containers and testids", () => {
   const htmlPath = path.join(__dirname, "..", "index.html");
-  const html = fs.readFileSync(htmlPath, "utf8");
+  const html = stripHtmlComments(fs.readFileSync(htmlPath, "utf8"));
 
   const requiredIds = [
     // Shell roots

@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("presence collaborator pills use --formula-grid-* tokens when overlaid on the grid", () => {
   const cssPath = path.join(__dirname, "..", "src", "styles", "presence-ui.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   assert.match(
     css,
@@ -26,4 +28,3 @@ test("presence collaborator pills use --formula-grid-* tokens when overlaid on t
     "Expected collaborator pills to use --formula-grid-header-text for text",
   );
 });
-

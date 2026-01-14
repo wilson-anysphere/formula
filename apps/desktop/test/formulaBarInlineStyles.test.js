@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,7 +27,7 @@ test("FormulaBarView avoids inline display toggles (use CSS state classes)", () 
   }
 
   const cssPath = path.join(__dirname, "..", "src", "styles", "ui.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   for (const selector of [
     ".formula-bar:not(.formula-bar--editing) .formula-bar-input",

@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,7 +16,7 @@ test("Branch manager React panels avoid inline styles", () => {
 
   const branchManagerSource = stripComments(fs.readFileSync(branchManagerPath, "utf8"));
   const mergeSource = stripComments(fs.readFileSync(mergePath, "utf8"));
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   assert.equal(
     /\bstyle\s*=/.test(branchManagerSource),

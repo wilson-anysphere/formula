@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -65,7 +65,7 @@ test("CellEditorOverlay avoids inline display/z-index style assignments", () => 
 
 test("CellEditorOverlay static visibility + z-index are defined in CSS", () => {
   const cssPath = path.join(__dirname, "..", "src", "styles", "shell.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   const baseRule = css.match(/\.cell-editor\s*\{([\s\S]*?)\}/);
   assert.ok(baseRule, "Expected shell.css to define a .cell-editor rule");
@@ -78,7 +78,7 @@ test("CellEditorOverlay static visibility + z-index are defined in CSS", () => {
   if (/^\d+$/.test(zIndexValue)) {
     const parsed = Number.parseInt(zIndexValue, 10);
     const chartsCssPath = path.join(__dirname, "..", "src", "styles", "charts-overlay.css");
-    const chartsCss = fs.readFileSync(chartsCssPath, "utf8");
+    const chartsCss = stripCssComments(fs.readFileSync(chartsCssPath, "utf8"));
     // Shared-grid overlay layers are explicitly z-indexed in charts-overlay.css. Keep the
     // editor above all of them so it can sit on top of selection/charts overlays.
     const sharedSelectors = [

@@ -4,13 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("ui.css disables smooth scrolling when reduced motion is enabled", () => {
   const uiCssPath = path.join(__dirname, "..", "src", "styles", "ui.css");
-  const css = fs.readFileSync(uiCssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(uiCssPath, "utf8"));
 
   // Guardrail: keep the smooth-scroll baseline for users without reduced motion enabled.
   assert.match(

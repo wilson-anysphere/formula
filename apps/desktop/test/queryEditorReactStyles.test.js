@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,7 +30,7 @@ test("Query editor React panels avoid inline styles (use query-editor.css classe
 
   const cssPath = path.join(__dirname, "..", "src", "styles", "query-editor.css");
   assert.equal(fs.existsSync(cssPath), true, "Expected apps/desktop/src/styles/query-editor.css to exist");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
   for (const selector of [".query-editor", ".query-editor-container", ".query-editor-preview__table"]) {
     assert.ok(css.includes(selector), `Expected query-editor.css to define ${selector}`);
   }

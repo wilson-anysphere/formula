@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -70,7 +70,7 @@ test("pythonPanelMount is class-driven (no static inline style assignments)", ()
 
 test("python-panel.css defines the pythonPanelMount class selectors", () => {
   const cssPath = path.join(__dirname, "..", "src", "styles", "python-panel.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   const requiredSelectors = [
     "python-panel-mount",

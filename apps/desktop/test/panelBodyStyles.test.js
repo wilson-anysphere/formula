@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function extractBlock(source, selector) {
@@ -28,7 +30,7 @@ function extractBlock(source, selector) {
 
 test("workspace.css defines panel body container/fill helpers (class-driven mounts)", () => {
   const cssPath = path.join(__dirname, "..", "src", "styles", "workspace.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   for (const legacy of [".dock-panel__mount", ".panel-mount--fill-column", ".dock-panel__body--fill"]) {
     assert.equal(

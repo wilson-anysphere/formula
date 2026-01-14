@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("split view chrome uses grid theme bridge tokens", () => {
   const cssPath = path.join(__dirname, "..", "src", "styles", "workspace.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
 
   assert.match(
     css,
@@ -22,4 +24,3 @@ test("split view chrome uses grid theme bridge tokens", () => {
     "Expected grid splitter to use --formula-grid-line",
   );
 });
-

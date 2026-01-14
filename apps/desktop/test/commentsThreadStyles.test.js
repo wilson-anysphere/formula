@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripComments } from "./sourceTextUtils.js";
+import { stripComments, stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,7 +55,7 @@ test("SpreadsheetApp.renderCommentThread is styled via CSS classes (no inline st
 
   // Resolved visual state should be driven by CSS (data-resolved selector), not JS inline styles.
   const cssPath = path.join(__dirname, "..", "src", "styles", "comments.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
   assert.ok(
     css.includes('.comment-thread[data-resolved="true"]'),
     "comments.css should style resolved threads via .comment-thread[data-resolved=\"true\"]",
@@ -84,7 +84,7 @@ test("comment tooltip is token-styled and positioned via CSS variables (not left
   );
 
   const cssPath = path.join(__dirname, "..", "src", "styles", "comments.css");
-  const css = fs.readFileSync(cssPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(cssPath, "utf8"));
   assert.ok(
     css.includes("background: var(--tooltip-bg)") && css.includes("color: var(--tooltip-text)"),
     "comments.css tooltip should use --tooltip-bg/--tooltip-text tokens",

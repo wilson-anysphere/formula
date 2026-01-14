@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripCssComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function parseVarsFromBlock(blockBody) {
@@ -15,10 +17,6 @@ function parseVarsFromBlock(blockBody) {
     vars[match[1]] = match[2].trim();
   }
   return vars;
-}
-
-function stripCssComments(css) {
-  return css.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 /**
@@ -39,7 +37,7 @@ function collectVarAssignments(css, name) {
 
 test("tokens.css defines required design tokens", () => {
   const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
-  const css = fs.readFileSync(tokensPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(tokensPath, "utf8"));
 
   const defined = new Set();
   const regex = /--([a-z0-9-]+)\s*:/gi;
@@ -85,7 +83,7 @@ test("tokens.css defines required design tokens", () => {
 
 test("tokens.css uses tight radius tokens (4px/3px) per mockups", () => {
   const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
-  const css = fs.readFileSync(tokensPath, "utf8");
+  const css = stripCssComments(fs.readFileSync(tokensPath, "utf8"));
 
   const rootMatch = css.match(/:root\s*\{([\s\S]*?)\}/);
   assert.ok(rootMatch, "tokens.css missing :root block");
