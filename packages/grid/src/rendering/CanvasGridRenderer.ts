@@ -339,7 +339,10 @@ async function guardPngBlob(blob: Blob): Promise<void> {
 
   if (isJpeg && blob.size > initial.byteLength) {
     // JPEG dimensions can occur after variable-length metadata segments, so allow a larger sniff.
-    const MAX_JPEG_SNIFF_BYTES = 1024 * 1024;
+    // Align with the desktop workbook image byte limit (10MiB) so SVG/JPEG images that include
+    // large metadata/comment prefixes cannot bypass decompression bomb guards by pushing the
+    // size-defining tags past a small sniff window.
+    const MAX_JPEG_SNIFF_BYTES = 10 * 1024 * 1024;
     const toRead = Math.min(blob.size, MAX_JPEG_SNIFF_BYTES);
     if (toRead > initial.byteLength) {
       const larger = await readSlice(blob.slice(0, toRead));
@@ -348,7 +351,7 @@ async function guardPngBlob(blob: Blob): Promise<void> {
   } else if (isSvgLike && blob.size > initial.byteLength) {
     // SVG needs more than the initial signature bytes because the `<svg ...>` tag (and width/height)
     // can appear after an XML declaration and comments.
-    const MAX_SVG_SNIFF_BYTES = 1024 * 1024;
+    const MAX_SVG_SNIFF_BYTES = 10 * 1024 * 1024;
     const toRead = Math.min(blob.size, MAX_SVG_SNIFF_BYTES);
     if (toRead > initial.byteLength) {
       const larger = await readSlice(blob.slice(0, toRead));

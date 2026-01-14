@@ -1589,10 +1589,10 @@ describe("CanvasGridRenderer image cells", () => {
     const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
     vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
 
-    // Ensure `<svg ...>` appears after the initial TYPE_SNIFF_BYTES (32) to exercise the
-    // larger SVG header read path in guardPngBlob.
+    // Ensure `<svg ...>` appears after the initial TYPE_SNIFF_BYTES (32) *and* after the
+    // legacy 1MiB sniff budget so guardPngBlob must read deeper into the Blob payload.
     const leadingWhitespace = " ".repeat(40);
-    const prefix = "a".repeat(300 * 1024);
+    const prefix = "a".repeat(2 * 1024 * 1024);
     const svg = `${leadingWhitespace}<!-- <svg width="1" height="1"></svg> -->\n<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" data-width="1" data-height="1" width="10001" height="1"></svg>`;
     const bytes = createSvgBytes(svg);
     const imageResolver = vi.fn(async () => new Blob([bytes], { type: "image/svg+xml" }));
