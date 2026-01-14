@@ -93,6 +93,39 @@ describe("FormulaBarView argument preview (integration)", () => {
     host.remove();
   });
 
+  it("supports whitespace between function name and '(' (Excel-style)", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    const provider = vi.fn((expr: string) => {
+      if (expr === "A1") return true;
+      return "(preview unavailable)";
+    });
+    view.setArgumentPreviewProvider(provider);
+
+    const formula = "=IF (A1, 1, 2)";
+    view.textarea.value = formula;
+
+    // Cursor inside first argument (A1).
+    const cursorA1 = formula.indexOf("A1") + 1;
+    view.textarea.setSelectionRange(cursorA1, cursorA1);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await flushPreview();
+
+    const preview = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
+    expect(preview?.dataset.argStart).toBe(String(formula.indexOf("A1")));
+    expect(preview?.dataset.argEnd).toBe(String(formula.indexOf("A1") + 2));
+    expect(preview?.textContent).toBe("↳ A1  →  TRUE");
+    expect(provider).toHaveBeenCalledWith("A1");
+
+    host.remove();
+  });
+
   it("treats escaped brackets inside structured refs as part of the argument expression", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
