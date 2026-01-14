@@ -146,6 +146,9 @@ Then decrypt exactly 0x200 ciphertext bytes using RC4 with `rc4_key` (reset RC4 
 cases (“0” or “40”), `key_size_bytes == 5`; use the 5-byte key directly
 (`rc4_key = h_block[0..5]`). Do **not** pad it to 16 bytes.
 
+This differs from legacy BIFF8 `FILEPASS` CryptoAPI RC4 in the wild, where some writers treat a
+40-bit key as a 16-byte RC4 key by appending 11 zero bytes (see `docs/office-encryption.md`).
+
 ## Password verification (EncryptionVerifier)
 
 Standard CryptoAPI stores a verifier to check whether the derived key is correct before attempting
