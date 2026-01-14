@@ -1004,7 +1004,7 @@ auto-update artifact is not always the same file you’d choose for manual insta
 
 - macOS: updater uses `*.app.tar.gz` (not the `.dmg`)
 - Linux: updater uses `*.AppImage` (not `.deb`/`.rpm`)
-- Windows: updater uses the installer referenced in `latest.json` (`.msi`)
+- Windows: updater uses the **`.msi`** installer referenced in `latest.json` (the `.exe` is shipped for manual install/downgrade)
 
 Quick reference (auto-update vs manual install):
 
@@ -1035,7 +1035,7 @@ wired to the correct **updater-consumed** artifacts:
    - Then inspect:
    - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
 3. Confirm each `platforms[*].url` points at the expected **updater** asset type (not a manual-only installer):
-   - macOS: `*.app.tar.gz` (**not** `.dmg`)
+   - macOS: `*.app.tar.gz` (or `*.tar.gz`; **not** `.dmg`)
    - Windows: `.msi`
    - Linux: `*.AppImage` (**not** `.deb`/`.rpm`)
 4. Confirm each URL filename matches an actual Release asset (no broken/missing assets).
@@ -1110,10 +1110,10 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
     PY
     ```
 
-    Also confirm each platform entry points at the **updater-consumed** asset type:
-    - `darwin-*` → `*.app.tar.gz`
-    - `windows-*` → `*.msi` (updater runs the Windows Installer)
-    - `linux-*` → `*.AppImage`
+   Also confirm each platform entry points at the **updater-consumed** asset type:
+   - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive
+   - `windows-*` → `*.msi` (updater runs the Windows Installer; this repo requires the manifest to reference the MSI)
+   - `linux-*` → `*.AppImage`
 
 3. Download the artifacts and do quick sanity checks:
 
