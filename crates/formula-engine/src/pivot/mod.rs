@@ -1675,7 +1675,11 @@ impl PivotEngine {
             };
             for vf in &cfg.value_fields {
                 let base = if vf.name.is_empty() {
-                    format!("{:?} of {}", vf.aggregation, vf.source_field)
+                    format!(
+                        "{:?} of {}",
+                        vf.aggregation,
+                        vf.source_field
+                    )
                 } else {
                     vf.name.clone()
                 };
@@ -1691,7 +1695,11 @@ impl PivotEngine {
         if cfg.grand_totals.columns {
             for vf in &cfg.value_fields {
                 let base = if vf.name.is_empty() {
-                    format!("{:?} of {}", vf.aggregation, vf.source_field)
+                    format!(
+                        "{:?} of {}",
+                        vf.aggregation,
+                        vf.source_field
+                    )
                 } else {
                     vf.name.clone()
                 };

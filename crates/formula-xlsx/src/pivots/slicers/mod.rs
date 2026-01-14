@@ -103,6 +103,7 @@ pub fn slicer_selection_to_engine_filter_field_with_resolver(
     selection: &SlicerSelectionState,
     mut resolve: impl FnMut(&str) -> Option<formula_engine::pivot::PivotKeyPart>,
 ) -> formula_engine::pivot::FilterField {
+    let field = field.into();
     let allowed = match &selection.selected_items {
         None => None,
         Some(items) => {
@@ -117,7 +118,7 @@ pub fn slicer_selection_to_engine_filter_field_with_resolver(
     };
 
     formula_engine::pivot::FilterField {
-        source_field: PivotFieldRef::CacheFieldName(field.into()),
+        source_field: PivotFieldRef::CacheFieldName(field),
         allowed,
     }
 }
@@ -132,8 +133,9 @@ pub fn timeline_selection_to_engine_filter_field(
     field: impl Into<String>,
     _selection: &TimelineSelectionState,
 ) -> formula_engine::pivot::FilterField {
+    let field = field.into();
     formula_engine::pivot::FilterField {
-        source_field: PivotFieldRef::CacheFieldName(field.into()),
+        source_field: PivotFieldRef::CacheFieldName(field),
         allowed: None,
     }
 }
