@@ -22,6 +22,7 @@ of the collab stack doesn’t have to re-implement it.
 - `getYMap`, `getYArray`, `getYText` – duck-type checks tolerant of foreign constructors.
 - `isYAbstractType` – structural `AbstractType` detection without relying solely on `instanceof`.
 - `getDocTypeConstructors` – derive Y.Map/Y.Array/Y.Text constructors compatible with a given doc (useful when cloning values into foreign-module docs).
+- `cloneYjsValue` – deep-clone a Yjs value into freshly-constructed Yjs types (optionally using constructors from `getDocTypeConstructors`).
 - `replaceForeignRootType` – normalize a foreign root into this module’s constructors.
 - `getMapRoot`, `getArrayRoot`, `getTextRoot` – safe root access that avoids constructor-mismatch throws.
 - `patchForeignItemConstructor` – best-effort prototype patching so foreign Yjs `Item` structs pass `instanceof Y.Item` checks (used by UndoManager integrations).

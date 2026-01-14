@@ -1,6 +1,6 @@
 import * as Y from "yjs";
-import { cloneYjsValue } from "./cloneYjsValue.js";
 import {
+  cloneYjsValue,
   getArrayRoot,
   getDocTypeConstructors,
   getMapRoot,

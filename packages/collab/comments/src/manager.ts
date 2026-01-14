@@ -1,6 +1,5 @@
 import * as Y from "yjs";
-import { getDocTypeConstructors, getYArray, getYMap, getYText, isYAbstractType, replaceForeignRootType } from "@formula/collab-yjs-utils";
-import type { DocTypeConstructors } from "@formula/collab-yjs-utils";
+import { cloneYjsValue, getDocTypeConstructors, getYArray, getYMap, getYText, isYAbstractType, replaceForeignRootType } from "@formula/collab-yjs-utils";
 
 import type { Comment, CommentAuthor, CommentKind, Reply } from "./types.ts";
 
@@ -849,43 +848,6 @@ function findAvailableRootName(doc: Y.Doc, base: string): string {
     if (!doc.share.has(name)) return name;
   }
   return `${base}_${Date.now()}`;
-}
-
-function cloneYjsValue(value: any, ctors: DocTypeConstructors): any {
-  const map = getYMap(value);
-  if (map) {
-    const out = new ctors.Map();
-    map.forEach((v: any, k: string) => {
-      out.set(k, cloneYjsValue(v, ctors));
-    });
-    return out;
-  }
-
-  const array = getYArray(value);
-  if (array) {
-    const out = new ctors.Array();
-    for (const item of array.toArray()) {
-      out.push([cloneYjsValue(item, ctors)]);
-    }
-    return out;
-  }
-
-  const text = getYText(value);
-  if (text) {
-    const out = new ctors.Text();
-    out.applyDelta(structuredClone(text.toDelta()));
-    return out;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((v) => cloneYjsValue(v, ctors));
-  }
-
-  if (value && typeof value === "object") {
-    return structuredClone(value);
-  }
-
-  return value;
 }
 
 function hasForeignYjsTypes(value: unknown, seen: Set<any> = new Set()): boolean {

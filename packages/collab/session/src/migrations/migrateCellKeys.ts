@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 import { getWorkbookRoots } from "@formula/collab-workbook";
-import { getYArray, getYMap, getYText } from "@formula/collab-yjs-utils";
+import { cloneYjsValue, getYMap } from "@formula/collab-yjs-utils";
 
 import { normalizeCellKey } from "../cell-key.js";
 
@@ -77,49 +77,24 @@ function deletePlaintextFields(value: unknown): void {
   delete (value as any).formula;
 }
 
-function cloneYjsValue(value: unknown): unknown {
-  const map = getYMap(value);
-  if (map) {
-    // Always clone to *local* constructors (this module's Yjs instance). Docs can
-    // contain nested types created by a different Yjs module instance (CJS vs
-    // ESM, or duplicate dependency trees). Those foreign types may not pass
-    // `instanceof Y.AbstractType` checks during integration, so copying their
-    // constructor would re-introduce "Unexpected content type" crashes.
-    const out = new Y.Map();
-    map.forEach((v: unknown, k: string) => {
-      out.set(k, cloneYjsValue(v));
-    });
-    return out;
-  }
+const LOCAL_YJS_CTORS = { Map: Y.Map, Array: Y.Array, Text: Y.Text };
 
-  const array = getYArray(value);
-  if (array) {
-    const out = new Y.Array();
-    const items = typeof array.toArray === "function" ? array.toArray() : [];
-    for (const item of items) {
-      out.push([cloneYjsValue(item)]);
-    }
-    return out;
-  }
-
-  const text = getYText(value);
-  if (text) {
-    const out = new Y.Text();
-    out.applyDelta(structuredClone(text.toDelta()));
-    return out;
-  }
-
-  if (value && typeof value === "object") return structuredClone(value);
-  return value;
+function cloneYjsValueToLocal(value: unknown): unknown {
+  // Always clone to *local* constructors (this module's Yjs instance). Docs can
+  // contain nested types created by a different Yjs module instance (CJS vs
+  // ESM, or duplicate dependency trees). Those foreign types may not pass
+  // `instanceof Y.AbstractType` checks during integration, so copying their
+  // constructor would re-introduce "Unexpected content type" crashes.
+  return cloneYjsValue(value as any, LOCAL_YJS_CTORS);
 }
 
 function cloneCellValue(value: unknown, MapCtor: new () => Y.Map<unknown>): unknown {
   const map = getYMapLike(value);
-  if (!map) return cloneYjsValue(value);
+  if (!map) return cloneYjsValueToLocal(value);
 
   const out = new MapCtor();
   map.forEach((v, k) => {
-    out.set(k, cloneYjsValue(v));
+    out.set(k, cloneYjsValueToLocal(v));
   });
   return out;
 }
@@ -253,7 +228,7 @@ function mergeCellValues(params: {
   const canonicalMap = getYMapLike(canonical);
   if (canonicalMap) {
     canonicalMap.forEach((v, k) => {
-      out.set(k, cloneYjsValue(v));
+      out.set(k, cloneYjsValueToLocal(v));
       // Treat `undefined` as "missing" so legacy payloads can fill it (matches
       // prior behavior where `out.get(k)` couldn't distinguish missing vs
       // undefined anyway).
@@ -261,7 +236,7 @@ function mergeCellValues(params: {
     });
   } else if (isPlainRecord(canonical)) {
     for (const [k, v] of Object.entries(canonical)) {
-      out.set(k, cloneYjsValue(v));
+      out.set(k, cloneYjsValueToLocal(v));
       if (v !== undefined) hasKey.add(k);
     }
   }
@@ -273,7 +248,7 @@ function mergeCellValues(params: {
         // "merge" is intentionally conservative: keep canonical values when a field
         // exists, but salvage missing fields from legacy payloads.
         if (hasKey.has(k)) return;
-        out.set(k, cloneYjsValue(v));
+        out.set(k, cloneYjsValueToLocal(v));
         if (v !== undefined) hasKey.add(k);
       });
       continue;
@@ -282,7 +257,7 @@ function mergeCellValues(params: {
     if (isPlainRecord(legacy)) {
       for (const [k, v] of Object.entries(legacy)) {
         if (hasKey.has(k)) continue;
-        out.set(k, cloneYjsValue(v));
+        out.set(k, cloneYjsValueToLocal(v));
         if (v !== undefined) hasKey.add(k);
       }
     }

@@ -3,7 +3,16 @@ import * as Y from "yjs";
 import { normalizeCell } from "../cell.js";
 import { normalizeDocumentState } from "../state.js";
 import { a1ToRowCol, rowColToA1 } from "./a1.js";
-import { getArrayRoot, getDocTypeConstructors, getMapRoot, getYArray, getYMap, getYText, yjsValueToJson } from "../../../../collab/yjs-utils/src/index.ts";
+import {
+  cloneYjsValue,
+  getArrayRoot,
+  getDocTypeConstructors,
+  getMapRoot,
+  getYArray,
+  getYMap,
+  getYText,
+  yjsValueToJson,
+} from "../../../../collab/yjs-utils/src/index.ts";
 
 /**
  * @typedef {import("../types.js").DocumentState} DocumentState
@@ -566,42 +575,6 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
     return map;
   }
 
-  /**
-   * Deep clone a Yjs value so it can be re-inserted into the document without
-   * re-integrating an already-attached type (which can throw inside Yjs).
-   *
-   * Used to preserve unknown metadata when applying a snapshot.
-   *
-   * @param {any} value
-   * @returns {any}
-   */
-  function cloneYjsValue(value) {
-    const text = getYText(value);
-    if (text) {
-      const out = new docConstructors.Text();
-      out.applyDelta(structuredClone(text.toDelta()));
-      return out;
-    }
-    const array = getYArray(value);
-    if (array) {
-      const out = new docConstructors.Array();
-      for (const item of array.toArray()) out.push([cloneYjsValue(item)]);
-      return out;
-    }
-    const map = getYMap(value);
-    if (map) {
-      const out = new docConstructors.Map();
-      for (const key of Array.from(map.keys()).sort()) {
-        out.set(key, cloneYjsValue(map.get(key)));
-      }
-      return out;
-    }
-    if (Array.isArray(value)) return value.map((v) => cloneYjsValue(v));
-    if (isRecord(value)) return structuredClone(value);
-    if (value && typeof value === "object") return structuredClone(value);
-    return value;
-  }
-
   doc.transact(
     (transaction) => {
       // --- Sheets ---
@@ -637,7 +610,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
               ) {
                 continue;
               }
-              entry.set(key, cloneYjsValue(existing.get(key)));
+              entry.set(key, cloneYjsValue(existing.get(key), docConstructors));
             }
           }
           entry.set("id", sheetId);

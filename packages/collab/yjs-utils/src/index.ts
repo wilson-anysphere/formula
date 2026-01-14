@@ -384,6 +384,65 @@ export function getTextRoot(doc: Y.Doc, name: string): Y.Text {
   throw new Error(`Unsupported Yjs root type for "${name}": ${existing?.constructor?.name ?? typeof existing}`);
 }
 
+/**
+ * Deep-clone a Yjs value from one document into freshly-constructed Yjs types.
+ *
+ * This is used when copying state between docs (e.g. snapshot/restore) since Yjs
+ * types cannot be moved between documents or between different `yjs` module
+ * instances (ESM vs CJS).
+ *
+ * When `constructors` is provided, it is used to create new Yjs types compatible
+ * with the target doc's module instance (see `getDocTypeConstructors`).
+ */
+export function cloneYjsValue(value: any, constructors: { Map?: new () => any; Array?: new () => any; Text?: new () => any } | null = null): any {
+  const map = getYMap(value);
+  if (map) {
+    const MapCtor = constructors?.Map ?? (map as any).constructor;
+    const out = new (MapCtor as any)();
+    const keys = Array.from(map.keys()).sort();
+    for (const key of keys) {
+      out.set(key, cloneYjsValue(map.get(key), constructors));
+    }
+    return out;
+  }
+
+  const array = getYArray(value);
+  if (array) {
+    const ArrayCtor = constructors?.Array ?? (array as any).constructor;
+    const out = new (ArrayCtor as any)();
+    for (const item of array.toArray()) {
+      out.push([cloneYjsValue(item, constructors)]);
+    }
+    return out;
+  }
+
+  const text = getYText(value);
+  if (text) {
+    const TextCtor = constructors?.Text ?? (text as any).constructor;
+    const out = new (TextCtor as any)();
+    // Preserve formatting by cloning the Y.Text delta instead of just its plain string.
+    out.applyDelta(structuredClone(text.toDelta()));
+    return out;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneYjsValue(item, constructors));
+  }
+
+  if (value && typeof value === "object") {
+    const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
+    if (typeof structuredCloneFn === "function") {
+      try {
+        return structuredCloneFn(value);
+      } catch {
+        // Ignore: fall through.
+      }
+    }
+  }
+
+  return value;
+}
+
 function isPlainObject(value: unknown): value is Record<string, any> {
   if (!value || typeof value !== "object") return false;
   if (Array.isArray(value)) return false;
