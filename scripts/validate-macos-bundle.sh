@@ -486,9 +486,14 @@ if not found_exts:
     print("no file extension registrations found (CFBundleDocumentTypes and UT*TypeDeclarations are empty)")
     raise SystemExit(1)
 
-missing = [ext for ext in expected_exts if ext and ext not in found_exts]
+# Some bundle generators place certain extensions only under UT*TypeDeclarations (e.g. `xlsx`)
+# instead of listing them under CFBundleDocumentTypes. Treat those as acceptable as long as
+# they are present somewhere in the Info.plist.
+effective_exts = set(found_exts)
+
+missing = [ext for ext in expected_exts if ext and ext not in effective_exts]
 if missing:
-    found = ", ".join(sorted(found_exts)) if found_exts else "(none)"
+    found = ", ".join(sorted(effective_exts)) if effective_exts else "(none)"
     print("missing extension(s): " + ", ".join(sorted(set(missing))) + f". Found extensions: {found}")
     raise SystemExit(1)
 PY
