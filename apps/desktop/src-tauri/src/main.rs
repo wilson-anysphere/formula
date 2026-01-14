@@ -2338,7 +2338,11 @@ fn main() {
             if startup_bench {
                 // CI benchmark: measure desktop shell startup without requiring built frontend
                 // assets. This mode should be lightweight and exit quickly.
-                const TIMEOUT_SECS: u64 = 20;
+                // Keep this comfortably below the default per-run timeout in
+                // `apps/desktop/tests/performance/desktopStartupRunnerShared.ts` (15s) so that
+                // harnesses capture the debug stderr output instead of force-killing the process
+                // tree on timeout.
+                const TIMEOUT_SECS: u64 = 13;
                 let window_for_timeout = app.get_webview_window("main");
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
