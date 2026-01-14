@@ -160,6 +160,26 @@ fn rc4_key_for_block(h: &[u8], block: u32, key_size_bits: u32, hash_alg: HashAlg
     digest[..key_len].to_vec()
 }
 
+fn rc4_key_for_block_with_optional_padding(
+    h: &[u8],
+    block: u32,
+    key_size_bits: u32,
+    hash_alg: HashAlg,
+    pad_40_bit_to_128: bool,
+) -> Vec<u8> {
+    let key = rc4_key_for_block(h, block, key_size_bits, hash_alg);
+    if !pad_40_bit_to_128 {
+        return key;
+    }
+    let effective_bits = if key_size_bits == 0 { 40 } else { key_size_bits };
+    if effective_bits != 40 {
+        return key;
+    }
+    let mut padded = vec![0u8; 16];
+    padded[..key.len()].copy_from_slice(&key);
+    padded
+}
+
 fn build_tiny_zip() -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut writer = zip::ZipWriter::new(cursor);
@@ -175,6 +195,7 @@ fn build_standard_rc4_encryption_info(
     salt: [u8; 16],
     key_size_bits: u32,
     hash_alg: HashAlg,
+    pad_40_bit_to_128: bool,
 ) -> Vec<u8> {
     // Deterministic verifier plaintext.
     let verifier_plain: [u8; 16] = [
@@ -193,7 +214,13 @@ fn build_standard_rc4_encryption_info(
     };
 
     let h = iterated_hash(password, &salt, hash_alg);
-    let key0 = rc4_key_for_block(&h, 0, key_size_bits, hash_alg);
+    let key0 = rc4_key_for_block_with_optional_padding(
+        &h,
+        0,
+        key_size_bits,
+        hash_alg,
+        pad_40_bit_to_128,
+    );
 
     // Encrypt verifier + verifier hash with a single RC4 stream (no reset between fields).
     let mut rc4 = Rc4::new(&key0);
@@ -241,12 +268,19 @@ fn build_standard_rc4_encrypted_package(
     key_size_bits: u32,
     hash_alg: HashAlg,
     plaintext_zip: &[u8],
+    pad_40_bit_to_128: bool,
 ) -> Vec<u8> {
     let h = iterated_hash(password, &salt, hash_alg);
 
     let mut ciphertext = plaintext_zip.to_vec();
     for (block, chunk) in ciphertext.chunks_mut(RC4_BLOCK_LEN).enumerate() {
-        let key = rc4_key_for_block(&h, block as u32, key_size_bits, hash_alg);
+        let key = rc4_key_for_block_with_optional_padding(
+            &h,
+            block as u32,
+            key_size_bits,
+            hash_alg,
+            pad_40_bit_to_128,
+        );
         let mut rc4 = Rc4::new(&key);
         rc4.apply_keystream(chunk);
     }
@@ -292,9 +326,9 @@ fn decrypts_standard_rc4_keysize_56_roundtrip() {
         assert!(plaintext.starts_with(b"PK"));
 
         let encryption_info =
-            build_standard_rc4_encryption_info(password, salt, key_size_bits, hash_alg);
+            build_standard_rc4_encryption_info(password, salt, key_size_bits, hash_alg, false);
         let encrypted_package =
-            build_standard_rc4_encrypted_package(password, salt, key_size_bits, hash_alg, &plaintext);
+            build_standard_rc4_encrypted_package(password, salt, key_size_bits, hash_alg, &plaintext, false);
         let ole_bytes = build_ole_container(&encryption_info, &encrypted_package);
 
         let decrypted =
@@ -321,15 +355,53 @@ fn decrypts_standard_rc4_keysize_zero_means_40_roundtrip() {
         assert!(plaintext.starts_with(b"PK"));
 
         let encryption_info =
-            build_standard_rc4_encryption_info(password, salt, key_size_bits, hash_alg);
+            build_standard_rc4_encryption_info(password, salt, key_size_bits, hash_alg, false);
         let encrypted_package =
-            build_standard_rc4_encrypted_package(password, salt, key_size_bits, hash_alg, &plaintext);
+            build_standard_rc4_encrypted_package(password, salt, key_size_bits, hash_alg, &plaintext, false);
         let ole_bytes = build_ole_container(&encryption_info, &encrypted_package);
 
         let decrypted =
             formula_offcrypto::decrypt_standard_ooxml_from_bytes(ole_bytes, password).unwrap_or_else(
                 |err| {
                     panic!("decrypt failed for {hash_alg:?}: {err}");
+                },
+            );
+        assert_eq!(decrypted, plaintext, "hash_alg={hash_alg:?}");
+    }
+}
+
+#[test]
+fn decrypts_standard_rc4_keysize_zero_padded_40bit_key_compat_roundtrip() {
+    // Compatibility: Some producers treat a 40-bit RC4 key as a 16-byte key by appending 11 zero
+    // bytes. This is not compliant with the MS-OFFCRYPTO Standard RC4 spec, but we accept it for
+    // maximum interoperability.
+    for hash_alg in [HashAlg::Sha1, HashAlg::Md5] {
+        let password = "password";
+        let salt: [u8; 16] = [
+            0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D,
+            0x2E, 0x2F,
+        ];
+        let key_size_bits = 0; // MUST be treated as 40-bit per MS-OFFCRYPTO.
+
+        let plaintext = build_tiny_zip();
+        assert!(plaintext.starts_with(b"PK"));
+
+        let encryption_info =
+            build_standard_rc4_encryption_info(password, salt, key_size_bits, hash_alg, true);
+        let encrypted_package = build_standard_rc4_encrypted_package(
+            password,
+            salt,
+            key_size_bits,
+            hash_alg,
+            &plaintext,
+            true,
+        );
+        let ole_bytes = build_ole_container(&encryption_info, &encrypted_package);
+
+        let decrypted =
+            formula_offcrypto::decrypt_standard_ooxml_from_bytes(ole_bytes, password).unwrap_or_else(
+                |err| {
+                    panic!("decrypt failed for padded 40-bit {hash_alg:?}: {err}");
                 },
             );
         assert_eq!(decrypted, plaintext, "hash_alg={hash_alg:?}");
