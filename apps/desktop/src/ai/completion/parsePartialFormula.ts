@@ -318,19 +318,22 @@ export function createLocaleAwarePartialFormulaParser(options: {
     } catch {
       baseline = { isFormula: true, inFunctionCall: false };
     }
-    // The fallback parser is intentionally locale-agnostic, and will treat `,` as an argument
-    // separator until a `;` appears. In semicolon locales (where `,` is the decimal separator),
-    // that can mis-classify partial numbers like `1,` as "arg 1". Fix up the arg span/index
-    // using the known locale separator so completion edits remain stable.
-    const openParenIndex = findOpenParenIndex(prefix);
-    if (openParenIndex != null) {
-      const { argIndex, currentArg } = getArgContextWithSeparator(
-        prefix,
-        openParenIndex,
-        cursor,
-        getLocaleArgSeparator(localeId),
-      );
-      baseline = { ...baseline, argIndex, currentArg };
+    const localeArgSeparator = getLocaleArgSeparator(localeId);
+    if (localeArgSeparator === ";") {
+      // The fallback parser is intentionally locale-agnostic, and will treat `,` as an argument
+      // separator until a `;` appears. In semicolon locales (where `,` is the decimal separator),
+      // that can mis-classify partial numbers like `1,` as "arg 1". Fix up the arg span/index
+      // using the known locale separator so completion edits remain stable.
+      const openParenIndex = findOpenParenIndex(prefix);
+      if (openParenIndex != null) {
+        const { argIndex, currentArg } = getArgContextWithSeparator(
+          prefix,
+          openParenIndex,
+          cursor,
+          localeArgSeparator,
+        );
+        baseline = { ...baseline, argIndex, currentArg };
+      }
     }
     baseline = canonicalizeInCallContext(baseline, localeId, functionRegistry);
 
