@@ -96,6 +96,18 @@ type EngineWorkbookJson = {
   >;
 };
 
+const DEFAULT_SHEET_NAME = "Sheet1";
+
+function normalizeSheetName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+function sheetNameOrDefault(value: unknown): string {
+  return normalizeSheetName(value) ?? DEFAULT_SHEET_NAME;
+}
+
 function colNameToIndex(colName: string): number {
   if (colName.trim() === "") {
     throw new Error("Expected a non-empty column name");
@@ -700,7 +712,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               break;
             case "getCell":
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
+                const sheet = normalizeSheetName(params.sheet);
                 result = normalizeCellData(wb.getCell(params.address, sheet));
               }
               break;
@@ -708,14 +720,11 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).getCellRich !== "function") {
                 throw new Error("getCellRich: WasmWorkbook.getCellRich is not available in this WASM build");
               }
-              {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
-                result = cloneToPlainData((wb as any).getCellRich(params.address, sheet));
-              }
+              result = cloneToPlainData((wb as any).getCellRich(params.address, normalizeSheetName(params.sheet)));
               break;
             case "getRange":
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
+                const sheet = normalizeSheetName(params.sheet);
                 result = normalizeRangeData(wb.getRange(params.range, sheet));
               }
               break;
@@ -726,8 +735,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 );
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
-                result = normalizeRangeDataCompact((wb as any).getRangeCompact(params.range, sheet));
+                result = normalizeRangeDataCompact((wb as any).getRangeCompact(params.range, normalizeSheetName(params.sheet)));
               }
               break;
             case "setSheetDimensions":
@@ -735,7 +743,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setSheetDimensions: not available in this WASM build");
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 (wb as any).setSheetDimensions(sheet, params.rows, params.cols);
               }
               result = null;
@@ -745,7 +753,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("getSheetDimensions: not available in this WASM build");
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 result = (wb as any).getSheetDimensions(sheet);
               }
               break;
@@ -767,7 +775,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setColWidthChars: not available in this WASM build");
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 (wb as any).setColWidthChars(sheet, params.col, params.widthChars);
               }
               result = null;
@@ -781,8 +789,13 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               break;
             case "setCells":
               for (const update of params.updates as Array<any>) {
-                if (typeof update?.sheet === "string" && update.sheet.trim() === "") {
-                  delete update.sheet;
+                if (typeof update?.sheet === "string") {
+                  const trimmed = update.sheet.trim();
+                  if (trimmed === "") {
+                    delete update.sheet;
+                  } else {
+                    update.sheet = trimmed;
+                  }
                 }
               }
               if (typeof (wb as any).setCells === "function") {
@@ -799,15 +812,13 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setCellRich: WasmWorkbook.setCellRich is not available in this WASM build");
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
-                (wb as any).setCellRich(params.address, params.value, sheet);
+                (wb as any).setCellRich(params.address, params.value, normalizeSheetName(params.sheet));
               }
               result = null;
               break;
             case "setRange":
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
-                wb.setRange(params.range, params.values, sheet);
+                wb.setRange(params.range, params.values, normalizeSheetName(params.sheet));
               }
               result = null;
               break;
@@ -868,7 +879,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setCellStyleId: WasmWorkbook.setCellStyleId is not available in this WASM build");
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 // `crates/formula-wasm` uses a sheet-first signature (`setCellStyleId(sheet, address, styleId)`),
                 // but some older builds used a sheet-last form (`setCellStyleId(address, styleId, sheet)`).
                 //
@@ -899,7 +910,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setRowStyleId: WasmWorkbook.setRowStyleId is not available in this WASM build");
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 // Backward compatibility: older WASM builds used a numeric `styleId` where `0`
                 // clears the override. Newer builds accept `Option<u32>` and treat both `0` and
                 // `null`/`undefined` as clear. Always forwarding a number keeps both working.
@@ -913,7 +924,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setColStyleId: WasmWorkbook.setColStyleId is not available in this WASM build");
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 const styleId = params.styleId == null ? 0 : params.styleId;
                 (wb as any).setColStyleId(sheet, params.col, styleId);
               }
@@ -926,7 +937,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 );
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 (wb as any).setFormatRunsByCol(sheet, params.col, params.runs ?? []);
               }
               result = null;
@@ -938,7 +949,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 );
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 const styleId = params.styleId == null ? 0 : params.styleId;
                 (wb as any).setSheetDefaultStyleId(sheet, styleId);
               }
@@ -949,7 +960,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setColWidth: WasmWorkbook.setColWidth is not available in this WASM build");
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 (wb as any).setColWidth(sheet, params.col, params.width ?? null);
               }
               result = null;
@@ -959,7 +970,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setColHidden: WasmWorkbook.setColHidden is not available in this WASM build");
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 (wb as any).setColHidden(sheet, params.col, Boolean(params.hidden));
               }
               result = null;
@@ -969,7 +980,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("setColFormatRuns: WasmWorkbook.setColFormatRuns is not available in this WASM build");
               }
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
+                const sheet = sheetNameOrDefault(params.sheet);
                 (wb as any).setColFormatRuns(sheet, params.col, params.runs);
               }
               result = null;
@@ -982,8 +993,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               break;
             case "recalculate":
               {
-                const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : undefined;
-                result = normalizeCellChanges(wb.recalculate(sheet));
+                result = normalizeCellChanges(wb.recalculate(normalizeSheetName(params.sheet)));
               }
               break;
             case "applyOperation":
@@ -991,10 +1001,11 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 const op = params.op as any;
                 if (op && typeof op === "object") {
                   const sheet = (op as any).sheet as unknown;
-                  if (typeof sheet === "string" && sheet.trim() === "") {
+                  if (typeof sheet === "string") {
+                    const trimmed = sheet.trim();
                     // Defensive: avoid creating an empty-named sheet via `ensure_sheet("")` when
                     // callers accidentally pass a blank sheet id.
-                    (op as any).sheet = "Sheet1";
+                    (op as any).sheet = trimmed === "" ? DEFAULT_SHEET_NAME : trimmed;
                   }
                 }
 
@@ -1068,7 +1079,9 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).getPivotSchema !== "function") {
                 throw new Error("getPivotSchema: WasmWorkbook.getPivotSchema is not available in this WASM build");
               }
-              result = cloneToPlainData((wb as any).getPivotSchema(params.sheet, params.sourceRangeA1, params.sampleSize));
+              result = cloneToPlainData(
+                (wb as any).getPivotSchema(sheetNameOrDefault(params.sheet), params.sourceRangeA1, params.sampleSize)
+              );
               break;
             case "getPivotFieldItems":
               if (typeof (wb as any).getPivotFieldItems !== "function") {
@@ -1076,7 +1089,9 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                   "getPivotFieldItems: WasmWorkbook.getPivotFieldItems is not available in this WASM build"
                 );
               }
-              result = cloneToPlainData((wb as any).getPivotFieldItems(params.sheet, params.sourceRangeA1, params.field));
+              result = cloneToPlainData(
+                (wb as any).getPivotFieldItems(sheetNameOrDefault(params.sheet), params.sourceRangeA1, params.field)
+              );
               break;
             case "getPivotFieldItemsPaged":
               if (typeof (wb as any).getPivotFieldItemsPaged !== "function") {
@@ -1085,7 +1100,13 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 );
               }
               result = cloneToPlainData(
-                (wb as any).getPivotFieldItemsPaged(params.sheet, params.sourceRangeA1, params.field, params.offset, params.limit)
+                (wb as any).getPivotFieldItemsPaged(
+                  sheetNameOrDefault(params.sheet),
+                  params.sourceRangeA1,
+                  params.field,
+                  params.offset,
+                  params.limit
+                )
               );
               break;
             case "calculatePivot":
@@ -1096,7 +1117,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               // mappings (JSON cloning would drop `undefined` object keys entirely).
               {
                 const raw = (wb as any).calculatePivot(
-                  params.sheet,
+                  sheetNameOrDefault(params.sheet),
                   params.sourceRangeA1,
                   params.destinationTopLeftA1,
                   params.config
