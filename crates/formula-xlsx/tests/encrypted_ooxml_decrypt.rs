@@ -185,3 +185,36 @@ fn xlsxpackage_from_bytes_with_password_decrypts_agile_and_standard_xlsm() {
         assert!(!vba.is_empty(), "expected vbaProject.bin to be non-empty");
     }
 }
+
+#[test]
+fn decrypts_standard_cryptoapi_fixture_produced_by_poi() {
+    // Fixture lives in `formula-io` because it is also used by lower-level CryptoAPI tests.
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../formula-io/tests/fixtures/offcrypto_standard_cryptoapi_password.xlsx");
+    let bytes = std::fs::read(&path).unwrap_or_else(|err| panic!("read fixture {path:?}: {err}"));
+
+    let cursor = Cursor::new(bytes);
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open OLE container");
+    let decrypted =
+        decrypt_ooxml_from_cfb(&mut ole, PASSWORD).expect("decrypt POI-encrypted workbook");
+    assert!(decrypted.starts_with(b"PK"));
+
+    // The workbook contains a single sheet ("Sheet1") with cell A1="hello".
+    let pkg = XlsxPackage::from_bytes(&decrypted).expect("open decrypted package as XLSX");
+    assert!(
+        pkg.part_names()
+            .any(|n| n.eq_ignore_ascii_case("xl/workbook.xml")),
+        "decrypted package missing xl/workbook.xml"
+    );
+
+    // Tolerate both sharedStrings and inline string storage.
+    let has_hello = pkg
+        .part("xl/sharedStrings.xml")
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .is_some_and(|xml| xml.contains("hello"))
+        || pkg
+            .part("xl/worksheets/sheet1.xml")
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            .is_some_and(|xml| xml.contains("hello"));
+    assert!(has_hello, "expected decrypted workbook to contain the string 'hello'");
+}

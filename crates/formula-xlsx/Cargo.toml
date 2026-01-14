@@ -22,6 +22,7 @@ cipher = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 digest = "0.10"
 hmac = "0.12"
+md-5 = "0.10"
 formula-engine = { path = "../formula-engine" }
 formula-format = { path = "../formula-format" }
 formula-columnar = { path = "../formula-columnar" }
