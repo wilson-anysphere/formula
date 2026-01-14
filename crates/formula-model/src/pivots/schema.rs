@@ -728,7 +728,7 @@ mod tests {
         assert_eq!(col.as_cache_field_name(), None);
         // `display_string` is intended for UI and uses a minimal DAX-like shape.
         assert_eq!(col.display_string(), "Dim Product[Category]");
-        // `Display` always quotes the table name to match `formula_dax` / Excel semantics.
+        // `Display` quotes table names when required by DAX/Excel semantics.
         assert_eq!(col.to_string(), "'Dim Product'[Category]");
         assert!(col != "Dim Product");
 

@@ -50,7 +50,6 @@ pub use apply::{
     apply_pivot_cell_writes_to_worksheet, apply_pivot_result_to_worksheet, PivotApplyError,
     PivotApplyOptions,
 };
-
 #[derive(Debug, Error)]
 pub enum PivotError {
     #[error("worksheet not found: {0}")]
