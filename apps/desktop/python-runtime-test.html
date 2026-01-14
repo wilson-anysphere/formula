@@ -12,7 +12,10 @@
       import { MockWorkbook } from "@formula/python-runtime/test-utils";
 
       globalThis.__formulaPythonRuntime = { PyodideRuntime, MockWorkbook };
-      // Optional: set `globalThis.__pyodideIndexURL` to override where Pyodide loads from.
+      // This test page is used by Playwright e2e tests, which expect the Pyodide
+      // distribution to be self-hosted under `/pyodide/...` (populated by
+      // `scripts/ensure-pyodide-assets.mjs`).
+      globalThis.__pyodideIndexURL = "/pyodide/v0.25.1/full/";
     </script>
   </body>
 </html>
