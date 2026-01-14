@@ -509,6 +509,9 @@ GitHub Releases `latest.json` manifest; see `docs/release.md`):
 - `plugins.updater.endpoints` → update JSON endpoint(s). This repo defaults to the GitHub Releases manifest:
   - `https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json`
   - (The matching signature, `latest.json.sig`, is uploaded by `tauri-action` and verified using `pubkey`.)
+- Each update payload is signed using the same updater key:
+  - Inline: `latest.json.platforms[*].signature` (per-platform payload signature)
+  - Detached: `<asset>.sig` files uploaded alongside the release artifacts (useful for offline verification)
 - `plugins.updater.dialog: false` → the Rust host emits events instead of showing a built-in dialog (custom UI in the frontend)
 - `plugins.updater.windows.installMode` controls the Windows update install mode (currently `passive`)
 
