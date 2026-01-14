@@ -130,6 +130,13 @@ Notes:
 
   A scheduled cross-platform GitHub Actions workflow also runs this benchmark daily and uploads JSON + log artifacts per OS:
   - `.github/workflows/desktop-perf-platform-matrix.yml`
+    - per-OS artifacts: `desktop-perf-<os>`
+    - cross-OS merged artifact: `desktop-perf-platform-matrix` (`desktop-perf-platform-matrix.json`)
+    - includes best-effort WebView runtime metadata (WebKitGTK / WKWebView / WebView2 version) to help attribute regressions to runner image updates
+
+  For on-demand PR runs (same-repo PRs only), maintainers can apply the `desktop-perf-matrix` / `run-desktop-perf` label to trigger:
+  - `.github/workflows/desktop-perf-platform-matrix-pr.yml`
+    - runs the same matrix on the PR head SHA and posts a summary comment to the PR
 
 ### Idle memory benchmark (desktop process RSS)
 
@@ -176,8 +183,8 @@ Tuning knobs:
 - `FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1` (or `--enforce`) to fail the command when p95 exceeds the budget
 - `FORMULA_RUN_DESKTOP_MEMORY_BENCH=1` to allow running in CI (the runner skips in CI by default)
 
-The scheduled cross-platform workflow (`.github/workflows/desktop-perf-platform-matrix.yml`) also runs this benchmark
-daily and uploads per-OS JSON + logs, along with the startup timings.
+  The scheduled cross-platform workflow (`.github/workflows/desktop-perf-platform-matrix.yml`) also runs this benchmark
+  daily and uploads per-OS JSON + logs, along with the startup timings (and a cross-OS merged summary artifact).
 
 ### Size report (dist + binary + installer artifacts)
 
