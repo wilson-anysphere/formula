@@ -245,7 +245,7 @@ jobs:
         # If plugins.updater.active=true but updater signing secrets are missing, the release would upload
         # unsigned updater metadata (missing `latest.json.sig`) and auto-update would not work.
         if: steps.params.outputs.upload == 'true'
-        run: node scripts/ci/check-tauri-updater-secrets.mjs
+        run: node scripts/check-updater-signing-secrets.mjs
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
