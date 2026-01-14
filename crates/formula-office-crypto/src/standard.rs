@@ -433,16 +433,6 @@ pub(crate) fn verify_password_standard(
     }
 }
 
-#[allow(dead_code)]
-fn verify_password_standard_with_key(
-    header: &EncryptionHeader,
-    verifier: &EncryptionVerifier,
-    hash_alg: HashAlgorithm,
-    key0: &[u8],
-) -> Result<(), OfficeCryptoError> {
-    verify_password_standard_with_key_and_mode(header, verifier, hash_alg, key0).map(|_| ())
-}
-
 fn verify_password_standard_rc4_key_style(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
