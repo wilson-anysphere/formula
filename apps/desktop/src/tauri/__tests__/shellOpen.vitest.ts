@@ -92,6 +92,23 @@ describe("shellOpen", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it("blocks http(s) URLs with userinfo even when the Tauri API is available", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    await expect(shellOpen("https://user:pass@example.com")).rejects.toThrow(/username\/password/i);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("blocks http(s) URLs with userinfo in web builds", async () => {
+    (globalThis as any).__TAURI__ = undefined;
+    const winOpen = vi.fn();
+    (globalThis as any).window = { open: winOpen };
+
+    await expect(shellOpen("https://user:pass@example.com")).rejects.toThrow(/username\/password/i);
+    expect(winOpen).not.toHaveBeenCalled();
+  });
+
   it("does not fall back to window.open when __TAURI__ is present but the invoke API is missing", async () => {
     (globalThis as any).__TAURI__ = { plugin: {} };
     const winOpen = vi.fn();

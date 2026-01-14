@@ -71,6 +71,9 @@ export async function shellOpen(url: string): Promise<void> {
   if (BLOCKED_PROTOCOLS.has(protocol)) {
     throw new Error(`Refusing to open URL with blocked protocol "${protocol}:"`);
   }
+  if ((protocol === "http" || protocol === "https") && (parsed.username !== "" || parsed.password !== "")) {
+    throw new Error("Refusing to open URL containing a username/password");
+  }
 
   const tauri = getTauriGlobalOrNull();
   const invoke = getTauriInvokeOrNull();

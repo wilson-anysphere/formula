@@ -50,6 +50,11 @@ export async function openExternalHyperlink(uri, deps) {
   if (BLOCKED_PROTOCOLS.has(protocol)) {
     return false;
   }
+  if ((protocol === "http" || protocol === "https") && (parsed.username || parsed.password)) {
+    // Userinfo can be used to construct misleading URLs (e.g. `https://trusted.com@evil.com/...`)
+    // and is never required for typical external navigation.
+    return false;
+  }
 
   // In the desktop shell, link opening is routed through a Rust command that enforces a strict
   // scheme allowlist. Keep the JS allowlist in sync (do not allow overrides in Tauri builds).

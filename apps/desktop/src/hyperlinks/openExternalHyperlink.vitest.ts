@@ -38,6 +38,22 @@ describe("openExternalHyperlink", () => {
     expect(shellOpen).not.toHaveBeenCalled();
   });
 
+  it("blocks http(s) links with userinfo", async () => {
+    (globalThis as any).__TAURI__ = undefined;
+
+    const shellOpen = vi.fn().mockResolvedValue(undefined);
+    const confirmUntrustedProtocol = vi.fn().mockResolvedValue(true);
+    const permissions = { request: vi.fn().mockResolvedValue(true) };
+
+    await expect(
+      openExternalHyperlink("https://user:pass@example.com", { shellOpen, confirmUntrustedProtocol, permissions }),
+    ).resolves.toBe(false);
+
+    expect(confirmUntrustedProtocol).not.toHaveBeenCalled();
+    expect(permissions.request).not.toHaveBeenCalled();
+    expect(shellOpen).not.toHaveBeenCalled();
+  });
+
   it("blocks non-allowlisted schemes in Tauri builds without prompting", async () => {
     (globalThis as any).__TAURI__ = { core: { invoke: vi.fn() } };
 
