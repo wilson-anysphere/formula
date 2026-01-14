@@ -54,15 +54,14 @@ run_metadata() {
     return 0
   fi
 
-  # Always print Cargo's actual error output for debugging. If the failure is due
-  # to a stale lockfile, add a short remediation hint on top.
-  cat "$err" >&2 || true
-
   if grep -Eqi "needs to be updated but --locked was passed|but --locked was passed to prevent this" "$err"; then
     echo "::error::Cargo.lock is out of date (${context}). Run 'cargo generate-lockfile' (or build locally) and commit the updated Cargo.lock."
   else
     echo "::error::cargo metadata failed (${context}). See logs above."
   fi
+
+  # Print Cargo's actual error output for debugging.
+  cat "$err" >&2 || true
 
   rm -f "$err"
   return 1
