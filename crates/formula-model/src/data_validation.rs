@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::value::text_eq_case_insensitive;
 use crate::{CellValue, Range};
 
 pub type DataValidationId = u32;
@@ -361,7 +362,10 @@ pub fn validate_value(
                 );
             }
 
-            if allowed.iter().any(|v| case_insensitive_eq(v, text.trim())) {
+            if allowed
+                .iter()
+                .any(|v| text_eq_case_insensitive(v, text.trim()))
+            {
                 DataValidationResult::ok()
             } else {
                 DataValidationResult::fail(validation, DataValidationErrorKind::NotInList)
@@ -567,13 +571,6 @@ fn parse_list_constant(formula: &str) -> Option<Vec<String>> {
         .filter(|s| !s.is_empty())
         .collect();
     Some(items)
-}
-
-fn case_insensitive_eq(a: &str, b: &str) -> bool {
-    if a.eq_ignore_ascii_case(b) {
-        return true;
-    }
-    a.to_lowercase() == b.to_lowercase()
 }
 
 fn coerce_number(value: &CellValue) -> Option<f64> {

@@ -258,6 +258,20 @@ fn list_validation_supports_constants_and_callback_sources() {
 }
 
 #[test]
+fn list_validation_is_case_insensitive_for_unicode_text() {
+    let ctx = TestCtx;
+
+    // Unicode-aware case-insensitive matching should behave like Excel (ß -> SS).
+    let constant = dv(DataValidationKind::List, None, "\"Maß\"", None);
+    assert!(validate_value(
+        &constant,
+        &CellValue::String("MASS".to_string()),
+        &ctx
+    )
+    .ok);
+}
+
+#[test]
 fn list_and_text_validations_use_rich_value_display_strings() {
     let ctx = TestCtx;
 
