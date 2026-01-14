@@ -57,12 +57,12 @@ The backend abstraction exists so the engine can:
 
 `TableBackend` supports optional accelerations via methods like:
 
-- `stats_sum`, `stats_min`, `stats_max`, `stats_distinct_count`, `stats_has_blank`
+- `stats_sum`, `stats_min`, `stats_max`, `stats_non_blank_count`, `stats_distinct_count`, `stats_has_blank`
 - `dictionary_values`
 - `filter_eq`, `filter_in`
 - `distinct_values_filtered`
 - `group_by_aggregations`
-- `hash_join` (when both sides are backed by `formula-columnar`)
+- `columnar_table` / `hash_join` (when backed by `formula-columnar`)
 
 #### In-memory backend (`InMemoryTableBackend`)
 
