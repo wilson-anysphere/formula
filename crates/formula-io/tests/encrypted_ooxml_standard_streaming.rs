@@ -45,18 +45,22 @@ fn decrypts_standard_fixture_via_streaming_reader() {
     )
     .expect("open standard.xlsx with password");
 
-    let Workbook::Xlsx(package) = decrypted else {
-        panic!("expected Workbook::Xlsx for decrypted Standard workbook");
+    // `open_workbook_with_options` may return either:
+    // - `Workbook::Model` for Standard/CryptoAPI AES (streaming decrypt open path), or
+    // - `Workbook::Xlsx` for other encrypted OOXML variants (in-memory decrypt to a preserved ZIP).
+    //
+    // Normalize to a model workbook so we can validate contents regardless of the internal open path.
+    let decrypted_model = match decrypted {
+        Workbook::Model(workbook) => workbook,
+        Workbook::Xlsx(package) => {
+            let decrypted_bytes = package
+                .write_to_bytes()
+                .expect("serialize decrypted workbook package to bytes");
+            formula_xlsx::read_workbook_from_reader(std::io::Cursor::new(decrypted_bytes))
+                .expect("parse decrypted bytes to model workbook")
+        }
+        other => panic!("expected Workbook::Model or Workbook::Xlsx, got {other:?}"),
     };
-
-    // Materialize the decrypted ZIP bytes and parse them into a model workbook so we can validate
-    // cell contents. (The streaming decrypt path itself is exercised by unit tests inside
-    // `encrypted_ooxml.rs`.)
-    let decrypted_bytes = package
-        .write_to_bytes()
-        .expect("serialize decrypted workbook package to bytes");
-    let decrypted_model = formula_xlsx::read_workbook_from_reader(std::io::Cursor::new(decrypted_bytes))
-        .expect("parse decrypted bytes to model workbook");
     assert_expected_contents(&decrypted_model);
 
     // Sanity: compare some key cell values with the known-good plaintext fixture.
