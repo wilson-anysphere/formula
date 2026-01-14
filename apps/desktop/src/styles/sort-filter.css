@@ -228,3 +228,32 @@
   padding: 6px;
   border-top: 1px solid var(--formula-grid-line, var(--border));
 }
+
+/* Ensure nested shared sort/filter primitives inherit grid-scoped token styling when rendered as an in-grid dropdown. */
+.formula-table-filter-dropdown .formula-sort-filter__row {
+  color: inherit;
+}
+
+.formula-table-filter-dropdown .formula-sort-filter__row:focus-within {
+  outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+}
+
+.formula-table-filter-dropdown .formula-sort-filter__button:not(.formula-sort-filter__button--primary) {
+  background: var(--formula-grid-bg, var(--bg-primary));
+  color: inherit;
+  border-color: var(--formula-grid-line, var(--border));
+}
+
+.formula-table-filter-dropdown .formula-sort-filter__button:focus-visible {
+  border-color: var(--formula-grid-selection-border, var(--selection-border));
+}
+
+@supports selector(:has(*)) {
+  .formula-table-filter-dropdown .formula-sort-filter__row:focus-within {
+    outline: none;
+  }
+
+  .formula-table-filter-dropdown .formula-sort-filter__row:has(:focus-visible) {
+    outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+  }
+}
