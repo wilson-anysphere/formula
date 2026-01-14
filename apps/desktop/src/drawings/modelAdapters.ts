@@ -207,13 +207,14 @@ function unwrapSingletonId(value: unknown): unknown {
 }
 
 function parseSheetId(value: unknown): string | undefined {
-  if (value == null) return undefined;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
+  const unwrapped = unwrapSingletonId(value);
+  if (unwrapped == null) return undefined;
+  if (typeof unwrapped === "string") {
+    const trimmed = unwrapped.trim();
     return trimmed ? trimmed : undefined;
   }
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  if (typeof value === "bigint") return String(value);
+  if (typeof unwrapped === "number" && Number.isFinite(unwrapped)) return String(unwrapped);
+  if (typeof unwrapped === "bigint") return String(unwrapped);
   return undefined;
 }
 
