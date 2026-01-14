@@ -70,6 +70,27 @@ function normalizeFormula(value) {
 }
 
 /**
+ * Parse a run of ASCII digits into a number.
+ *
+ * Leading zeros are allowed (this is used for legacy cell key formats).
+ *
+ * @param {string} value
+ * @param {number} start
+ * @param {number} end
+ * @returns {number | null}
+ */
+function parseUnsignedInt(value, start, end) {
+  if (end <= start) return null;
+  let out = 0;
+  for (let i = start; i < end; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 48 || code > 57) return null;
+    out = out * 10 + (code - 48);
+  }
+  return out;
+}
+
+/**
  * Iterate legacy list items stored on a Map root (i.e. CRDT list items with
  * `parentSub === null`).
  *
@@ -165,39 +186,97 @@ function mapEntriesFromArrayRoot(arrayType) {
  * - `r{row}c{col}` (unit-test convenience; assumed to be in Sheet1)
  *
  * @param {string} key
- * @returns {{ sheetId: string, row: number, col: number } | null}
+ * @param {{ sheetId: string, row: number, col: number, isCanonical: boolean }} [out]
+ * @returns {{ sheetId: string, row: number, col: number, isCanonical: boolean } | null}
  */
-function parseSpreadsheetCellKey(key) {
-  const colon = key.split(":");
-  if (colon.length === 3) {
-    const sheetId = colon[0];
-    const row = Number(colon[1]);
-    const col = Number(colon[2]);
+function parseSpreadsheetCellKey(key, out) {
+  if (typeof key !== "string" || key.length === 0) return null;
+
+  const firstColon = key.indexOf(":");
+  if (firstColon !== -1) {
+    const sheetId = key.slice(0, firstColon);
     if (!sheetId) return null;
-    if (!Number.isInteger(row) || row < 0) return null;
-    if (!Number.isInteger(col) || col < 0) return null;
-    return { sheetId, row, col };
+
+    const secondColon = key.indexOf(":", firstColon + 1);
+    if (secondColon !== -1) {
+      // Reject 3+ colon encodings (unsupported).
+      if (key.indexOf(":", secondColon + 1) !== -1) return null;
+
+      const rowStart = firstColon + 1;
+      const rowEnd = secondColon;
+      const colStart = secondColon + 1;
+      const colEnd = key.length;
+
+      // Fast path: digit-only row/col segments are the common case.
+      const rowDigits = parseUnsignedInt(key, rowStart, rowEnd);
+      const colDigits = parseUnsignedInt(key, colStart, colEnd);
+      if (rowDigits != null && colDigits != null) {
+        if (!Number.isInteger(rowDigits) || rowDigits < 0) return null;
+        if (!Number.isInteger(colDigits) || colDigits < 0) return null;
+        const isCanonical =
+          (rowEnd - rowStart === 1 || key.charCodeAt(rowStart) !== 48) &&
+          (colEnd - colStart === 1 || key.charCodeAt(colStart) !== 48);
+        if (out) {
+          out.sheetId = sheetId;
+          out.row = rowDigits;
+          out.col = colDigits;
+          out.isCanonical = isCanonical;
+          return out;
+        }
+        return { sheetId, row: rowDigits, col: colDigits, isCanonical };
+      }
+
+      // Fallback: preserve legacy acceptance semantics (e.g. `1e0`, whitespace).
+      const rowStr = key.slice(rowStart, rowEnd);
+      const colStr = key.slice(colStart, colEnd);
+      const row = Number(rowStr);
+      const col = Number(colStr);
+      if (!Number.isInteger(row) || row < 0) return null;
+      if (!Number.isInteger(col) || col < 0) return null;
+      if (out) {
+        out.sheetId = sheetId;
+        out.row = row;
+        out.col = col;
+        out.isCanonical = false;
+        return out;
+      }
+      return { sheetId, row, col, isCanonical: false };
+    }
+
+    // Legacy `${sheetId}:${row},${col}` encoding.
+    const comma = key.indexOf(",", firstColon + 1);
+    if (comma === -1) return null;
+    const row = parseUnsignedInt(key, firstColon + 1, comma);
+    if (row == null) return null;
+    const col = parseUnsignedInt(key, comma + 1, key.length);
+    if (col == null) return null;
+    if (out) {
+      out.sheetId = sheetId;
+      out.row = row;
+      out.col = col;
+      out.isCanonical = false;
+      return out;
+    }
+    return { sheetId, row, col, isCanonical: false };
   }
 
-  if (colon.length === 2) {
-    const sheetId = colon[0];
-    if (!sheetId) return null;
-    const m = colon[1].match(/^(\d+),(\d+)$/);
-    if (!m) return null;
-    const row = Number(m[1]);
-    const col = Number(m[2]);
-    if (!Number.isInteger(row) || row < 0) return null;
-    if (!Number.isInteger(col) || col < 0) return null;
-    return { sheetId, row, col };
-  }
-
-  const m = key.match(/^r(\d+)c(\d+)$/);
-  if (m) {
-    const row = Number(m[1]);
-    const col = Number(m[2]);
-    if (!Number.isInteger(row) || row < 0) return null;
-    if (!Number.isInteger(col) || col < 0) return null;
-    return { sheetId: "Sheet1", row, col };
+  // Unit-test convenience `r{row}c{col}` encoding (assumed to be in Sheet1).
+  if (key.charCodeAt(0) === 114) {
+    const cIdx = key.indexOf("c", 1);
+    if (cIdx !== -1) {
+      const row = parseUnsignedInt(key, 1, cIdx);
+      const col = parseUnsignedInt(key, cIdx + 1, key.length);
+      if (row != null && col != null) {
+        if (out) {
+          out.sheetId = "Sheet1";
+          out.row = row;
+          out.col = col;
+          out.isCanonical = false;
+          return out;
+        }
+        return { sheetId: "Sheet1", row, col, isCanonical: false };
+      }
+    }
   }
 
   return null;
@@ -369,9 +448,11 @@ export function branchStateFromYjsDoc(doc) {
   /** @type {Record<string, CellMap>} */
   const cells = {};
 
+  /** @type {{ sheetId: string, row: number, col: number, isCanonical: boolean }} */
+  const parsedScratch = { sheetId: "", row: 0, col: 0, isCanonical: false };
   cellsMap.forEach((cellData, rawKey) => {
-    const parsed = parseSpreadsheetCellKey(rawKey);
-    if (!parsed?.sheetId) return;
+    const parsed = parseSpreadsheetCellKey(rawKey, parsedScratch);
+    if (!parsed) return;
     const sheetId = parsed.sheetId;
     if (!cells[sheetId]) cells[sheetId] = {};
 
@@ -389,8 +470,7 @@ export function branchStateFromYjsDoc(doc) {
     // If any representation of this cell is encrypted, treat it as encrypted and
     // do not allow plaintext duplicates (e.g. from legacy key encodings) to
     // overwrite the ciphertext in branch snapshots.
-    const canonicalKey = `${sheetId}:${parsed.row}:${parsed.col}`;
-    const isCanonical = rawKey === canonicalKey;
+    const isCanonical = parsed.isCanonical === true;
 
     if (cell.enc != null) {
       if (!existing || existing.enc == null || isCanonical) {
@@ -765,18 +845,14 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
       //
       // We still delete legacy encodings to keep the document canonical and to
       // avoid permanently re-propagating duplicate keys after a checkout.
+      /** @type {{ sheetId: string, row: number, col: number, isCanonical: boolean }} */
+      const parsedScratch = { sheetId: "", row: 0, col: 0, isCanonical: false };
       cellsMap.forEach((_cellData, rawKey) => {
         if (typeof rawKey !== "string") return;
-        const parsed = parseSpreadsheetCellKey(rawKey);
+        const parsed = parseSpreadsheetCellKey(rawKey, parsedScratch);
         if (!parsed) return;
-        const canonical = `${parsed.sheetId}:${parsed.row}:${parsed.col}`;
-
-        if (rawKey !== canonical) {
-          legacyKeysToDelete.push(rawKey);
-          if (!desiredCells.has(canonical)) canonicalKeysToClear.add(canonical);
-          return;
-        }
-
+        const canonical = parsed.isCanonical === true ? rawKey : `${parsed.sheetId}:${parsed.row}:${parsed.col}`;
+        if (parsed.isCanonical !== true) legacyKeysToDelete.push(rawKey);
         if (!desiredCells.has(canonical)) canonicalKeysToClear.add(canonical);
       });
 
