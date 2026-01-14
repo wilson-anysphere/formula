@@ -1307,21 +1307,39 @@ Validation + edge cases (Rust behavior):
 - `inputDistributions[*].cell` should not contain duplicates (not currently validated):
   - duplicates will cause the same cell to be set multiple times per iteration (last write wins), and correlated sampling becomes ill-defined.
 - Every `Distribution` is validated up-front. Invalid distributions return `WhatIfError::InvalidParams(<msg>)`, where `<msg>` is one of:
-  - normal: `"normal std_dev must be >= 0"`
-  - uniform: `"uniform min must be <= max"`
-  - triangular: `"triangular requires min <= mode <= max"`
-  - lognormal: `"lognormal std_dev must be >= 0"`
+  - normal:
+    - `"normal mean must be finite"`
+    - `"normal std_dev must be finite"`
+    - `"normal std_dev must be >= 0"`
+  - uniform:
+    - `"uniform min and max must be finite"`
+    - `"uniform min must be <= max"`
+  - triangular:
+    - `"triangular min, mode, and max must be finite"`
+    - `"triangular requires min <= mode <= max"`
+  - lognormal:
+    - `"lognormal mean must be finite"`
+    - `"lognormal std_dev must be finite"`
+    - `"lognormal std_dev must be >= 0"`
   - discrete:
     - `"discrete distribution requires at least one value"`
     - `"discrete values and probabilities must have equal length"`
+    - `"discrete values must be finite"`
+    - `"discrete probabilities must be finite"`
     - `"discrete probabilities must be >= 0"`
     - `"discrete probabilities must sum to > 0"` (does not need to equal 1)
   - beta:
+    - `"beta alpha and beta must be finite"`
     - `"beta alpha and beta must be > 0"`
+    - `"beta min and max must be finite"` (when both are provided)
     - `"beta min must be <= max"` (when both are provided)
     - When `min`/`max` are omitted/null, Rust defaults to `[0, 1]`.
-  - exponential: `"exponential rate must be > 0"`
-  - poisson: `"poisson lambda must be >= 0"`
+  - exponential:
+    - `"exponential rate must be finite"`
+    - `"exponential rate must be > 0"`
+  - poisson:
+    - `"poisson lambda must be finite"`
+    - `"poisson lambda must be >= 0"`
 - Output cells must evaluate to numbers each iteration; otherwise `WhatIfError::NonNumericCell { cell, value }`.
 - Correlations:
   - `correlations.matrix` is validated up-front. Invalid matrices return `WhatIfError::InvalidParams(<msg>)`, where `<msg>` is one of:
@@ -1333,7 +1351,15 @@ Validation + edge cases (Rust behavior):
     - `"correlation matrix entries must be within [-1, 1]"`
     - `"correlation matrix must be symmetric"`
     - `"correlation matrix is not positive definite"` (Cholesky decomposition failure)
-  - Correlated sampling is currently supported **only** when *all* input distributions are `{ type: "normal", ... }` → otherwise `InvalidParams("correlated sampling is currently supported only for normal distributions")`.
+  - When `correlations` is provided, correlated sampling uses a **Gaussian copula**:
+    1. Generate correlated standard normals using the provided correlation matrix.
+    2. Convert each normal sample `z` into a uniform sample `u = Φ(z)` (standard normal CDF).
+    3. Transform `u` through the inverse CDF of each input distribution.
+  - Correlations are supported for the following input distributions:
+    - `normal`, `uniform`, `triangular`, `lognormal`, `exponential`, `beta`
+  - Correlations are **not** supported for:
+    - `discrete` → `InvalidParams("correlated sampling is not supported for discrete distributions")`
+    - `poisson` → `InvalidParams("correlated sampling is not supported for poisson distributions")`
   - Matrix row/column order is the same as `inputDistributions` order (`matrix[i][j]` is corr(input i, input j)).
 - Histogram edge cases:
   - If all samples are identical (`min == max`), Rust returns a single bin with `count = iterations`.
