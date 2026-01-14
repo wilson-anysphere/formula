@@ -568,3 +568,27 @@ fn agile_decrypt_matches_office_crypto_reference() {
     assert_eq!(office_crypto_decrypted, plain_zip);
     assert_eq!(office_crypto_decrypted, decrypted);
 }
+
+#[test]
+fn agile_decrypt_empty_password_matches_office_crypto_reference() {
+    let password = "";
+    let plain_zip = build_zip_with_padding();
+
+    let encrypted_cfb = encrypt_zip_with_password(&plain_zip, password);
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    let decrypted =
+        decrypt_agile_encrypted_package(&encryption_info, &encrypted_package, password).unwrap();
+    assert_eq!(decrypted, plain_zip);
+
+    let mut ole = CompoundFile::open(Cursor::new(encrypted_cfb.as_slice())).expect("open cfb");
+    let decrypted_from_cfb =
+        formula_xlsx::decrypt_ooxml_from_cfb(&mut ole, password).expect("decrypt from cfb");
+    assert_eq!(decrypted_from_cfb, plain_zip);
+    assert_eq!(decrypted_from_cfb, decrypted);
+
+    let office_crypto_decrypted = office_crypto::decrypt_from_bytes(encrypted_cfb, password).unwrap();
+    assert_eq!(office_crypto_decrypted, plain_zip);
+    assert_eq!(office_crypto_decrypted, decrypted);
+}
