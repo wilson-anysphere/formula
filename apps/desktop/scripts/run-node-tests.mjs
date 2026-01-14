@@ -125,7 +125,10 @@ if (allowedFlags.has("--test-isolation")) {
 // run in parallel. Allow opting into higher parallelism via FORMULA_NODE_TEST_CONCURRENCY.
 const parsedConcurrency = Number.parseInt(process.env.FORMULA_NODE_TEST_CONCURRENCY ?? "", 10);
 const concurrency = Number.isFinite(parsedConcurrency) && parsedConcurrency > 0 ? parsedConcurrency : 1;
-const nodeArgs = [...baseNodeArgs, `--test-concurrency=${concurrency}`, "--test", ...runnableFiles];
+const supportsTestConcurrency = supportsNodeFlag(`--test-concurrency=${concurrency}`);
+const nodeArgs = [...baseNodeArgs];
+if (supportsTestConcurrency) nodeArgs.push(`--test-concurrency=${concurrency}`);
+nodeArgs.push("--test", ...runnableFiles);
 const child = spawn(process.execPath, nodeArgs, { stdio: "inherit" });
 child.on("exit", (code, signal) => {
   if (signal) {
@@ -134,6 +137,19 @@ child.on("exit", (code, signal) => {
   }
   process.exit(code ?? 1);
 });
+
+/**
+ * Some `node --test` flags are relatively new. We want this runner to stay usable even when
+ * a sandbox pins an older Node.js version (engines: >=18), so probe for support before
+ * passing optional flags.
+ *
+ * @param {string} flag
+ * @returns {boolean}
+ */
+function supportsNodeFlag(flag) {
+  const probe = spawnSync(process.execPath, [flag, "--version"], { stdio: "ignore" });
+  return probe.status === 0;
+}
 
 /**
  * @param {string} dir
