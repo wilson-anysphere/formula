@@ -76,6 +76,26 @@ test("fails when index.html has no entry script tags", () => {
   assert.match(proc.stderr, /No JS <script src/);
 });
 
+test("supports fractional budgets (KiB) without rounding", () => {
+  const { root, distDir } = writeFixture({
+    indexHtml: `<!doctype html><html><head><script type="module" src="/assets/entry.js"></script></head></html>`,
+    files: {
+      // 1200 bytes ≈ 1.17 KiB (should be allowed by a 1.4 KiB budget).
+      "assets/entry.js": "x".repeat(1200),
+    },
+  });
+
+  const proc = run(distDir, {
+    env: {
+      FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB: "1.4",
+      FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB: "1.4",
+    },
+  });
+  fs.rmSync(root, { recursive: true, force: true });
+
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("fails when budgets are exceeded", () => {
   const { root, distDir } = writeFixture({
     indexHtml: `<!doctype html><html><head><script type="module" src="/assets/entry.js"></script></head></html>`,
@@ -117,6 +137,31 @@ test("warn-only prints violations but exits 0", () => {
 
   assert.equal(proc.status, 0);
   assert.match(proc.stderr, /JS bundle size budgets exceeded/i);
+});
+
+test("skip gzip prints placeholders and exits 0", () => {
+  const { root, distDir } = writeFixture({
+    indexHtml: `<!doctype html><html><head><script type="module" src="/assets/entry.js"></script></head></html>`,
+    files: {
+      "assets/entry.js": "console.log('entry');\n",
+    },
+  });
+
+  const proc = run(distDir, {
+    env: {
+      FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP: "1",
+    },
+  });
+  fs.rmSync(root, { recursive: true, force: true });
+
+  assert.equal(proc.status, 0, proc.stderr);
+
+  const totalRow = proc.stdout.split("\n").find((line) => line.startsWith("| Total JS (dist/**"));
+  assert.ok(totalRow, "expected Total JS row in output");
+
+  const cols = totalRow.split("|").map((s) => s.trim());
+  // cols: [ "", "Metric", "Files", "Bytes", "KiB", "Gzip KiB", "Budget (KiB)", "Status", "" ]
+  assert.equal(cols[5], "—", `expected gzip column to be placeholder, got: ${cols[5]}`);
 });
 
 test("optional assets total budget (dist/assets/**/*.js) can be enforced separately", () => {
