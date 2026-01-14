@@ -13,6 +13,13 @@ fn fixture_path() -> PathBuf {
         .join("biff8_rc4_standard_pw_open.xls")
 }
 
+fn basic_fixture_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("basic.xls")
+}
+
 fn read_workbook_stream_from_xls_bytes(data: &[u8]) -> Vec<u8> {
     let cursor = Cursor::new(data.to_vec());
     let mut ole = cfb::CompoundFile::open(cursor).expect("open xls cfb");
@@ -179,3 +186,16 @@ fn rc4_standard_unsupported_version_errors() {
     ));
 }
 
+#[test]
+fn import_unencrypted_xls_with_password_is_unaffected() {
+    // Supplying a password for a non-encrypted workbook should be ignored and import should still
+    // succeed.
+    let result = formula_xls::import_xls_path_with_password(basic_fixture_path(), PASSWORD)
+        .expect("import xls");
+
+    let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
+    assert_eq!(
+        sheet.value_a1("A1").unwrap(),
+        CellValue::String("Hello".to_owned())
+    );
+}
