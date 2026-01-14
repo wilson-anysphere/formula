@@ -16,6 +16,7 @@ import { applyPivotCellUpdates } from "../../pivots/applyUpdates.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
+import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../../collab/permissionGuards";
 
 type RangeRect = { startRow: number; startCol: number; endRow: number; endCol: number };
 
@@ -31,6 +32,13 @@ type Props = {
   invoke?: TauriInvoke;
   drainBackendSync?: () => Promise<void>;
   sheetNameResolver?: SheetNameResolver | null;
+  /**
+   * Optional SpreadsheetApp-like object for read-only detection.
+   *
+   * Pivot create/refresh operations mutate the workbook and should be disabled for
+   * viewer/commenter roles.
+   */
+  app?: { isReadOnly?: () => boolean } | null;
 };
 
 function cellToA1(row: number, col: number): string {
@@ -171,6 +179,57 @@ function estimatePivotOutputRect(params: {
 export function PivotBuilderPanelContainer(props: Props) {
   const doc = props.getDocumentController();
   const sheetNameResolver = props.sheetNameResolver ?? null;
+  const app = props.app ?? null;
+
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(() => {
+    if (!app || typeof app.isReadOnly !== "function") return false;
+    try {
+      return Boolean(app.isReadOnly());
+    } catch {
+      return false;
+    }
+  });
+
+  const [isEditing, setIsEditing] = useState<boolean>(() => {
+    const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+    return globalEditing === true;
+  });
+
+  const mutationsDisabled = isReadOnly || isEditing;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onReadOnlyChanged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail as any;
+      if (detail && typeof detail.readOnly === "boolean") {
+        setIsReadOnly(detail.readOnly);
+        return;
+      }
+      if (!app || typeof app.isReadOnly !== "function") return;
+      try {
+        setIsReadOnly(Boolean(app.isReadOnly()));
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+    return () => window.removeEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+  }, [app]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onEditingChanged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail as any;
+      if (detail && typeof detail.isEditing === "boolean") {
+        setIsEditing(detail.isEditing);
+        return;
+      }
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      setIsEditing(globalEditing === true);
+    };
+    window.addEventListener("formula:spreadsheet-editing-changed", onEditingChanged as EventListener);
+    return () => window.removeEventListener("formula:spreadsheet-editing-changed", onEditingChanged as EventListener);
+  }, []);
 
   const activeSheetId = props.getActiveSheetId?.() ?? doc?.getSheetIds?.()?.[0] ?? "Sheet1";
 
@@ -401,7 +460,7 @@ export function PivotBuilderPanelContainer(props: Props) {
     return getSheetNameValidationErrorMessage(newSheetName, { existingNames: existingSheetNames });
   }, [destinationKind, existingSheetNames, newSheetName]);
 
-  const canCreate = !busy && !sourceError && !fieldsError && availableFields.length > 0 && !newSheetNameError;
+  const canCreate = !mutationsDisabled && !busy && !sourceError && !fieldsError && availableFields.length > 0 && !newSheetNameError;
 
   const destinationSummary = useMemo(() => {
     if (destinationKind === "new") {
@@ -475,6 +534,10 @@ export function PivotBuilderPanelContainer(props: Props) {
   const createPivot = useCallback(
     async (cfg: PivotTableConfig) => {
       setActionError(null);
+      if (mutationsDisabled) {
+        setActionError(isReadOnly ? READ_ONLY_SHEET_MUTATION_MESSAGE : "Finish editing before creating a pivot table.");
+        return;
+      }
 
       const backend = resolveBackend();
       if (!backend) {
@@ -579,6 +642,8 @@ export function PivotBuilderPanelContainer(props: Props) {
       }
     },
     [
+      isReadOnly,
+      mutationsDisabled,
       availableFields.length,
       activeSheetId,
       destCellA1,
@@ -602,6 +667,10 @@ export function PivotBuilderPanelContainer(props: Props) {
   const refreshPivot = useCallback(
     async (pivotId: string) => {
       setActionError(null);
+      if (mutationsDisabled) {
+        setActionError(isReadOnly ? READ_ONLY_SHEET_MUTATION_MESSAGE : "Finish editing before refreshing a pivot table.");
+        return;
+      }
 
       const backend = resolveBackend();
       if (!backend) {
@@ -637,7 +706,7 @@ export function PivotBuilderPanelContainer(props: Props) {
         setBusy(null);
       }
     },
-    [doc, ensureUpdatesEditable, loadPivotList, props.drainBackendSync, resolveBackend],
+    [doc, ensureUpdatesEditable, isReadOnly, loadPivotList, mutationsDisabled, props.drainBackendSync, resolveBackend],
   );
 
   return (
@@ -805,7 +874,7 @@ export function PivotBuilderPanelContainer(props: Props) {
                   type="button"
                   data-testid={`pivot-refresh-${p.id}`}
                   onClick={() => void refreshPivot(p.id)}
-                  disabled={busy != null}
+                  disabled={busy != null || mutationsDisabled}
                 >
                   {t("pivotBuilder.pivots.refresh")}
                 </button>

@@ -556,6 +556,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
 
     if (panelId === PanelIds.PIVOT_BUILDER) {
       makeBodyFillAvailableHeight(body);
+      const app = options.getSpreadsheetApp?.() ?? null;
       renderReactPanel(
         panelId,
         body,
@@ -566,6 +567,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
             getActiveSheetId={options.getActiveSheetId}
             getSelection={options.getSelection as any}
             sheetNameResolver={options.sheetNameResolver ?? null}
+            app={app as any}
             invoke={options.invoke as any}
             drainBackendSync={options.drainBackendSync}
           />
