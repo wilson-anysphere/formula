@@ -1563,4 +1563,109 @@ mod tests {
             "res={res:?}"
         );
     }
+
+    #[test]
+    fn decryptor_rejects_cryptoapi_encryptioninfo_header_size_out_of_bounds() {
+        // FILEPASS RC4 CryptoAPI with a valid dwEncryptionInfoLen, but an EncryptionInfo headerSize
+        // that exceeds the available bytes.
+        let mut enc_info = Vec::new();
+        enc_info.extend_from_slice(&4u16.to_le_bytes()); // major
+        enc_info.extend_from_slice(&2u16.to_le_bytes()); // minor
+        enc_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_info.extend_from_slice(&1u32.to_le_bytes()); // headerSize (needs 1 byte, but none provided)
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+        payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+        payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&enc_info);
+
+        let stream = [
+            record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
+            record(RECORD_FILEPASS, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let res = decrypt_biff_workbook_stream(&stream, "pw");
+        assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
+    }
+
+    #[test]
+    fn decryptor_rejects_cryptoapi_encryptionverifier_hash_truncation() {
+        // Build an EncryptionInfo blob whose verifier declares a 20-byte verifier hash but does not
+        // provide enough bytes.
+        let mut enc_info = Vec::new();
+        enc_info.extend_from_slice(&4u16.to_le_bytes()); // major
+        enc_info.extend_from_slice(&2u16.to_le_bytes()); // minor
+        enc_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_info.extend_from_slice(&32u32.to_le_bytes()); // headerSize
+        enc_info.extend_from_slice(&[0u8; 32]); // EncryptionHeader (contents don't matter; verifier parsing should fail first)
+
+        // EncryptionVerifier:
+        //   saltSize=16, salt=16, encryptedVerifier=16, verifierHashSize=20, encryptedVerifierHash=10 (truncated)
+        enc_info.extend_from_slice(&16u32.to_le_bytes());
+        enc_info.extend_from_slice(&[0u8; 16]);
+        enc_info.extend_from_slice(&[0u8; 16]);
+        enc_info.extend_from_slice(&20u32.to_le_bytes());
+        enc_info.extend_from_slice(&[0u8; 10]);
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+        payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+        payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&enc_info);
+
+        let stream = [
+            record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
+            record(RECORD_FILEPASS, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let res = decrypt_biff_workbook_stream(&stream, "pw");
+        assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
+    }
+
+    #[test]
+    fn decryptor_rejects_legacy_cryptoapi_filepass_payload_too_short() {
+        // Legacy FILEPASS layout uses wEncryptionInfo==0x0004 and requires at least 14 bytes before
+        // the EncryptionHeader bytes begin. Ensure we return a structured error (not a panic) when
+        // the record payload is shorter than that.
+        let payload = [
+            ENCRYPTION_TYPE_RC4.to_le_bytes(),            // wEncryptionType
+            ENCRYPTION_INFO_CRYPTOAPI_LEGACY.to_le_bytes(), // wEncryptionInfo
+        ]
+        .concat();
+
+        let stream = [
+            record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
+            record(RECORD_FILEPASS, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let res = decrypt_biff_workbook_stream(&stream, "pw");
+        assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 32,
+            rng_seed: proptest::test_runner::RngSeed::Fixed(0xDEC0DE),
+            failure_persistence: None,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn decryptor_is_panic_free_on_arbitrary_input(buf in proptest::collection::vec(any::<u8>(), 0..=4096)) {
+            prop_assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _ = decrypt_biff_workbook_stream(&buf, "pw");
+                }))
+                .is_ok(),
+                "decrypt_biff_workbook_stream panicked"
+            );
+        }
+    }
 }
