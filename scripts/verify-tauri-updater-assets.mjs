@@ -149,6 +149,55 @@ function isPlainObject(value) {
 }
 
 /**
+ * Best-effort locate a Tauri updater `platforms` map within a JSON payload.
+ *
+ * Tauri v1/v2 manifests typically have `{ platforms: { ... } }` at the top-level, but we keep this
+ * robust in case future versions nest the object.
+ *
+ * @param {unknown} root
+ * @returns {{ platforms: Record<string, any>; path: string[] } | null}
+ */
+export function findPlatformsObject(root) {
+  if (!root || (typeof root !== "object" && !Array.isArray(root))) return null;
+
+  /** @type {{ value: unknown; path: string[] }[]} */
+  const queue = [{ value: root, path: [] }];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    const { value, path: currentPath } = current;
+
+    if (isPlainObject(value)) {
+      const platforms = /** @type {any} */ (value).platforms;
+      if (isPlainObject(platforms)) {
+        return { platforms, path: [...currentPath, "platforms"] };
+      }
+
+      if (currentPath.length >= 8) continue;
+      for (const [key, child] of Object.entries(value)) {
+        if (child && (isPlainObject(child) || Array.isArray(child))) {
+          queue.push({ value: child, path: [...currentPath, key] });
+        }
+      }
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      if (currentPath.length >= 8) continue;
+      for (let i = 0; i < value.length; i += 1) {
+        const child = value[i];
+        if (child && (isPlainObject(child) || Array.isArray(child))) {
+          queue.push({ value: child, path: [...currentPath, String(i)] });
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * @param {string} urlOrPath
  */
 function filenameFromUrl(urlOrPath) {
@@ -527,11 +576,14 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  const msg = err instanceof Error ? err.stack || err.message : String(err);
-  console.error(`verify-tauri-updater-assets: ${msg}`);
-  process.exit(1);
-});
+// Only execute the CLI when invoked as the entrypoint; allow importing this module from node:test.
+if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    const msg = err instanceof Error ? err.stack || err.message : String(err);
+    console.error(`verify-tauri-updater-assets: ${msg}`);
+    process.exit(1);
+  });
+}
 
 /**
  * @param {{ apiBase: string; repo: string; tag: string; token: string; wantsManifestSig: boolean }} opts
@@ -700,8 +752,9 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
     }
   }
 
-  const platforms = manifest?.platforms;
-  if (!isPlainObject(platforms)) {
+  const platformsFound = findPlatformsObject(manifest);
+  const platforms = platformsFound?.platforms;
+  if (!platformsFound || !platforms) {
     throw new VerificationFailure({
       retryable: false,
       logLines,
@@ -754,7 +807,8 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
   }
 
   const groups = groupPlatformKeys(platformKeys);
-  logLines.push(`- Platforms in latest.json: ${platformKeys.join(", ")}`);
+  const platformsPath = platformsFound.path.join(".");
+  logLines.push(`- Platforms in latest.json (${platformKeys.length}) at ${platformsPath}: ${platformKeys.join(", ")}`);
 
   /** @type {{platform: string, url: string, assetName: string, inlineSig: boolean, sigAssetName: string, sigAssetPresent: boolean}[]} */
   const updaterEntries = [];
