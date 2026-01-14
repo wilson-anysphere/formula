@@ -1028,36 +1028,37 @@ impl DataModel {
                         v.is_blank() || &v != key
                     });
                 }
-                UnmatchedFactRows::Dense { bits, len, count } => {
+                UnmatchedFactRows::Dense { .. } => {
                     let key = &key_for_updates;
-                    let len = *len;
-                    let mut clear_row = |row: usize| {
-                        if row >= len {
-                            return;
-                        }
-                        let word = row / 64;
-                        let bit = row % 64;
-                        let mask = 1u64 << bit;
-                        if (bits[word] & mask) != 0 {
-                            bits[word] &= !mask;
-                            *count = (*count).saturating_sub(1);
-                        }
-                    };
-
                     if let Some(rows) = from_table_ref.filter_eq(from_idx, key) {
+                        let UnmatchedFactRows::Dense { bits, len, count } = unmatched else {
+                            unreachable!("match arm already ensures unmatched fact rows are dense");
+                        };
+                        let len = *len;
+                        let mut clear_row = |row: usize| {
+                            if row >= len {
+                                return;
+                            }
+                            let word = row / 64;
+                            let bit = row % 64;
+                            let mask = 1u64 << bit;
+                            if (bits[word] & mask) != 0 {
+                                bits[word] &= !mask;
+                                *count = (*count).saturating_sub(1);
+                            }
+                        };
+
                         for row in rows {
                             clear_row(row);
                         }
                     } else {
-                        // Fallback: scan and compare.
-                        for row in 0..from_table_ref.row_count() {
+                        // Fallback: keep only rows that are still unmatched.
+                        unmatched.retain(|row| {
                             let v = from_table_ref
-                                .value_by_idx(row, from_idx)
+                                .value_by_idx(*row, from_idx)
                                 .unwrap_or(Value::Blank);
-                            if &v == key {
-                                clear_row(row);
-                            }
-                        }
+                            v.is_blank() || &v != key
+                        });
                     }
                 }
             }
