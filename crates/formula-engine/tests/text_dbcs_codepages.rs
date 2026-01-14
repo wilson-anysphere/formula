@@ -77,3 +77,60 @@ fn byte_count_text_functions_use_dbcs_byte_semantics_under_cp950() {
     // Traditional Chinese (Big5). Choose a character that is representable as a 2-byte sequence.
     assert_dbcs_byte_semantics_for_codepage(950, "漢");
 }
+
+#[test]
+fn asc_and_dbcs_convert_ascii_fullwidth_under_all_dbcs_codepages() {
+    for codepage in [936u16, 949u16, 950u16] {
+        let mut sheet = TestSheet::new();
+        sheet.set_text_codepage(codepage);
+        assert_eq!(
+            sheet.eval(r#"=DBCS("ABC 123")"#),
+            Value::Text("ＡＢＣ　１２３".to_string()),
+            "codepage={codepage}"
+        );
+        assert_eq!(
+            sheet.eval(r#"=ASC("ＡＢＣ　１２３")"#),
+            Value::Text("ABC 123".to_string()),
+            "codepage={codepage}"
+        );
+    }
+}
+
+#[test]
+fn asc_and_dbcs_convert_compatibility_symbols_under_cp936() {
+    // Japanese (cp932) coverage already exists in `tests/functions/text_dbcs.rs`.
+    let mut sheet = TestSheet::new();
+    sheet.set_text_codepage(936);
+    assert_eq!(
+        sheet.eval(r#"=DBCS("¢£¬¯¦¥₩")"#),
+        Value::Text("￠￡￢￣￤￥￦".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=ASC("￠￡￢￣￤￥￦")"#),
+        Value::Text("¢£¬¯¦¥₩".to_string())
+    );
+}
+
+#[test]
+fn kana_conversions_are_cp932_only() {
+    // Under non-Japanese DBCS codepages, katakana should be left unchanged aside from the
+    // ASCII/fullwidth and compatibility symbol conversions.
+    let mut sheet = TestSheet::new();
+    sheet.set_text_codepage(936);
+    assert_eq!(sheet.eval(r#"=ASC("ガ")"#), Value::Text("ガ".to_string()));
+    assert_eq!(
+        sheet.eval(r#"=DBCS("ｶﾞ")"#),
+        Value::Text("ｶﾞ".to_string())
+    );
+}
+
+#[test]
+fn kana_conversions_still_apply_under_cp932() {
+    let mut sheet = TestSheet::new();
+    sheet.set_text_codepage(932);
+    assert_eq!(
+        sheet.eval(r#"=DBCS("ｶﾞ")"#),
+        Value::Text("ガ".to_string())
+    );
+    assert_eq!(sheet.eval(r#"=ASC("ガ")"#), Value::Text("ｶﾞ".to_string()));
+}
