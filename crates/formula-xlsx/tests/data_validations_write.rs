@@ -338,6 +338,35 @@ fn no_op_roundtrip_preserves_data_validations_subtree() -> Result<(), Box<dyn st
 }
 
 #[test]
+fn semantically_equivalent_formula_text_does_not_trigger_data_validations_rewrite(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // The model convention is to store formulas without a leading '='. Callers may still supply
+    // one (often with incidental whitespace after it). That should not cause us to spuriously
+    // rewrite `<dataValidations>` when the effective formula is unchanged.
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/metadata/data-validation-list.xlsx");
+    let fixture_bytes = std::fs::read(&fixture)?;
+    let original_sheet_xml = read_part(&fixture_bytes, "xl/worksheets/sheet1.xml")?;
+    let original_dv = extract_data_validations_subtree(&original_sheet_xml)
+        .expect("fixture should contain a <dataValidations> block");
+
+    let mut doc = load_from_path(&fixture)?;
+    assert_eq!(doc.workbook.sheets.len(), 1);
+    assert_eq!(doc.workbook.sheets[0].data_validations.len(), 1);
+    doc.workbook.sheets[0].data_validations[0]
+        .validation
+        .formula1 = r#"= "Yes,No""#.to_string();
+
+    let out_bytes = doc.save_to_vec()?;
+    let out_sheet_xml = read_part(&out_bytes, "xl/worksheets/sheet1.xml")?;
+    let out_dv = extract_data_validations_subtree(&out_sheet_xml)
+        .expect("output should contain a <dataValidations> block");
+
+    assert_eq!(out_dv, original_dv);
+    Ok(())
+}
+
+#[test]
 fn no_op_roundtrip_preserves_data_validations_with_xlfn_formulas(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Ensure our semantic-change detector treats `_xlfn.`-prefixed formulas as equivalent to the

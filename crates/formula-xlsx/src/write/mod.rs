@@ -1717,7 +1717,7 @@ fn normalize_dv_formula(formula: &str) -> String {
     // Match `read` normalization for data validation formulas:
     // - strip a single leading '='
     // - strip `_xlfn.` prefixes at function-call boundaries
-    crate::formula_text::strip_xlfn_prefixes(trimmed.strip_prefix('=').unwrap_or(trimmed))
+    crate::formula_text::strip_xlfn_prefixes(trimmed.strip_prefix('=').unwrap_or(trimmed).trim())
 }
 
 fn normalize_dv_ranges(ranges: &[Range]) -> Vec<(u32, u32, u32, u32)> {
