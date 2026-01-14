@@ -1055,6 +1055,7 @@ This is not an exhaustive list, but the most common contributor-facing constrain
     - `TableResult::Virtual { columns, rows }` (materialized rows with explicit `(table, column)` lineage).
   - `SUMMARIZE`/`SUMMARIZECOLUMNS` return virtual tables of grouping columns only (no computed columns).
   - `SUMMARIZE` currently requires a physical base table argument.
-  - `CALCULATE` table filter arguments must currently be physical tables (virtual tables are rejected).
+  - `CALCULATE` *table filter* arguments (table expressions used as row filters) must currently evaluate
+    to a physical table result; virtual tables are rejected.
 - **`/` operator**
   - The `/` operator performs raw `f64` division; use `DIVIDE(...)` for DAX-like blank/alternate behavior.
