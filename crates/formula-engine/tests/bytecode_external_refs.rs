@@ -1,5 +1,7 @@
 use formula_engine::eval::CellAddr;
-use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
+use formula_engine::{
+    bytecode, BytecodeCompileReason, Engine, ErrorKind, ExternalValueProvider, Value,
+};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -111,7 +113,7 @@ fn bytecode_missing_external_cell_ref_is_ref_error() {
 }
 
 #[test]
-fn bytecode_indirect_external_cell_ref_evaluates_via_provider() {
+fn bytecode_indirect_external_cell_ref_is_ref_error() {
     let mut engine = Engine::new();
     let provider = Arc::new(Provider::new());
     engine.set_external_value_provider(Some(provider.clone()));
@@ -120,25 +122,40 @@ fn bytecode_indirect_external_cell_ref_evaluates_via_provider() {
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")+1"#)
         .unwrap();
 
-    // Ensure we compile to bytecode (no AST fallback).
+    // External workbook references are not supported by INDIRECT, so this formula should fall
+    // back from bytecode when the external reference is visible at compile time.
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 0);
+    assert_eq!(stats.fallback, 1);
     assert_eq!(
-        engine.bytecode_program_count(),
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::LowerError(
+                bytecode::LowerError::ExternalReference
+            ))
+            .copied()
+            .unwrap_or(0),
         1,
-        "expected INDIRECT formulas to compile to bytecode (stats={:?}, report={:?})",
-        engine.bytecode_compile_stats(),
+        "expected INDIRECT external workbook refs to fall back due to ExternalReference (stats={stats:?}, report={:?})",
         engine.bytecode_compile_report(32)
     );
+    assert_eq!(engine.bytecode_program_count(), 0);
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(42.0));
-    assert!(
-        provider.calls() > 0,
-        "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        provider.calls(),
+        0,
+        "expected bytecode INDIRECT to reject external workbook refs without consulting the provider"
     );
 }
 
 #[test]
-fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_evaluates_via_provider() {
+fn bytecode_indirect_dynamic_external_cell_ref_is_ref_error() {
     let mut engine = Engine::new();
     let provider = Arc::new(Provider::new());
     engine.set_external_value_provider(Some(provider.clone()));
@@ -155,16 +172,20 @@ fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_evaluates_via_provid
     assert_eq!(
         engine.bytecode_program_count(),
         1,
-        "expected INDIRECT formulas to compile to bytecode (stats={:?}, report={:?})",
+        "expected dynamic INDIRECT formulas to compile to bytecode (stats={:?}, report={:?})",
         engine.bytecode_compile_stats(),
         engine.bytecode_compile_report(32)
     );
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(42.0));
-    assert!(
-        provider.calls() > 0,
-        "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        provider.calls(),
+        0,
+        "expected dynamic INDIRECT to reject external workbook refs without consulting the provider"
     );
 }
 
