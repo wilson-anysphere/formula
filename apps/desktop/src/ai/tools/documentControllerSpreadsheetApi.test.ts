@@ -819,6 +819,45 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(result.data?.values).toEqual([[2]]);
   });
 
+  it("can surface live computed formula values via getCellComputedValueForSheet (gated by include_formula_values)", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "B1", 1);
+    controller.setCellFormula("Sheet1", "A1", "B1+1");
+
+    const api = new DocumentControllerSpreadsheetApi(controller, {
+      getCellComputedValueForSheet: (sheetId, cell) => {
+        if (sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) return 2;
+        return null;
+      },
+    });
+
+    // Adapter should surface a computed `value` even though DocumentController stores `value:null` for formulas.
+    expect(api.getCell({ sheet: "Sheet1", row: 1, col: 1 })).toMatchObject({ value: 2, formula: "=B1+1" });
+
+    // ToolExecutor should still treat formula values as opt-in.
+    const executorNoValues = new ToolExecutor(api, { default_sheet: "Sheet1" });
+    const noValues = await executorNoValues.execute({
+      name: "read_range",
+      parameters: { range: "A1:A1", include_formulas: true },
+    });
+    expect(noValues.ok).toBe(true);
+    expect(noValues.tool).toBe("read_range");
+    if (!noValues.ok || noValues.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(noValues.data?.values).toEqual([[null]]);
+    expect(noValues.data?.formulas).toEqual([["=B1+1"]]);
+
+    const executorWithValues = new ToolExecutor(api, { default_sheet: "Sheet1", include_formula_values: true });
+    const withValues = await executorWithValues.execute({
+      name: "read_range",
+      parameters: { range: "A1:A1", include_formulas: true },
+    });
+    expect(withValues.ok).toBe(true);
+    expect(withValues.tool).toBe("read_range");
+    if (!withValues.ok || withValues.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(withValues.data?.values).toEqual([[2]]);
+    expect(withValues.data?.formulas).toEqual([["=B1+1"]]);
+  });
+
   it("read_range returns primitive values + formulas without per-cell controller.getCell calls", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 123);

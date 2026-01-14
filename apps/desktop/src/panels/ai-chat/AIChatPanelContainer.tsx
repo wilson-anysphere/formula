@@ -138,6 +138,13 @@ function formatToolCallForDisplay(call: LLMToolCall, sheetNameResolver: SheetNam
 
 export interface AIChatPanelContainerProps {
   getDocumentController: () => unknown;
+  /**
+   * Optional accessor for the running SpreadsheetApp instance.
+   *
+   * When provided, chat/agent can opt into reading live computed values for formula cells
+   * when `include_formula_values` is enabled.
+   */
+  getSpreadsheetApp?: () => unknown;
   getActiveSheetId?: () => string;
   /**
    * Optional UI selection provider (0-based coordinates).
@@ -240,6 +247,24 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
   const auditStore = useMemo(() => getDesktopAIAuditStore(), []);
 
   const documentController = useMemo(() => props.getDocumentController() as any, [props.getDocumentController]);
+  const getCellComputedValueForSheet = useMemo(() => {
+    if (!includeFormulaValues) return undefined;
+    let app: any = null;
+    try {
+      app = props.getSpreadsheetApp?.() as any;
+    } catch {
+      app = null;
+    }
+    const fn = app?.getCellComputedValueForSheet;
+    if (typeof fn !== "function") return undefined;
+    return (sheetId: string, cell: { row: number; col: number }) => {
+      try {
+        return fn.call(app, sheetId, cell);
+      } catch {
+        return undefined;
+      }
+    };
+  }, [includeFormulaValues, props.getSpreadsheetApp]);
   const schemaProvider = useMemo(() => {
     try {
       const wb = props.getSearchWorkbook?.();
@@ -277,6 +302,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
       getSelectedRange: props.getSelection as any,
       schemaProvider,
       createChart: props.createChart,
+      getCellComputedValueForSheet,
       auditStore,
       onApprovalRequired,
       previewOptions: { approval_cell_threshold: 0 },
@@ -288,12 +314,14 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     auditStore,
     client,
     documentController,
+    getCellComputedValueForSheet,
     includeFormulaValues,
     model,
     onApprovalRequired,
     props.createChart,
     props.getActiveSheetId,
     props.getSelection,
+    props.getSpreadsheetApp,
     props.sheetNameResolver,
     schemaProvider,
     ragService,
@@ -502,6 +530,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
         llmClient: client as any,
         auditStore,
         createChart: props.createChart,
+        getCellComputedValueForSheet,
         schemaProvider,
         onProgress: (event) =>
           setAgentEvents((prev) => {
@@ -539,6 +568,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     client,
     includeFormulaValues,
     documentController,
+    getCellComputedValueForSheet,
     model,
     onApprovalRequired,
     props,

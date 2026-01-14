@@ -47,6 +47,13 @@ export interface InlineEditControllerOptions {
    * (UI labels and LLM prompt context).
    */
   sheetNameResolver?: SheetNameResolver | null;
+  /**
+   * Optional provider for live computed values of formula cells.
+   *
+   * When provided (and `include_formula_values` is enabled for this run), inline edit
+   * can include computed formula results in its prompt context and tool reads.
+   */
+  getCellComputedValueForSheet?: (sheetId: string, cell: { row: number; col: number }) => unknown;
   getSelectionRange: () => Range | null;
   onApplied?: () => void;
   onClosed?: () => void;
@@ -211,14 +218,15 @@ export class InlineEditController {
         this.options.reserveForOutputTokens ?? getDefaultReserveForOutputTokens("inline_edit", contextWindowTokens);
       const keepLastMessages = this.options.keepLastMessages ?? 20;
 
-      const baseApi = new DocumentControllerSpreadsheetApi(this.options.document, {
-        sheetNameResolver: this.options.sheetNameResolver ?? null
-      });
-      const api = createAbortableSpreadsheetApi(baseApi, signal);
       const includeFormulaValues =
         typeof this.options.toolExecutorOptions?.include_formula_values === "boolean"
           ? this.options.toolExecutorOptions.include_formula_values
           : readIncludeFormulaValuesFromStorage();
+      const baseApi = new DocumentControllerSpreadsheetApi(this.options.document, {
+        sheetNameResolver: this.options.sheetNameResolver ?? null,
+        getCellComputedValueForSheet: includeFormulaValues ? this.options.getCellComputedValueForSheet : undefined,
+      });
+      const api = createAbortableSpreadsheetApi(baseApi, signal);
 
       this.overlay.setRunning("Building context…");
       throwIfAborted(signal);

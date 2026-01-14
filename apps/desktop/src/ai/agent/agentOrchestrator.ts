@@ -105,6 +105,14 @@ export interface RunAgentTaskParams {
    */
   createChart?: SpreadsheetApi["createChart"];
   /**
+   * Optional provider for live computed values of formula cells.
+   *
+   * When provided (and `toolExecutorOptions.include_formula_values` is enabled),
+   * the DocumentController SpreadsheetApi adapter will call this to populate
+   * `cell.value` for formula cells that otherwise store `value:null` in the model.
+   */
+  getCellComputedValueForSheet?: (sheetId: string, cell: { row: number; col: number }) => unknown;
+  /**
    * Preview engine configuration for approval gating.
    *
    * NOTE: Agent mode defaults to `approval_cell_threshold: 0` so any non-noop mutation
@@ -300,7 +308,9 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     const defaultSheetId = params.defaultSheetId ?? "Sheet1";
     const spreadsheet = new DocumentControllerSpreadsheetApi(params.documentController, {
       createChart: params.createChart,
-      sheetNameResolver: params.sheetNameResolver ?? null
+      sheetNameResolver: params.sheetNameResolver ?? null,
+      getCellComputedValueForSheet:
+        params.toolExecutorOptions?.include_formula_values === true ? params.getCellComputedValueForSheet : undefined,
     });
     const toolPolicy = params.toolExecutorOptions?.toolPolicy ?? getDesktopToolPolicy({ mode: "agent" });
 

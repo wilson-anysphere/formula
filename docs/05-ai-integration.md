@@ -562,6 +562,7 @@ Spreadsheet tool calling is **provider-agnostic** and shared across Chat, Inline
     - DLP-safe default: when DLP is configured, formula values are only surfaced/used when the range-level DLP decision is **ALLOW** (no redaction). Under **REDACT**, formula-derived values are treated as `null` to avoid inference/exfiltration.
     - Note: ToolExecutor evaluates DLP over the selected range only (it does not trace formula dependencies). Hosts that compute formula values should ensure `cell.value` does not incorporate restricted data outside the evaluated selection.
     - **Desktop UI:** the AI chat panel includes an “Include formula values” toggle (persisted in `localStorage` under `formula.ai.includeFormulaValues`) which threads through to `toolExecutorOptions.include_formula_values` for chat/agent/inline edit.
+      - When enabled, desktop also wires `SpreadsheetApp.getCellComputedValueForSheet(...)` into `DocumentControllerSpreadsheetApi` so formula cells can expose **live** computed values (not just cached import snapshots).
 - The LLM-facing adapter is [`packages/ai-tools/src/llm/integration.ts`](../packages/ai-tools/src/llm/integration.ts) (`SpreadsheetLLMToolExecutor`),
   which connects the ToolExecutor to a host `SpreadsheetApi` (desktop uses `DocumentControllerSpreadsheetApi`).
 - Desktop `SpreadsheetApi` implementation: [`apps/desktop/src/ai/tools/documentControllerSpreadsheetApi.ts`](../apps/desktop/src/ai/tools/documentControllerSpreadsheetApi.ts)

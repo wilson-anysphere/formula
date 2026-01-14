@@ -176,6 +176,18 @@ export interface AiChatOrchestratorOptions {
    * integration).
    */
   createChart?: SpreadsheetApi["createChart"];
+  /**
+   * Optional provider for live computed values of formula cells.
+   *
+   * When provided (and `toolExecutorOptions.include_formula_values` is enabled),
+   * the DocumentController SpreadsheetApi adapter will call this to populate
+   * `cell.value` for formula cells that otherwise store `value:null` in the model.
+   *
+   * This is intentionally opt-in and gated by `include_formula_values` because
+   * computing formula results can be expensive and because cached values can be
+   * an inference channel.
+   */
+  getCellComputedValueForSheet?: (sheetId: string, cell: { row: number; col: number }) => unknown;
 
   /**
    * If not provided, defaults to the desktop audit store (sqlite-backed with
@@ -262,7 +274,9 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
   const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, {
     createChart: options.createChart,
-    sheetNameResolver: options.sheetNameResolver ?? null
+    sheetNameResolver: options.sheetNameResolver ?? null,
+    getCellComputedValueForSheet:
+      options.toolExecutorOptions?.include_formula_values === true ? options.getCellComputedValueForSheet : undefined,
   });
   const devOnBuildStats =
     import.meta.env.MODE === "development"

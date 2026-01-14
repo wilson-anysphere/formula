@@ -2246,6 +2246,7 @@ export class SpreadsheetApp {
       schemaProvider: createSchemaProviderFromSearchWorkbook(this.searchWorkbook),
       getSheetId: () => this.sheetId,
       sheetNameResolver: this.sheetNameResolver,
+      getCellComputedValueForSheet: (sheetId, cell) => this.getCellComputedValueForSheet(sheetId, cell),
       getSelectionRange: () => this.getInlineEditSelectionRange(),
       onApplied: () => {
         this.renderGrid();

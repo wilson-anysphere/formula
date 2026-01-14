@@ -303,6 +303,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         <AIChatPanelContainer
           key={workbookId ?? "default"}
           getDocumentController={options.getDocumentController}
+          getSpreadsheetApp={options.getSpreadsheetApp}
           getActiveSheetId={options.getActiveSheetId}
           getSelection={options.getSelection as any}
           getSearchWorkbook={options.getSearchWorkbook}

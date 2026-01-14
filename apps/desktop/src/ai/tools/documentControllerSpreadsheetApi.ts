@@ -333,14 +333,46 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   readonly controller: DocumentController;
   readonly createChart?: SpreadsheetApi["createChart"];
   readonly sheetNameResolver: SheetNameResolver | null;
+  readonly getCellComputedValueForSheet:
+    | ((sheetId: string, cell: { row: number; col: number }) => unknown)
+    | null;
 
   constructor(
     controller: DocumentController,
-    options: { createChart?: SpreadsheetApi["createChart"]; sheetNameResolver?: SheetNameResolver | null } = {}
+    options: {
+      createChart?: SpreadsheetApi["createChart"];
+      sheetNameResolver?: SheetNameResolver | null;
+      /**
+       * Optional hook to provide live computed values for formula cells.
+       *
+       * NOTE: `DocumentController` generally stores `value:null` for formula cells created
+       * via user edit APIs. Desktop UI code (SpreadsheetApp) can still compute formula
+       * results on demand, so AI integrations can opt in to passing a provider here.
+       */
+      getCellComputedValueForSheet?: (sheetId: string, cell: { row: number; col: number }) => unknown;
+    } = {}
   ) {
     this.controller = controller;
     this.createChart = options.createChart;
     this.sheetNameResolver = options.sheetNameResolver ?? null;
+    this.getCellComputedValueForSheet = options.getCellComputedValueForSheet ?? null;
+  }
+
+  private maybeGetComputedValueForCell(params: {
+    sheetId: string;
+    coord: { row: number; col: number };
+    cellState: any;
+  }): unknown | undefined {
+    if (!this.getCellComputedValueForSheet) return undefined;
+    const cellState = params.cellState;
+    if (!cellState || cellState.formula == null) return undefined;
+    // Only compute when we don't already have a cached value (imports/snapshots can provide both).
+    if (cellState.value != null) return undefined;
+    try {
+      return this.getCellComputedValueForSheet(params.sheetId, params.coord);
+    } catch {
+      return undefined;
+    }
   }
 
   listSheets(): string[] {
@@ -361,10 +393,14 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
       if (!sheetModel?.cells) continue;
       for (const [key, cellState] of sheetModel.cells.entries()) {
         if (!cellState) continue;
-        const value = cellState.value ?? null;
+        let value = cellState.value ?? null;
         const formula = cellState.formula ?? null;
         if (value == null && formula == null) continue;
         const { row, col } = parseControllerCellKey(key);
+        if (value == null && formula != null) {
+          const computed = this.maybeGetComputedValueForCell({ sheetId, coord: { row, col }, cellState });
+          if (computed !== undefined) value = computed;
+        }
         entries.push({
           address: { sheet: displayName, row: row + 1, col: col + 1 },
           cell: {
@@ -381,7 +417,9 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     const sheetId = this.resolveSheetIdOrThrow(address.sheet);
     const coord = toControllerCoord(address);
     const state = this.controller.getCell(sheetId, coord);
-    return toCellData(this.controller, sheetId, coord, state);
+    const computed = this.maybeGetComputedValueForCell({ sheetId, coord, cellState: state });
+    const stateForRead = computed !== undefined && state && typeof state === "object" ? { ...state, value: computed } : state;
+    return toCellData(this.controller, sheetId, coord, stateForRead);
   }
 
   setCell(address: CellAddress, cell: CellData): void {
@@ -469,6 +507,8 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
 
     const startRow0 = range.startRow - 1;
     const startCol0 = range.startCol - 1;
+    // Avoid per-cell allocation when calling into a computed-value provider.
+    const coordScratch = { row: 0, col: 0 };
 
     type FormatRun = { startRow: number; endRowExclusive: number; styleId: number };
     const runListsByCol: Array<FormatRun[] | null> = new Array(colCount).fill(null);
@@ -540,7 +580,13 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         if (rawFormula != null) {
           const normalizedFormula = normalizeFormula(rawFormula);
           if (normalizedFormula) {
-            const rawValue = cellState.value ?? null;
+            let rawValue = cellState.value ?? null;
+            if (rawValue == null && this.getCellComputedValueForSheet) {
+              coordScratch.row = row0;
+              coordScratch.col = col0;
+              const computed = this.maybeGetComputedValueForCell({ sheetId, coord: coordScratch, cellState });
+              if (computed !== undefined) rawValue = computed;
+            }
             row[c] = {
               value: rawValue != null && typeof rawValue === "object" ? cloneCellValue(rawValue) : rawValue,
               formula: normalizedFormula,
@@ -789,6 +835,8 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
           return () => ({ chart_id: `preview_chart_${++counter}` });
         })()
       : undefined;
+    // Do not copy `getCellComputedValueForSheet` into clones (PreviewEngine simulation) because
+    // computed values should reflect the cloned DocumentController state, not the live UI workbook.
     return new DocumentControllerSpreadsheetApi(cloned, { createChart, sheetNameResolver: this.sheetNameResolver });
   }
 
