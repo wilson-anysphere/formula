@@ -7705,6 +7705,7 @@ export class SpreadsheetApp {
     const fontSizePx = 14;
     const defaultTextColor = resolveCssVar("--formula-grid-cell-text", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) });
     const errorTextColor = resolveCssVar("--formula-grid-error-text", { fallback: resolveCssVar("--error", { fallback: defaultTextColor }) });
+    const linkTextColor = resolveCssVar("--formula-grid-link", { fallback: resolveCssVar("--link", { fallback: defaultTextColor }) });
     const commentIndicatorColor = resolveCssVar("--formula-grid-comment-indicator", { fallback: resolveCssVar("--warning", { fallback: "CanvasText" }) });
     const commentIndicatorResolvedColor = resolveCssVar("--formula-grid-comment-indicator-resolved", {
       fallback: resolveCssVar("--text-secondary", { fallback: commentIndicatorColor }),
@@ -7782,11 +7783,21 @@ export class SpreadsheetApp {
             }
           } else if (isRichTextValue(state.value)) {
             rich = state.value;
-          } else if (state.value != null) {
-            rich = { text: this.formatCellValueForDisplay(coordScratch, state.value as any), runs: [] };
-          }
+            } else if (state.value != null) {
+              rich = { text: this.formatCellValueForDisplay(coordScratch, state.value as any), runs: [] };
+            }
 
-          if (!rich || rich.text === "") continue;
+            // Apply default hyperlink styling for URL-like strings when the underlying cell value is not
+            // already rich text (rich text runs may carry explicit formatting).
+            if (rich && typeof rich.text === "string" && looksLikeExternalHyperlink(rich.text) && !isRichTextValue(state.value)) {
+              color = linkTextColor;
+              // `renderRichText` draws underlines based on run style.
+              if (Array.isArray(rich.runs) && rich.runs.length === 0) {
+                rich.runs = [{ start: 0, end: rich.text.length, style: { underline: true } }];
+              }
+            }
+
+            if (!rich || rich.text === "") continue;
 
           renderRichText(
             ctx,
