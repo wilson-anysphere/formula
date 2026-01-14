@@ -223,10 +223,6 @@ function closeReadline(rl: Interface | null): void {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
-}
-
 export async function runOnce({
   binPath,
   timeoutMs,
