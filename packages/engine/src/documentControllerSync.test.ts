@@ -55,6 +55,20 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     });
   });
 
+  it("preserves DocumentController sheet tab order (sheetOrder) rather than sheetMeta insertion order", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", 1);
+
+    doc.addSheet({ sheetId: "sheet_2", name: "Budget" });
+    doc.addSheet({ sheetId: "sheet_3", name: "Costs" });
+
+    // Reorder the sheets so the model order differs from the sheetMeta insertion order.
+    doc.reorderSheets(["sheet_3", "Sheet1", "sheet_2"]);
+
+    const json = exportDocumentToEngineWorkbookJson(doc);
+    expect(json.sheetOrder).toEqual(["Costs", "Sheet1", "Budget"]);
+  });
+
   it("includes localeId in exported workbook JSON when provided", () => {
     const doc = new DocumentController();
     doc.setCellFormula("Sheet1", "A1", "1+1");

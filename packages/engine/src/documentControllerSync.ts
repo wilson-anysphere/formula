@@ -190,16 +190,17 @@ function getDocumentSheetIds(doc: any): string[] {
     ids.push(id);
   };
 
-  // Prefer sheet metadata ordering when available (it can include empty/unmaterialized sheets).
-  const meta: unknown = doc?.sheetMeta;
-  if (meta instanceof Map) {
-    for (const id of meta.keys()) push(id);
-  }
-
+  // Prefer the sheet ordering returned by `DocumentController.getSheetIds()` (tab order).
   const sheetIds: unknown =
     typeof doc?.getSheetIds === "function" ? (doc.getSheetIds() as string[]) : [];
   if (Array.isArray(sheetIds)) {
     for (const id of sheetIds) push(id);
+  }
+
+  // Append any sheets that exist only in metadata (defensive / backwards compatibility).
+  const meta: unknown = doc?.sheetMeta;
+  if (meta instanceof Map) {
+    for (const id of meta.keys()) push(id);
   }
 
   return ids.length > 0 ? ids : ["Sheet1"];

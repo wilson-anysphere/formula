@@ -7158,25 +7158,29 @@ export class SpreadsheetApp {
                return;
              }
 
-              const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
-              const sheetMetaRequiresHydrate = sheetMetaDeltas.some((delta: any) => {
-                if (!delta) return false;
-                // Sheet add/delete.
-                if (delta.before == null || delta.after == null) return true;
-                return false;
-              });
+               const sheetMetaDeltas = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
+               const sheetOrderDelta = payload?.sheetOrderDelta ?? null;
+               const sheetMetaRequiresHydrate = sheetMetaDeltas.some((delta: any) => {
+                 if (!delta) return false;
+                 // Sheet add/delete.
+                 if (delta.before == null || delta.after == null) return true;
+                 // Sheet rename.
+                 const beforeName = typeof delta.before?.name === "string" ? delta.before.name : null;
+                 const afterName = typeof delta.after?.name === "string" ? delta.after.name : null;
+                 return beforeName !== afterName;
+               });
 
-             if (sheetMetaRequiresHydrate) {
-               this.clearComputedValuesByCoord();
-               void this.enqueueWasmSync(async (worker) => {
-                const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
-                  workbookFileMetadata: this.workbookFileMetadata,
-                  localeId: getLocale(),
-                });
-                this.applyComputedChanges(changes);
-              });
-               return;
-             }
+              if (sheetMetaRequiresHydrate || sheetOrderDelta) {
+                this.clearComputedValuesByCoord();
+                void this.enqueueWasmSync(async (worker) => {
+                 const changes = await engineHydrateFromDocument(engineClientAsSyncTarget(worker), this.document, {
+                   workbookFileMetadata: this.workbookFileMetadata,
+                   localeId: getLocale(),
+                 });
+                 this.applyComputedChanges(changes);
+               });
+                return;
+              }
 
              const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
              const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
