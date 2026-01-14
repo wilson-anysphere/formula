@@ -36,7 +36,7 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
-            async function findRun(workflowFile) {
+            async function findLatestRun(workflowFile) {
               const resp = await github.rest.actions.listWorkflowRunsForWorkflow({
                 owner,
                 repo,
@@ -44,18 +44,11 @@ jobs:
                 per_page: 50,
               });
 
-              let any = null;
-              let completed = null;
-
               for (const run of resp.data.workflow_runs) {
                 if (run.head_sha !== sha) continue;
-                if (!any) any = run;
-                if (run.status === "completed") {
-                  completed = run;
-                  break;
-                }
+                return run;
               }
-              return { any, completed };
+              return null;
             }
 
             let corpusRunId = null;
@@ -64,41 +57,41 @@ jobs:
 
             if (triggeredName === "corpus") {
               corpusRunId = context.payload.workflow_run.id;
-              const excel = await findRun("excel-compat.yml");
-              if (excel.any && !excel.completed) {
+              const excel = await findLatestRun("excel-compat.yml");
+              if (excel && excel.status !== "completed") {
                 // Excel workflow is in progress; wait for it to complete so we don't emit a partial
                 // scorecard and then immediately re-run.
                 shouldGenerate = false;
               } else {
-                excelRunId = excel.completed ? excel.completed.id : null;
+                excelRunId = excel ? excel.id : null;
                 // If Excel didn't run for this commit, there is no calc metric to report. Avoid
                 // emitting a corpus-only scorecard.
                 shouldGenerate = !!excelRunId;
               }
             } else if (triggeredName === "Excel Compatibility (Oracle)") {
               excelRunId = context.payload.workflow_run.id;
-              const corpus = await findRun("corpus.yml");
-              if (corpus.any && !corpus.completed) {
+              const corpus = await findLatestRun("corpus.yml");
+              if (corpus && corpus.status !== "completed") {
                 // Corpus workflow is in progress; wait so we can generate a full scorecard in one
                 // shot. If corpus never ran, `corpus.any` will be null and we'll generate a partial
                 // scorecard (missing corpus metrics).
                 shouldGenerate = false;
               } else {
-                corpusRunId = corpus.completed ? corpus.completed.id : null;
+                corpusRunId = corpus ? corpus.id : null;
                 // Always generate after the Excel workflow; corpus metrics are optional and will be
                 // marked missing when the corpus workflow did not run for this commit.
                 shouldGenerate = true;
               }
             } else {
               // Unexpected; fall back to searching both.
-              const corpus = await findRun("corpus.yml");
-              const excel = await findRun("excel-compat.yml");
-              const anyPending = (corpus.any && !corpus.completed) || (excel.any && !excel.completed);
+              const corpus = await findLatestRun("corpus.yml");
+              const excel = await findLatestRun("excel-compat.yml");
+              const anyPending = (corpus && corpus.status !== "completed") || (excel && excel.status !== "completed");
               if (anyPending) {
                 shouldGenerate = false;
               } else {
-                corpusRunId = corpus.completed ? corpus.completed.id : null;
-                excelRunId = excel.completed ? excel.completed.id : null;
+                corpusRunId = corpus ? corpus.id : null;
+                excelRunId = excel ? excel.id : null;
                 shouldGenerate = !!excelRunId;
               }
             }
