@@ -1045,6 +1045,32 @@ export interface CreateScenarioParams {
   comment?: string | null;
 }
 
+/**
+ * Proposed `formula-wasm` request shape (mirrors the existing `goalSeek` style).
+ *
+ * For simplicity and to match `goalSeek`, the request uses A1 addresses without `Sheet!`
+ * prefixes and supplies the sheet separately. The binding can convert these into fully
+ * qualified `CellRef` strings (`Sheet1!A1` / `'My Sheet'!A1`) before calling Rust so
+ * scenarios remain stable even if the host’s “active sheet” changes.
+ */
+export interface CreateScenarioRequest {
+  // Defaults to "Sheet1" when omitted/empty.
+  sheet?: string;
+
+  name: string;
+  changingCells: string[]; // A1 addresses (no sheet prefix)
+  values: CellValue[]; // must match changingCells length
+  createdBy: string;
+  comment?: string | null;
+}
+
+export interface GenerateScenarioSummaryReportRequest {
+  // Defaults to "Sheet1" when omitted/empty.
+  sheet?: string;
+  resultCells: string[]; // A1 addresses (no sheet prefix)
+  scenarioIds: ScenarioId[];
+}
+
 export interface Scenario {
   id: ScenarioId;
   name: string;
@@ -1066,12 +1092,12 @@ export interface SummaryReport {
 //   // Likely implemented as `WasmWorkbook` methods (consistent with existing formula-wasm APIs),
 //   // but could also be exposed as a separate manager object. Either approach is viable as long
 //   // as scenario state persists across calls.
-//   workbook.createScenario(params: CreateScenarioParams) -> ScenarioId
+//   workbook.createScenario(request: CreateScenarioRequest) -> ScenarioId
 //   workbook.listScenarios() -> Scenario[]
 //   workbook.getScenario(id: ScenarioId) -> Scenario | null
 //   workbook.deleteScenario(id: ScenarioId) -> boolean
 //   workbook.applyScenario(id: ScenarioId) / workbook.restoreScenarioBase()
-//   workbook.generateScenarioSummaryReport({ resultCells, scenarioIds }) -> SummaryReport
+//   workbook.generateScenarioSummaryReport(request: GenerateScenarioSummaryReportRequest) -> SummaryReport
 ```
 
 Validation + edge cases (Rust behavior):
@@ -1098,6 +1124,17 @@ Validation + edge cases (Rust behavior):
     - If a host wants persistence, it should persist enough data to recreate scenarios via `create_scenario`.
     - Note: `create_scenario` allocates new ids and timestamps (`createdMs`), so ids/timestamps will not be stable across reload unless the Rust API is extended.
     - If exposed via `formula-wasm`, the binding should also keep the JS-facing workbook input state consistent with scenario apply/restore mutations (similar to how `goalSeek` updates the `changingCell` input). Otherwise `getCell`/`toJson` may drift from engine state.
+
+Proposed WASM binding validation rules (if/when implemented):
+
+- `sheet`:
+  - must be a string when provided; empty/whitespace is treated as `"Sheet1"`.
+  - must refer to an existing sheet (otherwise throw `"missing sheet: ..."` like other `formula-wasm` APIs).
+- `changingCells` / `resultCells`:
+  - each cell must be a non-empty string
+  - must be a valid A1 address
+  - must **not** contain `!` (no sheet prefix); the binding should apply the `sheet` context itself
+- `values.length` must equal `changingCells.length` (mirror Rust error message if possible).
 
 ### Monte Carlo Simulation
 
@@ -1250,6 +1287,25 @@ Validation + edge cases (Rust behavior):
   - The model is recalculated after each sample batch; outputs reflect the last iteration at the end of the run.
   - If exposed via `formula-wasm`, the binding must keep the JS-facing workbook input state consistent with these mutations (similar to how `goalSeek` updates the `changingCell` input). Otherwise `getCell`/`toJson` may drift from engine state.
   - Engine-backed note: like Goal Seek, Monte Carlo writes input cells via `set_cell_value(CellValue::Number(...))`, which will clear any existing formulas in those input cells when using `EngineWhatIfModel`.
+
+Proposed WASM binding validation rules (if/when implemented):
+
+- `sheet`:
+  - must be a string when provided; empty/whitespace is treated as `"Sheet1"`.
+  - must refer to an existing sheet (otherwise throw).
+- `iterations` / `histogramBins`:
+  - must be finite numbers, integer-valued, and `> 0`.
+- `inputDistributions[*].cell` / `outputCells[*]`:
+  - must be non-empty strings
+  - must be valid A1 addresses
+  - must **not** contain `!` (no sheet prefix); the binding should apply the `sheet` context itself
+- `seed` (optional): must be a non-negative safe integer (to preserve deterministic seeding).
+- `onProgress` (optional): must be a function.
+
+WASM binding return shape (suggested):
+
+- For parity with `goalSeek`, a future `runMonteCarloSimulation` binding can return only the `SimulationResult`.
+- It should not attempt to return a full `recalculate()` cell-delta list for each iteration; hosts can fetch cells/ranges after the run if they need to refresh UI state.
 
 ---
 
@@ -1434,6 +1490,24 @@ Validation + edge cases (Rust behavior):
       - failure returns a `SolverError` like: `"cell Sheet1!A1 is not numeric (value: ...)"`.
     - Objective + constraint cells are re-read after every `recalc()` using the same coercion rules, but **non-coercible values become `NaN`** rather than throwing.
       - Downstream solver code treats non-finite objective/constraint values as very bad via a fixed penalty (`NON_FINITE_PENALTY = 1e30`).
+
+Proposed WASM binding validation rules (if/when implemented):
+
+- `sheet`:
+  - must be a string when provided; empty/whitespace is treated as `"Sheet1"`.
+  - must refer to an existing sheet (otherwise throw).
+- `objectiveCell`, `variableCells[*]`, `constraintCells[*]`:
+  - must be non-empty strings
+  - must be valid A1 addresses
+  - should **not** contain `!` (no sheet prefix) if the binding follows the `goalSeek` style
+- `problem.variables.length` must equal `variableCells.length`.
+- `problem.constraints[*].index` must be within `[0, constraintCells.length)`.
+- Numeric fields in `options` / `problem` should be finite; integer-valued fields should be integers.
+
+WASM binding return shape (suggested):
+
+- Return only the `SolveOutcome` (mirrors the Rust return type).
+- Like `goalSeek`, a binding can avoid returning a full workbook recalc change list; hosts can refresh via `getCell`/`getRange` if needed.
 
 ---
 
