@@ -195,5 +195,6 @@ export const ar = {
   "versionHistory.compare.sheetMetaField.tabColor": "لون علامة التبويب",
   "versionHistory.compare.sheetMetaField.frozenRows": "صفوف مجمّدة",
   "versionHistory.compare.sheetMetaField.frozenCols": "أعمدة مجمّدة",
-  "formulaDiff.aria.emptyFormula": "صيغة فارغة"
+  "formulaDiff.aria.emptyFormula": "صيغة فارغة",
+  "formulaDiff.label.diff": "الفرق"
 }; 

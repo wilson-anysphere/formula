@@ -1,4 +1,5 @@
 import { diffFormulaToRenderOps, isEffectivelyEmptyFormula } from "./formulaDiffRender.ts";
+import { t } from "../../i18n/index.js";
 
 export type RenderFormulaDiffDomOptions = {
   /**
@@ -32,7 +33,7 @@ export function renderFormulaDiffDom(
 
   const label = document.createElement("div");
   label.className = "conflict-dialog__formula-diff-label";
-  label.textContent = opts.label ?? "Diff";
+  label.textContent = opts.label ?? t("formulaDiff.label.diff");
   root.appendChild(label);
 
   const code = document.createElement("code");
@@ -44,6 +45,7 @@ export function renderFormulaDiffDom(
     code.classList.add("formula-diff-view--empty");
     const marker = document.createElement("span");
     marker.className = "formula-diff-empty-marker";
+    marker.setAttribute("aria-label", t("formulaDiff.aria.emptyFormula"));
     marker.textContent = "∅";
     code.appendChild(marker);
     root.appendChild(code);

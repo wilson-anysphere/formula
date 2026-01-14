@@ -195,5 +195,6 @@ export const deDE = {
   "versionHistory.compare.sheetMetaField.tabColor": "Tab-Farbe",
   "versionHistory.compare.sheetMetaField.frozenRows": "Fixierte Zeilen",
   "versionHistory.compare.sheetMetaField.frozenCols": "Fixierte Spalten",
-  "formulaDiff.aria.emptyFormula": "Leere Formel"
+  "formulaDiff.aria.emptyFormula": "Leere Formel",
+  "formulaDiff.label.diff": "Diff"
 }; 
