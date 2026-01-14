@@ -208,6 +208,23 @@ test("Typing =Vlo suggests Vlookup( (title-style casing)", async () => {
   );
 });
 
+test("Typing =Forecast.Et suggests Forecast.Ets( (segment title-style casing)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=Forecast.Et";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=Forecast.Ets("),
+    `Expected a Forecast.Ets suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("FunctionSpec.completionBoost biases function-name completion ranking", async () => {
   const functionRegistry = new FunctionRegistry([
     { name: "SUMIF", args: [] },

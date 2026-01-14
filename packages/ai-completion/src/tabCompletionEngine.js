@@ -1870,27 +1870,42 @@ function applyNameCase(name, typedPrefix) {
     return `${qualifier}${applyNameCase(restName, restTyped)}`;
   }
 
-  // Infer case preference from the *letters* the user typed (ignore digits, dots, underscores).
-  // This yields nicer results for common patterns like:
-  //   "=vlo"  -> "=vlookup("
-  //   "=VLO"  -> "=VLOOKUP("
-  //   "=Vlo"  -> "=Vlookup("
-  const letters = typedPrefix.replaceAll(/[^A-Za-z]/g, "");
-  if (!letters) return name;
+  // Infer case preference from the user-typed prefix.
+  //
+  // Instead of looking at the prefix as a single token, treat dotted/segmented names
+  // as multiple "words" so title-style typing like `Forecast.Et` can complete to
+  // `Forecast.Ets` without producing mixed-case tails like `Forecast.EtS`.
+  //
+  // Examples:
+  //   "=vlo"          -> "=vlookup("
+  //   "=VLO"          -> "=VLOOKUP("
+  //   "=Vlo"          -> "=Vlookup("
+  //   "=Forecast.Et"  -> "=Forecast.Ets("
+  const segments = typedPrefix.split(/[^A-Za-z]+/g).filter((s) => s.length > 0);
+  if (segments.length === 0) return name;
 
-  const lower = letters.toLowerCase();
-  const upper = letters.toUpperCase();
-  if (letters === lower) return name.toLowerCase();
-  if (letters === upper) return name.toUpperCase();
+  const isAllLower = segments.every((s) => s === s.toLowerCase());
+  if (isAllLower) return name.toLowerCase();
 
-  // Title-ish casing: first letter uppercase, remainder lowercase.
-  if (letters[0] === upper[0] && letters.slice(1) === lower.slice(1)) {
+  const isAllUpper = segments.every((s) => s === s.toUpperCase());
+  if (isAllUpper) return name.toUpperCase();
+
+  const isTitleCase = segments.every((s) => s[0] === s[0].toUpperCase() && s.slice(1) === s.slice(1).toLowerCase());
+  if (isTitleCase) {
     const lowered = name.toLowerCase();
-    const firstLetterIdx = lowered.search(/[a-z]/);
-    if (firstLetterIdx >= 0) {
-      return lowered.slice(0, firstLetterIdx) + lowered[firstLetterIdx].toUpperCase() + lowered.slice(firstLetterIdx + 1);
+    let out = "";
+    let capitalizeNext = true;
+    for (let i = 0; i < lowered.length; i++) {
+      const ch = lowered[i];
+      if (capitalizeNext && ch >= "a" && ch <= "z") {
+        out += ch.toUpperCase();
+        capitalizeNext = false;
+        continue;
+      }
+      out += ch;
+      if (ch === "." || ch === "_") capitalizeNext = true;
     }
-    return lowered;
+    return out;
   }
 
   return name;
