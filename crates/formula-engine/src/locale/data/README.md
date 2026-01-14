@@ -63,10 +63,13 @@ Note: after normalization, the JSON will typically contain **fewer entries** tha
 
 #### `es-ES` (Spanish) source requirements
 
-`es-ES` should be backed by a complete Excel-extracted mapping. Do **not** replace
-`sources/es-ES.json` with partial online translation tables: those commonly omit large parts of
-Excel’s function surface area, causing many Spanish spellings to degrade to canonical (English)
-names.
+`es-ES` must be backed by an Excel-extracted mapping generated from the **full function catalog**
+(see `shared/functionCatalog.json`). Do **not** replace `sources/es-ES.json` with partial online
+translation tables: those commonly omit large parts of Excel’s function surface area, causing many
+Spanish spellings to degrade to canonical (English) names.
+
+If you cannot run the Excel extractor (Windows + Excel desktop required), prefer to **not** touch
+`es-ES` sources rather than committing a partial mapping.
 
 #### Generating `sources/<locale>.json` from a real Excel install (Windows)
 
@@ -108,12 +111,16 @@ For debugging, you can also pass:
 After updating the source JSON, regenerate and verify the generated TSVs:
 
 ```bash
+node scripts/normalize-locale-function-sources.js
 node scripts/generate-locale-function-tsv.js
 node scripts/generate-locale-function-tsv.js --check
 ```
 
 Quick verification checklist (especially for `es-ES`):
 
+- If you re-extracted from Excel, confirm the extractor ran against the full catalog (it should
+  write one translation per catalog function before normalization, and should not report a large
+  skipped set).
 - `node scripts/generate-locale-function-tsv.js --check` passes.
   - Note: `--check` only verifies that the committed TSVs match what would be generated from the
     committed JSON sources; it does **not** prove that the sources are complete (missing entries are

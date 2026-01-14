@@ -122,13 +122,11 @@ Notes / caveats:
 - `sources/<locale>.json` is expected to come from this extractor whenever possible. Avoid replacing
   `sources/es-ES.json` with partial online translation tables; missing entries silently fall back to
   English in the generated TSVs.
-- Prefer committing the extractor output verbatim (one entry per canonical function, including
-  identity mappings) so the JSON represents an explicit snapshot of what Excel reports for the full
-  catalog.
-- For `es-ES`, treat a “complete” extraction as **one translation per canonical function** in
-  `shared/functionCatalog.json` (i.e. the extractor should not report a large skipped set).
-- Quick sanity check (counts):
-  - `node --input-type=module -e "import fs from 'node:fs'; const cat=JSON.parse(fs.readFileSync('shared/functionCatalog.json','utf8')); const src=JSON.parse(fs.readFileSync('crates/formula-engine/src/locale/data/sources/es-ES.json','utf8')); console.log('es-ES translations:', Object.keys(src.translations).length, '/', cat.functions.length);"`
+- For `es-ES`, treat a “complete” extraction as the extractor writing **one translation per canonical
+  function** (before normalization) and not reporting a large skipped set.
+- Before committing, normalize the extracted JSON sources to omit identity mappings and ensure
+  deterministic casing:
+  - `node scripts/normalize-locale-function-sources.js`
 - After extracting, regenerate + verify with:
   - `node scripts/generate-locale-function-tsv.js`
   - `node scripts/generate-locale-function-tsv.js --check`
