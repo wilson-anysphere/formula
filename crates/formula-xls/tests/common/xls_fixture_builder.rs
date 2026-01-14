@@ -126,8 +126,8 @@ const AUTOFILTER_OP_LESS_THAN: u8 = 6;
 // tolerant, but we aim to emit the canonical values we see in the wild.
 const AUTOFILTER_VT_EMPTY: u8 = 0;
 const AUTOFILTER_VT_NUMBER: u8 = 5; // VT_R8 (stored as RK by some producers)
-// Many BIFF8 AUTOFILTER records use vt=4 for string operands (string stored as trailing
-// XLUnicodeString). The importer also supports vt=8, but we prefer vt=4 here to exercise that path.
+                                    // Many BIFF8 AUTOFILTER records use vt=4 for string operands (string stored as trailing
+                                    // XLUnicodeString). The importer also supports vt=8, but we prefer vt=4 here to exercise that path.
 const AUTOFILTER_VT_STRING: u8 = 4;
 // Common boolean DOPER encodings observed in BIFF8 AutoFilter records.
 const AUTOFILTER_VT_BOOL: u8 = 6;
@@ -940,7 +940,7 @@ fn build_table_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // row input: A1
     table_payload.extend_from_slice(&0u16.to_le_bytes()); // rwInpRow
     table_payload.extend_from_slice(&0u16.to_le_bytes()); // colInpRow
-    // col input: B2
+                                                          // col input: B2
     table_payload.extend_from_slice(&1u16.to_le_bytes()); // rwInpCol
     table_payload.extend_from_slice(&1u16.to_le_bytes()); // colInpCol
     push_record(&mut sheet, RECORD_TABLE, &table_payload);
@@ -1004,7 +1004,7 @@ fn build_table_formula_ptgtbl_wide_payload_sheet_stream(xf_cell: u16) -> Vec<u8>
     // row input: A1
     table_payload.extend_from_slice(&0u16.to_le_bytes()); // rwInpRow
     table_payload.extend_from_slice(&0u16.to_le_bytes()); // colInpRow
-    // col input: B2
+                                                          // col input: B2
     table_payload.extend_from_slice(&1u16.to_le_bytes()); // rwInpCol
     table_payload.extend_from_slice(&1u16.to_le_bytes()); // colInpCol
     push_record(&mut sheet, RECORD_TABLE, &table_payload);
@@ -2223,13 +2223,13 @@ pub fn build_page_setup_flags_nopls_fit_to_fixture_xls() -> Vec<u8> {
     let sheet_stream = build_page_setup_flags_sheet_stream_with_wsbool(
         16,
         setup_record_with_grbit(
-            9,                  // iPaperSize (ignored due to fNoPls)
-            80,                 // iScale (ignored due to fNoPls)
-            2,                  // iFitWidth (preserved)
-            3,                  // iFitHeight (preserved)
+            9,                   // iPaperSize (ignored due to fNoPls)
+            80,                  // iScale (ignored due to fNoPls)
+            2,                   // iFitWidth (preserved)
+            3,                   // iFitHeight (preserved)
             SETUP_GRBIT_F_NOPLS, // fNoPls=1, fPortrait=0 (landscape)
-            0.5,                // numHdr (non-default)
-            0.6,                // numFtr (non-default)
+            0.5,                 // numHdr (non-default)
+            0.6,                 // numFtr (non-default)
         ),
         WSBOOL_OPTION_FIT_TO_PAGE,
     );
@@ -6436,7 +6436,11 @@ fn build_invalid_margins_sheet_stream_with_left_margin(invalid_left: [u8; 8]) ->
     // Other margins: invalid-only (these should remain at model defaults).
     push_record(&mut sheet, RECORD_RIGHTMARGIN, &(-1.0f64).to_le_bytes());
     push_record(&mut sheet, RECORD_TOPMARGIN, &f64::NAN.to_le_bytes());
-    push_record(&mut sheet, RECORD_BOTTOMMARGIN, &f64::INFINITY.to_le_bytes());
+    push_record(
+        &mut sheet,
+        RECORD_BOTTOMMARGIN,
+        &f64::INFINITY.to_le_bytes(),
+    );
 
     // SETUP record with invalid header/footer margins.
     push_record(
@@ -6454,7 +6458,11 @@ fn build_invalid_margins_sheet_stream_with_left_margin(invalid_left: [u8; 8]) ->
     );
 
     // Provide at least one cell so calamine returns a non-empty range.
-    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, XF_GENERAL_CELL, 1.0));
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, XF_GENERAL_CELL, 1.0),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
@@ -8371,8 +8379,12 @@ fn build_shared_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
     );
 
     // B2: FORMULA record contains only PtgExp referencing the base cell (B1).
-    let rgce_b2: Vec<u8> = [vec![0x01], 0u16.to_le_bytes().to_vec(), 1u16.to_le_bytes().to_vec()]
-        .concat();
+    let rgce_b2: Vec<u8> = [
+        vec![0x01],
+        0u16.to_le_bytes().to_vec(),
+        1u16.to_le_bytes().to_vec(),
+    ]
+    .concat();
     push_record(
         &mut sheet,
         RECORD_FORMULA,
@@ -8415,19 +8427,10 @@ fn build_shared_formula_shrfmla_only_continued_ptgstr_sheet_stream(xf_cell: u16)
     // CONTINUE boundary.
     let shared_rgce: Vec<u8> = vec![
         // PtgRefN(row_off=0,col_off=-1).
-        0x2C,
-        0x00, 0x00, // row_off = 0
+        0x2C, 0x00, 0x00, // row_off = 0
         0xFF, 0xFF, // col_off = -1 with relative bits
         // PtgStr("ABCDE") [ptg=0x17][cch=5][flags=0][chars...]
-        0x17,
-        5,
-        0,
-        b'A',
-        b'B',
-        b'C',
-        b'D',
-        b'E',
-        // PtgConcat
+        0x17, 5, 0, b'A', b'B', b'C', b'D', b'E', // PtgConcat
         0x08,
     ];
 
@@ -9232,7 +9235,7 @@ fn build_formula_array_constant_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // Formula: SUM({1,2;3,4})
     let rgce = [
         0x20u8, // PtgArray
-        0, 0, 0, 0, 0, 0, 0, // 7-byte header
+        0, 0, 0, 0, 0, 0, 0,    // 7-byte header
         0x22, // PtgFuncVar
         0x01, // argc=1
         0x04, 0x00, // iftab=4 (SUM)
@@ -9692,7 +9695,8 @@ fn build_shared_formula_ptgname_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
 fn build_shared_formula_shrfmla_only_ptgref_relative_flags_workbook_stream() -> Vec<u8> {
     let xf_cell = 16u16;
-    let sheet_stream = build_shared_formula_shrfmla_only_ptgref_relative_flags_sheet_stream(xf_cell);
+    let sheet_stream =
+        build_shared_formula_shrfmla_only_ptgref_relative_flags_sheet_stream(xf_cell);
     build_single_sheet_workbook_stream("SharedOnlyRefFlags", &sheet_stream, 1252)
 }
 
@@ -11273,7 +11277,9 @@ fn build_shared_formula_area3d_oob_workbook_stream() -> Vec<u8> {
     let sheet1_offset = globals.len();
     globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
         .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
-    globals.extend_from_slice(&build_shared_area3d_oob_shared_formula_sheet_stream(xf_cell));
+    globals.extend_from_slice(&build_shared_area3d_oob_shared_formula_sheet_stream(
+        xf_cell,
+    ));
 
     globals
 }
@@ -11564,7 +11570,11 @@ fn build_sheet1_bottom_number_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
 
     // A65536: NUMBER record.
-    push_record(&mut sheet, RECORD_NUMBER, &number_cell(ROW, 0, xf_cell, 1.0));
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(ROW, 0, xf_cell, 1.0),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
@@ -11589,8 +11599,16 @@ fn build_sheet1_bottom_two_number_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
 
-    push_record(&mut sheet, RECORD_NUMBER, &number_cell(ROW1, 0, xf_cell, 1.0)); // A65535
-    push_record(&mut sheet, RECORD_NUMBER, &number_cell(ROW2, 0, xf_cell, 2.0)); // A65536
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(ROW1, 0, xf_cell, 1.0),
+    ); // A65535
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(ROW2, 0, xf_cell, 2.0),
+    ); // A65536
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
@@ -11732,7 +11750,13 @@ fn build_shared_area3d_oob_shared_formula_sheet_stream(xf_cell: u16) -> Vec<u8> 
     // filling down shifts both endpoints by +1 row.
     let mut shared_rgce = Vec::<u8>::new();
     let col_with_flags: u16 = 0xC000; // col=0 (A) + rowRel + colRel
-    shared_rgce.extend_from_slice(&ptg_area3d(0, BASE_ROW, FOLLOW_ROW, col_with_flags, col_with_flags));
+    shared_rgce.extend_from_slice(&ptg_area3d(
+        0,
+        BASE_ROW,
+        FOLLOW_ROW,
+        col_with_flags,
+        col_with_flags,
+    ));
     shared_rgce.push(0x1E); // PtgInt
     shared_rgce.extend_from_slice(&1u16.to_le_bytes());
     shared_rgce.push(0x03); // PtgAdd
@@ -11784,7 +11808,13 @@ fn build_shared_area3d_oob_shrfmla_only_sheet_stream(_xf_cell: u16) -> Vec<u8> {
     // filling down shifts both endpoints by +1 row.
     let mut shared_rgce = Vec::<u8>::new();
     let col_with_flags: u16 = 0xC000; // col=0 (A) + rowRel + colRel
-    shared_rgce.extend_from_slice(&ptg_area3d(0, BASE_ROW, FOLLOW_ROW, col_with_flags, col_with_flags));
+    shared_rgce.extend_from_slice(&ptg_area3d(
+        0,
+        BASE_ROW,
+        FOLLOW_ROW,
+        col_with_flags,
+        col_with_flags,
+    ));
     shared_rgce.push(0x1E); // PtgInt
     shared_rgce.extend_from_slice(&1u16.to_le_bytes());
     shared_rgce.push(0x03); // PtgAdd
@@ -13217,7 +13247,9 @@ fn build_shared_formula_master_not_top_left_workbook_stream() -> Vec<u8> {
     let sheet_offset = globals.len();
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
-    globals.extend_from_slice(&build_shared_formula_master_not_top_left_sheet_stream(xf_cell));
+    globals.extend_from_slice(&build_shared_formula_master_not_top_left_sheet_stream(
+        xf_cell,
+    ));
 
     globals
 }
@@ -13361,6 +13393,84 @@ fn build_shared_formula_sheet_scoped_name_dedup_collision_workbook_stream() -> V
     globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
         .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
     globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 222.0));
+
+    // -- Sheet 2 ------------------------------------------------------------------
+    let sheet2_offset = globals.len();
+    globals[boundsheet_offset_positions[2]..boundsheet_offset_positions[2] + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_shared_ptgname_shrfmla_sheet_stream(xf_cell));
+
+    globals
+}
+
+fn build_shared_formula_sheet_scoped_name_dedup_collision_invalid_second_workbook_stream() -> Vec<u8>
+{
+    // Similar to `build_shared_formula_sheet_scoped_name_dedup_collision_workbook_stream`, but with
+    // the colliding *valid* sheet name first. This means the invalid sheet's sanitized name must be
+    // deduped (e.g. `Bad_Name (2)`), and `PtgName` resolution must use that final deduped name.
+    //
+    // This workbook contains:
+    // - Sheet 0: `Bad_Name` (valid)
+    // - Sheet 1: `Bad:Name` (invalid; sanitizes to `Bad_Name` and must be deduped)
+    // - Sheet 2: `Ref`, with a shared formula (A1:A2) whose rgce is `PtgName` referencing a
+    //   sheet-scoped defined name on sheet 1.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records.
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["Bad_Name", "Bad:Name", "Ref"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // Sheet-scoped defined name on `Bad:Name` (itab=2 => sheet index 1).
+    let name_rgce: Vec<u8> = vec![
+        0x24, // PtgRef
+        0x00, 0x00, // row = 0
+        0x00, 0x00, // col = 0 (absolute)
+    ];
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record(
+            "LocalName",
+            /*itab*/ 2,
+            /*hidden*/ false,
+            None,
+            &name_rgce,
+        ),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0 (valid name) -----------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 222.0));
+
+    // -- Sheet 1 (invalid name, will be deduped) ----------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 111.0));
 
     // -- Sheet 2 ------------------------------------------------------------------
     let sheet2_offset = globals.len();
@@ -13770,7 +13880,8 @@ fn build_array_formula_ptgarray_sheet_stream(xf_cell: u16) -> Vec<u8> {
     };
 
     let rgcb = rgcb_array_constant_numbers_2x2(&[1.0, 2.0, 3.0, 4.0]);
-    let mut array_payload = array_record_refu(base_row, 1, base_col as u8, base_col as u8, &array_rgce);
+    let mut array_payload =
+        array_record_refu(base_row, 1, base_col as u8, base_col as u8, &array_rgce);
     array_payload.extend_from_slice(&rgcb);
     push_record(&mut sheet, RECORD_ARRAY, &array_payload);
 
@@ -13924,19 +14035,37 @@ fn build_array_formula_external_refs_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(
         &mut sheet,
         RECORD_FORMULA,
-        &formula_cell(base_b_row, base_b_col, xf_cell, 0.0, &ptg_exp(base_b_row, base_b_col)),
+        &formula_cell(
+            base_b_row,
+            base_b_col,
+            xf_cell,
+            0.0,
+            &ptg_exp(base_b_row, base_b_col),
+        ),
     );
     // ARRAY record stores the shared rgce.
     push_record(
         &mut sheet,
         RECORD_ARRAY,
-        &array_record_refu(base_b_row, 1, base_b_col as u8, base_b_col as u8, &array_b_rgce),
+        &array_record_refu(
+            base_b_row,
+            1,
+            base_b_col as u8,
+            base_b_col as u8,
+            &array_b_rgce,
+        ),
     );
     // B2 FORMULA: PtgExp -> base cell (B1).
     push_record(
         &mut sheet,
         RECORD_FORMULA,
-        &formula_cell(1, base_b_col, xf_cell, 0.0, &ptg_exp(base_b_row, base_b_col)),
+        &formula_cell(
+            1,
+            base_b_col,
+            xf_cell,
+            0.0,
+            &ptg_exp(base_b_row, base_b_col),
+        ),
     );
 
     // Array formula group #2: C1:C2, formula `'[Book1.xlsx]ExtSheet'!ExtDefined+1` (PtgNameX + 1).
@@ -13948,18 +14077,36 @@ fn build_array_formula_external_refs_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(
         &mut sheet,
         RECORD_FORMULA,
-        &formula_cell(base_c_row, base_c_col, xf_cell, 0.0, &ptg_exp(base_c_row, base_c_col)),
+        &formula_cell(
+            base_c_row,
+            base_c_col,
+            xf_cell,
+            0.0,
+            &ptg_exp(base_c_row, base_c_col),
+        ),
     );
     push_record(
         &mut sheet,
         RECORD_ARRAY,
-        &array_record_refu(base_c_row, 1, base_c_col as u8, base_c_col as u8, &array_c_rgce),
+        &array_record_refu(
+            base_c_row,
+            1,
+            base_c_col as u8,
+            base_c_col as u8,
+            &array_c_rgce,
+        ),
     );
     // C2 FORMULA: PtgExp -> base cell (C1).
     push_record(
         &mut sheet,
         RECORD_FORMULA,
-        &formula_cell(1, base_c_col, xf_cell, 0.0, &ptg_exp(base_c_row, base_c_col)),
+        &formula_cell(
+            1,
+            base_c_col,
+            xf_cell,
+            0.0,
+            &ptg_exp(base_c_row, base_c_col),
+        ),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
@@ -15184,7 +15331,12 @@ fn build_shared_formula_ptgarea_row_oob_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let rgce_shared: Vec<u8> = {
         let mut v = Vec::new();
         // Base formula area: A65535:A65536
-        v.extend_from_slice(&ptg_area(BASE_ROW, FOLLOWER_ROW, col_with_flags, col_with_flags));
+        v.extend_from_slice(&ptg_area(
+            BASE_ROW,
+            FOLLOWER_ROW,
+            col_with_flags,
+            col_with_flags,
+        ));
         // SUM(...)
         v.push(0x22); // PtgFuncVar
         v.push(1); // argc=1
@@ -15286,7 +15438,11 @@ fn build_shared_formula_ptgref_col_oob_shrfmla_only_sheet_stream(xf_cell: u16) -
         v
     };
 
-    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla_record(0, 0, 0, 1, &rgce_shared));
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 0, 0, 1, &rgce_shared),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
@@ -15334,7 +15490,11 @@ fn build_shared_formula_ptgarea_col_oob_shrfmla_only_sheet_stream(xf_cell: u16) 
         v
     };
 
-    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla_record(0, 0, 0, 1, &rgce_shared));
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 0, 0, 1, &rgce_shared),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
@@ -15429,9 +15589,11 @@ fn build_shared_formula_ptgexp_missing_shrfmla_row_oob_sheet_stream(xf_cell: u16
         0x24, // PtgRef
         FOLLOWER_ROW.to_le_bytes()[0],
         FOLLOWER_ROW.to_le_bytes()[1],
-        0x00, 0xC0, // col = A (0) + row_rel + col_rel
+        0x00,
+        0xC0, // col = A (0) + row_rel + col_rel
         0x1E, // PtgInt
-        0x01, 0x00, // 1
+        0x01,
+        0x00, // 1
         0x03, // PtgAdd
     ];
     push_record(
@@ -15478,6 +15640,22 @@ pub fn build_shared_formula_ptgexp_missing_shrfmla_row_oob_fixture_xls() -> Vec<
 /// corresponding to the `NAME.itab` scope), not the deduped collision sheet.
 pub fn build_shared_formula_sheet_scoped_name_dedup_collision_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_sheet_scoped_name_dedup_collision_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+pub fn build_shared_formula_sheet_scoped_name_dedup_collision_invalid_second_fixture_xls() -> Vec<u8>
+{
+    let workbook_stream =
+        build_shared_formula_sheet_scoped_name_dedup_collision_invalid_second_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -16996,8 +17174,8 @@ fn build_setup_fnopls_fit_to_page_sheet_stream() -> Vec<u8> {
     setup.extend_from_slice(&0i16.to_le_bytes()); // iPageStart (ignored)
     setup.extend_from_slice(&2u16.to_le_bytes()); // iFitWidth
     setup.extend_from_slice(&3u16.to_le_bytes()); // iFitHeight
-    // grbit: fNoPls=1 and fPortrait=0 (landscape). Paper size / percent scale / orientation should
-    // be ignored due to fNoPls, but FitTo + numHdr/numFtr should still be imported.
+                                                  // grbit: fNoPls=1 and fPortrait=0 (landscape). Paper size / percent scale / orientation should
+                                                  // be ignored due to fNoPls, but FitTo + numHdr/numFtr should still be imported.
     setup.extend_from_slice(&0x0004u16.to_le_bytes());
     setup.extend_from_slice(&0u16.to_le_bytes()); // iRes (ignored)
     setup.extend_from_slice(&0u16.to_le_bytes()); // iVRes (ignored)
@@ -17007,7 +17185,11 @@ fn build_setup_fnopls_fit_to_page_sheet_stream() -> Vec<u8> {
     push_record(&mut sheet, RECORD_SETUP, &setup);
 
     // Provide at least one cell so calamine returns a non-empty range.
-    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, XF_GENERAL_CELL, 1.0));
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, XF_GENERAL_CELL, 1.0),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet

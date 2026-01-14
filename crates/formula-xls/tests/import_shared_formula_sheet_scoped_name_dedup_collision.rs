@@ -25,11 +25,8 @@ fn quote_sheet_name_if_needed(name: &str) -> String {
     }
 }
 
-#[test]
-fn decodes_sheet_scoped_ptgname_when_sanitization_collides_and_sheet_is_deduped() {
-    let bytes =
-        xls_fixture_builder::build_shared_formula_sheet_scoped_name_dedup_collision_fixture_xls();
-    let result = import_fixture(&bytes);
+fn assert_decoded_formula_resolves_to_scoped_sheet(bytes: &[u8]) {
+    let result = import_fixture(bytes);
 
     assert!(
         result.workbook.sheet_by_name("Bad:Name").is_none(),
@@ -61,13 +58,20 @@ fn decodes_sheet_scoped_ptgname_when_sanitization_collides_and_sheet_is_deduped(
         .formula(CellRef::from_a1("A2").unwrap())
         .expect("expected formula in Ref!A2");
 
-    assert!(
-        formula.contains(&invalid_sheet_name),
+    let (sheet_prefix, name_ref) = formula
+        .split_once('!')
+        .expect("expected sheet-qualified name reference");
+    assert_eq!(name_ref, "LocalName");
+
+    let invalid_prefix = quote_sheet_name_if_needed(&invalid_sheet_name);
+    assert_eq!(
+        sheet_prefix, invalid_prefix,
         "expected formula to reference the sheet scoped by NAME.itab, got {formula:?}"
     );
-    assert!(
-        !formula.contains(&collision_sheet_name),
-        "expected formula not to reference the deduped collision sheet, got {formula:?}"
+    let collision_prefix = quote_sheet_name_if_needed(&collision_sheet_name);
+    assert_ne!(
+        sheet_prefix, collision_prefix,
+        "expected formula not to reference the colliding sheet, got {formula:?}"
     );
 
     let expected = format!(
@@ -76,4 +80,18 @@ fn decodes_sheet_scoped_ptgname_when_sanitization_collides_and_sheet_is_deduped(
     );
     assert_eq!(formula, expected);
     assert_parseable_formula(formula);
+}
+
+#[test]
+fn decodes_sheet_scoped_ptgname_when_sanitization_collides_and_sheet_is_deduped() {
+    let bytes =
+        xls_fixture_builder::build_shared_formula_sheet_scoped_name_dedup_collision_fixture_xls();
+    assert_decoded_formula_resolves_to_scoped_sheet(&bytes);
+}
+
+#[test]
+fn decodes_sheet_scoped_ptgname_when_invalid_sheet_sanitization_is_deduped() {
+    let bytes = xls_fixture_builder::
+        build_shared_formula_sheet_scoped_name_dedup_collision_invalid_second_fixture_xls();
+    assert_decoded_formula_resolves_to_scoped_sheet(&bytes);
 }
