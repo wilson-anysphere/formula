@@ -15,6 +15,113 @@ import { getMapRoot, getYArray, getYMap } from "../../../../collab/yjs-utils/src
 const UTF8_ENCODER = new TextEncoder();
 const UTF8_DECODER = new TextDecoder();
 
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// Defensive cap: drawing ids in sheet view state can be remote-authored. Keep read-time cloning
+// strict so malicious commits can't force unbounded `structuredClone(...)` work.
+const MAX_DRAWING_ID_STRING_CHARS = 4096;
+
+/**
+ * @param {any} raw
+ * @returns {any}
+ */
+function sanitizeDrawingsList(raw) {
+  if (!Array.isArray(raw)) return raw;
+  /** @type {any[]} */
+  const out = [];
+  let changed = false;
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      changed = true;
+      continue;
+    }
+    const rawId = entry.id;
+    if (typeof rawId === "string") {
+      if (rawId.length > MAX_DRAWING_ID_STRING_CHARS) {
+        changed = true;
+        continue;
+      }
+      const trimmed = rawId.trim();
+      if (!trimmed) {
+        changed = true;
+        continue;
+      }
+      if (trimmed !== rawId) {
+        changed = true;
+        out.push({ ...entry, id: trimmed });
+      } else {
+        out.push(entry);
+      }
+      continue;
+    }
+    if (typeof rawId === "number") {
+      if (!Number.isSafeInteger(rawId)) {
+        changed = true;
+        continue;
+      }
+      out.push(entry);
+      continue;
+    }
+    changed = true;
+  }
+  return changed ? out : raw;
+}
+
+/**
+ * @param {any} view
+ * @returns {any}
+ */
+function sanitizeSheetViewForPatch(view) {
+  if (!isRecord(view)) return view;
+  if (!Object.prototype.hasOwnProperty.call(view, "drawings")) return view;
+  const sanitized = sanitizeDrawingsList(view.drawings);
+  if (sanitized === view.drawings) return view;
+  return { ...view, drawings: sanitized };
+}
+
+/**
+ * @param {any} meta
+ * @returns {any}
+ */
+function sanitizeSheetMetaForPatch(meta) {
+  if (!isRecord(meta)) return meta;
+  const viewRaw = meta.view;
+  const sanitizedView = sanitizeSheetViewForPatch(viewRaw);
+  if (sanitizedView === viewRaw) return meta;
+  return { ...meta, view: sanitizedView };
+}
+
+/**
+ * Sanitize a commit patch payload before cloning/returning it.
+ *
+ * @param {any} patch
+ * @returns {any}
+ */
+function sanitizeCommitPatch(patch) {
+  if (!isRecord(patch)) return patch;
+  const sheets = patch.sheets;
+  if (!isRecord(sheets)) return patch;
+  const metaById = sheets.metaById;
+  if (!isRecord(metaById)) return patch;
+
+  /** @type {Record<string, any>} */
+  const nextMetaById = {};
+  let changed = false;
+  for (const [sheetId, meta] of Object.entries(metaById)) {
+    if (meta === null) {
+      nextMetaById[sheetId] = null;
+      continue;
+    }
+    const sanitized = sanitizeSheetMetaForPatch(meta);
+    if (sanitized !== meta) changed = true;
+    nextMetaById[sheetId] = sanitized;
+  }
+  if (!changed) return patch;
+  return { ...patch, sheets: { ...sheets, metaById: nextMetaById } };
+}
+
 function isNodeRuntime() {
   const proc = /** @type {any} */ (globalThis.process);
   // Require `process.release.name === "node"` to avoid false positives from lightweight
@@ -628,7 +735,7 @@ export class YjsBranchStore {
     const patchEncoding = commitMap.get("patchEncoding");
     const isChunkEncoded = patchEncoding === "gzip-chunks" || commitMap.get("patchChunks") !== undefined;
     if (!isChunkEncoded) {
-      return structuredClone(inline ?? { schemaVersion: 1 });
+      return structuredClone(sanitizeCommitPatch(inline ?? { schemaVersion: 1 }));
     }
 
     // If a writer crashed after appending all chunks but before flipping
@@ -659,7 +766,7 @@ export class YjsBranchStore {
     }
 
     const decoded = await this.#decodeJsonFromGzipChunks(chunksArr, `patch(${commitId})`);
-    return /** @type {Patch} */ (decoded);
+    return /** @type {Patch} */ (sanitizeCommitPatch(decoded));
   }
 
   /**
@@ -670,7 +777,7 @@ export class YjsBranchStore {
   async #readCommitSnapshot(commitMap, commitId) {
     const snapshot = commitMap.get("snapshot");
     if (snapshot !== undefined) {
-      return normalizeDocumentState(structuredClone(snapshot));
+      return normalizeDocumentState(snapshot);
     }
 
     const snapshotEncoding = commitMap.get("snapshotEncoding");

@@ -274,7 +274,9 @@ export function applyPatch(state, patch) {
           }
         }
         if (isRecord(meta.view)) {
-          nextMeta.view = structuredClone(meta.view);
+          // Avoid deep-cloning untrusted view payloads here; we normalize the full document
+          // state (including drawing id validation) before returning.
+          nextMeta.view = /** @type {any} */ (meta.view);
         } else if (
           "frozenRows" in meta ||
           "frozenCols" in meta ||

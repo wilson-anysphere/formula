@@ -1042,6 +1042,7 @@ The UI drawing overlay requires a stable numeric key (`DrawingObject.id: number`
 - Any other id (missing, non-numeric, non-positive, or unsafe integer) is mapped into a **reserved hashed namespace**: `id <= -2^33`.
   - String ids are **trimmed** before hashing to match `DocumentController` normalization.
   - Very long string ids are hashed from a bounded summary (prefix/middle/suffix + length) to avoid large allocations.
+  - Additionally, for collab safety, most consumers treat **string ids longer than 4096 chars as invalid** and will ignore/drop those drawing entries when normalizing sheet view state (desktop `DocumentController`, desktop sheet-view binder, full collab binder upgrade path, workbook schema normalization, and BranchService snapshot normalization).
 
 In addition, ChartStore “canvas charts” are rendered as drawing objects with ids in a separate negative namespace:
 

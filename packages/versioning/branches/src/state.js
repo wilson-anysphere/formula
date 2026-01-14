@@ -456,7 +456,22 @@ export function normalizeDocumentState(input) {
   let state;
 
   if (isWorkbookDocumentState(input)) {
-    state = structuredClone(input);
+    // Avoid `structuredClone(input)` here: `sheets.metaById[*].view.drawings` is user-authored shared
+    // state and may contain pathological ids (e.g. multi-megabyte strings). We rebuild normalized
+    // sheet metadata below, so deep-cloning the raw sheet meta up-front is unnecessary and can
+    // amplify memory usage.
+    const raw = /** @type {any} */ (input);
+    state = {
+      schemaVersion: 1,
+      // Keep a reference to the raw sheets object for read-only normalization below.
+      // (We overwrite `state.sheets` with a new normalized object before returning.)
+      sheets: raw.sheets,
+      // Cells/metadata collections are still cloned so the returned state is safe to mutate.
+      cells: structuredClone(raw.cells),
+      metadata: isRecord(raw.metadata) ? structuredClone(raw.metadata) : {},
+      namedRanges: isRecord(raw.namedRanges) ? structuredClone(raw.namedRanges) : {},
+      comments: isRecord(raw.comments) ? structuredClone(raw.comments) : {},
+    };
   } else if (isLegacyDocumentState(input)) {
     const legacy = /** @type {LegacyDocumentState} */ (input);
     const cells = isRecord(legacy.sheets) ? structuredClone(legacy.sheets) : {};
@@ -471,13 +486,15 @@ export function normalizeDocumentState(input) {
   } else {
     // Be forgiving: best-effort coerce partial objects (useful for tests).
     const raw = isRecord(input) ? input : {};
+    const sheetsRaw = raw.sheets;
     state = {
       schemaVersion: 1,
-      sheets: isRecord(raw.sheets) ? /** @type {any} */ (structuredClone(raw.sheets)) : { order: [], metaById: {} },
+      // Avoid deep-cloning sheets: we rebuild normalized sheet metadata below.
+      sheets: isRecord(sheetsRaw) ? /** @type {any} */ (sheetsRaw) : { order: [], metaById: {} },
       cells: isRecord(raw.cells)
         ? structuredClone(raw.cells)
         : // Some callers might still pass the legacy `sheets` field for cells.
-          (isRecord(raw.sheets) && !Array.isArray(raw.sheets?.order) ? structuredClone(raw.sheets) : {}),
+          (isRecord(sheetsRaw) && !Array.isArray(sheetsRaw?.order) ? structuredClone(sheetsRaw) : {}),
       metadata: isRecord(raw.metadata) ? structuredClone(raw.metadata) : {},
       namedRanges: isRecord(raw.namedRanges) ? structuredClone(raw.namedRanges) : {},
       comments: isRecord(raw.comments) ? structuredClone(raw.comments) : {},
