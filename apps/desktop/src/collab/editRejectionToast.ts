@@ -92,14 +92,17 @@ function describeRejectedTarget(kind: RejectionKind, rejected: any[]): string | 
 export function showCollabEditRejectedToast(rejected: any[]): void {
   if (!Array.isArray(rejected) || rejected.length === 0) return;
 
-  // Tests (and some desktop integration points) recreate `#toast-root` between runs.
+  // Tests (and some desktop integration points) recreate `#toast-root` between runs. If we keep
+  // throttling state across different roots, a toast that would normally appear can be suppressed
+  // because the previous run emitted the same message moments earlier.
+  //
+  // In the real app the root is long-lived, so this preserves the intended spam protection while
+  // keeping tests deterministic.
   if (lastToastRoot && !lastToastRoot.isConnected) {
     lastToastRoot = null;
     lastToastMessage = null;
     lastToastTime = 0;
   }
-  // Reset throttle state when that happens so we don't accidentally suppress the
-  // first toast in a fresh UI mount.
   const toastRoot = (() => {
     try {
       return document.getElementById("toast-root");
@@ -107,7 +110,7 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
       return null;
     }
   })();
-  if (toastRoot && toastRoot !== lastToastRoot) {
+  if (toastRoot !== lastToastRoot) {
     lastToastRoot = toastRoot;
     lastToastMessage = null;
     lastToastTime = 0;
@@ -137,11 +140,11 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
   if (canThrottle && message === lastToastMessage && now - lastToastTime < REJECTION_TOAST_THROTTLE_MS) {
     return;
   }
-  lastToastMessage = message;
-  lastToastTime = now;
 
   try {
     showToast(message, "warning");
+    lastToastMessage = message;
+    lastToastTime = now;
   } catch {
     // `showToast` requires a #toast-root; some test-only contexts don't include it.
   }
