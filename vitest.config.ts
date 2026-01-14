@@ -30,6 +30,11 @@ const gridNodeEntry = resolve(repoRoot, "packages/grid/src/node.ts");
 const fillEngineEntry = resolve(repoRoot, "packages/fill-engine/src/index.ts");
 const textLayoutEntry = resolve(repoRoot, "packages/text-layout/src/index.js");
 const textLayoutHarfBuzzEntry = resolve(repoRoot, "packages/text-layout/src/harfbuzz.js");
+const aiAuditEntry = resolve(repoRoot, "packages/ai-audit/src/index.node.ts");
+const aiAuditBrowserEntry = resolve(repoRoot, "packages/ai-audit/src/index.ts");
+const aiAuditNodeEntry = resolve(repoRoot, "packages/ai-audit/src/index.node.ts");
+const aiAuditSqliteEntry = resolve(repoRoot, "packages/ai-audit/src/sqlite.node.ts");
+const aiAuditExportEntry = resolve(repoRoot, "packages/ai-audit/src/export.ts");
 const graphemeSplitterShimEntry = resolve(repoRoot, "scripts/vitest-shims/grapheme-splitter.ts");
 const linebreakShimEntry = resolve(repoRoot, "scripts/vitest-shims/linebreak.ts");
 const graphemeSplitterPackageEntry = resolve(repoRoot, "node_modules/grapheme-splitter");
@@ -86,6 +91,12 @@ export default defineConfig({
       { find: /^@formula\/fill-engine$/, replacement: fillEngineEntry },
       { find: /^@formula\/text-layout$/, replacement: textLayoutEntry },
       { find: /^@formula\/text-layout\/harfbuzz$/, replacement: textLayoutHarfBuzzEntry },
+      // AI workspace packages used by desktop tests.
+      { find: /^@formula\/ai-audit$/, replacement: aiAuditEntry },
+      { find: /^@formula\/ai-audit\/browser$/, replacement: aiAuditBrowserEntry },
+      { find: /^@formula\/ai-audit\/node$/, replacement: aiAuditNodeEntry },
+      { find: /^@formula\/ai-audit\/sqlite$/, replacement: aiAuditSqliteEntry },
+      { find: /^@formula\/ai-audit\/export$/, replacement: aiAuditExportEntry },
       // Some cached/stale `node_modules` environments may be missing transitive dependencies of the
       // aliased workspace packages. Provide lightweight shims for pure-JS deps used by
       // `@formula/text-layout` so desktop tests can still run.
