@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,6 +51,43 @@ const repoVitestBin = path.join(repoRoot, "node_modules", ".bin", vitestBinName)
 const vitestCmd = existsSync(cwdVitestBin) ? cwdVitestBin : existsSync(repoVitestBin) ? repoVitestBin : "vitest";
 
 const baseArgs = mode === "watch" ? ["--watch"] : ["--run"];
+
+// Vitest can exceed Node's default heap limits when running the full monorepo suite
+// in a single process (Vite transform cache + module graph). To keep `pnpm test:vitest`
+// reliable in memory-constrained environments, run the full suite in a small number
+// of shards (separate Vitest processes) so memory can be reclaimed between runs.
+//
+// This only applies to full-suite, run-once invocations (no explicit test paths).
+const isFullSuiteRun = mode === "run" && args.length === 0;
+const envShardCountRaw = (process.env.FORMULA_VITEST_SHARDS ?? process.env.VITEST_SHARDS ?? "").trim();
+const envShardCount = (() => {
+  if (!envShardCountRaw) return null;
+  const parsed = Number(envShardCountRaw);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(1, Math.trunc(parsed));
+})();
+const shardCount = isFullSuiteRun ? envShardCount ?? 2 : 1;
+
+if (mode === "run" && shardCount > 1) {
+  for (let shard = 1; shard <= shardCount; shard += 1) {
+    console.log(`\n[vitest] Running shard ${shard}/${shardCount}...\n`);
+    const res = spawnSync(vitestCmd, [...baseArgs, ...args, `--shard=${shard}/${shardCount}`], {
+      stdio: "inherit",
+      // On Windows, `.cmd` shims in PATH are easiest to resolve via a shell.
+      shell: process.platform === "win32",
+    });
+
+    if (res.signal) {
+      process.kill(process.pid, res.signal);
+      process.exit(1);
+    }
+
+    if (typeof res.status === "number" && res.status !== 0) {
+      process.exit(res.status);
+    }
+  }
+  process.exit(0);
+}
 
 const child = spawn(vitestCmd, [...baseArgs, ...args], {
   stdio: "inherit",

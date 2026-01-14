@@ -553,7 +553,6 @@ describe("startupMetrics", () => {
       // resume and schedule follow-up timers within the same advancement window.
       await vi.advanceTimersByTimeAsync(10);
       await new Promise<void>((resolve) => queueMicrotask(resolve));
-      await new Promise<void>((resolve) => queueMicrotask(resolve));
 
       expect(invoke).toHaveBeenCalledWith("report_startup_webview_loaded");
       expect(listen).toHaveBeenCalled();

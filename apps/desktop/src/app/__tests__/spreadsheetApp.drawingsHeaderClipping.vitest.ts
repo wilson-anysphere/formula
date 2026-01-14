@@ -381,13 +381,14 @@ describe("SpreadsheetApp drawings header clipping", () => {
         new PointerEvent("pointerdown", {
           bubbles: true,
           cancelable: true,
+          pointerId: 3,
+          pointerType: "mouse",
           button: 0,
           clientX: headerWidth - 5,
           clientY: headerHeight + 5,
         }),
       );
       expect((app as any).selectedDrawingId).toBe(null);
-
       app.destroy();
       root.remove();
     } finally {

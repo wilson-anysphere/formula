@@ -224,7 +224,7 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
         selectionRange: document.createElement("div"),
         activeValue: document.createElement("div"),
       };
- 
+
       // Disable the dedicated controller so SpreadsheetApp's legacy drawing gesture logic owns the drag.
       const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
       const sheetId = app.getCurrentSheetId();
@@ -260,7 +260,7 @@ describe("SpreadsheetApp legacy drawing interactions", () => {
       const rect = drawingObjectToViewportRect(object, viewport, geom);
       const startClientX = rect.x + rect.width / 2;
       const startClientY = rect.y + rect.height / 2;
- 
+
       const dxPx = 10;
       const dyPx = 5;
  
