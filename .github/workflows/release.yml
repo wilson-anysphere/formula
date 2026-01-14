@@ -1632,7 +1632,15 @@ jobs:
             $candidatesJoined = $releaseCandidates -join "`n"
             throw "windows-arm64: Expected Rust release directory not found. Looked in:`n$candidatesJoined"
           }
-          $exe = Get-ChildItem -Path $releaseDir -Recurse -File -Filter "formula-desktop.exe" | Select-Object -First 1
+          # Avoid scanning the entire Cargo target release directory (can be large in CI). The binary
+          # is expected at <releaseDir>/formula-desktop.exe; fall back to a recursive search only if
+          # the direct path is missing (defensive against unusual build layouts).
+          $exePath = Join-Path $releaseDir "formula-desktop.exe"
+          if (Test-Path $exePath) {
+            $exe = Get-Item -LiteralPath $exePath
+          } else {
+            $exe = Get-ChildItem -Path $releaseDir -Recurse -File -Filter "formula-desktop.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
           if (-not $exe) {
             throw "windows-arm64: Expected compiled binary formula-desktop.exe not found under: $releaseDir"
           }
