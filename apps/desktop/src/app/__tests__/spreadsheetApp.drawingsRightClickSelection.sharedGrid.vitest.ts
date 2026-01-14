@@ -153,7 +153,7 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
     expect(app.getGridMode()).toBe("shared");
 
     // Move the active cell away from A1 so we can detect selection changes.
@@ -256,7 +256,7 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
     // When drawing interactions are disabled, SpreadsheetApp relies on its capture-phase
     // drawing hit testing (`onDrawingPointerDownCapture`) to keep shared-grid selection
     // stable on right-click.
-    const app = new SpreadsheetApp(root, status);
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
     expect(app.getGridMode()).toBe("shared");
 
     const drawing: DrawingObject = {
