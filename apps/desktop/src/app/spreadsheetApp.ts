@@ -9448,12 +9448,14 @@ export class SpreadsheetApp {
       this.formulaRangePreviewTooltipLastKey = null;
       return;
     }
+    // Always clear `aria-describedby` even if the tooltip is already hidden, so any stale
+    // association is removed if external code toggled attributes unexpectedly.
+    this.syncFormulaRangePreviewTooltipDescribedBy(false);
     if (!this.formulaRangePreviewTooltipVisible && tooltip.hidden) return;
     this.formulaRangePreviewTooltipVisible = false;
     tooltip.hidden = true;
     tooltip.setAttribute("aria-hidden", "true");
     tooltip.classList.remove("formula-range-preview-tooltip--visible");
-    this.syncFormulaRangePreviewTooltipDescribedBy(false);
   }
 
   private syncFormulaRangePreviewTooltipDescribedBy(visible: boolean): void {
