@@ -847,6 +847,47 @@ mod tests {
     }
 
     #[test]
+    fn standard_cryptoapi_rc4_sha1_40bit_padding_ciphertext_vector() {
+        // Deterministic 40-bit RC4 key padding vectors from `docs/offcrypto-standard-cryptoapi-rc4.md`.
+        //
+        // CryptoAPI/Office pad 40-bit keys to a 16-byte RC4 key by appending 11 zero bytes.
+        let password = "password";
+        let salt: Vec<u8> = (0u8..=0x0F).collect();
+
+        let deriver = StandardKeyDeriver::new(
+            HashAlgorithm::Sha1,
+            40,
+            &salt,
+            password,
+            StandardKeyDerivation::Rc4,
+        );
+        let key0 = deriver.derive_key_for_block(0).expect("key0");
+        assert_eq!(key0.as_slice(), hex_decode("6ad7dedf2d"));
+
+        let plaintext = b"Hello, RC4 CryptoAPI!";
+
+        // Raw 5-byte key (NOT CryptoAPI-compatible).
+        let mut ciphertext_raw = plaintext.to_vec();
+        rc4_xor_in_place(&key0, &mut ciphertext_raw).expect("rc4 encrypt raw");
+        assert_eq!(
+            ciphertext_raw,
+            hex_decode("d1fa444913b4839b06eb4851750a07761005f025bf")
+        );
+
+        // CryptoAPI padded 16-byte key (correct behavior).
+        let mut padded_key = [0u8; 16];
+        padded_key[..5].copy_from_slice(&key0);
+        let mut ciphertext_padded = plaintext.to_vec();
+        rc4_xor_in_place(&padded_key, &mut ciphertext_padded).expect("rc4 encrypt padded");
+        assert_eq!(
+            ciphertext_padded,
+            hex_decode("7a8bd000713a6e30ba9916476d27b01d36707a6ef8")
+        );
+
+        assert_ne!(ciphertext_raw, ciphertext_padded);
+    }
+
+    #[test]
     fn standard_cryptoapi_rc4_md5_derivation_vector() {
         // Deterministic test vector from `docs/offcrypto-standard-cryptoapi-rc4.md`.
         let password = "password";
