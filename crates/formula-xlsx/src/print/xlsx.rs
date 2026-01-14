@@ -446,7 +446,13 @@ pub(crate) fn parse_worksheet_print_settings(
     let mut scale: Option<u16> = None;
     let mut fit_to_width: Option<u16> = None;
     let mut fit_to_height: Option<u16> = None;
-    let mut fit_to_page = false;
+    // In OOXML, `pageSetup` stores both percent scaling (`scale`) and fit-to-page dimensions
+    // (`fitToWidth`/`fitToHeight`). The `sheetPr/pageSetUpPr/@fitToPage` flag determines which
+    // mode is active.
+    //
+    // Some non-Excel producers omit `pageSetUpPr` while still providing `fitToWidth`/`fitToHeight`;
+    // keep this optional so we can apply a best-effort inference only when the flag is absent.
+    let mut fit_to_page: Option<bool> = None;
 
     let mut manual_breaks = ManualPageBreaks::default();
     let mut in_row_breaks = false;
@@ -466,7 +472,7 @@ pub(crate) fn parse_worksheet_print_settings(
                 fit_to_height = fth.or(fit_to_height);
             }
             Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"pageSetUpPr" => {
-                fit_to_page = parse_fit_to_page(&e)?;
+                fit_to_page = Some(parse_fit_to_page(&e)?);
             }
             Event::Start(e) if e.local_name().as_ref() == b"rowBreaks" => in_row_breaks = true,
             Event::End(e) if e.local_name().as_ref() == b"rowBreaks" => in_row_breaks = false,
@@ -493,15 +499,30 @@ pub(crate) fn parse_worksheet_print_settings(
         buf.clear();
     }
 
-    let scaling = if fit_to_page || fit_to_width.is_some() || fit_to_height.is_some() {
-        Scaling::FitTo {
+    fn normalize_scale(scale: u16) -> u16 {
+        if scale == 0 { 100 } else { scale }
+    }
+
+    let scaling = match fit_to_page {
+        Some(true) => Scaling::FitTo {
             width: fit_to_width.unwrap_or(0),
             height: fit_to_height.unwrap_or(0),
+        },
+        Some(false) => Scaling::Percent(normalize_scale(scale.unwrap_or(100))),
+        None => {
+            // Best-effort: if the sheet omits `pageSetUpPr` but supplies fit dimensions, treat it as
+            // fit-to-page mode.
+            if fit_to_width.is_some() || fit_to_height.is_some() {
+                Scaling::FitTo {
+                    width: fit_to_width.unwrap_or(0),
+                    height: fit_to_height.unwrap_or(0),
+                }
+            } else if let Some(scale) = scale {
+                Scaling::Percent(normalize_scale(scale))
+            } else {
+                Scaling::Percent(100)
+            }
         }
-    } else if let Some(scale) = scale {
-        Scaling::Percent(scale)
-    } else {
-        Scaling::Percent(100)
     };
 
     Ok((

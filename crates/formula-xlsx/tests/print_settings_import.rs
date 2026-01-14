@@ -64,6 +64,51 @@ fn build_xlsx_without_defined_names() -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
+fn build_xlsx_fit_to_page_disabled_but_fit_dimensions_present() -> Vec<u8> {
+    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    // Regression: `pageSetUpPr/@fitToPage` controls whether `pageSetup/@fitToWidth` and
+    // `pageSetup/@fitToHeight` are active. When `fitToPage="0"`, Excel uses `pageSetup/@scale`
+    // percent scaling instead (even if fit dimensions are present).
+    let worksheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetPr>
+    <pageSetUpPr fitToPage="0"/>
+  </sheetPr>
+  <sheetData/>
+  <pageSetup paperSize="9" orientation="portrait" scale="77" fitToWidth="2" fitToHeight="3"/>
+</worksheet>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml).unwrap();
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .unwrap();
+    zip.write_all(workbook_rels).unwrap();
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(worksheet_xml).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
 #[test]
 fn print_settings_imports_page_setup_breaks_print_area_and_titles_into_workbook_model() {
     let bytes = load_fixture_xlsx();
@@ -145,4 +190,18 @@ fn print_settings_imports_worksheet_page_setup_even_without_defined_names() {
     // brk/@id values are 1-based; model stores 0-based indices.
     assert!(sheet.manual_page_breaks.row_breaks_after.contains(&0));
     assert!(sheet.manual_page_breaks.col_breaks_after.contains(&2));
+}
+
+#[test]
+fn print_settings_scale_wins_when_fit_to_page_is_explicitly_disabled() {
+    let bytes = build_xlsx_fit_to_page_disabled_but_fit_dimensions_present();
+
+    let workbook = read_workbook_model_from_bytes(&bytes).expect("read workbook model");
+    assert_eq!(workbook.print_settings.sheets.len(), 1);
+    let sheet = &workbook.print_settings.sheets[0];
+
+    assert_eq!(sheet.sheet_name, "Sheet1");
+    assert_eq!(sheet.page_setup.paper_size.code, 9);
+    assert_eq!(sheet.page_setup.orientation, Orientation::Portrait);
+    assert_eq!(sheet.page_setup.scaling, Scaling::Percent(77));
 }
