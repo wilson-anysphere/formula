@@ -119,6 +119,56 @@ Excel can encode rich text in two places:
   - visibility flags (`showGridLines`, `showRowColHeaders`, etc.)
   - extension payloads (`<extLst>`)
 
+### Worksheet protection (`<sheetProtection>`)
+
+Worksheet protection is stored in `xl/worksheets/sheetN.xml` as a `<sheetProtection …/>` element. It
+contains:
+
+- a legacy `password="ABCD"` hash (16-bit, not cryptographically secure)
+- allow-list booleans like `formatCells`, `insertRows`, `sort`, `autoFilter`, etc.
+- inverted “protected” flags: `objects` and `scenarios`
+- (newer Excel) modern hashing attributes like `algorithmName`, `hashValue`, `saltValue`,
+  `spinCount`, etc.
+
+#### Preservation strategy
+
+- **Parsed into model:** a best-effort subset of allow-list flags plus the legacy `password` hash
+  into `Worksheet.sheet_protection`. Unsupported attributes are ignored.
+- **Preserved byte-for-byte:** modern hashing attributes (e.g. `algorithmName`, `hashValue`,
+  `saltValue`, `spinCount`) must be preserved on round-trip even if the public model only exposes
+  the legacy `password` hash.
+  - In practice this means: if we aren’t changing protection, we should avoid rewriting
+    `<sheetProtection>` (see the patch-in-place logic in `crates/formula-xlsx/src/write/mod.rs`).
+
+#### Patch/write rules
+
+- If protection settings change, the writer replaces the `<sheetProtection>` element using the
+  modeled fields. This currently drops unmodeled attributes (including modern hashing attributes).
+- When inserting/replacing `<sheetProtection>`, preserve schema ordering (Excel expects
+  `sheetData`, then optional `sheetCalcPr`, then `sheetProtection`).
+
+### Tables (`xl/tables/table*.xml`)
+
+Excel “tables” (ListObjects) are stored in separate parts like `xl/tables/table1.xml` and linked
+from the worksheet via `<tableParts>` plus a `.../relationships/table` relationship in
+`xl/worksheets/_rels/sheetN.xml.rels`.
+
+Table part parsing/writing lives in `crates/formula-xlsx/src/tables/xml.rs`.
+
+#### Table `<autoFilter>` (same semantics as worksheet `<autoFilter>`)
+
+`table*.xml` can contain an `<autoFilter>` element whose schema/behavior matches the worksheet-level
+`<autoFilter>` (same `filterColumn`/`filters`/`customFilters`/`dynamicFilter`/`sortState` vocabulary).
+
+- Worksheet autoFilter parsing/writing lives in `crates/formula-xlsx/src/autofilter/*` and is applied
+  during round-trip patching in `crates/formula-xlsx/src/write/mod.rs`.
+
+For forward compatibility, any advanced filter criteria we don’t model (e.g. newer filter elements or
+`extLst` payloads) should be preserved by storing the original XML fragments in the `raw_xml` fields
+on the AutoFilter / FilterColumn structs and re-emitting them unchanged. Worksheet autoFilters
+already do this via `crates/formula-xlsx/src/autofilter/*`; table autoFilters should follow the same
+pattern when we extend `crates/formula-xlsx/src/tables/xml.rs` beyond the common subset.
+
 ### Comments (legacy notes + threaded comments)
 
 #### Preservation strategy
@@ -361,27 +411,6 @@ Implementation note (Formula): `formula-xlsx` currently treats `t="d"` as an *op
 stores the value as a plain string in the workbook model, while preserving the original `t` + raw
 `<v>` text in round-trip metadata. This lets us rewrite `sheetData` without corrupting typed date
 cells (see `crates/formula-xlsx/src/write/mod.rs`).
-
-#### Tables (`xl/tables/table*.xml`)
-
-Excel “tables” (ListObjects) are stored in separate parts like `xl/tables/table1.xml` and linked from
-the worksheet via `<tableParts>` plus a `.../relationships/table` relationship in
-`xl/worksheets/_rels/sheetN.xml.rels`.
-
-##### Table `<autoFilter>` (same semantics as worksheet `<autoFilter>`)
-
-`table*.xml` can contain an `<autoFilter>` element whose schema/behavior matches the worksheet-level
-`<autoFilter>` (same `filterColumn`/`filters`/`customFilters`/`dynamicFilter`/`sortState` vocabulary).
-
-- Worksheet autoFilter parsing/writing lives in `crates/formula-xlsx/src/autofilter/*` and is applied
-  during round-trip patching in `crates/formula-xlsx/src/write/mod.rs`.
-- Table part parsing/writing lives in `crates/formula-xlsx/src/tables/xml.rs`.
-
-For forward compatibility, any advanced filter criteria we don’t model (e.g. newer filter elements or
-`extLst` payloads) should be preserved by storing the original XML fragments in the `raw_xml` fields
-on the AutoFilter / FilterColumn structs and re-emitting them unchanged. Worksheet autoFilters
-already do this via `crates/formula-xlsx/src/autofilter/*`; table autoFilters should follow the same
-pattern when we extend `crates/formula-xlsx/src/tables/xml.rs` beyond the common subset.
 
 #### Images in Cells (`IMAGE()` / “Place in Cell”) (Rich Data + `metadata.xml`)
 
@@ -1267,22 +1296,6 @@ interface XlsxDocument {
   binaryParts: Map<PartPath, Uint8Array>;  // vbaProject.bin, etc.
 }
 ```
-
-### Worksheet protection hashing attributes (forward compatibility)
-
-`<sheetProtection>` can include newer hashing attributes like `algorithmName`, `hashValue`,
-`saltValue`, and `spinCount` (used by modern Excel versions instead of the legacy `password="ABCD"`
-hash).
-
-Even if the public model only exposes the legacy `password` hash, these newer attributes must be
-preserved byte-for-byte on round-trip unless the user explicitly edits protection settings. In the
-current writer this falls under the general “patch in place” strategy in
-`crates/formula-xlsx/src/write/mod.rs`: if we aren’t changing sheet protection, we should avoid
-rewriting `<sheetProtection>` so we don’t drop unmodeled attributes.
-
-If we *do* rewrite `<sheetProtection>` (because protection settings changed), we currently emit only
-the legacy `password="ABCD"` hash and modeled allow-list flags, so modern hashing attributes will be
-lost.
 
 ### Relationship ID Preservation
 
