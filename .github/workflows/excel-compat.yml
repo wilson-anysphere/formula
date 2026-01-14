@@ -235,16 +235,20 @@ jobs:
           $include = $env:EFFECTIVE_INCLUDE_TAGS
           $exclude = $env:EFFECTIVE_EXCLUDE_TAGS
 
-          $args = @(
-            "tools/excel-oracle/compare.py",
-            "--cases", "tests/compatibility/excel-oracle/cases.json",
-            "--expected", "${{ steps.expected.outputs.path }}",
-            "--actual", "tests/compatibility/excel-oracle/datasets/engine-results.json",
-            "--report", "tests/compatibility/excel-oracle/reports/mismatch-report.json",
-            "--max-mismatch-rate", $maxRate,
-            # Some functions (like odd-coupon bonds) use iterative solvers and can differ from Excel
-            # by small floating point amounts even when the math is correct.
-            "--tag-abs-tol", "odd_coupon=1e-6",
+           $args = @(
+             "tools/excel-oracle/compare.py",
+             "--cases", "tests/compatibility/excel-oracle/cases.json",
+             "--expected", "${{ steps.expected.outputs.path }}",
+             "--actual", "tests/compatibility/excel-oracle/datasets/engine-results.json",
+             "--report", "tests/compatibility/excel-oracle/reports/mismatch-report.json",
+             # Defense in depth: if any paths in the report are absolute (e.g. self-hosted runners),
+             # hash them so artifacts don't leak usernames/mount points. Repo-relative paths remain
+             # readable.
+             "--privacy-mode", "private",
+             "--max-mismatch-rate", $maxRate,
+             # Some functions (like odd-coupon bonds) use iterative solvers and can differ from Excel
+             # by small floating point amounts even when the math is correct.
+             "--tag-abs-tol", "odd_coupon=1e-6",
             "--tag-rel-tol", "odd_coupon=1e-6"
           )
           if ($max -gt 0) { $args += @("--max-cases", $max) }
