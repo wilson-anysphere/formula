@@ -37,7 +37,15 @@ describe("ai-audit browser bundling", () => {
            import { AIAuditRecorder, LocalStorageAIAuditStore, createDefaultAIAuditStore } from "@formula/ai-audit";
            import { BoundedAIAuditStore } from "@formula/ai-audit";
            import { LocalStorageAIAuditStore as FromBrowserSubpath } from "@formula/ai-audit/browser";
-           console.log(AIAuditRecorder, LocalStorageAIAuditStore, FromBrowserSubpath, BoundedAIAuditStore, createDefaultAIAuditStore);
+           import { createDefaultAIAuditStore as FromBrowserFactory } from "@formula/ai-audit/browser";
+           console.log(
+             AIAuditRecorder,
+             LocalStorageAIAuditStore,
+             FromBrowserSubpath,
+             BoundedAIAuditStore,
+             createDefaultAIAuditStore,
+             FromBrowserFactory,
+           );
          `
        }
      });
