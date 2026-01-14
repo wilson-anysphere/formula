@@ -188,3 +188,27 @@ test("applyExternalImageCacheDeltas ignores invalid entries (non-Uint8Array byte
 
   assert.equal(doc.getImage("img1"), null);
 });
+
+test("applyExternalImageCacheDeltas does not emit update events or bump updateVersion", () => {
+  const doc = new DocumentController();
+  const before = doc.updateVersion;
+
+  let updateCount = 0;
+  doc.on("update", () => {
+    updateCount += 1;
+  });
+
+  doc.applyExternalImageCacheDeltas(
+    [
+      {
+        imageId: "img1",
+        before: null,
+        after: { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" },
+      },
+    ],
+    { source: "hydration" },
+  );
+
+  assert.equal(updateCount, 0);
+  assert.equal(doc.updateVersion, before);
+});
