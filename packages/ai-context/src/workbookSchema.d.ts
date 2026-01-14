@@ -11,6 +11,15 @@ export type WorkbookSchemaRectInput =
   | WorkbookSchemaRect
   | { startRow: number; startCol: number; endRow: number; endCol: number }
   | { start: { row: number; col: number }; end: { row: number; col: number } };
+
+/**
+ * Generic helper for workbook collection fields (sheets/tables/namedRanges).
+ *
+ * Note: Some fields are typed more precisely (e.g. `WorkbookSchemaSheets`) to model
+ * differences between array vs map inputs, but this alias can be useful for callers
+ * that want a single collection type.
+ */
+export type WorkbookSchemaCollection<T> = ReadonlyArray<T> | Set<T> | Map<unknown, T> | Record<string, T>;
 export interface WorkbookSchemaSheet {
   name: string;
 }
