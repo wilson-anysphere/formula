@@ -538,6 +538,10 @@ pub enum PrecedentNode {
     /// Cell reference into an external workbook, e.g. `[Book.xlsx]Sheet1!A1`.
     ///
     /// `sheet` is the canonical external sheet key (`"[workbook]sheet"`, e.g. `"[Book.xlsx]Sheet1"`).
+    ///
+    /// For external 3D spans, auditing may also surface the unexpanded span key
+    /// (`"[workbook]Sheet1:Sheet3"`) when expansion is not possible (e.g. no provider or missing
+    /// `sheet_order`).
     ExternalCell {
         sheet: String,
         addr: CellAddr,
@@ -545,6 +549,10 @@ pub enum PrecedentNode {
     /// Range reference into an external workbook, e.g. `[Book.xlsx]Sheet1!A1:B3`.
     ///
     /// `sheet` is the canonical external sheet key (`"[workbook]sheet"`, e.g. `"[Book.xlsx]Sheet1"`).
+    ///
+    /// For external 3D spans, auditing may also surface the unexpanded span key
+    /// (`"[workbook]Sheet1:Sheet3"`) when expansion is not possible (e.g. no provider or missing
+    /// `sheet_order`).
     ExternalRange {
         sheet: String,
         start: CellAddr,
@@ -6831,9 +6839,10 @@ impl Engine {
 
     /// Direct precedents (cells and ranges referenced by the formula in `cell`).
     ///
-    /// Note: external-workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1` are expanded at
-    /// evaluation time using [`ExternalValueProvider::sheet_order`]. They are not currently
-    /// surfaced as per-sheet precedents in this auditing API.
+    /// Note: external-workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1` are expanded using
+    /// [`ExternalValueProvider::sheet_order`] when a provider is configured. When the sheet order
+    /// is unavailable, this API reports the raw span key (e.g. `"[Book.xlsx]Sheet1:Sheet3"`) as a
+    /// single external precedent.
     pub fn precedents(&self, sheet: &str, addr: &str) -> Result<Vec<PrecedentNode>, EngineError> {
         self.precedents_impl(sheet, addr, false)
     }

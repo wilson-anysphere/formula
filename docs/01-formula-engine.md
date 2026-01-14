@@ -336,9 +336,12 @@ ambiguous. This can matter for uncommon paths containing bracket characters (e.g
     dependency graph, so the engine cannot automatically determine which formulas are affected by a
     particular external cell changing.
 * **Auditing APIs:** `Engine::precedents(...)` reports external single-sheet references
-  (`[Book.xlsx]Sheet1!A1`) but does not currently expand external-workbook 3D spans
-  (`[Book.xlsx]Sheet1:Sheet3!A1`) into per-sheet precedents, since span expansion depends on
-  `sheet_order(...)` at evaluation time.
+  (`[Book.xlsx]Sheet1!A1`).
+  * For external-workbook 3D spans (`[Book.xlsx]Sheet1:Sheet3!A1`), `precedents(...)` expands into
+    per-sheet precedents when a provider is configured and `sheet_order(...)` is available.
+  * If no provider is configured (or `sheet_order(...)` is unavailable/missing endpoints),
+    `precedents(...)` reports the raw span key as a single external precedent
+    (e.g. `"[Book.xlsx]Sheet1:Sheet3"`), since it cannot determine the intermediate sheets.
 * **External 3D spans as formula results:** `=[Book.xlsx]Sheet1:Sheet3!A1` is a multi-area reference
   union. Since the engine cannot spill multi-area unions as a single rectangular array, it evaluates
   to `#VALUE!` when the span can be expanded (or `#REF!` when `sheet_order` is unavailable/missing
