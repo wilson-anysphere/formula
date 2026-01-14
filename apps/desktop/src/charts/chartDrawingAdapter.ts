@@ -21,7 +21,10 @@ export function chartIdToDrawingId(chartId: string): number {
   // workbook drawings frequently contain small numeric ids as well.
   const hashed = stableHash32(String(chartId ?? ""));
   // Avoid `0` which can be treated as a sentinel in some callers.
-  return hashed === 0 ? -1 : -hashed;
+  //
+  // When the hash is 0, use the reserved `-2^32` value so we stay within the chart namespace
+  // without colliding with `hashed === 1` (which would otherwise also map to `-1`).
+  return hashed === 0 ? -0x100000000 : -hashed;
 }
 
 /**
@@ -33,12 +36,12 @@ export function chartIdToDrawingId(chartId: string): number {
  * `drawings/modelAdapters.ts`).
  */
 export function isChartStoreDrawingId(id: number): boolean {
-  // `chartIdToDrawingId` returns values in `[-(2^32-1), -1]`.
+  // `chartIdToDrawingId` returns values in `[-2^32, -1]`.
   //
   // Workbook drawings can also use negative ids when their raw ids are not JS-safe; those hashed
   // ids live at `<= -2^33` (see `parseDrawingObjectId` in `drawings/modelAdapters.ts`) so they do
   // not collide with the chart namespace.
-  return typeof id === "number" && Number.isFinite(id) && id < 0 && id >= -0xffffffff;
+  return typeof id === "number" && Number.isFinite(id) && id < 0 && id >= -0x100000000;
 }
 
 export function chartAnchorToDrawingAnchor(anchor: ChartAnchor): DrawingAnchor {

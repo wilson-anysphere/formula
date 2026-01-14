@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { anchorToRectPx, pxToEmu } from "../../drawings/overlay";
 import type { GridGeometry } from "../../drawings/overlay";
 import type { ChartRecord } from "../chartStore";
-import { chartRecordToDrawingObject } from "../chartDrawingAdapter";
+import { chartIdToDrawingId, chartRecordToDrawingObject, isChartStoreDrawingId } from "../chartDrawingAdapter";
 
 const geom: GridGeometry = {
   cellOriginPx: ({ row, col }) => ({ x: col * 100, y: row * 20 }),
@@ -11,6 +11,18 @@ const geom: GridGeometry = {
 };
 
 describe("charts/chartDrawingAdapter", () => {
+  it("maps chart ids into a disjoint negative namespace", () => {
+    const id = chartIdToDrawingId("chart_test");
+    expect(id).toBeLessThan(0);
+    expect(id).toBeGreaterThanOrEqual(-0x100000000);
+    expect(isChartStoreDrawingId(id)).toBe(true);
+
+    // The chart namespace should include the `-2^32` sentinel used when the hash is 0.
+    expect(isChartStoreDrawingId(-0x100000000)).toBe(true);
+    // But it should not overlap with the hashed workbook-drawing namespace (<= -2^33).
+    expect(isChartStoreDrawingId(-0x200000000)).toBe(false);
+  });
+
   it("maps a twoCell chart anchor into a DrawingObject with a correct rect", () => {
     const chart: ChartRecord = {
       id: "chart_1",
