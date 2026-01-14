@@ -178,6 +178,80 @@ fn parses_plot_area_wrapped_in_mc_alternate_content() {
 }
 
 #[test]
+fn captures_chart_space_ext_lst_wrapped_in_mc_alternate_content() {
+    let xml = r#"<c:chartSpace
+    xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <mc:AlternateContent>
+    <mc:Choice>
+      <c:spPr />
+    </mc:Choice>
+    <mc:Fallback>
+      <c:extLst>
+        <c:ext uri="{01234567-89AB-CDEF-0123-456789ABCDEF}" />
+      </c:extLst>
+    </mc:Fallback>
+  </mc:AlternateContent>
+  <c:chart>
+    <c:plotArea>
+      <c:barChart>
+        <c:barDir val="col"/>
+      </c:barChart>
+    </c:plotArea>
+  </c:chart>
+ </c:chartSpace>
+ "#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "xl/charts/chart1.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+    assert!(
+        model
+            .chart_space_ext_lst_xml
+            .as_deref()
+            .is_some_and(|xml| xml.contains("extLst")),
+        "expected chartSpace extLst to be captured even when wrapped in AlternateContent"
+    );
+}
+
+#[test]
+fn captures_chart_ext_lst_wrapped_in_mc_alternate_content() {
+    let xml = r#"<c:chartSpace
+    xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <c:chart>
+    <mc:AlternateContent>
+      <mc:Choice>
+        <c:spPr />
+      </mc:Choice>
+      <mc:Fallback>
+        <c:extLst>
+          <c:ext uri="{01234567-89AB-CDEF-0123-456789ABCDEF}" />
+        </c:extLst>
+      </mc:Fallback>
+    </mc:AlternateContent>
+    <c:plotArea>
+      <c:barChart>
+        <c:barDir val="col"/>
+      </c:barChart>
+    </c:plotArea>
+  </c:chart>
+ </c:chartSpace>
+ "#;
+
+    let model =
+        parse_chart_space(xml.as_bytes(), "xl/charts/chart1.xml").expect("parse chartSpace");
+    assert_eq!(model.chart_kind, ChartKind::Bar);
+    assert!(
+        model
+            .chart_ext_lst_xml
+            .as_deref()
+            .is_some_and(|xml| xml.contains("extLst")),
+        "expected chart extLst to be captured even when wrapped in AlternateContent"
+    );
+}
+
+#[test]
 fn chooses_fallback_when_choice_contains_unsupported_chart_type() {
     // If `mc:Choice` contains a chart type we don't yet support, but `mc:Fallback`
     // contains a supported chart, we should still parse the fallback chart.
