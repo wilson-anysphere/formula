@@ -906,6 +906,52 @@ jobs:
             trap - EXIT
           done
 
+      - name: Verify Linux .rpm desktop integration (file associations + deep links + compliance)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Preferred location (matches docs/release.md), but fall back to scanning common Cargo target dirs.
+          shopt -s nullglob
+          rpms=(apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm)
+ 
+          if ((${#rpms[@]} == 0)); then
+            roots=()
+            if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+              roots+=("${CARGO_TARGET_DIR}")
+            fi
+            roots+=("apps/desktop/src-tauri/target" "apps/desktop/target" "target")
+ 
+            rpms=()
+            for root in "${roots[@]}"; do
+              [[ -d "${root}" ]] || continue
+              rpms+=("${root}"/release/bundle/rpm/*.rpm)
+              rpms+=("${root}"/*/release/bundle/rpm/*.rpm)
+            done
+          fi
+ 
+          if ((${#rpms[@]} > 0)); then mapfile -t rpms < <(printf '%s\n' "${rpms[@]}" | sort -u); fi
+          shopt -u nullglob
+ 
+          if ((${#rpms[@]} == 0)); then
+            echo "::error::could not find any .rpm artifacts under apps/desktop/src-tauri/target/release/bundle/rpm or target/**/release/bundle/rpm" >&2
+            exit 1
+          fi
+ 
+          for rpm_path in "${rpms[@]}"; do
+            echo "Validating rpm: ${rpm_path}"
+ 
+            tmpdir="$(mktemp -d)"
+            trap 'rm -rf "${tmpdir}"' EXIT
+ 
+            # Extract the RPM into a synthetic filesystem root so we can inspect its .desktop metadata.
+            rpm2cpio "${rpm_path}" | (cd "${tmpdir}" && cpio -idm --quiet --no-absolute-filenames)
+            python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir}"
+ 
+            rm -rf "${tmpdir}"
+            trap - EXIT
+          done
+
       - name: Verify Linux package dependency metadata (.deb + .rpm)
         if: runner.os == 'Linux'
         run: bash scripts/ci/verify-linux-package-deps.sh
