@@ -858,7 +858,13 @@ export class DocumentCellProvider implements CellProvider {
         // Clearing caches is faster and gives more predictable latency.
         // Keep the threshold > `maxDirectEvictions` so medium-sized invalidations (where preserving
         // unrelated cached cells is still valuable) continue to take the scan+selective-evict path.
-        const hugeInvalidationThreshold = Math.max(this.sheetCacheMaxSize, maxDirectEvictions * 2);
+        const hugeInvalidationThreshold = Math.max(
+          // Keep medium/large invalidations scanning the LRU (instead of dropping all caches),
+          // but cap worst-case invalidation work when the invalidated region is large relative to
+          // what we can even cache.
+          maxDirectEvictions * 2,
+          Math.floor(this.sheetCacheMaxSize * 0.5)
+        );
         if (cellCount >= hugeInvalidationThreshold) {
           this.invalidateAll();
           return true;

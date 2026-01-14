@@ -280,6 +280,37 @@ describe("DocumentCellProvider (shared grid)", () => {
     unsubscribe();
   });
 
+  it("invalidateDocCells falls back to invalidateAll when the invalidation is large relative to a large sheet cache", () => {
+    const sheetCacheMaxSize = 500_000;
+    const { provider } = createProvider({
+      getSheetId: () => "sheet-1",
+      getCell: () => ({ value: "hello", formula: null }),
+      // Make the grid big enough to cover the invalidation region.
+      rowCount: 1_001,
+      colCount: 1_001,
+      sheetCacheMaxSize,
+    });
+
+    // Populate cache so `sheetCaches.get(sheetId)` exists.
+    provider.getCell(1, 1);
+
+    const updates: any[] = [];
+    const unsubscribe = provider.subscribe((update) => updates.push(update));
+
+    const sheetCache = (provider as any).sheetCaches.get("sheet-1");
+    expect(sheetCache).toBeTruthy();
+    const keysSpy = vi.spyOn(sheetCache, "keys");
+
+    // 600x600 = 360k cells (>50% of 500k). This should take the invalidateAll path.
+    provider.invalidateDocCells({ startRow: 0, endRow: 600, startCol: 0, endCol: 600 });
+
+    expect(keysSpy).not.toHaveBeenCalled();
+    expect(updates).toEqual([{ type: "invalidateAll" }]);
+    expect((provider as any).sheetCaches.size).toBe(0);
+
+    unsubscribe();
+  });
+
   it("looks up comment metadata by numeric coords (no A1 string conversion)", () => {
     const meta = { resolved: false };
     const getCommentMeta = vi.fn((row: number, col: number) => {
