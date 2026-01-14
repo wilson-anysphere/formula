@@ -426,6 +426,138 @@ mod tests {
         out
     }
 
+    fn setup_payload(
+        i_paper_size: u16,
+        i_scale: u16,
+        i_fit_width: u16,
+        i_fit_height: u16,
+        grbit: u16,
+        num_hdr: f64,
+        num_ftr: f64,
+    ) -> Vec<u8> {
+        // BIFF8 SETUP record payload.
+        let mut out = Vec::new();
+        out.extend_from_slice(&i_paper_size.to_le_bytes());
+        out.extend_from_slice(&i_scale.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // iPageStart
+        out.extend_from_slice(&i_fit_width.to_le_bytes());
+        out.extend_from_slice(&i_fit_height.to_le_bytes());
+        out.extend_from_slice(&grbit.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // iRes
+        out.extend_from_slice(&0u16.to_le_bytes()); // iVRes
+        out.extend_from_slice(&num_hdr.to_le_bytes());
+        out.extend_from_slice(&num_ftr.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes()); // iCopies
+        out
+    }
+
+    #[test]
+    fn parses_page_setup_margins_and_fit_to_page_scaling() {
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(
+                RECORD_SETUP,
+                &setup_payload(
+                    9,      // A4
+                    77,     // iScale (ignored when fit-to-page)
+                    2,      // iFitWidth
+                    3,      // iFitHeight
+                    0x0000, // landscape (SETUP.grbit.fPortrait=0)
+                    0.5,    // header inches
+                    0.6,    // footer inches
+                ),
+            ),
+            record(RECORD_LEFTMARGIN, &1.0f64.to_le_bytes()),
+            record(RECORD_LEFTMARGIN, &2.0f64.to_le_bytes()), // last wins
+            record(RECORD_RIGHTMARGIN, &1.2f64.to_le_bytes()),
+            record(RECORD_TOPMARGIN, &1.3f64.to_le_bytes()),
+            record(RECORD_BOTTOMMARGIN, &1.4f64.to_le_bytes()),
+            record(RECORD_WSBOOL, &0x0100u16.to_le_bytes()), // fFitToPage=1
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = super::parse_biff_sheet_print_settings(&stream, 0).expect("parse");
+        let setup = parsed.page_setup.as_ref().expect("expected page_setup");
+        assert_eq!(setup.paper_size.code, 9);
+        assert_eq!(setup.orientation, Orientation::Landscape);
+        assert_eq!(setup.scaling, Scaling::FitTo { width: 2, height: 3 });
+        assert_eq!(setup.margins.left, 2.0);
+        assert_eq!(setup.margins.right, 1.2);
+        assert_eq!(setup.margins.top, 1.3);
+        assert_eq!(setup.margins.bottom, 1.4);
+        assert_eq!(setup.margins.header, 0.5);
+        assert_eq!(setup.margins.footer, 0.6);
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn parses_percent_scaling_when_fit_to_page_disabled() {
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(
+                RECORD_SETUP,
+                &setup_payload(1, 80, 1, 1, 0x0000, 0.3, 0.3), // iScale=80%
+            ),
+            record(RECORD_WSBOOL, &0u16.to_le_bytes()), // fFitToPage=0
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = super::parse_biff_sheet_print_settings(&stream, 0).expect("parse");
+        let setup = parsed.page_setup.as_ref().expect("expected page_setup");
+        assert_eq!(setup.scaling, Scaling::Percent(80));
+    }
+
+    #[test]
+    fn setup_f_nopls_ignores_printer_fields() {
+        // fNoPls=1 => iPaperSize/iScale/fPortrait are undefined and must be ignored.
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(
+                RECORD_SETUP,
+                &setup_payload(9, 80, 1, 1, 0x0004, 0.4, 0.5), // values ignored except header/footer
+            ),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = super::parse_biff_sheet_print_settings(&stream, 0).expect("parse");
+        let setup = parsed.page_setup.as_ref().expect("expected page_setup");
+        assert_eq!(setup.paper_size, PageSetup::default().paper_size);
+        assert_eq!(setup.orientation, Orientation::Portrait);
+        assert_eq!(setup.scaling, Scaling::Percent(100));
+        assert_eq!(setup.margins.header, 0.4);
+        assert_eq!(setup.margins.footer, 0.5);
+    }
+
+    #[test]
+    fn warns_on_truncated_margin_records_and_continues() {
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_TOPMARGIN, &[0xAA, 0xBB]), // truncated
+            record(RECORD_LEFTMARGIN, &1.0f64.to_le_bytes()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = super::parse_biff_sheet_print_settings(&stream, 0).expect("parse");
+        let setup = parsed.page_setup.as_ref().expect("expected page_setup");
+        assert_eq!(setup.margins.left, 1.0);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("truncated TOPMARGIN record")),
+            "expected truncated-TOPMARGIN warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
     #[test]
     fn print_settings_warnings_are_bounded_and_preserve_page_break_cap_warning() {
         // Fill the print-settings warning buffer with many truncated WSBOOL records.
