@@ -440,7 +440,7 @@ function defaultTransact(doc: Y.Doc): WorkbookTransact {
 
 function coerceString(value: unknown): string | null {
   const text = getYText(value);
-  if (text) return text.toString();
+  if (text) return yjsValueToJson(text);
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);

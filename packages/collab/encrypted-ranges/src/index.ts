@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 import { getWorkbookRoots } from "@formula/collab-workbook";
-import { getYArray, getYMap, getYText } from "@formula/collab-yjs-utils";
+import { getYArray, getYMap, getYText, yjsValueToJson } from "@formula/collab-yjs-utils";
 
 export type EncryptedRange = {
   id: string;
@@ -61,7 +61,7 @@ function assertEncryptedRangesSchemaSupported(value: unknown): void {
 
 function coerceString(value: unknown): string | null {
   const text = getYText(value);
-  if (text) return text.toString();
+  if (text) return yjsValueToJson(text);
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);

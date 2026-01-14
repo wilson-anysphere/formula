@@ -10,6 +10,7 @@ import {
   getYMap,
   getYText,
   isYAbstractType,
+  yjsValueToJson,
 } from "@formula/collab-yjs-utils";
 import {
   CellConflictMonitor,
@@ -185,7 +186,7 @@ function normalizeForeignScalar(value: any): any {
   }
 
   const text = getYText(value);
-  if (text) return text.toString();
+  if (text) return yjsValueToJson(text);
 
   return value;
 }
