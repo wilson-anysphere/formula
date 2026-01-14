@@ -102,6 +102,71 @@ jobs:
   assert.match(proc.stdout, /Tauri CLI version pins match/i);
 });
 
+test("fails when docs/release.md pins a different Tauri CLI version", { skip: !canRun }, () => {
+  const proc = run({
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  TAURI_CLI_VERSION: 2.9.5
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+    ".github/workflows/release.yml": `
+name: Release
+env:
+  TAURI_CLI_VERSION: 2.9.5
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+    "docs/release.md": `
+\`\`\`bash
+TAURI_CLI_VERSION=2.9.6
+\`\`\`
+`,
+  });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /docs\/release\.md/i);
+  assert.match(proc.stderr, /TAURI_CLI_VERSION/i);
+});
+
+test("passes when docs/release.md uses a v/V-prefixed Tauri CLI version", { skip: !canRun }, () => {
+  const proc = run({
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  TAURI_CLI_VERSION: 2.9.5
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+    ".github/workflows/release.yml": `
+name: Release
+env:
+  TAURI_CLI_VERSION: 2.9.5
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+    "docs/release.md": `
+\`\`\`bash
+export TAURI_CLI_VERSION=v2.9.5
+\`\`\`
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Tauri CLI version pins match/i);
+});
+
 test("ignores TAURI_CLI_VERSION strings inside YAML block scalars", { skip: !canRun }, () => {
   const proc = run({
     ".github/workflows/ci.yml": `
