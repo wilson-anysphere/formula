@@ -362,12 +362,16 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                 Cow::Borrowed(&def.rgce)
             };
 
-            let decoded = rgce::decode_biff8_rgce_with_base_and_rgcb(
-                &rgce_to_decode,
-                &def.rgcb,
-                ctx,
-                Some(target_cell),
-            );
+            let decoded = if def.rgcb.is_empty() {
+                rgce::decode_biff8_rgce_with_base(&rgce_to_decode, ctx, Some(target_cell))
+            } else {
+                rgce::decode_biff8_rgce_with_base_and_rgcb(
+                    &rgce_to_decode,
+                    &def.rgcb,
+                    ctx,
+                    Some(target_cell),
+                )
+            };
             for w in decoded.warnings {
                 push_warning_bounded(
                     &mut warnings,
