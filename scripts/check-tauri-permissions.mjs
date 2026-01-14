@@ -76,23 +76,45 @@ function runTauriPermissionLs() {
   const cached = readCachedPermissionLsOutput();
   if (cached) return cached;
 
-  const cmd = "bash";
-  const args = [
-    "-lc",
-    // Use the repo cargo wrapper so agent-specific safe defaults apply.
-    "cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls",
-  ];
-  const result = spawnSync(cmd, args, {
-    cwd: repoRoot,
-    encoding: "utf8",
-    maxBuffer: 20 * 1024 * 1024,
-    env: {
-      ...process.env,
-      // Keep output stable/parseable.
-      NO_COLOR: "1",
-      CARGO_TERM_COLOR: "never",
+  /** @type {import("node:child_process").SpawnSyncReturns<string>} */
+  let result;
+
+  // Preferred path: run via bash + the repo cargo wrapper so safe defaults (isolated CARGO_HOME,
+  // job limiting, etc) apply.
+  result = spawnSync(
+    "bash",
+    [
+      "-lc",
+      // Use the repo cargo wrapper so agent-specific safe defaults apply.
+      "cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls",
+    ],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024,
+      env: {
+        ...process.env,
+        // Keep output stable/parseable.
+        NO_COLOR: "1",
+        CARGO_TERM_COLOR: "never",
+      },
     },
-  });
+  );
+
+  // Fallback: environments without `bash` (notably some Windows setups) can still run the
+  // `cargo tauri` subcommand directly.
+  if (result.error && result.error.code === "ENOENT") {
+    result = spawnSync("cargo", ["tauri", "permission", "ls"], {
+      cwd: path.join(repoRoot, "apps", "desktop"),
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024,
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        CARGO_TERM_COLOR: "never",
+      },
+    });
+  }
 
   if (result.status !== 0) {
     const stdout = (result.stdout ?? "").trim();
