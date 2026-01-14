@@ -7,8 +7,7 @@
 use std::io::{Cursor, Read as _, Write as _};
 use std::path::PathBuf;
 
-use ms_offcrypto_writer::Ecma376AgileWriter;
-use rand::{rngs::StdRng, SeedableRng as _};
+use formula_office_crypto::{encrypt_package_to_ole, EncryptOptions, EncryptionScheme, HashAlgorithm};
 use zip::write::FileOptions;
 
 use formula_io::{
@@ -37,15 +36,18 @@ fn build_tiny_zip() -> Vec<u8> {
 }
 
 fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
-    let mut cursor = Cursor::new(Vec::new());
-    let mut rng = StdRng::from_seed([0u8; 32]);
-    let mut agile =
-        Ecma376AgileWriter::create(&mut rng, password, &mut cursor).expect("create agile");
-    agile
-        .write_all(plain_zip)
-        .expect("write plaintext zip to agile writer");
-    agile.finalize().expect("finalize agile writer");
-    cursor.into_inner()
+    // Keep tests fast: we only need a decryptable Agile container, not Excel's default KDF cost.
+    encrypt_package_to_ole(
+        plain_zip,
+        password,
+        EncryptOptions {
+            scheme: EncryptionScheme::Agile,
+            key_bits: 128,
+            hash_algorithm: HashAlgorithm::Sha256,
+            spin_count: 1_000,
+        },
+    )
+    .expect("encrypt to OLE EncryptedPackage wrapper")
 }
 
 #[test]
