@@ -766,14 +766,20 @@ where
         }
     };
 
-    out.vba_project_bin = read_optional_part("xl/vbaProject.bin", XLSX_VBA_PROJECT_MAX_BYTES);
+    out.vba_project_bin = read_optional_part(
+        "xl/vbaProject.bin",
+        XLSX_VBA_PROJECT_MAX_BYTES.min(MAX_OPTIONAL_PRESERVE_PART_BYTES),
+    );
     out.vba_project_signature_bin = read_optional_part(
         "xl/vbaProjectSignature.bin",
-        XLSX_VBA_SIGNATURE_MAX_BYTES,
+        XLSX_VBA_SIGNATURE_MAX_BYTES.min(MAX_OPTIONAL_PRESERVE_PART_BYTES),
     );
 
     if let Some(power_query_xml) =
-        read_optional_part(FORMULA_POWER_QUERY_PART, XLSX_POWER_QUERY_XML_MAX_BYTES)
+        read_optional_part(
+            FORMULA_POWER_QUERY_PART,
+            XLSX_POWER_QUERY_XML_MAX_BYTES.min(MAX_OPTIONAL_PRESERVE_PART_BYTES),
+        )
     {
         out.power_query_xml = Some(power_query_xml.clone());
         out.original_power_query_xml = Some(power_query_xml);
