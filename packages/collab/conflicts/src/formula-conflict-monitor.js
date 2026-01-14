@@ -1,9 +1,19 @@
 import * as Y from "yjs";
-import { getMapRoot } from "@formula/collab-yjs-utils";
+import { getMapRoot, yjsValueToJson } from "@formula/collab-yjs-utils";
 import { normalizeFormula } from "../../../versioning/src/formula/normalize.js";
 import { resolveFormulaConflict } from "./formula-conflict-resolver.js";
 import { cellRefFromKey } from "./cell-ref.js";
 import { tryEvaluateFormula } from "./formula-eval.js";
+
+/**
+ * @param {any} value
+ * @returns {string}
+ */
+function coerceString(value) {
+  const json = yjsValueToJson(value);
+  if (json == null) return "";
+  return String(json);
+}
 
 function safeCellRefFromKey(cellKey) {
   try {
@@ -254,7 +264,7 @@ export class FormulaConflictMonitor {
     if (!conflict) return false;
 
     const cell = /** @type {any} */ (this.cells.get(conflict.cellKey));
-    const currentFormula = (cell?.get?.("formula") ?? "").toString();
+    const currentFormula = coerceString(cell?.get?.("formula"));
     const currentValue = cell?.get?.("value") ?? null;
 
     if (conflict.kind === "content") {
@@ -313,11 +323,11 @@ export class FormulaConflictMonitor {
 
       const cellMap = /** @type {Y.Map<any>} */ (event.target);
       const modifiedByChange = event.changes.keys.get("modifiedBy");
-      const currentModifiedBy = (cellMap.get("modifiedBy") ?? "").toString();
+      const currentModifiedBy = coerceString(cellMap.get("modifiedBy"));
       // `modifiedBy` is best-effort metadata. Some writers may not update it.
       // If it didn't change in this transaction, we can't reliably attribute the overwrite.
       const remoteUserId = modifiedByChange ? currentModifiedBy : "";
-      const oldModifiedBy = modifiedByChange ? (modifiedByChange.oldValue ?? "").toString() : currentModifiedBy;
+      const oldModifiedBy = modifiedByChange ? coerceString(modifiedByChange.oldValue) : currentModifiedBy;
       const valueChange = event.changes.keys.get("value");
       const formulaChange = event.changes.keys.get("formula");
  
@@ -336,8 +346,8 @@ export class FormulaConflictMonitor {
       }
  
       if (formulaChange) {
-        const oldFormula = (formulaChange.oldValue ?? "").toString();
-        const newFormula = (cellMap.get("formula") ?? "").toString();
+        const oldFormula = coerceString(formulaChange.oldValue);
+        const newFormula = coerceString(cellMap.get("formula"));
         const action = formulaChange.action;
         const itemId = getItemId(cellMap, "formula");
         const newItemOriginId = getItemOriginId(cellMap, "formula");
@@ -371,11 +381,11 @@ export class FormulaConflictMonitor {
           const itemId = getItemId(cellMap, "value");
           const newItemOriginId = getItemOriginId(cellMap, "value");
           const itemLeftId = getItemLeftId(cellMap, "value");
-          const currentFormula = (cellMap.get("formula") ?? "").toString();
+          const currentFormula = coerceString(cellMap.get("formula"));
           // When the formula key changes in the same transaction, use its oldValue to
           // reconstruct what the cell formula looked like before this remote overwrite.
           // Otherwise, the formula key is unchanged, so the current value is also the old value.
-          const oldFormula = formulaChange ? (formulaChange.oldValue ?? "").toString() : currentFormula;
+          const oldFormula = formulaChange ? coerceString(formulaChange.oldValue) : currentFormula;
 
           this._handleValueChange({
             cellKey,
@@ -420,7 +430,7 @@ export class FormulaConflictMonitor {
     // Normalize post-transaction visible state. Yjs stores formula clears as
     // `null` (or key deletes); track those as an empty string to match the
     // `setLocalFormula` API semantics.
-    const nextFormula = (cellMap.get("formula") ?? "").toString().trim();
+    const nextFormula = coerceString(cellMap.get("formula")).trim();
     const nextValue = cellMap.get("value") ?? null;
 
     const formulaItemId = hasFormulaChange ? getItemId(cellMap, "formula") : null;
@@ -457,7 +467,7 @@ export class FormulaConflictMonitor {
         //
         // Binder-style writers may set `formula=null` before `value=null`, so
         // ordering alone is not sufficient when the prior formula was empty.
-        const priorFormula = (formulaChange?.oldValue ?? "").toString().trim();
+        const priorFormula = coerceString(formulaChange?.oldValue).trim();
         if (!priorFormula) {
           // Treat clears on value-cells as value edits (also matches binder-style ordering).
           kind = "value";

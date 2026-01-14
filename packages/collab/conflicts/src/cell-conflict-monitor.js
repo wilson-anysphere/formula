@@ -1,6 +1,16 @@
 import * as Y from "yjs";
-import { getMapRoot } from "@formula/collab-yjs-utils";
+import { getMapRoot, yjsValueToJson } from "@formula/collab-yjs-utils";
 import { cellRefFromKey } from "./cell-ref.js";
+
+/**
+ * @param {any} value
+ * @returns {string}
+ */
+function coerceString(value) {
+  const json = yjsValueToJson(value);
+  if (json == null) return "";
+  return String(json);
+}
 
 function safeCellRefFromKey(cellKey) {
   try {
@@ -157,16 +167,16 @@ export class CellConflictMonitor {
       const modifiedByChange = event.changes.keys.get("modifiedBy");
       const oldValue = change.oldValue ?? null;
       const newValue = cellMap.get("value") ?? null;
-      const currentModifiedBy = (cellMap.get("modifiedBy") ?? "").toString();
+      const currentModifiedBy = coerceString(cellMap.get("modifiedBy"));
       // `modifiedBy` is best-effort metadata. Some writers may not update it.
       // If it didn't change in this transaction, we can't reliably attribute the overwrite.
       const remoteUserId = modifiedByChange ? currentModifiedBy : "";
-      const oldModifiedBy = modifiedByChange ? (modifiedByChange.oldValue ?? "").toString() : currentModifiedBy;
+      const oldModifiedBy = modifiedByChange ? coerceString(modifiedByChange.oldValue) : currentModifiedBy;
       const action = change.action;
       const itemId = getItemId(cellMap, "value");
       const newItemOriginId = getItemOriginId(cellMap, "value");
       const itemLeftId = getItemLeftId(cellMap, "value");
-      const currentFormula = (cellMap.get("formula") ?? "").toString();
+      const currentFormula = coerceString(cellMap.get("formula"));
 
       this._handleValueChange({
         cellKey,
