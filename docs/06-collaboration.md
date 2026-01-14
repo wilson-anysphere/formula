@@ -339,6 +339,17 @@ Desktop dev/testing toggle:
 - This is implemented in `apps/desktop/src/collab/devEncryption.ts` and is intended for manual verification (two clients: one with the key, one without).
 - The key is derived deterministically from `docId` + a hardcoded dev salt (not production key management).
 
+Desktop encryption commands (Command Palette):
+
+- `collab.encryptSelectedRange` — encrypt the current selection and generate a shareable key string.
+  - If the entered `keyId` already exists in the local key store, the desktop UI will reuse it (it does not silently overwrite key bytes).
+- `collab.removeEncryptedRange` — remove encrypted range *metadata* overlapping the current selection.
+  - Note: removing a range does **not** decrypt cells that already have an `enc` payload.
+- `collab.exportEncryptionKey` — export the key for the active cell’s encrypted range.
+  - Prefers the `keyId` embedded in an existing encrypted cell payload (if present), otherwise falls back to policy metadata.
+- `collab.importEncryptionKey` — import a shared key string into the local key store.
+  - If the key id already exists with different bytes, the UI prompts before overwriting.
+
 Notes:
 
 - Plaintext is JSON `{ value, formula, format? }` and is bound to `{ docId, sheetId, row, col }` via AES-GCM Additional Authenticated Data (AAD) to prevent replay across docs/cells.
