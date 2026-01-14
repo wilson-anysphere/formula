@@ -145,9 +145,9 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
 
-      // DocumentImageStore supports async hydration (IndexedDB) via `getAsync`, which makes
-      // DrawingOverlay.render asynchronous even for placeholder rendering. Disable it so this
-      // unit test can assert immediately on canvas calls without flakiness.
+      // DocumentImageStore supports async hydration (IndexedDB) via `getAsync`, which can
+      // schedule follow-up overlay renders after the initial synchronous placeholder pass.
+      // Disable it so this unit test can assert deterministically on canvas calls.
       (app as any).drawingImages.getAsync = undefined;
 
       const drawingCanvas = (app as any).drawingCanvas as HTMLCanvasElement;
