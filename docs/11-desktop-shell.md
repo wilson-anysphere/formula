@@ -459,6 +459,14 @@ Notable keys:
   - In this repo we use the `formula://...` scheme for OAuth redirects; ensure `schemes` includes `"formula"`.
   - On Linux, the freedesktop `.desktop` file includes these as `MimeType=x-scheme-handler/<scheme>`.
   - Important: on Linux, the `.desktop` file only includes file MIME types when `bundle.fileAssociations[].mimeType` is set (it does **not** guess from extensions).
+- **Linux Parquet MIME mapping**: many distros' `shared-mime-info` database does not include a `*.parquet` glob by default, so we ship a shared-mime-info XML definition in the bundled packages:
+  - Source file in the repo: `apps/desktop/src-tauri/mime/<identifier>.xml` (where `<identifier>` comes from `apps/desktop/src-tauri/tauri.conf.json` `identifier`).
+  - Packaged location: `/usr/share/mime/packages/<identifier>.xml` (mapped via `bundle.linux.(deb|rpm|appimage).files`).
+  - Packaging metadata must include `shared-mime-info` so `update-mime-database` triggers run on install.
+  - CI validates both presence and content (must define `application/vnd.apache.parquet` with a `*.parquet` glob) in:
+    - `scripts/ci/verify_linux_desktop_integration.py`
+    - `scripts/ci/verify-linux-package-deps.sh`
+    - `scripts/validate-linux-{appimage,deb,rpm}.sh`
 - `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0t64 | libgtk-3-0`,
   appindicator, `librsvg2-2`, `libssl3t64 | libssl3`).
 - `bundle.linux.rpm.depends` documents runtime deps for RPM-based distros using **RPM rich dependencies**
