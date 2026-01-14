@@ -63,6 +63,33 @@ Notes / caveats:
 - Newer error kinds (e.g. `#SPILL!`) may not exist in older Excel versions; the script will fail
   rather than emitting a misleading mapping if Excel appears not to recognize an error literal.
 
+## Extract localized function-name spellings (locale data)
+
+For localized formula editing / round-tripping, the engine needs a complete mapping from canonical
+function names (en-US) to the exact spelling Excel displays for a locale.
+
+The committed translation sources live under:
+
+`crates/formula-engine/src/locale/data/sources/*.json`
+
+To extract a full mapping from a **real Excel install** for the active Excel UI language, run
+(from repo root on Windows):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
+  -LocaleId de-DE `
+  -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
+
+node scripts/generate-locale-function-tsv.js
+```
+
+Notes / caveats:
+
+- The output reflects the **active Excel UI language**. Install the corresponding Office language
+  pack and set the Excel display language before extracting.
+- The script prints the detected Excel UI locale and will warn if it does not match `-LocaleId`.
+- Use `-Visible` and/or `-MaxFunctions N` for debugging.
+
 ## CI note (Excel availability)
 
 GitHub-hosted `windows-latest` runners typically **do not include Microsoft Excel**. To generate oracle data in CI you generally need a **self-hosted Windows runner** with Excel installed.

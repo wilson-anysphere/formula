@@ -237,6 +237,7 @@ $workbook = $null
 $sheet = $null
 $cell = $null
 $origCalculation = $null
+$excelUiLocale = $null
 
 $translations = @{}
 $skipped = New-Object System.Collections.Generic.List[string]
@@ -255,6 +256,24 @@ try {
   try { $excel.AskToUpdateLinks = $false } catch {}
   # msoAutomationSecurityForceDisable = 3 (disable macros)
   try { $excel.AutomationSecurity = 3 } catch {}
+
+  try {
+    # msoLanguageIDUI = 2
+    $uiLcid = [int]$excel.LanguageSettings.LanguageID(2)
+    $excelUiLocale = [System.Globalization.CultureInfo]::new($uiLcid).Name
+  } catch {
+    $excelUiLocale = $null
+  }
+
+  $excelVersion = $null
+  $excelBuild = $null
+  try { $excelVersion = [string]$excel.Version } catch {}
+  try { $excelBuild = [string]$excel.Build } catch {}
+
+  Write-Host "Excel: version=$excelVersion build=$excelBuild uiLocale=$excelUiLocale"
+  if ($excelUiLocale -and ($excelUiLocale -ne $LocaleId)) {
+    Write-Warning "Excel UI locale ($excelUiLocale) does not match -LocaleId ($LocaleId). Ensure Excel is configured for the target locale before extracting."
+  }
 
   # Avoid evaluating formulas during extraction (e.g. WEBSERVICE/CUBE functions).
   # We only need Excel to parse the formula so we can read back FormulaLocal.
