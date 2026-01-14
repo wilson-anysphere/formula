@@ -3696,21 +3696,44 @@ export class SpreadsheetApp {
       const activeId = this.sheetId;
       if (!activeId) return;
 
+      const source = typeof payload?.source === "string" ? payload.source : "";
       const docAny = this.document as any;
       const sheetsMap: unknown = docAny?.model?.sheets;
       const sheetMetaMap: unknown = docAny?.sheetMeta;
-      const visibility = (sheetMetaMap instanceof Map ? sheetMetaMap.get(activeId)?.visibility : undefined) ?? "visible";
+
+      const sheetMeta = sheetMetaMap instanceof Map ? (sheetMetaMap as Map<string, any>) : null;
+      // `DocumentController.applyState` keeps removed sheets reachable until the end of `applyState`,
+      // but it clears `sheetMeta` up front and only repopulates entries for sheets that will survive
+      // the restore. Treat sheets missing metadata during an `applyState` change as effectively
+      // removed so we don't keep them as the active sheet and accidentally recreate them later via
+      // lazy reads (`getCell`, `getSheetView`).
+      const isApplyState = source === "applyState" && sheetMeta != null;
+      const hasActiveMeta = !isApplyState || sheetMeta.has(activeId);
+
+      const visibilityRaw = sheetMeta && hasActiveMeta ? sheetMeta.get(activeId)?.visibility : undefined;
+      const visibility: "visible" | "hidden" | "veryHidden" =
+        visibilityRaw === "visible" || visibilityRaw === "hidden" || visibilityRaw === "veryHidden" ? visibilityRaw : "visible";
       const sheetExists = sheetsMap instanceof Map ? sheetsMap.has(activeId) : this.document.getSheetIds().includes(activeId);
-      const sheetIsVisible = visibility === "visible";
+      const sheetIsVisible = hasActiveMeta && visibility === "visible";
       if (sheetExists && sheetIsVisible) return;
 
       const sheetIds = this.document.getSheetIds();
       if (sheetIds.length === 0) return;
 
-      const visibleSheetIds = this.document.getVisibleSheetIds();
+      const candidateSheetIds = isApplyState ? sheetIds.filter((id) => sheetMeta!.has(id)) : sheetIds;
+      if (candidateSheetIds.length === 0) return;
+
+      const visibleSheetIds = isApplyState
+        ? candidateSheetIds.filter((id) => {
+            const visRaw = sheetMeta!.get(id)?.visibility;
+            const vis: "visible" | "hidden" | "veryHidden" =
+              visRaw === "visible" || visRaw === "hidden" || visRaw === "veryHidden" ? visRaw : "visible";
+            return vis === "visible";
+          })
+        : this.document.getVisibleSheetIds();
 
       const visibleSet = new Set(visibleSheetIds);
-      const sheetIdSet = new Set(sheetIds);
+      const sheetIdSet = new Set(candidateSheetIds);
 
       const ordering: string[] = (() => {
         if (Array.isArray(this.undoRedoSheetOrderSnapshot) && this.undoRedoSheetOrderSnapshot.length > 0) {
@@ -3733,7 +3756,10 @@ export class SpreadsheetApp {
       );
 
       const fallback =
-        (preferred && sheetIdSet.has(preferred) ? preferred : null) ?? visibleSheetIds[0] ?? sheetIds[0] ?? null;
+        (preferred && sheetIdSet.has(preferred) ? preferred : null) ??
+        visibleSheetIds[0] ??
+        candidateSheetIds[0] ??
+        null;
       if (!fallback || fallback === activeId) return;
 
       this.activateSheet(fallback);
