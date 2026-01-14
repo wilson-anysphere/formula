@@ -1074,9 +1074,24 @@ export class CanvasGridRenderer {
   }
 
   clearImageCache(): void {
-    for (const [imageId] of this.imageBitmapCache) {
-      this.invalidateImage(imageId);
+    // Close any decoded bitmaps, then drop all entries (including pending/error/missing).
+    //
+    // Note: we intentionally avoid calling `invalidateImage()` in a loop because that marks the
+    // viewport dirty and schedules a render for each image id. In synchronous `requestAnimationFrame`
+    // test environments, that can result in `renderFrame()` running while we're still iterating the
+    // Map, potentially repopulating it and causing the iteration to never terminate.
+    for (const entry of this.imageBitmapCache.values()) {
+      if (entry.state !== "ready") continue;
+      const bitmap = entry.bitmap as any;
+      if (bitmap && typeof bitmap.close === "function") {
+        try {
+          bitmap.close();
+        } catch {
+          // Ignore bitmap disposal failures (best-effort).
+        }
+      }
     }
+
     this.imageBitmapCache.clear();
     this.imageBitmapCacheReadyCount = 0;
     this.imagePlaceholderPattern = null;
