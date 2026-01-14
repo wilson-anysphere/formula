@@ -56,7 +56,8 @@ function safeParseJson(text: string): any | null {
 }
 
 function normalizeWorkbookId(workbookId: string | undefined): string {
-  return workbookId?.trim() ? workbookId : "default";
+  const trimmed = workbookId?.trim() ?? "";
+  return trimmed ? trimmed : "default";
 }
 
 function queriesStorageKey(workbookId: string): string {
