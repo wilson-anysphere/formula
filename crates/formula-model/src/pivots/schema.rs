@@ -425,7 +425,9 @@ impl Default for SubtotalPosition {
 #[serde(rename_all = "camelCase")]
 #[serde(default)]
 pub struct GrandTotals {
+    #[serde(default = "crate::serde_defaults::default_true")]
     pub rows: bool,
+    #[serde(default = "crate::serde_defaults::default_true")]
     pub columns: bool,
 }
 
