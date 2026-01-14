@@ -82,6 +82,33 @@ function unwrapPossiblyTaggedEnum(
     const tag = recordKeys[0]!;
     return { tag, value: (input as JsonRecord)[tag] };
   }
+  if (recordKeys.length > 1) {
+    // Some payloads include object-shaped metadata alongside the variant (e.g.
+    // `{ meta: {...}, Shape: {...} }`). Prefer a key that matches a known variant for
+    // the current context.
+    const normalizedContext = context.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+    const knownVariants =
+      normalizedContext.includes("drawingobjectkind")
+        ? ["image", "shape", "chartplaceholder", "chart", "unknown"]
+        : normalizedContext.includes("anchor")
+          ? ["onecell", "twocell", "absolute", "cell"]
+          : [];
+    if (knownVariants.length > 0) {
+      const matches = recordKeys.filter((key) => knownVariants.includes(normalizeEnumTag(key)));
+      if (matches.length === 1) {
+        const tag = matches[0]!;
+        return { tag, value: (input as JsonRecord)[tag] };
+      }
+    }
+
+    // Fallback heuristic: Rust enum variants are typically PascalCase (metadata keys are usually
+    // camelCase/snake_case). If exactly one object key is PascalCase, treat it as the tag.
+    const pascalKeys = recordKeys.filter((key) => /^[A-Z]/.test(key));
+    if (pascalKeys.length === 1) {
+      const tag = pascalKeys[0]!;
+      return { tag, value: (input as JsonRecord)[tag] };
+    }
+  }
 
   throw new Error(`${context} must be an externally-tagged or internally-tagged enum object`);
 }
@@ -446,7 +473,13 @@ function convertModelDrawingObjectKind(
     }
     case "chartplaceholder": {
       const relIdValue = pick(value, ["rel_id", "relId", "chart_id", "chartId"]);
-      const relId = readString(relIdValue, "DrawingObjectKind.ChartPlaceholder.rel_id");
+      const relIdUnwrapped = unwrapSingletonId(relIdValue);
+      const relId =
+        typeof relIdUnwrapped === "string"
+          ? relIdUnwrapped
+          : typeof relIdUnwrapped === "number" || typeof relIdUnwrapped === "bigint"
+            ? String(relIdUnwrapped)
+            : "";
       const rawXmlValue = pick(value, ["raw_xml", "rawXml"]);
       const rawXml = readOptionalString(rawXmlValue);
       const label = extractDrawingObjectName(rawXml);
@@ -457,7 +490,9 @@ function convertModelDrawingObjectKind(
       //
       // When the rel id is unknown, treat the object as `unknown` so overlay
       // rendering can use `graphicFramePlaceholderLabel(...)` for a stable label.
-      if (relId.trim() === "" || relId === "unknown") {
+      const looksLikeChartGraphicFrame =
+        typeof rawXml === "string" && rawXml.includes("drawingml/2006/chart");
+      if ((relId.trim() === "" || relId === "unknown") && !looksLikeChartGraphicFrame) {
         return {
           type: "unknown",
           rawXml,
@@ -472,9 +507,12 @@ function convertModelDrawingObjectKind(
         sheetId && objectId != null
           ? `${sheetId}:${String(objectId)}`
           : // Back-compat: when the sheet context isn't available, fall back to the drawing rel id.
-            relId;
+            relId.trim() !== "" && relId !== "unknown"
+              ? relId
+              : undefined;
 
-      return { type: "chart", chartId, label: labelMeta ?? (label ?? `Chart (${relId})`), rawXml, raw_xml: rawXml };
+      const fallbackLabel = relId.trim() !== "" && relId !== "unknown" ? `Chart (${relId})` : "Chart";
+      return { type: "chart", chartId, label: labelMeta ?? (label ?? fallbackLabel), rawXml, raw_xml: rawXml };
     }
     case "chart": {
       // UI/other internal representations may already use `{ type: "chart", chartId }`.
@@ -490,7 +528,7 @@ function convertModelDrawingObjectKind(
           type: "unknown",
           rawXml,
           raw_xml: rawXml,
-          label: labelMeta ?? extractDrawingObjectName(rawXml),
+          label: labelMeta ?? extractDrawingObjectName(rawXml) ?? graphicFramePlaceholderLabel(rawXml) ?? undefined,
         };
       }
     default:
