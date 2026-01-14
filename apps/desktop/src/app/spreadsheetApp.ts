@@ -18133,6 +18133,7 @@ export class SpreadsheetApp {
       return;
     }
 
+    const sheetId = this.sheetId;
     void Promise.resolve(this.insertPicturesFromFiles(imageFiles, { placeAt })).catch((err) => {
       // Avoid unhandled promise rejections in event handlers; show an error toast when possible.
       console.error("Failed to insert picture:", err);
@@ -18141,7 +18142,10 @@ export class SpreadsheetApp {
       } catch {
         // `showToast` requires a #toast-root; some test-only contexts don't include it.
       }
-      this.focus();
+      // Avoid stealing focus if the user navigated to another sheet while the async insert was in-flight.
+      if (this.sheetId === sheetId) {
+        this.focus();
+      }
     });
   }
 

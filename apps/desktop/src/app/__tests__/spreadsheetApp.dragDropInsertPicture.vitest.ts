@@ -71,6 +71,16 @@ function createRoot(): HTMLElement {
   return root;
 }
 
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (err: unknown) => void } {
+  let resolve!: (value: T) => void;
+  let reject!: (err: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("SpreadsheetApp drag/drop image file insertion", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -250,6 +260,51 @@ describe("SpreadsheetApp drag/drop image file insertion", () => {
 
     expect(insertPicturesFromFiles).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("does not steal focus after sheet switch when a dropped picture insert fails asynchronously", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    // Ensure Sheet2 exists for `activateSheet`.
+    (app.getDocument() as any).setCellValue("Sheet2", { row: 0, col: 0 }, "sheet2");
+
+    const deferred = createDeferred<void>();
+    const insertPicturesFromFiles = vi.fn(() => deferred.promise);
+    (app as any).insertPicturesFromFiles = insertPicturesFromFiles;
+
+    const focusSpy = vi.spyOn(app, "focus");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: "image/png" });
+    const dataTransfer = { files: [file], types: ["Files"], dropEffect: "none", items: [] } as any;
+
+    const event = new Event("drop", { bubbles: true, cancelable: true }) as any;
+    Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+    Object.defineProperty(event, "clientX", { value: 60 });
+    Object.defineProperty(event, "clientY", { value: 30 });
+    root.dispatchEvent(event);
+
+    expect(insertPicturesFromFiles).toHaveBeenCalled();
+
+    // Switch sheets while the insert promise is still pending.
+    app.activateSheet("Sheet2");
+    focusSpy.mockClear();
+
+    deferred.reject(new Error("insert failed"));
+    // Let the `.catch` handler flush.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(focusSpy).not.toHaveBeenCalled();
 
     app.destroy();
     root.remove();
