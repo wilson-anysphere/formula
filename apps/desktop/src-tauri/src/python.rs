@@ -192,7 +192,9 @@ fn read_protocol_line_bounded<R: BufRead>(
     buf: &mut Vec<u8>,
 ) -> Result<Option<String>, String> {
     buf.clear();
-    let limit = max_bytes.saturating_add(1);
+    // Allow room for a trailing newline. On Windows the Python text layer may emit `\r\n` even when
+    // the runner writes `\n`, so permit an extra byte for the optional `\r`.
+    let limit = max_bytes.saturating_add(2);
     let mut limited = BufReadTake::new(reader, limit);
     let read = limited
         .read_until(b'\n', buf)
@@ -1083,6 +1085,12 @@ mod tests {
         let mut buf = Vec::new();
 
         let mut reader = BufReader::new(Cursor::new(b"abcde\n"));
+        let line = read_protocol_line_bounded(&mut reader, 5, &mut buf)
+            .expect("expected ok")
+            .expect("expected a line");
+        assert_eq!(line, "abcde");
+
+        let mut reader = BufReader::new(Cursor::new(b"abcde\r\n"));
         let line = read_protocol_line_bounded(&mut reader, 5, &mut buf)
             .expect("expected ok")
             .expect("expected a line");
