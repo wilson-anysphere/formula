@@ -1514,6 +1514,7 @@ export class SpreadsheetApp {
   >();
   private readonly chartCanvasStoreAdapter: ChartCanvasStoreAdapter;
   private chartRecordLookupCache: { list: readonly ChartRecord[]; map: Map<string, ChartRecord> } | null = null;
+  private chartPresenceCache: { list: readonly ChartRecord[]; sheetId: string; hasCharts: boolean } | null = null;
   private canvasChartDrawingObjectsCache:
     | {
         source: readonly ChartRecord[];
@@ -10758,19 +10759,6 @@ export class SpreadsheetApp {
       if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
       return;
     }
-    const hasDrawings = this.drawingObjects.length !== 0;
-    const hasComments = this.commentMetaByCoord.size !== 0;
-    const hasCharts = this.chartStore.listCharts().some((chart) => chart.sheetId === this.sheetId);
-
-    // Fast path: if the active sheet has no hover-relevant overlays, skip all work.
-    if (!hasComments && !hasDrawings && !hasCharts) {
-      if (this.sharedHoverCellKey != null || this.sharedHoverCellRect != null) {
-        this.clearSharedHoverCellCache();
-      }
-      if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
-      if (this.root.style.cursor) this.root.style.cursor = "";
-      return;
-    }
 
     const target = e.target as HTMLElement | null;
     // In both shared and legacy grid modes, pointermoves in the sheet body almost always target
@@ -10804,6 +10792,20 @@ export class SpreadsheetApp {
       return;
     }
 
+    const hasDrawings = this.drawingObjects.length !== 0;
+    const hasComments = this.commentMetaByCoord.size !== 0;
+    const hasCharts = this.selectedChartId != null || this.hasChartsOnSheet(this.sheetId);
+
+    // Fast path: if the active sheet has no hover-relevant overlays, skip all work.
+    if (!hasComments && !hasDrawings && !hasCharts) {
+      if (this.sharedHoverCellKey != null || this.sharedHoverCellRect != null) {
+        this.clearSharedHoverCellCache();
+      }
+      if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
+      if (this.root.style.cursor) this.root.style.cursor = "";
+      return;
+    }
+
     const useOffsetCoords =
       target === this.root ||
       target === this.selectionCanvas ||
@@ -10832,7 +10834,7 @@ export class SpreadsheetApp {
     // drawings overlay. If a chart is selected, we must still compute chart cursor feedback so resize
     // handles remain interactive/correct when drawings overlap.
     const chartCursor =
-      this.useCanvasCharts || drawingCursor == null || this.selectedChartId != null
+      hasCharts && (this.useCanvasCharts || drawingCursor == null || this.selectedChartId != null)
         ? this.chartCursorAtPoint(x, y)
         : null;
     const chartHandleCursor = chartCursor != null && chartCursor !== "move" ? chartCursor : null;
@@ -11367,18 +11369,27 @@ export class SpreadsheetApp {
     return "move";
   }
 
+  private hasChartsOnSheet(sheetId: string, charts?: readonly ChartRecord[]): boolean {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return false;
+    const list = charts ?? this.chartStore.listCharts();
+    const cached = this.chartPresenceCache;
+    if (cached && cached.list === list && cached.sheetId === id) return cached.hasCharts;
+    let found = false;
+    for (const chart of list) {
+      if (chart.sheetId === id) {
+        found = true;
+        break;
+      }
+    }
+    this.chartPresenceCache = { list, sheetId: id, hasCharts: found };
+    return found;
+  }
+
   private chartCursorAtPoint(x: number, y: number): string | null {
     const charts = this.chartStore.listCharts();
     if (charts.length === 0) return null;
     const sheetId = this.sheetId;
-    let hasChartOnSheet = false;
-    for (const chart of charts) {
-      if (chart.sheetId === sheetId) {
-        hasChartOnSheet = true;
-        break;
-      }
-    }
-    if (!hasChartOnSheet) return null;
 
     const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
     const px = x - layout.originX;
@@ -18086,8 +18097,9 @@ export class SpreadsheetApp {
     // Chart selection handles are rendered above drawings, even when charts themselves are under the
     // drawings overlay. If a chart is selected, we must still compute chart cursor feedback so resize
     // handles remain interactive/correct when drawings overlap.
+    const hasCharts = this.selectedChartId != null || this.hasChartsOnSheet(this.sheetId);
     const chartCursor =
-      this.useCanvasCharts || drawingCursor == null || this.selectedChartId != null
+      hasCharts && (this.useCanvasCharts || drawingCursor == null || this.selectedChartId != null)
         ? this.chartCursorAtPoint(x, y)
         : null;
     const chartHandleCursor = chartCursor != null && chartCursor !== "move" ? chartCursor : null;
