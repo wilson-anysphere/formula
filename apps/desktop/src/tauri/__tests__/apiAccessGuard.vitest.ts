@@ -33,7 +33,7 @@ function isTestFile(relPath: string): boolean {
 }
 
 describe("tauri/api guardrails", () => {
-  it("does not access __TAURI__.event / __TAURI__.window / dialog.open/save outside src/tauri/api", async () => {
+  it("does not access __TAURI__.event / __TAURI__.window / __TAURI__.dialog.* outside src/tauri/api", async () => {
     const files = await collectSourceFiles(SRC_ROOT);
     const violations = new Set<string>();
 
@@ -67,8 +67,8 @@ describe("tauri/api guardrails", () => {
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugin['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
       /\b__TAURI__\s*(?:\?\.)?\s*\[\s*['"]plugins['"]\s*\]\s*(?:\?\.)?\s*\[\s*['"]window['"]\s*\]/,
 
-      // Dialog open/save should go through getTauriDialogOr{Null,Throw}. (Confirm/alert are handled
-      // separately by nativeDialogs and are intentionally not included here.)
+      // Dialog open/save should go through getTauriDialogOr{Null,Throw} (or open/save-only helpers).
+      // Confirm/message/alert should also be accessed via nativeDialogs or tauri/api helpers.
       /\b__TAURI__\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
       /\b__TAURI__\s*\.\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
       /\b__TAURI__\s*(?:\?\.)\s*plugin\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
