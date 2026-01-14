@@ -5,6 +5,7 @@ use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 
 use formula_io::offcrypto::decrypt_encrypted_package_standard_aes_to_writer;
+use proptest::prelude::*;
 
 const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 4096;
 const AES_BLOCK_LEN: usize = 16;
@@ -43,6 +44,74 @@ fn encrypt_encrypted_package_standard_aes_ecb(plaintext: &[u8], key: &[u8]) -> V
 
 fn make_plaintext(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i as u8).wrapping_mul(31).wrapping_add(7)).collect()
+}
+
+fn key_strategy() -> impl Strategy<Value = Vec<u8>> {
+    prop_oneof![
+        Just(vec![0x11u8; 16]),
+        Just(vec![0x22u8; 24]),
+        Just(vec![0x33u8; 32]),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 64,
+        max_shrink_iters: 0,
+        .. ProptestConfig::default()
+    })]
+
+    #[test]
+    fn prop_streaming_decrypt_roundtrip_with_trailing_bytes(
+        plaintext in proptest::collection::vec(any::<u8>(), 0..=20_000),
+        key in key_strategy(),
+        trailing_len in 0usize..=64,
+        trailing_byte in any::<u8>(),
+    ) {
+        let mut encrypted = encrypt_encrypted_package_standard_aes_ecb(&plaintext, &key);
+        encrypted.extend(std::iter::repeat(trailing_byte).take(trailing_len));
+
+        let mut out = Vec::new();
+        let bytes_written = decrypt_encrypted_package_standard_aes_to_writer(
+            Cursor::new(encrypted),
+            &key,
+            &[],
+            &mut out,
+        )
+        .expect("decrypt");
+
+        prop_assert_eq!(bytes_written, plaintext.len() as u64);
+        prop_assert_eq!(out, plaintext);
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 64,
+        max_shrink_iters: 0,
+        .. ProptestConfig::default()
+    })]
+
+    #[test]
+    fn prop_streaming_decrypt_rejects_truncation(
+        plaintext in proptest::collection::vec(any::<u8>(), 1..=20_000),
+        key in key_strategy(),
+        remove_bytes in 1usize..=64,
+    ) {
+        let mut encrypted = encrypt_encrypted_package_standard_aes_ecb(&plaintext, &key);
+        let new_len = encrypted.len().saturating_sub(remove_bytes);
+        encrypted.truncate(new_len);
+
+        let mut out = Vec::new();
+        let res = decrypt_encrypted_package_standard_aes_to_writer(
+            Cursor::new(encrypted),
+            &key,
+            &[],
+            &mut out,
+        );
+
+        prop_assert!(res.is_err());
+    }
 }
 
 #[test]
