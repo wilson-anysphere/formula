@@ -184,6 +184,18 @@ export class ChartRendererAdapter implements ChartRenderer {
 
   constructor(private readonly store: ChartStore) {}
 
+  private resetSurface(surface: Surface): void {
+    // Setting canvas width/height resets the backing store allocation (both OffscreenCanvas and
+    // HTMLCanvasElement). Do this before dropping references so large chart surfaces don't linger
+    // in memory if the adapter is kept referenced after teardown (tests/hot reload).
+    try {
+      surface.canvas.width = 0;
+      surface.canvas.height = 0;
+    } catch {
+      // Best-effort: ignore failures (mocked canvas implementations may not support it).
+    }
+  }
+
   renderToCanvas(ctx: CanvasRenderingContext2D, chartId: string, rect: Rect): void {
     const themeKey = getThemeKey();
     const scale = getContextScale(ctx);
@@ -269,17 +281,24 @@ export class ChartRendererAdapter implements ChartRenderer {
    */
   pruneSurfaces(keep: ReadonlySet<string>): void {
     if (!keep || keep.size === 0) {
+      for (const surface of this.surfaces.values()) {
+        this.resetSurface(surface);
+      }
       this.surfaces.clear();
       return;
     }
-    for (const id of this.surfaces.keys()) {
+    for (const [id, surface] of this.surfaces) {
       if (keep.has(id)) continue;
+      this.resetSurface(surface);
       this.surfaces.delete(id);
     }
   }
 
   destroy(): void {
     // Drop references to offscreen surfaces so their backing buffers can be GC'd.
+    for (const surface of this.surfaces.values()) {
+      this.resetSurface(surface);
+    }
     this.surfaces.clear();
   }
 
