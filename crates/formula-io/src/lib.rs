@@ -3114,9 +3114,15 @@ fn ole_workbook_has_biff_filepass_record<R: std::io::Read + std::io::Write + std
 
 /// Open a spreadsheet workbook based on file extension.
 ///
-/// If you only need a [`formula_model::Workbook`] (data + formulas) and do not need full-fidelity
-/// round-trip preservation, prefer [`open_workbook_model`] which uses streaming readers and avoids
-/// inflating every package part into memory.
+/// For `.xlsx` / `.xlsm` inputs, this returns [`Workbook::Xlsx`] backed by
+/// [`formula_xlsx::XlsxLazyPackage`], which keeps the underlying OPC ZIP container as a lazy source
+/// (file path or bytes) and only inflates individual parts on demand. Saving uses a streaming ZIP
+/// rewrite path that **raw-copies** untouched entries (`zip::ZipWriter::raw_copy_file`) for
+/// performance and round-trip fidelity.
+///
+/// If you only need a [`formula_model::Workbook`] (data + formulas) and do not need OPC-level
+/// round-trip preservation, prefer [`open_workbook_model`], which parses only the parts needed to
+/// build the model.
 ///
 /// Currently supports:
 /// - `.xls` / `.xlt` / `.xla` (via `formula-xls`)

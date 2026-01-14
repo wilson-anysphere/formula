@@ -1472,59 +1472,52 @@ Current severity policy (subject to refinement as the writer matures):
 
 ## Performance Considerations
 
-### Streaming Parsing
+### Streaming ZIP rewrite (round-trip preservation)
 
-For large files, don't load entire XML into memory:
+When we edit an existing `.xlsx` / `.xlsm` and want to **preserve everything we don’t understand**
+(charts, pivots, `customXml/`, VBA, media blobs, etc.), we avoid rebuilding the whole ZIP from
+scratch.
 
-```typescript
-// BAD: Load entire file
-const xml = await parseXml(await readFile(path));
-const cells = xml.querySelectorAll("c");
+Instead, we write a new archive using a **streaming ZIP rewriter**:
 
-// GOOD: Stream parsing
-const parser = new SaxParser();
-parser.on("element:c", (cell) => {
-  processCell(cell);
-});
-await parser.parseStream(fileStream);
-```
+- The input ZIP is read once; the output ZIP is written once.
+- **Untouched entries are copied byte-for-byte** using `zip::ZipWriter::raw_copy_file(...)` (no
+  inflate + re-deflate), which preserves existing compression and avoids loading large binaries into
+  memory.
+- Only the small set of **modified** parts are inflated and rewritten (typically worksheets,
+  `xl/sharedStrings.xml`, `[Content_Types].xml`, relevant `*.rels`, etc).
 
-### Lazy Loading
+This is the core of `.xlsx/.xlsm` round-trip compatibility in the “edit existing workbook” save
+path.
 
-Don't parse everything upfront:
+### Lazy package API: `formula_xlsx::XlsxLazyPackage`
 
-```typescript
-class LazyWorksheet {
-  private parsed = false;
-  private xmlPath: string;
-  private data?: SheetData;
-  
-  async getData(): Promise<SheetData> {
-    if (!this.parsed) {
-      this.data = await this.parse();
-      this.parsed = true;
-    }
-    return this.data!;
-  }
-}
-```
+`XlsxLazyPackage` is a thin wrapper around an existing OPC ZIP container (a file path on disk, or
+an owned byte buffer) plus an in-memory map of explicit part overrides:
 
-### Parallel Processing
+- Open without inflating all parts:
+  - `XlsxLazyPackage::open(path)` / `XlsxLazyPackage::from_file(...)` (native)
+  - `XlsxLazyPackage::from_bytes(...)` / `XlsxLazyPackage::from_vec(...)` (in-memory)
+- Read only what you need: `read_part("xl/workbook.xml")?` inflates just that part.
+- Override only what you change: `set_part("xl/workbook.xml", bytes)`.
+- Save using the streaming rewriter: `write_to(...)` / `write_to_bytes()` (raw-copy for untouched
+  ZIP entries).
 
-Parse independent parts concurrently:
+Use `XlsxLazyPackage` when you need OPC-level round-trip preservation but want to keep memory usage
+low for large workbooks.
 
-```typescript
-const [workbook, styles, sharedStrings] = await Promise.all([
-  parseWorkbook(archive),
-  parseStyles(archive),
-  parseSharedStrings(archive),
-]);
+### In-memory package API: `formula_xlsx::XlsxPackage`
 
-// Then parse sheets (which depend on above)
-const sheets = await Promise.all(
-  workbook.sheets.map(s => parseSheet(archive, s, styles, sharedStrings))
-);
-```
+`XlsxPackage::from_bytes(...)` inflates the entire ZIP into a `BTreeMap<part_name, Vec<u8>>`. This
+is convenient for algorithms that need random access to many parts at once, but it has real memory
+cost (and enforces safety limits to avoid ZIP bombs).
+
+Full materialization happens when:
+
+- you construct an `XlsxPackage` (e.g. `XlsxPackage::from_bytes` / `from_bytes_limited`), and/or
+- you operate on the full part map (`parts_map()` / `parts_map_mut()`).
+
+Prefer the lazy/streaming path unless you truly need whole-package inspection or mutation.
 
 ---
 
