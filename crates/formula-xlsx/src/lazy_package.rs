@@ -90,8 +90,11 @@ pub struct XlsxLazyPackage {
     /// Deterministic map of part overrides keyed by canonical part name (`xl/workbook.xml`, without
     /// a leading `/`).
     overrides: BTreeMap<String, PartOverride>,
-    /// When set, macros are stripped on write.
-    strip_macros: bool,
+    /// When set, macros are stripped on write, targeting the provided workbook kind.
+    ///
+    /// This matches the `target_kind` parameter of
+    /// [`crate::streaming::strip_vba_project_streaming_with_kind`].
+    strip_macros: Option<WorkbookKind>,
     /// Optional workbook kind enforcement (used to update `[Content_Types].xml`).
     workbook_kind: Option<WorkbookKind>,
     /// Cached set of part names discovered at open time (canonical, without leading `/`).
@@ -117,7 +120,7 @@ impl XlsxLazyPackage {
         Ok(Self {
             source: Source::Path(path),
             overrides: BTreeMap::new(),
-            strip_macros: false,
+            strip_macros: None,
             workbook_kind: None,
             part_names,
         })
@@ -130,7 +133,7 @@ impl XlsxLazyPackage {
         Ok(Self {
             source: Source::Bytes(Arc::new(bytes)),
             overrides: BTreeMap::new(),
-            strip_macros: false,
+            strip_macros: None,
             workbook_kind: None,
             part_names,
         })
@@ -153,6 +156,13 @@ impl XlsxLazyPackage {
     /// from the underlying ZIP container.
     pub fn read_part(&self, name: &str) -> Result<Option<Vec<u8>>, XlsxError> {
         let canonical = Self::canonicalize_part_name(name);
+
+        // If macro stripping is enabled, treat macro-related parts as missing even if a caller
+        // added an override for them after calling `remove_vba_project`.
+        if self.strip_macros.is_some() && is_macro_part_name(&canonical) {
+            return Ok(None);
+        }
+
         if let Some(override_op) = self.overrides.get(&canonical) {
             match override_op {
                 PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
@@ -160,11 +170,6 @@ impl XlsxLazyPackage {
                 }
                 PartOverride::Remove => return Ok(None),
             }
-        }
-
-        // Best-effort: if macros are being stripped, treat obvious macro surfaces as missing.
-        if self.strip_macros && is_macro_part_name(&canonical) {
-            return Ok(None);
         }
 
         let mut reader = self.source.open_reader()?;
@@ -209,16 +214,32 @@ impl XlsxLazyPackage {
     /// Replace or insert a part in-memory.
     pub fn set_part(&mut self, name: &str, bytes: Vec<u8>) {
         let canonical = Self::canonicalize_part_name(name);
-        self.overrides
-            .insert(canonical.clone(), PartOverride::Replace(bytes));
-        if !self.part_names.iter().any(|n| n == &canonical) {
-            self.part_names.push(canonical);
+
+        // Once macro stripping is enabled, never allow macro surfaces to be reintroduced into the
+        // output via overrides.
+        if self.strip_macros.is_some() && is_macro_part_name(&canonical) {
+            self.overrides.insert(canonical, PartOverride::Remove);
+            return;
         }
+
+        self.overrides.insert(canonical, PartOverride::Replace(bytes));
     }
 
     /// Remove macro-related parts and relationships from the package on write.
     pub fn remove_vba_project(&mut self) -> Result<(), XlsxError> {
-        self.strip_macros = true;
+        self.remove_vba_project_with_kind(WorkbookKind::Workbook)
+    }
+
+    /// Remove macro-related parts and relationships from the package, targeting a specific output
+    /// workbook kind.
+    ///
+    /// This controls how the workbook "main" content type is rewritten in `[Content_Types].xml`
+    /// after stripping macros.
+    pub fn remove_vba_project_with_kind(&mut self, target_kind: WorkbookKind) -> Result<(), XlsxError> {
+        self.strip_macros = Some(target_kind);
+        // Match `XlsxPackage::{remove_vba_project,remove_vba_project_with_kind}` semantics: stripping
+        // macros rewrites the workbook main content type to the requested macro-free kind.
+        self.workbook_kind = Some(target_kind);
 
         // Prevent callers from reintroducing macro surfaces via overrides.
         let macro_override_keys: Vec<String> = self
@@ -231,8 +252,6 @@ impl XlsxLazyPackage {
             self.overrides.insert(key, PartOverride::Remove);
         }
 
-        // Best-effort: update cached names.
-        self.part_names.retain(|n| !is_macro_part_name(n));
         Ok(())
     }
 
@@ -254,18 +273,55 @@ impl XlsxLazyPackage {
     /// copy.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn write_to<W: Write + Seek>(&self, output: W) -> Result<(), XlsxError> {
-        let mut overrides = self.build_part_overrides(/*kind_already_handled=*/false)?;
+        // If macro stripping is enabled, we can sometimes avoid the macro-stripping rewrite:
+        // - When the *source* package is macro-free, macro stripping only needs to ensure we don't
+        //   emit macro-capable overrides (e.g. added `xl/macrosheets/**` parts).
+        // - When the source is macro-capable and there are non-macro overrides, we need an
+        //   intermediate temp file so we can apply overrides on top of the macro-stripped base.
+        //
+        // Note: `part_names` is a snapshot of the *source* ZIP entries (it does not include
+        // overrides), so we can use it to cheaply detect macro-capable sources.
+        if let Some(_target_kind) = self.strip_macros {
+            let source_has_macros = self.part_names.iter().any(|name| is_macro_part_name(name));
 
-        if self.strip_macros {
-            // First pass: strip macros into a temporary file.
-            let mut tmp = tempfile()?;
+            if !source_has_macros {
+                // Source is already macro-free; just apply overrides after forcing macro-related
+                // overrides to `Remove` and patching workbook kind.
+                let overrides = self.build_part_overrides(/*kind_already_handled=*/false)?;
+                let input = self.source.open_reader()?;
+                patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+                    input,
+                    output,
+                    &WorkbookCellPatches::default(),
+                    &overrides,
+                )?;
+                return Ok(());
+            }
+
+            // Source contains macro-capable parts; strip macros first.
             let kind = self.workbook_kind.unwrap_or(WorkbookKind::Workbook);
+
+            // If there are no non-macro overrides to apply afterwards, we can stream the macro
+            // stripping directly into the output.
+            let has_non_macro_overrides = self
+                .overrides
+                .keys()
+                .any(|name| !is_macro_part_name(name));
+            if !has_non_macro_overrides {
+                let input = self.source.open_reader()?;
+                strip_vba_project_streaming_with_kind(input, output, kind)?;
+                return Ok(());
+            }
+
+            // Otherwise, use an intermediate temp file so we can apply overrides on top of the
+            // macro-stripped base without inflating all parts into memory.
+            let mut tmp = tempfile()?;
             let input = self.source.open_reader()?;
             strip_vba_project_streaming_with_kind(input, &mut tmp, kind)?;
 
-            // Second pass: apply any explicit part overrides on top of the macro-stripped package.
+            // Second pass: apply explicit part overrides on top of the macro-stripped package.
             // Note: workbook kind is already handled by the macro-strip streaming pass.
-            overrides = self.build_part_overrides(/*kind_already_handled=*/true)?;
+            let overrides = self.build_part_overrides(/*kind_already_handled=*/true)?;
             tmp.seek(SeekFrom::Start(0))?;
             patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
                 &mut tmp,
@@ -276,6 +332,7 @@ impl XlsxLazyPackage {
             return Ok(());
         }
 
+        let overrides = self.build_part_overrides(/*kind_already_handled=*/false)?;
         let input = self.source.open_reader()?;
         patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
             input,
@@ -309,8 +366,22 @@ impl XlsxLazyPackage {
         &self,
         kind_already_handled: bool,
     ) -> Result<HashMap<String, PartOverride>, XlsxError> {
-        let mut out: HashMap<String, PartOverride> =
-            self.overrides.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut out: HashMap<String, PartOverride> = self
+            .overrides
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        // If macro stripping is enabled, force all macro-related overrides to `Remove` so they
+        // cannot reintroduce macro-capable surfaces into the output.
+        if self.strip_macros.is_some() {
+            for (name, op) in out.iter_mut() {
+                if is_macro_part_name(name) {
+                    *op = PartOverride::Remove;
+                }
+            }
+        }
+
         if !kind_already_handled {
             if let Some(kind) = self.workbook_kind {
                 if let Some(updated) = self.patched_content_types_for_kind(kind)? {
@@ -345,15 +416,54 @@ impl XlsxLazyPackage {
 fn is_macro_part_name(name: &str) -> bool {
     let name = name.strip_prefix('/').unwrap_or(name);
     let lower = name.to_ascii_lowercase();
-    lower == "xl/vbaproject.bin"
-        || lower == "xl/vbadata.xml"
-        || lower == "xl/vbaprojectsignature.bin"
-        || lower.starts_with("xl/macrosheets/")
-        || lower.starts_with("xl/dialogsheets/")
-        || lower.starts_with("customui/")
-        || lower.starts_with("xl/activex/")
-        || lower.starts_with("xl/ctrlprops/")
-        || lower.starts_with("xl/controls/")
+
+    fn is_macro_surface_part(lower: &str) -> bool {
+        lower == "xl/vbaproject.bin"
+            || lower == "xl/vbadata.xml"
+            || lower == "xl/vbaprojectsignature.bin"
+            || lower.starts_with("xl/macrosheets/")
+            || lower.starts_with("xl/dialogsheets/")
+            || lower.starts_with("customui/")
+            || lower.starts_with("xl/activex/")
+            || lower.starts_with("xl/ctrlprops/")
+            || lower.starts_with("xl/controls/")
+    }
+
+    if is_macro_surface_part(&lower) {
+        return true;
+    }
+
+    // Relationship parts for deleted macro surfaces should also be deleted. For example, stripping
+    // `xl/vbaProject.bin` also deletes `xl/_rels/vbaProject.bin.rels`.
+    if lower.ends_with(".rels") {
+        if let Some(source) = source_part_from_rels_part(&lower) {
+            if !source.is_empty() && is_macro_surface_part(&source) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
+    // Root relationships.
+    if rels_part == "_rels/.rels" {
+        return Some(String::new());
+    }
+
+    if let Some(rels_file) = rels_part.strip_prefix("_rels/") {
+        let rels_file = rels_file.strip_suffix(".rels")?;
+        return Some(rels_file.to_string());
+    }
+
+    let (dir, rels_file) = rels_part.rsplit_once("/_rels/")?;
+    let rels_file = rels_file.strip_suffix(".rels")?;
+    if dir.is_empty() {
+        return Some(rels_file.to_string());
+    }
+
+    Some(format!("{dir}/{rels_file}"))
 }
 
 fn list_part_names<R: Read + Seek>(mut reader: R) -> Result<Vec<String>, XlsxError> {

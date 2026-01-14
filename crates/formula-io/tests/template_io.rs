@@ -71,7 +71,9 @@ fn saving_xlsx_with_xlm_macrosheets_as_xltx_strips_macrosheets() {
 
     let saved = reopen_pkg(&out_path);
     assert!(
-        saved.part("xl/macrosheets/sheet1.xml").is_none(),
+        !saved
+            .part_names()
+            .any(|name| name.starts_with("xl/macrosheets/")),
         "expected XLM macro sheet parts to be stripped when saving to `.xltx`"
     );
 }
