@@ -66,7 +66,7 @@ export type SheetStructureCommandHandlers = {
    */
   deleteActiveSheet: () => void | Promise<void>;
   /**
-   * Open the "Organize Sheets" dialog (reorder/rename/delete).
+   * Open the Organize Sheets dialog (reorder/rename/hide/etc).
    */
   openOrganizeSheets?: (() => void | Promise<void>) | null;
 };
@@ -578,7 +578,7 @@ export function registerDesktopCommands(params: {
       category: commandCategoryEditing,
       icon: null,
       description: "Open the Organize Sheets dialog",
-      keywords: ["organize sheets", "sheets", "tabs", "reorder", "rename"],
+      keywords: ["organize sheets", "sheets", "worksheets", "tabs", "reorder", "rename", "hide"],
     },
   );
 

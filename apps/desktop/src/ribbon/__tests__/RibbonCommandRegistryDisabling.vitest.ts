@@ -172,9 +172,12 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     const commandRegistry = new CommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
 
-    // These ids are intentionally handled outside CommandRegistry (e.g. ribbon overrides), so they
-    // must remain enabled via the exemption list even when the CommandRegistry is empty.
+    // These are currently handled directly by the desktop ribbon command handler (not via CommandRegistry),
+    // so they must be exempt from the registry-backed disabling allowlist.
     expect(baselineDisabledById["data.sortFilter.filter"]).toBeUndefined();
+    expect(baselineDisabledById["data.sortFilter.clear"]).toBeUndefined();
+    expect(baselineDisabledById["data.sortFilter.reapply"]).toBeUndefined();
+    expect(baselineDisabledById["data.sortFilter.advanced.clearFilter"]).toBeUndefined();
 
     // Organize Sheets is now a real CommandRegistry command, so it should be disabled in the baseline
     // state when the registry does not register it.

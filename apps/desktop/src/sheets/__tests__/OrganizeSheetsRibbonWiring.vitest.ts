@@ -6,23 +6,29 @@ import { fileURLToPath } from "node:url";
 import { stripComments } from "../../__tests__/sourceTextUtils";
 
 describe("Organize Sheets ribbon wiring", () => {
-  it("routes the ribbon command id to openOrganizeSheets()", () => {
+  it("routes the ribbon command id through CommandRegistry to openOrganizeSheets()", () => {
     const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
-    const source = stripComments(readFileSync(mainTsPath, "utf8"));
+    const commandsPath = fileURLToPath(new URL("../../commands/registerDesktopCommands.ts", import.meta.url));
+    const main = stripComments(readFileSync(mainTsPath, "utf8"));
+    const commands = stripComments(readFileSync(commandsPath, "utf8"));
 
-    // Ensure the ribbon command id is explicitly handled and opens the dialog.
-    // Be tolerant of minor formatting differences (single vs double quotes, whitespace).
-    const caseMatch = source.match(/case\s+["']home\.cells\.format\.organizeSheets["']\s*:/);
-    expect(caseMatch).not.toBeNull();
-    const caseIndex = caseMatch?.index ?? -1;
-    expect(caseIndex).toBeGreaterThanOrEqual(0);
-    expect(source.slice(caseIndex, caseIndex + 300)).toMatch(/openOrganizeSheets\s*\(/);
+    // The ribbon schema uses `home.cells.format.organizeSheets`. Ensure it's registered as a
+    // real CommandRegistry command (no main.ts switch-case wiring).
+    const registerMatch = commands.match(/\bregisterBuiltinCommand\(\s*["']home\.cells\.format\.organizeSheets["']/);
+    expect(registerMatch).not.toBeNull();
+    const registerIndex = registerMatch?.index ?? -1;
+    expect(registerIndex).toBeGreaterThanOrEqual(0);
+    expect(commands.slice(registerIndex, registerIndex + 600)).toContain("sheetStructureHandlers?.openOrganizeSheets");
+
+    // Ensure `main.ts` passes the handler into registerDesktopCommands (so the command can open the dialog).
+    const handlersMatch = main.match(/\bsheetStructureHandlers\s*:\s*{[\s\S]*?\bopenOrganizeSheets\b/);
+    expect(handlersMatch).not.toBeNull();
 
     // Ensure the helper exists and delegates to `openOrganizeSheetsDialog`.
-    const fnMatch = source.match(/(?:function\s+openOrganizeSheets\s*\(|const\s+openOrganizeSheets\s*=\s*\(\)\s*=>)/);
+    const fnMatch = main.match(/(?:function\s+openOrganizeSheets\s*\(|const\s+openOrganizeSheets\s*=\s*\(\)\s*=>)/);
     expect(fnMatch).not.toBeNull();
     const fnIndex = fnMatch?.index ?? -1;
     expect(fnIndex).toBeGreaterThanOrEqual(0);
-    expect(source.slice(fnIndex, fnIndex + 1600)).toContain("openOrganizeSheetsDialog(");
+    expect(main.slice(fnIndex, fnIndex + 1600)).toContain("openOrganizeSheetsDialog(");
   });
 });
