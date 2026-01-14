@@ -63,12 +63,12 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
   assert.doesNotMatch(
     router,
     /\bcase\s+["']comments\.togglePanel["']:/,
-    "Expected main.ts to not handle comments.togglePanel via switch case",
+    "Expected ribbonCommandRouter.ts to not handle comments.togglePanel via switch case (should dispatch via CommandRegistry)",
   );
   assert.doesNotMatch(
     router,
     /\bcase\s+["']comments\.addComment["']:/,
-    "Expected main.ts to not handle comments.addComment via switch case",
+    "Expected ribbonCommandRouter.ts to not handle comments.addComment via switch case (should dispatch via CommandRegistry)",
   );
 
   // Guardrail: the legacy review.comments.* ids should not be handled in main.ts anymore.

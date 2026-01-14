@@ -81,6 +81,16 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
       `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
     );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected ribbonCommandRouter.ts to not handle ${id} via switch case (should dispatch via CommandRegistry)`,
+    );
+    assert.doesNotMatch(
+      router,
+      new RegExp(`\\bcommandOverrides:\\s*\\{[\\s\\S]*?["']${escapeRegExp(id)}["']\\s*:`),
+      `Expected ribbonCommandRouter.ts to not special-case ${id} via commandOverrides (should dispatch via CommandRegistry)`,
+    );
   }
 
   assert.match(
