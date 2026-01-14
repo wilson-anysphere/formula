@@ -58,10 +58,33 @@ describe("registerDataQueriesCommands", () => {
     expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES).kind).toBe("closed");
   });
 
+  it("syncs ribbon state + restores focus when the toggle command cannot run (missing layout controller)", async () => {
+    const commandRegistry = new CommandRegistry();
+    const refreshRibbonUiState = vi.fn();
+    const focusAfterExecute = vi.fn();
+    const showToast = vi.fn();
+
+    registerDataQueriesCommands({
+      commandRegistry,
+      layoutController: null,
+      getPowerQueryService: () => null,
+      showToast,
+      notify: () => {},
+      refreshRibbonUiState,
+      focusAfterExecute,
+    });
+
+    await commandRegistry.executeCommand(DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections, true);
+    expect(showToast).toHaveBeenCalled();
+    expect(refreshRibbonUiState).toHaveBeenCalledTimes(1);
+    expect(focusAfterExecute).toHaveBeenCalledTimes(1);
+  });
+
   it("invokes powerQueryService.refreshAll() when executing refresh commands", async () => {
     const commandRegistry = new CommandRegistry();
     const layoutController = createLayoutHarness();
 
+    const focusAfterExecute = vi.fn();
     const refreshAll = vi.fn(() => ({ promise: Promise.resolve() }));
     const service = {
       ready: Promise.resolve(),
@@ -75,13 +98,14 @@ describe("registerDataQueriesCommands", () => {
       getPowerQueryService: () => service as any,
       showToast: () => {},
       notify: () => {},
+      focusAfterExecute,
     });
 
     await commandRegistry.executeCommand(DATA_QUERIES_RIBBON_COMMANDS.refreshAll);
+    expect(focusAfterExecute).toHaveBeenCalledTimes(1);
     // Refresh is kicked off in an async continuation; flush microtasks.
     await Promise.resolve();
     await Promise.resolve();
     expect(refreshAll).toHaveBeenCalledTimes(1);
   });
 });
-
