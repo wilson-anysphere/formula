@@ -12,6 +12,77 @@ use crate::{MacroPresence, RecalcPolicy, WorkbookKind, XlsxError, MAX_XLSX_PACKA
 trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
 
+struct PartNamesIter<'a> {
+    pkg: &'a StreamingXlsxPackage,
+    source_iter: std::collections::btree_set::Iter<'a, String>,
+    added_iter: std::collections::btree_set::Iter<'a, String>,
+    next_source: Option<&'a String>,
+    next_added: Option<&'a String>,
+}
+
+impl<'a> PartNamesIter<'a> {
+    fn new(pkg: &'a StreamingXlsxPackage) -> Self {
+        let mut it = Self {
+            pkg,
+            source_iter: pkg.source_part_names.iter(),
+            added_iter: pkg.added_part_names.iter(),
+            next_source: None,
+            next_added: None,
+        };
+        it.next_source = it.advance_source();
+        it.next_added = it.added_iter.next();
+        it
+    }
+
+    fn advance_source(&mut self) -> Option<&'a String> {
+        while let Some(name) = self.source_iter.next() {
+            if self.pkg.is_source_part_removed(name.as_str()) {
+                continue;
+            }
+            return Some(name);
+        }
+        None
+    }
+}
+
+impl<'a> Iterator for PartNamesIter<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.next_source, self.next_added) {
+            (None, None) => None,
+            (Some(s), None) => {
+                let out = s.as_str();
+                self.next_source = self.advance_source();
+                Some(out)
+            }
+            (None, Some(a)) => {
+                let out = a.as_str();
+                self.next_added = self.added_iter.next();
+                Some(out)
+            }
+            (Some(s), Some(a)) => {
+                // Deterministic merge to produce globally-sorted part names (matching
+                // `XlsxPackage::part_names` ordering).
+                if s <= a {
+                    let out = s.as_str();
+                    self.next_source = self.advance_source();
+                    if s == a {
+                        // Should not happen in valid usage (added parts are non-source), but be
+                        // defensive.
+                        self.next_added = self.added_iter.next();
+                    }
+                    Some(out)
+                } else {
+                    let out = a.as_str();
+                    self.next_added = self.added_iter.next();
+                    Some(out)
+                }
+            }
+        }
+    }
+}
+
 /// A lazy/streaming XLSX/XLSM package representation that avoids inflating every part into memory.
 ///
 /// This type keeps the source ZIP reader plus an in-memory overlay of [`PartOverride`] mutations.
@@ -164,11 +235,7 @@ impl StreamingXlsxPackage {
     ///
     /// Part names are returned in canonical form (no leading `/`, `/` separators).
     pub fn part_names(&self) -> impl Iterator<Item = &str> + '_ {
-        self.source_part_names
-            .iter()
-            .filter(|name| !self.is_source_part_removed(name.as_str()))
-            .map(String::as_str)
-            .chain(self.added_part_names.iter().map(String::as_str))
+        PartNamesIter::new(self)
     }
 
     /// Detect whether the effective package contains any macro-capable content.
