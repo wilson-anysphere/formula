@@ -332,11 +332,11 @@ export class KeybindingService {
     if (capture) {
       const captureHandler = (e: KeyboardEvent) => {
         if (allowBuiltins === false) return;
-        void this.dispatchKeydown(e, { allowBuiltins: true, allowExtensions: false });
+        void this.dispatchKeydown(e, { allowBuiltins: true, allowExtensions: false }).catch(() => {});
       };
       const bubbleHandler = (e: KeyboardEvent) => {
         if (allowExtensions === false) return;
-        void this.dispatchKeydown(e, { allowBuiltins: false, allowExtensions: true });
+        void this.dispatchKeydown(e, { allowBuiltins: false, allowExtensions: true }).catch(() => {});
       };
       target.addEventListener("keydown", captureHandler, { capture: true });
       target.addEventListener("keydown", bubbleHandler, { capture: false });
@@ -348,7 +348,7 @@ export class KeybindingService {
     }
 
     const handler = (e: KeyboardEvent) => {
-      void this.dispatchKeydown(e, { allowBuiltins, allowExtensions });
+      void this.dispatchKeydown(e, { allowBuiltins, allowExtensions }).catch(() => {});
     };
     target.addEventListener("keydown", handler, { capture: false });
     this.removeListener = () => target.removeEventListener("keydown", handler, { capture: false });
@@ -391,7 +391,11 @@ export class KeybindingService {
       try {
         await this.executeMatch(match);
       } catch (err) {
-        this.params.onCommandError?.(match.binding.command, err);
+        try {
+          this.params.onCommandError?.(match.binding.command, err);
+        } catch {
+          // ignore
+        }
       }
     })();
     return true;
@@ -422,7 +426,11 @@ export class KeybindingService {
     try {
       await this.executeMatch(match);
     } catch (err) {
-      this.params.onCommandError?.(match.binding.command, err);
+      try {
+        this.params.onCommandError?.(match.binding.command, err);
+      } catch {
+        // ignore
+      }
     }
     return true;
   }

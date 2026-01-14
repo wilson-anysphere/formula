@@ -116,8 +116,13 @@ class Emitter {
   emit(event, payload) {
     const existing = this.listeners.get(event);
     if (!existing) return;
-    for (const handler of existing) {
-      handler(payload);
+    // Snapshot so listeners can mutate subscriptions safely during emit.
+    for (const handler of Array.from(existing)) {
+      try {
+        handler(payload);
+      } catch {
+        // ignore
+      }
     }
   }
 }
@@ -257,7 +262,8 @@ export class RefreshManager {
       return;
     }
 
-    void this.configureRegistration(query.id, token, providedPolicy);
+    // Best-effort: persistence scheduling should never surface as an unhandled rejection.
+    void this.configureRegistration(query.id, token, providedPolicy).catch(() => {});
   }
 
   /**
@@ -574,7 +580,8 @@ export class RefreshManager {
     while (this.running.size < this.concurrency && this.queue.length > 0) {
       const job = this.queue.shift();
       if (!job) break;
-      void this.start(job);
+      // Best-effort: jobs should never surface as unhandled promise rejections (they reject via their own handle promise).
+      void this.start(job).catch(() => {});
     }
   }
 

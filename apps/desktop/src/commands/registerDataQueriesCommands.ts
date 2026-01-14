@@ -196,16 +196,16 @@ export function registerDataQueriesCommands(params: {
         // user likely switched away or when the refresh took long enough to be meaningful.
         if (shouldNotifyInBackground() || elapsedMs >= 5_000) {
           const noun = queryCount === 1 ? "query" : "queries";
-          void notify({ title: "Power Query refresh complete", body: `Refreshed ${queryCount} ${noun}.` });
+          void notify({ title: "Power Query refresh complete", body: `Refreshed ${queryCount} ${noun}.` }).catch(() => {});
         }
       } catch (err) {
         console.error("Failed to refresh all queries:", err);
         showToast(`Failed to refresh queries: ${String(err)}`, "error");
         if (shouldNotifyInBackground()) {
-          void notify({ title: "Power Query refresh failed", body: "One or more queries failed to refresh." });
+          void notify({ title: "Power Query refresh failed", body: "One or more queries failed to refresh." }).catch(() => {});
         }
       }
-    })();
+    })().catch(() => {});
 
     // Don't wait for the refresh to complete; restore focus immediately so long-running
     // refresh jobs don't steal focus later when their promise settles.

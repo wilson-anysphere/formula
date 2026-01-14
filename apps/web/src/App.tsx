@@ -1375,7 +1375,7 @@ function EngineDemoApp() {
       });
 
       await syncFormulaBar(toA1(startRow0, startCol0));
-    })();
+    })().catch(() => {});
   };
 
   const handleGridCut = (event: ClipboardEvent<HTMLDivElement>) => {
@@ -1414,7 +1414,7 @@ function EngineDemoApp() {
 
         provider.applyRecalcChanges(directChanges.length > 0 ? [...changes, ...directChanges] : changes);
         await syncFormulaBar(toA1(startRow0, startCol0));
-      })();
+      })().catch(() => {});
     }
   };
 

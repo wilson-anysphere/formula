@@ -850,7 +850,7 @@ export function DataQueriesPanelContainer(props: Props) {
         return;
       }
       oauthBroker.resolveRedirect(pendingPkce.redirectUri, redirectUrl);
-    })();
+    })().catch(() => {});
   }, [pendingPkce]);
 
   const cancelPkceRedirect = useCallback(() => {
