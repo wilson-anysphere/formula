@@ -439,12 +439,12 @@ fn cell_width_omitted_reference_uses_current_cell_and_is_not_circular() {
 }
 
 #[test]
-fn cell_protect_prefix_and_width_return_ref_for_out_of_bounds_reference() {
+fn cell_metadata_keys_return_ref_for_out_of_bounds_reference() {
     use formula_engine::Engine;
 
     // Restrict the sheet to only column A; reference column B should be out-of-bounds.
     let mut engine = Engine::new();
-    engine.set_sheet_dimensions("Sheet1", 3, 1).unwrap(); // rows 1..=3, cols A only
+    engine.set_sheet_dimensions("Sheet1", 6, 1).unwrap(); // rows 1..=6, cols A only
 
     engine
         .set_cell_formula("Sheet1", "A1", "=CELL(\"protect\",B1)")
@@ -454,6 +454,15 @@ fn cell_protect_prefix_and_width_return_ref_for_out_of_bounds_reference() {
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "A3", "=CELL(\"width\",B1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=CELL(\"format\",B1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", "=CELL(\"color\",B1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A6", "=CELL(\"parentheses\",B1)")
         .unwrap();
 
     engine.recalculate_single_threaded();
@@ -468,6 +477,18 @@ fn cell_protect_prefix_and_width_return_ref_for_out_of_bounds_reference() {
     );
     assert_eq!(
         engine.get_cell_value("Sheet1", "A3"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A5"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A6"),
         Value::Error(ErrorKind::Ref)
     );
 }

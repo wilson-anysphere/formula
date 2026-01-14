@@ -407,11 +407,19 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
         }
         CellInfoType::Format => {
             let cell_ref = record_explicit_cell(ctx);
+            let (rows, cols) = ctx.sheet_dimensions(&cell_ref.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
             let fmt = cell_number_format(ctx, &cell_ref.sheet_id, addr);
             Value::Text(cell_format_code(fmt))
         }
         CellInfoType::Color => {
             let cell_ref = record_explicit_cell(ctx);
+            let (rows, cols) = ctx.sheet_dimensions(&cell_ref.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
             let format_code = cell_number_format(ctx, &cell_ref.sheet_id, addr);
             let options = format_options_for_cell(ctx);
             let info = formula_format::cell_format_info(format_code, &options);
@@ -419,6 +427,10 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
         }
         CellInfoType::Parentheses => {
             let cell_ref = record_explicit_cell(ctx);
+            let (rows, cols) = ctx.sheet_dimensions(&cell_ref.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
             let format_code = cell_number_format(ctx, &cell_ref.sheet_id, addr);
             let options = format_options_for_cell(ctx);
             let info = formula_format::cell_format_info(format_code, &options);
