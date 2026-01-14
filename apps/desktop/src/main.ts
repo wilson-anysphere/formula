@@ -65,7 +65,7 @@ import { pickAdjacentVisibleSheetId } from "./sheets/sheetNavigation";
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
-import { SecondaryGridView } from "./grid/splitView/secondaryGridView.js";
+import type { SecondaryGridView } from "./grid/splitView/secondaryGridView.js";
 import { resolveDesktopGridMode } from "./grid/shared/desktopGridMode.js";
 import { resolveEnableDrawingInteractions } from "./drawings/drawingInteractionsFlag.js";
 import { FORMULA_AUDITING_RIBBON_COMMAND_IDS } from "./commands/formulaAuditingCommandIds.js";
@@ -411,6 +411,14 @@ const loadOrganizeSheetsDialogModule = createLazyImport(() => import("./sheets/O
   onError: (err) => reportLazyImportFailure("Organize Sheets", err),
 });
 
+const loadSecondaryGridViewModule = createLazyImport(
+  () => startupImport("secondary-grid-view", () => import("./grid/splitView/secondaryGridView.js")),
+  {
+    label: "Split View",
+    onError: (err) => reportLazyImportFailure("Split View", err),
+  },
+);
+
 const loadPageSetupDialogModule = createLazyImport(() => import("./print/PageSetupDialog.js"), {
   label: "Page Setup",
   onError: (err) => reportLazyImportFailure("Printing", err),
@@ -560,6 +568,10 @@ let sharedContextMenu: ContextMenu | null = null;
 // secondary pane without crashing in runtimes where split view is not initialized
 // (e.g. Playwright, minimal DOM).
 let secondaryGridView: SecondaryGridView | null = null;
+type SecondaryGridViewModule = typeof import("./grid/splitView/secondaryGridView.js");
+let secondaryGridViewModule: SecondaryGridViewModule | null = null;
+let secondaryGridViewInitToken = 0;
+let secondaryGridViewInitPromise: Promise<void> | null = null;
 
 type SheetActivatedEvent = { sheet: { id: string; name: string } };
 const sheetActivatedListeners = new Set<(event: SheetActivatedEvent) => void>();
@@ -4877,7 +4889,6 @@ if (
     }
   });
   // --- Split view primary pane persistence (scroll/zoom) ----------------------
-  // --- Split view primary pane persistence (scroll/zoom) ----------------------
 
   let stopPrimaryScrollSubscription: (() => void) | null = null;
   let stopPrimaryZoomSubscription: (() => void) | null = null;
@@ -4952,6 +4963,8 @@ if (
     applySplitRatioCss(ratio);
 
     if (split.direction === "none") {
+      secondaryGridViewInitToken += 1;
+      secondaryGridViewInitPromise = null;
       secondaryGridView?.destroy();
       secondaryGridView = null;
       app.setSplitViewSecondaryGridView(null);
@@ -4980,93 +4993,119 @@ if (
     ensurePrimarySplitPanePersistence();
 
     if (!secondaryGridView) {
-      const pane = split.panes.secondary;
-      const initialScroll = { scrollX: pane.scrollX ?? 0, scrollY: pane.scrollY ?? 0 };
-      const initialZoom = pane.zoom ?? 1;
-      // Split view is two panes over the *same* active sheet (Excel-style). Keep the
-      // secondary pane sheet in lockstep with SpreadsheetApp's current sheet so:
-      // - selection sync stays correct
-      // - in-place edits / fill commits in the secondary pane apply to the visible sheet
-      // Note: Layout state may persist a `sheetId` per pane for future multi-sheet UX, but
-      // the current desktop UI sheet tabs always drive `app.getCurrentSheetId()`.
-      const getSecondarySheetId = () => app.getCurrentSheetId();
+      const createSecondaryGridView = (mod: SecondaryGridViewModule) => {
+        const pane = layoutController.layout.splitView.panes.secondary;
+        const initialScroll = { scrollX: pane.scrollX ?? 0, scrollY: pane.scrollY ?? 0 };
+        const initialZoom = pane.zoom ?? 1;
 
-      // Use the same DocumentController / computed value cache as the primary grid so
-      // the secondary pane stays live with edits and formula recalculation.
-      const limits = app.getGridLimits();
-      const rowCount = Number.isInteger(limits.maxRows) ? limits.maxRows + 1 : DEFAULT_DESKTOP_LOAD_MAX_ROWS + 1;
-      const colCount = Number.isInteger(limits.maxCols) ? limits.maxCols + 1 : DEFAULT_DESKTOP_LOAD_MAX_COLS + 1;
+        // Split view is two panes over the *same* active sheet (Excel-style). Keep the
+        // secondary pane sheet in lockstep with SpreadsheetApp's current sheet so:
+        // - selection sync stays correct
+        // - in-place edits / fill commits in the secondary pane apply to the visible sheet
+        // Note: Layout state may persist a `sheetId` per pane for future multi-sheet UX, but
+        // the current desktop UI sheet tabs always drive `app.getCurrentSheetId()`.
+        const getSecondarySheetId = () => app.getCurrentSheetId();
 
-      secondaryGridView = new SecondaryGridView({
-        container: gridSecondaryEl,
-        provider: app.getSharedGridProvider() ?? undefined,
-        imageResolver: app.getSharedGridImageResolver() ?? undefined,
-        document: app.getDocument(),
-        getSheetId: getSecondarySheetId,
-        rowCount,
-        colCount,
-        showFormulas: () => app.getShowFormulas(),
-        getComputedValue: (cell) => app.getCellComputedValueForSheet(getSecondarySheetId(), cell),
-        getDrawingObjects: (sheetId) => app.getDrawingObjects(sheetId),
-        images: app.getDrawingImages(),
-        chartRenderer: app.getDrawingChartRenderer(),
-        getSelectedDrawingId: () => app.getSelectedDrawingId(),
-        onRequestRefresh: () => app.refresh(),
-        onSelectionChange: () => syncPrimarySelectionFromSecondary(),
-        onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
-        callbacks: app.getSharedGridRangeSelectionCallbacks(),
-        initialScroll,
-        initialZoom,
-        persistScroll: (scroll) => {
-          const pane = layoutController.layout.splitView.panes.secondary;
-          if (pane.scrollX === scroll.scrollX && pane.scrollY === scroll.scrollY) return;
-          layoutController.setSplitPaneScroll("secondary", scroll, { persist: false, emit: false });
-          scheduleSplitPanePersist();
-        },
-        persistZoom: (zoom) => {
-          const pane = layoutController.layout.splitView.panes.secondary;
-          if (pane.zoom === zoom) return;
-          layoutController.setSplitPaneZoom("secondary", zoom, { persist: false, emit: false });
-          scheduleSplitPanePersist();
-        },
-        onEditStateChange: (isEditing) => {
-          if (splitViewSecondaryIsEditing === isEditing) return;
-          splitViewSecondaryIsEditing = isEditing;
-          renderStatusMode();
-          syncTitlebar();
-          emitSpreadsheetEditingChanged();
-          scheduleRibbonSelectionFormatStateUpdate();
-          renderSheetTabs();
-          recomputeKeyboardContextKeys?.();
-        },
-      });
-      app.setSplitViewSecondaryGridView(secondaryGridView);
+        // Use the same DocumentController / computed value cache as the primary grid so
+        // the secondary pane stays live with edits and formula recalculation.
+        const limits = app.getGridLimits();
+        const rowCount = Number.isInteger(limits.maxRows) ? limits.maxRows + 1 : DEFAULT_DESKTOP_LOAD_MAX_ROWS + 1;
+        const colCount = Number.isInteger(limits.maxCols) ? limits.maxCols + 1 : DEFAULT_DESKTOP_LOAD_MAX_COLS + 1;
 
-      // Ensure the secondary selection reflects the current primary selection without
-      // affecting either pane's scroll positions.
-      if (lastSplitSelection) {
-        const selection = lastSplitSelection;
-        splitSelectionSyncInProgress = true;
-        try {
-          const ranges = selection.ranges.map((r) => gridRangeFromDocRange(r));
-          const activeCell = { row: selection.active.row + SPLIT_HEADER_ROWS, col: selection.active.col + SPLIT_HEADER_COLS };
-          secondaryGridView.grid.setSelectionRanges(ranges, {
-            activeIndex: selection.activeRangeIndex,
-            activeCell,
-            scrollIntoView: false,
-          });
-        } finally {
-          splitSelectionSyncInProgress = false;
+        const view = new mod.SecondaryGridView({
+          container: gridSecondaryEl,
+          provider: app.getSharedGridProvider() ?? undefined,
+          imageResolver: app.getSharedGridImageResolver() ?? undefined,
+          document: app.getDocument(),
+          getSheetId: getSecondarySheetId,
+          rowCount,
+          colCount,
+          showFormulas: () => app.getShowFormulas(),
+          getComputedValue: (cell) => app.getCellComputedValueForSheet(getSecondarySheetId(), cell),
+          getDrawingObjects: (sheetId) => app.getDrawingObjects(sheetId),
+          images: app.getDrawingImages(),
+          chartRenderer: app.getDrawingChartRenderer(),
+          getSelectedDrawingId: () => app.getSelectedDrawingId(),
+          onRequestRefresh: () => app.refresh(),
+          onSelectionChange: () => syncPrimarySelectionFromSecondary(),
+          onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
+          callbacks: app.getSharedGridRangeSelectionCallbacks(),
+          initialScroll,
+          initialZoom,
+          persistScroll: (scroll) => {
+            const pane = layoutController.layout.splitView.panes.secondary;
+            if (pane.scrollX === scroll.scrollX && pane.scrollY === scroll.scrollY) return;
+            layoutController.setSplitPaneScroll("secondary", scroll, { persist: false, emit: false });
+            scheduleSplitPanePersist();
+          },
+          persistZoom: (zoom) => {
+            const pane = layoutController.layout.splitView.panes.secondary;
+            if (pane.zoom === zoom) return;
+            layoutController.setSplitPaneZoom("secondary", zoom, { persist: false, emit: false });
+            scheduleSplitPanePersist();
+          },
+          onEditStateChange: (isEditing) => {
+            if (splitViewSecondaryIsEditing === isEditing) return;
+            splitViewSecondaryIsEditing = isEditing;
+            renderStatusMode();
+            syncTitlebar();
+            emitSpreadsheetEditingChanged();
+            scheduleRibbonSelectionFormatStateUpdate();
+            renderSheetTabs();
+            recomputeKeyboardContextKeys?.();
+          },
+        });
+
+        secondaryGridView = view;
+        app.setSplitViewSecondaryGridView(view);
+
+        // Ensure the secondary selection reflects the current primary selection without
+        // affecting either pane's scroll positions.
+        if (lastSplitSelection) {
+          const selection = lastSplitSelection;
+          splitSelectionSyncInProgress = true;
+          try {
+            const ranges = selection.ranges.map((r) => gridRangeFromDocRange(r));
+            const activeCell = { row: selection.active.row + SPLIT_HEADER_ROWS, col: selection.active.col + SPLIT_HEADER_COLS };
+            view.grid.setSelectionRanges(ranges, {
+              activeIndex: selection.activeRangeIndex,
+              activeCell,
+              scrollIntoView: false,
+            });
+          } finally {
+            splitSelectionSyncInProgress = false;
+          }
         }
-      }
 
-      // Ensure the secondary pane respects the current formula bar state (e.g. when enabling split view
-      // while already editing a formula).
-      syncSecondaryGridInteractionMode();
+        // Ensure the secondary pane respects the current formula bar state (e.g. when enabling split view
+        // while already editing a formula).
+        syncSecondaryGridInteractionMode();
+      };
+
+      if (secondaryGridViewModule) {
+        createSecondaryGridView(secondaryGridViewModule);
+      } else if (!secondaryGridViewInitPromise) {
+        const initToken = ++secondaryGridViewInitToken;
+        const initPromise = (async () => {
+          const mod = await loadSecondaryGridViewModule();
+          if (!mod) return;
+          secondaryGridViewModule = mod;
+          if (initToken !== secondaryGridViewInitToken) return;
+          if (layoutController.layout.splitView.direction === "none") return;
+          if (secondaryGridView) return;
+          createSecondaryGridView(mod);
+          // Re-render so CSS state + Playwright hooks reflect the newly created pane.
+          renderSplitView();
+        })();
+        secondaryGridViewInitPromise = initPromise;
+        void initPromise.finally(() => {
+          if (secondaryGridViewInitPromise === initPromise) secondaryGridViewInitPromise = null;
+        });
+      }
     }
- 
+
     // Expose for Playwright (secondary pane autofill).
-    window.__formulaSecondaryGrid = secondaryGridView.grid;
+    window.__formulaSecondaryGrid = secondaryGridView ? secondaryGridView.grid : null;
     const active = split.activePane ?? "primary";
     gridRoot.dataset.splitActive = active === "primary" ? "true" : "false";
     gridSecondaryEl.dataset.splitActive = active === "secondary" ? "true" : "false";
@@ -11613,5 +11652,13 @@ void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() })
       if (tauriBackend) {
         startPowerQueryService();
       }
+    });
+
+    schedule(() => {
+      // Split view (secondary grid) is large and not required for the initial shell render.
+      // Preload it after TTI so the toggle command can create the secondary pane instantly.
+      void loadSecondaryGridViewModule().then((mod) => {
+        if (mod) secondaryGridViewModule = mod;
+      });
     });
   });
