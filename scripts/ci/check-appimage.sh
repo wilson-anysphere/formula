@@ -68,6 +68,10 @@ fi
 # - We can locate the main application ELF binary inside the extracted filesystem.
 # - The binary architecture matches the current runner's architecture (e.g. x86-64).
 # - `ldd` resolves all shared library dependencies (no "not found").
+# - Desktop integration metadata is present in the extracted payload:
+#   - `.desktop` MimeType/Exec entries match `bundle.fileAssociations` + `plugins.deep-link.desktop`
+#   - compliance artifacts (LICENSE/NOTICE) are packaged under /usr/share/doc/<mainBinaryName>/
+#   - Parquet shared-mime-info XML definition is packaged under /usr/share/mime/packages/<identifier>.xml
 #
 # This script is meant to be run after the Linux release build has produced:
 #   <target>/release/bundle/appimage/*.AppImage
