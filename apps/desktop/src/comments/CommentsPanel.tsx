@@ -53,7 +53,10 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
                   type="button"
                   className="comment-thread__resolve-button"
                   disabled={!canComment}
-                  onClick={() => props.onSetResolved({ commentId: comment.id, resolved: !comment.resolved })}
+                  onClick={() => {
+                    if (!canComment) return;
+                    props.onSetResolved({ commentId: comment.id, resolved: !comment.resolved });
+                  }}
                 >
                   {comment.resolved ? t("comments.unresolve") : t("comments.resolve")}
                 </button>
