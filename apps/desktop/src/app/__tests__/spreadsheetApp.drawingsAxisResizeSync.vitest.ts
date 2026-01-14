@@ -333,7 +333,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       const h1 = Number(firstStroke!.args[3]);
       expect(Number.isFinite(x1)).toBe(true);
       expect(Number.isFinite(y1)).toBe(true);
-
+ 
       // Cursor should detect the drawing at its current position.
       // Use the center of the rect to avoid hitting resize handles (the placeholder is only 10x10px).
       expect((app as any).drawingCursorAtPoint(x1 + w1 / 2, y1 + h1 / 2)).toBe("move");
