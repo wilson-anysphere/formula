@@ -1,6 +1,7 @@
 //! BIFF8 worksheet formula helpers.
 //!
-//! This module contains a best-effort shared-formula fallback used by the `.xls` importer:
+//! This module contains best-effort BIFF8 worksheet-formula fallbacks/overrides used by the
+//! `.xls` importer:
 //! some non-standard producers emit follower-cell `FORMULA` records whose `rgce` consists of a
 //! single `PtgExp` token (pointing at a "base" cell), but omit the corresponding `SHRFMLA`/`ARRAY`
 //! definition record.
@@ -15,6 +16,11 @@
 //!
 //! Relative-offset ptgs (`PtgRefN` / `PtgAreaN`) are copied verbatim because they are interpreted
 //! relative to the *current* formula cell at decode time.
+//!
+//! Additionally, calamine’s `.xls` formula decoder can mis-handle relative flags in 3D area
+//! references (`PtgArea3d`) by treating the high flag bits of the column fields as part of the
+//! column index. When we detect these patterns, we re-decode formulas directly from the BIFF
+//! worksheet stream and override calamine’s string output.
 
 use std::collections::HashMap;
 
@@ -36,6 +42,11 @@ pub(crate) struct PtgExpFallbackResult {
     /// Recovered formulas (`CellRef` -> formula text without a leading `=`).
     pub(crate) formulas: HashMap<CellRef, String>,
     pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SheetFormulaOverrides {
+    pub(crate) formulas: HashMap<CellRef, String>,
 }
 
 /// Best-effort recovery of `PtgExp`-only formulas by materializing from the referenced base cell's
@@ -161,6 +172,189 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         formulas: recovered,
         warnings,
     })
+}
+
+/// Best-effort parse + materialization of BIFF8 worksheet formulas used as an override when
+/// calamine mis-decodes certain token streams (notably `PtgArea3d` with relative flags).
+///
+/// The returned formulas are a map of cell -> decoded formula text (no leading `=`) that should
+/// replace calamine’s output.
+pub(crate) fn parse_biff8_sheet_formula_overrides(
+    workbook_stream: &[u8],
+    start: usize,
+    ctx: &rgce::RgceDecodeContext<'_>,
+) -> Result<SheetFormulaOverrides, String> {
+    let parsed = worksheet_formulas::parse_biff8_worksheet_formulas(workbook_stream, start)?;
+
+    let mut out = SheetFormulaOverrides::default();
+
+    for (cell_ref, cell) in parsed.formula_cells {
+        // Shared formula reference (PtgExp).
+        if let Some((base_row, base_col)) = parse_ptg_exp(&cell.rgce) {
+            let base_cell = CellRef::new(base_row, base_col);
+            let Some(shrfmla) = parsed.shrfmla.get(&base_cell) else {
+                continue;
+            };
+            if !range_contains(shrfmla.range, cell_ref) {
+                continue;
+            }
+
+            let Some(materialized) = materialize_biff8_rgce(
+                &shrfmla.rgce,
+                base_row,
+                base_col,
+                cell_ref.row,
+                cell_ref.col,
+            ) else {
+                continue;
+            };
+
+            if let Some(text) = decode_formula_text_best_effort(&materialized, cell_ref, ctx) {
+                out.formulas.insert(cell_ref, text);
+            }
+            continue;
+        }
+
+        // Non-shared formulas: only override when we detect a 3D area token that uses relative
+        // flags (these are easy to mis-decode if the high bits of the column fields are treated as
+        // part of the column index).
+        if !rgce_contains_area3d_relative_flags(&cell.rgce) {
+            continue;
+        }
+
+        if let Some(text) = decode_formula_text_best_effort(&cell.rgce, cell_ref, ctx) {
+            out.formulas.insert(cell_ref, text);
+        }
+    }
+
+    Ok(out)
+}
+
+fn decode_formula_text_best_effort(
+    rgce_bytes: &[u8],
+    cell_ref: CellRef,
+    ctx: &rgce::RgceDecodeContext<'_>,
+) -> Option<String> {
+    let base = rgce::CellCoord::new(cell_ref.row, cell_ref.col);
+    let decoded = rgce::decode_biff8_rgce_with_base(rgce_bytes, ctx, Some(base));
+
+    // Be conservative: only override formulas when decoding succeeded without warnings.
+    if !decoded.warnings.is_empty() {
+        return None;
+    }
+    if decoded.text.is_empty() || decoded.text == "#UNKNOWN!" {
+        return None;
+    }
+    Some(decoded.text)
+}
+
+fn range_contains(range: (CellRef, CellRef), cell: CellRef) -> bool {
+    let (start, end) = range;
+    cell.row >= start.row && cell.row <= end.row && cell.col >= start.col && cell.col <= end.col
+}
+
+fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
+    // Best-effort scan: parse only a subset of tokens needed to find PtgArea3d while staying
+    // aligned for common fixed-width ptgs.
+    let mut i = 0usize;
+    while i < rgce_bytes.len() {
+        let ptg = rgce_bytes[i];
+        i += 1;
+
+        match ptg {
+            // PtgExp / PtgTbl: [rw:u16][col:u16]
+            0x01 | 0x02 => i = i.saturating_add(4),
+
+            // Fixed-width/no-payload operators + PtgParen.
+            0x03..=0x16 | 0x2F => {}
+
+            // PtgAttr: [grbit:u8][wAttr:u16] (+ optional jump table for tAttrChoose)
+            0x19 => {
+                if i + 3 > rgce_bytes.len() {
+                    return false;
+                }
+                let grbit = rgce_bytes[i];
+                let w_attr = u16::from_le_bytes([rgce_bytes[i + 1], rgce_bytes[i + 2]]) as usize;
+                i += 3;
+
+                const T_ATTR_CHOOSE: u8 = 0x04;
+                if grbit & T_ATTR_CHOOSE != 0 {
+                    let needed = w_attr.saturating_mul(2);
+                    i = i.saturating_add(needed);
+                }
+            }
+
+            // PtgStr: [cch:u8][flags:u8][chars...]
+            0x17 => {
+                if i + 2 > rgce_bytes.len() {
+                    return false;
+                }
+                let cch = rgce_bytes[i] as usize;
+                let flags = rgce_bytes[i + 1];
+                i += 2;
+                let bytes = if flags & 0x01 != 0 { cch.saturating_mul(2) } else { cch };
+                i = i.saturating_add(bytes);
+                // Ignore rich/ext segments; this is best-effort and our fixtures emit none.
+            }
+
+            // PtgErr / PtgBool
+            0x1C | 0x1D => i = i.saturating_add(1),
+            // PtgInt
+            0x1E => i = i.saturating_add(2),
+            // PtgNum
+            0x1F => i = i.saturating_add(8),
+            // PtgArray
+            0x20 | 0x40 | 0x60 => i = i.saturating_add(7),
+            // PtgFunc
+            0x21 | 0x41 | 0x61 => i = i.saturating_add(2),
+            // PtgFuncVar
+            0x22 | 0x42 | 0x62 => i = i.saturating_add(3),
+            // PtgName
+            0x23 | 0x43 | 0x63 => i = i.saturating_add(6),
+
+            // PtgRef: [row:u16][col+flags:u16]
+            0x24 | 0x44 | 0x64 => i = i.saturating_add(4),
+            // PtgArea: [row1:u16][row2:u16][col1+flags:u16][col2+flags:u16]
+            0x25 | 0x45 | 0x65 => i = i.saturating_add(8),
+
+            // PtgMem* tokens: [cce:u16][rgce:cce bytes]
+            0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
+            | 0x2E | 0x4E | 0x6E => {
+                if i + 2 > rgce_bytes.len() {
+                    return false;
+                }
+                let cce = u16::from_le_bytes([rgce_bytes[i], rgce_bytes[i + 1]]) as usize;
+                i = i.saturating_add(2 + cce);
+            }
+
+            // PtgRef3d: [ixti:u16][row:u16][col+flags:u16]
+            0x3A | 0x5A | 0x7A => i = i.saturating_add(6),
+
+            // PtgArea3d: [ixti:u16][row1:u16][row2:u16][col1+flags:u16][col2+flags:u16]
+            0x3B | 0x5B | 0x7B => {
+                if i + 10 > rgce_bytes.len() {
+                    return false;
+                }
+                let col1_off = i + 6;
+                let col2_off = i + 8;
+                let col1 = u16::from_le_bytes([rgce_bytes[col1_off], rgce_bytes[col1_off + 1]]);
+                let col2 = u16::from_le_bytes([rgce_bytes[col2_off], rgce_bytes[col2_off + 1]]);
+                if (col1 & RELATIVE_MASK) != 0 || (col2 & RELATIVE_MASK) != 0 {
+                    return true;
+                }
+                i = i.saturating_add(10);
+            }
+
+            // Unknown/unsupported token; bail so we don't mis-scan.
+            _ => return false,
+        }
+
+        if i > rgce_bytes.len() {
+            return false;
+        }
+    }
+
+    false
 }
 
 fn parse_ptg_exp(rgce: &[u8]) -> Option<(u32, u32)> {

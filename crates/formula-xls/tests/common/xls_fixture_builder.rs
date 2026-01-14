@@ -349,6 +349,27 @@ pub fn build_shared_formula_ptgfuncvar_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a shared-formula range (`SharedArea3D!B1:B2`) whose
+/// shared `rgce` uses a 3D area reference (`PtgArea3d`) with relative flags.
+///
+/// This exercises shared-formula materialization for area endpoints with independent relative
+/// bits. The intended decoded formulas are:
+/// - `SharedArea3D!B1`: `Sheet1!A1:A2`
+/// - `SharedArea3D!B2`: `Sheet1!A2:A3`
+pub fn build_shared_formula_area3d_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_area3d_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where only the
 /// non-anchor cell (`B1`) has a formatted `BLANK` record.
 ///
@@ -5276,6 +5297,63 @@ fn build_shared_formula_ptgfuncvar_sheet_stream(xf_cell: u16) -> Vec<u8> {
     sheet
 }
 
+fn build_shared_formula_area3d_workbook_stream() -> Vec<u8> {
+    // Two-sheet workbook:
+    // - Sheet1: a simple value sheet used as the 3D reference target.
+    // - SharedArea3D: contains a shared-formula range B1:B2 whose shared rgce uses PtgArea3d with
+    //   relative flags in the column fields.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records (workbook sheet list).
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["Sheet1", "SharedArea3D"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // External reference tables used by 3D formula tokens.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    // EXTERNSHEET entry for Sheet1 (itab=0).
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0 (Sheet1) ---------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 1.0));
+
+    // -- Sheet 1 (SharedArea3D) ---------------------------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_shared_area3d_shared_formula_sheet_stream(xf_cell));
+
+    globals
+}
+
 fn build_merged_formatted_blank_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -7163,6 +7241,41 @@ fn ptg_area3d(ixti: u16, row1: u16, row2: u16, col1: u16, col2: u16) -> Vec<u8> 
     out
 }
 
+fn ptg_area3d_with_rel_flags(
+    ixti: u16,
+    row1: u16,
+    row2: u16,
+    col1: u16,
+    col2: u16,
+    row1_rel: bool,
+    col1_rel: bool,
+    row2_rel: bool,
+    col2_rel: bool,
+) -> Vec<u8> {
+    // PtgArea3d (0x3B) payload with independent relative flags for each endpoint:
+    //   [ixti: u16]
+    //   [rowFirst: u16][rowLast: u16]
+    //   [colFirst+flags: u16][colLast+flags: u16]
+    //
+    // BIFF8 stores relative row/col flags in the high bits of the column fields:
+    // - bit 14: row-relative
+    // - bit 15: col-relative
+    let col1_u16 = pack_biff8_col_flags(col1, row1_rel, col1_rel);
+    let col2_u16 = pack_biff8_col_flags(col2, row2_rel, col2_rel);
+    ptg_area3d(ixti, row1, row2, col1_u16, col2_u16)
+}
+
+fn pack_biff8_col_flags(col: u16, row_rel: bool, col_rel: bool) -> u16 {
+    let mut out = col & 0x3FFF;
+    if row_rel {
+        out |= 0x4000;
+    }
+    if col_rel {
+        out |= 0x8000;
+    }
+    out
+}
+
 fn ptg_name(name_id: u32) -> Vec<u8> {
     // PtgName (0x23) payload: [name_id: u32][reserved: u16]
     let mut out = Vec::<u8>::new();
@@ -7683,6 +7796,57 @@ fn build_simple_ref3d_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
         &mut sheet,
         RECORD_FORMULA,
         &formula_cell(0, 0, xf_cell, 0.0, &rgce),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_area3d_shared_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // SharedArea3D!B1:B2:
+    //   B1: Sheet1!A1:A2
+    //   B2: Sheet1!A2:A3
+    //
+    // Shared formula definition (SHRFMLA) uses PtgArea3d with relative flags so materialization
+    // must shift both area endpoints by +1 row for B2.
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [1, 2) => B1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&1u16.to_le_bytes()); // first col (B)
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Shared-formula base rgce: PtgArea3d Sheet1!A1:A2 (ixti=0), with both endpoints row/col-relative.
+    let base_rgce = ptg_area3d_with_rel_flags(0, 0, 1, 0, 0, true, true, true, true);
+
+    // Base cell B1: full formula token stream.
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 1, xf_cell, 0.0, &base_rgce),
+    );
+
+    // Shared formula definition for B1:B2.
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 1, &base_rgce),
+    );
+
+    // B2: PtgExp referencing base cell B1 (row=0, col=1).
+    let ptgexp = ptg_exp(0, 1);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &ptgexp),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
@@ -10703,7 +10867,9 @@ fn shrfmla_record(
     // SHRFMLA record payload (BIFF8) [MS-XLS 2.4.277].
     //
     // Layout (RefU + cUse + cce + rgce):
-    //   [rwFirst: u16][rwLast: u16][colFirst: u8][colLast: u8][cUse: u16][cce: u16][rgce bytes]
+    //   [rwFirst: u16][rwLast: u16][colFirst: u8][colLast: u8]  // RefU range
+    //   [cUse: u16]
+    //   [cce: u16][rgce bytes]
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&rw_first.to_le_bytes());
     out.extend_from_slice(&rw_last.to_le_bytes());

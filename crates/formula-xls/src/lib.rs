@@ -732,6 +732,38 @@ fn import_xls_path_with_biff_reader(
     let mut sheet_ids_by_calamine_idx: Vec<formula_model::WorksheetId> =
         Vec::with_capacity(sheets.len());
 
+    // Best-effort BIFF8 formula decoding context used to override calamine formula strings in a
+    // handful of tricky cases (notably shared formulas and 3D areas with relative flags).
+    let mut biff_rgce_sheet_names: Vec<String> = Vec::new();
+    let mut biff_rgce_externsheet: Vec<biff::externsheet::ExternSheetEntry> = Vec::new();
+    let mut biff_rgce_supbooks: Vec<biff::supbook::SupBookInfo> = Vec::new();
+    let biff_rgce_defined_names: Vec<biff::rgce::DefinedNameMeta> = Vec::new();
+
+    if let (Some(workbook_stream), Some(biff_version), Some(codepage)) =
+        (workbook_stream.as_deref(), biff_version, biff_codepage)
+    {
+        if biff_version == biff::BiffVersion::Biff8 {
+            // Prefer BIFF BoundSheet names (BIFF sheet index order) when available; fall back to
+            // calamine metadata order.
+            if let Some(biff_sheets) = biff_sheets.as_deref() {
+                biff_rgce_sheet_names = biff_sheets.iter().map(|s| s.name.clone()).collect();
+            }
+            if biff_rgce_sheet_names.is_empty() {
+                biff_rgce_sheet_names = sheets.iter().map(|s| s.name.clone()).collect();
+            }
+
+            let externsheet_table = biff::externsheet::parse_biff_externsheet(
+                workbook_stream,
+                biff_version,
+                codepage,
+            );
+            biff_rgce_externsheet = externsheet_table.entries;
+
+            let supbook_table = biff::supbook::parse_biff8_supbook_table(workbook_stream, codepage);
+            biff_rgce_supbooks = supbook_table.supbooks;
+        }
+    }
+
     for (sheet_idx, sheet_meta) in sheets.iter().enumerate() {
         let source_sheet_name = sheet_meta.name.clone();
         let biff_idx = sheet_mapping.get(sheet_idx).copied().flatten();
@@ -1779,6 +1811,47 @@ fn import_xls_path_with_biff_reader(
                             ),
                             &mut warnings_suppressed,
                         ),
+                    }
+                }
+            }
+        }
+
+        // Best-effort override path for BIFF8 formulas that calamine can mis-decode:
+        // - shared formulas (`PtgExp` + `SHRFMLA`)
+        // - 3D area references (`PtgArea3d`) that carry relative flags in the high bits of the
+        //   column fields.
+        if let (Some(workbook_stream), Some(codepage), Some(biff_version), Some(biff_idx)) = (
+            workbook_stream.as_deref(),
+            biff_codepage,
+            biff_version,
+            biff_idx,
+        ) {
+            if biff_version == biff::BiffVersion::Biff8 && !biff_rgce_externsheet.is_empty() {
+                if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
+                    if sheet_info.offset < workbook_stream.len() {
+                        let rgce_ctx = biff::rgce::RgceDecodeContext {
+                            codepage,
+                            sheet_names: &biff_rgce_sheet_names,
+                            externsheet: &biff_rgce_externsheet,
+                            supbooks: &biff_rgce_supbooks,
+                            defined_names: &biff_rgce_defined_names,
+                        };
+
+                        match biff::formulas::parse_biff8_sheet_formula_overrides(
+                            workbook_stream,
+                            sheet_info.offset,
+                            &rgce_ctx,
+                        ) {
+                            Ok(parsed) => {
+                                for (cell_ref, formula) in parsed.formulas {
+                                    let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                                    sheet.set_formula(anchor, Some(formula));
+                                }
+                            }
+                            Err(err) => warnings.push(ImportWarning::new(format!(
+                                "failed to import `.xls` BIFF8 formulas for sheet `{sheet_name}`: {err}"
+                            ))),
+                        }
                     }
                 }
             }
