@@ -322,6 +322,47 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
   return null;
 }
 
+function tryReadExternalWorkbookNameRef(input: string, start: number): { text: string; end: number } | null {
+  // Workbook-scoped external defined names can appear in unquoted form:
+  //   [Book.xlsx]MyName
+  //
+  // The engine serializer prefers the quoted form (`'[Book.xlsx]MyName'`) to avoid structured-ref
+  // ambiguity, but the parser accepts the unquoted form and users may type it directly.
+  if (input[start] !== "[") return null;
+
+  // Scan the workbook prefix, treating `[` as a literal character and honoring Excel's `]]` escape
+  // for literal `]` characters inside the workbook id.
+  let i = start + 1;
+  while (i < input.length) {
+    if (input[i] === "]") {
+      if (input[i + 1] === "]") {
+        i += 2;
+        continue;
+      }
+      i += 1;
+      break;
+    }
+    i += 1;
+  }
+  if (i <= start + 1 || i > input.length) return null;
+
+  // Optional whitespace between the workbook prefix and the name token.
+  while (i < input.length && isWhitespace(input[i] ?? "")) i += 1;
+
+  const first = codePointAt(input, i);
+  if (!first || !isIdentifierStart(first.ch)) return null;
+
+  let end = first.nextIndex;
+  while (end < input.length) {
+    const next = codePointAt(input, end);
+    if (!next) break;
+    if (!isIdentifierPart(next.ch)) break;
+    end = next.nextIndex;
+  }
+
+  return { text: input.slice(start, end), end };
+}
+
 function tryReadQuotedIdentifier(input: string, start: number): { text: string; end: number } | null {
   if (input[start] !== "'") return null;
 
@@ -741,6 +782,13 @@ export function tokenizeFormula(input: string): FormulaToken[] {
     if (implicitStructured) {
       tokens.push({ type: "reference", text: implicitStructured.text, start: i, end: implicitStructured.end });
       i = implicitStructured.end;
+      continue;
+    }
+
+    const externalNameRef = tryReadExternalWorkbookNameRef(input, i);
+    if (externalNameRef) {
+      tokens.push({ type: "identifier", text: externalNameRef.text, start: i, end: externalNameRef.end });
+      i = externalNameRef.end;
       continue;
     }
 

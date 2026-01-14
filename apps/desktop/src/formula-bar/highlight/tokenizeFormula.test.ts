@@ -176,6 +176,18 @@ describe("tokenizeFormula", () => {
     ]);
   });
 
+  it("tokenizes workbook-scoped external defined names (unquoted external name refs)", () => {
+    // The engine parser accepts unquoted workbook-scoped external names (and users may type them)
+    // even though the canonical renderer prefers the quoted form.
+    const tokens = tokenizeFormula("=[Book.xlsx]MyName+1").filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["identifier", "[Book.xlsx]MyName"],
+      ["operator", "+"],
+      ["number", "1"],
+    ]);
+  });
+
   it("tokenizes Excel structured references as single reference tokens", () => {
     const input = "=SUM(Table1[Amount])";
     const tokens = tokenizeFormula(input);

@@ -76,6 +76,19 @@ describe("tokenizeFormula (cross-package)", () => {
     expect(consumerIdents).toEqual(sharedIdents);
   });
 
+  it("matches between packages for workbook-scoped external defined names (unquoted name refs)", () => {
+    const input = "=[Book.xlsx]MyName+1";
+    const sharedIdents = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "identifier")
+      .map((t) => t.text);
+    const consumerIdents = consumerTokenizeFormula(input)
+      .filter((t) => t.type === "identifier")
+      .map((t) => t.text);
+
+    expect(sharedIdents).toEqual(["[Book.xlsx]MyName"]);
+    expect(consumerIdents).toEqual(sharedIdents);
+  });
+
   it("matches between packages for structured table specifiers and selectors", () => {
     const input =
       "=SUM(Table1[#All], Table1[#Headers], Table1[#Data], Table1[#Totals], Table1[[#Headers],[Amount]], Table1[[#Totals],[Amount]])";
