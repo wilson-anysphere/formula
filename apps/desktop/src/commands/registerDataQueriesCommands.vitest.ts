@@ -174,4 +174,39 @@ describe("registerDataQueriesCommands", () => {
     await Promise.resolve();
     expect(refreshAll).toHaveBeenCalledTimes(1);
   });
+
+  it("does not execute refresh commands while the spreadsheet is editing (split-view secondary editor via global flag)", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = createLayoutHarness();
+
+    const focusAfterExecute = vi.fn();
+    const refreshAll = vi.fn(() => ({ promise: Promise.resolve() }));
+    const service = {
+      ready: Promise.resolve(),
+      getQueries: () => [{ id: "q1" }],
+      refreshAll,
+    };
+
+    registerDataQueriesCommands({
+      commandRegistry,
+      layoutController,
+      getPowerQueryService: () => service as any,
+      showToast: () => {},
+      notify: () => {},
+      focusAfterExecute,
+    });
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    try {
+      await commandRegistry.executeCommand(DATA_QUERIES_RIBBON_COMMANDS.refreshAll);
+      // Flush microtasks in case a refresh job was queued.
+      await Promise.resolve();
+      await Promise.resolve();
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+    }
+
+    expect(refreshAll).not.toHaveBeenCalled();
+    expect(focusAfterExecute).not.toHaveBeenCalled();
+  });
 });

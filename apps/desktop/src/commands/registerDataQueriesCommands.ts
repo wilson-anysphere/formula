@@ -25,14 +25,20 @@ export function registerDataQueriesCommands(params: {
   commandRegistry: CommandRegistry;
   layoutController: LayoutController | null;
   /**
-   * Optional spreadsheet edit-state predicate. When omitted, refresh commands are assumed to be runnable.
+   * Optional spreadsheet edit-state predicate.
+   *
+   * When omitted, falls back to the desktop-shell-owned `globalThis.__formulaSpreadsheetIsEditing`
+   * flag (when present).
    *
    * The desktop shell passes a custom predicate (`isSpreadsheetEditing`) that includes split-view
    * secondary editor state so command palette/keybindings cannot bypass ribbon disabling.
    */
   isEditing?: (() => boolean) | null;
   /**
-   * Optional spreadsheet read-only predicate. When omitted, refresh commands are assumed to be runnable.
+   * Optional spreadsheet read-only predicate.
+   *
+   * When omitted, falls back to the SpreadsheetApp-owned `globalThis.__formulaSpreadsheetIsReadOnly`
+   * flag (when present).
    *
    * The desktop ribbon disables refresh commands in read-only collab roles; guard execution so
    * command palette/keybindings cannot bypass that state.
@@ -70,8 +76,8 @@ export function registerDataQueriesCommands(params: {
     focusAfterExecute = null,
     now = () => Date.now(),
   } = params;
-  const isEditingFn = isEditing ?? (() => false);
-  const isReadOnlyFn = isReadOnly ?? (() => false);
+  const isEditingFn = isEditing ?? (() => (globalThis as any).__formulaSpreadsheetIsEditing === true);
+  const isReadOnlyFn = isReadOnly ?? (() => (globalThis as any).__formulaSpreadsheetIsReadOnly === true);
 
   commandRegistry.registerBuiltinCommand(
     DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections,

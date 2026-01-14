@@ -72,4 +72,34 @@ describe("registerRibbonMacroCommands", () => {
     expect(pendingFocus).toBe("runner-run");
     expect(openedPanels).toEqual([PanelIds.MACROS]);
   });
+
+  it("does not execute macro commands while the spreadsheet is editing (split-view secondary editor via global flag)", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const openPanel = vi.fn();
+    const setPendingMacrosPanelFocus = vi.fn();
+
+    registerRibbonMacroCommands({
+      commandRegistry,
+      handlers: {
+        openPanel,
+        focusScriptEditorPanel: vi.fn(),
+        focusVbaMigratePanel: vi.fn(),
+        setPendingMacrosPanelFocus,
+        startMacroRecorder: vi.fn(),
+        stopMacroRecorder: vi.fn(),
+        isTauri: () => false,
+      },
+    });
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    try {
+      await commandRegistry.executeCommand("view.macros.viewMacros.run");
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+    }
+
+    expect(openPanel).not.toHaveBeenCalled();
+    expect(setPendingMacrosPanelFocus).not.toHaveBeenCalled();
+  });
 });

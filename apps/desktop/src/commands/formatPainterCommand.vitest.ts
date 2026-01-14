@@ -97,4 +97,28 @@ describe("format painter command", () => {
     expect(disarm).toHaveBeenCalledTimes(1);
     expect(armed).toBe(false);
   });
+
+  it("does not arm while the spreadsheet is editing (split-view secondary editor via global flag)", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const arm = vi.fn();
+    const disarm = vi.fn();
+
+    registerFormatPainterCommand({
+      commandRegistry,
+      isArmed: () => false,
+      arm,
+      disarm,
+    });
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    try {
+      await commandRegistry.executeCommand(FORMAT_PAINTER_COMMAND_ID);
+    } finally {
+      delete (globalThis as any).__formulaSpreadsheetIsEditing;
+    }
+
+    expect(arm).not.toHaveBeenCalled();
+    expect(disarm).not.toHaveBeenCalled();
+  });
 });
