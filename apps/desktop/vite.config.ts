@@ -236,6 +236,10 @@ export default defineConfig({
       "src/ai/dlp/__tests__/**/*.test.ts",
       "src/editor/cellEditorOverlay.f4.test.ts",
       "src/ai/inline-edit/__tests__/**/*.test.ts",
+      // Drawing overlay interaction unit tests live under `src/drawings/__tests__` but use the
+      // `.test.ts` suffix for historical reasons. Include the specific suite we rely on for
+      // transform-aware selection handle hit-testing so `pnpm -C apps/desktop vitest run ...` works.
+      "src/drawings/__tests__/selectionHandles.test.ts",
     ],
     exclude: ["tests/**", "node_modules/**"],
   },
