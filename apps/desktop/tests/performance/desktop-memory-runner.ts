@@ -6,6 +6,7 @@ import { createInterface, type Interface } from "node:readline";
 import {
   defaultDesktopBinPath,
   parseStartupLine,
+  parseProcChildrenPids,
   percentile,
   repoRoot,
   resolvePerfHome,
@@ -14,7 +15,6 @@ import {
   type StartupMetrics,
   type TerminateProcessTreeMode,
 } from "./desktopStartupUtil.ts";
-import { parseProcChildrenPids } from "./linuxProcUtil.ts";
 
 type Summary = {
   runs: number;

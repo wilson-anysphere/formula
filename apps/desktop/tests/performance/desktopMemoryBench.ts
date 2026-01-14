@@ -26,6 +26,9 @@ import { createInterface } from 'node:readline';
 import { type BenchmarkResult } from './benchmark.ts';
 import {
   defaultDesktopBinPath,
+  collectProcessTreePidsLinux,
+  findPidForExecutableLinux,
+  getProcessTreeRssBytesLinux,
   mean,
   median,
   percentile,
@@ -36,11 +39,6 @@ import {
   terminateProcessTree,
   stdDev,
 } from './desktopStartupUtil.ts';
-import {
-  collectProcessTreePidsLinux,
-  findPidForExecutableLinux,
-  getProcessTreeRssBytesLinux,
-} from './linuxProcUtil.ts';
 
 // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
 const perfHome = resolvePerfHome();

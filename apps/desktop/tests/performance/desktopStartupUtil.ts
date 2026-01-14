@@ -8,3 +8,4 @@
 // standalone runners + integrated benchmarks.
 export * from './desktopStartupRunnerShared.ts';
 export * from './processTree.ts';
+export * from './linuxProcUtil.ts';

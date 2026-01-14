@@ -52,6 +52,8 @@ import { resolve } from 'node:path';
 import { type BenchmarkResult } from './benchmark.ts';
 import {
   defaultDesktopBinPath,
+  findPidForExecutableLinux,
+  getProcessRssMbLinux,
   mean,
   median,
   percentile,
@@ -65,7 +67,6 @@ import {
   stdDev,
   type StartupMetrics,
 } from './desktopStartupUtil.ts';
-import { findPidForExecutableLinux, getProcessRssMbLinux } from './linuxProcUtil.ts';
 
 // Benchmark environment knobs:
 // - `FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1` prevents the release updater from running a

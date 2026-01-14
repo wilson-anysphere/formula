@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { parseProcChildrenPids, parseProcStatusVmRssKb } from './linuxProcUtil.ts';
+import { parseProcChildrenPids, parseProcStatusVmRssKb } from './desktopStartupUtil.ts';
 
 describe('linuxProcUtil /proc parsing', () => {
   test('parseProcChildrenPids parses an empty children file', () => {
