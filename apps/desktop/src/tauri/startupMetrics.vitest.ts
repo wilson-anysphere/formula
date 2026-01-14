@@ -284,6 +284,26 @@ describe("startupMetrics", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("can retry first-render reporting after a transient invoke failure", async () => {
+    const originalRaf = (globalThis as any).requestAnimationFrame;
+    try {
+      // Ensure `nextFrame()` doesn't wait on an environment-provided rAF.
+      (globalThis as any).requestAnimationFrame = undefined;
+
+      const invoke = vi.fn().mockRejectedValueOnce(new Error("transient")).mockResolvedValue(null);
+      const listen = vi.fn().mockResolvedValue(() => {});
+      (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+
+      await markStartupFirstRender();
+      await markStartupFirstRender();
+
+      const calls = invoke.mock.calls.map((args) => args[0]);
+      expect(calls.filter((c) => c === "report_startup_first_render")).toHaveLength(2);
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRaf;
+    }
+  });
+
   it("can report first render even if __TAURI__ is injected after the call starts", async () => {
     const invoke = vi.fn().mockResolvedValue(null);
     const listen = vi.fn().mockResolvedValue(() => {});
