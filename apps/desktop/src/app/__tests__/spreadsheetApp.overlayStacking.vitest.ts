@@ -130,14 +130,26 @@ function expectOverlayZOrder(root: HTMLElement): void {
   expect(cellEditor).toBeTruthy();
 
   const drawingZ = zIndexNumber(getComputedStyle(drawingLayer as Element).zIndex);
-  const chartZ = zIndexNumber(getComputedStyle(chartLayer as Element).zIndex);
+  const chartStyle = getComputedStyle(chartLayer as Element);
+  const drawingStyle = getComputedStyle(drawingLayer as Element);
+  const auditingStyle = getComputedStyle(auditingLayer as Element);
+  const chartSelectionStyle = getComputedStyle(chartSelectionLayer as Element);
+  const outlineStyle = getComputedStyle(outlineLayer as Element);
+  const chartZ = zIndexNumber(chartStyle.zIndex);
   const auditingZ = zIndexNumber(getComputedStyle(auditingLayer as Element).zIndex);
   const selectionZ = zIndexNumber(getComputedStyle(selectionLayer as Element).zIndex);
-  const chartSelectionZ = zIndexNumber(getComputedStyle(chartSelectionLayer as Element).zIndex);
-  const outlineZ = zIndexNumber(getComputedStyle(outlineLayer as Element).zIndex);
+  const chartSelectionZ = zIndexNumber(chartSelectionStyle.zIndex);
+  const outlineZ = zIndexNumber(outlineStyle.zIndex);
   const vScrollbarZ = zIndexNumber(getComputedStyle(vScrollbarTrack as Element).zIndex);
   const hScrollbarZ = zIndexNumber(getComputedStyle(hScrollbarTrack as Element).zIndex);
   const editorZ = zIndexNumber(getComputedStyle(cellEditor as Element).zIndex);
+
+  // Non-interactive overlay canvases should never intercept pointer events.
+  expect(chartStyle.pointerEvents).toBe("none");
+  expect(drawingStyle.pointerEvents).toBe("none");
+  expect(auditingStyle.pointerEvents).toBe("none");
+  expect(chartSelectionStyle.pointerEvents).toBe("none");
+  expect(outlineStyle.pointerEvents).toBe("none");
 
   // Overlay stacking (low → high):
   //   - auditing highlights (z=1)
