@@ -227,3 +227,30 @@ fn bytecode_sum_over_external_range_compiles_and_uses_reference_semantics() {
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
 }
+
+#[test]
+fn bytecode_degenerate_external_3d_sheet_range_matches_endpoints_nfkc_case_insensitively() {
+    struct NfkcProvider;
+
+    impl ExternalValueProvider for NfkcProvider {
+        fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+            if sheet == "[Book.xlsx]Kelvin" && addr.row == 0 && addr.col == 0 {
+                return Some(Value::Number(41.0));
+            }
+            None
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(NfkcProvider)));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]'Kelvin':'KELVIN'!A1")
+        .unwrap();
+
+    // Ensure we compile to bytecode (no AST fallback).
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+}

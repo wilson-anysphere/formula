@@ -287,3 +287,21 @@ fn structural_edits_match_sheet_names_case_insensitively_across_unicode() {
     assert!(changed);
     assert_eq!(out, "=A1+'ß'!A2");
 }
+
+#[test]
+fn structural_edits_match_sheet_names_nfkc_case_insensitively() {
+    // Excel applies compatibility normalization (NFKC) when comparing sheet names.
+    // U+212A KELVIN SIGN (K) is NFKC-equivalent to ASCII 'K'.
+    let edit = StructuralEdit::InsertRows {
+        sheet: "KELVIN".to_string(),
+        row: 0,
+        count: 1,
+    };
+    let origin = CellAddr::new(0, 0);
+
+    let (out, changed) =
+        rewrite_formula_for_structural_edit("='Kelvin'!A1", "Other", origin, &edit);
+
+    assert!(changed);
+    assert_eq!(out, "='Kelvin'!A2");
+}
