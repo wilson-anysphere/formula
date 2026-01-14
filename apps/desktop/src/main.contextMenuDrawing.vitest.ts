@@ -202,7 +202,7 @@ describe("Drawing context menu (main wiring helper)", () => {
     }
   });
 
-  it("disables z-order actions for canvas chart ids (negative drawing ids)", () => {
+  it("disables z-order actions for a single canvas chart (no reorder possible)", () => {
     const contextMenu = new ContextMenu({ testId: "context-menu-drawing-chart" });
     let selectedId: number | null = -123;
     const app = {
@@ -241,6 +241,91 @@ describe("Drawing context menu (main wiring helper)", () => {
     } finally {
       contextMenu.close();
       document.querySelector('[data-testid="context-menu-drawing-chart"]')?.remove();
+    }
+  });
+
+  it("enables z-order actions for canvas charts within their chart stack", () => {
+    const contextMenu = new ContextMenu({ testId: "context-menu-drawing-chart-stack" });
+    let selectedId: number | null = -2;
+    const app = {
+      hitTestDrawingAtClientPoint: vi.fn(() => ({ id: -2 })),
+      getSelectedDrawingId: vi.fn(() => selectedId),
+      // Topmost-first ordering: charts first, then workbook drawings.
+      listDrawingsForSheet: vi.fn(() => [{ id: -1 }, { id: -2 }, { id: -3 }, { id: 1 }]),
+      isSelectedDrawingImage: vi.fn(() => false),
+      selectDrawingById: vi.fn((id: number | null) => {
+        selectedId = id;
+      }),
+      cut: vi.fn(),
+      copy: vi.fn(),
+      deleteDrawingById: vi.fn(),
+      bringSelectedDrawingForward: vi.fn(),
+      sendSelectedDrawingBackward: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    try {
+      tryOpenDrawingContextMenuAtClientPoint({
+        app,
+        contextMenu,
+        clientX: 10,
+        clientY: 20,
+        isEditing: false,
+      });
+
+      const overlay = document.querySelector<HTMLElement>('[data-testid="context-menu-drawing-chart-stack"]');
+      const buttons = Array.from(overlay?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+      const buttonByLabel = (label: string) =>
+        buttons.find((btn) => (btn.querySelector(".context-menu__label")?.textContent ?? "").trim() === label) ?? null;
+
+      expect(buttonByLabel("Bring Forward")?.disabled).toBe(false);
+      expect(buttonByLabel("Send Backward")?.disabled).toBe(false);
+    } finally {
+      contextMenu.close();
+      document.querySelector('[data-testid="context-menu-drawing-chart-stack"]')?.remove();
+    }
+  });
+
+  it("disables Bring Forward for the topmost workbook drawing when canvas charts exist", () => {
+    const contextMenu = new ContextMenu({ testId: "context-menu-drawing-z-order-with-charts" });
+    let selectedId: number | null = 10;
+    const app = {
+      hitTestDrawingAtClientPoint: vi.fn(() => ({ id: 10 })),
+      getSelectedDrawingId: vi.fn(() => selectedId),
+      // Topmost-first ordering: charts first, then workbook drawings. Drawing id=10 is topmost
+      // within the drawings stack, even though it's not index 0 overall.
+      listDrawingsForSheet: vi.fn(() => [{ id: -1 }, { id: -2 }, { id: 10 }, { id: 11 }]),
+      isSelectedDrawingImage: vi.fn(() => false),
+      selectDrawingById: vi.fn((id: number | null) => {
+        selectedId = id;
+      }),
+      cut: vi.fn(),
+      copy: vi.fn(),
+      deleteDrawingById: vi.fn(),
+      bringSelectedDrawingForward: vi.fn(),
+      sendSelectedDrawingBackward: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    try {
+      tryOpenDrawingContextMenuAtClientPoint({
+        app,
+        contextMenu,
+        clientX: 10,
+        clientY: 20,
+        isEditing: false,
+      });
+
+      const overlay = document.querySelector<HTMLElement>('[data-testid="context-menu-drawing-z-order-with-charts"]');
+      const buttons = Array.from(overlay?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+      const buttonByLabel = (label: string) =>
+        buttons.find((btn) => (btn.querySelector(".context-menu__label")?.textContent ?? "").trim() === label) ?? null;
+
+      expect(buttonByLabel("Bring Forward")?.disabled).toBe(true);
+      expect(buttonByLabel("Send Backward")?.disabled).toBe(false);
+    } finally {
+      contextMenu.close();
+      document.querySelector('[data-testid="context-menu-drawing-z-order-with-charts"]')?.remove();
     }
   });
 });

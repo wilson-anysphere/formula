@@ -31,8 +31,11 @@ export function buildDrawingContextMenuItems(params: {
   const clipboardEnabled = enabled && app.isSelectedDrawingImage();
 
   const { canBringForward, canSendBackward } = (() => {
-    // Canvas charts use negative ids (stable hash namespace) and are not currently reorderable.
-    if (!enabled || selectedId == null || selectedId < 0) return { canBringForward: false, canSendBackward: false };
+    // In `?canvasCharts=1` mode, ChartStore charts render as drawing objects with negative ids and
+    // form a separate z-stack above workbook drawings. Arrange operations should therefore be
+    // enabled/disabled based on the selection's position *within its stack* (chart stack vs
+    // workbook drawings stack).
+    if (!enabled || selectedId == null) return { canBringForward: false, canSendBackward: false };
     // `listDrawingsForSheet` returns topmost-first ordering.
     const drawings = app.listDrawingsForSheet();
     if (!Array.isArray(drawings) || drawings.length < 2) {
