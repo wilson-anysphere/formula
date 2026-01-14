@@ -109,3 +109,32 @@ fn bytecode_custom_sheet_dims_expand_3d_whole_column_per_sheet() {
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
 }
+
+#[test]
+fn bytecode_custom_sheet_dims_expand_3d_whole_row_per_sheet() {
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 10, 5)
+        .expect("set Sheet1 dimensions");
+    engine
+        .set_sheet_dimensions("Sheet2", 10, 7)
+        .expect("set Sheet2 dimensions");
+
+    // Row 1 spans different column counts on each sheet.
+    engine.set_cell_value("Sheet1", "E1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "G1", 2.0).unwrap();
+
+    // Put the formula on row 2 to avoid a circular reference (since `1:1` includes row 1).
+    engine
+        .set_cell_formula("Sheet1", "B2", "=SUM(Sheet1:Sheet2!1:1)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formulas to compile to bytecode on custom sheet dims; got: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
+}
