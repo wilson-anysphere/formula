@@ -76,6 +76,31 @@ fn roundtrip_standard_rc4_40bit_encryption() {
 }
 
 #[test]
+fn roundtrip_standard_rc4_40bit_padded_key_encryption() {
+    // Compatibility coverage: some producers treat 40-bit RC4 keys as 16-byte key blobs where the
+    // remaining bytes are zero.
+    let password = "password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    let ole_bytes = encrypt_standard_rc4_ooxml_ole_with_key_bits_padded_40bit_key(
+        plaintext,
+        password,
+        Rc4HashAlgorithm::Sha1,
+        0, // keyBits=0 must be interpreted as 40-bit RC4
+    );
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+
+    let err = decrypt_encrypted_package_ole(&ole_bytes, "wrong-password").expect_err("wrong pw");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+}
+
+#[test]
 fn roundtrip_standard_rc4_keysize_zero_encryption() {
     // MS-OFFCRYPTO specifies that a `keySize` of 0 must be interpreted as 40-bit RC4.
     let password = "password";
@@ -529,6 +554,16 @@ fn rc4_apply(key: &[u8], data: &mut [u8]) {
     }
 }
 
+fn rc4_apply_with_optional_40bit_padding(key: &[u8], pad_40bit_key_to_16: bool, data: &mut [u8]) {
+    if pad_40bit_key_to_16 && key.len() == 5 {
+        let mut padded = [0u8; 16];
+        padded[..5].copy_from_slice(key);
+        rc4_apply(&padded, data);
+    } else {
+        rc4_apply(key, data);
+    }
+}
+
 fn encrypt_standard_rc4_ooxml_ole(
     plaintext: &[u8],
     password: &str,
@@ -542,6 +577,7 @@ fn encrypt_standard_rc4_ooxml_ole(
         128,
         None,
         verifier_trailing_len,
+        false,
     )
 }
 
@@ -551,7 +587,21 @@ fn encrypt_standard_rc4_ooxml_ole_with_key_bits(
     hash_alg: Rc4HashAlgorithm,
     key_bits: u32,
 ) -> Vec<u8> {
-    encrypt_standard_rc4_ooxml_ole_inner(plaintext, password, hash_alg, key_bits, None, 0)
+    encrypt_standard_rc4_ooxml_ole_inner(plaintext, password, hash_alg, key_bits, None, 0, false)
+}
+
+fn encrypt_standard_rc4_ooxml_ole_with_key_bits_padded_40bit_key(
+    plaintext: &[u8],
+    password: &str,
+    hash_alg: Rc4HashAlgorithm,
+    key_bits: u32,
+) -> Vec<u8> {
+    let effective_key_bits = if key_bits == 0 { 40 } else { key_bits };
+    assert_eq!(
+        effective_key_bits, 40,
+        "this helper is only intended for 40-bit RC4"
+    );
+    encrypt_standard_rc4_ooxml_ole_inner(plaintext, password, hash_alg, key_bits, None, 0, true)
 }
 
 fn encrypt_standard_rc4_ooxml_ole_with_overridden_verifier_hash_size(
@@ -567,6 +617,7 @@ fn encrypt_standard_rc4_ooxml_ole_with_overridden_verifier_hash_size(
         128,
         Some(verifier_hash_size_override),
         0,
+        false,
     )
 }
 
@@ -577,6 +628,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     key_bits: u32,
     verifier_hash_size_override: Option<u32>,
     verifier_trailing_len: usize,
+    pad_40bit_key_to_16: bool,
 ) -> Vec<u8> {
     // Deterministic parameters (not intended to be secure).
     let salt: Vec<u8> = (0u8..=0x0F).collect();
@@ -648,9 +700,12 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     // MS-OFFCRYPTO Standard RC4 40-bit regression guard:
     //
     // For Standard/CryptoAPI RC4, the RC4 KSA key is exactly `keyLen = keySize/8` bytes. In
-    // particular, 40-bit RC4 uses a 5-byte key (no zero-padding to 16 bytes).
+    // particular, 40-bit RC4 uses a 5-byte key. Some producers treat this 5-byte key as a 16-byte
+    // key blob where the remaining bytes are zero.
     if hash_alg == Rc4HashAlgorithm::Sha1 && key_bits == 40 {
         let expected_ciphertext = hex_decode("d1fa444913b4839b06eb4851750a07761005f025bf");
+        let expected_padded_ciphertext =
+            hex_decode("7a8bd000713a6e30ba9916476d27b01d36707a6ef8");
 
         let mut ciphertext = b"Hello, RC4 CryptoAPI!".to_vec();
         rc4_apply(&key0, &mut ciphertext);
@@ -659,13 +714,18 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
             "RC4(40-bit keyLen=5, plaintext) vector mismatch"
         );
 
-        // Sanity: zero-padding the key to 16 bytes MUST produce a different ciphertext.
+        // Sanity: zero-padding the key to 16 bytes MUST produce a different ciphertext, and we
+        // also lock down the padded ciphertext vector for compatibility.
         let mut padded = vec![0u8; 16];
         padded[..5].copy_from_slice(&key0);
-        let mut wrong = b"Hello, RC4 CryptoAPI!".to_vec();
-        rc4_apply(&padded, &mut wrong);
+        let mut padded_ciphertext = b"Hello, RC4 CryptoAPI!".to_vec();
+        rc4_apply(&padded, &mut padded_ciphertext);
+        assert_eq!(
+            padded_ciphertext, expected_padded_ciphertext,
+            "RC4(40-bit padded-to-16 key, plaintext) vector mismatch"
+        );
         assert_ne!(
-            wrong, expected_ciphertext,
+            padded_ciphertext, expected_ciphertext,
             "RC4 ciphertext unexpectedly matches when padding 40-bit key to 16 bytes"
         );
     }
@@ -687,7 +747,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
         verifier_buf.extend_from_slice(&verifier_hash);
         verifier_buf.resize(16 + verifier_hash_size as usize, 0);
     }
-    rc4_apply(&key0, &mut verifier_buf);
+    rc4_apply_with_optional_40bit_padding(key0.as_slice(), pad_40bit_key_to_16, &mut verifier_buf);
     let encrypted_verifier = &verifier_buf[..16];
     let encrypted_verifier_hash = &verifier_buf[16..];
 
@@ -742,7 +802,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     let mut block_index: u32 = 0;
     for chunk in ciphertext.chunks_mut(0x200) {
         let key = standard_rc4_derive_key(hash_alg, &spun, key_len, block_index);
-        rc4_apply(&key, chunk);
+        rc4_apply_with_optional_40bit_padding(key.as_slice(), pad_40bit_key_to_16, chunk);
         block_index = block_index.checked_add(1).expect("block counter overflow");
     }
 
@@ -759,12 +819,16 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
         // If we (incorrectly) used a 0x400-byte re-key interval, bytes [0x200..0x3ff] would be
         // encrypted by *continuing* the RC4 stream with block0 key.
         let mut block0_400 = plaintext[..0x400].to_vec();
-        rc4_apply(&k0, &mut block0_400);
+        rc4_apply_with_optional_40bit_padding(k0.as_slice(), pad_40bit_key_to_16, &mut block0_400);
 
         // With the correct 0x200-byte interval, bytes [0x200..0x3ff] must be encrypted with a
         // fresh RC4 state using block1 key.
         let mut expected_block1 = plaintext[0x200..0x400].to_vec();
-        rc4_apply(&k1, &mut expected_block1);
+        rc4_apply_with_optional_40bit_padding(
+            k1.as_slice(),
+            pad_40bit_key_to_16,
+            &mut expected_block1,
+        );
 
         assert_eq!(
             &ciphertext[0x200..0x400],

@@ -73,6 +73,14 @@ enum StandardAesCipherMode {
     Cbc { iv: [u8; 16] },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rc4KeyStyle {
+    /// Use the derived RC4 key bytes as-is (key length = `keySize/8`).
+    Raw,
+    /// For 40-bit RC4 (keyLen=5), use a 16-byte key where the remaining bytes are zero.
+    Padded40Bit,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct StandardEncryptionInfo {
     #[allow(dead_code)]
@@ -323,7 +331,8 @@ pub(crate) fn verify_password_standard(
                 StandardKeyDerivation::Rc4,
             );
             let key0 = deriver.derive_key_for_block(0)?;
-            verify_password_standard_with_key(header, verifier, hash_alg, key0.as_slice())
+            let _ = verify_password_standard_rc4_key_style(header, verifier, hash_alg, key0.as_slice())?;
+            Ok(())
         }
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
             // Standard AES uses CryptoAPI `CryptDeriveKey` semantics (ipad/opad expansion).
@@ -393,6 +402,38 @@ fn verify_password_standard_with_key(
 ) -> Result<(), OfficeCryptoError> {
     let _mode = verify_password_standard_with_key_and_mode(header, verifier, hash_alg, key0)?;
     Ok(())
+}
+
+fn verify_password_standard_rc4_key_style(
+    header: &EncryptionHeader,
+    verifier: &EncryptionVerifier,
+    hash_alg: HashAlgorithm,
+    key0: &[u8],
+) -> Result<Rc4KeyStyle, OfficeCryptoError> {
+    match verify_password_standard_with_key_and_mode(header, verifier, hash_alg, key0) {
+        Ok(_) => Ok(Rc4KeyStyle::Raw),
+        Err(OfficeCryptoError::InvalidPassword) => {
+            // Some real-world CryptoAPI RC4 producers treat 40-bit keys as a 16-byte key blob where
+            // the remaining bytes are zero. Try that as a compatibility fallback.
+            if key0.len() == 5 {
+                let mut padded_key = [0u8; 16];
+                padded_key[..5].copy_from_slice(key0);
+                match verify_password_standard_with_key_and_mode(
+                    header,
+                    verifier,
+                    hash_alg,
+                    padded_key.as_slice(),
+                ) {
+                    Ok(_) => Ok(Rc4KeyStyle::Padded40Bit),
+                    Err(OfficeCryptoError::InvalidPassword) => Err(OfficeCryptoError::InvalidPassword),
+                    Err(e) => Err(e),
+                }
+            } else {
+                Err(OfficeCryptoError::InvalidPassword)
+            }
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn verify_password_standard_with_key_and_mode(
@@ -775,12 +816,8 @@ fn decrypt_standard_encrypted_package_rc4(
         StandardKeyDerivation::Rc4,
     );
     let key0 = deriver.derive_key_for_block(0)?;
-    match verify_password_standard_with_key(&info.header, &info.verifier, hash_alg, key0.as_slice())
-    {
-        Ok(()) => {}
-        Err(OfficeCryptoError::InvalidPassword) => return Err(OfficeCryptoError::InvalidPassword),
-        Err(e) => return Err(e),
-    }
+    let key_style =
+        verify_password_standard_rc4_key_style(&info.header, &info.verifier, hash_alg, key0.as_slice())?;
 
     // Password is valid; decrypt the package. Standard RC4 has no padding; treat trailing bytes
     // (OLE sector slack) as irrelevant.
@@ -801,7 +838,16 @@ fn decrypt_standard_encrypted_package_rc4(
     let mut block_index: u32 = 0;
     for chunk in out.chunks_mut(RC4_ENCRYPTED_PACKAGE_BLOCK_SIZE) {
         let key = deriver.derive_key_for_block(block_index)?;
-        rc4_xor_in_place(&key, chunk)?;
+        match key_style {
+            Rc4KeyStyle::Raw => {
+                rc4_xor_in_place(&key, chunk)?;
+            }
+            Rc4KeyStyle::Padded40Bit => {
+                let mut padded_key = [0u8; 16];
+                padded_key[..5].copy_from_slice(&key);
+                rc4_xor_in_place(padded_key.as_slice(), chunk)?;
+            }
+        }
         block_index = block_index.checked_add(1).ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("RC4 block index overflow".to_string())
         })?;
