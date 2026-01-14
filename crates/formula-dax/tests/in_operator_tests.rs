@@ -71,6 +71,25 @@ fn in_operator_scalar_table_expression_rhs() {
 }
 
 #[test]
+fn in_operator_calculate_filter_rhs_table_expression() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+    let filter = FilterContext::empty();
+    let row_ctx = RowContext::default();
+
+    // IN inside CALCULATE can use a one-column table expression, not only a table constructor.
+    let value = engine
+        .evaluate(
+            &model,
+            "CALCULATE(COUNTROWS(Orders), Orders[CustomerId] IN SUMMARIZE(FILTER(Customers, Customers[Region] = \"East\"), Customers[CustomerId]))",
+            &filter,
+            &row_ctx,
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(3i64));
+}
+
+#[test]
 fn in_operator_table_expression_requires_one_column() {
     let model = build_model();
     let engine = DaxEngine::new();

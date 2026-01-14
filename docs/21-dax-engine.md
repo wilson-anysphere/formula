@@ -494,11 +494,11 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
 5. Column comparisons / membership: `Table[Column] <op> <rhs>` where `<op>` is:
    - `=` (direct value filter)
    - `<>`, `<`, `<=`, `>`, `>=` (implemented by scanning rows to compute the set of allowed values)
-   - `IN` (value membership) with a one-column table constructor, e.g. `Fact[Category] IN { \"A\", \"B\" }`
+   - `IN` (value membership) with a one-column table expression, e.g. `Fact[Category] IN { \"A\", \"B\" }` or `Fact[Category] IN VALUES(Dim[Category])`
 
    Notes:
    - For `=`/`<>`/`<`/`<=`/`>`/`>=`, the RHS is evaluated as a scalar expression.
-   - For `IN`, the RHS must be a one-column table constructor (`{ ... }`).
+   - For `IN`, the RHS must evaluate to a one-column table expression (table constructor or table function).
    - Non-equality comparisons currently build a *value set* by scanning rows under the current filters
      (except the column being filtered).
 
@@ -726,7 +726,7 @@ Supported expression forms:
   - arithmetic: `+ - * /`
   - text concatenation: `&` (single ampersand)
   - comparisons: `= <> < <= > >=`
-  - membership: `expr IN { ... }` (RHS must be a one-column table constructor)
+  - membership: `expr IN tableExpr` (RHS must evaluate to a one-column table; multi-column membership is via `CONTAINSROW`)
   - boolean: `&&` and `||`
 - Parentheses for grouping
 - Variables:

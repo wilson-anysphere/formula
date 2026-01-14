@@ -2945,14 +2945,76 @@ impl DaxEngine {
 
                     match op {
                         BinaryOp::In => {
-                            let values = engine.eval_one_column_table_literal(
-                                model,
-                                right,
-                                eval_filter,
-                                row_ctx,
-                                env,
-                            )?;
-                            column_filters.push((key, values.into_iter().collect()));
+                            let table_result =
+                                engine.eval_table(model, right, eval_filter, row_ctx, env)?;
+                            let values: HashSet<Value> = match table_result {
+                                TableResult::Physical {
+                                    table,
+                                    rows,
+                                    visible_cols,
+                                } => {
+                                    let table_ref = model
+                                        .table(&table)
+                                        .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                                    let (col_count, col_idx) = match visible_cols.as_deref() {
+                                        Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                                        None => (table_ref.columns().len(), 0),
+                                    };
+                                    if col_count != 1 {
+                                        return Err(DaxError::Eval(
+                                            "IN currently only supports one-column tables".into(),
+                                        ));
+                                    }
+                                    let mut out = HashSet::new();
+                                    for row in rows {
+                                        let value = table_ref
+                                            .value_by_idx(row, col_idx)
+                                            .unwrap_or(Value::Blank);
+                                        out.insert(value);
+                                    }
+                                    out
+                                }
+                                TableResult::PhysicalAll {
+                                    table,
+                                    row_count,
+                                    visible_cols,
+                                } => {
+                                    let table_ref = model
+                                        .table(&table)
+                                        .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                                    let (col_count, col_idx) = match visible_cols.as_deref() {
+                                        Some(cols) => (cols.len(), cols.get(0).copied().unwrap_or(0)),
+                                        None => (table_ref.columns().len(), 0),
+                                    };
+                                    if col_count != 1 {
+                                        return Err(DaxError::Eval(
+                                            "IN currently only supports one-column tables".into(),
+                                        ));
+                                    }
+                                    let mut out = HashSet::new();
+                                    for row in 0..row_count {
+                                        let value = table_ref
+                                            .value_by_idx(row, col_idx)
+                                            .unwrap_or(Value::Blank);
+                                        out.insert(value);
+                                    }
+                                    out
+                                }
+                                TableResult::Virtual { columns, rows } => {
+                                    if columns.len() != 1 {
+                                        return Err(DaxError::Eval(
+                                            "IN currently only supports one-column tables".into(),
+                                        ));
+                                    }
+                                    rows.into_iter()
+                                        .map(|row_values| {
+                                            row_values.get(0).cloned().unwrap_or(Value::Blank)
+                                        })
+                                        .collect()
+                                }
+                            };
+
+                            column_filters.push((key, values));
                             Ok(())
                         }
                         BinaryOp::Equals => {
