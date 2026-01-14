@@ -237,7 +237,7 @@ function cellHasValue(cell: Cell | null): boolean {
 }
 
 function cellHasFormula(cell: Cell | null): boolean {
-  return Boolean(cell?.formula && cell.formula.trim().length > 0);
+  return normalizeFormulaInput(cell?.formula) !== null;
 }
 
 function cellHasEnc(cell: Cell | null): boolean {
@@ -450,12 +450,13 @@ function initialDraftForCellConflict(
   seedSource: "base" | "ours" | "theirs"
 ): ManualCellDraft {
   const hasEnc = cellHasEnc(conflict.base) || cellHasEnc(conflict.ours) || cellHasEnc(conflict.theirs);
+  const hasFormula = cellHasFormula(seed);
 
   return {
     deleteCell: seed === null,
     encSource: hasEnc && cellHasEnc(seed) ? seedSource : "custom",
-    valueText: seed && seed.formula ? "" : valueToEditorText(seed?.value),
-    formulaText: seed && seed.formula ? normalizeFormulaInput(seed.formula) ?? seed.formula : "",
+    valueText: hasFormula ? "" : valueToEditorText(seed?.value),
+    formulaText: hasFormula ? normalizeFormulaInput(seed?.formula) ?? "" : "",
     formatText: seed?.format ? JSON.stringify(seed.format, null, 2) : "",
     formatError: null,
   };
