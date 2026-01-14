@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+import { extractYamlRunSteps, stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
@@ -15,17 +15,18 @@ async function readWorkflow() {
 
 test("release workflow buckets Linux AppImage tarballs as linux (includes *.AppImage.tgz)", async () => {
   const text = await readWorkflow();
-  const lines = text.split(/\r?\n/);
+  const runSteps = extractYamlRunSteps(text);
 
   // The `bucket_for()` helper groups assets for a step summary. Ensure AppImage tarballs are treated
   // as Linux (not mis-grouped as macOS tarballs).
-  const idx = lines.findIndex((line) => line.includes('elif [[ "$base" == *.deb'));
-  assert.ok(
-    idx >= 0,
-    `Expected to find linux bucket_for() branch in ${path.relative(repoRoot, workflowPath)}`,
-  );
+  const step = runSteps.find((s) => s.script.includes('elif [[ "$base" == *.deb'));
+  assert.ok(step, `Expected ${path.relative(repoRoot, workflowPath)} to define bucket_for() linux branch in a run step.`);
 
-  const snippet = lines.slice(idx, idx + 6).join("\n");
+  const scriptLines = step.script.split(/\r?\n/);
+  const idx = scriptLines.findIndex((line) => line.includes('elif [[ "$base" == *.deb'));
+  assert.ok(idx >= 0);
+
+  const snippet = scriptLines.slice(idx, idx + 6).join("\n");
   assert.match(
     snippet,
     /\$base\" == \*\.AppImage\.tgz\b/,
