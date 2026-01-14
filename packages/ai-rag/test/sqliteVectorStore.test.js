@@ -827,7 +827,9 @@ test(
         "ch-old",
         5,
         "hello",
-        JSON.stringify({ metadataHash: "mh-old", extra: "X" }),
+        // Include a conflicting standard key to ensure the upgrade path prefers
+        // the existing structured columns when schema_version=2.
+        JSON.stringify({ sheetName: "WRONG", metadataHash: "mh-old", extra: "X" }),
       ]);
       insert.free();
 
@@ -842,6 +844,7 @@ test(
       assert.ok(rec);
       assert.equal(rec.metadata.contentHash, "ch-old");
       assert.equal(rec.metadata.metadataHash, "mh-old");
+      assert.equal(rec.metadata.sheetName, "Sheet1");
       assert.equal(rec.metadata.extra, "X");
 
       const stmt = store._db.prepare("SELECT metadata_hash, metadata_json FROM vectors WHERE id = ? LIMIT 1;");

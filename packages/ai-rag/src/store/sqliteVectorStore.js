@@ -526,7 +526,11 @@ export class SqliteVectorStore {
     if (altered) this._dirty = true;
   }
 
-  _migrateVectorsToV2() {
+  /**
+   * @param {{ preferExistingColumns?: boolean }} [opts]
+   */
+  _migrateVectorsToV2(opts) {
+    const preferExistingColumns = Boolean(opts?.preferExistingColumns);
     this._ensureVectorsColumnsV2();
 
     const select = this._db.prepare(`
@@ -589,47 +593,42 @@ export class SqliteVectorStore {
 
         const rect = meta?.rect ?? null;
 
+        // When migrating v1 DBs, `metadata_json` is the only source of truth. For
+        // repairing schema_version=2 DBs that are merely missing newer columns
+        // (e.g. `metadata_hash`), prefer existing structured columns so stale
+        // metadata_json (if present) does not overwrite newer column values.
+        const stringFrom = (col, metaVal) => {
+          if (preferExistingColumns) {
+            return typeof col === "string" ? col : typeof metaVal === "string" ? metaVal : null;
+          }
+          return typeof metaVal === "string" ? metaVal : typeof col === "string" ? col : null;
+        };
+        const numberFrom = (col, metaVal) => {
+          if (preferExistingColumns) {
+            return Number.isFinite(col) ? col : Number.isFinite(metaVal) ? metaVal : null;
+          }
+          return Number.isFinite(metaVal) ? metaVal : Number.isFinite(col) ? col : null;
+        };
+
         const workbookId =
           typeof workbookIdCol === "string"
             ? workbookIdCol
             : typeof meta.workbookId === "string"
               ? meta.workbookId
               : null;
-        const sheetName =
-          typeof meta.sheetName === "string"
-            ? meta.sheetName
-            : typeof sheetNameCol === "string"
-              ? sheetNameCol
-              : null;
-        const kind =
-          typeof meta.kind === "string" ? meta.kind : typeof kindCol === "string" ? kindCol : null;
-        const title =
-          typeof meta.title === "string"
-            ? meta.title
-            : typeof titleCol === "string"
-              ? titleCol
-              : null;
+        const sheetName = stringFrom(sheetNameCol, meta.sheetName);
+        const kind = stringFrom(kindCol, meta.kind);
+        const title = stringFrom(titleCol, meta.title);
 
-        const r0 = Number.isFinite(rect?.r0) ? rect.r0 : Number.isFinite(r0Col) ? r0Col : null;
-        const c0 = Number.isFinite(rect?.c0) ? rect.c0 : Number.isFinite(c0Col) ? c0Col : null;
-        const r1 = Number.isFinite(rect?.r1) ? rect.r1 : Number.isFinite(r1Col) ? r1Col : null;
-        const c1 = Number.isFinite(rect?.c1) ? rect.c1 : Number.isFinite(c1Col) ? c1Col : null;
+        const r0 = numberFrom(r0Col, rect?.r0);
+        const c0 = numberFrom(c0Col, rect?.c0);
+        const r1 = numberFrom(r1Col, rect?.r1);
+        const c1 = numberFrom(c1Col, rect?.c1);
 
-        const contentHash =
-          typeof meta.contentHash === "string"
-            ? meta.contentHash
-            : typeof contentHashCol === "string"
-              ? contentHashCol
-              : null;
-        const metadataHash =
-          typeof meta.metadataHash === "string"
-            ? meta.metadataHash
-            : typeof metadataHashCol === "string"
-              ? metadataHashCol
-              : null;
-        const tokenCount =
-          Number.isFinite(meta.tokenCount) ? meta.tokenCount : Number.isFinite(tokenCountCol) ? tokenCountCol : null;
-        const text = typeof meta.text === "string" ? meta.text : typeof textCol === "string" ? textCol : null;
+        const contentHash = stringFrom(contentHashCol, meta.contentHash);
+        const metadataHash = stringFrom(metadataHashCol, meta.metadataHash);
+        const tokenCount = numberFrom(tokenCountCol, meta.tokenCount);
+        const text = stringFrom(textCol, meta.text);
 
         // Rewrite metadata_json to include only non-standard keys.
         /** @type {any} */
@@ -693,7 +692,7 @@ export class SqliteVectorStore {
     this._db.run("BEGIN;");
     try {
       // v1 -> v2: add structured metadata columns and shrink metadata_json.
-      this._migrateVectorsToV2();
+      this._migrateVectorsToV2({ preferExistingColumns: Number.isFinite(current) && current >= SCHEMA_VERSION });
 
       this._setMetaValue("schema_version", String(SCHEMA_VERSION));
       this._db.run("COMMIT;");
