@@ -150,6 +150,84 @@ describe("OrganizeSheetsDialog", () => {
     expect(hide1After!.disabled).toBe(false);
   });
 
+  it("prevents deleting the last visible sheet (even if hidden sheets remain)", () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+    ]);
+
+    let activeSheetId = "s1";
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const hide2 = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-hide-s2"]');
+    expect(hide2).toBeInstanceOf(HTMLButtonElement);
+    act(() => {
+      hide2!.click();
+    });
+    expect(store.getById("s2")?.visibility).toBe("hidden");
+
+    const deleteVisible = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-delete-s1"]');
+    expect(deleteVisible).toBeInstanceOf(HTMLButtonElement);
+    expect(deleteVisible!.disabled).toBe(true);
+
+    const deleteHidden = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-delete-s2"]');
+    expect(deleteHidden).toBeInstanceOf(HTMLButtonElement);
+    expect(deleteHidden!.disabled).toBe(false);
+  });
+
+  it("reorders sheets via move up/down buttons", () => {
+    const doc = new DocumentController();
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+      { id: "s3", name: "Sheet3", visibility: "visible" },
+    ]);
+
+    let activeSheetId = "s1";
+
+    act(() => {
+      openOrganizeSheetsDialog({
+        store,
+        getActiveSheetId: () => activeSheetId,
+        activateSheet: (next) => {
+          activeSheetId = next;
+        },
+        renameSheetById: () => {},
+        getDocument: () => doc,
+        isEditing: () => false,
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-testid="organize-sheets-dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLDialogElement);
+
+    const moveDown = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-move-down-s1"]');
+    expect(moveDown).toBeInstanceOf(HTMLButtonElement);
+    act(() => {
+      moveDown!.click();
+    });
+
+    expect(store.listAll().map((s) => s.id)).toEqual(["s2", "s1", "s3"]);
+  });
+
   it("deletes the active sheet and activates a fallback", async () => {
     const doc = new DocumentController();
     const store = new WorkbookSheetStore([

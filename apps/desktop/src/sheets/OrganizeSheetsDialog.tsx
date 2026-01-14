@@ -194,7 +194,15 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
       const deletedName = sheet.name;
       // Use the pre-delete sheet ordering (by name) so 3D refs like `Sheet1:Sheet3!A1`
       // can shift boundaries correctly when an endpoint is deleted (Excel-like).
-      const sheetOrder = store.listAll().map((s) => s.name);
+      const allSheets = store.listAll();
+      const sheetOrder = allSheets.map((s) => s.name);
+      // Mirror Excel: prevent deleting the last visible sheet (even if hidden sheets remain).
+      const visibleCount = allSheets.filter((s) => s.visibility === "visible").length;
+      const sheetMeta = allSheets.find((s) => s.id === sheet.id) ?? sheet;
+      if (sheetMeta.visibility === "visible" && visibleCount <= 1) {
+        reportError(new Error("Cannot delete the last visible sheet"));
+        return;
+      }
 
       const currentActive = host.getActiveSheetId();
       const wasActive = sheet.id === currentActive;
@@ -254,7 +262,8 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
         {sheets.map((sheet, index) => {
           const isActive = sheet.id === activeSheetId;
           const badge = visibilityBadgeLabel(sheet.visibility);
-          const canDelete = sheets.length > 1;
+          // Mirror Excel: you cannot delete the last *visible* sheet (even if hidden sheets remain).
+          const canDelete = sheets.length > 1 && (sheet.visibility !== "visible" || visibleCount > 1);
           const canHide = sheet.visibility === "visible" && visibleCount > 1;
           const canUnhide = sheet.visibility !== "visible";
           const moveUpDisabled = index <= 0;
@@ -275,8 +284,8 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                   <input
                     type="text"
                     value={renameDraft}
-                    onChange={(e) => {
-                      const next = e.target.value;
+                    onInput={(e) => {
+                      const next = (e.target as HTMLInputElement).value;
                       renameDraftRef.current = next;
                       setRenameDraft(next);
                     }}
