@@ -4,6 +4,35 @@ const DEFAULT_MAX_COLUMNS_FOR_SCHEMA = 20;
 const DEFAULT_MAX_COLUMNS_FOR_ROWS = 20;
 const MAX_FORMULA_SAMPLES = 12;
 
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseImageValue(value) {
+  if (!isPlainObject(value)) return null;
+  const obj = /** @type {any} */ (value);
+
+  let payload = null;
+  // formula-model envelope: `{ type: "image", value: {...} }`.
+  if (typeof obj.type === "string") {
+    if (obj.type.toLowerCase() !== "image") return null;
+    payload = isPlainObject(obj.value) ? obj.value : null;
+  } else {
+    // Direct payload shape.
+    payload = obj;
+  }
+
+  if (!payload) return null;
+
+  const imageId = payload.imageId ?? payload.image_id ?? payload.id;
+  if (typeof imageId !== "string" || imageId.trim() === "") return null;
+
+  const altTextRaw = payload.altText ?? payload.alt_text ?? payload.alt;
+  const altText = typeof altTextRaw === "string" && altTextRaw.trim() !== "" ? altTextRaw : null;
+
+  return { imageId, altText };
+}
+
 function formatScalar(value) {
   if (value == null) return "";
   if (value instanceof Date) {
@@ -29,6 +58,8 @@ function formatScalar(value) {
     // Prefer a stable, compact string representation over "[object Object]".
     const text = /** @type {any} */ (value)?.text;
     if (typeof text === "string") return formatScalar(text);
+    const image = parseImageValue(value);
+    if (image) return formatScalar(image.altText ?? "[Image]");
     try {
       const json = JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? String(v) : v));
       if (typeof json === "string") {

@@ -142,6 +142,28 @@ test("chunkToText prefers object.text when present", () => {
   assert.doesNotMatch(text, /runs/);
 });
 
+test("chunkToText formats in-cell image values as alt text / placeholders", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
+    cells: [
+      [{ v: "Photo" }, { v: "Other" }],
+      [
+        { v: { type: "image", value: { imageId: "img_1", altText: "Kitten" } } },
+        { v: { type: "image", value: { imageId: "img_2" } } },
+      ],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Photo=Kitten/);
+  assert.match(text, /Other=\[Image\]/);
+  // Avoid leaking internal image payload structure into RAG text.
+  assert.doesNotMatch(text, /imageId|img_1|img_2|\"type\"/);
+});
+
 test("chunkToText detects header rows below a title row and preserves the title as pre-header context", () => {
   const chunk = {
     kind: "dataRegion",
