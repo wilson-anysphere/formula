@@ -1106,4 +1106,68 @@ describe("AIChatPanel attachments UI", () => {
       root.unmount();
     });
   });
+
+  it("prefers attaching the currently selected chart when available (no picker)", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const getChartAttachment = vi.fn(() => ({ type: "chart" as const, reference: "chart_selected" }));
+    const getChartOptions = vi.fn(() => [
+      { id: "chart_selected", label: "Selected chart" },
+      { id: "chart_other", label: "Other chart" },
+    ]);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getChartAttachment,
+          getChartOptions,
+        }),
+      );
+    });
+
+    const attachChartBtn = container.querySelector('[data-testid="ai-chat-attach-chart"]') as HTMLButtonElement | null;
+    expect(attachChartBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      attachChartBtn!.click();
+    });
+
+    // Should attach immediately without opening a quick pick dialog.
+    expect(container.textContent).toContain("chart: chart_selected");
+    expect(document.body.querySelector('[data-testid="quick-pick"]')).toBeNull();
+
+    const input = container.querySelector("input") as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Send") as HTMLButtonElement | undefined;
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      setNativeInputValue(input!, "Hello");
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+      input!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      sendButton!.click();
+      await waitFor(() => sendMessage.mock.calls.length === 1);
+    });
+
+    const callArgs = sendMessage.mock.calls[0]?.[0] as any;
+    expect(callArgs.attachments).toEqual([{ type: "chart", reference: "chart_selected" }]);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });

@@ -120,6 +120,12 @@ export interface AIChatPanelContainerProps {
    * Optional chart metadata provider for attaching chart ids to chat messages.
    */
   getCharts?: () => Array<{ id: string; sheetId: string; title?: string; chartType?: { kind: string; name?: string } }>;
+  /**
+   * Optional selected chart provider. When present, the chat UI can offer a one-click
+   * "attach chart" action that uses the currently-selected chart, falling back to a
+   * chart picker when nothing is selected.
+   */
+  getSelectedChartId?: () => string | null;
   sheetNameResolver?: SheetNameResolver | null;
   workbookId?: string;
   createChart?: SpreadsheetApi["createChart"];
@@ -375,6 +381,14 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     return out;
   }, [props.getCharts, sheetNameResolver]);
 
+  const getChartAttachment = useCallback(() => {
+    const id = props.getSelectedChartId?.();
+    if (typeof id !== "string") return null;
+    const trimmed = id.trim();
+    if (!trimmed) return null;
+    return { type: "chart", reference: trimmed } as const;
+  }, [props.getSelectedChartId]);
+
   const [agentGoal, setAgentGoal] = useState("");
   const [agentConstraints, setAgentConstraints] = useState("");
   const [agentContinueOnDenied, setAgentContinueOnDenied] = useState(false);
@@ -496,6 +510,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
             getFormulaAttachment={getFormulaAttachment}
             getTableOptions={getTableOptions}
             getChartOptions={props.getCharts ? getChartOptions : undefined}
+            getChartAttachment={props.getSelectedChartId ? getChartAttachment : undefined}
           />
         ) : (
           <div className="ai-chat-agent">

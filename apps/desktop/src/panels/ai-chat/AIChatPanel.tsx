@@ -239,31 +239,35 @@ export function AIChatPanel(props: AIChatPanelProps) {
 
   async function attachChart() {
     if (sending) return;
-    const charts = safeInvoke(props.getChartOptions) ?? [];
-    if (charts.length) {
-      const picked = await showQuickPick(
-        charts.map((c) => ({
-          label: c.label,
-          value: c.id,
-          description: c.description,
-          detail: c.detail,
-        })),
-        { placeHolder: t("chat.attachChart.placeholder") },
-      );
-      if (!picked) return;
-      addAttachment({ type: "chart", reference: picked });
+    // Prefer attaching an already-selected chart when the host app can provide one.
+    // This matches "attach selected chart" UX, while still allowing users to pick
+    // from all known charts when nothing is selected.
+    const selected = safeInvoke(props.getChartAttachment);
+    if (selected) {
+      addAttachment(selected);
       return;
     }
 
-    const attachment = safeInvoke(props.getChartAttachment);
-    if (!attachment) {
+    const charts = safeInvoke(props.getChartOptions) ?? [];
+    if (!charts.length) {
       const reason = props.getChartOptions
         ? t("chat.attachChart.disabled.noCharts")
         : t("chat.attachChart.disabled.noSelection");
       toastBestEffort(reason);
       return;
     }
-    addAttachment(attachment);
+
+    const picked = await showQuickPick(
+      charts.map((c) => ({
+        label: c.label,
+        value: c.id,
+        description: c.description,
+        detail: c.detail,
+      })),
+      { placeHolder: t("chat.attachChart.placeholder") },
+    );
+    if (!picked) return;
+    addAttachment({ type: "chart", reference: picked });
   }
 
   async function send() {
