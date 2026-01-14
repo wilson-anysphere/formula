@@ -267,6 +267,21 @@ test("fails when .xlsx association is missing a mimeType entry", () => {
   assert.match(proc.stderr, /xlsx/i);
 });
 
+test("fails when Parquet association uses an unexpected mimeType", () => {
+  const config = baseConfig({
+    fileAssociations: [
+      { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      { ext: ["csv"], mimeType: "text/csv" },
+      { ext: ["parquet"], mimeType: "application/x-parquet" },
+    ],
+  });
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /mimeType mismatch/i);
+  assert.match(proc.stderr, /parquet/i);
+  assert.match(proc.stderr, /application\/vnd\.apache\.parquet/i);
+});
+
 test("fails when macOS Info.plist is missing CFBundleDocumentTypes", () => {
   const config = baseConfig();
   const plist = basePlistWithFormulaScheme().replace(/<key>CFBundleDocumentTypes[\s\S]*$/i, "</dict>\n</plist>\n");

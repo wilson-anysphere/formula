@@ -261,6 +261,30 @@ function collectFileAssociationExtensions(config) {
   return Array.from(out).sort();
 }
 
+/**
+ * @param {any[]} fileAssociations
+ * @returns {Map<string, Set<string>>}
+ */
+function collectMimeTypesByExtension(fileAssociations) {
+  /** @type {Map<string, Set<string>>} */
+  const out = new Map();
+  for (const assoc of fileAssociations) {
+    const rawExt = /** @type {any} */ (assoc)?.ext;
+    const exts = Array.isArray(rawExt) ? rawExt : typeof rawExt === "string" ? [rawExt] : [];
+    const rawMime = /** @type {any} */ (assoc)?.mimeType;
+    const mime = typeof rawMime === "string" ? rawMime.trim().toLowerCase() : "";
+    if (!mime) continue;
+    for (const e of exts) {
+      const normalized = String(e).trim().toLowerCase().replace(/^\./, "");
+      if (!normalized) continue;
+      const existing = out.get(normalized) ?? new Set();
+      existing.add(mime);
+      out.set(normalized, existing);
+    }
+  }
+  return out;
+}
+
 function main() {
   /** @type {any} */
   let config;
@@ -364,6 +388,32 @@ function main() {
         }),
         "Fix: add mimeType to each file association entry (Linux-only field).",
       ]);
+    }
+
+    // Ensure the most important extensions are wired to stable MIME types so OS integration works.
+    // If these drift, the `.desktop` (Linux) and file manager resolution may no longer line up.
+    const expectedMimeByExt = {
+      xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      csv: "text/csv",
+      parquet: "application/vnd.apache.parquet",
+    };
+    const mimeByExt = collectMimeTypesByExtension(fileAssociations);
+    for (const [ext, expectedMime] of Object.entries(expectedMimeByExt)) {
+      const observed = mimeByExt.get(ext);
+      if (!observed || observed.size === 0) continue;
+      if (!observed.has(expectedMime)) {
+        errBlock("File association mimeType mismatch (tauri.conf.json)", [
+          `Extension .${ext} must use mimeType: ${expectedMime}`,
+          `Found mimeType(s): ${Array.from(observed).join(", ")}`,
+          "Fix: update bundle.fileAssociations so the configured MIME type matches OS conventions.",
+        ]);
+      } else if (observed.size > 1) {
+        errBlock("File association mimeType is ambiguous (tauri.conf.json)", [
+          `Extension .${ext} should map to a single mimeType (${expectedMime}).`,
+          `Found multiple mimeType values: ${Array.from(observed).join(", ")}`,
+          "Fix: remove duplicate/overlapping file association entries so each extension has one MIME type.",
+        ]);
+      }
     }
   }
 
