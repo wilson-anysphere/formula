@@ -197,10 +197,10 @@ require_env_pin_usage() {
     validated_any=1
 
     if [[ "$content" != *"node-version: \${{ env.NODE_VERSION }}"* ]]; then
-      echo "Node version pin mismatch in ${file}:"
-      echo "  Expected: node-version: \${{ env.NODE_VERSION }}"
-      echo "  Found:    ${match}"
-      echo
+      echo "Node version pin mismatch in ${file}:" >&2
+      echo "  Expected: node-version: \${{ env.NODE_VERSION }}" >&2
+      echo "  Found:    ${match}" >&2
+      echo >&2
       fail=1
     fi
   done <<<"$matches"
