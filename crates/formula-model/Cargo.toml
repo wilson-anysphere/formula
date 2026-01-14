@@ -15,7 +15,7 @@ formula-format = { path = "../formula-format" }
 thiserror = "2.0"
 chrono = { version = "0.4", features = ["serde"] }
 ordered-float = "4"
-uuid = { version = "1", features = ["serde"] }
+uuid = { version = "1", features = ["serde", "v5"] }
 unicode-normalization = "0.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

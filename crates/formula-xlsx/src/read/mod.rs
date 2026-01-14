@@ -8,6 +8,7 @@ use std::path::Path;
 
 use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::drawings::{DrawingObject, ImageData, ImageId};
+use formula_model::pivots::{PivotChartId, PivotChartModel, PivotTableId};
 use formula_model::rich_text::RichText;
 use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, Comment, CommentKind, DataValidation,
@@ -65,6 +66,29 @@ fn is_threaded_comment_rel_type(type_uri: &str) -> bool {
     // Excel has emitted a few variants over time; accept the canonical URI and tolerate
     // other future variants that contain "threadedComment" (mirrors the importer).
     type_uri == REL_TYPE_THREADED_COMMENTS || type_uri.contains("threadedComment")
+}
+
+// Namespace used for deterministic `Uuid::new_v5` IDs when importing pivot-related objects from an
+// XLSX package.
+//
+// Pivot tables / charts do not have stable IDs in OOXML, so we derive them from stable part names.
+const PIVOT_BINDING_NAMESPACE: PivotTableId =
+    PivotTableId::from_u128(0xaa5f186245314193be90229689c7d364);
+
+fn pivot_table_id_from_part_name(part_name: &str) -> PivotTableId {
+    let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
+    let mut key = String::with_capacity("pivotTable:".len() + part_name.len());
+    key.push_str("pivotTable:");
+    key.push_str(part_name);
+    PivotTableId::new_v5(&PIVOT_BINDING_NAMESPACE, key.as_bytes())
+}
+
+fn pivot_chart_id_from_part_name(part_name: &str) -> PivotChartId {
+    let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
+    let mut key = String::with_capacity("pivotChart:".len() + part_name.len());
+    key.push_str("pivotChart:");
+    key.push_str(part_name);
+    PivotChartId::new_v5(&PIVOT_BINDING_NAMESPACE, key.as_bytes())
 }
 
 #[derive(Debug, Error)]
@@ -1245,6 +1269,41 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     // Best-effort entity/record rich value decoding. This only affects the in-memory model; the
     // underlying parts are preserved verbatim for round-trip.
     rich_values::apply_rich_values_to_workbook(&mut workbook, &rich_value_cells, &parts);
+
+    // Best-effort pivot chart binding import. Pivot charts are stored as regular chart parts with a
+    // `<c:pivotSource>` element binding them to a pivot table part.
+    //
+    // Missing/invalid chart parts should not prevent the workbook from loading, so this is
+    // intentionally tolerant.
+    let package = crate::XlsxPackage::from_parts_map(parts);
+    if let Ok(chart_parts) = package.pivot_chart_parts() {
+        workbook.pivot_charts = chart_parts
+            .into_iter()
+            .filter_map(|chart_part| {
+                let pivot_source_part = chart_part.pivot_source_part?;
+                let pivot_source_part = pivot_source_part
+                    .strip_prefix('/')
+                    .unwrap_or(pivot_source_part.as_str())
+                    .to_string();
+                let chart_part_name = chart_part
+                    .part_name
+                    .strip_prefix('/')
+                    .unwrap_or(chart_part.part_name.as_str())
+                    .to_string();
+
+                Some(PivotChartModel {
+                    id: pivot_chart_id_from_part_name(&chart_part_name),
+                    name: chart_part
+                        .pivot_source_name
+                        .unwrap_or_else(|| chart_part_name.clone()),
+                    pivot_table_id: pivot_table_id_from_part_name(&pivot_source_part),
+                    sheet_id: None,
+                    chart_part: Some(chart_part_name),
+                })
+            })
+            .collect();
+    }
+    let parts = package.into_parts_map();
 
     let print_settings_snapshot = workbook.print_settings.clone();
 

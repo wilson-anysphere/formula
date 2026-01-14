@@ -30,6 +30,9 @@ pub struct PivotChartModel {
     pub id: PivotChartId,
     pub name: String,
     pub pivot_table_id: PivotTableId,
+    /// Optional original chart part name (e.g. `xl/charts/chart1.xml`) for round-trip fidelity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chart_part: Option<String>,
     /// Optional placement hint for sheet-hosted pivot charts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sheet_id: Option<WorksheetId>,
@@ -54,4 +57,3 @@ pub struct TimelineModel {
     pub connected_pivots: Vec<PivotTableId>,
     pub sheet_id: WorksheetId,
 }
-

@@ -159,6 +159,7 @@ fn duplicate_sheet_duplicates_pivot_tables_and_rewrites_sources() {
         id: uuid::Uuid::from_u128(21),
         name: "PivotChart1".to_string(),
         pivot_table_id: pivot1_id,
+        chart_part: None,
         sheet_id: Some(sheet1),
     });
 
@@ -341,6 +342,7 @@ fn delete_sheet_removes_pivots_and_dependent_objects() {
         id: uuid::Uuid::from_u128(20),
         name: "Chart1".to_string(),
         pivot_table_id: report_pivot_id,
+        chart_part: None,
         sheet_id: Some(report),
     });
 

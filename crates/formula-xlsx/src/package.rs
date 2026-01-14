@@ -822,6 +822,19 @@ impl XlsxPackage {
         Self::from_bytes(bytes.as_ref())
     }
 
+    /// Construct an [`XlsxPackage`] from an already-inflated part map.
+    ///
+    /// This is crate-private and is primarily used by higher-level readers that already have all
+    /// parts in memory (e.g. `load_from_bytes`) but want to reuse `XlsxPackage` helpers like pivot
+    /// chart discovery without re-reading the ZIP container.
+    pub(crate) fn from_parts_map(parts: BTreeMap<String, Vec<u8>>) -> Self {
+        Self { parts }
+    }
+
+    pub(crate) fn into_parts_map(self) -> BTreeMap<String, Vec<u8>> {
+        self.parts
+    }
+
     pub fn part(&self, name: &str) -> Option<&[u8]> {
         if let Some(bytes) = self.parts.get(name) {
             return Some(bytes.as_slice());
