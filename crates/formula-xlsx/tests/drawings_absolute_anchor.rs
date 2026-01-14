@@ -63,6 +63,7 @@ fn parse_absolute_anchor_drawing_part() {
             ext: EmuSize::new(789, 1011),
         }
     );
+    assert_eq!(drawing.objects[0].size, Some(EmuSize::new(789, 1011)));
 }
 
 #[test]
@@ -276,6 +277,7 @@ fn parse_absolute_anchor_chart_drawing_part_from_archive() {
             ext: EmuSize::new(789, 1011),
         }
     );
+    assert_eq!(drawing.objects[0].size, Some(EmuSize::new(789, 1011)));
     assert!(matches!(
         &drawing.objects[0].kind,
         DrawingObjectKind::ChartPlaceholder { rel_id, .. } if rel_id == "rId1"

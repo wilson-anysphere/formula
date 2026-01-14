@@ -280,8 +280,8 @@ impl DrawingPart {
                                 preserved.insert("xlsx.embed_rel_id".to_string(), embed.clone());
                                 preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
 
-                                let size =
-                                    extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
+                                let size = size_from_anchor(anchor)
+                                    .or_else(|| extract_size_from_transform(&pic));
 
                                 objects.push(DrawingObject {
                                     id,
@@ -296,8 +296,8 @@ impl DrawingPart {
                                 // Best-effort: preserve the entire anchor subtree so we can
                                 // round-trip the original XML even when the image relationship
                                 // is missing/invalid.
-                                let size =
-                                    extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
+                                let size = size_from_anchor(anchor)
+                                    .or_else(|| extract_size_from_transform(&pic));
                                 objects.push(DrawingObject {
                                     id,
                                     kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
@@ -310,7 +310,8 @@ impl DrawingPart {
                         }
                     }
                     Err(_) => {
-                        let size = extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
+                        let size =
+                            size_from_anchor(anchor).or_else(|| extract_size_from_transform(&pic));
                         objects.push(DrawingObject {
                             id: DrawingObjectId((z + 1) as u32),
                             kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
@@ -331,7 +332,7 @@ impl DrawingPart {
             .into_iter()
             .find(|n| is_sp_node(*n))
             {
-                let size = extract_size_from_transform(&sp).or_else(|| size_from_anchor(anchor));
+                let size = size_from_anchor(anchor).or_else(|| extract_size_from_transform(&sp));
                 match parse_named_node(&sp, drawing_xml, "cNvPr") {
                     Ok((id, sp_xml)) => objects.push(DrawingObject {
                         id,
@@ -360,7 +361,8 @@ impl DrawingPart {
             .into_iter()
             .find(|n| is_graphic_frame_node(*n))
             {
-                let size = extract_size_from_transform(&frame).or_else(|| size_from_anchor(anchor));
+                let size =
+                    size_from_anchor(anchor).or_else(|| extract_size_from_transform(&frame));
                 match parse_named_node(&frame, drawing_xml, "cNvPr") {
                     Ok((id, frame_xml)) => {
                         // `xdr:graphicFrame` is used for multiple object types (charts, SmartArt diagrams,
@@ -436,7 +438,8 @@ impl DrawingPart {
             }
 
             // Unknown anchor type: preserve the entire anchor subtree.
-            let size = size_from_anchor(anchor);
+            let size =
+                size_from_anchor(anchor).or_else(|| extract_size_from_transform(&anchor_node));
             objects.push(DrawingObject {
                 id: DrawingObjectId((z + 1) as u32),
                 kind: DrawingObjectKind::Unknown {
@@ -512,7 +515,8 @@ impl DrawingPart {
                 // malformed). In those cases, preserve the full anchor subtree as an unknown
                 // drawing object, but keep the parsed DrawingML id and any size information we can
                 // extract.
-                let size = extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
+                let size =
+                    size_from_anchor(anchor).or_else(|| extract_size_from_transform(&pic));
 
                 match parse_pic(&pic, drawing_xml) {
                     Ok((id, pic_xml, embed)) => {
@@ -571,7 +575,7 @@ impl DrawingPart {
             .into_iter()
             .find(|n| is_sp_node(*n))
             {
-                let size = extract_size_from_transform(&sp).or_else(|| size_from_anchor(anchor));
+                let size = size_from_anchor(anchor).or_else(|| extract_size_from_transform(&sp));
 
                 match parse_named_node(&sp, drawing_xml, "cNvPr") {
                     Ok((id, sp_xml)) => objects.push(DrawingObject {
@@ -608,7 +612,7 @@ impl DrawingPart {
             .find(|n| is_graphic_frame_node(*n))
             {
                 let size =
-                    extract_size_from_transform(&frame).or_else(|| size_from_anchor(anchor));
+                    size_from_anchor(anchor).or_else(|| extract_size_from_transform(&frame));
 
                 match parse_named_node(&frame, drawing_xml, "cNvPr") {
                     Ok((id, frame_xml)) => {
@@ -687,7 +691,8 @@ impl DrawingPart {
 
             // Unknown anchor type: preserve the entire anchor subtree.
             let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
-            let size = size_from_anchor(anchor);
+            let size =
+                size_from_anchor(anchor).or_else(|| extract_size_from_transform(&anchor_node));
             objects.push(DrawingObject {
                 id: DrawingObjectId((z + 1) as u32),
                 kind: DrawingObjectKind::Unknown {
