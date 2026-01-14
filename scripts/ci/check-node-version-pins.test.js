@@ -157,6 +157,50 @@ jobs:
   assert.match(proc.stdout, /Node version pins match/i);
 });
 
+test("ignores node usage strings inside non-run YAML block scalars when discovering node workflows", { skip: !canRun }, () => {
+  const proc = run({
+    ".nvmrc": "22",
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  NODE_VERSION: 22
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: \${{ env.NODE_VERSION }}
+`,
+    ".github/workflows/release.yml": `
+name: Release
+env:
+  NODE_VERSION: 22
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: \${{ env.NODE_VERSION }}
+`,
+    ".github/workflows/docs.yml": `
+name: Docs
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      NOTES: |
+        node -v
+    steps:
+      - run: echo ok
+`,
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Node version pins match/i);
+});
+
 test("fails when NODE_VERSION differs between CI and release workflows", { skip: !canRun }, () => {
   const proc = run({
     ".nvmrc": "22",

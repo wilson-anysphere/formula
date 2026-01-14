@@ -154,6 +154,93 @@ extract_mise_node_major() {
   extract_first_numeric_major "$value"
 }
 
+workflow_uses_node_tooling() {
+  local file="$1"
+  # Only treat workflow YAML configuration and executable `run:` scripts as semantic:
+  # - Ignore commented-out YAML.
+  # - Ignore non-`run:` YAML block scalar bodies (e.g. env vars, action inputs) so strings like
+  #   "actions/setup-node@" or "node -v" embedded in documentation can't accidentally classify a
+  #   workflow as Node-consuming.
+  awk '
+    function indent(s) {
+      match(s, /^[ ]*/);
+      return RLENGTH;
+    }
+
+    BEGIN {
+      in_block = 0;
+      block_indent = 0;
+      block_is_run = 0;
+      block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
+      found = 0;
+    }
+
+    {
+      raw = $0;
+      sub(/\r$/, "", raw);
+      ind = indent(raw);
+
+      if (in_block) {
+        # Blank/whitespace-only lines are always part of the scalar.
+        if (raw ~ /^[[:space:]]*$/) next;
+        if (ind > block_indent) {
+          if (block_is_run) {
+            trimmed = raw;
+            sub(/^[[:space:]]*/, "", trimmed);
+            # Ignore comment-only script lines.
+            if (trimmed ~ /^#/) next;
+            if (trimmed ~ /^node([[:space:]]|$)/) {
+              found = 1;
+              exit;
+            }
+          }
+          next;
+        }
+        in_block = 0;
+        block_is_run = 0;
+      }
+
+      trimmed = raw;
+      sub(/^[[:space:]]*/, "", trimmed);
+      if (trimmed ~ /^#/) next;
+
+      line = raw;
+      sub(/#.*/, "", line);
+      is_block = (line ~ block_re);
+
+      if (line ~ /^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*actions\/setup-node@/) {
+        found = 1;
+        exit;
+      }
+      if (line ~ /^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*pnpm\/action-setup@/) {
+        found = 1;
+        exit;
+      }
+
+      # Inline run steps: `run: node ...`.
+      if (!is_block && line ~ /^[[:space:]]*-?[[:space:]]*run:[[:space:]]+/) {
+        cmd = line;
+        sub(/^[[:space:]]*-?[[:space:]]*run:[[:space:]]*/, "", cmd);
+        if (cmd ~ /^node([[:space:]]|$)/) {
+          found = 1;
+          exit;
+        }
+      }
+
+      # Track YAML block scalars so we can selectively scan only `run:` script bodies.
+      if (is_block) {
+        block_is_run = (line ~ /^[[:space:]]*-?[[:space:]]*run:[[:space:]]*[>|]/);
+        in_block = 1;
+        block_indent = ind;
+      }
+    }
+
+    END {
+      exit found ? 0 : 1;
+    }
+  ' "$file"
+}
+
 require_node_env_pins_match() {
   local file="$1"
   local expected_major="$2"
@@ -390,16 +477,23 @@ if ! [[ "$ci_node_major" =~ ^[0-9]+$ ]]; then
 fi
 # Discover workflows that depend on Node (setup-node, pnpm, or direct `node` invocation)
 # and ensure they follow the same pinning rules as CI/release.
-mapfile -t node_workflows < <(
-  {
-    # `git grep` exits 1 when there are no matches. We always include CI + release workflows
-    # explicitly below, so treat "no matches" as an empty set (and fail later with a clearer
-    # message if needed).
-    git grep -l -E 'actions/setup-node@|pnpm/action-setup@|^[[:space:]]*run:[[:space:]]*node[[:space:]]|^[[:space:]]*node[[:space:]]|\|[[:space:]]*node[[:space:]]' \
-      -- .github/workflows/*.yml || true
-    printf '%s\n' "$ci_workflow" "$release_workflow"
-  } | sort -u
-)
+workflow_files=()
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  workflow_files+=("$file")
+done < <(git ls-files .github/workflows | grep -E '\.(yml|yaml)$' || true)
+
+node_workflows=()
+for workflow in "${workflow_files[@]}"; do
+  if workflow_uses_node_tooling "$workflow"; then
+    node_workflows+=("$workflow")
+  fi
+done
+
+# Always include CI + release workflows (they establish the canonical env pin for the repo).
+node_workflows+=("$ci_workflow" "$release_workflow")
+mapfile -t node_workflows < <(printf '%s\n' "${node_workflows[@]}" | sort -u)
+
 if [ "${#node_workflows[@]}" -eq 0 ]; then
   echo "Node workflow pin check failed: no workflows appear to use Node tooling." >&2
   exit 1
