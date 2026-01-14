@@ -1363,6 +1363,10 @@ Core types ([`solver/mod.rs`](../crates/formula-engine/src/solver/mod.rs)):
 - `Constraint` / `Relation` — constraint index + relation + RHS (+ tolerance)
 - `SolveOptions` — method selection, iteration limit, numeric tolerance, method-specific options, optional progress callback.
 - `SolveOutcome` / `SolveStatus` — solution + status (`Optimal | Feasible | Infeasible | Unbounded | IterationLimit | Cancelled`)
+- Method-specific option structs (re-exported from `solver/mod.rs`):
+  - `SimplexOptions` ([`solver/simplex.rs`](../crates/formula-engine/src/solver/simplex.rs))
+  - `GrgOptions` ([`solver/grg.rs`](../crates/formula-engine/src/solver/grg.rs))
+  - `EvolutionaryOptions` ([`solver/evolutionary.rs`](../crates/formula-engine/src/solver/evolutionary.rs))
 
 ### Proposed JS/WASM DTOs
 
