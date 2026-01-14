@@ -3524,6 +3524,11 @@ function syncSheetUi(): void {
   if (syncingSheetUi) return;
   syncingSheetUi = true;
   try {
+    // Capture the current sheet ordering before any potential collab metadata sync replaces the store.
+    // This lets us choose an Excel-like adjacent visible sheet when the active sheet disappears due to
+    // remote deletes (the new store no longer contains the deleted id, but the previous ordering does).
+    const prevSheetsForAdjacentActivation = workbookSheetStore.listAll();
+
     ensureCollabSheetObserver();
 
     const session = app.getCollabSession?.() ?? null;
@@ -3538,7 +3543,12 @@ function syncSheetUi(): void {
       // If the active sheet is missing from the visible list, prefer activating the adjacent
       // visible sheet (Excel-like). This can happen when the active sheet is hidden/veryHidden
       // or removed during state restores (version history, branch checkout, etc).
-      const preferred = pickAdjacentVisibleSheetId(workbookSheetStore.listAll(), activeId);
+      const currentById = new Map(workbookSheetStore.listAll().map((sheet) => [sheet.id, sheet.visibility] as const));
+      const orderedCurrentVisibility = prevSheetsForAdjacentActivation.map((sheet) => ({
+        id: sheet.id,
+        visibility: currentById.get(sheet.id) ?? ("hidden" satisfies SheetVisibility),
+      }));
+      const preferred = pickAdjacentVisibleSheetId(orderedCurrentVisibility, activeId);
       const fallback =
         (preferred && sheets.some((sheet) => sheet.id === preferred) ? preferred : null) ?? sheets[0]?.id ?? null;
       if (fallback) {
