@@ -7,6 +7,8 @@ import {
   runDesktopStartupIterations,
   resolveDesktopStartupTargets,
   resolvePerfHome,
+  type DesktopStartupBenchKind,
+  type DesktopStartupMode,
   type StartupMetrics,
 } from "./desktopStartupUtil.ts";
 
@@ -16,11 +18,8 @@ import {
 //   activity and skew startup/idle-memory measurements.
 // - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
 
-type StartupBenchKind = "shell" | "full";
-type StartupMode = "cold" | "warm";
-
 type Summary = {
-  mode: StartupMode;
+  mode: DesktopStartupMode;
   runs: number;
   windowVisible: { p50: number; p95: number; targetMs: number };
   // `first_render_ms` is only meaningful for the full-app benchmark (the shell benchmark uses a
@@ -61,7 +60,7 @@ function usage(): string {
   ].join("\n");
 }
 
-function parseBenchKindFromEnv(): StartupBenchKind | null {
+function parseBenchKindFromEnv(): DesktopStartupBenchKind | null {
   const raw = (process.env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? "").trim().toLowerCase();
   if (!raw) return null;
   if (raw === "shell") return "shell";
@@ -70,7 +69,7 @@ function parseBenchKindFromEnv(): StartupBenchKind | null {
 }
 
 function parseArgs(argv: string[]): {
-  mode: StartupMode;
+  mode: DesktopStartupMode;
   runs: number;
   timeoutMs: number;
   binPath: string | null;
@@ -81,7 +80,7 @@ function parseArgs(argv: string[]): {
   allowInCi: boolean;
   enforce: boolean;
   jsonPath: string | null;
-  benchKind: StartupBenchKind;
+  benchKind: DesktopStartupBenchKind;
 } {
   const args = [...argv];
 
@@ -91,7 +90,7 @@ function parseArgs(argv: string[]): {
       `Invalid FORMULA_DESKTOP_STARTUP_MODE=${JSON.stringify(modeRaw)} (expected "cold" or "warm")`,
     );
   }
-  let mode: StartupMode = modeRaw;
+  let mode: DesktopStartupMode = modeRaw;
 
   const envRuns = Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? "") || 20;
   const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS ?? "") || 15_000;
@@ -100,7 +99,7 @@ function parseArgs(argv: string[]): {
   const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH === "1";
 
   const envKind = parseBenchKindFromEnv();
-  const defaultKind: StartupBenchKind = envKind ?? (process.env.CI ? "shell" : "full");
+  const defaultKind: DesktopStartupBenchKind = envKind ?? (process.env.CI ? "shell" : "full");
 
   let windowTargetMsOverride: number | null = null;
   let firstRenderTargetMsOverride: number | null = null;
@@ -164,7 +163,7 @@ function formatMaybeMs(ms: number | null): string {
   return `${ms}ms`;
 }
 
-function printSummary(summary: Summary, benchKind: StartupBenchKind): void {
+function printSummary(summary: Summary, benchKind: DesktopStartupBenchKind): void {
   const windowStatus = summary.windowVisible.p95 <= summary.windowVisible.targetMs ? "PASS" : "FAIL";
   const ttiStatus = summary.tti.p95 <= summary.tti.targetMs ? "PASS" : "FAIL";
 

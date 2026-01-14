@@ -60,6 +60,8 @@ import {
   resolveDesktopStartupTargets,
   resolvePerfHome,
   stdDev,
+  type DesktopStartupBenchKind,
+  type DesktopStartupMode,
   type StartupMetrics,
 } from './desktopStartupUtil.ts';
 
@@ -69,8 +71,6 @@ import {
 //   activity and skew startup/idle-memory benchmarks.
 // - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
 
-type StartupMode = 'cold' | 'warm';
-type StartupBenchKind = 'full' | 'shell';
 function buildResult(
   name: string,
   values: number[],
@@ -99,7 +99,7 @@ function buildResult(
   };
 }
 
-function parseStartupMode(): StartupMode {
+function parseStartupMode(): DesktopStartupMode {
   const modeRaw = (process.env.FORMULA_DESKTOP_STARTUP_MODE ?? 'cold').trim().toLowerCase();
   if (modeRaw !== 'cold' && modeRaw !== 'warm') {
     throw new Error(
@@ -109,7 +109,7 @@ function parseStartupMode(): StartupMode {
   return modeRaw;
 }
 
-function parseBenchKind(): StartupBenchKind {
+function parseBenchKind(): DesktopStartupBenchKind {
   const kindRaw = (process.env.FORMULA_DESKTOP_STARTUP_BENCH_KIND ?? '').trim().toLowerCase();
   if (!kindRaw) {
     // Default to the full end-to-end app startup measurement (requires the desktop frontend assets
