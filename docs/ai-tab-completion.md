@@ -33,7 +33,8 @@ This doc describes:
 
 ### Locale-aware partial parsing (desktop)
 
-The core engine’s built-in `parsePartialFormula()` is intentionally lightweight and ASCII-oriented.
+The core engine’s built-in `parsePartialFormula()` is intentionally lightweight. It includes best-effort Unicode support
+for non-ASCII function identifiers, but it is not a full locale-aware parser.
 
 Desktop wires a locale-aware parser by injecting `parsePartialFormula` when constructing `TabCompletionEngine`:
 - Baseline span calculation comes from the JS parser (`@formula/ai-completion`).
