@@ -59,6 +59,8 @@ fn simple_xlsx_bytes() -> Vec<u8> {
 fn derive_rc4_key_md5(h: &[u8], block: u32, key_len: usize) -> Vec<u8> {
     use md5::Digest as _;
 
+    assert!(key_len > 0, "RC4 key length must be non-zero");
+
     let mut hasher = md5::Md5::new();
     hasher.update(h);
     hasher.update(block.to_le_bytes());

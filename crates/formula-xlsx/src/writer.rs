@@ -879,7 +879,7 @@ fn sheet_xml(
     } else {
         String::new()
     };
-    let sheet_format_pr_xml = sheet_format_pr_xml(sheet);
+    let sheet_format_pr = sheet_format_pr_xml(sheet);
     let cols_xml = render_cols(sheet, &outline, style_to_xf);
 
     struct ColumnarInfo<'a> {
@@ -1136,7 +1136,7 @@ fn sheet_xml(
     };
 
     let conditional_formatting_xml = render_conditional_formatting(sheet, local_to_global_dxf);
-    let sheet_protection_xml = sheet_protection_xml(sheet);
+    let sheet_protection = sheet_protection_xml(sheet);
     let data_validations_xml = sheet_data_validations_xml(sheet);
 
     let mut page_margins_xml = String::new();
@@ -1200,9 +1200,9 @@ fn sheet_xml(
     }
     xml.push_str(&format!(r#"  <dimension ref="{dimension_ref}"/>"#));
     xml.push('\n');
-    if !sheet_format_pr_xml.is_empty() {
+    if !sheet_format_pr.is_empty() {
         xml.push_str("  ");
-        xml.push_str(&sheet_format_pr_xml);
+        xml.push_str(&sheet_format_pr);
         xml.push('\n');
     }
     if !cols_xml.is_empty() {
@@ -1217,9 +1217,9 @@ fn sheet_xml(
         xml.push('\n');
     }
     xml.push_str("  </sheetData>\n");
-    if !sheet_protection_xml.is_empty() {
+    if !sheet_protection.is_empty() {
         xml.push_str("  ");
-        xml.push_str(&sheet_protection_xml);
+        xml.push_str(&sheet_protection);
         xml.push('\n');
     }
     if !auto_filter_xml.is_empty() {
