@@ -271,6 +271,7 @@ class ComparePrivacyModeTests(unittest.TestCase):
             )
 
             secret_patch_path = str(tmp_path / "patch-output.json")
+            relative_patch_path = "tools/excel-oracle/odd_coupon_boundary_cases.json"
             expected_payload = {
                 "schemaVersion": 1,
                 "generatedAt": "unit-test",
@@ -283,7 +284,13 @@ class ComparePrivacyModeTests(unittest.TestCase):
                             "build": "unit-test",
                             "operatingSystem": "windows",
                             "caseSet": {"path": secret_patch_path},
-                        }
+                        },
+                        {
+                            "version": "16.0",
+                            "build": "unit-test",
+                            "operatingSystem": "windows",
+                            "caseSet": {"path": relative_patch_path},
+                        },
                     ],
                 },
                 "caseSet": {"path": str(cases_path), "count": 1},
@@ -353,6 +360,10 @@ class ComparePrivacyModeTests(unittest.TestCase):
             self.assertEqual(
                 redacted_patch_path,
                 f"sha256={hashlib.sha256(secret_patch_path.encode('utf-8')).hexdigest()}",
+            )
+            self.assertEqual(
+                report["expectedSource"]["patches"][1]["caseSet"]["path"],
+                relative_patch_path,
             )
 
 
