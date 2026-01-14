@@ -27,6 +27,7 @@ aes = "0.8"
 base64 = "0.22"
 cfb = "0.10"
 encoding_rs = "0.8"
+md5 = { package = "md-5", version = "0.10" }
 formula-columnar = { path = "../formula-columnar", optional = true, features = ["arrow"] }
 formula-fs = { path = "../formula-fs" }
 formula-format = { path = "../formula-format" }
