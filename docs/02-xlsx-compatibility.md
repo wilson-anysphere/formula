@@ -28,12 +28,12 @@ This repo’s File I/O workstream uses the following shorthand (see [`instructio
 | Feature | L1 impact | L4 impact | Preservation / patching summary |
 |---|---:|---:|---|
 | Data validations (`<dataValidations>`) | Low (UI affordance) | High | Preserve the `<dataValidations>` subtree byte-for-byte on round-trip; ensure schema-ordering when inserting/replacing nearby sections (e.g. `<mergeCells>` must come before `<dataValidations>`). |
-| Row/column default styles (`row/@s`, `col/@style`) | Medium (formatting/render) | High | Preserved byte-for-byte when we don’t rewrite the containing rows/cols; currently not fully modeled, so edits that regenerate `<cols>` or synthesize new `<row>` elements may drop style defaults unless the model is populated. |
+| Row/column default styles (`row/@s`, `col/@style`) | Medium (formatting/render) | High | Preserved when we don’t rewrite the containing rows/cols; note that **empty style-only** `<row>` elements can be dropped by the sheet-data patcher unless they carry other unknown attrs (e.g. `spans`) or are explicitly modeled. Regenerating `<cols>` currently drops `col/@style`. |
 | Rich text (`sharedStrings` runs + `inlineStr`) | High (display fidelity) | High | Parse rich runs for display; preserve raw `<si>` records and unchanged inline `<is>` subtrees to avoid reserializing formatting. |
 | Sheet view state (`<sheetViews>` beyond zoom/freeze) | Medium (UI state) | Medium | Preserve the full `<sheetViews>` block when unchanged; if we need to update zoom/freeze, we currently rewrite `<sheetViews>` as a minimal block (zoom + pane), which may drop other view state. |
 | Comments (legacy notes + threaded) | Medium (collab/review) | High | Parse comment text/authors into the model; preserve all comment-related OPC parts byte-for-byte unless explicitly rewriting comment XML. |
 | Outline metadata (`outlinePr`, row/col `outlineLevel`/`collapsed`/`hidden`) | Medium (grouping UX) | High | Outline can be parsed into `formula_model::Outline` via the `formula_xlsx::outline` helpers; on write, we preserve existing outline attrs when rows/cols are preserved, and we emit outline attrs for newly-written rows/cols based on `Worksheet.outline`. |
-| OPC robustness (path normalization) | High (open more files) | High | Normalize part lookup for leading `/`, Windows `\` separators, and ASCII case differences; relationship targets also strip `#fragment` / `?query`. `.rels` bytes are preserved unless we must explicitly repair/append relationships. |
+| OPC robustness (path normalization) | High (open more files) | High | Normalize part lookup for leading `/`, Windows `\` separators, ASCII case differences, and percent-decoding fallback. Relationship targets also strip `#fragment` / `?query`. `.rels` bytes are preserved unless we must explicitly repair/append relationships. |
 
 ---
 
@@ -66,7 +66,7 @@ SpreadsheetML supports row/column-level default formatting:
 
 - **Parsed into model:** the workbook model supports row/col default styles via `RowProperties.style_id` / `ColProperties.style_id`, but the current XLSX reader does **not** populate these from `row/@s` or `col/@style` yet.
 - **Preserved byte-for-byte:**
-  - `row/@s` + `row/@customFormat` are preserved as long as the original `<row>` element is preserved by the sheet-data patcher.
+  - `row/@s` + `row/@customFormat` are preserved *when the original `<row>` element survives the sheet-data patcher*. Note: truly-empty rows can be dropped unless they contain “unknown” attributes (e.g. `spans`) or are represented in `Worksheet.row_properties`; since `row/@s` is not imported today, **rows that exist only to carry default styles may be lost**.
   - `col/@style` is preserved as long as the original `<cols>` section is preserved. (Regenerating `<cols>` currently emits only width/hidden/outline-related attributes, and may drop `style`.)
 
 #### Patch/write rules
@@ -162,7 +162,7 @@ Real-world XLSX producers sometimes emit relationship targets that diverge from 
 - Relationship target normalization is *lookup-only*:
   - tolerate Windows path separators (`\`)
   - ignore URI fragments/queries (`#…`, `?…`) when mapping to ZIP entry names
-  - fall back to case-insensitive lookups (and tolerate a leading `/`) when a target does not resolve as-is
+  - fall back to case-insensitive and percent-decoded lookups (and tolerate a leading `/`) when a target does not resolve as-is
 - Never rewrite a relationship `Target` string just to “normalize” it; preserve original strings unless the relationship itself is being created/repaired.
 
 ## XLSX File Format Structure

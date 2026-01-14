@@ -5,28 +5,99 @@ use zip::result::ZipError;
 use zip::ZipArchive;
 
 pub(crate) fn zip_part_names_equivalent(a: &str, b: &str) -> bool {
-    fn strip_leading_separators(mut bytes: &[u8]) -> &[u8] {
-        while matches!(bytes.first(), Some(b'/' | b'\\')) {
-            bytes = &bytes[1..];
-        }
-        bytes
-    }
-
-    let a = strip_leading_separators(a.as_bytes());
-    let b = strip_leading_separators(b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-
-    for (&a, &b) in a.iter().zip(b.iter()) {
-        let a = if a == b'\\' { b'/' } else { a.to_ascii_lowercase() };
-        let b = if b == b'\\' { b'/' } else { b.to_ascii_lowercase() };
-        if a != b {
-            return false;
+    fn hex_val(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
         }
     }
 
-    true
+    struct Normalized<'a> {
+        bytes: &'a [u8],
+        in_leading_separators: bool,
+    }
+
+    impl<'a> Normalized<'a> {
+        fn new(s: &'a str) -> Self {
+            Self {
+                bytes: s.as_bytes(),
+                in_leading_separators: true,
+            }
+        }
+
+        fn next_byte(&mut self) -> Option<u8> {
+            loop {
+                let b = *self.bytes.first()?;
+                let decoded = if b == b'%' && self.bytes.len() >= 3 {
+                    let hi = self.bytes[1];
+                    let lo = self.bytes[2];
+                    if let (Some(hi), Some(lo)) = (hex_val(hi), hex_val(lo)) {
+                        self.bytes = &self.bytes[3..];
+                        (hi << 4) | lo
+                    } else {
+                        self.bytes = &self.bytes[1..];
+                        b
+                    }
+                } else {
+                    self.bytes = &self.bytes[1..];
+                    b
+                };
+
+                // Skip any number of leading `/` or `\` separators, even when percent-encoded.
+                if self.in_leading_separators && matches!(decoded, b'/' | b'\\') {
+                    continue;
+                }
+                self.in_leading_separators = false;
+
+                let normalized = if decoded == b'\\' {
+                    b'/'
+                } else {
+                    decoded.to_ascii_lowercase()
+                };
+                return Some(normalized);
+            }
+        }
+    }
+
+    let mut a = Normalized::new(a);
+    let mut b = Normalized::new(b);
+    loop {
+        match (a.next_byte(), b.next_byte()) {
+            (Some(a), Some(b)) if a == b => continue,
+            (None, None) => return true,
+            _ => return false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equivalent_handles_case_separators_and_leading_slashes() {
+        assert!(zip_part_names_equivalent("XL\\Workbook.xml", "xl/workbook.xml"));
+        assert!(zip_part_names_equivalent("/xl/workbook.xml", "xl/workbook.xml"));
+        assert!(zip_part_names_equivalent("\\xl\\workbook.xml", "xl/workbook.xml"));
+    }
+
+    #[test]
+    fn equivalent_handles_percent_encoded_names() {
+        assert!(zip_part_names_equivalent(
+            "xl/worksheets/sheet 1.xml",
+            "xl/worksheets/sheet%201.xml"
+        ));
+        assert!(zip_part_names_equivalent(
+            "xl/worksheets/sheet1.xml",
+            "xl%2Fworksheets%2Fsheet1.xml"
+        ));
+        assert!(zip_part_names_equivalent(
+            "xl/worksheets/sheet1.xml",
+            "%2Fxl%2Fworksheets%2Fsheet1.xml"
+        ));
+    }
 }
 
 /// Open a ZIP entry by name, tolerating common producer mistakes:
