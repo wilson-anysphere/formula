@@ -129,6 +129,15 @@ python tools/excel-oracle/generate_cases.py --out tests/compatibility/excel-orac
 
 The generator is deterministic; committing `cases.json` makes CI stable and reviewable.
 
+For local debugging, the generator also supports:
+
+```powershell
+python tools/excel-oracle/generate_cases.py --include-volatile --out /tmp/cases.json
+```
+
+This opt-in mode includes volatile functions like `CELL`/`INFO` (which cannot be pinned/stably
+compared) and must not be committed or used for pinned datasets.
+
 The generator also validates the corpus against `shared/functionCatalog.json` to ensure:
 
 - every `non_volatile` catalog function is exercised by at least one **case formula** (`case.formula`)
