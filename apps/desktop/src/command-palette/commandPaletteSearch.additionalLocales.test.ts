@@ -110,4 +110,20 @@ describe("command palette function search (localized function names)", () => {
       document.documentElement.lang = prevLang;
     }
   });
+
+  it("treats unsupported locales as en-US for signature separators (pt-BR → comma)", () => {
+    const prevLang = document.documentElement.lang;
+    document.documentElement.lang = "pt-BR";
+
+    try {
+      const results = searchFunctionResults("sum", { limit: 10 });
+      expect(results[0]?.name).toBe("SUM");
+      // The formula engine does not currently support pt-BR, so formula punctuation falls back to en-US.
+      // That means `,` is used as the list/argument separator (even though pt-BR typically uses `;` in Excel).
+      expect(results[0]?.signature ?? "").toContain(",");
+      expect(results[0]?.signature ?? "").not.toContain(";");
+    } finally {
+      document.documentElement.lang = prevLang;
+    }
+  });
 });
