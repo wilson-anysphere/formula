@@ -3191,8 +3191,10 @@ export class FormulaBarView {
         return null;
       };
 
-      const renderSpan = (span: { start: number; end: number; className?: string } & Record<string, any>, text: string): string => {
-        const kind: string = span.kind ?? span.type ?? "unknown";
+      const spansHaveKind =
+        highlightedSpans.length > 0 && (highlightedSpans[0] as unknown as { kind?: unknown }).kind != null;
+
+      const renderSpan = (span: { start: number; end: number; className?: string }, text: string, kind: string): string => {
         const extraClass = span.className;
         // Whitespace spans don't receive styling and are never hover targets; avoid wrapping them
         // in <span> tags to keep long, formatted formulas lighter to render.
@@ -3249,7 +3251,10 @@ export class FormulaBarView {
       if (!ghost) {
         for (let i = 0; i < highlightedSpans.length; i += 1) {
           const span = highlightedSpans[i]!;
-          highlightParts[i] = renderSpan(span, span.text);
+          const kind = spansHaveKind
+            ? (span as unknown as { kind: string }).kind
+            : (span as unknown as { type: string }).type;
+          highlightParts[i] = renderSpan(span, span.text, kind);
         }
       } else {
         let ghostInserted = false;
@@ -3259,6 +3264,9 @@ export class FormulaBarView {
 
         for (let i = 0; i < highlightedSpans.length; i += 1) {
           const span = highlightedSpans[i]!;
+          const kind = spansHaveKind
+            ? (span as unknown as { kind: string }).kind
+            : (span as unknown as { type: string }).type;
           if (!ghostInserted && cursor <= span.start) {
             highlightParts.push(ghostHtml);
             if (previewHtml && !previewInserted) {
@@ -3273,7 +3281,7 @@ export class FormulaBarView {
             const before = span.text.slice(0, split);
             const after = span.text.slice(split);
             if (before) {
-              highlightParts.push(renderSpan(span, before));
+              highlightParts.push(renderSpan(span, before, kind));
             }
             highlightParts.push(ghostHtml);
             if (previewHtml && !previewInserted) {
@@ -3282,12 +3290,12 @@ export class FormulaBarView {
             }
             ghostInserted = true;
             if (after) {
-              highlightParts.push(renderSpan(span, after));
+              highlightParts.push(renderSpan(span, after, kind));
             }
             continue;
           }
 
-          highlightParts.push(renderSpan(span, span.text));
+          highlightParts.push(renderSpan(span, span.text, kind));
         }
 
         if (!ghostInserted) {
