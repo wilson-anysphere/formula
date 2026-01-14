@@ -59,6 +59,9 @@ Preview what would change (no writes):
 python -m tools.corpus.promote_public --input ... --dry-run
 ```
 
+The output is JSON and includes a `needs_force` field indicating whether updating the fixture/expectations would require
+re-running with `--force`.
+
 Optional heavier triage checks:
 
 ```bash

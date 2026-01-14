@@ -387,6 +387,9 @@ Note: when `--input` already points at the canonical `tools/corpus/public/*.b64`
 present, the command exits successfully without running triage (no Rust toolchain required). Pass `--force` to re-run
 triage and refresh the expectations entry.
 
+`--dry-run` prints a JSON summary including `needs_force` to indicate whether overwriting the fixture/expectations would
+require `--force`.
+
 For `.xlsb` inputs, `--sanitize` and leak scanning are not supported; provide an already-sanitized workbook and pass
 `--confirm-sanitized`.
 
