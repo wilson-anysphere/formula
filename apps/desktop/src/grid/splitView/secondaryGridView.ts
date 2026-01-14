@@ -82,6 +82,10 @@ export class SecondaryGridView {
   private zoomPersistTimer: number | null = null;
   private lastZoom = 1;
   private suppressSelectionCallbacks = false;
+  // Track axis sizing versions so we can invalidate cached drawings bounds when the
+  // renderer's row/col sizes change during interactive resize drags.
+  private rowsVersion = -1;
+  private colsVersion = -1;
 
   private readonly persistScroll?: (scroll: ScrollState) => void;
   private readonly persistZoom?: (zoom: number) => void;
@@ -302,9 +306,17 @@ export class SecondaryGridView {
 
           const zoom = this.grid.renderer.getZoom();
           this.container.dataset.zoom = String(zoom);
-          if (Math.abs(zoom - this.lastZoom) > 1e-6) {
-            this.lastZoom = zoom;
-            this.schedulePersistZoom(zoom);
+         if (Math.abs(zoom - this.lastZoom) > 1e-6) {
+           this.lastZoom = zoom;
+           this.schedulePersistZoom(zoom);
+         }
+
+          const rowsVersion = this.grid.renderer.scroll.rows.getVersion();
+          const colsVersion = this.grid.renderer.scroll.cols.getVersion();
+          if (rowsVersion !== this.rowsVersion || colsVersion !== this.colsVersion) {
+            this.rowsVersion = rowsVersion;
+            this.colsVersion = colsVersion;
+            this.drawingsOverlay.invalidateSpatialIndex();
           }
 
           this.repositionEditor();
