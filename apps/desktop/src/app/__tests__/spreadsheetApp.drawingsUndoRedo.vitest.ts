@@ -123,7 +123,7 @@ describe("SpreadsheetApp drawings undo/redo integration", () => {
       const sheetId = app.getCurrentSheetId();
 
       const overlay = (app as any).drawingOverlay as DrawingOverlay;
-      const renderSpy = vi.spyOn(overlay, "render").mockResolvedValue(undefined);
+      const renderSpy = vi.spyOn(overlay, "render").mockImplementation(() => {});
 
       const file = new File([new Uint8Array([137, 80, 78, 71])], "test.png", { type: "image/png" });
       await app.insertPicturesFromFiles([file]);
