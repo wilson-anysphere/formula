@@ -4974,6 +4974,40 @@ mod tests {
     }
 
     #[test]
+    fn read_workbook_blocking_opens_password_protected_xls_cryptoapi_fixture_with_password() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xls/tests/fixtures/encrypted/biff8_rc4_cryptoapi_pw_open.xls"
+        );
+        let path = std::path::Path::new(fixture);
+
+        let err = read_workbook_blocking_with_password(path, None)
+            .expect_err("expected missing password to error");
+        assert!(
+            err.to_string().starts_with(PASSWORD_REQUIRED_PREFIX),
+            "expected password-required error, got: {err}"
+        );
+
+        let err = read_workbook_blocking_with_password(path, Some("wrong-password"))
+            .expect_err("expected wrong password to error");
+        assert!(
+            err.to_string().starts_with(INVALID_PASSWORD_PREFIX),
+            "expected invalid-password prefix, got: {err}"
+        );
+
+        let workbook =
+            read_workbook_blocking_with_password(path, Some("correct horse battery staple"))
+                .expect("open encrypted xls");
+        let sheet = workbook
+            .sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("Sheet1 should exist");
+        let cell_a1 = sheet.get_cell(0, 0);
+        assert_eq!(cell_a1.computed_value, CellScalar::Number(42.0));
+    }
+
+    #[test]
     fn encrypt_package_to_ole_bytes_rejects_empty_password() {
         let err =
             encrypt_package_to_ole_bytes(b"PK", "").expect_err("expected empty password to fail");
