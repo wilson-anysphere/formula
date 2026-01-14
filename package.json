@@ -20,6 +20,8 @@
     "generate:function-catalog": "node scripts/generate-function-catalog.js",
     "generate:locale-function-tsv": "node scripts/generate-locale-function-tsv.js",
     "check:locale-function-tsv": "node scripts/generate-locale-function-tsv.js --check",
+    "normalize:locale-function-sources": "node scripts/normalize-locale-function-sources.js",
+    "check:locale-function-sources": "node scripts/normalize-locale-function-sources.js --check",
     "generate:locale-error-tsvs": "node scripts/generate-locale-error-tsvs.mjs",
     "check:locale-error-tsvs": "node scripts/generate-locale-error-tsvs.mjs --check",
     "report:function-parity": "node scripts/report-function-parity.mjs",
