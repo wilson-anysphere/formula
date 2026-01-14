@@ -371,6 +371,61 @@ fn phonetic_metadata_is_cleared_when_move_range_overwrites_cell() {
 }
 
 #[test]
+fn phonetic_metadata_is_not_copied_by_copy_range() {
+    let mut sheet = TestSheet::new();
+    sheet.set("B1", "漢字");
+    sheet.set_phonetic("B1", Some("かんじ"));
+
+    sheet.apply_operation(EditOp::CopyRange {
+        sheet: "Sheet1".to_string(),
+        src: Range::from_a1("B1").expect("range"),
+        dst_top_left: CellRef::from_a1("A1").expect("cell"),
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("漢字".to_string())
+    );
+}
+
+#[test]
+fn phonetic_metadata_is_not_copied_by_fill() {
+    let mut sheet = TestSheet::new();
+    sheet.set("B1", "漢字");
+    sheet.set_phonetic("B1", Some("かんじ"));
+
+    sheet.apply_operation(EditOp::Fill {
+        sheet: "Sheet1".to_string(),
+        src: Range::from_a1("B1").expect("range"),
+        dst: Range::from_a1("A1").expect("range"),
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("漢字".to_string())
+    );
+}
+
+#[test]
+fn phonetic_metadata_moves_with_cell_on_move_range() {
+    let mut sheet = TestSheet::new();
+    sheet.set("B1", "漢字");
+    sheet.set_phonetic("B1", Some("かんじ"));
+
+    sheet.apply_operation(EditOp::MoveRange {
+        sheet: "Sheet1".to_string(),
+        src: Range::from_a1("B1").expect("range"),
+        dst_top_left: CellRef::from_a1("A1").expect("cell"),
+    });
+
+    assert_eq!(
+        sheet.eval("=PHONETIC(A1)"),
+        Value::Text("かんじ".to_string())
+    );
+    assert_eq!(sheet.eval("=PHONETIC(B1)"), Value::Text(String::new()));
+}
+
+#[test]
 fn phonetic_metadata_is_removed_when_clear_cell_deletes_record() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", "漢字");

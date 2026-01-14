@@ -249,8 +249,9 @@ struct Cell {
     ///
     /// Lifecycle rules (Excel-like):
     /// - When a cell's *input* changes via `Engine::set_cell_value`, `Engine::set_cell_formula*`,
-    ///   or `Engine::set_range_values`, any existing `phonetic` metadata is cleared (set to
-    ///   `None`) to avoid returning stale furigana for new content.
+    ///   `Engine::set_range_values`, or copy/fill operations that overwrite cell contents, any
+    ///   existing `phonetic` metadata is cleared (set to `None`) to avoid returning stale furigana
+    ///   for new content.
     /// - When a cell is cleared via `Engine::clear_cell`, the cell record is removed entirely
     ///   (phonetic metadata is implicitly removed).
     /// - During recalculation, the engine may update cached `value` fields, but it must not mutate
@@ -9111,6 +9112,10 @@ fn copy_range(
             value.formula = Some(new_formula);
         }
 
+        // Copy/paste-style operations overwrite cell input but do not explicitly set phonetic
+        // metadata. Clear it to avoid returning stale furigana via PHONETIC().
+        value.phonetic = None;
+
         sheet.cells.insert(cell_addr_from_cell_ref(target), value);
     }
 }
@@ -9159,6 +9164,9 @@ fn fill_range(
             }
             value.formula = Some(new_formula);
         }
+        // Fill operations overwrite cell input but do not explicitly set phonetic metadata. Clear
+        // it to avoid returning stale furigana via PHONETIC().
+        value.phonetic = None;
         sheet.cells.insert(cell_addr_from_cell_ref(cell), value);
     }
 }
