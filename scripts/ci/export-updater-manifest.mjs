@@ -46,6 +46,20 @@ function walkSync(dir, predicate, out) {
   for (const ent of entries) {
     const full = path.join(dir, ent.name);
     if (ent.isDirectory()) {
+      // Bundle output directories can contain large trees (macOS .app bundles, frameworks, debug
+      // symbol bundles, etc). These directories are never expected to contain updater manifests, so
+      // skip descending into them to keep fallback scanning fast in CI.
+      const lower = ent.name.toLowerCase();
+      if (
+        lower === "node_modules" ||
+        lower === ".git" ||
+        lower.endsWith(".app") ||
+        lower.endsWith(".framework") ||
+        lower.endsWith(".xcframework") ||
+        lower.endsWith(".dsym")
+      ) {
+        continue;
+      }
       walkSync(full, predicate, out);
     } else if (ent.isFile()) {
       if (predicate(full)) out.push(full);
@@ -140,6 +154,33 @@ function main() {
   for (const dir of candidateDirs) {
     const bundleDirs = findBundleDirs(dir);
     for (const bundleDir of bundleDirs) {
+      // Fast path: check the expected manifest locations first to avoid scanning the entire bundle
+      // tree (which can be large on macOS/Windows).
+      const direct = path.join(bundleDir, "latest.json");
+      if (fs.existsSync(direct)) {
+        found.push(direct);
+        continue;
+      }
+
+      let entries;
+      try {
+        entries = fs.readdirSync(bundleDir, { withFileTypes: true });
+      } catch {
+        entries = [];
+      }
+
+      let foundInChild = false;
+      for (const ent of entries) {
+        if (!ent.isDirectory()) continue;
+        const candidate = path.join(bundleDir, ent.name, "latest.json");
+        if (fs.existsSync(candidate)) {
+          found.push(candidate);
+          foundInChild = true;
+        }
+      }
+      if (foundInChild) continue;
+
+      // Fallback: recursive walk (prunes known-large directories).
       walkSync(bundleDir, (p) => path.basename(p) === "latest.json", found);
     }
   }
