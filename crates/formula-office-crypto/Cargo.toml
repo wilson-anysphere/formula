@@ -30,4 +30,4 @@ getrandom = { version = "0.2", features = ["js"] }
 ms-offcrypto-writer = "1.0.7"
 rand09 = { package = "rand", version = "0.9" }
 proptest = "1"
-zip = { version = "2.1", default-features = false, features = ["deflate"] }
+zip = { version = "2.1", default-features = false }

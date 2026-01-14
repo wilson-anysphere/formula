@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
 use std::path::PathBuf;
 
@@ -12,22 +11,6 @@ fn fixture(path: &str) -> PathBuf {
         .join("encrypted")
         .join("ooxml")
         .join(path)
-}
-
-fn zip_parts(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).expect("open zip archive");
-    let mut parts = BTreeMap::new();
-    for idx in 0..archive.len() {
-        let mut file = archive.by_index(idx).expect("open zip entry");
-        let name = file.name().to_string();
-        if name.ends_with('/') {
-            continue;
-        }
-        let mut content = Vec::new();
-        file.read_to_end(&mut content).expect("read zip entry bytes");
-        parts.insert(name, content);
-    }
-    parts
 }
 
 #[test]
@@ -52,18 +35,14 @@ fn decrypts_agile_fixture_xlsm() {
 }
 
 #[test]
-fn decrypts_excel_agile_fixture_xlsm_matches_plaintext_parts() {
+fn decrypts_excel_agile_fixture_xlsm_matches_plaintext_bytes() {
     let encrypted = std::fs::read(fixture("basic-password.xlsm")).expect("read encrypted fixture");
     let expected =
         std::fs::read(fixture("plaintext-basic.xlsm")).expect("read expected decrypted bytes");
 
     let decrypted = decrypt_agile_ooxml_from_bytes(encrypted, "password").expect("decrypt fixture");
     assert!(decrypted.starts_with(b"PK"));
-    assert_eq!(
-        zip_parts(&decrypted),
-        zip_parts(&expected),
-        "decrypted xlsm parts must match plaintext-basic.xlsm"
-    );
+    assert_eq!(decrypted, expected);
 
     let encrypted = std::fs::read(fixture("basic-password.xlsm")).expect("read encrypted fixture");
     let err = decrypt_agile_ooxml_from_bytes(encrypted, "not-the-password")
