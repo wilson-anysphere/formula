@@ -1325,8 +1325,16 @@ Implementation notes:
 
 ## Release, signing, updater keys
 
+Desktop packaging is handled by the GitHub Actions release workflow (`.github/workflows/release.yml`).
+CI produces multi-arch installers/bundles:
+
+- **macOS:** universal (`x86_64` + `arm64`) `.dmg` + `.app.tar.gz`
+- **Windows:** `x64` + `arm64` installers (`.msi` + `.exe`)
+- **Linux:** `x86_64` + `arm64` `.AppImage` + `.deb` + `.rpm`
+
 The updater config (`plugins.updater.*`) is in `apps/desktop/src-tauri/tauri.conf.json`.
 
-For the actual release workflow, signing, and updater key management, see:
+For the full release process, expected artifact set, and verification commands (e.g. `lipo`, `dumpbin`, `dpkg`, `rpm`),
+see:
 
 - `docs/release.md`
