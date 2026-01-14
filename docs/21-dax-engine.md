@@ -184,7 +184,10 @@ Internally, `DataModel` materializes relationship metadata (`RelationshipInfo`),
     Full mapping from **to_table key → matching to_table row(s)**. `RowSet` is an internal compact
     representation:
     - `RowSet::One(row)` for the common unique-key case (no allocation)
-    - `RowSet::Many(Vec<row>)` when a non-blank key matches multiple `to_table` rows (many-to-many)
+    - `RowSet::Many(Vec<row>)` when a non-blank key matches multiple `to_table` rows (many-to-many)  
+      Note: for many-to-many relationships, physical `BLANK` keys do not participate in relationship
+      joins and are skipped (they are not stored in the index), to avoid materializing a potentially
+      huge, never-used row list.
   - `ToIndex::KeySet { keys: HashSet<Value>, has_duplicates }`  
     Scalable representation for **columnar many-to-many** relationships where the `to_table` side may
     contain a very large number of duplicate keys. Instead of storing `Vec<usize>` row lists per key,
@@ -437,7 +440,8 @@ Public helper APIs on `FilterContext` that are useful when calling the engine fr
 Filters combine with **AND** semantics:
 
 - A row must satisfy all column filters on its table, and
-- If a `row_filter` is present for a table, the row must be in that explicit set.
+- If a `row_filter` is present for a table, the row must be allowed by that row filter (whether it is
+  `All`, a sparse `Rows(...)` set, or a dense bitmap `Mask(...)`).
 
 Filter propagation happens in `resolve_row_sets(...)`:
 
