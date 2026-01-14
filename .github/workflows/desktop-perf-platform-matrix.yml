@@ -641,28 +641,56 @@ jobs:
             byArtifact[name] = readJsonMaybe(p);
           }
           
-          const merged = {
-            generatedAt: new Date().toISOString(),
-            ci: {
-              workflow: process.env.GITHUB_WORKFLOW ?? null,
-              runId: process.env.GITHUB_RUN_ID ?? null,
+           const merged = {
+             generatedAt: new Date().toISOString(),
+             ci: {
+               workflow: process.env.GITHUB_WORKFLOW ?? null,
+               runId: process.env.GITHUB_RUN_ID ?? null,
               runNumber: process.env.GITHUB_RUN_NUMBER ?? null,
               attempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
             },
             git: { sha: process.env.GITHUB_SHA ?? null, ref: process.env.GITHUB_REF ?? null },
-            artifacts: byArtifact,
-          };
-          
-          fs.writeFileSync(path.resolve("merged/desktop-perf-platform-matrix.json"), JSON.stringify(merged, null, 2), "utf8");
-          
-          const summaryPath = process.env.GITHUB_STEP_SUMMARY;
-          if (!summaryPath) process.exit(0);
-          
+             artifacts: byArtifact,
+           };
+           
+           fs.writeFileSync(path.resolve("merged/desktop-perf-platform-matrix.json"), JSON.stringify(merged, null, 2), "utf8");
+
           const rows = [
             { label: "Linux", artifact: "desktop-perf-ubuntu-24.04" },
             { label: "Windows", artifact: "desktop-perf-windows-2022" },
             { label: "macOS", artifact: "desktop-perf-macos-14" },
           ].map((r) => ({ ...r, data: byArtifact[r.artifact] ?? null }));
+
+          // Convert key p95 metrics into benchmark-action format for long-term trending (gh-pages).
+          // Keep metric names stable once published.
+          const bench = [];
+          function pushMetric(name, unit, value) {
+            if (typeof value !== "number" || !Number.isFinite(value)) return;
+            bench.push({ name, unit, value });
+          }
+          for (const row of rows) {
+            const os = String(row.label).trim().toLowerCase();
+            const cold = row.data?.startupCold?.summary ?? null;
+            const warm = row.data?.startupWarm?.summary ?? null;
+            const mem = row.data?.idleMemory?.summary ?? null;
+            pushMetric(`desktop.platform.${os}.startup.cold.window_visible_ms.p95`, "ms", cold?.windowVisible?.p95);
+            pushMetric(`desktop.platform.${os}.startup.cold.tti_ms.p95`, "ms", cold?.tti?.p95);
+            pushMetric(`desktop.platform.${os}.startup.warm.window_visible_ms.p95`, "ms", warm?.windowVisible?.p95);
+            pushMetric(`desktop.platform.${os}.startup.warm.tti_ms.p95`, "ms", warm?.tti?.p95);
+            if (os === "windows") {
+              pushMetric(`desktop.platform.${os}.memory.idle_working_set_mb.p95`, "mb", mem?.rssMb?.p95);
+            } else {
+              pushMetric(`desktop.platform.${os}.memory.idle_rss_mb.p95`, "mb", mem?.rssMb?.p95);
+            }
+          }
+          fs.writeFileSync(
+            path.resolve("merged/benchmark-results.desktop-perf-platform-matrix.json"),
+            JSON.stringify(bench, null, 2),
+            "utf8",
+          );
+           
+           const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+           if (!summaryPath) process.exit(0);
           
           const lines = [];
           lines.push("## Desktop perf summary (all OS)");
@@ -717,3 +745,35 @@ jobs:
           if-no-files-found: warn
           path: |
             merged/desktop-perf-platform-matrix.json
+            merged/benchmark-results.desktop-perf-platform-matrix.json
+
+  publish:
+    name: Publish desktop perf platform matrix history (gh-pages)
+    needs: [desktop-perf, merge]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    # Only scheduled runs on main should update gh-pages history.
+    if: github.repository == 'wilson-anysphere/formula' && github.ref == 'refs/heads/main' && github.event_name == 'schedule' && needs.desktop-perf.result == 'success' && needs.merge.result == 'success'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download merged perf summary artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: desktop-perf-platform-matrix
+          path: artifacts/desktop-perf-platform-matrix
+
+      - name: Publish benchmark results (non-gating)
+        uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
+        with:
+          tool: customSmallerIsBetter
+          output-file-path: artifacts/desktop-perf-platform-matrix/merged/benchmark-results.desktop-perf-platform-matrix.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '120%'
+          comment-on-alert: false
+          fail-on-alert: false
