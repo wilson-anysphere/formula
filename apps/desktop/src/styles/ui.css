@@ -792,7 +792,7 @@ a:visited {
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-3) calc(var(--space-4) + var(--space-1));
-  max-width: 360px;
+  max-width: min(360px, calc(100% - 20px));
   background: var(--formula-grid-bg, var(--bg-primary));
   border: 1px solid var(--formula-grid-line, var(--border));
   border-radius: var(--radius);
