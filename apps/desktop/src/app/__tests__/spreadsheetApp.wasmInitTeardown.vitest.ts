@@ -4,6 +4,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as engineModule from "@formula/engine";
+
+import { SpreadsheetApp } from "../spreadsheetApp";
+
 vi.mock("@formula/engine", () => ({
   createEngineClient: vi.fn(),
   engineHydrateFromDocument: vi.fn(async () => []),
@@ -125,7 +129,6 @@ describe("SpreadsheetApp WASM init teardown", () => {
   });
 
   it("terminates a still-initializing wasm engine client on dispose()", async () => {
-    const engineModule = await import("@formula/engine");
     const createEngineClient = (engineModule as any).createEngineClient as ReturnType<typeof vi.fn>;
     const engineHydrateFromDocument = (engineModule as any).engineHydrateFromDocument as ReturnType<typeof vi.fn>;
 
@@ -143,7 +146,6 @@ describe("SpreadsheetApp WASM init teardown", () => {
     };
     createEngineClient.mockReturnValue(mockEngine);
 
-    const { SpreadsheetApp } = await import("../spreadsheetApp");
     const initSpy = vi.spyOn(SpreadsheetApp.prototype as any, "initWasmEngine");
 
     const root = createRoot();

@@ -123,9 +123,9 @@ describe("SpreadsheetApp drawings debug state", () => {
 
       const state = app.getDrawingsDebugState();
       expect(state.sheetId).toBe(app.getCurrentSheetId());
-      expect(state.drawings.length).toBeGreaterThan(0);
+      expect(state.drawings.some((d) => d.kind === "image")).toBe(true);
 
-      const drawing = state.drawings[0]!;
+      const drawing = state.drawings.find((d) => d.kind === "image")!;
       expect(drawing.rectPx).not.toBeNull();
       expect(drawing.rectPx?.width).toBeGreaterThan(0);
       expect(drawing.rectPx?.height).toBeGreaterThan(0);
@@ -158,9 +158,9 @@ describe("SpreadsheetApp drawings debug state", () => {
 
       const state = app.getDrawingsDebugState();
       expect(state.sheetId).toBe(app.getCurrentSheetId());
-      expect(state.drawings.length).toBeGreaterThan(0);
+      expect(state.drawings.some((d) => d.kind === "image")).toBe(true);
 
-      const drawing = state.drawings[0]!;
+      const drawing = state.drawings.find((d) => d.kind === "image")!;
       expect(drawing.rectPx).not.toBeNull();
       expect(drawing.rectPx?.width).toBeGreaterThan(0);
       expect(drawing.rectPx?.height).toBeGreaterThan(0);
@@ -191,7 +191,8 @@ describe("SpreadsheetApp drawings debug state", () => {
       const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: "image/png" });
       await app.insertPicturesFromFiles([file], { placeAt: { row: 0, col: 0 } });
 
-      const drawingId = app.getDrawingsDebugState().drawings[0]!.id;
+      const drawingId = app.getSelectedDrawingId();
+      expect(drawingId).not.toBeNull();
       const rect1 = app.getDrawingRectPx(drawingId);
       expect(rect1).not.toBeNull();
 

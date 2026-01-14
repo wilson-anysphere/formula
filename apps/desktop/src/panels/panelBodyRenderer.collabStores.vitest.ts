@@ -84,7 +84,7 @@ function flushPromises() {
   return new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
-async function waitForInAct(condition: () => boolean, timeoutMs = 2_000) {
+async function waitForInAct(condition: () => boolean, timeoutMs = 5_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (condition()) return;

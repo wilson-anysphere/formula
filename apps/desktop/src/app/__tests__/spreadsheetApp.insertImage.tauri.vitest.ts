@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { pxToEmu } from "../../drawings/overlay";
+import { SpreadsheetApp } from "../spreadsheetApp";
 
 const mocks = vi.hoisted(() => {
   return {
@@ -161,7 +162,6 @@ describe("SpreadsheetApp insert image (Tauri picker)", () => {
       activeValue: document.createElement("div"),
     };
 
-    const { SpreadsheetApp } = await import("../spreadsheetApp");
     const app = new SpreadsheetApp(root, status);
     const sheetId = app.getCurrentSheetId();
 
