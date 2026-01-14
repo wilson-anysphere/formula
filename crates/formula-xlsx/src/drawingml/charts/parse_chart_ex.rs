@@ -1048,6 +1048,18 @@ mod tests {
     }
 
     #[test]
+    fn chart_ex_unknown_kind_diagnostic_includes_root_namespace() {
+        let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"><cx:chart/></cx:chartSpace>"#;
+        let model = parse_chart_ex(xml.as_bytes(), "unit-test").expect("parse");
+        assert!(
+            model.diagnostics.iter().any(|d| d.message
+                == "ChartEx chart kind could not be inferred (root ns=http://schemas.microsoft.com/office/drawing/2014/chartex); hints: <none>"),
+            "expected kind inference diagnostic with root namespace, got: {:#?}",
+            model.diagnostics
+        );
+    }
+
+    #[test]
     fn collect_chart_ex_kind_hints_normalizes_and_deduplicates() {
         let xml = r#"<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
   <cx:chart>
