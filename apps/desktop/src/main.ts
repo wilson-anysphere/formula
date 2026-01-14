@@ -3463,7 +3463,12 @@ function syncSheetUi(): void {
     const sheets = listSheetsForUi();
     const activeId = app.getCurrentSheetId();
     if (!sheets.some((sheet) => sheet.id === activeId)) {
-      const fallback = sheets[0]?.id ?? null;
+      // If the active sheet is missing from the visible list, prefer activating the adjacent
+      // visible sheet (Excel-like). This can happen when the active sheet is hidden/veryHidden
+      // or removed during state restores (version history, branch checkout, etc).
+      const preferred = pickAdjacentVisibleSheetId(workbookSheetStore.listAll(), activeId);
+      const fallback =
+        (preferred && sheets.some((sheet) => sheet.id === preferred) ? preferred : null) ?? sheets[0]?.id ?? null;
       if (fallback) {
         // If the active sheet is removed (eg: via version restore or branch checkout),
         // automatically switch to the first remaining sheet.
@@ -3931,7 +3936,9 @@ function installSheetStoreSubscription(): void {
     // visible sheet (not just the dropdown value). This keeps the sheet switcher + grid
     // consistent even when sheet visibility changes are initiated outside `syncSheetUi()`.
     if (!sheets.some((sheet) => sheet.id === activeId)) {
-      const fallback = sheets[0]?.id ?? null;
+      const preferred = pickAdjacentVisibleSheetId(workbookSheetStore.listAll(), activeId);
+      const fallback =
+        (preferred && sheets.some((sheet) => sheet.id === preferred) ? preferred : null) ?? sheets[0]?.id ?? null;
       if (fallback) {
         app.activateSheet(fallback);
         restoreFocusAfterSheetNavigation();
