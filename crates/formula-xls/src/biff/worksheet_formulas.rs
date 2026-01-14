@@ -157,9 +157,19 @@ pub(crate) fn parse_biff8_shrfmla_record(
     if let Ok(rgce) = parse_shrfmla_with_refu(&mut c) {
         return Ok(ParsedSharedFormulaRecord { rgce });
     }
-    // Layout B: Ref8 (8) + cUse (2) + cce (2).
-    let mut c = cursor;
+    // Layout B: RefU (6) + cce (2). Some producers omit `cUse`.
+    let mut c = cursor.clone();
+    if let Ok(rgce) = parse_shrfmla_with_refu_no_cuse(&mut c) {
+        return Ok(ParsedSharedFormulaRecord { rgce });
+    }
+    // Layout C: Ref8 (8) + cUse (2) + cce (2).
+    let mut c = cursor.clone();
     if let Ok(rgce) = parse_shrfmla_with_ref8(&mut c) {
+        return Ok(ParsedSharedFormulaRecord { rgce });
+    }
+    // Layout D: Ref8 (8) + cce (2). Some producers omit `cUse`.
+    let mut c = cursor;
+    if let Ok(rgce) = parse_shrfmla_with_ref8_no_cuse(&mut c) {
         return Ok(ParsedSharedFormulaRecord { rgce });
     }
 
@@ -636,11 +646,27 @@ fn parse_shrfmla_with_refu(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, S
     cursor.read_biff8_rgce(cce)
 }
 
+fn parse_shrfmla_with_refu_no_cuse(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
+    // ref (rwFirst:u16, rwLast:u16, colFirst:u8, colLast:u8)
+    cursor.skip_bytes(2 + 2 + 1 + 1)?;
+    // cce
+    let cce = cursor.read_u16_le()? as usize;
+    cursor.read_biff8_rgce(cce)
+}
+
 fn parse_shrfmla_with_ref8(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
     // ref (rwFirst:u16, rwLast:u16, colFirst:u16, colLast:u16)
     cursor.skip_bytes(8)?;
     // cUse
     cursor.skip_bytes(2)?;
+    let cce = cursor.read_u16_le()? as usize;
+    cursor.read_biff8_rgce(cce)
+}
+
+fn parse_shrfmla_with_ref8_no_cuse(cursor: &mut FragmentCursor<'_>) -> Result<Vec<u8>, String> {
+    // ref (rwFirst:u16, rwLast:u16, colFirst:u16, colLast:u16)
+    cursor.skip_bytes(8)?;
+    // cce
     let cce = cursor.read_u16_le()? as usize;
     cursor.read_biff8_rgce(cce)
 }
@@ -1031,6 +1057,30 @@ mod tests {
         out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         out.extend_from_slice(payload);
         out
+    }
+
+    #[test]
+    fn parses_shrfmla_record_without_cuse() {
+        // Some producers omit the `cUse` field in the SHRFMLA header, yielding:
+        //   RefU (6 bytes) + cce (u16) + rgce (cce bytes)
+        let mut payload = Vec::new();
+        // RefU: rwFirst=0, rwLast=0, colFirst=0, colLast=0.
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.push(0);
+        payload.push(0);
+        // cce=1, rgce=[0x03] (arbitrary 1-byte token with no payload).
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.push(0x03);
+
+        let stream = record(RECORD_SHRFMLA, &payload);
+        let allows_continuation = |id: u16| id == RECORD_SHRFMLA;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+        assert_eq!(record.record_id, RECORD_SHRFMLA);
+
+        let parsed = parse_biff8_shrfmla_record(&record).expect("parse shrfmla");
+        assert_eq!(parsed.rgce, vec![0x03]);
     }
 
     #[test]
