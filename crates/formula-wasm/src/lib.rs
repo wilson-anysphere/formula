@@ -1287,14 +1287,9 @@ fn pivot_subtotals_model_to_engine(
     position: formula_model::pivots::SubtotalPosition,
 ) -> pivot_engine::SubtotalPosition {
     match position {
-        formula_model::pivots::SubtotalPosition::Automatic => {
-            pivot_engine::SubtotalPosition::Automatic
-        }
+        formula_model::pivots::SubtotalPosition::None => pivot_engine::SubtotalPosition::None,
         formula_model::pivots::SubtotalPosition::Top => pivot_engine::SubtotalPosition::Top,
         formula_model::pivots::SubtotalPosition::Bottom => pivot_engine::SubtotalPosition::Bottom,
-        // `Automatic` and other variants are not currently modeled by the pivot engine; treat them
-        // as "no subtotals" for now.
-        _ => pivot_engine::SubtotalPosition::None,
     }
 }
 
