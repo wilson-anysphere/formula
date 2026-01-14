@@ -5285,7 +5285,8 @@ pub fn build_autofilter_criteria_blanks_fixture_xls() -> Vec<u8> {
 /// Build a BIFF8 `.xls` fixture like [`build_autofilter_criteria_fixture_xls`], but with
 /// `AUTOFILTER` records that use BIFF text operator codes (`contains`, `beginsWith`, `endsWith`).
 ///
-/// These are preserved as `FilterCriterion::OpaqueCustom` so they can round-trip to XLSX.
+/// These import as [`formula_model::autofilter::FilterCriterion::TextMatch`] (matching the XLSX
+/// parser) so the engine can evaluate them.
 ///
 /// The sheet is named `FilterCriteriaTextOps` and the `_xlnm._FilterDatabase` defined name points at
 /// `$A$1:$C$5`.

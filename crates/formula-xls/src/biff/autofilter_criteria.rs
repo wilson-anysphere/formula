@@ -189,9 +189,10 @@ impl AutoFilterOp {
             8 => AutoFilterOp::LessThanOrEqual,
             // Best-effort text operators (OOXML `customFilter/@operator` values).
             //
-            // These have been observed in BIFF8 AutoFilter records produced by some writers. When
-            // present, we preserve them as `OpaqueCustom` criteria so the operator round-trips to
-            // XLSX even if we do not model its semantics directly.
+            // These have been observed in BIFF8 AutoFilter records produced by some writers.
+            // Positive operators (`contains`, `beginsWith`, `endsWith`) import as `TextMatch` so the
+            // filter is evaluable by the engine; negative operators are preserved as `OpaqueCustom`
+            // so the operator/value pair can round-trip to XLSX.
             9 => AutoFilterOp::Contains,
             10 => AutoFilterOp::BeginsWith,
             11 => AutoFilterOp::EndsWith,
