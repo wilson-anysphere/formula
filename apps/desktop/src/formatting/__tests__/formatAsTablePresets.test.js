@@ -50,3 +50,15 @@ test("applyFormatAsTablePreset applies header formatting, banded rows, and outli
   assert.equal(bottomRight.border?.bottom?.color, `#${preset.borders.outlineColor}`);
   assert.equal(bottomRight.border?.right?.color, `#${preset.borders.outlineColor}`);
 });
+
+test("applyFormatAsTablePreset refuses overly large ranges (banding cap)", () => {
+  const doc = new DocumentController();
+  // Materialize the sheet so the test only measures the formatting call's history impact.
+  doc.setCellValue("Sheet1", "A1", "x");
+
+  const before = doc.history.length;
+  // 10,003 rows => floor((rows - 1) / 2) = 5,001 banded-row ops (exceeds the cap).
+  const ok = applyFormatAsTablePreset(doc, "Sheet1", { start: { row: 0, col: 0 }, end: { row: 10_002, col: 0 } }, "light");
+  assert.equal(ok, false);
+  assert.equal(doc.history.length, before);
+});

@@ -1,5 +1,6 @@
 import type { DocumentController } from "../document/documentController.js";
 import { applyOutsideBorders, type CellRange } from "./toolbar.js";
+import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT } from "./selectionSizeGuard.js";
 
 export type FormatAsTablePresetId = "light" | "medium" | "dark";
 
@@ -94,6 +95,15 @@ function fillPatch(argb: string): Record<string, any> {
 export function applyFormatAsTablePreset(doc: DocumentController, sheetId: string, range: CellRange, presetId: FormatAsTablePresetId): boolean {
   const preset = getFormatAsTablePreset(presetId);
   const { table, header, body } = computeTablePresetRanges(range);
+
+  const rowCount = table.end.row - table.start.row + 1;
+  const colCount = table.end.col - table.start.col + 1;
+  const cellCount = rowCount * colCount;
+  const maxBandedRowOps = 5_000;
+  const bandedRowOps = Math.floor(Math.max(0, rowCount - 1) / 2);
+  if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || bandedRowOps > maxBandedRowOps) {
+    return false;
+  }
 
   let applied = true;
   const label = "Format as Table";
