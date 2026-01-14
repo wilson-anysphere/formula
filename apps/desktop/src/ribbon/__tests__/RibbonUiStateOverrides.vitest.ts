@@ -354,6 +354,7 @@ describe("Ribbon UI state overrides", () => {
       "pageLayout.pageSetup.printArea.addTo",
       "pageLayout.arrange.bringForward",
       "pageLayout.arrange.sendBackward",
+      "pageLayout.arrange.selectionPane",
     ];
 
     for (const id of expected) {

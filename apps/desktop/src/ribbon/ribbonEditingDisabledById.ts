@@ -201,4 +201,8 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   // Drawing order operations should not run while the user is editing text (cell editor / formula bar).
   "pageLayout.arrange.bringForward": true,
   "pageLayout.arrange.sendBackward": true,
+  // Selection Pane opens an object management UI (including delete/reorder actions). Disable while
+  // editing to match Excel-style "edit mode" ribbon behavior and avoid leaving the cell editor active
+  // while focus moves elsewhere.
+  "pageLayout.arrange.selectionPane": true,
 };

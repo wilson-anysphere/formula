@@ -2263,6 +2263,9 @@ const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
   delete out["view.splitVertical"];
   delete out["view.splitHorizontal"];
   delete out["view.splitNone"];
+  // Selection Pane is a view panel (object list). Allow it in read-only even though other Arrange
+  // commands are disabled; sheet mutations are already guarded by permission checks.
+  delete out["pageLayout.arrange.selectionPane"];
   delete out["audit.togglePrecedents"];
   delete out["audit.toggleDependents"];
   delete out["audit.toggleTransitive"];
