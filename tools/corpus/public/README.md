@@ -53,6 +53,12 @@ Tip: you can reduce triage report size by lowering the diff entry cap:
 python -m tools.corpus.promote_public --input ... --diff-limit 10
 ```
 
+Preview what would change (no writes):
+
+```bash
+python -m tools.corpus.promote_public --input ... --dry-run
+```
+
 Optional heavier triage checks:
 
 ```bash

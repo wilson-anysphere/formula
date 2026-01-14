@@ -207,6 +207,11 @@ def main() -> int:
     )
     parser.add_argument("--public-dir", type=Path, default=Path("tools/corpus/public"))
     parser.add_argument("--force", action="store_true", help="Overwrite existing fixture/expectations.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run sanitize/leak-scan/triage and print what would change, but do not write any files.",
+    )
 
     # Safety controls
     parser.add_argument(
@@ -381,6 +386,8 @@ def main() -> int:
                                 "fixture": str(fixture_path),
                                 "expectations": str(expectations_path),
                                 "expectations_changed": False,
+                                "fixture_changed": False,
+                                "dry_run": args.dry_run,
                                 "triage_report": None,
                                 "skipped": "already_promoted",
                             },
@@ -405,23 +412,30 @@ def main() -> int:
         print(f"Triage failed: {e}")
         return 1
 
-    triage_out: Path = args.triage_out
-    ensure_dir(triage_out)
-    report_id = (report.get("sha256") or sha256_hex(workbook_bytes))[:16]
-    report_path = triage_out / f"{report_id}.json"
-    write_json(report_path, report)
+    report_path: Path | None = None
+    if not args.dry_run:
+        triage_out: Path = args.triage_out
+        ensure_dir(triage_out)
+        report_id = (report.get("sha256") or sha256_hex(workbook_bytes))[:16]
+        report_path = triage_out / f"{report_id}.json"
+        write_json(report_path, report)
 
     # 2) Validate we won't overwrite existing entries unless --force is set.
     try:
         entry = extract_public_expectations(report)
+        fixture_changed = True
+        expectations_changed = True
 
         if fixture_path.exists():
             existing_fixture_bytes = read_workbook_input(fixture_path).data
+            fixture_changed = existing_fixture_bytes != workbook_bytes
             if existing_fixture_bytes != workbook_bytes and not args.force:
                 raise FileExistsError(
                     f"Refusing to overwrite existing fixture {fixture_path} (bytes differ). "
                     "Re-run with --force to overwrite."
                 )
+        else:
+            fixture_changed = True
 
         current_expectations: dict[str, Any] = {}
         if expectations_path.exists():
@@ -431,7 +445,7 @@ def main() -> int:
                     f"Expected {expectations_path} to be a JSON object mapping names -> expectations."
                 )
 
-        _updated, _changed = upsert_expectations_entry(
+        _updated, expectations_changed = upsert_expectations_entry(
             expectations=current_expectations,
             workbook_name=display_name,
             entry=entry,
@@ -440,6 +454,22 @@ def main() -> int:
     except (FileExistsError, ValueError) as e:
         print(str(e))
         return 1
+
+    if args.dry_run:
+        print(
+            json.dumps(
+                {
+                    "fixture": str(fixture_path),
+                    "expectations": str(expectations_path),
+                    "fixture_changed": fixture_changed,
+                    "expectations_changed": expectations_changed,
+                    "dry_run": True,
+                    "triage_report": None,
+                },
+                indent=2,
+            )
+        )
+        return 0
 
     # 3) Write the public fixture and upsert expectations.json.
     try:
@@ -458,7 +488,9 @@ def main() -> int:
         "fixture": str(fixture_path),
         "expectations": str(expectations_path),
         "expectations_changed": changed,
-        "triage_report": str(report_path),
+        "fixture_changed": fixture_changed,
+        "dry_run": False,
+        "triage_report": str(report_path) if report_path else None,
     }
     print(json.dumps(summary, indent=2))
     return 0
