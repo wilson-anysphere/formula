@@ -101,3 +101,56 @@ fn preserves_shared_string_rich_runs_on_string_cells() {
     let rich = preserved.rich.as_ref().expect("preserved rich runs");
     assert_eq!(rich.runs, run_bytes);
 }
+
+#[test]
+fn preserves_shared_string_rich_run_offsets_with_surrogate_pairs() {
+    let mut builder = XlsbFixtureBuilder::new();
+
+    // Text containing a surrogate pair (😀 is 2 UTF-16 code units).
+    let text = "A😀B";
+
+    // Two StrRun entries (MS-XLSB): [ich: u32][ifnt: u16][reserved: u16]
+    // Run 0 starts at ich=0; run 1 starts at ich=3 (A=1 code unit, 😀=2).
+    let mut run_bytes = Vec::new();
+
+    run_bytes.extend_from_slice(&0u32.to_le_bytes()); // ich = 0
+    run_bytes.extend_from_slice(&0x0102u16.to_le_bytes()); // ifnt
+    run_bytes.extend_from_slice(&0x0304u16.to_le_bytes()); // reserved
+
+    run_bytes.extend_from_slice(&3u32.to_le_bytes()); // ich = 3 (after A😀)
+    run_bytes.extend_from_slice(&0x0506u16.to_le_bytes()); // ifnt
+    run_bytes.extend_from_slice(&0x0708u16.to_le_bytes()); // reserved
+
+    let sst_idx = builder.add_shared_string_with_rich_runs(text, run_bytes.clone());
+    builder.set_cell_sst(0, 0, sst_idx);
+
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let path = tmpdir.path().join("rich-surrogate.xlsb");
+    std::fs::write(&path, bytes).expect("write xlsb bytes");
+
+    let wb = XlsbWorkbook::open_with_options(
+        &path,
+        OpenOptions {
+            preserve_parsed_parts: true,
+            ..OpenOptions::default()
+        },
+    )
+    .expect("open xlsb");
+
+    let sheet = wb.read_sheet(0).expect("read sheet");
+    let a1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Text(text.to_string()));
+
+    let preserved = a1.preserved_string.as_ref().expect("preserved string");
+    let rich = preserved.rich.as_ref().expect("preserved rich runs");
+
+    // The preserved run bytes should use UTF-16 offsets (not Rust `char` indices), so the second
+    // run starts at 3.
+    assert_eq!(rich.runs, run_bytes);
+}
