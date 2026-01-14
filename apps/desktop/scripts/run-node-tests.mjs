@@ -549,6 +549,8 @@ async function filterExternalDependencyTests(files, opts) {
   /** @type {Set<string>} */
   const visiting = new Set();
   const builtins = new Set(builtinModules);
+  /** @type {Map<string, { rootDir: string, exports: any, main: string | null }> | null} */
+  let workspacePackages = null;
 
   // Treat `import type ... from "..."` / `export type ... from "..."` as *type-only* when
   // deciding whether a test can run without external deps. These statements are erased by
@@ -900,6 +902,82 @@ async function filterExternalDependencyTests(files, opts) {
           break;
         }
         continue;
+      }
+
+      // Workspace packages can still be imported directly from source even when `node_modules`
+      // is missing. Treat those as internal dependencies and recurse.
+      if (specifier.startsWith("@formula/")) {
+        const parsed = parseWorkspaceSpecifier(specifier.split("?")[0].split("#")[0]);
+        if (parsed) {
+          const pkgs = await getWorkspacePackages();
+          const info = pkgs.get(parsed.packageName);
+          if (info) {
+            const target = resolveExportPath(info.exports, parsed.exportKey, info.main);
+            if (target) {
+              const cleanedTarget =
+                target.startsWith("./") || target.startsWith("../") || target.startsWith("/")
+                  ? target
+                  : `./${target}`;
+              const basePath = path.resolve(info.rootDir, cleanedTarget.split("?")[0].split("#")[0]);
+              let resolved = null;
+
+              if (path.extname(basePath)) {
+                try {
+                  const stats = await stat(basePath);
+                  if (stats.isFile()) resolved = basePath;
+                } catch {
+                  resolved = null;
+                }
+              } else {
+                for (const ext of candidateExtensions) {
+                  const candidate = `${basePath}${ext}`;
+                  try {
+                    const stats = await stat(candidate);
+                    if (stats.isFile()) {
+                      resolved = candidate;
+                      break;
+                    }
+                  } catch {
+                    // continue
+                  }
+                }
+                if (!resolved) {
+                  try {
+                    const stats = await stat(basePath);
+                    if (stats.isDirectory()) {
+                      for (const ext of candidateExtensions) {
+                        const candidate = path.join(basePath, `index${ext}`);
+                        try {
+                          const idxStats = await stat(candidate);
+                          if (idxStats.isFile()) {
+                            resolved = candidate;
+                            break;
+                          }
+                        } catch {
+                          // continue
+                        }
+                      }
+                    }
+                  } catch {
+                    // ignore
+                  }
+                }
+              }
+
+              if (resolved) {
+                if (!opts.canStripTypes && /\.(ts|tsx)$/.test(resolved)) {
+                  hasExternal = true;
+                  break;
+                }
+                if (await fileHasExternalDependencies(resolved)) {
+                  hasExternal = true;
+                  break;
+                }
+                continue;
+              }
+            }
+          }
+        }
       }
 
       // Any other bare specifier requires external packages.

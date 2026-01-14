@@ -653,9 +653,143 @@ async function filterExternalDependencyTests(files, opts) {
     ? [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"]
     : [".js", ".ts", ".mjs", ".cjs", ".jsx", ".json"];
 
+  // When dependencies are not installed, `node_modules` may be missing (or contain only a
+  // subset of workspace links). In that scenario, `@formula/*` workspace imports can still
+  // be resolved directly from the repo source tree via `package.json` exports/main.
+  const workspacePackages = await loadWorkspacePackageEntrypoints();
+
   function isBuiltin(specifier) {
     if (specifier.startsWith("node:")) return true;
     return builtins.has(specifier);
+  }
+
+  function parseWorkspaceSpecifier(specifier) {
+    if (!specifier.startsWith("@formula/")) return null;
+    const parts = specifier.split("/");
+    if (parts.length < 2) return null;
+    const packageName = `${parts[0]}/${parts[1]}`;
+    const subpath = parts.slice(2).join("/");
+    const exportKey = subpath ? `./${subpath}` : ".";
+    return { packageName, exportKey };
+  }
+
+  /**
+   * @param {any} exportsMap
+   * @param {string} exportKey
+   * @param {string | null} main
+   */
+  function resolveExportPath(exportsMap, exportKey, main) {
+    /**
+     * @param {any} entry
+     * @returns {string | null}
+     */
+    function pickExportPath(entry) {
+      if (typeof entry === "string") return entry;
+      if (Array.isArray(entry)) {
+        for (const item of entry) {
+          const picked = pickExportPath(item);
+          if (picked) return picked;
+        }
+        return null;
+      }
+      if (entry && typeof entry === "object") {
+        // Prefer Node's default ESM condition order.
+        if (typeof entry.node === "string") return entry.node;
+        if (typeof entry.import === "string") return entry.import;
+        if (typeof entry.default === "string") return entry.default;
+        if (typeof entry.require === "string") return entry.require;
+
+        // Fall back to searching nested condition objects.
+        for (const value of Object.values(entry)) {
+          const picked = pickExportPath(value);
+          if (picked) return picked;
+        }
+      }
+      return null;
+    }
+
+    let target = null;
+    if (exportsMap) {
+      if (typeof exportsMap === "string") {
+        if (exportKey === ".") target = exportsMap;
+      } else if (exportsMap && typeof exportsMap === "object") {
+        const keys = Object.keys(exportsMap);
+        const looksLikeSubpathMap = keys.some((k) => k === "." || k.startsWith("./"));
+        if (looksLikeSubpathMap) {
+          target = pickExportPath(exportsMap?.[exportKey]);
+        } else if (exportKey === ".") {
+          target = pickExportPath(exportsMap);
+        }
+      }
+    }
+
+    // Packages without an `exports` map (like `@formula/marketplace-shared`) still allow deep
+    // imports via `@scope/pkg/<path>`.
+    if (!exportsMap && exportKey !== ".") return exportKey;
+
+    if (!target && exportKey === "." && typeof main === "string") target = main;
+    return target;
+  }
+
+  /**
+   * Resolve a workspace package import (e.g. `@formula/collab-session` or
+   * `@formula/marketplace-shared/extension-package/v2-browser.mjs`) directly from the repo.
+   *
+   * @param {string} specifier
+   * @returns {Promise<string | null>} absolute file path
+   */
+  async function resolveWorkspaceImport(specifier) {
+    const parsed = parseWorkspaceSpecifier(specifier.split("?")[0].split("#")[0]);
+    if (!parsed) return null;
+    const info = workspacePackages.get(parsed.packageName);
+    if (!info) return null;
+
+    const target = resolveExportPath(info.exports, parsed.exportKey, info.main);
+    if (!target) return null;
+
+    const cleanedTarget =
+      target.startsWith("./") || target.startsWith("../") || target.startsWith("/") ? target : `./${target}`;
+    const basePath = path.resolve(info.rootDir, cleanedTarget.split("?")[0].split("#")[0]);
+
+    if (path.extname(basePath)) {
+      try {
+        const stats = await stat(basePath);
+        if (stats.isFile()) return basePath;
+      } catch {
+        return null;
+      }
+      return null;
+    }
+
+    for (const ext of candidateExtensions) {
+      const candidate = `${basePath}${ext}`;
+      try {
+        const stats = await stat(candidate);
+        if (stats.isFile()) return candidate;
+      } catch {
+        // continue
+      }
+    }
+
+    // Directory export: try index files.
+    try {
+      const stats = await stat(basePath);
+      if (stats.isDirectory()) {
+        for (const ext of candidateExtensions) {
+          const candidate = path.join(basePath, `index${ext}`);
+          try {
+            const idxStats = await stat(candidate);
+            if (idxStats.isFile()) return candidate;
+          } catch {
+            // continue
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
   }
 
   async function nearestPackageInfo(startDir) {
@@ -914,6 +1048,23 @@ async function filterExternalDependencyTests(files, opts) {
           break;
         }
         continue;
+      }
+
+      // Workspace packages can still be imported directly from source even when `node_modules`
+      // is missing. Treat those as internal dependencies and recurse.
+      if (specifier.startsWith("@formula/")) {
+        const workspaceResolved = await resolveWorkspaceImport(specifier);
+        if (workspaceResolved) {
+          if (!opts.canStripTypes && /\.(ts|tsx)$/.test(workspaceResolved)) {
+            hasExternal = true;
+            break;
+          }
+          if (await fileHasExternalDependencies(workspaceResolved)) {
+            hasExternal = true;
+            break;
+          }
+          continue;
+        }
       }
 
       // Any other bare specifier requires external packages.
