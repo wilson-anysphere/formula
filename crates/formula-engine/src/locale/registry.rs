@@ -589,6 +589,32 @@ AVERAGE\tSOMME
     }
 
     #[test]
+    fn error_translation_rejects_extra_tsv_columns() {
+        let translations = ErrorTranslations::new("#VALUE!\t#WERT!\tEXTRA\n");
+        let err = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            translations.maps();
+        }))
+        .expect_err("expected extra TSV columns to panic");
+        let msg = panic_message(&*err);
+        assert!(msg.contains("too many columns"));
+        assert!(msg.contains("line 1"));
+        assert!(msg.contains("#VALUE!\\t#WERT!\\tEXTRA"));
+    }
+
+    #[test]
+    fn error_translation_rejects_non_error_literals() {
+        let translations = ErrorTranslations::new("VALUE\t#WERT!\n");
+        let err = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            translations.maps();
+        }))
+        .expect_err("expected non-error literal columns to panic");
+        let msg = panic_message(&*err);
+        assert!(msg.contains("expected error literals to start with '#'"));
+        assert!(msg.contains("line 1"));
+        assert!(msg.contains("VALUE\\t#WERT!"));
+    }
+
+    #[test]
     fn canonical_boolean_literal_uses_unicode_case_folding() {
         // Function translation keys use Unicode-aware uppercasing for case-insensitive matching.
         // Boolean keyword translation should behave the same so locales with non-ASCII spellings
