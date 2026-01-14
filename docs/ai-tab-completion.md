@@ -97,10 +97,16 @@ The engine consumes a `CompletionContext` (see `packages/ai-completion/src/tabCo
           - When no enum/heuristic suggestions apply, the engine falls back to **nested function-name completion**
             at the cursor (still enforcing the formula bar’s “pure insertion” constraint).
             - Example: `=IF(VLO` → `=IF(VLOOKUP(`
-           - This fallback is intentionally conservative (it requires ≥2 typed characters) to avoid noisy completions
-             in cases like unquoted string-unit args (e.g. `DATEDIF(..., d`).
+            - This fallback is intentionally conservative (it requires ≥2 typed characters) to avoid noisy completions
+              in cases like unquoted string-unit args (e.g. `DATEDIF(..., d`).
+          - When the user has already typed a **complete literal or reference** (so there’s nothing left to “complete”),
+            `suggestArgumentValues()` may still offer a low-confidence **auto-close parens** suggestion when the function
+            could be complete after the current argument:
+            - `=ABS(A1` → `=ABS(A1)`
+            - `=ABS(5` → `=ABS(5)`
+            - `=TEXT(A1,"yyyy-mm-dd"` → `=TEXT(A1,"yyyy-mm-dd")`
 
-   **B. Pattern-based (local value repetition)**
+    **B. Pattern-based (local value repetition)**
    - Implemented by `getPatternSuggestions()`.
    - Only active for non-formula input (`!parsed.isFormula`).
    - Uses `suggestPatternValues()` to scan nearby cells for repeated strings that match the typed prefix.

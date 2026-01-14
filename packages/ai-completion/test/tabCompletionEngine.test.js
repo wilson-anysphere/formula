@@ -1606,6 +1606,74 @@ test("Typing =SUM('My Sheet'!A1 suggests auto-closing parens without needing sch
   );
 });
 
+test("Typing =ABS(A1 suggests auto-closing parens for a value arg cell reference", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ABS(A1";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=ABS(A1)"),
+    `Expected ABS to suggest closing parens after a cell reference, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =ABS(5 suggests auto-closing parens for a numeric literal", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ABS(5";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=ABS(5)"),
+    `Expected ABS to suggest closing parens after a numeric literal, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test('Typing =TEXT(A1,"yyyy-mm-dd" suggests auto-closing parens after a complete string enum', async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=TEXT(A1,"yyyy-mm-dd"';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({ A1: 1 }),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXT(A1,"yyyy-mm-dd")'),
+    `Expected TEXT to suggest closing parens after a complete string enum, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =VLOOKUP(..., TRUE suggests auto-closing parens after a complete boolean literal", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=VLOOKUP(A1, A1:A10, 2, TRUE";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({ A1: 1 }),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=VLOOKUP(A1, A1:A10, 2, TRUE)"),
+    `Expected VLOOKUP to suggest closing parens after TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Auto-closing parens is not suggested when the function needs more args (VLOOKUP)", async () => {
   const engine = new TabCompletionEngine();
 

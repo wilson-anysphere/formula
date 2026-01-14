@@ -1114,6 +1114,7 @@ export class TabCompletionEngine {
     const argIndex = parsed.argIndex ?? 0;
     const fnSpec = fnName ? this.functionRegistry.getFunction(fnName) : undefined;
     const argType = this.functionRegistry.getArgType(fnName, argIndex) ?? "any";
+    const functionCouldBeComplete = functionCouldBeCompleteAfterArg(fnSpec, argIndex);
 
     const spanStart = parsed.currentArg?.start ?? cursor;
     const spanEnd = parsed.currentArg?.end ?? cursor;
@@ -1148,6 +1149,31 @@ export class TabCompletionEngine {
         // Only complete tokens that are actually inside the current argument span.
         if (token.start < spanStart || token.end > spanEnd) return [];
         return this.suggestFunctionNames(context, token);
+      } catch {
+        return [];
+      }
+    };
+
+    const autoCloseSuggestions = () => {
+      try {
+        if (cursor !== input.length) return [];
+        if (!functionCouldBeComplete) return [];
+        if (!innerPrefix.trim()) return [];
+        // Do not auto-close inside unterminated strings / quoted sheet names / structured refs.
+        if (isInUnclosedDoubleQuotedString(innerPrefix)) return [];
+        if (findUnclosedSheetQuoteStart(innerPrefix) !== null) return [];
+        if (findOpenStructuredRefTokenStart(innerPrefix) !== null) return [];
+        if (!looksLikeCompleteRangeOrCellArg(innerPrefix) && !looksLikeCompleteLiteralArg(innerPrefix)) return [];
+        const closed = closeUnbalancedParens(input);
+        if (closed === input) return [];
+        return [
+          {
+            text: closed,
+            displayText: closed,
+            type: "function_arg",
+            confidence: 0.25,
+          },
+        ];
       } catch {
         return [];
       }
@@ -1200,6 +1226,9 @@ export class TabCompletionEngine {
       // Preserve typed casing (e.g. "t" -> "true", "T" -> "TRUE") without
       // rewriting the user's already-typed characters.
       const replacement = completeIdentifier(rawReplacement, typedPrefix);
+      // If the user already typed the full replacement, don't emit a no-op suggestion.
+      // (The desktop formula bar ignores these because they don't insert any ghost text.)
+      if (replacement.length <= typedPrefix.length) return;
       const displayText = entry.displayText ?? replacement;
       suggestions.push({
         text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${replacement}`),
@@ -1236,14 +1265,18 @@ export class TabCompletionEngine {
       if (enumEntries?.length) {
         for (const entry of enumEntries) addReplacement(entry);
         const out = dedupeSuggestions(suggestions);
-        return out.length > 0 ? out : fallbackFunctionSuggestions();
+        if (out.length > 0) return out;
+        const closed = autoCloseSuggestions();
+        return closed.length > 0 ? closed : fallbackFunctionSuggestions();
       }
 
       for (const boolLiteral of ["TRUE", "FALSE"]) {
         addReplacement({ replacement: boolLiteral, confidence: 0.5 });
       }
       const out = dedupeSuggestions(suggestions);
-      return out.length > 0 ? out : fallbackFunctionSuggestions();
+      if (out.length > 0) return out;
+      const closed = autoCloseSuggestions();
+      return closed.length > 0 ? closed : fallbackFunctionSuggestions();
     }
 
     if (argType === "number") {
@@ -1251,14 +1284,18 @@ export class TabCompletionEngine {
       if (enumEntries?.length) {
         for (const entry of enumEntries) addReplacement(entry);
         const out = dedupeSuggestions(suggestions);
-        return out.length > 0 ? out : fallbackFunctionSuggestions();
+        if (out.length > 0) return out;
+        const closed = autoCloseSuggestions();
+        return closed.length > 0 ? closed : fallbackFunctionSuggestions();
       }
 
       for (const n of ["1", "0"]) {
         addReplacement({ replacement: n, confidence: 0.4 });
       }
       const out = dedupeSuggestions(suggestions);
-      return out.length > 0 ? out : fallbackFunctionSuggestions();
+      if (out.length > 0) return out;
+      const closed = autoCloseSuggestions();
+      return closed.length > 0 ? closed : fallbackFunctionSuggestions();
     }
 
     if (argType === "string") {
@@ -1266,9 +1303,12 @@ export class TabCompletionEngine {
       if (enumEntries?.length) {
         for (const entry of enumEntries) addReplacement(entry);
         const out = dedupeSuggestions(suggestions);
-        return out.length > 0 ? out : fallbackFunctionSuggestions();
+        if (out.length > 0) return out;
+        const closed = autoCloseSuggestions();
+        return closed.length > 0 ? closed : fallbackFunctionSuggestions();
       }
-      return fallbackFunctionSuggestions();
+      const closed = autoCloseSuggestions();
+      return closed.length > 0 ? closed : fallbackFunctionSuggestions();
     }
 
     if (argType === "value") {
@@ -1288,10 +1328,13 @@ export class TabCompletionEngine {
           });
         }
       }
-      return suggestions.length > 0 ? suggestions : fallbackFunctionSuggestions();
+      if (suggestions.length > 0) return suggestions;
+      const closed = autoCloseSuggestions();
+      return closed.length > 0 ? closed : fallbackFunctionSuggestions();
     }
 
-    return fallbackFunctionSuggestions();
+    const closed = autoCloseSuggestions();
+    return closed.length > 0 ? closed : fallbackFunctionSuggestions();
   }
 
   /**
@@ -2763,6 +2806,21 @@ function looksLikeCompleteRangeOrCellArg(text) {
     looksLikeCompleteA1CellArg(rangeText) ||
     looksLikeCompleteColumnRangeArg(rangeText)
   );
+}
+
+function looksLikeCompleteLiteralArg(text) {
+  if (typeof text !== "string") return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const upper = trimmed.toUpperCase();
+  if (upper === "TRUE" || upper === "FALSE") return true;
+  // Conservative number literal check (supports integers, decimals, and scientific notation).
+  // Intentionally reject trailing-dot forms like "1." to avoid auto-closing while the user
+  // is still typing a decimal.
+  if (/^[+\-]?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?$/.test(trimmed)) return true;
+  // Closed string literal: starts/ends with quotes and is not unterminated.
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && !isInUnclosedDoubleQuotedString(trimmed)) return true;
+  return false;
 }
 
 /**
