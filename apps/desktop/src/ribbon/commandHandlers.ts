@@ -140,8 +140,10 @@ function stepDecimalPlacesInNumberFormat(format: string | null, direction: "incr
   const raw = (format ?? "").trim();
   const section = (raw.split(";")[0] ?? "").trim();
   const lower = section.toLowerCase();
+  const compact = lower.replace(/\s+/g, "");
   // Avoid trying to manipulate date/time format codes.
-  if (lower.includes("m/d/yyyy") || lower.includes("yyyy-mm-dd")) return null;
+  if (compact.includes("m/d/yyyy") || compact.includes("yyyy-mm-dd")) return null;
+  if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact)) return null;
 
   const currencyMatch = /[$€£¥]/.exec(section);
   const prefix = currencyMatch?.[0] ?? "";
@@ -508,12 +510,23 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
       ctx.applyFormattingToSelection("Number format", (_doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"));
       return true;
     }
-    if (kind === "percentage") {
+    if (kind === "percent" || kind === "percentage") {
       ctx.applyFormattingToSelection("Number format", (_doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"));
       return true;
     }
-    if (kind === "shortDate" || kind === "longDate") {
+    if (kind === "date" || kind === "shortDate") {
       ctx.applyFormattingToSelection("Number format", (_doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"));
+      return true;
+    }
+    if (kind === "longDate") {
+      ctx.applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+        let applied = true;
+        for (const range of ranges) {
+          const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "yyyy-mm-dd" }, { label: "Number format" });
+          if (ok === false) applied = false;
+        }
+        return applied;
+      });
       return true;
     }
     if (kind === "time") {
@@ -521,6 +534,30 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
         let applied = true;
         for (const range of ranges) {
           const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "h:mm:ss" }, { label: "Number format" });
+          if (ok === false) applied = false;
+        }
+        return applied;
+      });
+      return true;
+    }
+    if (kind === "commaStyle") {
+      ctx.applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+        let applied = true;
+        for (const range of ranges) {
+          const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "#,##0.00" }, { label: "Number format" });
+          if (ok === false) applied = false;
+        }
+        return applied;
+      });
+      return true;
+    }
+    if (kind === "increaseDecimal" || kind === "decreaseDecimal") {
+      const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(ctx), kind === "increaseDecimal" ? "increase" : "decrease");
+      if (!next) return true;
+      ctx.applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+        let applied = true;
+        for (const range of ranges) {
+          const ok = doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
           if (ok === false) applied = false;
         }
         return applied;

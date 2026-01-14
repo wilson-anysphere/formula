@@ -34,6 +34,8 @@ describe("handleRibbonCommand", () => {
     expect(handleRibbonCommand(ctx, "format.toggleBold")).toBe(true);
     expect(handleRibbonCommand(ctx, "format.fillColor.yellow")).toBe(true);
     expect(handleRibbonCommand(ctx, "format.numberFormat.number")).toBe(true);
+    expect(handleRibbonCommand(ctx, "format.numberFormat.percent")).toBe(true);
+    expect(handleRibbonCommand(ctx, "format.numberFormat.longDate")).toBe(true);
   });
 
   it("toggles bold", () => {
@@ -64,6 +66,29 @@ describe("handleRibbonCommand", () => {
 
     const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 });
     expect(style.numberFormat).toBe("0.00");
+  });
+
+  it("applies long date format", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+
+    handleRibbonCommand(ctx, "format.numberFormat.longDate");
+
+    const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 });
+    expect(style.numberFormat).toBe("yyyy-mm-dd");
+  });
+
+  it("does not adjust decimals for time-only formats", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+
+    handleRibbonCommand(ctx, "format.numberFormat.time");
+    expect(doc.getCellFormat("Sheet1", { row: 0, col: 0 }).numberFormat).toBe("h:mm:ss");
+
+    handleRibbonCommand(ctx, "format.numberFormat.increaseDecimal");
+
+    const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 });
+    expect(style.numberFormat).toBe("h:mm:ss");
   });
 
   it("returns false for unknown commands", () => {
