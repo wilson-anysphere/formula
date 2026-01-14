@@ -394,6 +394,7 @@ This section documents the “wiring points” for hosts.
   - Style ids are workbook-global; `0` is always the default/empty style.
 
 - Column metadata (`CELL("width")`):
+  - `EngineClient.setSheetDefaultColWidth(sheet, widthChars)` to set the sheet default width used for columns without explicit overrides (`null` clears back to Excel’s standard `8.43`).
   - `EngineClient.setColWidthChars(sheet, col, widthChars)` (preferred) or `EngineClient.setColWidth(col, widthChars, sheet)`
     - widths are in Excel “character” units (OOXML `col/@width`), not pixels
   - `EngineClient.setColHidden(col, hidden, sheet)` to set the explicit hidden flag
