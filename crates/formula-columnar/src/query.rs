@@ -298,13 +298,25 @@ fn eval_filter_expr(table: &ColumnarTable, expr: &FilterExpr) -> Result<BitVec, 
     match expr {
         FilterExpr::And(left, right) => {
             let mut left_mask = eval_filter_expr(table, left)?;
+            if left_mask.count_ones() == 0 {
+                return Ok(left_mask);
+            }
             let right_mask = eval_filter_expr(table, right)?;
+            if right_mask.all_true() {
+                return Ok(left_mask);
+            }
             left_mask.and_inplace(&right_mask);
             Ok(left_mask)
         }
         FilterExpr::Or(left, right) => {
             let mut left_mask = eval_filter_expr(table, left)?;
+            if left_mask.all_true() {
+                return Ok(left_mask);
+            }
             let right_mask = eval_filter_expr(table, right)?;
+            if right_mask.count_ones() == 0 {
+                return Ok(left_mask);
+            }
             left_mask.or_inplace(&right_mask);
             Ok(left_mask)
         }
@@ -505,6 +517,11 @@ fn eval_filter_string(
         return Ok(BitVec::with_len_all_false(rows));
     }
 
+    // Fast path: inequality against a string not in the dictionary matches all non-null rows.
+    if matches!(op, CmpOp::Ne) && target.is_none() {
+        return eval_filter_is_null(table, col, false);
+    }
+
     let mut out = BitVec::with_capacity_bits(rows);
     for (chunk_idx, chunk) in chunks.iter().enumerate() {
         let base = chunk_idx * page;
@@ -549,6 +566,25 @@ fn eval_filter_is_null(table: &ColumnarTable, col: usize, is_null: bool) -> Resu
             col,
             column_count: table.column_count(),
         });
+    }
+
+    if let Some(stats) = table.stats(col) {
+        let nulls = stats.null_count as usize;
+        let rows = table.row_count();
+        if nulls == 0 {
+            return Ok(if is_null {
+                BitVec::with_len_all_false(rows)
+            } else {
+                BitVec::with_len_all_true(rows)
+            });
+        }
+        if nulls == rows {
+            return Ok(if is_null {
+                BitVec::with_len_all_true(rows)
+            } else {
+                BitVec::with_len_all_false(rows)
+            });
+        }
     }
 
     let chunks = table
