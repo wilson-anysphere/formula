@@ -4124,6 +4124,13 @@ export class SpreadsheetApp {
 
   destroy(): void {
     this.disposed = true;
+    // Cancel any in-progress inline-edit runs promptly so a destroyed SpreadsheetApp
+    // doesn't stay referenced by tool/LLM work.
+    try {
+      this.inlineEditController.close();
+    } catch {
+      // ignore
+    }
     // Cancel in-flight AI work promptly so destroyed SpreadsheetApp instances don't stay
     // referenced by long-running LLM requests (tests/hot reload/multi-document flows).
     try {

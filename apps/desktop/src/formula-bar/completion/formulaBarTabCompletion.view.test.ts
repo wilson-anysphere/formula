@@ -10,6 +10,69 @@ import { FormulaBarTabCompletionController } from "../../ai/completion/formulaBa
 import { getLocale, setLocale } from "../../i18n/index.js";
 
 describe("FormulaBarView tab completion (integration)", () => {
+  it("aborts in-flight backend completions on destroy()", async () => {
+    const doc = new DocumentController();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    let observedSignal: AbortSignal | undefined;
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      completionClient: {
+        completeTabCompletion: vi.fn((req: any) => {
+          observedSignal = req?.signal as AbortSignal | undefined;
+          return new Promise((_resolve, reject) => {
+            const signal = req?.signal as AbortSignal | undefined;
+            if (!signal) {
+              reject(new Error("missing abort signal"));
+              return;
+            }
+            if (signal.aborted) {
+              reject(signal.reason ?? new Error("aborted"));
+              return;
+            }
+            signal.addEventListener(
+              "abort",
+              () => {
+                reject(signal.reason ?? new Error("aborted"));
+              },
+              { once: true },
+            );
+          });
+        }),
+      },
+    });
+
+    try {
+      view.focus({ cursor: "end" });
+      view.textarea.value = "=1+";
+      view.textarea.setSelectionRange(3, 3);
+      view.textarea.dispatchEvent(new Event("input"));
+
+      // Wait for the backend request to be initiated (the client sees the signal).
+      for (let i = 0; i < 10 && !observedSignal; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+
+      expect(observedSignal).toBeDefined();
+      expect(observedSignal?.aborted).toBe(false);
+
+      completion.destroy();
+      expect(observedSignal?.aborted).toBe(true);
+      // Ensure no suggestion is applied after teardown.
+      expect(view.model.aiSuggestion()).toBeNull();
+    } finally {
+      completion.destroy();
+      host.remove();
+    }
+  });
+
   it("caps preview evaluation cell reads (MAX_CELL_READS) for large formulas", async () => {
     const doc = new DocumentController();
     // Preview evaluation intentionally avoids materializing sheets in an empty workbook.

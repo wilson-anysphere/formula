@@ -78,6 +78,8 @@ export class FormulaBarTabCompletionController {
   #cellsVersion = 0;
   #completionRequest = 0;
   #pendingCompletion: Promise<void> | null = null;
+  #abort: AbortController | null = null;
+  #destroyed = false;
 
   readonly #unsubscribe: Array<() => void> = [];
 
@@ -183,6 +185,22 @@ export class FormulaBarTabCompletionController {
   }
 
   destroy(): void {
+    if (this.#destroyed) return;
+    this.#destroyed = true;
+    // Invalidate any in-flight request so stale results can't apply after teardown.
+    this.#completionRequest += 1;
+    try {
+      this.#abort?.abort();
+    } catch {
+      // ignore
+    }
+    this.#abort = null;
+    this.#pendingCompletion = null;
+    try {
+      this.#formulaBar.setAiSuggestion(null);
+    } catch {
+      // ignore
+    }
     for (const stop of this.#unsubscribe.splice(0)) stop();
   }
 
@@ -197,11 +215,20 @@ export class FormulaBarTabCompletionController {
   }
 
   update(): void {
+    if (this.#destroyed) return;
     const model = this.#formulaBar.model;
 
     // Invalidate any in-flight request so stale results can't re-apply a ghost
     // after the user changes selection, commits, cancels, etc.
     const requestId = ++this.#completionRequest;
+    if (this.#abort) {
+      try {
+        this.#abort.abort();
+      } catch {
+        // ignore
+      }
+      this.#abort = null;
+    }
 
     if (!model.isEditing) {
       this.#formulaBar.setAiSuggestion(null);
@@ -274,6 +301,9 @@ export class FormulaBarTabCompletionController {
       getCacheKey: () => `${sheetId}:${cellsVersion}`,
     };
 
+    const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+    this.#abort = abortController;
+
     this.#pendingCompletion = this.#completion
       .getSuggestions(
         {
@@ -291,9 +321,11 @@ export class FormulaBarTabCompletionController {
             sheetNameResolver: this.#sheetNameResolver,
             getWorkbookFileMetadata: this.#getWorkbookFileMetadata,
           }),
+          ...(abortController ? { signal: abortController.signal } : {}),
         },
       )
       .then((suggestions) => {
+        if (this.#destroyed) return;
         if (requestId !== this.#completionRequest) return;
         if (this.#getSheetId() !== sheetId) return;
         if (!model.isEditing) return;
@@ -309,6 +341,7 @@ export class FormulaBarTabCompletionController {
         this.#formulaBar.setAiSuggestion(best ? { text: best.text, preview: best.preview } : null);
       })
       .catch(() => {
+        if (this.#destroyed) return;
         if (requestId !== this.#completionRequest) return;
         this.#formulaBar.setAiSuggestion(null);
       });
