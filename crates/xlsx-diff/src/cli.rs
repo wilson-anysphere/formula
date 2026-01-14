@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use globset::Glob;
 use serde::Serialize;
@@ -31,11 +31,15 @@ pub struct Args {
     #[arg(long)]
     password: Option<String>,
 
-    /// Password for the original workbook (if encrypted). Overrides `--password`.
+    /// Read the password from a file (trailing newlines are trimmed).
+    #[arg(long, value_name = "PATH", conflicts_with = "password")]
+    password_file: Option<PathBuf>,
+
+    /// Password for the original workbook (if encrypted). Overrides `--password`/`--password-file`.
     #[arg(long = "original-password")]
     original_password: Option<String>,
 
-    /// Password for the modified workbook (if encrypted). Overrides `--password`.
+    /// Password for the modified workbook (if encrypted). Overrides `--password`/`--password-file`.
     #[arg(long = "modified-password")]
     modified_password: Option<String>,
 
@@ -180,14 +184,22 @@ pub fn run_with_args(args: Args) -> Result<()> {
         }
     }
 
+    let shared_password = if let Some(path) = args.password_file.as_deref() {
+        let value = std::fs::read_to_string(path)
+            .with_context(|| format!("read password file {}", path.display()))?;
+        Some(value.trim_end_matches(&['\r', '\n'][..]).to_string())
+    } else {
+        args.password.clone()
+    };
+
     let original_pw = args
         .original_password
         .as_deref()
-        .or(args.password.as_deref());
+        .or(shared_password.as_deref());
     let modified_pw = args
         .modified_password
         .as_deref()
-        .or(args.password.as_deref());
+        .or(shared_password.as_deref());
 
     let mut report = crate::diff_workbooks_with_inputs_and_options(
         DiffInput {

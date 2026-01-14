@@ -62,6 +62,31 @@ fn cli_succeeds_with_password() {
 }
 
 #[test]
+fn cli_succeeds_with_password_file() {
+    let plain = fixture_path("plaintext.xlsx");
+    let encrypted = fixture_path("agile.xlsx");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let pw_path = tmp.path().join("password.txt");
+    std::fs::write(&pw_path, format!("{PASSWORD}\n")).expect("write password file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&plain)
+        .arg(&encrypted)
+        .arg("--password-file")
+        .arg(&pw_path)
+        .output()
+        .expect("run xlsx-diff");
+
+    assert!(
+        output.status.success(),
+        "expected exit 0\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+#[test]
 fn cli_original_password_overrides_shared_password() {
     let plain = fixture_path("plaintext.xlsx");
     let encrypted = fixture_path("agile.xlsx");
@@ -110,4 +135,3 @@ fn cli_modified_password_overrides_shared_password() {
         String::from_utf8_lossy(&output.stderr),
     );
 }
-
