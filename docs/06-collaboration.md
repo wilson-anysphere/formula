@@ -274,6 +274,11 @@ This decode is intentionally best-effort and does **not** replace server-side ve
 - mask unreadable cells immediately (before remote updates arrive), and
 - proactively disable edits that the server would drop anyway.
 
+Because the JWT payload is unverified and therefore untrusted, desktop treats `rangeRestrictions` defensively:
+`CollabSession.setPermissions(...)` will throw if any restriction fails validation, and the desktop app will
+fall back to dropping invalid restrictions (and, as a last resort, continuing with safe defaults) rather than
+crashing on startup.
+
 Fallback for opaque / non-JWT tokens:
 
 - If the token is missing or does not look like a JWT payload (or decoding fails), desktop treats the token as **opaque** and falls back to:
