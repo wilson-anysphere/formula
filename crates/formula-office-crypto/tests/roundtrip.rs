@@ -50,6 +50,28 @@ fn roundtrip_standard_rc4_md5_encryption() {
     let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
     assert_eq!(decrypted, plaintext);
     assert_zip_contains_workbook_xml(&decrypted);
+
+    let err = decrypt_encrypted_package_ole(&ole_bytes, "wrong-password").expect_err("wrong pw");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+}
+
+#[test]
+fn roundtrip_standard_rc4_40bit_encryption() {
+    let password = "password";
+    let plaintext = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/basic.xlsx"
+    ));
+    let ole_bytes =
+        encrypt_standard_rc4_ooxml_ole_with_key_bits(plaintext, password, Rc4HashAlgorithm::Sha1, 40);
+    assert!(is_encrypted_ooxml_ole(&ole_bytes));
+
+    let decrypted = decrypt_encrypted_package_ole(&ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+    assert_zip_contains_workbook_xml(&decrypted);
+
+    let err = decrypt_encrypted_package_ole(&ole_bytes, "wrong-password").expect_err("wrong pw");
+    assert!(matches!(err, OfficeCryptoError::InvalidPassword));
 }
 
 #[test]
@@ -259,7 +281,23 @@ fn encrypt_standard_rc4_ooxml_ole(
     hash_alg: Rc4HashAlgorithm,
     verifier_trailing_len: usize,
 ) -> Vec<u8> {
-    encrypt_standard_rc4_ooxml_ole_inner(plaintext, password, hash_alg, None, verifier_trailing_len)
+    encrypt_standard_rc4_ooxml_ole_inner(
+        plaintext,
+        password,
+        hash_alg,
+        128,
+        None,
+        verifier_trailing_len,
+    )
+}
+
+fn encrypt_standard_rc4_ooxml_ole_with_key_bits(
+    plaintext: &[u8],
+    password: &str,
+    hash_alg: Rc4HashAlgorithm,
+    key_bits: u32,
+) -> Vec<u8> {
+    encrypt_standard_rc4_ooxml_ole_inner(plaintext, password, hash_alg, key_bits, None, 0)
 }
 
 fn encrypt_standard_rc4_ooxml_ole_with_overridden_verifier_hash_size(
@@ -272,6 +310,7 @@ fn encrypt_standard_rc4_ooxml_ole_with_overridden_verifier_hash_size(
         plaintext,
         password,
         hash_alg,
+        128,
         Some(verifier_hash_size_override),
         0,
     )
@@ -281,12 +320,13 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     plaintext: &[u8],
     password: &str,
     hash_alg: Rc4HashAlgorithm,
+    key_bits: u32,
     verifier_hash_size_override: Option<u32>,
     verifier_trailing_len: usize,
 ) -> Vec<u8> {
     // Deterministic parameters (not intended to be secure).
     let salt: Vec<u8> = (0u8..=0x0F).collect();
-    let key_bits = 128u32;
+    assert_eq!(key_bits % 8, 0, "key_bits must be byte-aligned");
     let key_len = (key_bits / 8) as usize;
 
     // Derive spun password hash + block 0 key.
@@ -295,22 +335,36 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     // Test vectors (lock down derivation for both SHA1 and MD5).
     if hash_alg == Rc4HashAlgorithm::Sha1 {
         let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
-        assert_eq!(
-            key0,
-            hex_decode("6ad7dedf2da3514b1d85eabee069d47d"),
-            "SHA1 block0 key vector mismatch"
-        );
+        let expected = match key_bits {
+            40 => hex_decode("6ad7dedf2d"),
+            128 => hex_decode("6ad7dedf2da3514b1d85eabee069d47d"),
+            _ => panic!("no SHA1 test vector for keyBits={key_bits}"),
+        };
+        assert_eq!(key0, expected, "SHA1 block0 key vector mismatch");
     }
     if hash_alg == Rc4HashAlgorithm::Md5 {
         let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
+        let expected = match key_bits {
+            40 => hex_decode("69badcae24"),
+            128 => hex_decode("69badcae244868e209d4e053ccd2a3bc"),
+            _ => panic!("no MD5 test vector for keyBits={key_bits}"),
+        };
         assert_eq!(
             key0,
-            hex_decode("69badcae244868e209d4e053ccd2a3bc"),
+            expected,
             "MD5 block0 key vector mismatch"
         );
     }
 
     let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
+    let rc4_key0: Vec<u8> = if key_bits == 40 {
+        assert_eq!(key0.len(), 5, "40-bit RC4 key must be 5 bytes");
+        let mut padded = vec![0u8; 16];
+        padded[..5].copy_from_slice(&key0);
+        padded
+    } else {
+        key0.clone()
+    };
 
     // Build EncryptionVerifier.
     let verifier_plain: [u8; 16] = [
@@ -329,7 +383,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
         verifier_buf.extend_from_slice(&verifier_hash);
         verifier_buf.resize(16 + verifier_hash_size as usize, 0);
     }
-    rc4_apply(&key0, &mut verifier_buf);
+    rc4_apply(&rc4_key0, &mut verifier_buf);
     let encrypted_verifier = &verifier_buf[..16];
     let encrypted_verifier_hash = &verifier_buf[16..];
 
@@ -382,7 +436,14 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     let mut block_index: u32 = 0;
     for chunk in ciphertext.chunks_mut(0x200) {
         let key = standard_rc4_derive_key(hash_alg, &spun, key_len, block_index);
-        rc4_apply(&key, chunk);
+        if key_bits == 40 {
+            assert_eq!(key.len(), 5, "40-bit RC4 key must be 5 bytes");
+            let mut padded = vec![0u8; 16];
+            padded[..5].copy_from_slice(&key);
+            rc4_apply(&padded, chunk);
+        } else {
+            rc4_apply(&key, chunk);
+        }
         block_index = block_index.checked_add(1).expect("block counter overflow");
     }
 
