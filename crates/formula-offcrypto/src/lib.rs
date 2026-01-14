@@ -2376,16 +2376,28 @@ pub fn standard_verify_key(
     aes_ecb_decrypt_in_place(key, &mut verifier[..])?;
     let expected_hash: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&verifier[..]));
 
-    let mut verifier_hash: Zeroizing<Vec<u8>> =
-        Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
-    aes_ecb_decrypt_in_place(key, &mut verifier_hash[..])?;
-    if verifier_hash.len() < SHA1_LEN {
+    let encrypted_verifier_hash = info.verifier.encrypted_verifier_hash.as_slice();
+    // `encryptedVerifierHash` is AES-ECB ciphertext, so it must be block-aligned.
+    if encrypted_verifier_hash.len() % 16 != 0 {
+        return Err(OffcryptoError::InvalidCiphertextLength {
+            len: encrypted_verifier_hash.len(),
+        });
+    }
+    // SHA1 hashes are 20 bytes, padded to an AES block boundary (16) => 32 bytes. We only need
+    // the first 20 bytes post-decryption, but we must decrypt at least 32 bytes to cover them.
+    if encrypted_verifier_hash.len() < 32 {
         return Err(OffcryptoError::InvalidVerifierHashLength {
-            len: verifier_hash.len(),
+            len: encrypted_verifier_hash.len(),
         });
     }
 
-    if util::ct_eq(&expected_hash[..], &verifier_hash[..SHA1_LEN]) {
+    // Avoid allocating for the common/expected case (`encryptedVerifierHash` is 32 bytes). Decrypt
+    // only the first 2 blocks; extra padding blocks (if present) are ignored for verification.
+    let mut verifier_hash_buf: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
+    verifier_hash_buf[..].copy_from_slice(&encrypted_verifier_hash[..32]);
+    aes_ecb_decrypt_in_place(key, &mut verifier_hash_buf[..])?;
+
+    if util::ct_eq(&expected_hash[..], &verifier_hash_buf[..SHA1_LEN]) {
         Ok(())
     } else {
         Err(OffcryptoError::InvalidPassword)
