@@ -1376,8 +1376,11 @@ Core types ([`solver/mod.rs`](../crates/formula-engine/src/solver/mod.rs)):
 - `Objective` / `ObjectiveKind` — maximize/minimize/target (with `targetValue` + `targetTolerance`)
 - `VarSpec` / `VarType` — bounds + variable domain (`Continuous | Integer | Binary`)
 - `Constraint` / `Relation` — constraint index + relation + RHS (+ tolerance)
+- `SolveMethod` — method selection (`Simplex | GrgNonlinear | Evolutionary`)
 - `SolveOptions` — method selection, iteration limit, numeric tolerance, method-specific options, optional progress callback.
+- `Progress` — progress snapshot sent to the callback (`iteration`, objectives, constraint violation).
 - `SolveOutcome` / `SolveStatus` — solution + status (`Optimal | Feasible | Infeasible | Unbounded | IterationLimit | Cancelled`)
+- `SolverError` — error type returned for invalid problems/models or engine/model failures.
 - Method-specific option structs (re-exported from `solver/mod.rs`):
   - `SimplexOptions` ([`solver/simplex.rs`](../crates/formula-engine/src/solver/simplex.rs))
   - `GrgOptions` ([`solver/grg.rs`](../crates/formula-engine/src/solver/grg.rs))
@@ -1522,8 +1525,15 @@ Validation + edge cases (Rust behavior):
   - `VarType::Binary`: bounds are forced to `[0, 1]` regardless of input.
 - Simplex-specific:
   - If a variable has a non-finite lower bound, simplex treats it as `0.0` (Excel-like “Assume Non-Negative” default).
-  - Simplex infers a linear model by finite differences at the starting point; if the objective or any constraint is non-finite during inference it returns a `SolverError` (not a partial outcome).
+    - If `upper` is finite and `< 0` after this normalization, simplex returns `SolveStatus::Infeasible` with `bestVars: []` (not a `SolverError`).
+  - Simplex infers a linear model by finite differences at the starting point. Non-finite objective/constraint values during inference fail fast with a `SolverError` message like:
+    - `"objective is not finite at the starting point (...); simplex requires a valid linear model"`
+    - `"constraint {idx} is not finite at the starting point (...); simplex requires a valid linear model"`
+    - `"objective is not finite while inferring coefficient for var {j} (...)"`
+    - `"constraint {idx} is not finite while inferring coefficient for var {j} (...)"`
 - GRG-specific: only `Continuous` variables participate in the gradient; integer/binary vars are effectively held fixed (use Simplex or Evolutionary for mixed-integer problems).
+- Evolutionary-specific:
+  - For variables with unbounded/infinite limits (`lower=-Infinity` or `upper=Infinity`), the evolutionary method uses a heuristic finite search window around the starting value (`center ± 10`) when generating random candidates and mutations. For meaningful global search, hosts should provide finite bounds.
 - Progress + cancellation:
   - `SolveOptions.progress` returns `false` to cancel; solver returns `SolveStatus::Cancelled`.
     - `bestVars` contains the best solution found so far when available; it may be empty if the solver cancels before finding *any* feasible solution (notably for `Simplex`).
@@ -1551,7 +1561,9 @@ Validation + edge cases (Rust behavior):
         - `"invalid cell reference '<input>': missing address"` (e.g. `"Sheet1!"`)
         - `"invalid cell reference '<input>': missing sheet name"` (e.g. `"!A1"`)
     - Note: `EngineSolverModel` does **not** validate that the address portion is a syntactically-valid A1 reference (it stores it as a string).
-      - Invalid A1 strings will be read as `#REF!` by the engine and then handled by the numeric coercion rules below.
+      - The engine will treat invalid addresses as `#REF!`.
+      - Because decision variables are read **strictly** at construction time, an invalid variable address will typically surface as a `SolverError("cell Sheet!<addr> is not numeric (value: #REF!)")` during `EngineSolverModel::new`.
+      - Invalid objective/constraint addresses are read as `NaN` and then handled by the solver’s non-finite penalties.
     - A future `formula-wasm` binding will likely mirror `goalSeek` and accept A1 addresses without `Sheet!` prefixes, using a separate `sheet` field as the default sheet.
   - Numeric coercion:
     - Decision variables are read **strictly** at construction time:
