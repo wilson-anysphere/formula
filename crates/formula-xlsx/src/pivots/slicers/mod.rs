@@ -861,8 +861,11 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             .ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;
         let parsed = parse_slicer_xml(xml)?;
 
+        // Best-effort: malformed `.rels` parts should not prevent slicer discovery.
         let cache_part = match parsed.cache_rid.as_deref() {
-            Some(rid) => resolve_relationship_target(package, &part_name, rid)?,
+            Some(rid) => resolve_relationship_target(package, &part_name, rid)
+                .ok()
+                .flatten(),
             None => None,
         };
 
@@ -916,8 +919,11 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             .ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;
         let parsed = parse_timeline_xml(xml)?;
 
+        // Best-effort: malformed `.rels` parts should not prevent timeline discovery.
         let cache_part = match parsed.cache_rid.as_deref() {
-            Some(rid) => resolve_relationship_target(package, &part_name, rid)?,
+            Some(rid) => resolve_relationship_target(package, &part_name, rid)
+                .ok()
+                .flatten(),
             None => None,
         };
 
@@ -2187,10 +2193,8 @@ mod engine_filter_field_tests {
             available_items: Vec::new(),
             selected_items: None,
         };
-
         let actual =
             slicer_selection_to_engine_filter_field_with_resolver("Region", &selection, |_| None);
-
         let expected = formula_engine::pivot::FilterField {
             source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
             allowed: None,
