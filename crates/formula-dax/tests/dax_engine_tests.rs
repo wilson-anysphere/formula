@@ -429,6 +429,32 @@ fn calculate_keepfilters_preserves_existing_filters_for_boolean_expressions() {
 }
 
 #[test]
+fn calculate_keepfilters_boolean_filter_evaluates_like_ordinary_filter_arg() {
+    let mut model = build_model();
+    model
+        .add_measure("Range Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "Keep Range After Clear",
+            "CALCULATE([Range Sales], ALL(Orders[Amount]), KEEPFILTERS(Orders[Amount] > 7 && Orders[Amount] < 20))",
+        )
+        .unwrap();
+
+    let amount_20 =
+        FilterContext::empty().with_column_equals("Orders", "Amount", Value::from(20.0));
+
+    // The boolean filter inside KEEPFILTERS should be evaluated the same way as an ordinary
+    // boolean CALCULATE filter argument (i.e., not restricted by the existing Orders[Amount]
+    // filter). Since ALL(Orders[Amount]) clears the existing Amount filter, the final result
+    // should be the full range (10 + 8 = 18), not BLANK.
+    assert_eq!(
+        model.evaluate_measure("Keep Range After Clear", &amount_20).unwrap(),
+        18.0.into()
+    );
+}
+
+#[test]
 fn calculate_keepfilters_on_table_expression_preserves_existing_table_filters() {
     let mut model = build_model();
     model

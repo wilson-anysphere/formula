@@ -2078,8 +2078,14 @@ impl DaxEngine {
             // removed.
             let mut base_filter = eval_filter.clone();
             for key in &referenced_columns {
+                // Evaluate the boolean filter expression in the same context as an ordinary
+                // CALCULATE filter argument (replacement semantics): ignore any existing filters
+                // on the referenced columns when determining candidate rows.
+                //
+                // `KEEPFILTERS` changes *application* semantics (intersection vs replacement),
+                // but should not change how the inner filter is evaluated.
+                base_filter.column_filters.remove(key);
                 if !keep_filters {
-                    base_filter.column_filters.remove(key);
                     clear_columns.insert(key.clone());
                 }
             }
