@@ -1,5 +1,4 @@
 import { FormulaBarModel } from "./FormulaBarModel.js";
-import { type ErrorExplanation } from "./errors.js";
 import { type RangeAddress } from "../spreadsheet/a1.js";
 import {
   assignFormulaReferenceColors,
@@ -21,7 +20,7 @@ type FixFormulaErrorWithAiInfo = {
   /** The current formula bar draft (may differ from `input` while editing). */
   draft: string;
   value: unknown;
-  explanation: ErrorExplanation;
+  explanation: NonNullable<ReturnType<FormulaBarModel["errorExplanation"]>>;
 };
 
 type FormulaReferenceHighlight = {

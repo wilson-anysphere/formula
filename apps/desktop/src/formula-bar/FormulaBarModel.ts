@@ -1,4 +1,4 @@
-import { explainFormulaError, type ErrorExplanation } from "./errors.js";
+import { explainFormulaError } from "./errors.js";
 import { getFunctionCallContext } from "./highlight/functionContext.js";
 import { getFunctionSignature, signatureParts, type FunctionSignature } from "./highlight/functionSignatures.js";
 import { rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
@@ -325,7 +325,7 @@ export class FormulaBarModel {
     };
   }
 
-  errorExplanation(): ErrorExplanation | null {
+  errorExplanation(): ReturnType<typeof explainFormulaError> {
     return explainFormulaError(this.#activeCell.value);
   }
 

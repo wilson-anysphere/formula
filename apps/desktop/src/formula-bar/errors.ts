@@ -1,4 +1,4 @@
-export type ErrorExplanation = {
+type ErrorExplanation = {
   code: string;
   title: string;
   description: string;
