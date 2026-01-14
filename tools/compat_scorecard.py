@@ -413,8 +413,9 @@ def main() -> int:
         choices=[_PRIVACY_PUBLIC, _PRIVACY_PRIVATE],
         default=_PRIVACY_PUBLIC,
         help=(
-            "Control redaction of outputs. `public` preserves run URLs; `private` hashes non-"
-            "`github.com` run URLs (e.g. GitHub Enterprise Server domains)."
+            "Control redaction of outputs. `private` hashes non-`github.com` run URLs (e.g. GitHub "
+            "Enterprise Server domains) and hashes absolute filesystem paths embedded in inputs "
+            "(e.g. oracle expectedPath/actualPath). Repo-relative paths are preserved."
         ),
     )
     parser.add_argument(

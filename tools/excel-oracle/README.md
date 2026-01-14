@@ -197,6 +197,10 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -OutPath tests/compatibility/excel-oracle/datasets/excel-oracle.json
 ```
 
+Note: the generated dataset includes `caseSet.path` metadata. If you pass an absolute `-CasesPath`,
+the script normalizes it to a portable, privacy-safe relative path (when it can detect a repo-relative
+suffix like `tests/...` or `tools/...`).
+
 Tip: pass `-DryRun` to see how many cases would be selected by the tag filters / `-MaxCases` without starting Excel.
 
 To generate only a subset of cases (by tag):
@@ -473,6 +477,15 @@ From repo root:
 python tools/excel-oracle/compat_gate.py
 ```
 
+For defense in depth when generating reports in less-trusted environments, you can enable privacy mode:
+
+```bash
+python tools/excel-oracle/compat_gate.py --privacy-mode private
+```
+
+This hashes absolute filesystem paths embedded in the mismatch report (for example Windows paths with
+usernames). Repo-relative paths remain readable.
+
 The gate supports tier presets:
 
 ```bash
@@ -524,6 +537,16 @@ python tools/excel-oracle/compare.py \
   --actual tests/compatibility/excel-oracle/datasets/engine-results.json \
   --report tests/compatibility/excel-oracle/reports/mismatch-report.json
 ```
+
+If you are generating reports on a machine where paths may include sensitive usernames/mount points,
+use:
+
+```bash
+python tools/excel-oracle/compare.py --privacy-mode private ...
+```
+
+In `privacy-mode=private`, absolute filesystem paths in the report metadata are hashed; relative paths
+are preserved.
 
 To preview how many cases would be compared (after tag filtering / `--max-cases`) without writing a report file, use:
 
