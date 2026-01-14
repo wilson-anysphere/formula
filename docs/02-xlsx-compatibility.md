@@ -357,6 +357,11 @@ Notes:
 | `t="e"` | Error | Error string (#VALUE!, etc.) |
 | `t="d"` | Date (typed) | ISO-8601 text in `<v>`.<br>Excel should interpret as a date serial for calculation.<br>Round-trip must preserve `t` and the original ISO string. |
 
+Implementation note (Formula): `formula-xlsx` currently treats `t="d"` as an *opaque* cell type and
+stores the value as a plain string in the workbook model, while preserving the original `t` + raw
+`<v>` text in round-trip metadata. This lets us rewrite `sheetData` without corrupting typed date
+cells (see `crates/formula-xlsx/src/write/mod.rs`).
+
 #### Tables (`xl/tables/table*.xml`)
 
 Excel “tables” (ListObjects) are stored in separate parts like `xl/tables/table1.xml` and linked from
@@ -1274,6 +1279,10 @@ preserved byte-for-byte on round-trip unless the user explicitly edits protectio
 current writer this falls under the general “patch in place” strategy in
 `crates/formula-xlsx/src/write/mod.rs`: if we aren’t changing sheet protection, we should avoid
 rewriting `<sheetProtection>` so we don’t drop unmodeled attributes.
+
+If we *do* rewrite `<sheetProtection>` (because protection settings changed), we currently emit only
+the legacy `password="ABCD"` hash and modeled allow-list flags, so modern hashing attributes will be
+lost.
 
 ### Relationship ID Preservation
 
