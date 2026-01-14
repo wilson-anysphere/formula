@@ -258,6 +258,14 @@ function buildDesktop({ env, buildFrontend = true } = {}) {
   // eslint-disable-next-line no-console
   console.log("[perf-desktop] Building desktop binary (target/release/formula-desktop)...");
   const pkg = detectDesktopPackageName();
+  // `scripts/cargo_agent.sh` defaults `CARGO_PROFILE_RELEASE_CODEGEN_UNITS` based on its job count
+  // for stability on multi-agent hosts. For perf + size measurements we want a binary that matches
+  // the repo's Cargo.toml release profile (`codegen-units = 1`), so default it here (callers can
+  // still override via the environment).
+  const buildEnv = {
+    ...env,
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS: env.CARGO_PROFILE_RELEASE_CODEGEN_UNITS || "1",
+  };
   run(
     "bash",
     [
@@ -271,7 +279,7 @@ function buildDesktop({ env, buildFrontend = true } = {}) {
       "--features",
       "desktop",
     ],
-    { env },
+    { env: buildEnv },
   );
 }
 
