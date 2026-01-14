@@ -77,6 +77,18 @@ fn canonicalize_and_localize_more_function_names_for_de_de() {
         "=_xlfn.XVERWEIS(\"a\";A1:A2;B1:B2)",
     );
 
+    // Plain (non-`_xlfn.`) dynamic-array functions with localized German names.
+    assert_roundtrip("=UNIQUE(A1:A3)", "=EINDEUTIG(A1:A3)");
+    assert_roundtrip("=SORT(A1:A3)", "=SORTIEREN(A1:A3)");
+    assert_roundtrip("=DROP(A1:A3,1)", "=WEGLASSEN(A1:A3;1)");
+    assert_roundtrip("=TOCOL(A1:B2,1)", "=ZUSPALTE(A1:B2;1)");
+    assert_roundtrip("=TOROW(A1:B2,1)", "=ZUZEILE(A1:B2;1)");
+    assert_roundtrip(
+        "=XLOOKUP(1,A1:A3,B1:B3)",
+        "=XVERWEIS(1;A1:A3;B1:B3)",
+    );
+    assert_roundtrip("=IMAGE(\"https://example.com\")", "=BILD(\"https://example.com\")");
+
     // TRUE()/FALSE() as functions (not just boolean literals).
     assert_roundtrip("=TRUE()", "=WAHR()");
     assert_roundtrip("=FALSE()", "=FALSCH()");
