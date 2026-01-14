@@ -268,10 +268,7 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     );
 
     expect(((app.getDocument() as any).getSheetDrawings?.(sheetId) ?? [])).toHaveLength(0);
-
-    const insertedImageId = (setSpy.mock.calls[0]?.[0] as any)?.id;
-    expect(typeof insertedImageId).toBe("string");
-    expect(images.get(insertedImageId)).toBeUndefined();
+    expect(setSpy).not.toHaveBeenCalled();
 
     app.destroy();
     root.remove();

@@ -50,7 +50,7 @@ import {
 } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { duplicateSelected as duplicateDrawingSelected } from "../drawings/commands";
-import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFromFile } from "../drawings/insertImage";
+import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFromBytes } from "../drawings/insertImage";
 import { pickLocalImageFiles } from "../drawings/pickLocalImageFiles.js";
 import { MAX_INSERT_IMAGE_BYTES } from "../drawings/insertImageLimits.js";
 import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
@@ -9564,22 +9564,59 @@ export class SpreadsheetApp {
     const canInsertDrawing = typeof docAny.insertDrawing === "function";
 
     try {
-      const { objects: combinedObjects, image } = await insertImageFromFile(file, {
-        imageId,
-        anchor,
-        objects: existingObjects,
-        images: this.drawingImages,
-      });
+      const readFileBytes = async (file: File): Promise<Uint8Array> => {
+        const anyFile = file as any;
+        if (typeof anyFile?.arrayBuffer === "function") {
+          const buffer: ArrayBuffer = await anyFile.arrayBuffer();
+          return new Uint8Array(buffer);
+        }
 
-      const inserted = combinedObjects[combinedObjects.length - 1];
-      if (!inserted) {
+        const FileReaderCtor = (globalThis as any)?.FileReader as typeof FileReader | undefined;
+        if (typeof FileReaderCtor === "function") {
+          return await new Promise((resolve, reject) => {
+            const reader = new FileReaderCtor();
+            reader.onload = () => {
+              const result = reader.result;
+              if (result instanceof ArrayBuffer) {
+                resolve(new Uint8Array(result));
+                return;
+              }
+              reject(new Error("FileReader did not return an ArrayBuffer"));
+            };
+            reader.onerror = () => reject(reader.error ?? new Error("Failed to read file bytes"));
+            try {
+              reader.readAsArrayBuffer(file);
+            } catch (err) {
+              reject(err);
+            }
+          });
+        }
+
+        const ResponseCtor = (globalThis as any)?.Response as typeof Response | undefined;
+        if (typeof ResponseCtor === "function") {
+          const buffer = await new ResponseCtor(file as any).arrayBuffer();
+          return new Uint8Array(buffer);
+        }
+
+        throw new Error("Unable to read file bytes: File.arrayBuffer/FileReader/Response unavailable");
+      };
+
+      const bytes = await readFileBytes(file);
+      if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
+        const mb = Math.round(MAX_INSERT_IMAGE_BYTES / 1024 / 1024);
+        try {
+          showToast(`Image too large (>${mb}MB). Choose a smaller file.`, "warning");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        this.focus();
         return;
       }
 
-      // Guard against PNG decompression bombs: small compressed files can still decode into huge bitmaps.
+      // Guard against PNG decompression bombs: small compressed bytes can still decode into huge bitmaps.
       // We already cap raw bytes via `MAX_INSERT_IMAGE_BYTES`; also cap pixel dimensions for common formats
       // we can cheaply inspect without decoding.
-      const dims = readPngDimensions(image.bytes);
+      const dims = readPngDimensions(bytes);
       if (dims) {
         const MAX_DIMENSION = 10_000;
         const MAX_PIXELS = 50_000_000;
@@ -9589,15 +9626,27 @@ export class SpreadsheetApp {
           } catch {
             // `showToast` requires a #toast-root; unit tests don't always include it.
           }
-          // Remove the stored bytes since we won't insert the drawing.
-          try {
-            this.drawingImages.delete(image.id);
-          } catch {
-            // ignore
-          }
           this.focus();
           return;
         }
+      }
+
+      const mimeType =
+        typeof (file as any)?.type === "string" && String((file as any).type).trim()
+          ? String((file as any).type).trim()
+          : inferMimeTypeFromId(imageId, bytes);
+
+      const { objects: combinedObjects, image } = insertImageFromBytes(bytes, {
+        imageId,
+        mimeType,
+        anchor,
+        objects: existingObjects,
+        images: this.drawingImages,
+      });
+
+      const inserted = combinedObjects[combinedObjects.length - 1];
+      if (!inserted) {
+        return;
       }
 
       // Prefer placing the new object on top of existing drawings.
