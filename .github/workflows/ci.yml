@@ -14,6 +14,9 @@ env:
   # Keep in sync with the `tauri` dependency pinned in Cargo.lock (and the pinned
   # TAURI_CLI_VERSION in release.yml) so CI catches toolchain drift early.
   TAURI_CLI_VERSION: 2.9.5
+  # Opt-in: bundle Pyodide assets into `apps/desktop/dist` (otherwise Pyodide is downloaded
+  # on-demand at runtime and cached in the app data directory).
+  FORMULA_BUNDLE_PYODIDE_ASSETS: ${{ vars.FORMULA_BUNDLE_PYODIDE_ASSETS }}
 
 jobs:
   conflict-marker-guard:
@@ -335,6 +338,7 @@ jobs:
 
       - name: Detect Pyodide version (for caching)
         id: pyodide
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1'
         shell: bash
         run: |
           set -euo pipefail
@@ -343,16 +347,18 @@ jobs:
 
       - name: Restore Pyodide asset cache
         id: pyodide-cache
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
 
       - name: Ensure Pyodide assets are present
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1'
         run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
 
       - name: Save Pyodide asset cache
-        if: steps.pyodide-cache.outputs.cache-hit != 'true'
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1' && steps.pyodide-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/

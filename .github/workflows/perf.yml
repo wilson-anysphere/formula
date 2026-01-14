@@ -23,6 +23,9 @@ env:
   # Keep in sync with release.yml/ci.yml so performance runs don't break when
   # wasm-pack publishes a new incompatible version.
   WASM_PACK_VERSION: 0.13.1
+  # Opt-in: bundle Pyodide assets into `apps/desktop/dist` (otherwise Pyodide is downloaded
+  # on-demand at runtime and cached in the app data directory).
+  FORMULA_BUNDLE_PYODIDE_ASSETS: ${{ vars.FORMULA_BUNDLE_PYODIDE_ASSETS }}
 
 jobs:
   conflict-marker-guard:
@@ -159,7 +162,7 @@ jobs:
           fi
 
       - name: Detect Pyodide version (for caching)
-        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1' && steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         id: pyodide
         shell: bash
         run: |
@@ -168,7 +171,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Restore Pyodide asset cache
-        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1' && steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         id: pyodide-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -176,11 +179,11 @@ jobs:
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
 
       - name: Ensure Pyodide assets are present
-        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1' && steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full'
         run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
 
       - name: Save Pyodide asset cache
-        if: steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.pyodide-cache.outputs.cache-hit != 'true'
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1' && steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.pyodide-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/

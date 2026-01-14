@@ -55,6 +55,9 @@ env:
   # Keep these in sync with ci.yml/release.yml to reduce cross-workflow drift.
   NODE_VERSION: 22
   WASM_PACK_VERSION: 0.13.1
+  # Opt-in: bundle Pyodide assets into `apps/desktop/dist` (otherwise Pyodide is downloaded
+  # on-demand at runtime and cached in the app data directory).
+  FORMULA_BUNDLE_PYODIDE_ASSETS: ${{ vars.FORMULA_BUNDLE_PYODIDE_ASSETS }}
   # This workflow is for tracking/visibility, not gating. Force bench enforcement off even if
   # repo/organization variables set these for other workflows.
   FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH: "0"
@@ -254,6 +257,7 @@ jobs:
 
       - name: Detect Pyodide version (for caching)
         id: pyodide
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1'
         shell: bash
         run: |
           set -euo pipefail
@@ -262,16 +266,18 @@ jobs:
 
       - name: Restore Pyodide asset cache
         id: pyodide-cache
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
           key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
 
       - name: Ensure Pyodide assets are present
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1'
         run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
 
       - name: Save Pyodide asset cache
-        if: steps.pyodide-cache.outputs.cache-hit != 'true'
+        if: env.FORMULA_BUNDLE_PYODIDE_ASSETS == '1' && steps.pyodide-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
