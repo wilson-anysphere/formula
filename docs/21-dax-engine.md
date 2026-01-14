@@ -156,9 +156,26 @@ Internally, `DataModel` materializes two indices (`RelationshipInfo`):
   `RowSet` is an internal compact representation:
   - `RowSet::One(row)` for the common unique-key case (no allocation)
   - `RowSet::Many(Vec<row>)` when a key matches multiple `to_table` rows (many-to-many)
-- `from_index: HashMap<Value, Vec<usize>>` mapping **from_table key → from_table row indices**
+- `from_index: Option<HashMap<Value, Vec<usize>>>` mapping **from_table key → from_table row indices**
+  (only materialized for in-memory fact tables; for columnar fact tables it stays `None` and the engine
+  relies on backend primitives like `filter_eq` / `filter_in` instead)
+- `unmatched_fact_rows: Option<Vec<usize>>` containing **from_table rows whose foreign key is `BLANK` or
+  does not exist in `to_index`** (used for the virtual blank row behavior when `from_index` is not
+  materialized)
 
-These indices are built eagerly when the relationship is added, and updated on `DataModel::insert_row(...)`.
+These indices are built eagerly when the relationship is added. For in-memory tables,
+`DataModel::insert_row(...)` updates `to_index` and `from_index` incrementally (columnar tables are
+immutable and do not support row insertion).
+
+### Relationship join column type validation
+
+When a relationship is added, `DataModel` validates that the join columns have compatible types
+(`DaxError::RelationshipJoinColumnTypeMismatch`).
+
+- Columnar tables use the declared column types; `Number`/`DateTime`/`Currency`/`Percentage` are all
+  considered “numeric-like” and compatible with each other.
+- In-memory tables infer the join type by scanning up to 1,000 rows for the first non-blank value.
+  (If a type cannot be inferred, validation is skipped to avoid false positives for empty tables.)
 
 ### Cardinality
 
