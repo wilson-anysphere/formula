@@ -4279,6 +4279,20 @@ where
                 return map_value(&Value::Error(ErrorKind::Ref), f);
             }
 
+            // This function materializes/iterates the range, so record the referenced rectangle
+            // once for dynamic dependency tracing (avoid per-cell events).
+            grid.record_reference(
+                grid.sheet_id(),
+                CellCoord {
+                    row: resolved.row_start,
+                    col: resolved.col_start,
+                },
+                CellCoord {
+                    row: resolved.row_end,
+                    col: resolved.col_end,
+                },
+            );
+
             if resolved.rows() == 1 && resolved.cols() == 1 {
                 let v = grid.get_value(CellCoord {
                     row: resolved.row_start,
@@ -4327,6 +4341,19 @@ where
             if !range_in_bounds_on_sheet(grid, area.sheet, resolved) {
                 return map_value(&Value::Error(ErrorKind::Ref), f);
             }
+
+            // Record the referenced rectangle once for dynamic dependency tracing.
+            grid.record_reference(
+                area.sheet,
+                CellCoord {
+                    row: resolved.row_start,
+                    col: resolved.col_start,
+                },
+                CellCoord {
+                    row: resolved.row_end,
+                    col: resolved.col_end,
+                },
+            );
 
             if resolved.rows() == 1 && resolved.cols() == 1 {
                 let v = grid.get_value_on_sheet(
@@ -4438,10 +4465,14 @@ fn fn_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Value::Range(r) => {
             let resolved = r.resolve(base);
             if resolved.rows() == 1 && resolved.cols() == 1 {
-                let v = grid.get_value(CellCoord {
+                let coord = CellCoord {
                     row: resolved.row_start,
                     col: resolved.col_start,
-                });
+                };
+                if grid.in_bounds(coord) {
+                    grid.record_reference(grid.sheet_id(), coord, coord);
+                }
+                let v = grid.get_value(coord);
                 type_code_for_scalar(&v)
             } else {
                 64
@@ -4452,12 +4483,16 @@ fn fn_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             [only] => {
                 let resolved = only.range.resolve(base);
                 if resolved.rows() == 1 && resolved.cols() == 1 {
+                    let coord = CellCoord {
+                        row: resolved.row_start,
+                        col: resolved.col_start,
+                    };
+                    if grid.in_bounds_on_sheet(only.sheet, coord) {
+                        grid.record_reference(only.sheet, coord, coord);
+                    }
                     let v = grid.get_value_on_sheet(
                         only.sheet,
-                        CellCoord {
-                            row: resolved.row_start,
-                            col: resolved.col_start,
-                        },
+                        coord,
                     );
                     type_code_for_scalar(&v)
                 } else {
@@ -11907,6 +11942,76 @@ mod tests {
                     CellCoord { row: 1, col: 0 }
                 )
             ]
+        );
+    }
+
+    #[test]
+    fn bytecode_dependency_trace_isblank_records_reference() {
+        let grid = TracingGrid::default();
+
+        let range = RangeRef::new(
+            Ref::new(0, 0, true, true), // A1
+            Ref::new(1, 0, true, true), // A2
+        );
+        let base = CellCoord::new(0, 0);
+        let _ = fn_isblank(&[Value::Range(range)], &grid, base);
+
+        let trace = grid.trace.lock().unwrap().clone();
+        assert_eq!(
+            trace,
+            vec![(
+                0,
+                CellCoord { row: 0, col: 0 },
+                CellCoord { row: 1, col: 0 }
+            )]
+        );
+    }
+
+    #[test]
+    fn bytecode_dependency_trace_isblank_multirange_records_reference() {
+        let grid = TracingGrid::default();
+
+        let range = RangeRef::new(
+            Ref::new(0, 0, true, true), // A1
+            Ref::new(1, 0, true, true), // A2
+        );
+        let area = SheetRangeRef::new(3, range);
+        let mr = MultiRangeRef::new(Arc::from([area]));
+        let base = CellCoord::new(0, 0);
+        let _ = fn_isblank(&[Value::MultiRange(mr)], &grid, base);
+
+        let trace = grid.trace.lock().unwrap().clone();
+        assert_eq!(
+            trace,
+            vec![(
+                3,
+                CellCoord { row: 0, col: 0 },
+                CellCoord { row: 1, col: 0 }
+            )]
+        );
+    }
+
+    #[test]
+    fn bytecode_dependency_trace_type_single_cell_records_reference() {
+        let mut grid = TracingGrid::default();
+        grid.values.insert((0, 0), Value::Number(3.0));
+
+        let range = RangeRef::new(
+            Ref::new(0, 0, true, true), // A1
+            Ref::new(0, 0, true, true), // A1
+        );
+        let base = CellCoord::new(0, 0);
+        let out = fn_type(&[Value::Range(range)], &grid, base);
+        assert_eq!(out, Value::Number(1.0));
+
+        let trace = grid.trace.lock().unwrap().clone();
+        assert_eq!(
+            trace,
+            vec![(
+                0,
+                CellCoord { row: 0, col: 0 },
+                CellCoord { row: 0, col: 0 }
+            )]
         );
     }
 

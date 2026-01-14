@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 mod model;
@@ -17,6 +17,88 @@ pub use model::{
 
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
+
+/// Layout mode for a pivot table.
+///
+/// This is part of the canonical, serde-friendly pivot model used across IPC / persistence.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Layout {
+    /// Excel's default compact form.
+    #[default]
+    Compact,
+    /// Tabular form (one column per row field).
+    Tabular,
+    /// Outline form (grouped fields in a hierarchy).
+    Outline,
+}
+
+/// Where subtotals are displayed for each row/column field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtotalPosition {
+    /// Excel default behavior.
+    #[default]
+    Automatic,
+    /// No subtotals.
+    None,
+    /// Subtotals shown at the top of each group.
+    Top,
+    /// Subtotals shown at the bottom of each group.
+    Bottom,
+}
+
+/// Whether grand totals are enabled for pivot rows/columns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrandTotals {
+    pub rows: bool,
+    pub columns: bool,
+}
+
+impl Default for GrandTotals {
+    fn default() -> Self {
+        Self {
+            rows: true,
+            columns: true,
+        }
+    }
+}
+
+/// Filter configuration for a pivot field.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterField {
+    pub source_field: String,
+    /// Allowed items for this filter. `None` means no filtering (all items allowed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<HashSet<PivotKeyPart>>,
+}
+
+/// Canonical pivot configuration stored alongside a pivot table definition.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotConfig {
+    #[serde(default)]
+    pub row_fields: Vec<PivotField>,
+    #[serde(default)]
+    pub column_fields: Vec<PivotField>,
+    #[serde(default)]
+    pub value_fields: Vec<ValueField>,
+    #[serde(default)]
+    pub filter_fields: Vec<FilterField>,
+    // Backward compat: these fields were added later; missing keys should decode to empty vectors.
+    #[serde(default)]
+    pub calculated_fields: Vec<CalculatedField>,
+    #[serde(default)]
+    pub calculated_items: Vec<CalculatedItem>,
+    #[serde(default)]
+    pub layout: Layout,
+    #[serde(default)]
+    pub subtotals: SubtotalPosition,
+    #[serde(default)]
+    pub grand_totals: GrandTotals,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
