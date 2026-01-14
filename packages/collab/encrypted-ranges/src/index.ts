@@ -716,11 +716,17 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
     let sheetName: string | null = null;
 
     const matchesSheet = (rangeSheetId: string): boolean => {
+      // Stable sheet id match (case-insensitive for resilience to legacy/case-mismatched ids).
       if (rangeSheetId === sheetId) return true;
+      if (rangeSheetId.toLowerCase() === sheetId.toLowerCase()) return true;
       // Legacy support: older clients stored `sheetName` instead of the stable
       // workbook sheet id. Match those entries against the current sheet name.
       sheetName ??= resolveSheetName(sheetId);
-      return Boolean(sheetName) && rangeSheetId === sheetName;
+      if (!sheetName) return false;
+      return (
+        normalizeSheetNameForCaseInsensitiveCompare(rangeSheetId) ===
+        normalizeSheetNameForCaseInsensitiveCompare(sheetName)
+      );
     };
 
     const raw = metadata.get(METADATA_KEY);
