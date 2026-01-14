@@ -434,20 +434,8 @@ export function getTextRoot(doc: Y.Doc, name: string): Y.Text {
 
 function patchYTextContentPrototypes(text: any): void {
   if (!(text instanceof Y.Text)) return;
-  const protosByRef = getYTextContentPrototypesByRef();
   for (let n = (text as any)?._start ?? null; n !== null; n = n.right) {
-    const content = n?.content;
-    if (!content || typeof content !== "object" || typeof content.getRef !== "function") continue;
-    const ref = content.getRef();
-    if (typeof ref !== "number") continue;
-    const proto = protosByRef.get(ref);
-    if (!proto) continue;
-    if (Object.getPrototypeOf(content) === proto) continue;
-    try {
-      Object.setPrototypeOf(content, proto);
-    } catch {
-      // Ignore: non-extensible content objects (unexpected).
-    }
+    patchForeignContentConstructor(n?.content);
   }
 }
 
