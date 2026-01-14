@@ -41,3 +41,18 @@ fn pivot_field_ref_display_quotes_dax_keywords() {
     };
     assert_eq!(in_kw.to_string(), "'in'[Amount]");
 }
+
+#[test]
+fn pivot_field_ref_display_quotes_non_identifier_table_names() {
+    let leading_digit = PivotFieldRef::DataModelColumn {
+        table: "123Sales".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(leading_digit.to_string(), "'123Sales'[Amount]");
+
+    let punct = PivotFieldRef::DataModelColumn {
+        table: "Sales-2024".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(punct.to_string(), "'Sales-2024'[Amount]");
+}
