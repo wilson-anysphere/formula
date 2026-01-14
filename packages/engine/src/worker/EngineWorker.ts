@@ -1236,6 +1236,17 @@ export class EngineWorker {
         if (pending.signal && pending.abortListener) {
           pending.signal.removeEventListener("abort", pending.abortListener);
         }
+        // If the port throws on `postMessage`, it's commonly because the port/worker was already
+        // closed/terminated. Treat this as fatal so any other pending RPCs don't hang forever.
+        //
+        // One exception: DataCloneError indicates the caller attempted to send an unserializable
+        // payload. Reject the single request without tearing down the whole transport so callers
+        // can recover by sending a valid message.
+        const errName = (err as any)?.name;
+        const isDataCloneError = errName === "DataCloneError";
+        if (!isDataCloneError) {
+          this.shutdown(err instanceof Error ? err : new Error(String(err)));
+        }
         reject(err);
       }
     });

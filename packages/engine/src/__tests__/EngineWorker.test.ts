@@ -21,6 +21,9 @@ class MockMessagePort {
   }
 
   postMessage(message: unknown, transfer?: Transferable[]): void {
+    if (this.closed) {
+      throw new Error("MockMessagePort: postMessage after close()");
+    }
     this.sent.push({ message, transfer });
     queueMicrotask(() => {
       this.other?.dispatchMessage(message);
@@ -539,6 +542,47 @@ describe("EngineWorker RPC", () => {
     (channel.port1 as unknown as MockMessagePort).dispatchMessageError();
 
     await expectation;
+    expect(worker.terminated).toBe(true);
+  });
+
+  it("rejects all pending RPCs when MessagePort.postMessage throws (e.g. port closed)", async () => {
+    class NoResponseWorker implements WorkerLike {
+      terminated = false;
+      private port: MockMessagePort | null = null;
+
+      postMessage(message: unknown): void {
+        const init = message as InitMessage;
+        if (!init || typeof init !== "object" || (init as any).type !== "init") return;
+        this.port = init.port as unknown as MockMessagePort;
+        this.port.addEventListener("message", () => {});
+        this.port.postMessage({ type: "ready" } as WorkerOutboundMessage);
+      }
+
+      terminate(): void {
+        this.terminated = true;
+        try {
+          this.port?.close();
+        } catch {
+          // ignore
+        }
+        this.port = null;
+      }
+    }
+
+    const worker = new NoResponseWorker();
+    const channel = createMockChannel();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: () => channel,
+    });
+
+    const pingPromise = engine.ping();
+    // Simulate the port being closed unexpectedly (e.g. worker-side transport reset).
+    (channel.port1 as unknown as MockMessagePort).close();
+
+    await expect(engine.ping()).rejects.toThrow(/postMessage after close/i);
+    await expect(pingPromise).rejects.toThrow(/postMessage after close/i);
     expect(worker.terminated).toBe(true);
   });
 
