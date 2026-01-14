@@ -36,7 +36,7 @@ describe("registerHomeStylesCommands (via registerDesktopCommands)", () => {
       sheetStructureHandlers: {
         openOrganizeSheets: () => {},
         insertSheet: () => {},
-        deleteSheet: () => {},
+        deleteActiveSheet: () => {},
       },
       workbenchFileHandlers: {
         newWorkbook: () => {},

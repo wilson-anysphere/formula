@@ -149,7 +149,7 @@ describe("registerDesktopCommands", () => {
       sheetStructureHandlers: {
         openOrganizeSheets: vi.fn(),
         insertSheet: vi.fn(),
-        deleteSheet: vi.fn(),
+        deleteActiveSheet: vi.fn(),
       },
       formatPainter: {
         isArmed: formatPainterIsArmed,
@@ -288,7 +288,7 @@ describe("registerDesktopCommands", () => {
       sheetStructureHandlers: {
         openOrganizeSheets: () => {},
         insertSheet: () => {},
-        deleteSheet: () => {},
+        deleteActiveSheet: () => {},
       },
       workbenchFileHandlers: {
         newWorkbook: () => {},

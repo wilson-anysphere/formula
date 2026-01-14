@@ -40,7 +40,7 @@ describe("axis sizing ribbon commands", () => {
       sheetStructureHandlers: {
         openOrganizeSheets: () => {},
         insertSheet: () => {},
-        deleteSheet: () => {},
+        deleteActiveSheet: () => {},
       },
       workbenchFileHandlers: {
         newWorkbook: vi.fn(),

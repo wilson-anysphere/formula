@@ -22,7 +22,7 @@ describe("Home → Styles CommandRegistry commands", () => {
       sheetStructureHandlers: {
         openOrganizeSheets: () => {},
         insertSheet: () => {},
-        deleteSheet: () => {},
+        deleteActiveSheet: () => {},
       },
       workbenchFileHandlers: {
         newWorkbook: () => {},
