@@ -33,6 +33,7 @@ pub use encrypted_package::{
     decrypt_encrypted_package_standard_aes_sha1,
     decrypt_encrypted_package_standard_aes_to_writer,
     decrypt_standard_cryptoapi_rc4_encrypted_package_stream,
+    decrypt_standard_cryptoapi_rc4_encrypted_package_stream_with_hash,
     decrypt_standard_encrypted_package_stream,
     EncryptedPackageDecryptError,
     EncryptedPackageError,

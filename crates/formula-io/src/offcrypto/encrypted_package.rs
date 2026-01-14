@@ -3,18 +3,25 @@ use std::io::{Read, Write};
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
 
+use super::cryptoapi::{
+    final_hash,
+    hash_password_fixed_spin,
+    password_to_utf16le,
+    HashAlg as CryptoApiHashAlg,
+};
+
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 
 use crate::rc4_encrypted_package::{
-    parse_rc4_encrypted_package_stream, Rc4EncryptedPackageParseError, Rc4EncryptedPackageParseOptions,
+    parse_rc4_encrypted_package_stream, Rc4EncryptedPackageParseError,
+    Rc4EncryptedPackageParseOptions,
 };
 
 const ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN: usize = 8;
 const AES_BLOCK_LEN: usize = 16;
 const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
 const ENCRYPTED_PACKAGE_RC4_BLOCK_LEN: usize = 0x200;
-const CRYPTOAPI_SPIN_COUNT: u32 = 50_000;
 
 /// Hash algorithm used for IV derivation in the **non-standard CBC-segmented** Standard/CryptoAPI
 /// AES `EncryptedPackage` fallback scheme (`AlgIDHash`).
@@ -111,9 +118,14 @@ pub enum EncryptedPackageError {
     },
 
     #[error(
-        "`EncryptedPackage` RC4 key length must be between 1 and 20 bytes for SHA-1, got {key_len}"
+        "`EncryptedPackage` RC4 key length must be non-zero and must not exceed the hash digest length, got {key_len}"
     )]
     Rc4InvalidKeyLength { key_len: usize },
+
+    #[error(
+        "unsupported `EncryptionHeader.algIdHash` {alg_id_hash:#010x} for RC4 (supported: CALG_SHA1=0x00008004, CALG_MD5=0x00008003)"
+    )]
+    Rc4UnsupportedHashAlgorithm { alg_id_hash: u32 },
 }
 
 /// Errors returned by [`decrypt_encrypted_package_standard_aes_to_writer`].
@@ -794,52 +806,33 @@ impl Rc4 {
     }
 }
 
-fn password_utf16le_bytes(password: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(password.len().saturating_mul(2));
-    for cu in password.encode_utf16() {
-        out.extend_from_slice(&cu.to_le_bytes());
-    }
-    out
-}
-
-fn cryptoapi_password_hash_sha1(password: &str, salt: &[u8]) -> [u8; 20] {
-    // H = SHA1(salt || password_utf16le)
-    let pw = password_utf16le_bytes(password);
-    let mut hasher = Sha1::new();
-    hasher.update(salt);
-    hasher.update(&pw);
-    let mut h: [u8; 20] = hasher.finalize().into();
-
-    // for i in 0..CRYPTOAPI_SPIN_COUNT: H = SHA1(u32le(i) || H)
-    let mut buf = [0u8; 4 + 20];
-    for i in 0..CRYPTOAPI_SPIN_COUNT {
-        buf[..4].copy_from_slice(&i.to_le_bytes());
-        buf[4..].copy_from_slice(&h);
-        h = Sha1::digest(&buf).into();
-    }
-    h
-}
-
-fn cryptoapi_block_key_sha1(password_hash: &[u8; 20], block_index: u32) -> [u8; 20] {
-    let mut hasher = Sha1::new();
-    hasher.update(password_hash);
-    hasher.update(block_index.to_le_bytes());
-    hasher.finalize().into()
-}
-
 struct CryptoapiRc4EncryptedPackageDecryptor {
-    password_hash: [u8; 20],
+    password_hash: Vec<u8>,
     key_len: usize,
+    hash_alg: CryptoApiHashAlg,
 }
 
 impl CryptoapiRc4EncryptedPackageDecryptor {
     fn new(password: &str, salt: &[u8], key_len: usize) -> Result<Self, EncryptedPackageError> {
-        if !(1..=20).contains(&key_len) {
+        Self::new_with_hash_alg(password, salt, key_len, CryptoApiHashAlg::Sha1)
+    }
+
+    fn new_with_hash_alg(
+        password: &str,
+        salt: &[u8],
+        key_len: usize,
+        hash_alg: CryptoApiHashAlg,
+    ) -> Result<Self, EncryptedPackageError> {
+        if key_len == 0 || key_len > hash_alg.hash_len() {
             return Err(EncryptedPackageError::Rc4InvalidKeyLength { key_len });
         }
+
+        let pw_utf16le = password_to_utf16le(password);
+        let password_hash = hash_password_fixed_spin(&pw_utf16le, salt, hash_alg);
         Ok(Self {
-            password_hash: cryptoapi_password_hash_sha1(password, salt),
+            password_hash,
             key_len,
+            hash_alg,
         })
     }
 
@@ -852,15 +845,18 @@ impl CryptoapiRc4EncryptedPackageDecryptor {
             &Rc4EncryptedPackageParseOptions::default(),
         )
         .map_err(|err| match err {
-            Rc4EncryptedPackageParseError::TruncatedHeader => EncryptedPackageError::StreamTooShort {
-                len: encrypted_package_stream.len(),
-            },
-            Rc4EncryptedPackageParseError::DeclaredSizeExceedsPayload { declared, available } => {
-                EncryptedPackageError::ImplausibleOrigSize {
-                    orig_size: declared,
-                    ciphertext_len: available as usize,
+            Rc4EncryptedPackageParseError::TruncatedHeader => {
+                EncryptedPackageError::StreamTooShort {
+                    len: encrypted_package_stream.len(),
                 }
             }
+            Rc4EncryptedPackageParseError::DeclaredSizeExceedsPayload {
+                declared,
+                available,
+            } => EncryptedPackageError::ImplausibleOrigSize {
+                orig_size: declared,
+                ciphertext_len: available as usize,
+            },
             Rc4EncryptedPackageParseError::DeclaredSizeExceedsMax { declared, max } => {
                 EncryptedPackageError::OrigSizeExceedsMax {
                     orig_size: declared,
@@ -880,7 +876,7 @@ impl CryptoapiRc4EncryptedPackageDecryptor {
 
         let mut out = ciphertext[..orig_size_usize].to_vec();
         for (block_index, chunk) in out.chunks_mut(ENCRYPTED_PACKAGE_RC4_BLOCK_LEN).enumerate() {
-            let digest = cryptoapi_block_key_sha1(&self.password_hash, block_index as u32);
+            let digest = final_hash(&self.password_hash, block_index as u32, self.hash_alg);
             let mut rc4 = if self.key_len == 5 {
                 // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit RC4 key with the high
                 // 88 bits zero. Using a raw 5-byte key changes RC4 KSA and yields the wrong
@@ -907,14 +903,17 @@ impl CryptoapiRc4EncryptedPackageDecryptor {
 /// Unlike the Standard/CryptoAPI AES `EncryptedPackage` variant above (AES-ECB), the RC4 variant uses
 /// **0x200-byte blocks** (note: this differs from BIFF8 `FILEPASS` RC4, which re-keys every 0x400 bytes)
 /// and derives a fresh RC4 key for each block:
-/// - `password_hash = SHA1(salt || UTF16LE(password))`
-/// - for `i in 0..50000`: `password_hash = SHA1(LE32(i) || password_hash)`
-/// - `h_i = SHA1(password_hash || LE32(i))`
+/// - `password_hash = Hash(salt || UTF16LE(password))`
+/// - for `i in 0..50000`: `password_hash = Hash(LE32(i) || password_hash)`
+/// - `h_i = Hash(password_hash || LE32(i))`
 /// - If `key_len == 5` (40-bit): `rc4_key_i = h_i[0..5] || 0x00 * 11` (16 bytes total)
 /// - Otherwise: `rc4_key_i = h_i[0..key_len]`
 /// - RC4 is **reset** per block (do not carry keystream state across blocks).
 ///
 /// See `docs/offcrypto-standard-cryptoapi-rc4.md` for additional notes and test vectors.
+///
+/// This helper assumes `EncryptionHeader.algIdHash == CALG_SHA1`. For non-SHA1 Standard RC4 (e.g.
+/// `CALG_MD5`), use [`decrypt_standard_cryptoapi_rc4_encrypted_package_stream_with_hash`].
 pub fn decrypt_standard_cryptoapi_rc4_encrypted_package_stream(
     encrypted_package_stream: &[u8],
     password: &str,
@@ -925,6 +924,23 @@ pub fn decrypt_standard_cryptoapi_rc4_encrypted_package_stream(
         .decrypt_encrypted_package_stream(encrypted_package_stream)
 }
 
+/// Decrypt an MS-OFFCRYPTO "Standard" (CryptoAPI) RC4 `EncryptedPackage` stream, using the hash
+/// algorithm specified by `EncryptionHeader.algIdHash`.
+///
+/// `alg_id_hash` must be `CALG_SHA1` or `CALG_MD5`.
+pub fn decrypt_standard_cryptoapi_rc4_encrypted_package_stream_with_hash(
+    encrypted_package_stream: &[u8],
+    password: &str,
+    salt: &[u8],
+    key_len: usize,
+    alg_id_hash: u32,
+) -> Result<Vec<u8>, EncryptedPackageError> {
+    let hash_alg = CryptoApiHashAlg::from_calg_id(alg_id_hash)
+        .map_err(|_| EncryptedPackageError::Rc4UnsupportedHashAlgorithm { alg_id_hash })?;
+    CryptoapiRc4EncryptedPackageDecryptor::new_with_hash_alg(password, salt, key_len, hash_alg)?
+        .decrypt_encrypted_package_stream(encrypted_package_stream)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -932,6 +948,7 @@ mod tests {
     use aes::{Aes128, Aes192, Aes256};
     use cbc::cipher::block_padding::NoPadding;
     use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+    use md5::Md5;
     use std::io::Cursor;
 
     fn fixed_key(len: usize) -> Vec<u8> {
@@ -1399,6 +1416,45 @@ mod tests {
         }
     }
 
+    fn test_cryptoapi_password_hash_md5(password: &str, salt: &[u8]) -> [u8; 16] {
+        use md5::Digest as _;
+        const SPIN_COUNT: u32 = 50_000;
+        let pw = test_password_utf16le(password);
+
+        let mut hasher = Md5::new();
+        hasher.update(salt);
+        hasher.update(&pw);
+        let mut h: [u8; 16] = hasher.finalize().into();
+
+        let mut buf = [0u8; 4 + 16];
+        for i in 0..SPIN_COUNT {
+            buf[..4].copy_from_slice(&i.to_le_bytes());
+            buf[4..].copy_from_slice(&h);
+            h = Md5::digest(&buf).into();
+        }
+        h
+    }
+
+    fn test_cryptoapi_block_key_md5(
+        password_hash: &[u8; 16],
+        block_index: u32,
+        key_len: usize,
+    ) -> Vec<u8> {
+        use md5::Digest as _;
+        let mut hasher = Md5::new();
+        hasher.update(password_hash);
+        hasher.update(block_index.to_le_bytes());
+        let digest: [u8; 16] = hasher.finalize().into();
+        if key_len == 5 {
+            let mut key = Vec::with_capacity(16);
+            key.extend_from_slice(&digest[..5]);
+            key.resize(16, 0);
+            key
+        } else {
+            digest[..key_len].to_vec()
+        }
+    }
+
     struct TestCryptoapiRc4Encryptor {
         password_hash: [u8; 20],
         key_len: usize,
@@ -1420,6 +1476,42 @@ mod tests {
             let mut ciphertext = plaintext.to_vec();
             for (block_index, chunk) in ciphertext.chunks_mut(BLOCK_LEN).enumerate() {
                 let key = test_cryptoapi_block_key_sha1(
+                    &self.password_hash,
+                    block_index as u32,
+                    self.key_len,
+                );
+                let mut rc4 = TestRc4::new(&key);
+                rc4.apply_keystream(chunk);
+            }
+
+            let mut out = Vec::with_capacity(8 + ciphertext.len());
+            out.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+            out.extend_from_slice(&ciphertext);
+            out
+        }
+    }
+
+    struct TestCryptoapiRc4EncryptorMd5 {
+        password_hash: [u8; 16],
+        key_len: usize,
+    }
+
+    impl TestCryptoapiRc4EncryptorMd5 {
+        fn new(password: &str, salt: &[u8], key_len: usize) -> Self {
+            assert!(key_len <= 16);
+            let password_hash = test_cryptoapi_password_hash_md5(password, salt);
+            Self {
+                password_hash,
+                key_len,
+            }
+        }
+
+        fn encrypt_encrypted_package_stream(&self, plaintext: &[u8]) -> Vec<u8> {
+            const BLOCK_LEN: usize = 0x200;
+
+            let mut ciphertext = plaintext.to_vec();
+            for (block_index, chunk) in ciphertext.chunks_mut(BLOCK_LEN).enumerate() {
+                let key = test_cryptoapi_block_key_md5(
                     &self.password_hash,
                     block_index as u32,
                     self.key_len,
@@ -1484,6 +1576,62 @@ mod tests {
         let encryptor = TestCryptoapiRc4Encryptor::new(password, &salt, key_len);
         let decryptor = CryptoapiRc4EncryptedPackageDecryptor::new(password, &salt, key_len)
             .expect("decryptor");
+
+        // Ensure we cross at least one 0x200-byte boundary so per-block rekeying is exercised.
+        let plaintext = make_plaintext_pattern(10_000);
+        let encrypted = encryptor.encrypt_encrypted_package_stream(&plaintext);
+        let decrypted = decryptor
+            .decrypt_encrypted_package_stream(&encrypted)
+            .expect("decrypt");
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn rc4_cryptoapi_encryptedpackage_md5_block_boundary_regression() {
+        let password = "correct horse battery staple";
+        let salt: [u8; 16] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
+            0xDC, 0xFE,
+        ];
+        let key_len = 16;
+
+        let encryptor = TestCryptoapiRc4EncryptorMd5::new(password, &salt, key_len);
+        let decryptor = CryptoapiRc4EncryptedPackageDecryptor::new_with_hash_alg(
+            password,
+            &salt,
+            key_len,
+            CryptoApiHashAlg::Md5,
+        )
+        .expect("decryptor");
+
+        for len in [0usize, 1, 511, 512, 513, 1023, 1024, 1025, 10_000] {
+            let plaintext = make_plaintext_pattern(len);
+            let encrypted = encryptor.encrypt_encrypted_package_stream(&plaintext);
+            let decrypted = decryptor
+                .decrypt_encrypted_package_stream(&encrypted)
+                .expect("decrypt");
+            assert_eq!(decrypted, plaintext, "failed for len={len}");
+        }
+    }
+
+    #[test]
+    fn rc4_cryptoapi_encryptedpackage_md5_roundtrip_with_40_bit_key() {
+        // Regression: 40-bit CryptoAPI RC4 uses a padded 16-byte RC4 key, not a raw 5-byte key.
+        let password = "correct horse battery staple";
+        let salt: [u8; 16] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
+            0xDC, 0xFE,
+        ];
+        let key_len = 5;
+
+        let encryptor = TestCryptoapiRc4EncryptorMd5::new(password, &salt, key_len);
+        let decryptor = CryptoapiRc4EncryptedPackageDecryptor::new_with_hash_alg(
+            password,
+            &salt,
+            key_len,
+            CryptoApiHashAlg::Md5,
+        )
+        .expect("decryptor");
 
         // Ensure we cross at least one 0x200-byte boundary so per-block rekeying is exercised.
         let plaintext = make_plaintext_pattern(10_000);
