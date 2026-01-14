@@ -71,6 +71,12 @@ pub const MAX_REORDER_SHEET_IDS: usize = 10_000;
 /// Sheet IDs are typically UUID strings (36 bytes), so this is intentionally conservative.
 pub const MAX_SHEET_ID_BYTES: usize = 128;
 
+/// Maximum size (in bytes) of a sheet name accepted over IPC.
+///
+/// Sheet names are constrained by Excel to 31 UTF-16 code units, so real-world values are tiny.
+/// This cap is a defense-in-depth DoS guard for untrusted WebView inputs.
+pub const MAX_SHEET_NAME_BYTES: usize = 256;
+
 /// Maximum number of print-area ranges accepted by the `set_sheet_print_area` IPC command.
 ///
 /// Print areas are typically a small number of disjoint ranges; this cap prevents allocating large

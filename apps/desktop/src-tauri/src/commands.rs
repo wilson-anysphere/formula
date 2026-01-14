@@ -919,7 +919,7 @@ impl<'de> Deserialize<'de> for LimitedSheetFormatRunsByColDeltas {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplySheetFormattingDeltasRequest {
-    pub sheet_id: String,
+    pub sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     /// If present: `null` clears the sheet default format; an object sets it.
     #[serde(default)]
     pub default_format: Option<Option<SheetFormatJson>>,
@@ -1072,7 +1072,7 @@ impl<'de> Deserialize<'de> for LimitedSheetRowHeightDeltas {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplySheetViewDeltasRequest {
-    pub sheet_id: String,
+    pub sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     /// Column width deltas; `width: null` clears the override for that col.
     #[serde(default)]
     pub col_widths: Option<LimitedSheetColWidthDeltas>,
@@ -1144,6 +1144,28 @@ impl<const MAX_BYTES: usize> AsRef<str> for LimitedString<MAX_BYTES> {
 impl<const MAX_BYTES: usize> From<LimitedString<MAX_BYTES>> for String {
     fn from(value: LimitedString<MAX_BYTES>) -> Self {
         value.0
+    }
+}
+
+impl<const MAX_BYTES: usize> TryFrom<String> for LimitedString<MAX_BYTES> {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.len() > MAX_BYTES {
+            return Err(format!("string is too large (max {MAX_BYTES} bytes)"));
+        }
+        Ok(LimitedString(value))
+    }
+}
+
+impl<const MAX_BYTES: usize> TryFrom<&str> for LimitedString<MAX_BYTES> {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.len() > MAX_BYTES {
+            return Err(format!("string is too large (max {MAX_BYTES} bytes)"));
+        }
+        Ok(LimitedString(value.to_owned()))
     }
 }
 
@@ -2803,13 +2825,17 @@ pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookIn
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn add_sheet(
-    name: String,
-    sheet_id: Option<String>,
-    id: Option<String>,
-    after_sheet_id: Option<String>,
+    name: LimitedString<{ crate::ipc_limits::MAX_SHEET_NAME_BYTES }>,
+    sheet_id: Option<LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>>,
+    id: Option<LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>>,
+    after_sheet_id: Option<LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>>,
     index: Option<usize>,
     state: State<'_, SharedAppState>,
 ) -> Result<SheetInfo, String> {
+    let name = name.into_inner();
+    let sheet_id = sheet_id.map(|id| id.into_inner());
+    let id = id.map(|id| id.into_inner());
+    let after_sheet_id = after_sheet_id.map(|id| id.into_inner());
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -2831,12 +2857,15 @@ pub async fn add_sheet(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn add_sheet_with_id(
-    sheet_id: String,
-    name: String,
-    after_sheet_id: Option<String>,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
+    name: LimitedString<{ crate::ipc_limits::MAX_SHEET_NAME_BYTES }>,
+    after_sheet_id: Option<LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>>,
     index: Option<usize>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    let sheet_id = sheet_id.into_inner();
+    let name = name.into_inner();
+    let after_sheet_id = after_sheet_id.map(|id| id.into_inner());
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -2876,10 +2905,12 @@ pub async fn reorder_sheets(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn rename_sheet(
-    sheet_id: String,
-    name: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
+    name: LimitedString<{ crate::ipc_limits::MAX_SHEET_NAME_BYTES }>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    let sheet_id = sheet_id.into_inner();
+    let name = name.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -2893,7 +2924,7 @@ pub async fn rename_sheet(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn set_sheet_visibility(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     visibility: SheetVisibility,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
@@ -2901,6 +2932,7 @@ pub async fn set_sheet_visibility(
     // from the webview so workbook state reconciliation (applyState/restore) and automation can
     // round-trip Excel-compatible visibility metadata. Backend invariants (e.g. "cannot hide the
     // last visible sheet") are enforced in `AppState::set_sheet_visibility`.
+    let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -2939,10 +2971,11 @@ fn normalize_tab_color_rgb(raw: &str) -> Result<String, String> {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn set_sheet_tab_color(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     tab_color: Option<formula_model::TabColor>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -2983,10 +3016,11 @@ pub async fn set_sheet_tab_color(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn move_sheet(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     to_index: usize,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -3000,9 +3034,10 @@ pub async fn move_sheet(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn delete_sheet(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -4791,11 +4826,12 @@ pub fn mark_saved(state: State<'_, SharedAppState>) -> Result<(), String> {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_cell(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     row: usize,
     col: usize,
     state: State<'_, SharedAppState>,
 ) -> Result<CellValue, String> {
+    let sheet_id = sheet_id.into_inner();
     let state = state.inner().lock().unwrap();
     cell_value_from_state(&state, &sheet_id, row, col)
 }
@@ -4803,12 +4839,13 @@ pub fn get_cell(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_precedents(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     row: usize,
     col: usize,
     transitive: Option<bool>,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<String>, String> {
+    let sheet_id = sheet_id.into_inner();
     let state = state.inner().lock().unwrap();
     state
         .get_precedents(&sheet_id, row, col, transitive.unwrap_or(false))
@@ -4818,12 +4855,13 @@ pub fn get_precedents(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_dependents(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     row: usize,
     col: usize,
     transitive: Option<bool>,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<String>, String> {
+    let sheet_id = sheet_id.into_inner();
     let state = state.inner().lock().unwrap();
     state
         .get_dependents(&sheet_id, row, col, transitive.unwrap_or(false))
@@ -4833,13 +4871,14 @@ pub fn get_dependents(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn set_cell(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     row: usize,
     col: usize,
     value: Option<LimitedCellValue>,
     formula: Option<LimitedCellFormula>,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<CellUpdate>, String> {
+    let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -4861,13 +4900,14 @@ pub async fn set_cell(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_range(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     start_row: usize,
     start_col: usize,
     end_row: usize,
     end_col: usize,
     state: State<'_, SharedAppState>,
 ) -> Result<RangeData, String> {
+    let sheet_id = sheet_id.into_inner();
     let state = state.inner().lock().unwrap();
     let cells = state
         .get_range(&sheet_id, start_row, start_col, end_row, end_col)
@@ -4895,9 +4935,10 @@ pub fn get_range(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_sheet_used_range(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     state: State<'_, SharedAppState>,
 ) -> Result<Option<SheetUsedRange>, String> {
+    let sheet_id = sheet_id.into_inner();
     let state = state.inner().lock().unwrap();
     let workbook = state.get_workbook().map_err(app_error)?;
     let sheet = workbook
@@ -4951,9 +4992,10 @@ pub fn get_sheet_used_range(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_sheet_formatting(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     state: State<'_, SharedAppState>,
 ) -> Result<JsonValue, String> {
+    let sheet_id = sheet_id.into_inner();
     let state = state.inner().lock().unwrap();
     let sheet_uuid = state.persistent_sheet_uuid(&sheet_id).map_err(app_error)?;
     let Some(storage) = state.persistent_storage() else {
@@ -4975,9 +5017,10 @@ pub fn get_sheet_formatting(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_sheet_view_state(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     state: State<'_, SharedAppState>,
 ) -> Result<JsonValue, String> {
+    let sheet_id = sheet_id.into_inner();
     let state = state.inner().lock().unwrap();
     let sheet_uuid = state.persistent_sheet_uuid(&sheet_id).map_err(app_error)?;
     let Some(storage) = state.persistent_storage() else {
@@ -5002,9 +5045,10 @@ pub fn get_sheet_view_state(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_sheet_imported_col_properties(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     state: State<'_, SharedAppState>,
 ) -> Result<JsonValue, String> {
+    let sheet_id = sheet_id.into_inner();
     let state = state.inner().lock().unwrap();
     let sheet_uuid = state.persistent_sheet_uuid(&sheet_id).map_err(app_error)?;
     let Some(storage) = state.persistent_storage() else {
@@ -5286,7 +5330,7 @@ pub(crate) fn apply_sheet_formatting_deltas_inner(
         JsonValue::Object(out)
     }
 
-    let sheet_uuid = state.persistent_sheet_uuid(&payload.sheet_id)?;
+    let sheet_uuid = state.persistent_sheet_uuid(payload.sheet_id.as_ref())?;
     let Some(storage) = state.persistent_storage() else {
         return Err(AppStateError::Persistence(
             "workbook is not backed by persistent storage".to_string(),
@@ -5555,7 +5599,7 @@ pub fn apply_sheet_view_deltas(
 
     let mut state = state.inner().lock().unwrap();
     let sheet_uuid = state
-        .persistent_sheet_uuid(&payload.sheet_id)
+        .persistent_sheet_uuid(payload.sheet_id.as_ref())
         .map_err(app_error)?;
     let Some(storage) = state.persistent_storage() else {
         return Err(app_error(AppStateError::Persistence(
@@ -5632,7 +5676,7 @@ pub fn apply_sheet_formatting_deltas(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn set_range(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     start_row: usize,
     start_col: usize,
     end_row: usize,
@@ -5640,6 +5684,7 @@ pub async fn set_range(
     values: LimitedRangeCellEdits,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<CellUpdate>, String> {
+    let sheet_id = sheet_id.into_inner();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -5922,9 +5967,10 @@ fn from_core_sheet_print_settings(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_sheet_print_settings(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     state: State<'_, SharedAppState>,
 ) -> Result<SheetPrintSettings, String> {
+    let sheet_id = sheet_id.into_inner();
     let state = state.inner().lock().unwrap();
     let settings = state.sheet_print_settings(&sheet_id).map_err(app_error)?;
     Ok(from_core_sheet_print_settings(&settings))
@@ -5933,10 +5979,11 @@ pub fn get_sheet_print_settings(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn set_sheet_page_setup(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     page_setup: PageSetup,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    let sheet_id = sheet_id.into_inner();
     let mut state = state.inner().lock().unwrap();
     state
         .set_sheet_page_setup(&sheet_id, to_core_page_setup(&page_setup))
@@ -5947,10 +5994,11 @@ pub fn set_sheet_page_setup(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn set_sheet_print_area(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     print_area: Option<LimitedVec<PrintCellRange, { crate::ipc_limits::MAX_PRINT_AREA_RANGES }>>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    let sheet_id = sheet_id.into_inner();
     let print_area = print_area.map(|ranges| {
         ranges
             .into_inner()
@@ -5974,7 +6022,7 @@ pub fn set_sheet_print_area(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn export_sheet_range_pdf(
-    sheet_id: String,
+    sheet_id: LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
     range: PrintCellRange,
     col_widths_points: Option<LimitedF64Vec>,
     row_heights_points: Option<LimitedF64Vec>,
@@ -5983,6 +6031,7 @@ pub fn export_sheet_range_pdf(
     use crate::resource_limits::{MAX_PDF_BYTES, MAX_PDF_CELLS_PER_CALL, MAX_RANGE_DIM};
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
+    let sheet_id = sheet_id.into_inner();
     let state_guard = state.inner().lock().unwrap();
     let workbook = state_guard.get_workbook().map_err(app_error)?;
     let sheet = workbook
@@ -10055,9 +10104,10 @@ mod tests {
     #[test]
     fn limited_f64_vec_rejects_too_many_entries_by_size_hint() {
         let max = crate::resource_limits::MAX_RANGE_DIM;
-        let err = <LimitedF64Vec as Deserialize>::deserialize(SizeHintSeqDeserializer { len: max + 1 })
-            .expect_err("expected size_hint guard to reject oversized f64 vec")
-            .to_string();
+        let err =
+            <LimitedF64Vec as Deserialize>::deserialize(SizeHintSeqDeserializer { len: max + 1 })
+                .expect_err("expected size_hint guard to reject oversized f64 vec")
+                .to_string();
         assert!(
             err.contains("max") && err.contains(&max.to_string()),
             "unexpected error message: {err}"
@@ -10730,10 +10780,7 @@ mod tests {
             sheet.col_properties.get(&1).and_then(|p| p.width),
             Some(25.0)
         );
-        assert!(sheet
-            .col_properties
-            .get(&2)
-            .is_some_and(|p| p.hidden));
+        assert!(sheet.col_properties.get(&2).is_some_and(|p| p.hidden));
     }
 
     #[test]

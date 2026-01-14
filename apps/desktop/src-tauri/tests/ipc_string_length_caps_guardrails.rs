@@ -391,3 +391,37 @@ fn privileged_ipc_commands_have_json_length_caps() {
         &["MAX_REFRESH_STATE_BYTES"],
     );
 }
+
+#[test]
+fn sheet_ipc_commands_have_id_and_name_caps() {
+    let commands_src = include_str!("../src/commands.rs");
+
+    // Common sheet operations should never accept unbounded IDs/names from an untrusted WebView.
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn add_sheet(",
+        &["MAX_SHEET_ID_BYTES", "MAX_SHEET_NAME_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub async fn rename_sheet",
+        &["MAX_SHEET_ID_BYTES", "MAX_SHEET_NAME_BYTES"],
+    );
+    assert_fn_has_ipc_string_cap(
+        commands_src,
+        "pub fn export_sheet_range_pdf",
+        &["MAX_SHEET_ID_BYTES"],
+    );
+
+    // Request payload structs that include `sheetId` should use a bounded IPC string wrapper.
+    assert_marker_has_ipc_string_cap(
+        commands_src,
+        "pub struct ApplySheetFormattingDeltasRequest",
+        &["MAX_SHEET_ID_BYTES"],
+    );
+    assert_marker_has_ipc_string_cap(
+        commands_src,
+        "pub struct ApplySheetViewDeltasRequest",
+        &["MAX_SHEET_ID_BYTES"],
+    );
+}

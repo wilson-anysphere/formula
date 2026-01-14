@@ -1770,8 +1770,9 @@ impl AppState {
         };
 
         let workbook = self.get_workbook()?;
-        let sheet = resolve_sheet_case_insensitive(workbook, &payload.sheet_id)
-            .ok_or_else(|| AppStateError::UnknownSheet(payload.sheet_id.clone()))?;
+        let sheet_id = payload.sheet_id.as_ref();
+        let sheet = resolve_sheet_case_insensitive(workbook, sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
         let sheet_name = sheet.name.clone();
 
         // Sheet default formatting.
@@ -7445,7 +7446,7 @@ mod tests {
             apply_sheet_formatting_deltas_inner(
                 &mut state,
                 ApplySheetFormattingDeltasRequest {
-                    sheet_id: "Sheet1".to_string(),
+                    sheet_id: "Sheet1".to_string().try_into().unwrap(),
                     default_format: None,
                     row_formats: None,
                     col_formats: None,
@@ -7505,7 +7506,7 @@ mod tests {
             apply_sheet_formatting_deltas_inner(
                 &mut state,
                 ApplySheetFormattingDeltasRequest {
-                    sheet_id: "Sheet1".to_string(),
+                    sheet_id: "Sheet1".to_string().try_into().unwrap(),
                     default_format: Some(Some(default_format.into())),
                     row_formats: None,
                     col_formats: None,
@@ -7572,7 +7573,7 @@ mod tests {
             apply_sheet_formatting_deltas_inner(
                 &mut state,
                 ApplySheetFormattingDeltasRequest {
-                    sheet_id: "Sheet1".to_string(),
+                    sheet_id: "Sheet1".to_string().try_into().unwrap(),
                     default_format: None,
                     row_formats: None,
                     col_formats: None,
@@ -7653,7 +7654,7 @@ mod tests {
             apply_sheet_formatting_deltas_inner(
                 &mut state,
                 ApplySheetFormattingDeltasRequest {
-                    sheet_id: "Sheet1".to_string(),
+                    sheet_id: "Sheet1".to_string().try_into().unwrap(),
                     default_format: None,
                     row_formats: None,
                     col_formats: None,
