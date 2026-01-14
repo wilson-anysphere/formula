@@ -140,7 +140,11 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OfficeCrypt
     let _size_extra = read_u32_le(bytes, 4)?;
     let alg_id = read_u32_le(bytes, 8)?;
     let alg_id_hash = read_u32_le(bytes, 12)?;
-    let key_bits = read_u32_le(bytes, 16)?;
+    let mut key_bits = read_u32_le(bytes, 16)?;
+    // MS-OFFCRYPTO specifies that for RC4, `keySize=0` MUST be interpreted as 40-bit.
+    if alg_id == CALG_RC4 && key_bits == 0 {
+        key_bits = 40;
+    }
     let provider_type = read_u32_le(bytes, 20)?;
     let _reserved1 = read_u32_le(bytes, 24)?;
     let _reserved2 = read_u32_le(bytes, 28)?;
@@ -1039,6 +1043,18 @@ pub(crate) mod tests {
         let bytes = minimal_encryption_header_bytes(flags, CALG_RC4);
         let err = parse_encryption_header(&bytes).expect_err("expected error");
         assert!(matches!(err, OfficeCryptoError::InvalidFormat(_)));
+    }
+
+    #[test]
+    fn standard_encryption_header_rc4_keysize_zero_is_interpreted_as_40bit() {
+        // MS-OFFCRYPTO specifies that for RC4, `keySize=0` MUST be interpreted as 40-bit.
+        let flags = EncryptionHeaderFlags::F_CRYPTOAPI;
+        let mut bytes = minimal_encryption_header_bytes(flags, CALG_RC4);
+        bytes[16..20].copy_from_slice(&0u32.to_le_bytes()); // keyBits offset
+
+        let header = parse_encryption_header(&bytes).expect("parse header");
+        assert_eq!(header.alg_id, CALG_RC4);
+        assert_eq!(header.key_bits, 40);
     }
 
     #[test]
