@@ -1278,7 +1278,6 @@ impl Engine {
 
         true
     }
-
     /// Returns the configured worksheet dimensions for `sheet` (row/column count).
     ///
     /// When unset, sheets default to Excel-compatible dimensions
