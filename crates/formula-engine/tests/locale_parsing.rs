@@ -510,6 +510,18 @@ fn canonicalize_and_localize_error_literals() {
         de
     );
 
+    // Canonicalization should normalize error spelling/casing to the engine's canonical codes.
+    assert_eq!(
+        locale::canonicalize_formula("=#n/a!", &locale::EN_US).unwrap(),
+        "=#N/A"
+    );
+    // Localization should defensively normalize non-canonical inputs before mapping.
+    // de-DE currently keeps #N/A in canonical form (no localized mapping).
+    assert_eq!(
+        locale::localize_formula("=#n/a!", &locale::DE_DE).unwrap(),
+        "=#N/A"
+    );
+
     // Non-ASCII localized errors should be translated using Unicode-aware case folding.
     // de-DE: `#ÜBERLAUF!` is the localized spelling for `#SPILL!`.
     let de_spill_variants = ["=#ÜBERLAUF!", "=#Überlauf!", "=#üBeRlAuF!"];

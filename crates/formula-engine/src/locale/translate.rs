@@ -167,31 +167,29 @@ fn translate_formula_with_style(
                 match dir {
                     Direction::ToCanonical => {
                         // 1) Apply locale-specific mapping (localized -> canonical) if present.
-                        // 2) Normalize canonical spelling/casing for known errors (e.g. `#N/A!` -> `#N/A`).
+                        // 2) Normalize canonical spelling/casing for known errors
+                        //    (e.g. `#N/A!` -> `#N/A`, `#value!` -> `#VALUE!`).
                         // 3) Otherwise preserve the original token text.
-                        let mapped = locale
+                        let canonical = locale
                             .canonical_error_literal(raw)
-                            .unwrap_or_else(|| raw.as_str());
-                        if let Some(kind) = ErrorKind::from_code(mapped) {
+                            .unwrap_or(raw.as_str());
+                        if let Some(kind) = ErrorKind::from_code(canonical) {
                             out.push_str(kind.as_code());
                         } else {
-                            out.push_str(token_slice(expr_src, tok)?);
+                            out.push_str(canonical);
                         }
                     }
                     Direction::ToLocalized => {
                         // Some legacy/corrupt canonical formulas may contain non-canonical spellings
                         // like `#N/A!` or mixed casing. Normalize first so locale lookup works.
-                        let kind = ErrorKind::from_code(raw);
-                        let lookup_key = kind.map(|k| k.as_code()).unwrap_or_else(|| raw.as_str());
-
-                        if let Some(loc) = locale.localized_error_literal(lookup_key) {
+                        let canonical = ErrorKind::from_code(raw)
+                            .map(|kind| kind.as_code())
+                            .unwrap_or(raw.as_str());
+                        if let Some(loc) = locale.localized_error_literal(canonical) {
                             out.push_str(loc);
-                        } else if let Some(kind) = kind {
-                            // No localized mapping available; still normalize the canonical spelling.
-                            out.push_str(kind.as_code());
                         } else {
-                            out.push_str(token_slice(expr_src, tok)?);
-                        }
+                            out.push_str(canonical);
+                        };
                     }
                 }
                 idx += 1;

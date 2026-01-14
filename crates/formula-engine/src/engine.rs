@@ -11477,6 +11477,13 @@ fn rewrite_defined_name_structural(
     edit: &StructuralEdit,
 ) -> Result<Option<(NameDefinition, CompiledExpr)>, EngineError> {
     let origin = crate::CellAddr::new(0, 0);
+    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
+    for (order_index, &sheet_id) in engine.workbook.sheet_ids_in_order().iter().enumerate() {
+        let Some(name) = engine.workbook.sheet_name(sheet_id) else {
+            continue;
+        };
+        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
+    }
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
         NameDefinition::Reference(formula) => {
@@ -11485,10 +11492,7 @@ fn rewrite_defined_name_structural(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| {
-                    let sheet_id = engine.workbook.sheet_id(name)?;
-                    engine.workbook.sheet_order_index(sheet_id)
-                },
+                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
             );
             (NameDefinition::Reference(new_formula), changed)
         }
@@ -11498,10 +11502,7 @@ fn rewrite_defined_name_structural(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| {
-                    let sheet_id = engine.workbook.sheet_id(name)?;
-                    engine.workbook.sheet_order_index(sheet_id)
-                },
+                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
             );
             (NameDefinition::Formula(new_formula), changed)
         }
@@ -11535,6 +11536,13 @@ fn rewrite_defined_name_range_map(
     edit: &RangeMapEdit,
 ) -> Result<Option<(NameDefinition, CompiledExpr)>, EngineError> {
     let origin = crate::CellAddr::new(0, 0);
+    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
+    for (order_index, &sheet_id) in engine.workbook.sheet_ids_in_order().iter().enumerate() {
+        let Some(name) = engine.workbook.sheet_name(sheet_id) else {
+            continue;
+        };
+        sheet_order_indices.insert(Workbook::sheet_key(name), order_index);
+    }
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
         NameDefinition::Reference(formula) => {
@@ -11543,10 +11551,7 @@ fn rewrite_defined_name_range_map(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| {
-                    let sheet_id = engine.workbook.sheet_id(name)?;
-                    engine.workbook.sheet_order_index(sheet_id)
-                },
+                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
             );
             (NameDefinition::Reference(new_formula), changed)
         }
@@ -11556,10 +11561,7 @@ fn rewrite_defined_name_range_map(
                 ctx_sheet,
                 origin,
                 edit,
-                |name| {
-                    let sheet_id = engine.workbook.sheet_id(name)?;
-                    engine.workbook.sheet_order_index(sheet_id)
-                },
+                |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
             );
             (NameDefinition::Formula(new_formula), changed)
         }
