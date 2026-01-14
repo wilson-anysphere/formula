@@ -15,6 +15,10 @@ const expectedVersion = String(tauriConf?.version ?? "").trim();
 const expectedMainBinary = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
 const expectedIdentifier = String(tauriConf?.identifier ?? "").trim() || "app.formula.desktop";
 
+// Other node:test workers may mutate `process.env.PATH` while this file runs (worker threads share
+// a single process). Capture a stable base PATH so toolchain shims in this suite don't flake.
+const basePath = process.env.PATH ?? "";
+
 const hasBash = (() => {
   if (process.platform === "win32") return false;
   const probe = spawnSync("bash", ["-lc", "exit 0"], { stdio: "ignore" });
@@ -253,7 +257,7 @@ test("verify-linux-package-deps passes when bundles include Parquet shared-mime-
 
   const proc = runVerifier({
     env: {
-      PATH: `${binDir}:${process.env.PATH}`,
+      PATH: `${binDir}:${basePath}`,
       CARGO_TARGET_DIR: cargoTargetDir,
       FAKE_RPM_REQUIRES_FILE: requiresFile,
       FAKE_DEB_VERSION: expectedVersion,
@@ -301,7 +305,7 @@ test("verify-linux-package-deps fails when tauri identifier contains path separa
 
   const proc = runVerifier({
     env: {
-      PATH: `${binDir}:${process.env.PATH}`,
+      PATH: `${binDir}:${basePath}`,
       FORMULA_TAURI_CONF_PATH: tauriConfPath,
     },
   });
@@ -342,7 +346,7 @@ test(
 
     const proc = runVerifier({
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: `${binDir}:${basePath}`,
         FORMULA_TAURI_CONF_PATH: tauriConfPath,
       },
     });
@@ -381,7 +385,7 @@ test("verify-linux-package-deps fails when RPM Parquet shared-mime-info XML is m
 
   const proc = runVerifier({
     env: {
-      PATH: `${binDir}:${process.env.PATH}`,
+      PATH: `${binDir}:${basePath}`,
       CARGO_TARGET_DIR: cargoTargetDir,
       FAKE_RPM_REQUIRES_FILE: requiresFile,
       // Corrupt RPM MIME XML: omit the '*.parquet' glob.
@@ -428,7 +432,7 @@ test("verify-linux-package-deps fails when DEB Parquet shared-mime-info XML is m
 
   const proc = runVerifier({
     env: {
-      PATH: `${binDir}:${process.env.PATH}`,
+      PATH: `${binDir}:${basePath}`,
       CARGO_TARGET_DIR: cargoTargetDir,
       FAKE_RPM_REQUIRES_FILE: requiresFile,
       // Corrupt DEB MIME XML: omit the '*.parquet' glob.
@@ -475,7 +479,7 @@ test("verify-linux-package-deps fails when DEB Parquet shared-mime-info XML file
 
   const proc = runVerifier({
     env: {
-      PATH: `${binDir}:${process.env.PATH}`,
+      PATH: `${binDir}:${basePath}`,
       CARGO_TARGET_DIR: cargoTargetDir,
       FAKE_RPM_REQUIRES_FILE: requiresFile,
       FAKE_DEB_VERSION: expectedVersion,
@@ -520,7 +524,7 @@ test("verify-linux-package-deps fails when RPM Parquet shared-mime-info XML file
 
   const proc = runVerifier({
     env: {
-      PATH: `${binDir}:${process.env.PATH}`,
+      PATH: `${binDir}:${basePath}`,
       CARGO_TARGET_DIR: cargoTargetDir,
       FAKE_RPM_REQUIRES_FILE: requiresFile,
       FAKE_DEB_VERSION: expectedVersion,

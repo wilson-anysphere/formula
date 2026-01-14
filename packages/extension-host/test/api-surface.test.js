@@ -9,7 +9,7 @@ const { ExtensionHost } = require("../src");
 
 // Worker thread startup can be slow when the node:test runner executes files in parallel.
 // Keep activation timeouts generous so these API surface tests do not flake under load.
-const ACTIVATION_TIMEOUT_MS = 20_000;
+const ACTIVATION_TIMEOUT_MS = 30_000;
 
 async function writeExtensionFixture(extensionDir, manifest, entrypointCode) {
   await fs.mkdir(path.join(extensionDir, "dist"), { recursive: true });
