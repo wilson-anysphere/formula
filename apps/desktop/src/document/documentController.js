@@ -1374,6 +1374,10 @@ function unwrapSingletonId(value) {
  */
 function normalizeDrawings(raw) {
   if (!Array.isArray(raw)) return null;
+  // Some interop layers may wrap arrays as singleton arrays-of-arrays.
+  // Only unwrap when the single element is itself an array, so normal single-drawing lists
+  // (`[{...}]`) are preserved.
+  if (raw.length === 1 && Array.isArray(raw[0])) raw = raw[0];
   // Defensive guard: drawing ids can be authored by remote collaborators (collab sheet view state),
   // so keep validation strict to avoid unbounded memory/time costs when normalizing snapshots.
   // Normal drawing ids are small (numeric strings like "123" or u32 numbers).
