@@ -5569,6 +5569,14 @@ export class SpreadsheetApp {
     const sheetId = this.sheetId;
     const selectedId = this.selectedDrawingId;
     if (selectedId == null) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
 
     const docAny = this.document as any;
     if (typeof docAny.getSheetDrawings !== "function" || typeof docAny.setSheetDrawings !== "function") {
@@ -7040,9 +7048,31 @@ export class SpreadsheetApp {
   duplicateSelectedDrawing(): void {
     const selected = this.selectedDrawingId;
     if (selected == null) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+
     const result = duplicateDrawingSelected(this.listDrawingObjectsForSheet(), selected);
     if (!result) return;
-    this.setDrawingObjectsForSheet(result.objects);
+
+    this.document.beginBatch({ label: "Duplicate Drawing" });
+    try {
+      this.document.setSheetDrawings(this.sheetId, result.objects, { source: "drawings" });
+      this.document.endBatch();
+    } catch (err) {
+      this.document.cancelBatch();
+      throw err;
+    }
+
+    // Clear the caches so hit testing + overlay re-render see the committed state.
+    this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
     this.selectDrawing(result.duplicatedId);
   }
 
