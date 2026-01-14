@@ -2541,6 +2541,52 @@ fn bytecode_backend_external_workbook_reference_without_provider_is_ref_error() 
 }
 
 #[test]
+fn bytecode_backend_external_workbook_range_spills_via_provider() {
+    struct Provider;
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, sheet: &str, addr: formula_engine::eval::CellAddr) -> Option<Value> {
+            if sheet != "[Book.xlsx]Sheet1" {
+                return None;
+            }
+            match (addr.row, addr.col) {
+                (0, 0) => Some(Value::Number(1.0)),
+                (0, 1) => Some(Value::Number(2.0)),
+                (1, 0) => Some(Value::Number(3.0)),
+                (1, 1) => Some(Value::Number(4.0)),
+                _ => None,
+            }
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    engine
+        .set_cell_formula("Sheet1", "C1", "=[Book.xlsx]Sheet1!A1:B2")
+        .unwrap();
+
+    // Ensure the formula compiles to bytecode.
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.spill_range("Sheet1", "C1"),
+        Some((
+            formula_engine::eval::CellAddr { row: 0, col: 2 },
+            formula_engine::eval::CellAddr { row: 1, col: 3 }
+        ))
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(4.0));
+}
+
+#[test]
 fn sum_ignores_rich_values_in_references_via_bytecode_column_slices() {
     // Regression coverage: column-slice evaluation should tolerate non-numeric values in the
     // referenced range (ignored like text in Excel SUM semantics).
