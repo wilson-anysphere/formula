@@ -225,6 +225,35 @@ impl fmt::Display for PivotFieldRef {
     }
 }
 
+fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    let mut chars = raw.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+
+    // DAX allows bare table identifiers like `Table[Column]`. When the table name contains
+    // punctuation/whitespace (e.g. `Dim Product`) or other non-identifier characters, Excel uses
+    // single quotes: `'Dim Product'[Category]`.
+    //
+    // Prefer quoting when uncertain; it's the safer display form and round-trips via
+    // `parse_dax_column_ref` (which supports quoted identifiers + `''` escaping).
+    if !matches!(first, 'A'..='Z' | 'a'..='z' | '_') {
+        return true;
+    }
+    for ch in chars {
+        if !matches!(ch, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_') {
+            return true;
+        }
+    }
+    false
+}
+
+fn quote_dax_identifier(raw: &str) -> String {
+    // In DAX, single quotes inside a quoted identifier are escaped by doubling them.
+    let escaped = raw.replace('\'', "''");
+    format!("'{escaped}'")
+}
+
 fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     if dax_identifier_requires_quotes(raw) {
         Cow::Owned(quote_dax_identifier(raw))
