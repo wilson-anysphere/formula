@@ -15,7 +15,7 @@ Most users should start with:
 `promote_public` notes:
 
 - If `--name` is omitted when promoting from outside `tools/corpus/public/`, a hash-based name is used by default
-  (`workbook-<sha256[:16]>.xlsx`) to avoid leaking local/customer filenames.
+  (`workbook-<sha256[:16]>.{xlsx,xlsm,xlsb}`) to avoid leaking local/customer filenames.
 - Re-run with `--force` to refresh an existing fixture's expectations against the current engine behavior.
 
 The dashboard emits both human- and machine-readable outputs:
