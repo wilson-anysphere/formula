@@ -9314,105 +9314,6 @@ const ribbonActions = createRibbonActionsFromCommands({
         );
       }
     },
-    // File tab ribbon schema uses `file.*` ids for UI compatibility. Route them to the
-    // canonical `workbench.*` / `view.*` / `pageLayout.*` commands so ribbon, keybindings,
-    // and command palette stay consistent.
-    "file.new.new": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
-    },
-    "file.new.blankWorkbook": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
-    },
-    "file.open.open": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
-    },
-    "file.save.save": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook);
-    },
-    "file.save.saveAs": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
-    },
-    "file.save.saveAs.copy": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
-    },
-    "file.save.saveAs.download": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
-    },
-    "file.save.autoSave": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled);
-      app.focus();
-    },
-    "file.info.manageWorkbook.versions": async () => {
-      await commandRegistry.executeCommand("view.togglePanel.versionHistory");
-    },
-    "file.info.manageWorkbook.branches": async () => {
-      await commandRegistry.executeCommand("view.togglePanel.branchManager");
-    },
-    "file.print.print": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.print);
-    },
-    "file.print.printPreview": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.printPreview);
-    },
-    "file.print.pageSetup": async () => {
-      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
-    },
-    "file.print.pageSetup.printTitles": async () => {
-      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
-    },
-    "file.print.pageSetup.margins": async () => {
-      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
-    },
-    "file.options.close": async () => {
-      await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook);
-    },
-    "file.export.createPdf": async () => {
-      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
-    },
-    "file.export.export.pdf": async () => {
-      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
-    },
-    "file.export.changeFileType.pdf": async () => {
-      await commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
-    },
-    "file.export.export.csv": async () => {
-      handleExportDelimitedText({ delimiter: ",", extension: "csv", mime: "text/csv", label: "CSV" });
-    },
-    "file.export.changeFileType.csv": async () => {
-      handleExportDelimitedText({ delimiter: ",", extension: "csv", mime: "text/csv", label: "CSV" });
-    },
-    "file.export.changeFileType.tsv": async () => {
-      handleExportDelimitedText({
-        delimiter: "\t",
-        extension: "tsv",
-        mime: "text/tab-separated-values",
-        label: "TSV",
-      });
-    },
-    "file.export.export.xlsx": async () => {
-      if (!tauriBackend) {
-        showDesktopOnlyToast("Exporting workbooks is available in the desktop app.");
-        return;
-      }
-      try {
-        await handleSaveAs();
-      } catch (err) {
-        console.error("Failed to save workbook:", err);
-        showToast(`Failed to save workbook: ${String(err)}`, "error");
-      }
-    },
-    "file.export.changeFileType.xlsx": async () => {
-      if (!tauriBackend) {
-        showDesktopOnlyToast("Exporting workbooks is available in the desktop app.");
-        return;
-      }
-      try {
-        await handleSaveAs();
-      } catch (err) {
-        console.error("Failed to save workbook:", err);
-        showToast(`Failed to save workbook: ${String(err)}`, "error");
-      }
-    },
   },
   onBeforeExecuteCommand: async (_commandId, source) => {
     if (source.kind !== "extension") return;
@@ -9424,13 +9325,6 @@ const ribbonActions = createRibbonActionsFromCommands({
   // Ribbon toggles invoke both `onToggle` and `onCommand`. These overrides handle the
   // pressed state and suppress the follow-up `onCommand` call so we don't double-execute.
   toggleOverrides: {
-    "file.save.autoSave": async (pressed) => {
-      try {
-        await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled, pressed);
-      } finally {
-        app.focus();
-      }
-    },
     "view.toggleShowFormulas": async (pressed) => {
       // Route all ribbon "Show Formulas" toggles through the canonical command so
       // ribbon, command palette, and keybindings share the same logic/guards.

@@ -248,7 +248,7 @@ describe("Ribbon command wiring ↔ CommandRegistry disabling", () => {
     const implementedIds = extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaIdSet);
 
     // Guard against a broken traversal so the test can't pass vacuously.
-    expect(implementedIds).toContain("file.save.save");
+    expect(implementedIds).toContain("home.cells.format");
     expect(implementedIds).toContain("home.alignment.mergeCenter.mergeCenter");
 
     const commandRegistry = new CommandRegistry();

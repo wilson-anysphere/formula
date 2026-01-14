@@ -817,6 +817,10 @@ export function registerDesktopCommands(params: {
     }
   };
  
+  commandRegistry.registerBuiltinCommand("file.new.new", "New", () => workbenchFileHandlers.newWorkbook(), {
+    category: commandCategoryFile,
+    when: "false",
+  });
   commandRegistry.registerBuiltinCommand("file.new.blankWorkbook", "Blank workbook", () => workbenchFileHandlers.newWorkbook(), {
     category: commandCategoryFile,
     when: "false",
@@ -849,9 +853,13 @@ export function registerDesktopCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "file.save.autoSave",
     "AutoSave",
-    (enabled?: boolean) => {
-      // Allow both toggle-style invocation (no args) and ribbon toggle invocation (boolean arg).
-      return workbenchFileHandlers.setAutoSaveEnabled(enabled);
+    async (enabled?: boolean) => {
+      try {
+        // Allow both toggle-style invocation (no args) and ribbon toggle invocation (boolean arg).
+        await workbenchFileHandlers.setAutoSaveEnabled(enabled);
+      } finally {
+        focusGrid();
+      }
     },
     {
       category: commandCategoryFile,
