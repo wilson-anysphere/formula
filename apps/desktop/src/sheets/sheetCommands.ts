@@ -1,8 +1,9 @@
 import type { CollabSession } from "@formula/collab-session";
-import * as Y from "yjs";
 
+import { getWorkbookMutationPermission, READ_ONLY_SHEET_MUTATION_MESSAGE } from "../collab/permissionGuards";
 import { rewriteDocumentFormulasForSheetDelete } from "./sheetFormulaRewrite";
-import { findCollabSheetIndexById, listSheetsFromCollabSession } from "./collabWorkbookSheetStore";
+import { listSheetsFromCollabSession } from "./collabWorkbookSheetStore";
+import { tryInsertCollabSheet } from "./collabSheetMutations";
 import { generateDefaultSheetName, type WorkbookSheetStore } from "./workbookSheetStore";
 
 export type ToastFn = (message: string, kind?: any, options?: any) => void;
@@ -56,18 +57,17 @@ export function createAddSheetCommand(params: {
           id = `${id}_${Math.random().toString(16).slice(2)}`;
         }
 
-        collabSession.transactLocal(() => {
-          const sheet = new Y.Map<unknown>();
-          sheet.set("id", id);
-          sheet.set("name", desiredName);
-          sheet.set("visibility", "visible");
-
-          // Insert after the active sheet when possible; otherwise append.
-          const activeIndex = findCollabSheetIndexById(collabSession, activeId);
-          const insertIndex = activeIndex >= 0 ? activeIndex + 1 : collabSession.sheets.length;
-
-          collabSession.sheets.insert(insertIndex, [sheet as any]);
+        const inserted = tryInsertCollabSheet({
+          session: collabSession,
+          sheetId: id,
+          name: desiredName,
+          visibility: "visible",
+          insertAfterSheetId: activeId,
         });
+        if (!inserted.inserted) {
+          showToast(inserted.reason, "error");
+          return;
+        }
 
         // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
         doc.getCell(id, { row: 0, col: 0 });
@@ -129,6 +129,15 @@ export function createDeleteActiveSheetCommand(params: {
         return;
       }
 
+      const collabSession = app.getCollabSession?.() ?? null;
+      if (collabSession) {
+        const permission = getWorkbookMutationPermission(collabSession);
+        if (!permission.allowed) {
+          showToast(permission.reason ?? READ_ONLY_SHEET_MUTATION_MESSAGE, "error");
+          return;
+        }
+      }
+
       let ok = false;
       try {
         ok = await confirm(`Delete sheet "${sheet.name}"?`);
@@ -147,6 +156,12 @@ export function createDeleteActiveSheetCommand(params: {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         showToast(message, "error");
+        return;
+      }
+      // Defensive: collab sheet stores can no-op deletes when the session is read-only. Ensure the
+      // sheet is actually gone before proceeding with formula rewrites.
+      if (store.getById(activeId)) {
+        showToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "error");
         return;
       }
 
