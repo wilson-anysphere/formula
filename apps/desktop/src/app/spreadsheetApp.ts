@@ -3343,20 +3343,12 @@ export class SpreadsheetApp {
              if (handleHit) return false;
            }
 
-          // In canvas-charts mode, charts are rendered above workbook drawings. If a chart is under the pointer,
-          // let chart interactions win so drawings don't steal clicks from charts underneath.
+          // In canvas-charts mode, ChartStore charts are rendered above workbook drawings. If a chart is under the
+          // pointer (including selection handles that extend outside the chart bounds), let chart interactions win
+          // so drawings don't steal pointerdowns from charts underneath.
           if (this.useCanvasCharts) {
-            const chartHit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
-            if (chartHit) {
-              // Exception: allow interacting with visible selection handles for a selected drawing, even if a chart
-              // happens to be behind the handle bounds.
-              if (this.selectedDrawingId != null) {
-                this.maybeRefreshRootPosition({ force: true });
-                const x = e.clientX - this.rootLeft;
-                const y = e.clientY - this.rootTop;
-                const cursor = this.drawingCursorAtPoint(x, y);
-                if (cursor && cursor !== "move") return true;
-              }
+            const hit = this.hitTestDrawingAtClientPoint(e.clientX, e.clientY);
+            if (hit && isChartStoreDrawingId(hit.id)) {
               return false;
             }
           }

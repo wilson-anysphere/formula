@@ -238,6 +238,95 @@ describe("SpreadsheetApp canvas charts vs drawing handles (shared grid)", () => 
     root.remove();
   });
 
+  it("allows resizing a selected chart via its handles even when a drawing overlaps", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    expect(app.getGridMode()).toBe("shared");
+    expect((app as any).chartDrawingInteraction).toBeTruthy();
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId: "img-under-chart-handle" },
+      anchor: {
+        type: "absolute",
+        // Overlap the chart's bottom-right resize handle area (outside the chart bounds).
+        pos: { xEmu: pxToEmu(190), yEmu: pxToEmu(190) },
+        size: { cx: pxToEmu(60), cy: pxToEmu(60) },
+      },
+      zOrder: 0,
+    };
+    app.setDrawingObjects([drawing]);
+
+    const { chart_id: chartId } = app.addChart({
+      chart_type: "bar",
+      data_range: "A2:B5",
+      title: "Chart handle overlap drawing",
+      position: "A1",
+    });
+    const chartDrawingId = chartIdToDrawingId(chartId);
+    // Deterministic absolute anchor for stable handle coordinates.
+    (app as any).chartStore.updateChartAnchor(chartId, {
+      kind: "absolute",
+      xEmu: pxToEmu(100),
+      yEmu: pxToEmu(100),
+      cxEmu: pxToEmu(100),
+      cyEmu: pxToEmu(100),
+    });
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    selectionCanvas.getBoundingClientRect = root.getBoundingClientRect as any;
+
+    const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+    const colHeaderHeight = (app as any).colHeaderHeight as number;
+
+    // Chart bottom-right corner is at (100 + 100, 100 + 100) in sheet px. Click just outside
+    // the bounds but within the resize handle square (and within the overlapping drawing).
+    const handleClientX = rowHeaderWidth + 200 + 1;
+    const handleClientY = colHeaderHeight + 200 + 1;
+
+    // Sanity: without selecting the chart, this point is a drawing hit (the chart body doesn't cover it).
+    expect(app.hitTestDrawingAtClientPoint(handleClientX, handleClientY)?.id).toBe(drawing.id);
+
+    // Select the chart (e.g. via selection pane) so its handles are active.
+    app.selectDrawingById(chartDrawingId);
+    expect(app.getSelectedChartId()).toBe(chartId);
+    expect((app as any).selectedDrawingId).toBeNull();
+    // With the chart selected, the resize handle should win even though a drawing overlaps underneath.
+    expect(app.hitTestDrawingAtClientPoint(handleClientX, handleClientY)?.id).toBe(chartDrawingId);
+
+    const down = createPointerLikeMouseEvent("pointerdown", {
+      clientX: handleClientX,
+      clientY: handleClientY,
+      button: 0,
+      pointerId: 1,
+    });
+    selectionCanvas.dispatchEvent(down);
+
+    expect(app.getSelectedChartId()).toBe(chartId);
+    expect((app as any).selectedDrawingId).toBeNull();
+    expect((app as any).chartDrawingGestureActive).toBe(true);
+    expect(down.defaultPrevented).toBe(true);
+
+    // End the gesture to avoid leaking pointer listeners across tests.
+    const up = createPointerLikeMouseEvent("pointerup", {
+      clientX: handleClientX,
+      clientY: handleClientY,
+      button: 0,
+      pointerId: 1,
+    });
+    selectionCanvas.dispatchEvent(up);
+    expect((app as any).chartDrawingGestureActive).toBe(false);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("selects a ChartStore chart over an overlapping drawing on right-click when drawing interactions are disabled", () => {
     const root = createRoot();
     const status = {
