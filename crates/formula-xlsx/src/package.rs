@@ -551,66 +551,24 @@ pub fn read_part_from_reader_limited<R: Read + Seek>(
     reader.seek(SeekFrom::Start(0))?;
     let mut zip = zip::ZipArchive::new(reader)?;
 
-    // OPC part names should not include a leading `/` in the ZIP archive, but some producers do.
-    // Be tolerant by trying both forms.
-    let with_slash = if part_name.starts_with('/') {
-        None
-    } else {
-        Some(format!("/{part_name}"))
-    };
-    let candidates: [&str; 2] = if let Some(stripped) = part_name.strip_prefix('/') {
-        [part_name, stripped]
-    } else {
-        [
-            part_name,
-            with_slash
-                .as_deref()
-                .expect("initialized for non-slashed names"),
-        ]
-    };
-
     let max_bytes = max_bytes.min(usize::MAX as u64);
-    for candidate in candidates {
-        // `ZipFile` borrows `ZipArchive`; keep the `Result` in a local so it drops
-        // before `zip` to avoid borrowck issues.
-        let result = zip.by_name(candidate);
-        match result {
-            Ok(file) => {
-                if file.is_dir() {
-                    return Ok(None);
-                }
-
-                let part = candidate.strip_prefix('/').unwrap_or(candidate).to_string();
-                let size = file.size();
-                if size > max_bytes {
-                    return Err(XlsxError::PartTooLarge {
-                        part,
-                        size,
-                        max: max_bytes,
-                    });
-                }
-
-                // Do not trust ZIP metadata; enforce an upper bound on decompression output.
-                let take_limit = max_bytes.saturating_add(1);
-                let mut limited = file.take(take_limit);
-                let mut buf = Vec::new();
-                limited.read_to_end(&mut buf)?;
-                if (buf.len() as u64) > max_bytes {
-                    return Err(XlsxError::PartTooLarge {
-                        part,
-                        size: buf.len() as u64,
-                        max: max_bytes,
-                    });
-                }
-
-                return Ok(Some(buf));
+    // `ZipFile` borrows `ZipArchive`; keep the `Result` in a local so it drops before `zip` to
+    // avoid borrowck issues.
+    let result = crate::zip_util::open_zip_part(&mut zip, part_name);
+    match result {
+        Ok(mut file) => {
+            if file.is_dir() {
+                return Ok(None);
             }
-            Err(zip::result::ZipError::FileNotFound) => continue,
-            Err(err) => return Err(err.into()),
+            Ok(Some(crate::zip_util::read_zip_file_bytes_with_limit(
+                &mut file,
+                part_name,
+                max_bytes,
+            )?))
         }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(err) => Err(err.into()),
     }
-
-    Ok(None)
 }
 
 /// Parse the workbook theme palette from `xl/theme/theme1.xml` (if present) without inflating the
