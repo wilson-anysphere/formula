@@ -47,7 +47,10 @@ export function attachOfflinePersistence(doc: Y.Doc, opts: OfflinePersistenceOpt
   };
 
   if (autoLoad) {
-    void whenLoaded();
+    void whenLoaded().catch(() => {
+      // Best-effort: avoid unhandled rejections from auto-load in environments where persistence
+      // is unavailable (private browsing, blocked IndexedDB, etc).
+    });
   }
 
   return {
