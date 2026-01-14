@@ -1838,7 +1838,13 @@ export class CollabSession {
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        if (typeof provider.off === "function") provider.off("sync", handler);
+        if (typeof provider.off === "function") {
+          try {
+            provider.off("sync", handler);
+          } catch {
+            // ignore
+          }
+        }
         reject(new Error("Timed out waiting for provider sync"));
       }, timeoutMs);
       (timeout as any).unref?.();
@@ -1846,11 +1852,26 @@ export class CollabSession {
       const handler = (isSynced: boolean) => {
         if (!isSynced) return;
         clearTimeout(timeout);
-        if (typeof provider.off === "function") provider.off("sync", handler);
+        if (typeof provider.off === "function") {
+          try {
+            provider.off("sync", handler);
+          } catch {
+            // ignore
+          }
+        }
         resolve();
       };
 
-      provider.on("sync", handler);
+      try {
+        provider.on("sync", handler);
+      } catch {
+        // If the provider refuses sync listeners, fall back to a best-effort
+        // behavior and resolve immediately (mirrors the fail-open behavior when
+        // no provider is present).
+        clearTimeout(timeout);
+        resolve();
+        return;
+      }
 
       // After registering, double-check whether the provider has already synced
       // (either via the `.synced` property or our observed event-based state).
