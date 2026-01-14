@@ -2396,3 +2396,32 @@ fn cell_width_recalculates_when_column_width_changes_in_auto_mode() {
     engine.set_col_width("Sheet1", 0, Some(25.0_f32));
     assert_number(&engine.get_cell_value("Sheet1", "B1"), 25.1);
 }
+
+#[test]
+fn cell_width_recalculates_when_column_hidden_changes_in_auto_mode() {
+    use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Automatic,
+        ..CalcSettings::default()
+    });
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"width\",A1)")
+        .unwrap();
+
+    // Start with a custom width so we can verify that un-hiding restores the previous encoded
+    // value.
+    engine.set_col_width("Sheet1", 0, Some(25.0_f32));
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 25.1);
+
+    // Hiding the column should immediately recompute and return 0.
+    engine.set_col_hidden("Sheet1", 0, true);
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 0.0);
+
+    // Unhiding should recompute again and restore the encoded width.
+    engine.set_col_hidden("Sheet1", 0, false);
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 25.1);
+}
