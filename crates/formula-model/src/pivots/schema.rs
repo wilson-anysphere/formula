@@ -599,4 +599,33 @@ mod tests {
             PivotFieldRef::CacheFieldName("Region".to_string())
         );
     }
+
+    #[test]
+    fn pivot_field_ref_helpers_and_display_formats() {
+        let cache = PivotFieldRef::CacheFieldName("Region".to_string());
+        assert_eq!(cache.as_cache_field_name(), Some("Region"));
+        assert_eq!(cache.display_string(), "Region");
+        assert_eq!(cache.to_string(), "Region");
+
+        let col = PivotFieldRef::DataModelColumn {
+            table: "Dim Product".to_string(),
+            column: "Category".to_string(),
+        };
+        assert_eq!(col.as_cache_field_name(), None);
+        // `display_string` is intended for UI and uses a minimal DAX-like shape.
+        assert_eq!(col.display_string(), "Dim Product[Category]");
+        // `Display` always quotes the table name to match `formula_dax` / Excel semantics.
+        assert_eq!(col.to_string(), "'Dim Product'[Category]");
+
+        let col_with_quote = PivotFieldRef::DataModelColumn {
+            table: "O'Reilly".to_string(),
+            column: "Name".to_string(),
+        };
+        assert_eq!(col_with_quote.to_string(), "'O''Reilly'[Name]");
+
+        let measure = PivotFieldRef::DataModelMeasure("Total Sales".to_string());
+        assert_eq!(measure.as_cache_field_name(), None);
+        assert_eq!(measure.display_string(), "[Total Sales]");
+        assert_eq!(measure.to_string(), "[Total Sales]");
+    }
 }
