@@ -121,7 +121,8 @@ describe("engine.worker getWorkbookInfo fallback respects sheetOrder", () => {
       const sheets = (resp as any).result?.sheets ?? [];
       expect(sheets.map((s: any) => s.id)).toEqual(["Sheet2", "Sheet1", "Empty"]);
 
-      const byId = new Map(sheets.map((s: any) => [s.id, s]));
+      // Use an `as const` entry tuple so TS infers a stable Map value type (instead of `{}`).
+      const byId = new Map<string, any>(sheets.map((s: any) => [s.id, s] as const));
       expect(byId.get("Sheet1")?.visibility).toBe("hidden");
       expect(byId.get("Sheet1")?.tabColor).toEqual({ rgb: "FFFF0000" });
       expect(byId.get("Sheet2")?.visibility).toBe("veryHidden");
