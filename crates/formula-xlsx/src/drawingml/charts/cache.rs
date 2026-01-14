@@ -222,3 +222,141 @@ fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
         .find(|n| n.is_element() && n.tag_name().name() == name)
         .and_then(|n| n.text())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn get_node<'a>(doc: &'a roxmltree::Document<'a>, name: &str) -> Node<'a, 'a> {
+        doc.descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == name)
+            .unwrap_or_else(|| panic!("missing node {name}"))
+    }
+
+    #[test]
+    fn str_cache_pt_count_shorter_than_points_truncates_and_warns() {
+        let xml = r#"
+            <root>
+              <strCache>
+                <ptCount val="2"/>
+                <pt idx="0"><v>a</v></pt>
+                <pt idx="1"><v>b</v></pt>
+                <pt idx="2"><v>c</v></pt>
+              </strCache>
+            </root>
+        "#;
+
+        let doc = roxmltree::Document::parse(xml).expect("parse xml");
+        let node = get_node(&doc, "strCache");
+        let mut diagnostics = Vec::new();
+        let cache = parse_str_cache(node, &mut diagnostics, "ctx").expect("cache");
+
+        assert_eq!(cache, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "ctx: cache point idx=2 exceeds ptCount=2"
+        );
+    }
+
+    #[test]
+    fn str_cache_pt_count_longer_than_points_preserves_len_and_warns_missing() {
+        let xml = r#"
+            <root>
+              <strCache>
+                <ptCount val="4"/>
+                <pt idx="2"><v>c</v></pt>
+                <pt idx="0"><v>a</v></pt>
+              </strCache>
+            </root>
+        "#;
+
+        let doc = roxmltree::Document::parse(xml).expect("parse xml");
+        let node = get_node(&doc, "strCache");
+        let mut diagnostics = Vec::new();
+        let cache = parse_str_cache(node, &mut diagnostics, "ctx").expect("cache");
+
+        assert_eq!(cache.len(), 4);
+        assert_eq!(cache[0], "a");
+        assert_eq!(cache[2], "c");
+        assert_eq!(cache[1], "");
+        assert_eq!(cache[3], "");
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].message, "ctx: strCache missing 2 of 4 points");
+    }
+
+    #[test]
+    fn str_cache_missing_pt_count_infers_length_from_max_idx() {
+        let xml = r#"
+            <root>
+              <strCache>
+                <pt idx="0"><v>a</v></pt>
+                <pt idx="3"><v>d</v></pt>
+              </strCache>
+            </root>
+        "#;
+
+        let doc = roxmltree::Document::parse(xml).expect("parse xml");
+        let node = get_node(&doc, "strCache");
+        let mut diagnostics = Vec::new();
+        let cache = parse_str_cache(node, &mut diagnostics, "ctx").expect("cache");
+
+        assert_eq!(cache.len(), 4);
+        assert_eq!(cache[0], "a");
+        assert_eq!(cache[3], "d");
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn num_cache_invalid_values_emit_diagnostic_and_use_nan() {
+        let xml = r#"
+            <root>
+              <numCache>
+                <formatCode>General</formatCode>
+                <ptCount val="2"/>
+                <pt idx="0"><v>1</v></pt>
+                <pt idx="1"><v>abc</v></pt>
+              </numCache>
+            </root>
+        "#;
+
+        let doc = roxmltree::Document::parse(xml).expect("parse xml");
+        let node = get_node(&doc, "numCache");
+        let mut diagnostics = Vec::new();
+        let (cache, format_code) = parse_num_cache(node, &mut diagnostics, "ctx");
+
+        assert_eq!(format_code.as_deref(), Some("General"));
+        let cache = cache.expect("cache");
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache[0], 1.0);
+        assert!(cache[1].is_nan());
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "ctx: invalid numeric cache value \"abc\""
+        );
+    }
+
+    #[test]
+    fn empty_caches_return_none() {
+        let xml = r#"
+            <root>
+              <strCache><ptCount val="0"/></strCache>
+              <numCache><formatCode>General</formatCode></numCache>
+            </root>
+        "#;
+
+        let doc = roxmltree::Document::parse(xml).expect("parse xml");
+
+        let mut diagnostics = Vec::new();
+        let str_node = get_node(&doc, "strCache");
+        assert_eq!(parse_str_cache(str_node, &mut diagnostics, "ctx"), None);
+
+        let num_node = get_node(&doc, "numCache");
+        let (nums, format_code) = parse_num_cache(num_node, &mut diagnostics, "ctx");
+        assert!(nums.is_none());
+        assert_eq!(format_code.as_deref(), Some("General"));
+    }
+}
