@@ -1369,6 +1369,8 @@ export class SpreadsheetApp {
   private remotePresences: GridPresence[] = [];
   private readonly presenceClipRectScratch = { x: 0, y: 0, width: 0, height: 0 };
   private readonly overlayCellRectScratch: CellCoord = { row: 0, col: 0 };
+  private readonly overlayCellBoundsScratchA = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly overlayCellBoundsScratchB = { x: 0, y: 0, width: 0, height: 0 };
 
   private auditingRenderer = new AuditingOverlayRenderer();
   private auditingMode: "off" | AuditingMode = "off";
@@ -17598,11 +17600,12 @@ export class SpreadsheetApp {
     this.auditingCtx.clip();
 
     const cellScratch = this.overlayCellRectScratch;
+    const boundsScratch = this.overlayCellBoundsScratchA;
     this.auditingRenderer.render(this.auditingCtx, this.auditingHighlights, {
       getCellRect: (row, col) => {
         cellScratch.row = row;
         cellScratch.col = col;
-        return this.getCellRect(cellScratch);
+        return this.getCellRect(cellScratch, boundsScratch);
       },
     });
 
@@ -17632,11 +17635,16 @@ export class SpreadsheetApp {
     ctx.clip();
 
     const cellScratch = this.overlayCellRectScratch;
+    const boundsA = this.overlayCellBoundsScratchA;
+    const boundsB = this.overlayCellBoundsScratchB;
+    let useA = true;
     renderer.render(ctx, this.remotePresences, {
       getCellRect: (row: number, col: number) => {
         cellScratch.row = row;
         cellScratch.col = col;
-        return this.getCellRect(cellScratch);
+        const out = useA ? boundsA : boundsB;
+        useA = !useA;
+        return this.getCellRect(cellScratch, out);
       },
     });
 
@@ -17702,8 +17710,16 @@ export class SpreadsheetApp {
     );
 
     if (!this.formulaBar?.isFormulaEditing() && this.fillPreviewRange) {
-      const startRect = this.getCellRect({ row: this.fillPreviewRange.startRow, col: this.fillPreviewRange.startCol });
-      const endRect = this.getCellRect({ row: this.fillPreviewRange.endRow, col: this.fillPreviewRange.endCol });
+      const cellScratch = this.overlayCellRectScratch;
+      const rectA = this.overlayCellBoundsScratchA;
+      const rectB = this.overlayCellBoundsScratchB;
+
+      cellScratch.row = this.fillPreviewRange.startRow;
+      cellScratch.col = this.fillPreviewRange.startCol;
+      const startRect = this.getCellRect(cellScratch, rectA);
+      cellScratch.row = this.fillPreviewRange.endRow;
+      cellScratch.col = this.fillPreviewRange.endCol;
+      const endRect = this.getCellRect(cellScratch, rectB);
       if (startRect && endRect) {
         const x = startRect.x;
         const y = startRect.y;
