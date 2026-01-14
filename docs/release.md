@@ -110,14 +110,19 @@ Run them locally from the repo root:
 # Note: CI/release workflows run these scripts under the pinned Node major
 # (`NODE_VERSION` in .github/workflows/release.yml).
 # Using the same major locally reduces "works locally, breaks in release" drift.
-# Ensures TAURI_CLI_VERSION is patch-pinned and kept in sync with the repo's Tauri crates
-# (Cargo.toml major/minor + Cargo.lock resolved patch), across workflows + docs.
-node scripts/ci/check-tauri-cli-version.mjs
+ # Ensures TAURI_CLI_VERSION is patch-pinned and kept in sync with the repo's Tauri crates
+ # (Cargo.toml major/minor + Cargo.lock resolved patch), across workflows + docs.
+ node scripts/ci/check-tauri-cli-version.mjs
 
-# Ensures the tag version matches both:
-# - apps/desktop/src-tauri/tauri.conf.json "version"
-# - apps/desktop/src-tauri/Cargo.toml [package].version
-node scripts/check-desktop-version.mjs vX.Y.Z
+ # Ensures the commit you're about to release has a successful run of the main CI workflow on GitHub
+ # (prevents tagging/releasing a commit that never passed CI).
+ # Requires a token with Actions read access (in GitHub Actions, this is provided via secrets.GITHUB_TOKEN).
+ GITHUB_TOKEN=... node scripts/check-tag-ci-status.mjs --repo owner/repo --sha <commit>
+ 
+ # Ensures the tag version matches both:
+ # - apps/desktop/src-tauri/tauri.conf.json "version"
+ # - apps/desktop/src-tauri/Cargo.toml [package].version
+ node scripts/check-desktop-version.mjs vX.Y.Z
 
 # Ensures plugins.updater.pubkey/endpoints are not placeholders and the pubkey is a valid minisign key
 # when the updater is active.
