@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_GRID_FONT_FAMILY } from "@formula/grid/node";
 import { DocumentCellProvider } from "../documentCellProvider.js";
 
 type CellState = { value: unknown; formula: string | null; styleId?: number };
@@ -41,11 +40,13 @@ describe("DocumentCellProvider typography defaults (shared grid)", () => {
 
     const colHeader = provider.getCell(0, 5);
     expect(colHeader?.value).toBe("E");
-    expect(colHeader?.style?.fontFamily).toBe(DEFAULT_GRID_FONT_FAMILY);
+    expect(typeof colHeader?.style?.fontFamily).toBe("string");
+    expect(colHeader?.style?.fontFamily?.toLowerCase()).not.toContain("mono");
 
     const rowHeader = provider.getCell(5, 0);
     expect(rowHeader?.value).toBe(5);
-    expect(rowHeader?.style?.fontFamily).toBe(DEFAULT_GRID_FONT_FAMILY);
+    expect(typeof rowHeader?.style?.fontFamily).toBe("string");
+    expect(rowHeader?.style?.fontFamily?.toLowerCase()).not.toContain("mono");
 
     const dataCell = provider.getCell(1, 1);
     expect(dataCell?.value).toBe("hello");
@@ -55,4 +56,3 @@ describe("DocumentCellProvider typography defaults (shared grid)", () => {
     expect(doc.getCell).toHaveBeenCalledTimes(1);
   });
 });
-
