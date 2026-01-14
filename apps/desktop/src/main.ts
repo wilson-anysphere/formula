@@ -9182,6 +9182,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
   const importedChartObjectsRaw = await importedChartObjectsPromise;
   const importedChartObjects = Array.isArray(importedChartObjectsRaw) ? importedChartObjectsRaw : [];
+  const importedChartModels: unknown[] = [];
 
   // Hydrate DrawingML chart placeholders into the DocumentController snapshot so the drawing overlay
   // can render them. We use a lightweight JSON shape (`{ id, zOrder, anchor, kind }`) that
@@ -9200,7 +9201,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     const sheetId = workbookSheetStore.resolveIdByName(sheetName) ?? sheetName;
     if (!knownSheetIds.has(sheetId)) continue;
 
-    const chartId: string | null =
+    const rawChartId: string | null =
       typeof e.chart_id === "string"
         ? e.chart_id
         : typeof e.chartId === "string"
@@ -9214,6 +9215,11 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
         : typeof e.drawingObjectId === "number"
           ? e.drawingObjectId
           : null;
+
+    // Prefer a stable chart id keyed by the internal sheet id rather than the visible sheet name
+    // (sheet names can be renamed without changing `sheetId`).
+    const stableChartId: string | null = drawingObjectId != null ? `${sheetId}:${String(drawingObjectId)}` : null;
+    const chartId: string | null = stableChartId ?? rawChartId ?? relId;
 
     const id: string | null = drawingObjectId != null ? String(drawingObjectId) : chartId ?? relId;
     if (!id) continue;
@@ -9251,6 +9257,15 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     };
 
     (drawingsBySheet[sheetId] ??= []).push(drawing);
+
+    // Feed the chart model store using the same stable chart ids used by the drawing layer.
+    importedChartModels.push({
+      chart_id: chartId,
+      rel_id: relId,
+      sheet_name: sheetName,
+      drawing_object_id: drawingObjectId,
+      model: e.model,
+    });
   }
 
   const snapshotPayload: any = { schemaVersion: 1, sheets: snapshotSheets };
@@ -9348,7 +9363,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
   // Populate chart models extracted from imported XLSX chart parts so DrawingML chart placeholders
   // can be rendered via the canvas chart renderer.
-  app.setImportedChartModels(importedChartObjects);
+  app.setImportedChartModels(importedChartModels);
 
   doc.markSaved();
 

@@ -4395,22 +4395,23 @@ export class SpreadsheetApp {
             ? e.chartId
             : null;
 
-      if (!chartId) {
-        const sheetName =
-          typeof e.sheet_name === "string"
-            ? e.sheet_name
-            : typeof e.sheetName === "string"
-              ? e.sheetName
-              : null;
-        const drawingObjectId =
-          typeof e.drawing_object_id === "number"
-            ? e.drawing_object_id
-            : typeof e.drawingObjectId === "number"
-              ? e.drawingObjectId
-              : null;
-        if (sheetName && drawingObjectId != null) {
-          chartId = FormulaChartModelStore.chartIdFromSheetObject(sheetName, drawingObjectId);
-        }
+      const sheetName =
+        typeof e.sheet_name === "string" ? e.sheet_name : typeof e.sheetName === "string" ? e.sheetName : null;
+      const drawingObjectId =
+        typeof e.drawing_object_id === "number"
+          ? e.drawing_object_id
+          : typeof e.drawingObjectId === "number"
+            ? e.drawingObjectId
+            : null;
+
+      // Some import paths expose charts with a stable `${sheetId}:${drawingObjectId}` key, while
+      // others use `${sheetName}:${drawingObjectId}`. Keep both keys in the model store so drawing
+      // adapters can use either identifier.
+      const sheetObjectChartId =
+        sheetName && drawingObjectId != null ? FormulaChartModelStore.chartIdFromSheetObject(sheetName, drawingObjectId) : null;
+
+      if (!chartId && sheetObjectChartId) {
+        chartId = sheetObjectChartId;
       }
 
       const relId: string | null =
@@ -4423,6 +4424,9 @@ export class SpreadsheetApp {
       try {
         if (chartId && chartId.trim() !== "") {
           this.formulaChartModelStore.setFormulaModelChartModel(chartId, model);
+        }
+        if (sheetObjectChartId && sheetObjectChartId.trim() !== "" && sheetObjectChartId !== chartId) {
+          this.formulaChartModelStore.setFormulaModelChartModel(sheetObjectChartId, model);
         }
         // Back-compat: some drawing adapters may identify charts by the drawing relationship id
         // (`rId*`) when sheet/object context isn't available.
