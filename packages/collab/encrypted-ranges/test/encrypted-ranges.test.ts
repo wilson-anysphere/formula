@@ -127,6 +127,22 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(mgr.list()).toMatchObject([{ sheetId: "sheet-123", keyId: "k1" }]);
   });
 
+  it("manager add canonicalizes stable sheet id casing when possible", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map<unknown>();
+    sheet.set("id", "Sheet-ABC");
+    sheet.set("name", "Budget");
+    sheets.push([sheet]);
+
+    const mgr = new EncryptedRangeManager({ doc });
+    mgr.add({ sheetId: "sheet-abc", startRow: 0, startCol: 0, endRow: 0, endCol: 0, keyId: "k1" });
+
+    expect(mgr.list()).toMatchObject([{ sheetId: "Sheet-ABC", keyId: "k1" }]);
+  });
+
   it("manager update resolves sheet display names to stable sheet ids when possible", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
