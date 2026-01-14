@@ -117,3 +117,62 @@ fn unicode_and_whitespace_passwords_are_not_trimmed_or_normalized() {
         "expected InvalidPassword for NFD password, got {err:?}"
     );
 }
+
+#[test]
+fn integrity_check_failed_is_invalid_password() {
+    use std::io::{Cursor, Read, Write};
+
+    let plain_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let plain_zip = std::fs::read(plain_path).expect("read plain xlsb fixture");
+
+    let password = "password";
+    let encrypted = encrypt_package_to_ole(
+        &plain_zip,
+        password,
+        EncryptOptions {
+            scheme: EncryptionScheme::Agile,
+            key_bits: 256,
+            hash_algorithm: HashAlgorithm::Sha256,
+            spin_count: 2_048,
+        },
+    )
+    .expect("encrypt wrapper");
+
+    // Tamper with the EncryptedPackage ciphertext so the HMAC check fails.
+    let mut ole = cfb::CompoundFile::open(Cursor::new(&encrypted)).expect("open cfb");
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .expect("open EncryptionInfo")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+    let mut encrypted_package = Vec::new();
+    ole.open_stream("EncryptedPackage")
+        .expect("open EncryptedPackage")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+    assert!(
+        encrypted_package.len() > 8,
+        "expected EncryptedPackage to contain ciphertext bytes"
+    );
+    encrypted_package[8] ^= 0x01;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut out = cfb::CompoundFile::create(cursor).expect("create cfb");
+    out.create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    out.create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+    let tampered = out.into_inner().into_inner();
+
+    let err =
+        XlsbWorkbook::open_from_bytes_with_password(&tampered, password, OpenOptions::default())
+            .expect_err("expected integrity failure to error");
+    assert!(
+        matches!(err, formula_xlsb::Error::InvalidPassword),
+        "expected InvalidPassword for integrity failure, got {err:?}"
+    );
+}

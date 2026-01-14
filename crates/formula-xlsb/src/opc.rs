@@ -3364,7 +3364,8 @@ mod zip_guardrail_tests {
 
 fn map_office_crypto_err(err: office_crypto::OfficeCryptoError) -> ParseError {
     match err {
-        office_crypto::OfficeCryptoError::InvalidPassword => ParseError::InvalidPassword,
+        office_crypto::OfficeCryptoError::InvalidPassword
+        | office_crypto::OfficeCryptoError::IntegrityCheckFailed => ParseError::InvalidPassword,
         other => ParseError::OfficeCrypto(other.to_string()),
     }
 }
