@@ -16,6 +16,7 @@ This is intended for CI/release workflows to catch:
 
 Environment variables:
   CARGO_TARGET_DIR         Optional Cargo target directory override (also used for artifact discovery)
+  DOCKER_PLATFORM          Optional docker --platform override (default: host architecture)
   FORMULA_DEB_SMOKE_IMAGE  Ubuntu image to use (default: ubuntu:24.04)
   FORMULA_RPM_SMOKE_IMAGE  RPM-based image to use (default: fedora:40; supports openSUSE too)
 EOF
