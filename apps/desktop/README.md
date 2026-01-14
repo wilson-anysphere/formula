@@ -1,5 +1,23 @@
 # Formula Desktop (Vite/Webview)
 
+## Desktop perf (startup, memory, size)
+
+From the repo root, you can run the desktop perf helpers (builds the Tauri binary + frontend as needed):
+
+```bash
+pnpm perf:desktop-startup
+pnpm perf:desktop-memory
+pnpm perf:desktop-size
+```
+
+These commands run the desktop app with an isolated, repo-local HOME directory under `target/perf-home` by default
+(override via `FORMULA_PERF_HOME`, preserve via `FORMULA_PERF_PRESERVE_HOME=1`).
+
+More details (including metric definitions and CI gating env vars):
+
+- `docs/11-desktop-shell.md`
+- `docs/16-performance-targets.md`
+
 ## Bundle analysis (renderer build)
 
 To inspect which chunks/dependencies dominate the desktop renderer bundle, run:

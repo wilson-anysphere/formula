@@ -162,10 +162,10 @@ Tuning knobs:
 - `FORMULA_DESKTOP_MEMORY_TIMEOUT_MS` (default: 20000)
 - `FORMULA_DESKTOP_IDLE_RSS_TARGET_MB` (default: 100) to set a budget (alias: `FORMULA_DESKTOP_MEMORY_TARGET_MB`)
 - `FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1` (or `--enforce`) to fail the command when p95 exceeds the budget
-  - `FORMULA_RUN_DESKTOP_MEMORY_BENCH=1` to allow running in CI (the runner skips in CI by default)
+- `FORMULA_RUN_DESKTOP_MEMORY_BENCH=1` to allow running in CI (the runner skips in CI by default)
 
-  The scheduled cross-platform workflow (`.github/workflows/desktop-perf-platform-matrix.yml`) also runs this benchmark
-  daily and uploads per-OS JSON + logs, along with the startup timings.
+The scheduled cross-platform workflow (`.github/workflows/desktop-perf-platform-matrix.yml`) also runs this benchmark
+daily and uploads per-OS JSON + logs, along with the startup timings.
 
 ### Size report (dist + binary + installer artifacts)
 
