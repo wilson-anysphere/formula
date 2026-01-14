@@ -83,19 +83,19 @@ export interface EngineClient {
   /**
    * Set a cell's style id (formatting metadata).
    */
-  setCellStyleId(sheet: string, address: string, styleId: number, options?: RpcOptions): Promise<void>;
+  setCellStyleId(address: string, styleId: number, sheet?: string, options?: RpcOptions): Promise<void>;
   /**
    * Set (or clear) a column width override.
    *
    * `col` is 0-indexed (engine coordinates). `width=null` clears the override.
    */
-  setColWidth(sheet: string, col: number, width: number | null, options?: RpcOptions): Promise<void>;
+  setColWidth(col: number, width: number | null, sheet?: string, options?: RpcOptions): Promise<void>;
   /**
    * Set a column's hidden flag.
    *
    * `col` is 0-indexed (engine coordinates).
    */
-  setColHidden(sheet: string, col: number, hidden: boolean, options?: RpcOptions): Promise<void>;
+  setColHidden(col: number, hidden: boolean, sheet?: string, options?: RpcOptions): Promise<void>;
   /**
    * Intern (deduplicate) a style into the workbook's shared style table, returning its id.
    */
@@ -339,12 +339,12 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
     setWorkbookFileMetadata: async (directory, filename, rpcOptions) =>
       await withEngine((connected) => connected.setWorkbookFileMetadata(directory, filename, rpcOptions)),
-    setCellStyleId: async (sheet, address, styleId, rpcOptions) =>
-      await withEngine((connected) => connected.setCellStyleId(sheet, address, styleId, rpcOptions)),
-    setColWidth: async (sheet, col, width, rpcOptions) =>
-      await withEngine((connected) => connected.setColWidth(sheet, col, width, rpcOptions)),
-    setColHidden: async (sheet, col, hidden, rpcOptions) =>
-      await withEngine((connected) => connected.setColHidden(sheet, col, hidden, rpcOptions)),
+    setCellStyleId: async (address, styleId, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.setCellStyleId(address, styleId, sheet, rpcOptions)),
+    setColWidth: async (col, width, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.setColWidth(col, width, sheet, rpcOptions)),
+    setColHidden: async (col, hidden, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.setColHidden(col, hidden, sheet, rpcOptions)),
     internStyle: async (style, rpcOptions) => await withEngine((connected) => connected.internStyle(style, rpcOptions)),
     setLocale: async (localeId, rpcOptions) => await withEngine((connected) => connected.setLocale(localeId, rpcOptions)),
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),

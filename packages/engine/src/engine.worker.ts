@@ -460,21 +460,21 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setCellStyleId !== "function") {
                 throw new Error("setCellStyleId: WasmWorkbook.setCellStyleId is not available in this WASM build");
               }
-              (wb as any).setCellStyleId(params.sheet, params.address, params.styleId);
+              (wb as any).setCellStyleId(params.sheet ?? "Sheet1", params.address, params.styleId);
               result = null;
               break;
             case "setColWidth":
               if (typeof (wb as any).setColWidth !== "function") {
                 throw new Error("setColWidth: WasmWorkbook.setColWidth is not available in this WASM build");
               }
-              (wb as any).setColWidth(params.sheet, params.col, params.width ?? null);
+              (wb as any).setColWidth(params.sheet ?? "Sheet1", params.col, params.width ?? null);
               result = null;
               break;
             case "setColHidden":
               if (typeof (wb as any).setColHidden !== "function") {
                 throw new Error("setColHidden: WasmWorkbook.setColHidden is not available in this WASM build");
               }
-              (wb as any).setColHidden(params.sheet, params.col, Boolean(params.hidden));
+              (wb as any).setColHidden(params.sheet ?? "Sheet1", params.col, Boolean(params.hidden));
               result = null;
               break;
             case "internStyle":

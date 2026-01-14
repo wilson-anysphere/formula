@@ -301,17 +301,17 @@ export class EngineWorker {
     await this.invoke("setWorkbookFileMetadata", { directory, filename }, options);
   }
 
-  async setCellStyleId(sheet: string, address: string, styleId: number, options?: RpcOptions): Promise<void> {
+  async setCellStyleId(address: string, styleId: number, sheet?: string, options?: RpcOptions): Promise<void> {
     await this.flush();
     await this.invoke("setCellStyleId", { sheet, address, styleId }, options);
   }
 
-  async setColWidth(sheet: string, col: number, width: number | null, options?: RpcOptions): Promise<void> {
+  async setColWidth(col: number, width: number | null, sheet?: string, options?: RpcOptions): Promise<void> {
     await this.flush();
     await this.invoke("setColWidth", { sheet, col, width }, options);
   }
 
-  async setColHidden(sheet: string, col: number, hidden: boolean, options?: RpcOptions): Promise<void> {
+  async setColHidden(col: number, hidden: boolean, sheet?: string, options?: RpcOptions): Promise<void> {
     await this.flush();
     await this.invoke("setColHidden", { sheet, col, hidden }, options);
   }

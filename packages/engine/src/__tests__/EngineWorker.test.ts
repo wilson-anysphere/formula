@@ -703,7 +703,7 @@ describe("EngineWorker RPC", () => {
     // Fire-and-forget setCell leaves a pending microtask flush.
     void engine.setCell("A1", 1);
 
-    await engine.setColWidth("Sheet1", 3, 120);
+    await engine.setColWidth(3, 120, "Sheet1");
 
     const methods = worker.received
       .filter((msg): msg is RpcRequest => msg.type === "request")
@@ -720,7 +720,7 @@ describe("EngineWorker RPC", () => {
       channelFactory: createMockChannel
     });
 
-    await engine.setCellStyleId("Sheet1", "A1", 7);
+    await engine.setCellStyleId("A1", 7, "Sheet1");
 
     const requests = worker.received.filter(
       (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "setCellStyleId"

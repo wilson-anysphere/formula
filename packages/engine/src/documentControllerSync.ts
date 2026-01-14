@@ -50,7 +50,7 @@ export interface EngineSyncTarget {
   /**
    * Optional formatting metadata interning + application methods.
    */
-  internStyle?: (styleObj: unknown) => Promise<number> | number;
+  internStyle?: (style: unknown) => Promise<number> | number;
   setCellStyleId?: (address: string, styleId: number, sheet?: string) => Promise<void> | void;
   setRowStyleId?: (row: number, styleId: number, sheet?: string) => Promise<void> | void;
   setColStyleId?: (col: number, styleId: number, sheet?: string) => Promise<void> | void;
