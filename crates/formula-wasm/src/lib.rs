@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use formula_engine::calc_settings::{CalcSettings, CalculationMode, IterativeCalculationSettings};
 use formula_engine::{
     CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
-    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, FormatRun as EngineFormatRun,
+    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, metadata::FormatRun as EngineFormatRun,
     NameDefinition, NameScope, ParseOptions, Span as EngineSpan, Token, TokenKind,
     Value as EngineValue,
 };
