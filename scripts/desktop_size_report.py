@@ -257,6 +257,13 @@ def _cargo_target_directory(repo_root: Path) -> Path | None:
     `<repo>/target`.
     """
     try:
+        # `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+        # globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift
+        # for any cargo subprocess calls in this report.
+        env = os.environ.copy()
+        if env.get("RUSTUP_TOOLCHAIN") and (repo_root / "rust-toolchain.toml").is_file():
+            env.pop("RUSTUP_TOOLCHAIN", None)
+
         cp = subprocess.run(
             ["cargo", "metadata", "--no-deps", "--format-version=1"],
             cwd=repo_root,
@@ -265,6 +272,7 @@ def _cargo_target_directory(repo_root: Path) -> Path | None:
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=env,
         )
     except OSError:
         return None
