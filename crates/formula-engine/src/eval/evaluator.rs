@@ -280,6 +280,10 @@ pub trait ValueResolver {
     /// which must be resolved by workbook sheet order. Implementations should return sheet names
     /// (without the `[Book.xlsx]` prefix) in workbook order.
     ///
+    /// Expected semantics: endpoint matching should behave like Excel's sheet name comparison
+    /// (Unicode-aware, NFKC + case-insensitive), as implemented by
+    /// [`formula_model::sheet_name_eq_case_insensitive`].
+    ///
     /// Returning `None` indicates that the sheet order is unavailable, in which case external
     /// 3D spans evaluate to `#REF!`.
     fn external_sheet_order(&self, _workbook: &str) -> Option<Vec<String>> {

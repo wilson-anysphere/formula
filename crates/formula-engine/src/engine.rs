@@ -8877,7 +8877,8 @@ pub trait ExternalValueProvider: Send + Sync {
     /// prefix). Sheet names should be unquoted display names (e.g. return `Sheet 1`, not
     /// `'Sheet 1'`) and each sheet should appear exactly once.
     ///
-    /// Endpoint matching (`Sheet1` / `Sheet3`) is case-insensitive.
+    /// Endpoint matching (`Sheet1` / `Sheet3`) uses Excel-like Unicode-aware, NFKC +
+    /// case-insensitive comparison (see [`formula_model::sheet_name_eq_case_insensitive`]).
     ///
     /// Spans are resolved by workbook sheet order regardless of whether the user writes them
     /// “forward” or “reversed” in the formula (e.g. `Sheet3:Sheet1` is treated the same as
