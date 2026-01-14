@@ -1,5 +1,5 @@
 {
-  "source": "Microsoft Excel (de-DE) function name translations (legacy translation tables + Microsoft Support for newer functions).",
+  "source": "Microsoft Excel (de-DE) function name translations (Excel for Microsoft 365) via Range.Formula/FormulaLocal round-trip.",
   "translations": {
     "ABS": "ABS",
     "ACCRINT": "AUFGELZINS",
