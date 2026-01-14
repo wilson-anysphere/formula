@@ -70,6 +70,29 @@ describe.each(SOURCES)("$label permission-aware workbook managers", (source) => 
     expect(metadataMgr.get("k")).toBe("v2");
   });
 
+  it("nested Yjs values returned from root reads respect role changes", () => {
+    const doc = new Y.Doc();
+    const session = createCollabSession({ doc });
+    session.setPermissions({ role: "editor", userId: "u1", rangeRestrictions: [] });
+
+    const metadataMgr = source.createMetadataManagerForSessionWithPermissions(session);
+
+    // Create a nested structure and mutate it while editable.
+    metadataMgr.metadata.set("nested", new Y.Array());
+    const nested = (metadataMgr.metadata as any).get("nested");
+    expect(nested).toBeTruthy();
+    (nested as any).push([new Y.Map()]);
+    expect(((metadataMgr.metadata as any).get("nested") as any)?.length ?? 0).toBe(1);
+
+    // After a role downgrade, the *same previously-read object* should now be write-guarded.
+    session.setPermissions({ role: "viewer", userId: "u1", rangeRestrictions: [] });
+    expect(() => (nested as any).push([new Y.Map()])).toThrow(/read-?only/i);
+    // Destructured mutator should still be guarded (no reliance on `this` binding).
+    const { push } = nested as any;
+    expect(() => push([new Y.Map()])).toThrow(/read-?only/i);
+    expect(((metadataMgr.metadata as any).get("nested") as any)?.length ?? 0).toBe(1);
+  });
+
   it.each(["viewer", "commenter"] as const)("prevents %s from mutating workbook sheets", (role) => {
     const doc = new Y.Doc();
     const session = createCollabSession({ doc });
@@ -119,9 +142,13 @@ describe.each(SOURCES)("$label permission-aware workbook managers", (source) => 
     const metadataMgr = source.createMetadataManagerForSessionWithPermissions(session);
     expect(() => metadataMgr.set("foo", "bar")).toThrow(/read-?only/i);
     expect(() => (metadataMgr.metadata as any).set("foo", "bar")).toThrow(/read-?only/i);
+    const { set } = metadataMgr.metadata as any;
+    expect(() => set("foo", "bar")).toThrow(/read-?only/i);
     const nested = (metadataMgr.metadata as any).get("nested");
     expect(nested).toBeTruthy();
     expect(() => (nested as any).push([new Y.Map()])).toThrow(/read-?only/i);
+    const { push } = nested as any;
+    expect(() => push([new Y.Map()])).toThrow(/read-?only/i);
     // Ensure slice/map read helpers also return guarded nested values.
     const sliced = (nested as any).slice();
     expect(Array.isArray(sliced)).toBe(true);
