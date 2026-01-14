@@ -126,6 +126,10 @@ After updating the source JSON, regenerate and verify the generated TSVs:
 node scripts/normalize-locale-function-sources.js
 node scripts/generate-locale-function-tsv.js
 node scripts/generate-locale-function-tsv.js --check
+# or:
+pnpm normalize:locale-function-sources
+pnpm generate:locale-function-tsv
+pnpm check:locale-function-tsv
 ```
 
 #### Verification checklist (function TSVs)
