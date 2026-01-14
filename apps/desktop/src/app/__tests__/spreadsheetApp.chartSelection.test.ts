@@ -8,6 +8,7 @@ import { pxToEmu } from "../../drawings/overlay";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
+let priorCanvasCharts: string | undefined;
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -101,6 +102,8 @@ describe("SpreadsheetApp chart selection + drag", () => {
   afterEach(() => {
     if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
     else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
+    else process.env.CANVAS_CHARTS = priorCanvasCharts;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -108,6 +111,10 @@ describe("SpreadsheetApp chart selection + drag", () => {
   beforeEach(() => {
     priorGridMode = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
+    priorCanvasCharts = process.env.CANVAS_CHARTS;
+    // Default these tests to legacy chart mode; canvas charts mode is exercised via
+    // the explicit `process.env.CANVAS_CHARTS = "1"` cases below.
+    process.env.CANVAS_CHARTS = "0";
     document.body.innerHTML = "";
 
     const storage = createInMemoryLocalStorage();
@@ -199,7 +206,7 @@ describe("SpreadsheetApp chart selection + drag", () => {
 
   it("switching sheets clears chart selection even if the chart is on the target sheet", () => {
     const prior = process.env.CANVAS_CHARTS;
-    delete process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
     try {
       const root = createRoot();
       const status = {
@@ -247,7 +254,7 @@ describe("SpreadsheetApp chart selection + drag", () => {
 
   it("switching sheets mid-drag cancels an in-progress chart drag (legacy charts)", () => {
     const prior = process.env.CANVAS_CHARTS;
-    delete process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
     try {
       const root = createRoot();
       const status = {
@@ -1596,6 +1603,8 @@ describe("SpreadsheetApp chart selection + drag", () => {
 
 describe("SpreadsheetApp chart selection + drag (legacy grid)", () => {
   it("selects a chart on click", () => {
+    const priorCharts = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
     process.env.DESKTOP_GRID_MODE = "legacy";
     const root = createRoot();
     const status = {
@@ -1604,29 +1613,36 @@ describe("SpreadsheetApp chart selection + drag (legacy grid)", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
-    const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
-    expect(chart).toBeTruthy();
+    try {
+      const app = new SpreadsheetApp(root, status);
+      const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
+      expect(chart).toBeTruthy();
 
-    const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
-    expect(rect).not.toBeNull();
+      const rect = (app as any).chartAnchorToViewportRect(chart!.anchor);
+      expect(rect).not.toBeNull();
 
-    const layout = (app as any).chartOverlayLayout();
-    const originX = layout.originX as number;
-    const originY = layout.originY as number;
+      const layout = (app as any).chartOverlayLayout();
+      const originX = layout.originX as number;
+      const originY = layout.originY as number;
 
-    const clickX = originX + rect.left + 2;
-    const clickY = originY + rect.top + 2;
-    dispatchPointerEvent(root, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 1 });
-    dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 1 });
+      const clickX = originX + rect.left + 2;
+      const clickY = originY + rect.top + 2;
+      dispatchPointerEvent(root, "pointerdown", { clientX: clickX, clientY: clickY, pointerId: 1 });
+      dispatchPointerEvent(window, "pointerup", { clientX: clickX, clientY: clickY, pointerId: 1 });
 
-    expect(app.getSelectedChartId()).toBe(chart!.id);
+      expect(app.getSelectedChartId()).toBe(chart!.id);
 
-    app.destroy();
-    root.remove();
+      app.destroy();
+      root.remove();
+    } finally {
+      if (priorCharts === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = priorCharts;
+    }
   });
 
   it("dragging a chart updates its twoCell anchor", () => {
+    const priorCharts = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
     process.env.DESKTOP_GRID_MODE = "legacy";
     const root = createRoot();
     const status = {
@@ -1635,49 +1651,54 @@ describe("SpreadsheetApp chart selection + drag (legacy grid)", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
-    const result = app.addChart({
-      chart_type: "bar",
-      data_range: "A2:B5",
-      title: "Drag Chart Legacy",
-      position: "A1",
-    });
+    try {
+      const app = new SpreadsheetApp(root, status);
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "A2:B5",
+        title: "Drag Chart Legacy",
+        position: "A1",
+      });
 
-    const before = app.listCharts().find((c) => c.id === result.chart_id);
-    expect(before).toBeTruthy();
-    expect(before!.anchor.kind).toBe("twoCell");
+      const before = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(before).toBeTruthy();
+      expect(before!.anchor.kind).toBe("twoCell");
 
-    const beforeAnchor = before!.anchor as any;
-    expect(beforeAnchor.fromCol).toBe(0);
-    expect(beforeAnchor.toCol).toBeGreaterThan(0);
+      const beforeAnchor = before!.anchor as any;
+      expect(beforeAnchor.fromCol).toBe(0);
+      expect(beforeAnchor.toCol).toBeGreaterThan(0);
 
-    const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
-    expect(rect).not.toBeNull();
+      const rect = (app as any).chartAnchorToViewportRect(before!.anchor);
+      expect(rect).not.toBeNull();
 
-    const layout = (app as any).chartOverlayLayout();
-    const originX = layout.originX as number;
-    const originY = layout.originY as number;
+      const layout = (app as any).chartOverlayLayout();
+      const originX = layout.originX as number;
+      const originY = layout.originY as number;
 
-    const startX = originX + rect.left + 10;
-    const startY = originY + rect.top + 10;
-    const endX = startX + 100; // move by one column (default col width)
-    const endY = startY;
+      const startX = originX + rect.left + 10;
+      const startY = originY + rect.top + 10;
+      const endX = startX + 100; // move by one column (default col width)
+      const endY = startY;
 
-    dispatchPointerEvent(root, "pointerdown", { clientX: startX, clientY: startY, pointerId: 7 });
-    dispatchPointerEvent(window, "pointermove", { clientX: endX, clientY: endY, pointerId: 7 });
-    dispatchPointerEvent(window, "pointerup", { clientX: endX, clientY: endY, pointerId: 7 });
+      dispatchPointerEvent(root, "pointerdown", { clientX: startX, clientY: startY, pointerId: 7 });
+      dispatchPointerEvent(window, "pointermove", { clientX: endX, clientY: endY, pointerId: 7 });
+      dispatchPointerEvent(window, "pointerup", { clientX: endX, clientY: endY, pointerId: 7 });
 
-    const after = app.listCharts().find((c) => c.id === result.chart_id);
-    expect(after).toBeTruthy();
-    expect(after!.anchor.kind).toBe("twoCell");
+      const after = app.listCharts().find((c) => c.id === result.chart_id);
+      expect(after).toBeTruthy();
+      expect(after!.anchor.kind).toBe("twoCell");
 
-    const afterAnchor = after!.anchor as any;
-    expect(afterAnchor.fromCol).toBe(beforeAnchor.fromCol + 1);
-    expect(afterAnchor.toCol).toBe(beforeAnchor.toCol + 1);
-    expect(afterAnchor.fromRow).toBe(beforeAnchor.fromRow);
-    expect(afterAnchor.toRow).toBe(beforeAnchor.toRow);
+      const afterAnchor = after!.anchor as any;
+      expect(afterAnchor.fromCol).toBe(beforeAnchor.fromCol + 1);
+      expect(afterAnchor.toCol).toBe(beforeAnchor.toCol + 1);
+      expect(afterAnchor.fromRow).toBe(beforeAnchor.fromRow);
+      expect(afterAnchor.toRow).toBe(beforeAnchor.toRow);
 
-    app.destroy();
-    root.remove();
+      app.destroy();
+      root.remove();
+    } finally {
+      if (priorCharts === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = priorCharts;
+    }
   });
 });

@@ -4,10 +4,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { chartIdToDrawingId } from "../../charts/chartDrawingAdapter";
 import { SpreadsheetApp } from "../spreadsheetApp";
-
-let priorGridMode: string | undefined;
-let priorCanvasCharts: string | undefined;
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -74,14 +72,21 @@ function createRoot(): HTMLElement {
   return root;
 }
 
-describe("SpreadsheetApp charts dirty-on-scroll", () => {
-  beforeEach(() => {
-    priorGridMode = process.env.DESKTOP_GRID_MODE;
-    process.env.DESKTOP_GRID_MODE = "legacy";
-    priorCanvasCharts = process.env.CANVAS_CHARTS;
-    process.env.CANVAS_CHARTS = "0";
+describe("SpreadsheetApp canvas charts (default)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    delete process.env.DESKTOP_GRID_MODE;
+    delete process.env.CANVAS_CHARTS;
+    delete process.env.USE_CANVAS_CHARTS;
+  });
 
+  beforeEach(() => {
     document.body.innerHTML = "";
+    // Keep the grid mode deterministic for test geometry expectations.
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    delete process.env.CANVAS_CHARTS;
+    delete process.env.USE_CANVAS_CHARTS;
 
     const storage = createInMemoryLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
@@ -108,16 +113,7 @@ describe("SpreadsheetApp charts dirty-on-scroll", () => {
     };
   });
 
-  afterEach(() => {
-    if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
-    else process.env.DESKTOP_GRID_MODE = priorGridMode;
-    if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
-    else process.env.CANVAS_CHARTS = priorCanvasCharts;
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it("refreshes a chart's cached data when it was off-screen during edits", () => {
+  it("defaults to canvas charts and renders ChartStore charts via the drawings overlay", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -126,51 +122,27 @@ describe("SpreadsheetApp charts dirty-on-scroll", () => {
     };
 
     const app = new SpreadsheetApp(root, status);
-    expect(app.getGridMode()).toBe("legacy");
+    expect((app as any).useCanvasCharts).toBe(true);
 
-    const doc = app.getDocument();
-    const sheetId = app.getCurrentSheetId();
-    const sheetToken = /[^A-Za-z0-9_]/.test(sheetId) ? `'${sheetId.replace(/'/g, "''")}'` : sheetId;
+    // Legacy chart canvases should not be mounted by default.
+    expect(root.querySelector(".grid-canvas--chart")).toBeNull();
+    expect(root.querySelector(".chart-selection-canvas")).toBeNull();
 
-    const result = app.addChart({
-      chart_type: "bar",
-      data_range: `${sheetToken}!A2:B5`,
-      title: "Demo",
-      position: `${sheetToken}!A1`,
-    });
+    const chart = app.listCharts().find((c) => c.sheetId === app.getCurrentSheetId());
+    expect(chart).toBeTruthy();
 
-    const chartModels = (app as any).chartModels as Map<string, any>;
-    const beforeModel = chartModels.get(result.chart_id);
-    expect(beforeModel).toBeTruthy();
-    const beforeValues = [...(beforeModel?.series?.[0]?.values?.cache ?? [])];
+    const drawingObjects = app.getDrawingObjects();
+    const chartDrawingId = chartIdToDrawingId(chart!.id);
+    const chartObj = drawingObjects.find((obj) => obj.kind.type === "chart" && obj.id === chartDrawingId) ?? null;
+    expect(chartObj).not.toBeNull();
 
-    // Scroll far enough that the chart is guaranteed to be off-screen.
-    (app as any).scrollX = 100_000;
-    (app as any).scrollY = 100_000;
-    (app as any).renderCharts(false);
-
-    // Mutate a value cell inside the chart's data range (B2).
-    doc.setCellValue(sheetId, { row: 1, col: 1 }, 10);
-    // Mimic the UI path: a full refresh occurs, but should not rescan chart data while off-screen.
-    app.refresh("full");
-
-    const midModel = chartModels.get(result.chart_id);
-    expect(midModel).toBeTruthy();
-    const midValues = [...(midModel?.series?.[0]?.values?.cache ?? [])];
-    expect(midValues).toEqual(beforeValues);
-
-    // Scroll back so the chart becomes visible; the chart should now rescan its data.
-    (app as any).scrollX = 0;
-    (app as any).scrollY = 0;
-    (app as any).renderCharts(false);
-
-    const afterModel = chartModels.get(result.chart_id);
-    expect(afterModel).toBeTruthy();
-    const afterValues = [...(afterModel?.series?.[0]?.values?.cache ?? [])];
-    expect(afterValues).not.toEqual(beforeValues);
-    expect(afterValues[0]).toBe(10);
+    // Selection should still work through the unified drawing selection stack.
+    app.selectDrawingById(chartDrawingId);
+    expect(app.getSelectedChartId()).toBe(chart!.id);
+    expect(app.getDrawingHandlePointsPx(chartDrawingId)).not.toBeNull();
 
     app.destroy();
     root.remove();
   });
 });
+

@@ -1055,7 +1055,9 @@ function resolveUseCanvasCharts(search: string = typeof window !== "undefined" ?
   }
   if (typeof nodeValue === "boolean") return nodeValue;
 
-  return false;
+  // Default: use unified canvas-based chart rendering (charts render via the drawings overlay).
+  // This can be forced off via URL/env for debugging (`?canvasCharts=0`, `CANVAS_CHARTS=0`, etc).
+  return true;
 }
 
 function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
@@ -1245,7 +1247,9 @@ export class SpreadsheetApp {
   private suppressActiveSheetGuard = false;
 
   private gridCanvas: HTMLCanvasElement;
-  private chartCanvas: HTMLCanvasElement;
+  // Legacy-only chart canvas. When canvas charts are enabled, ChartStore charts render as drawing
+  // objects via `drawingCanvas`/`DrawingOverlay` and this layer is not created.
+  private chartCanvas: HTMLCanvasElement | null = null;
   private drawingCanvas: HTMLCanvasElement;
   private readonly drawingGeom: DrawingGridGeometry;
   private drawingOverlay: DrawingOverlay;
@@ -1360,7 +1364,7 @@ export class SpreadsheetApp {
   private presenceCanvas: HTMLCanvasElement | null = null;
   private selectionCanvas: HTMLCanvasElement;
   private gridCtx: CanvasRenderingContext2D;
-  private chartCtx: CanvasRenderingContext2D;
+  private chartCtx: CanvasRenderingContext2D | null = null;
   private referenceCtx: CanvasRenderingContext2D;
   private auditingCtx: CanvasRenderingContext2D;
   private presenceCtx: CanvasRenderingContext2D | null = null;
@@ -2384,12 +2388,19 @@ export class SpreadsheetApp {
       this.drawingCanvas.classList.add("drawing-layer--shared", "grid-canvas--shared-drawings");
     }
 
-    this.chartCanvas = document.createElement("canvas");
-    this.chartCanvas.className = "grid-canvas grid-canvas--chart";
-    this.chartCanvas.setAttribute("aria-hidden", "true");
-    if (this.gridMode === "shared") {
-      // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
-      this.chartCanvas.classList.add("grid-canvas--shared-chart");
+    // Legacy charts mode renders ChartStore charts onto their own canvas overlay. When canvas charts
+    // are enabled, ChartStore charts render as DrawingOverlay objects on `drawingCanvas`, so these
+    // legacy canvas layers are not created/mounted.
+    if (!this.useCanvasCharts) {
+      this.chartCanvas = document.createElement("canvas");
+      this.chartCanvas.className = "grid-canvas grid-canvas--chart";
+      this.chartCanvas.setAttribute("aria-hidden", "true");
+      if (this.gridMode === "shared") {
+        // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
+        this.chartCanvas.classList.add("grid-canvas--shared-chart");
+      }
+    } else {
+      this.chartCanvas = null;
     }
 
     this.chartOverlayGeom = {
@@ -2397,23 +2408,28 @@ export class SpreadsheetApp {
       cellSizePx: (cell) => this.chartCellSizePx(cell),
     };
 
-    this.chartSelectionCanvas = document.createElement("canvas");
-    // Chart selection handles are rendered on a separate overlay canvas. Keep the base
-    // class list minimal and use semantic classes so CSS can control stacking.
-    this.chartSelectionCanvas.className = "grid-canvas chart-selection-canvas";
-    this.chartSelectionCanvas.setAttribute("aria-hidden", "true");
-    if (this.gridMode === "shared") {
-      // Match the selection canvas z-index so chart handles are drawn above charts in shared mode.
-      this.chartSelectionCanvas.classList.add("grid-canvas--shared-selection");
+    if (!this.useCanvasCharts) {
+      this.chartSelectionCanvas = document.createElement("canvas");
+      // Chart selection handles are rendered on a separate overlay canvas. Keep the base
+      // class list minimal and use semantic classes so CSS can control stacking.
+      this.chartSelectionCanvas.className = "grid-canvas chart-selection-canvas";
+      this.chartSelectionCanvas.setAttribute("aria-hidden", "true");
+      if (this.gridMode === "shared") {
+        // Match the selection canvas z-index so chart handles are drawn above charts in shared mode.
+        this.chartSelectionCanvas.classList.add("grid-canvas--shared-selection");
+      }
+      this.chartSelectionOverlay = new DrawingOverlay(
+        this.chartSelectionCanvas,
+        this.chartOverlayImages,
+        this.chartOverlayGeom,
+        undefined,
+        () => this.renderChartSelectionOverlay(),
+        this.root,
+      );
+    } else {
+      this.chartSelectionCanvas = null;
+      this.chartSelectionOverlay = null;
     }
-    this.chartSelectionOverlay = new DrawingOverlay(
-      this.chartSelectionCanvas,
-      this.chartOverlayImages,
-      this.chartOverlayGeom,
-      undefined,
-      () => this.renderChartSelectionOverlay(),
-      this.root,
-    );
 
     this.referenceCanvas = document.createElement("canvas");
     this.referenceCanvas.className = "grid-canvas grid-canvas--content";
@@ -2438,12 +2454,12 @@ export class SpreadsheetApp {
 
     this.root.appendChild(this.gridCanvas);
     this.root.appendChild(this.drawingCanvas);
-    this.root.appendChild(this.chartCanvas);
+    if (this.chartCanvas) this.root.appendChild(this.chartCanvas);
     this.root.appendChild(this.referenceCanvas);
     this.root.appendChild(this.auditingCanvas);
     if (this.presenceCanvas) this.root.appendChild(this.presenceCanvas);
     this.root.appendChild(this.selectionCanvas);
-    this.root.appendChild(this.chartSelectionCanvas);
+    if (this.chartSelectionCanvas) this.root.appendChild(this.chartSelectionCanvas);
 
     // Avoid allocating a fresh `{row,col}` object for every chart cell lookup.
     const chartCoordScratch = { row: 0, col: 0 };
@@ -2607,12 +2623,19 @@ export class SpreadsheetApp {
     this.root.appendChild(this.auditingLegend);
 
     const gridCtx = this.gridCanvas.getContext("2d");
-    const chartCtx = this.chartCanvas.getContext("2d");
+    const chartCtx = this.chartCanvas ? this.chartCanvas.getContext("2d") : null;
     const referenceCtx = this.referenceCanvas.getContext("2d");
     const auditingCtx = this.auditingCanvas.getContext("2d");
     const presenceCtx = this.presenceCanvas ? this.presenceCanvas.getContext("2d") : null;
     const selectionCtx = this.selectionCanvas.getContext("2d");
-    if (!gridCtx || !chartCtx || !referenceCtx || !auditingCtx || (this.presenceCanvas && !presenceCtx) || !selectionCtx) {
+    if (
+      !gridCtx ||
+      (!this.useCanvasCharts && !chartCtx) ||
+      !referenceCtx ||
+      !auditingCtx ||
+      (this.presenceCanvas && !presenceCtx) ||
+      !selectionCtx
+    ) {
       throw new Error("Canvas 2D context not available");
     }
     this.gridCtx = gridCtx;
@@ -14836,12 +14859,15 @@ export class SpreadsheetApp {
       this.auditingCtx.setTransform(1, 0, 0, 1, 0, 0);
       this.auditingCtx.scale(this.dpr, this.dpr);
 
-      this.chartCanvas.width = Math.floor(this.width * this.dpr);
-      this.chartCanvas.height = Math.floor(this.height * this.dpr);
-      this.chartCanvas.style.width = `${this.width}px`;
-      this.chartCanvas.style.height = `${this.height}px`;
-      this.chartCtx.setTransform(1, 0, 0, 1, 0, 0);
-      this.chartCtx.scale(this.dpr, this.dpr);
+      // Legacy-only chart overlay canvas.
+      if (this.chartCanvas && this.chartCtx) {
+        this.chartCanvas.width = Math.floor(this.width * this.dpr);
+        this.chartCanvas.height = Math.floor(this.height * this.dpr);
+        this.chartCanvas.style.width = `${this.width}px`;
+        this.chartCanvas.style.height = `${this.height}px`;
+        this.chartCtx.setTransform(1, 0, 0, 1, 0, 0);
+        this.chartCtx.scale(this.dpr, this.dpr);
+      }
 
       // If auditing is currently off, avoid repeatedly clearing this canvas on scroll.
       // Track that it was resized so `renderAuditing()` can do a one-time clear if needed.
@@ -14867,7 +14893,7 @@ export class SpreadsheetApp {
 
     const legacyCanvases: HTMLCanvasElement[] = [
       this.gridCanvas,
-      this.chartCanvas,
+      ...(this.chartCanvas ? [this.chartCanvas] : []),
       this.referenceCanvas,
       this.auditingCanvas,
       ...(this.presenceCanvas ? [this.presenceCanvas] : []),
@@ -14883,7 +14909,7 @@ export class SpreadsheetApp {
     // Reset transforms and apply DPR scaling so drawing code uses CSS pixels.
     const legacyContexts: CanvasRenderingContext2D[] = [
       this.gridCtx,
-      this.chartCtx,
+      ...(this.chartCtx ? [this.chartCtx] : []),
       this.referenceCtx,
       this.auditingCtx,
       ...(this.presenceCtx ? [this.presenceCtx] : []),
@@ -16598,6 +16624,7 @@ export class SpreadsheetApp {
 
     // Reset the chart canvas transform and clear in CSS-pixel coordinates.
     const ctx = this.chartCtx;
+    if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(this.dpr, this.dpr);
     ctx.clearRect(0, 0, this.width, this.height);

@@ -121,6 +121,8 @@ describe("SpreadsheetApp charts + frozen panes", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    delete process.env.CANVAS_CHARTS;
+    delete process.env.USE_CANVAS_CHARTS;
   });
 
   beforeEach(() => {
@@ -206,6 +208,8 @@ describe("SpreadsheetApp charts + frozen panes", () => {
   it("routes charts into pane quadrants in shared-grid mode", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
+    const priorCharts = process.env.CANVAS_CHARTS;
+    process.env.CANVAS_CHARTS = "0";
     try {
       const root = createRoot();
       const status = {
@@ -256,6 +260,8 @@ describe("SpreadsheetApp charts + frozen panes", () => {
     } finally {
       if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
       else process.env.DESKTOP_GRID_MODE = prior;
+      if (priorCharts === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = priorCharts;
     }
   });
 });

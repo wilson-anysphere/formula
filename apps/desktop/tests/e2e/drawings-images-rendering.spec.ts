@@ -107,25 +107,30 @@ test.describe("drawing + image rendering regressions", () => {
 
     await gotoDesktop(page);
 
-    // Ensure the built-in overlay canvases exist (charts + drawings).
-    await expect(page.locator("canvas.grid-canvas--chart")).toHaveCount(1);
+    // Ensure the built-in overlay canvases exist.
+    // Note: ChartStore charts render via the drawings overlay by default (canvas charts mode),
+    // so the legacy chart canvas layer should not be mounted.
+    await expect(page.locator("canvas.grid-canvas--chart")).toHaveCount(0);
     await expect(page.getByTestId("drawing-layer-canvas")).toHaveCount(1);
 
     // Regression guard: overlay stacking should be deterministic across modes.
-    // Drawings/images must render above charts and cell content, but below selection UI.
+    // Drawings/images (and charts in canvas-charts mode) must render above cell content,
+    // but below selection UI.
     const z = await page.evaluate(() => {
       const drawing = document.querySelector(".drawing-layer");
-      const chart = document.querySelector(".grid-canvas--chart");
       const selection = document.querySelector(".grid-canvas--selection");
-      if (!drawing || !chart || !selection) return null;
+      const chart = document.querySelector(".grid-canvas--chart");
+      if (!drawing || !selection) return null;
       return {
         drawing: getComputedStyle(drawing).zIndex,
-        chart: getComputedStyle(chart).zIndex,
+        chart: chart ? getComputedStyle(chart).zIndex : null,
         selection: getComputedStyle(selection).zIndex,
       };
     });
     expect(z).not.toBeNull();
-    expect(Number(z!.chart)).toBeLessThan(Number(z!.drawing));
+    if (z!.chart != null) {
+      expect(Number(z!.chart)).toBeLessThan(Number(z!.drawing));
+    }
     expect(Number(z!.drawing)).toBeLessThan(Number(z!.selection));
 
     // Inject a DrawingML-style floating image drawing and image bytes, then assert that the
@@ -230,7 +235,7 @@ test.describe("drawing + image rendering regressions", () => {
     const fixture = loadInCellImageFixture();
 
     await gotoDesktop(page, "/?grid=shared");
-    await expect(page.locator("canvas.grid-canvas--chart")).toHaveCount(1);
+    await expect(page.locator("canvas.grid-canvas--chart")).toHaveCount(0);
     await expect(page.getByTestId("drawing-layer-canvas")).toHaveCount(1);
 
     await page.evaluate(async ({ fixture }) => {

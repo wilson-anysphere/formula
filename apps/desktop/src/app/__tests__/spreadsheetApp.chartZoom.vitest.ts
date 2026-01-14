@@ -97,6 +97,8 @@ describe("SpreadsheetApp chart zoom", () => {
   afterEach(() => {
     if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
     else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    delete process.env.CANVAS_CHARTS;
+    delete process.env.USE_CANVAS_CHARTS;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -104,6 +106,8 @@ describe("SpreadsheetApp chart zoom", () => {
   beforeEach(() => {
     priorGridMode = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
+    delete process.env.CANVAS_CHARTS;
+    delete process.env.USE_CANVAS_CHARTS;
     document.body.innerHTML = "";
 
     const storage = createInMemoryLocalStorage();
@@ -180,8 +184,8 @@ describe("SpreadsheetApp chart zoom", () => {
     const endY = startY;
 
     dispatchPointerEvent(root, "pointerdown", { clientX: startX, clientY: startY, pointerId: 200 });
-    dispatchPointerEvent(window, "pointermove", { clientX: endX, clientY: endY, pointerId: 200 });
-    dispatchPointerEvent(window, "pointerup", { clientX: endX, clientY: endY, pointerId: 200 });
+    dispatchPointerEvent(root, "pointermove", { clientX: endX, clientY: endY, pointerId: 200 });
+    dispatchPointerEvent(root, "pointerup", { clientX: endX, clientY: endY, pointerId: 200 });
 
     const after = app.listCharts().find((c) => c.id === result.chart_id);
     expect(after).toBeTruthy();
@@ -197,4 +201,3 @@ describe("SpreadsheetApp chart zoom", () => {
     root.remove();
   });
 });
-

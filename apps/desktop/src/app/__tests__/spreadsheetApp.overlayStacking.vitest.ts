@@ -110,9 +110,11 @@ function zIndexNumber(value: string): number {
 
 function expectOverlayZOrder(root: HTMLElement): void {
   const drawingLayer = root.querySelector(".drawing-layer");
-  const chartLayer = root.querySelector(".grid-canvas--chart");
   const auditingLayer = root.querySelector(".grid-canvas--auditing");
   const selectionLayer = root.querySelector(".grid-canvas--selection");
+  // Legacy-only chart canvas layers. In canvas-charts mode, ChartStore charts render via the
+  // drawing overlay so these canvases are not mounted.
+  const chartLayer = root.querySelector(".grid-canvas--chart");
   const chartSelectionLayer = root.querySelector(".chart-selection-canvas");
   const outlineLayer = root.querySelector(".outline-layer");
   const vScrollbarTrack = root.querySelector('[data-testid="scrollbar-track-y"]');
@@ -120,102 +122,108 @@ function expectOverlayZOrder(root: HTMLElement): void {
   const cellEditor = root.querySelector(".cell-editor");
 
   expect(drawingLayer).toBeTruthy();
-  expect(chartLayer).toBeTruthy();
   expect(auditingLayer).toBeTruthy();
   expect(selectionLayer).toBeTruthy();
-  expect(chartSelectionLayer).toBeTruthy();
   expect(outlineLayer).toBeTruthy();
   expect(vScrollbarTrack).toBeTruthy();
   expect(hScrollbarTrack).toBeTruthy();
   expect(cellEditor).toBeTruthy();
 
   const drawingZ = zIndexNumber(getComputedStyle(drawingLayer as Element).zIndex);
-  const chartStyle = getComputedStyle(chartLayer as Element);
   const drawingStyle = getComputedStyle(drawingLayer as Element);
   const auditingStyle = getComputedStyle(auditingLayer as Element);
-  const chartSelectionStyle = getComputedStyle(chartSelectionLayer as Element);
   const outlineStyle = getComputedStyle(outlineLayer as Element);
-  const chartZ = zIndexNumber(chartStyle.zIndex);
+  const chartStyle = chartLayer ? getComputedStyle(chartLayer as Element) : null;
+  const chartSelectionStyle = chartSelectionLayer ? getComputedStyle(chartSelectionLayer as Element) : null;
+  const chartZ = chartStyle ? zIndexNumber(chartStyle.zIndex) : null;
   const auditingZ = zIndexNumber(getComputedStyle(auditingLayer as Element).zIndex);
   const selectionZ = zIndexNumber(getComputedStyle(selectionLayer as Element).zIndex);
-  const chartSelectionZ = zIndexNumber(chartSelectionStyle.zIndex);
+  const chartSelectionZ = chartSelectionStyle ? zIndexNumber(chartSelectionStyle.zIndex) : null;
   const outlineZ = zIndexNumber(outlineStyle.zIndex);
   const vScrollbarZ = zIndexNumber(getComputedStyle(vScrollbarTrack as Element).zIndex);
   const hScrollbarZ = zIndexNumber(getComputedStyle(hScrollbarTrack as Element).zIndex);
   const editorZ = zIndexNumber(getComputedStyle(cellEditor as Element).zIndex);
 
   // Non-interactive overlay canvases should never intercept pointer events.
-  expect(chartStyle.pointerEvents).toBe("none");
+  if (chartStyle) expect(chartStyle.pointerEvents).toBe("none");
   expect(drawingStyle.pointerEvents).toBe("none");
   expect(auditingStyle.pointerEvents).toBe("none");
-  expect(chartSelectionStyle.pointerEvents).toBe("none");
+  if (chartSelectionStyle) expect(chartSelectionStyle.pointerEvents).toBe("none");
   expect(outlineStyle.pointerEvents).toBe("none");
 
   // Overlay stacking (low → high):
   //   - auditing highlights (z=1)
-  //   - chart canvas (z=2)
+  //   - chart canvas (z=2; legacy-only)
   //   - drawings/images overlay (z=3)
-  //   - selection + chart selection handles + outline (z=4)
+  //   - selection + outline (z=4; + legacy chart selection handles)
   //   - scrollbars (z=5)
   //   - cell editor (z=10)
   expect(auditingZ).toBe(1);
-  expect(chartZ).toBe(2);
   expect(drawingZ).toBe(3);
   expect(selectionZ).toBe(4);
-  expect(chartSelectionZ).toBe(4);
   expect(outlineZ).toBe(4);
   expect(vScrollbarZ).toBe(5);
   expect(hScrollbarZ).toBe(5);
   expect(editorZ).toBe(10);
 
-  expect(auditingZ).toBeLessThan(chartZ);
-  expect(chartZ).toBeLessThan(drawingZ);
+  if (chartZ != null) {
+    expect(chartZ).toBe(2);
+    expect(auditingZ).toBeLessThan(chartZ);
+    expect(chartZ).toBeLessThan(drawingZ);
+  }
   expect(drawingZ).toBeLessThan(selectionZ);
-  expect(chartSelectionZ).toBeGreaterThanOrEqual(selectionZ);
+  if (chartSelectionZ != null) {
+    expect(chartSelectionZ).toBe(4);
+    expect(chartSelectionZ).toBeGreaterThanOrEqual(selectionZ);
+  }
   expect(outlineZ).toBeGreaterThanOrEqual(selectionZ);
   expect(vScrollbarZ).toBeGreaterThan(selectionZ);
   expect(hScrollbarZ).toBeGreaterThan(selectionZ);
   expect(editorZ).toBeGreaterThan(vScrollbarZ);
 
-  // Selection, chart selection handles, and outline overlays share the same z-index, so ensure
+  // Selection, chart selection handles (legacy), and outline overlays share the same z-index, so ensure
   // DOM insertion order preserves the visual stacking when z-index ties.
-  if (chartSelectionZ === selectionZ) {
-    const children = Array.from(root.children);
-    expect(children.indexOf(chartSelectionLayer!)).toBeGreaterThan(children.indexOf(selectionLayer!));
+  const children = Array.from(root.children);
+  if (chartSelectionLayer && chartSelectionZ === selectionZ) {
+    expect(children.indexOf(chartSelectionLayer)).toBeGreaterThan(children.indexOf(selectionLayer!));
   }
-  if (outlineZ === chartSelectionZ) {
-    const children = Array.from(root.children);
-    expect(children.indexOf(outlineLayer!)).toBeGreaterThan(children.indexOf(chartSelectionLayer!));
+  if (outlineZ === selectionZ) {
+    // Outline must be above selection chrome.
+    expect(children.indexOf(outlineLayer!)).toBeGreaterThan(children.indexOf(selectionLayer!));
+  }
+  if (chartSelectionLayer && chartSelectionZ != null && outlineZ === chartSelectionZ) {
+    expect(children.indexOf(outlineLayer!)).toBeGreaterThan(children.indexOf(chartSelectionLayer));
   }
 }
 
 function expectPresenceOverlayZOrder(root: HTMLElement): void {
   const drawingLayer = root.querySelector(".drawing-layer");
-  const chartLayer = root.querySelector(".grid-canvas--chart");
   const auditingLayer = root.querySelector(".grid-canvas--auditing");
   const presenceLayer = root.querySelector(".grid-canvas--presence");
   const selectionLayer = root.querySelector(".grid-canvas--selection");
+  const chartLayer = root.querySelector(".grid-canvas--chart");
 
   expect(drawingLayer).toBeTruthy();
-  expect(chartLayer).toBeTruthy();
   expect(auditingLayer).toBeTruthy();
   expect(presenceLayer).toBeTruthy();
   expect(selectionLayer).toBeTruthy();
 
   const drawingZ = zIndexNumber(getComputedStyle(drawingLayer as Element).zIndex);
-  const chartZ = zIndexNumber(getComputedStyle(chartLayer as Element).zIndex);
+  const chartZ = chartLayer ? zIndexNumber(getComputedStyle(chartLayer as Element).zIndex) : null;
   const auditingZ = zIndexNumber(getComputedStyle(auditingLayer as Element).zIndex);
   const presenceZ = zIndexNumber(getComputedStyle(presenceLayer as Element).zIndex);
   const selectionZ = zIndexNumber(getComputedStyle(selectionLayer as Element).zIndex);
 
   expect(auditingZ).toBe(1);
-  expect(chartZ).toBe(2);
   expect(drawingZ).toBe(3);
   expect(presenceZ).toBe(4);
   expect(selectionZ).toBe(4);
 
-  expect(auditingZ).toBeLessThan(chartZ);
-  expect(chartZ).toBeLessThan(drawingZ);
+  if (chartZ != null) {
+    expect(chartZ).toBe(2);
+    expect(auditingZ).toBeLessThan(chartZ);
+    expect(chartZ).toBeLessThan(drawingZ);
+  }
   expect(drawingZ).toBeLessThan(presenceZ);
   expect(presenceZ).toBeLessThanOrEqual(selectionZ);
   expect(getComputedStyle(presenceLayer as Element).pointerEvents).toBe("none");
@@ -232,6 +240,8 @@ describe("SpreadsheetApp overlay stacking", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    delete process.env.CANVAS_CHARTS;
+    delete process.env.USE_CANVAS_CHARTS;
   });
 
   beforeEach(() => {
@@ -282,6 +292,9 @@ describe("SpreadsheetApp overlay stacking", () => {
 
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("legacy");
+      // Default canvas charts mode should not mount the legacy chart canvases.
+      expect(root.querySelector(".grid-canvas--chart")).toBeNull();
+      expect(root.querySelector(".chart-selection-canvas")).toBeNull();
 
       expectOverlayZOrder(root);
 
@@ -307,15 +320,16 @@ describe("SpreadsheetApp overlay stacking", () => {
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
 
-      // Shared mode still mounts the modifier classes; ensure they don't break stacking.
-      const drawing = root.querySelector(".drawing-layer");
-      const chart = root.querySelector(".grid-canvas--chart");
-      const selection = root.querySelector(".grid-canvas--selection");
-      expect(drawing?.classList.contains("drawing-layer--shared")).toBe(true);
-      expect(chart?.classList.contains("grid-canvas--shared-chart")).toBe(true);
-      expect(selection?.classList.contains("grid-canvas--shared-selection")).toBe(true);
+       // Shared mode still mounts the modifier classes; ensure they don't break stacking.
+       const drawing = root.querySelector(".drawing-layer");
+       const chart = root.querySelector(".grid-canvas--chart");
+       const selection = root.querySelector(".grid-canvas--selection");
+       expect(drawing?.classList.contains("drawing-layer--shared")).toBe(true);
+       // Canvas charts mode should not mount the legacy chart canvas.
+       expect(chart).toBeNull();
+       expect(selection?.classList.contains("grid-canvas--shared-selection")).toBe(true);
 
-      expectOverlayZOrder(root);
+       expectOverlayZOrder(root);
 
       app.destroy();
       root.remove();
