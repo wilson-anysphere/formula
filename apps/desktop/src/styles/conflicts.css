@@ -46,7 +46,7 @@
   justify-content: space-between;
   gap: var(--conflict-ui-gap-sm);
   min-width: 240px;
-  max-width: min(520px, calc(100vw - 32px));
+  max-width: min(520px, calc(100vw - (var(--space-6) * 2)));
   padding: var(--space-4) var(--conflict-ui-padding);
   background: var(--dialog-bg);
   border: 1px solid var(--dialog-border);
@@ -78,7 +78,7 @@
 .structural-conflict-ui-toast-root > div > button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .conflict-ui-dialog-root,
@@ -176,7 +176,7 @@
 .structural-conflict-ui-dialog-root button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .conflict-ui-dialog-root textarea,
@@ -196,7 +196,7 @@
 .structural-conflict-ui-dialog-root input:focus {
   outline: none;
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .conflict-dialog__manual-editor {
