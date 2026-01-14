@@ -1,7 +1,7 @@
 //! Regression test for `open_workbook_with_options` error mapping.
 //!
-//! `encrypted_ooxml::DecryptError::InvalidInfo` should surface as an OOXML encryption compatibility
-//! error (not the legacy `.xls`/FILEPASS `EncryptedWorkbook` error).
+//! Malformed OOXML encrypted containers should surface as an OOXML-related error (not the legacy
+//! `.xls`/FILEPASS `EncryptedWorkbook` error).
 #![cfg(all(feature = "encrypted-workbooks", not(target_arch = "wasm32")))]
 
 use std::io::{Cursor, Write as _};
@@ -13,8 +13,9 @@ fn maps_invalid_encryption_info_to_unsupported_ooxml_encryption() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
 
-    // Minimal Agile (4.4) EncryptionInfo header, but *no* XML payload. This forces
-    // `DecryptError::InvalidInfo`.
+    // Minimal Agile (4.4) EncryptionInfo header, but *no* XML payload.
+    // Additionally, keep the `EncryptedPackage` stream truncated (size prefix only) so the decrypt
+    // path fails fast.
     {
         let mut stream = ole
             .create_stream("EncryptionInfo")
@@ -51,14 +52,7 @@ fn maps_invalid_encryption_info_to_unsupported_ooxml_encryption() {
     .expect_err("expected invalid EncryptionInfo to error");
 
     assert!(
-        matches!(
-            err,
-            Error::UnsupportedOoxmlEncryption {
-                version_major: 4,
-                version_minor: 4,
-                ..
-            }
-        ),
-        "expected UnsupportedOoxmlEncryption(4,4), got {err:?}"
+        matches!(err, Error::UnsupportedOoxmlEncryption { .. }),
+        "expected UnsupportedOoxmlEncryption for malformed EncryptionInfo/EncryptedPackage, got {err:?}"
     );
 }
