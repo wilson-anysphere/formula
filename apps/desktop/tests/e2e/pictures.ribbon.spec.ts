@@ -41,8 +41,15 @@ async function getImageDrawingCount(page: Page): Promise<number> {
       if (typeof app.getDrawingsDebugState === "function") {
         const state = app.getDrawingsDebugState();
         if (Array.isArray(state)) return state;
-        if (state && typeof state === "object" && Array.isArray((state as any).objects)) return (state as any).objects;
-        return [];
+        if (state && typeof state === "object") {
+          const anyState = state as any;
+          if (Array.isArray(anyState.objects)) return anyState.objects;
+          if (Array.isArray(anyState.drawings)) return anyState.drawings;
+          if (Array.isArray(anyState.sheetDrawings)) return anyState.sheetDrawings;
+          if (Array.isArray(anyState.value)) return anyState.value;
+        }
+        // If the debug helper exists but returns an unexpected shape, fall back to other
+        // debug APIs when available (keeps this test resilient while the harness evolves).
       }
       if (typeof app.getDrawingObjects === "function") {
         return app.getDrawingObjects();
@@ -65,15 +72,24 @@ async function resolveLocator(
     name,
   }: { testId: string; commandId?: string; role?: Parameters<Locator["getByRole"]>[0]; name?: string },
 ): Promise<Locator> {
+  const isAttached = async (locator: Locator): Promise<boolean> => {
+    try {
+      await locator.first().waitFor({ state: "attached", timeout: 1_000 });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const byTestId = root.getByTestId(testId);
-  if ((await byTestId.count()) > 0) return byTestId;
+  if (await isAttached(byTestId)) return byTestId;
   if (commandId) {
     const byCommand = root.locator(`[data-command-id="${commandId}"]`);
-    if ((await byCommand.count()) > 0) return byCommand;
+    if (await isAttached(byCommand)) return byCommand;
   }
   if (role && name) {
     const byRole = root.getByRole(role, { name });
-    if ((await byRole.count()) > 0) return byRole;
+    if (await isAttached(byRole)) return byRole;
   }
   throw new Error(`Failed to resolve ribbon locator for testId=${testId}${commandId ? ` commandId=${commandId}` : ""}`);
 }
@@ -135,4 +151,3 @@ test.describe("Insert → Pictures", () => {
       .toBe(beforeCount + selectedPaths.length);
   });
 });
-
