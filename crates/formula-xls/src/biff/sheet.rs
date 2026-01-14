@@ -3660,4 +3660,56 @@ mod tests {
             parsed.warnings
         );
     }
+
+    #[test]
+    fn sheet_hyperlink_scan_breaks_before_decoding_additional_hlink_records() {
+        fn internal_hlink_payload(location: &str) -> Vec<u8> {
+            let mut data = Vec::new();
+
+            // ref8 anchor: A1 (0-based row/col).
+            data.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+            data.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // colLast
+
+            // guid (ignored).
+            data.extend_from_slice(&[0u8; 16]);
+
+            // streamVersion + linkOpts.
+            data.extend_from_slice(&2u32.to_le_bytes());
+            data.extend_from_slice(&HLINK_FLAG_HAS_LOCATION.to_le_bytes());
+
+            // HyperlinkString (u32 char count + UTF-16LE bytes).
+            let u16s: Vec<u16> = location.encode_utf16().collect();
+            data.extend_from_slice(&(u16s.len() as u32).to_le_bytes());
+            for ch in u16s {
+                data.extend_from_slice(&ch.to_le_bytes());
+            }
+
+            data
+        }
+
+        let mut stream: Vec<u8> = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Fill exactly up to the cap with valid hyperlinks.
+        for _ in 0..MAX_HYPERLINKS_PER_SHEET {
+            let payload = internal_hlink_payload("Sheet1!A1");
+            stream.extend_from_slice(&record(RECORD_HLINK, &payload));
+        }
+
+        // Next HLINK record is malformed; if we attempted to decode it we would emit a warning.
+        // The parser should stop *before* decoding any additional HLINK records after reaching the
+        // cap, so we should only see the truncation warning.
+        stream.extend_from_slice(&record(RECORD_HLINK, &[]));
+
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let parsed = parse_biff_sheet_hyperlinks(&stream, 0, 1252).expect("parse");
+        assert_eq!(parsed.hyperlinks.len(), MAX_HYPERLINKS_PER_SHEET);
+        assert_eq!(
+            parsed.warnings,
+            vec!["too many hyperlinks; additional HLINK records skipped".to_string()]
+        );
+    }
 }
