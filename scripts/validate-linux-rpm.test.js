@@ -114,6 +114,33 @@ test(
 );
 
 test(
+  "validate-linux-rpm accepts --rpm pointing at a directory of RPMs",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+    const binDir = join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeFakeRpmTool(binDir);
+
+    writeFileSync(join(tmp, "Formula-1.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+    writeFileSync(join(tmp, "Formula-2.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+    const listFile = join(tmp, "rpm-list.txt");
+    writeFileSync(
+      listFile,
+      ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop", "/usr/share/doc/formula/README"].join(
+        "\n",
+      ),
+      { encoding: "utf8" },
+    );
+
+    // Run from tmp dir and pass a relative directory to ensure --rpm resolves against the invocation cwd.
+    const proc = runValidator({ cwd: tmp, rpmArg: ".", fakeListFile: listFile, fakeMode: "ok" });
+    assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
   "validate-linux-rpm fails when /usr/bin/formula-desktop is missing",
   { skip: !hasBash },
   () => {

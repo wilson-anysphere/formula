@@ -44,7 +44,12 @@ EOF
 }
 
 err() {
-  echo "${SCRIPT_NAME}: ERROR: $*" >&2
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    # GitHub Actions error annotation (still readable locally).
+    echo "::error::${SCRIPT_NAME}: $*" >&2
+  else
+    echo "${SCRIPT_NAME}: ERROR: $*" >&2
+  fi
 }
 
 note() {
