@@ -276,7 +276,15 @@ Where to find them after installation:
 CI validates these files are present in the built bundles via:
 
 ```bash
-python scripts/ci/validate-desktop-bundle-compliance.py
+# macOS
+bash scripts/validate-macos-bundle.sh
+
+# Linux
+bash scripts/validate-linux-appimage.sh
+bash scripts/validate-linux-rpm.sh
+
+# Windows
+pwsh ./scripts/validate-windows-bundles.ps1
 ```
 
 ## Updater restart semantics (important)

@@ -502,6 +502,20 @@ validate_universal_binary() {
   echo "$info" | grep -qw "arm64" || die "macOS binary is missing arm64 slice: ${bin_path}"
 }
 
+validate_compliance_artifacts() {
+  local app_path="$1"
+  local resources_dir="${app_path}/Contents/Resources"
+  [ -d "$resources_dir" ] || die "missing Contents/Resources in app bundle: $app_path"
+
+  # The release process must ship OSS/compliance artifacts with the installed app.
+  # We bundle these via apps/desktop/src-tauri/tauri.conf.json -> bundle.resources.
+  for filename in LICENSE NOTICE; do
+    if [ ! -f "${resources_dir}/${filename}" ]; then
+      die "missing compliance file in app bundle resources: ${resources_dir}/${filename}"
+    fi
+  done
+}
+
 validate_app_bundle() {
   local app_path="$1"
 
@@ -518,6 +532,9 @@ validate_app_bundle() {
 
   validate_plist_file_associations "$plist_path" "xlsx" "xls" "csv"
   echo "bundle: Info.plist OK (file associations include .xlsx)"
+
+  validate_compliance_artifacts "$app_path"
+  echo "bundle: Resources OK (LICENSE/NOTICE present)"
 
   validate_universal_binary "$app_path"
 

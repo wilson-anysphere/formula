@@ -334,6 +334,16 @@ validate_static() {
     echo "${file_list}" | head -n 200 >&2
     exit 1
   fi
+
+  # OSS/compliance artifacts should ship with the installed app.
+  for filename in LICENSE NOTICE; do
+    if ! grep -qx "/usr/share/doc/formula-desktop/${filename}" <<<"${file_list}"; then
+      err "RPM payload missing compliance file: /usr/share/doc/formula-desktop/${filename}"
+      err "First 200 lines of rpm file list:"
+      echo "${file_list}" | head -n 200 >&2
+      exit 1
+    fi
+  done
 }
 
 validate_container() {

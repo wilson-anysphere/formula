@@ -56,6 +56,7 @@ set -euo pipefail
 
 if [[ "\${1:-}" == "--appimage-extract" ]]; then
   mkdir -p squashfs-root/usr/bin
+  mkdir -p squashfs-root/usr/share/doc/formula-desktop
 
   cat > squashfs-root/AppRun <<'APPRUN'
 #!/usr/bin/env bash
@@ -68,6 +69,9 @@ APPRUN
 echo "formula-desktop stub"
 BIN
   chmod +x squashfs-root/usr/bin/formula-desktop
+
+  echo "LICENSE stub" > squashfs-root/usr/share/doc/formula-desktop/LICENSE
+  echo "NOTICE stub" > squashfs-root/usr/share/doc/formula-desktop/NOTICE
 
   ${desktopBlock}
   exit 0

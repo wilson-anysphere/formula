@@ -661,6 +661,67 @@ try {
     }
   }
 
+  function Assert-MsiContainsComplianceArtifacts {
+    param(
+      [Parameter(Mandatory = $true)]
+      [System.IO.FileInfo]$Msi
+    )
+    Write-Host "Compliance artifact check (MSI): $($Msi.FullName)"
+
+    $tables = @()
+    try {
+      $tables = Get-MsiTableNames -MsiPath $Msi.FullName
+    } catch {
+      throw "Failed to open MSI for inspection: $($Msi.FullName)`n$($_.Exception.Message)"
+    }
+
+    if (-not ($tables -contains "File")) {
+      throw "MSI is missing the File table; cannot validate LICENSE/NOTICE are included."
+    }
+
+    $fileRows = Get-MsiRows -MsiPath $Msi.FullName -Query 'SELECT `FileName` FROM `File`' -ColumnCount 1
+    $fileNames = @()
+    foreach ($row in $fileRows) {
+      if ($row.Count -lt 1) { continue }
+      $raw = if ($null -ne $row[0]) { $row[0] } else { "" }
+      $raw = $raw.Trim()
+      if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+
+      # MSI FileName may be in "short|long" format. Prefer the long name when present.
+      $name = $raw
+      if ($name.Contains("|")) {
+        $parts = $name.Split("|")
+        if ($parts.Count -ge 2 -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
+          $name = $parts[1]
+        } elseif ($parts.Count -ge 1) {
+          $name = $parts[0]
+        }
+      }
+      $name = $name.Trim()
+      if (-not [string]::IsNullOrWhiteSpace($name)) {
+        $fileNames += $name
+      }
+    }
+
+    $required = @("LICENSE", "NOTICE")
+    $missing = @()
+    foreach ($req in $required) {
+      $found = $false
+      foreach ($n in $fileNames) {
+        $base = [System.IO.Path]::GetFileNameWithoutExtension($n)
+        if ($base -ieq $req) { $found = $true; break }
+      }
+      if (-not $found) {
+        $missing += $req
+      }
+    }
+
+    if ($missing.Count -gt 0) {
+      $presentSample = @($fileNames | Sort-Object -Unique | Select-Object -First 50) -join ", "
+      throw "MSI installer is missing required compliance files: $($missing -join ", "). Expected LICENSE/NOTICE to be included in the installed app directory (typically under resources\\). File table sample: $presentSample"
+    }
+  }
+
   function Test-StringContainsIgnoreCase {
     param(
       [Parameter(Mandatory = $true)] [string]$Haystack,
@@ -722,6 +783,7 @@ try {
   if ($msiInstallers.Count -gt 0) {
     foreach ($msi in $msiInstallers) {
       Assert-MsiDeclaresFileAssociation -Msi $msi -ExtensionNoDot $requiredExtensionNoDot
+      Assert-MsiContainsComplianceArtifacts -Msi $msi
     }
   } else {
     Write-Warning "No MSI installers found; falling back to best-effort EXE inspection for file association metadata."

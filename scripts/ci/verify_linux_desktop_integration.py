@@ -104,6 +104,42 @@ def load_expected_mime_types(tauri_config_path: Path) -> set[str]:
     return expected
 
 
+def load_expected_doc_package_name(tauri_config_path: Path) -> str:
+    """
+    The Linux bundle validators install compliance artifacts under:
+      /usr/share/doc/<package>/{LICENSE,NOTICE}
+
+    For our Tauri builds we use `mainBinaryName` as the stable package/doc directory name
+    (it is also the installed binary name under /usr/bin).
+    """
+    try:
+        config = json.loads(tauri_config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return "formula-desktop"
+    raw = config.get("mainBinaryName")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return "formula-desktop"
+
+
+def verify_compliance_artifacts(package_root: Path, package_name: str) -> None:
+    doc_dir = package_root / "usr" / "share" / "doc" / package_name
+    missing: list[Path] = []
+    for filename in ("LICENSE", "NOTICE"):
+        p = doc_dir / filename
+        if not p.is_file():
+            missing.append(p)
+    if missing:
+        formatted = "\n".join(f"- {p}" for p in missing)
+        raise SystemExit(
+            "[linux] ERROR: missing LICENSE/NOTICE compliance artifacts in package doc directory.\n"
+            f"Expected under: {doc_dir}\n"
+            f"Missing:\n{formatted}\n"
+            "Hint: ensure apps/desktop/src-tauri/tauri.conf.json includes bundle.resources and "
+            "bundle.linux.(deb|rpm).files mappings for /usr/share/doc/<package>/."
+        )
+
+
 def find_desktop_files(package_root: Path) -> list[Path]:
     candidates: list[Path] = []
     for rel in (
@@ -165,6 +201,7 @@ def main() -> int:
 
     expected_mime_types = load_expected_mime_types(args.tauri_config)
     expected_schemes = load_expected_deep_link_schemes(args.tauri_config)
+    expected_doc_pkg = load_expected_doc_package_name(args.tauri_config)
     if not expected_schemes:
         expected_scheme = args.url_scheme.strip().lower()
         if not expected_scheme:
@@ -265,6 +302,9 @@ def main() -> int:
         for line in bad_scheme_exec:
             print(f"[linux] - {line}", file=sys.stderr)
         return 1
+
+    # Finally, validate that the built package ships OSS/compliance artifacts.
+    verify_compliance_artifacts(args.package_root, expected_doc_pkg)
 
     return 0
 

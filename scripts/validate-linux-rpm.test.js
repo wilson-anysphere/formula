@@ -124,9 +124,12 @@ test(
     const listFile = join(tmp, "rpm-list.txt");
     writeFileSync(
       listFile,
-      ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop", "/usr/share/doc/formula/README"].join(
-        "\n",
-      ),
+      [
+        "/usr/bin/formula-desktop",
+        "/usr/share/applications/formula.desktop",
+        "/usr/share/doc/formula-desktop/LICENSE",
+        "/usr/share/doc/formula-desktop/NOTICE",
+      ].join("\n"),
       { encoding: "utf8" },
     );
 

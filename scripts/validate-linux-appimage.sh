@@ -332,6 +332,16 @@ validate_appimage() {
     die "Main binary is not executable: squashfs-root/usr/bin/$EXPECTED_MAIN_BINARY"
   fi
 
+  # Validate OSS/compliance artifacts are shipped inside the image.
+  # For Linux packages/AppImage we standardize on `usr/share/doc/<package>/`.
+  local doc_dir
+  doc_dir="$appdir/usr/share/doc/$EXPECTED_MAIN_BINARY"
+  for filename in LICENSE NOTICE; do
+    if [ ! -f "$doc_dir/$filename" ]; then
+      die "Missing compliance file in AppImage: squashfs-root/usr/share/doc/$EXPECTED_MAIN_BINARY/$filename"
+    fi
+  done
+
   local applications_dir
   applications_dir="$appdir/usr/share/applications"
   if [ ! -d "$applications_dir" ]; then

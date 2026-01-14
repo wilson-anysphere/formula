@@ -1195,9 +1195,6 @@ jobs:
           tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
 
-      - name: Validate bundles include LICENSE/NOTICE
-        run: python scripts/ci/validate-desktop-bundle-compliance.py
-
       - name: Package Windows debug symbols (PDB)
         if: runner.os == 'Windows'
         shell: pwsh
