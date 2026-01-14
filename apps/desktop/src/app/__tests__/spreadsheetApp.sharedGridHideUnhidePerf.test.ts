@@ -13,6 +13,18 @@ import { SpreadsheetApp } from "../spreadsheetApp";
 
 const OVERRIDE_COUNT = 10_000;
 const HIDE_AXIS_SIZE_BASE = 1;
+const PROVIDER_CACHE_MAX_SIZE = 50_000;
+
+function getProviderCacheStats(provider: any): { sheetCaches: number; maxSheetSize: number } {
+  const sheetCaches: Map<string, any> | undefined = provider?.sheetCaches;
+  if (!sheetCaches || typeof sheetCaches.size !== "number") return { sheetCaches: 0, maxSheetSize: 0 };
+  let maxSheetSize = 0;
+  for (const cache of sheetCaches.values()) {
+    const size = typeof cache?.size === "number" ? cache.size : 0;
+    if (size > maxSheetSize) maxSheetSize = size;
+  }
+  return { sheetCaches: sheetCaches.size, maxSheetSize };
+}
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -214,6 +226,7 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       const sharedGrid = (app as any).sharedGrid;
       expect(sharedGrid).toBeTruthy();
       const renderer = sharedGrid.renderer;
+      const provider = (app as any).sharedProvider;
 
       const baselineRowOverrides = (renderer as any).rowHeightOverridesBase.size as number;
       const baselineColOverrides = (renderer as any).colWidthOverridesBase.size as number;
@@ -255,6 +268,13 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       expect((renderer as any).rowHeightOverridesBase.size).toBeLessThanOrEqual(baselineRowOverrides + OVERRIDE_COUNT);
       expect((renderer as any).colWidthOverridesBase.size).toBeLessThanOrEqual(baselineColOverrides + OVERRIDE_COUNT);
 
+      // Axis override sync should not explode the shared provider cache.
+      {
+        const stats = getProviderCacheStats(provider);
+        expect(stats.sheetCaches).toBeLessThanOrEqual(4);
+        expect(stats.maxSheetSize).toBeLessThanOrEqual(PROVIDER_CACHE_MAX_SIZE);
+      }
+
       // "Unhide": clear the overrides and re-sync.
       (view as any).rowHeights = {};
       (view as any).colWidths = {};
@@ -272,6 +292,12 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
 
       // Two batch sync calls should schedule at most one invalidation per call (not per-index updates).
       expect(requestRenderSpy.mock.calls.length).toBeLessThanOrEqual(2);
+
+      {
+        const stats = getProviderCacheStats(provider);
+        expect(stats.sheetCaches).toBeLessThanOrEqual(4);
+        expect(stats.maxSheetSize).toBeLessThanOrEqual(PROVIDER_CACHE_MAX_SIZE);
+      }
 
       // Guardrails: keep work proportional to the override count, not sheet maxes.
       // Map.set call thresholds are generous and mainly exist to catch accidental
@@ -336,6 +362,7 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
         const sharedGrid = (app as any).sharedGrid;
         expect(sharedGrid).toBeTruthy();
         const renderer = sharedGrid.renderer;
+        const provider = (app as any).sharedProvider;
 
         const baselineRowOverrides = (renderer as any).rowHeightOverridesBase.size as number;
         const baselineColOverrides = (renderer as any).colWidthOverridesBase.size as number;
@@ -384,6 +411,12 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
         expect((renderer as any).rowHeightOverridesBase.size).toBeLessThanOrEqual(baselineRowOverrides + OVERRIDE_COUNT);
         expect((renderer as any).colWidthOverridesBase.size).toBeLessThanOrEqual(baselineColOverrides + OVERRIDE_COUNT);
 
+        {
+          const stats = getProviderCacheStats(provider);
+          expect(stats.sheetCaches).toBeLessThanOrEqual(4);
+          expect(stats.maxSheetSize).toBeLessThanOrEqual(PROVIDER_CACHE_MAX_SIZE);
+        }
+
         // Ensure the implementation remains sparse: avoid scanning all rows/cols to check hidden state.
         // (Current implementation iterates only `outline.*.entries` plus constant-time checks.)
         expect(rowEntrySpy.mock.calls.length).toBeLessThan(100_000);
@@ -414,6 +447,12 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
         // Keep work proportional to the number of hidden indices, not sheet maxes.
         expect(hideRun.mapSetCalls).toBeLessThan(600_000);
         expect(unhideRun.mapSetCalls).toBeLessThan(600_000);
+
+        {
+          const stats = getProviderCacheStats(provider);
+          expect(stats.sheetCaches).toBeLessThanOrEqual(4);
+          expect(stats.maxSheetSize).toBeLessThanOrEqual(PROVIDER_CACHE_MAX_SIZE);
+        }
 
         if (!process.env.CI) {
           expect(hideRun.elapsedMs).toBeLessThan(1_500);
