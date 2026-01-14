@@ -247,6 +247,28 @@ fn roundtrip_patching_preserves_sheet_format_pr_and_unknown_attrs() {
 }
 
 #[test]
+fn semantic_export_trims_default_col_width_float_noise() {
+    // Excel's default column width is commonly 8.43, which is not exactly representable as an f32.
+    // Ensure the regeneration writer emits a human-friendly value (not a long rounding artifact).
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();
+    workbook.sheet_mut(sheet_id).unwrap().default_col_width = Some(8.43);
+
+    let mut cursor = Cursor::new(Vec::new());
+    write_workbook_to_writer(&workbook, &mut cursor).expect("write workbook");
+    let bytes = cursor.into_inner();
+
+    let sheet_xml = zip_part(&bytes, "xl/worksheets/sheet1.xml");
+    let doc = roxmltree::Document::parse(&sheet_xml).expect("parse sheet xml");
+    let sheet_format = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "sheetFormatPr")
+        .expect("expected sheetFormatPr element");
+
+    assert_eq!(sheet_format.attribute("defaultColWidth"), Some("8.43"));
+}
+
+#[test]
 fn semantic_export_formats_sheet_format_pr_f32_without_rounding_noise() {
     let mut workbook = Workbook::new();
     let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();
