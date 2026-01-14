@@ -114,6 +114,22 @@ test("fails when windows-arm64 is missing", () => {
   assert.match(proc.stderr, /windows-aarch64/);
 });
 
+test("fails when linux-aarch64 is missing", () => {
+  const proc = runLocal({
+    version: "0.0.0",
+    platforms: {
+      "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      "linux-x86_64": { url: "https://example.com/Formula_x86_64.AppImage", signature: "sig" },
+    },
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /linux-aarch64/);
+});
+
 test("fails when updater asset types do not match platform expectations (Linux .deb)", () => {
   const proc = runLocal({
     version: "0.0.0",
