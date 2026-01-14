@@ -2300,6 +2300,21 @@ fn goal_seek_solves_quadratic_and_updates_workbook_state() {
         (solution - 5.0).abs() < 1e-6,
         "expected solution ≈ 5, got {solution}"
     );
+    assert!(
+        result.result.iterations > 0,
+        "expected goal seek to perform at least one iteration, got {}",
+        result.result.iterations
+    );
+    assert!(
+        (result.result.final_output - 25.0).abs() < 1e-6,
+        "expected final output ≈ 25, got {}",
+        result.result.final_output
+    );
+    assert!(
+        result.result.final_error.abs() < 1e-6,
+        "expected final error to be near zero, got {}",
+        result.result.final_error
+    );
 
     // Goal seek should include final input/output changes for cache updates.
     let a1_change = result
