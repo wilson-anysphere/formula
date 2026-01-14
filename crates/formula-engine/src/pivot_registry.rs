@@ -163,10 +163,15 @@ impl PivotRegistry {
     }
 
     pub fn register(&mut self, entry: PivotRegistryEntry) {
+        // A pivot can be refreshed with a different destination footprint (e.g. the output grows or
+        // shrinks). Ensure we don't keep stale metadata around for the old destination range.
+        //
+        // `pivot_id` is treated as a stable identifier for a logical pivot across refreshes.
         self.entries.retain(|e| {
-            !(e.sheet_id == entry.sheet_id
-                && e.destination.start == entry.destination.start
-                && e.destination.end == entry.destination.end)
+            !(e.pivot_id == entry.pivot_id
+                || (e.sheet_id == entry.sheet_id
+                    && e.destination.start == entry.destination.start
+                    && e.destination.end == entry.destination.end))
         });
         self.entries.push(entry);
     }

@@ -1704,3 +1704,78 @@ fn getpivotdata_tracks_dynamic_dependency_on_pivot_destination_via_registry() {
     sheet.recalc();
     assert_eq!(sheet.get("C1"), Value::Number(150.0));
 }
+
+#[test]
+fn getpivotdata_registry_replaces_entry_when_destination_changes_for_same_pivot_id() {
+    use formula_engine::pivot::{
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
+        SubtotalPosition, ValueField,
+    };
+    use formula_model::{CellRef, Range};
+
+    fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
+        values.to_vec()
+    }
+
+    let cfg = PivotConfig {
+        row_fields: vec![PivotField::new("Region")],
+        column_fields: vec![],
+        value_fields: vec![ValueField {
+            source_field: "Sales".into(),
+            name: "Sum of Sales".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        }],
+        filter_fields: vec![],
+        calculated_fields: vec![],
+        calculated_items: vec![],
+        layout: Layout::Tabular,
+        subtotals: SubtotalPosition::None,
+        grand_totals: GrandTotals {
+            rows: true,
+            columns: true,
+        },
+    };
+
+    let source = vec![
+        pv_row(&["Region".into(), "Sales".into()]),
+        pv_row(&["East".into(), 100.into()]),
+        pv_row(&["West".into(), 200.into()]),
+    ];
+
+    // Register a pivot with a destination that includes B2.
+    let mut pivot_v1 = PivotTable::new("PivotTable1", &source, cfg.clone()).expect("create pivot");
+    pivot_v1.id = "pivot-stable-id".to_string();
+    let destination_v1 = Range::new(CellRef::new(0, 0), CellRef::new(1, 1)); // A1:B2
+
+    let mut sheet = TestSheet::new();
+    sheet.register_pivot_table(destination_v1, pivot_v1);
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", B2, \"Region\", \"East\")"),
+        Value::Number(100.0)
+    );
+
+    // Refresh the same logical pivot id with a different destination footprint that no longer
+    // contains B2.
+    let mut pivot_v2 = PivotTable::new("PivotTable1", &source, cfg).expect("create pivot");
+    pivot_v2.id = "pivot-stable-id".to_string();
+    let destination_v2 = Range::new(CellRef::new(0, 0), CellRef::new(0, 0)); // A1 only
+    sheet.register_pivot_table(destination_v2, pivot_v2);
+
+    // A cell that is outside the new destination should no longer resolve to the pivot registry
+    // entry (and should fall back to scan-based heuristics, which fail here because the sheet has
+    // no rendered pivot output).
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", B2, \"Region\", \"East\")"),
+        Value::Error(ErrorKind::Ref)
+    );
+
+    // A cell inside the updated destination should still resolve via registry.
+    assert_eq!(
+        sheet.eval("=GETPIVOTDATA(\"Sum of Sales\", A1, \"Region\", \"East\")"),
+        Value::Number(100.0)
+    );
+}
