@@ -437,8 +437,11 @@ files (including our committed fixture corpus), Formula’s decryptors are curre
   - HMAC over header + plaintext (8-byte size header + plaintext ZIP bytes)
 - `crates/formula-offcrypto` accepts:
   - HMAC over the full `EncryptedPackage` stream bytes (8-byte size header + ciphertext + padding)
-    when integrity verification is enabled (`DecryptOptions.verify_integrity = true`); it does not
-    currently include fallback HMAC target variants.
+  - HMAC over ciphertext only (excludes the 8-byte size header)
+  - HMAC over plaintext only (decrypted ZIP bytes)
+  - HMAC over header + plaintext (8-byte size header + plaintext ZIP bytes)
+  - Note: these checks run only when integrity verification is enabled
+    (`DecryptOptions.verify_integrity = true`).
 
 Writers should follow MS-OFFCRYPTO/Excel (authenticate the stream bytes). If we ever decide to make
 `formula-office-crypto` strict, update this section and the corresponding compatibility tests.
