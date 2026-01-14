@@ -7000,12 +7000,11 @@ export class SpreadsheetApp {
     }
 
     this.drawingObjectsCache = null;
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
+    this.invalidateDrawingHitTestIndexCaches();
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
-    this.emitDrawingsChanged();
+    this.dispatchDrawingsChanged();
     if (this.getSelectedDrawingId() !== prevSelected) {
-      this.emitDrawingSelectionChanged();
+      this.dispatchDrawingSelectionChanged();
     }
   }
 
