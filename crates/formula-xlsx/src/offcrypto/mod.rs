@@ -147,24 +147,12 @@ fn read_cfb_stream_bytes<R: Read + Seek>(
     cfb: &mut cfb::CompoundFile<R>,
     name: &'static str,
 ) -> Result<Vec<u8>> {
-    let mut stream = match cfb.open_stream(name) {
-        Ok(s) => s,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            let with_slash = format!("/{name}");
-            match cfb.open_stream(&with_slash) {
-                Ok(s) => s,
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    return Err(OffCryptoError::MissingRequiredStream {
-                        stream: name.to_string(),
-                    });
-                }
-                Err(source) => {
-                    return Err(OffCryptoError::Io {
-                        context: "opening encrypted OLE stream",
-                        source,
-                    })
-                }
-            }
+    let mut stream = match open_cfb_stream_best_effort(cfb, name) {
+        Ok(Some(stream)) => stream,
+        Ok(None) => {
+            return Err(OffCryptoError::MissingRequiredStream {
+                stream: name.to_string(),
+            })
         }
         Err(source) => {
             return Err(OffCryptoError::Io {
@@ -182,4 +170,76 @@ fn read_cfb_stream_bytes<R: Read + Seek>(
             source,
         })?;
     Ok(buf)
+}
+
+fn open_cfb_stream_best_effort<R: Read + Seek>(
+    cfb: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> std::io::Result<Option<cfb::Stream<R>>> {
+    match cfb.open_stream(name) {
+        Ok(stream) => return Ok(Some(stream)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
+    }
+
+    let trimmed = name.trim_start_matches('/');
+    if trimmed != name {
+        match cfb.open_stream(trimmed) {
+            Ok(stream) => return Ok(Some(stream)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+
+    let with_slash = format!("/{trimmed}");
+    match cfb.open_stream(&with_slash) {
+        Ok(stream) => return Ok(Some(stream)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
+    }
+
+    // Some producers vary casing for `EncryptionInfo`/`EncryptedPackage` (and `cfb` treats stream
+    // names as case-sensitive). Walk the directory tree and locate a match case-insensitively, then
+    // open the exact discovered path for deterministic reads.
+    let mut found_path: Option<String> = None;
+    for entry in cfb.walk() {
+        if !entry.is_stream() {
+            continue;
+        }
+        let path = entry.path().to_string_lossy();
+        let normalized = path.as_ref().strip_prefix('/').unwrap_or(path.as_ref());
+        if normalized.eq_ignore_ascii_case(trimmed) {
+            found_path = Some(path.into_owned());
+            break;
+        }
+    }
+
+    let Some(found_path) = found_path else {
+        return Ok(None);
+    };
+
+    match cfb.open_stream(&found_path) {
+        Ok(stream) => return Ok(Some(stream)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
+    }
+
+    // Be defensive: some implementations accept the walk()-returned path but reject a leading
+    // slash (or vice versa).
+    let stripped = found_path.strip_prefix('/').unwrap_or(found_path.as_str());
+    if stripped != found_path {
+        match cfb.open_stream(stripped) {
+            Ok(stream) => return Ok(Some(stream)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+        let with_slash = format!("/{stripped}");
+        match cfb.open_stream(&with_slash) {
+            Ok(stream) => return Ok(Some(stream)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok(None)
 }
