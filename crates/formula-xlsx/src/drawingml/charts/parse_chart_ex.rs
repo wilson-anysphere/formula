@@ -275,12 +275,13 @@ fn detect_chart_kind(
     } else {
         hints.join(", ")
     };
+    let root_ns_display = if root_ns.is_empty() { "<none>" } else { root_ns };
     // 4) Unknown: capture a richer diagnostic to make it easier to debug/extend
     // detection for new ChartEx variants.
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
         message: format!(
-            "ChartEx chart kind could not be inferred (root ns={root_ns}); hints: {hint_list}"
+            "ChartEx chart kind could not be inferred (root ns={root_ns_display}); hints: {hint_list}"
         ),
     });
 
