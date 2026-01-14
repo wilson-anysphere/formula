@@ -643,7 +643,9 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       }
 
       if (!keyId || !keyBytes) {
-        showToast("Missing encryption key for this range. Import the key first.", "warning");
+        const uniqueIds = Array.from(new Set(keyIdCandidates));
+        const hint = uniqueIds.length > 0 ? ` (key id${uniqueIds.length > 1 ? "s" : ""}: ${uniqueIds.join(", ")})` : "";
+        showToast(`Missing encryption key for this range. Import the key first.${hint}`, "warning");
         return;
       }
 
