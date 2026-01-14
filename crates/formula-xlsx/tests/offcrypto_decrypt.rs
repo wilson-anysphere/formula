@@ -1,6 +1,9 @@
 use std::io::{Cursor, Write as _};
 
-use formula_xlsx::{decrypt_agile_ooxml_from_cfb, OffCryptoError};
+use formula_xlsx::{
+    decrypt_agile_ooxml_from_cfb, decrypt_agile_ooxml_from_ole_bytes,
+    decrypt_agile_ooxml_from_ole_reader, OffCryptoError,
+};
 use ms_offcrypto_writer::Ecma376AgileWriter;
 use rand::{rngs::StdRng, SeedableRng};
 
@@ -40,6 +43,51 @@ fn decrypt_agile_ooxml_from_cfb_roundtrip() {
 
     let mut cfb = cfb::CompoundFile::open(Cursor::new(encrypted_ole_bytes)).expect("open cfb");
     let decrypted = decrypt_agile_ooxml_from_cfb(&mut cfb, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext_zip);
+}
+
+#[test]
+fn decrypt_agile_ooxml_from_ole_bytes_roundtrip() {
+    let password = "Password1234_";
+    let plaintext_zip = small_zip_bytes();
+
+    let rng_seed = [0u8; 32];
+    let mut rng = StdRng::from_seed(rng_seed);
+    let cursor = Cursor::new(Vec::new());
+
+    let mut writer =
+        Ecma376AgileWriter::create(&mut rng, password, cursor).expect("create agile writer");
+    writer
+        .write_all(&plaintext_zip)
+        .expect("write plaintext zip bytes");
+
+    let encrypted_cursor = writer.into_inner().expect("finalize writer");
+    let encrypted_ole_bytes = encrypted_cursor.into_inner();
+
+    let decrypted = decrypt_agile_ooxml_from_ole_bytes(&encrypted_ole_bytes, password).expect("decrypt");
+    assert_eq!(decrypted, plaintext_zip);
+}
+
+#[test]
+fn decrypt_agile_ooxml_from_ole_reader_roundtrip() {
+    let password = "Password1234_";
+    let plaintext_zip = small_zip_bytes();
+
+    let rng_seed = [0u8; 32];
+    let mut rng = StdRng::from_seed(rng_seed);
+    let cursor = Cursor::new(Vec::new());
+
+    let mut writer =
+        Ecma376AgileWriter::create(&mut rng, password, cursor).expect("create agile writer");
+    writer
+        .write_all(&plaintext_zip)
+        .expect("write plaintext zip bytes");
+
+    let encrypted_cursor = writer.into_inner().expect("finalize writer");
+    let encrypted_ole_bytes = encrypted_cursor.into_inner();
+
+    let decrypted = decrypt_agile_ooxml_from_ole_reader(Cursor::new(encrypted_ole_bytes), password)
+        .expect("decrypt");
     assert_eq!(decrypted, plaintext_zip);
 }
 
