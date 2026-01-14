@@ -17,6 +17,26 @@ function parseVarsFromBlock(blockBody) {
   return vars;
 }
 
+function stripCssComments(css) {
+  return css.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+/**
+ * @param {string} css
+ * @param {string} name
+ */
+function collectVarAssignments(css, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`--${escaped}\\s*:\\s*([^;]+);`, "gi");
+  /** @type {string[]} */
+  const values = [];
+  let match = null;
+  while ((match = regex.exec(css))) {
+    values.push(match[1].trim());
+  }
+  return values;
+}
+
 test("tokens.css defines required design tokens", () => {
   const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
   const css = fs.readFileSync(tokensPath, "utf8");
@@ -75,4 +95,25 @@ test("tokens.css uses tight radius tokens (4px/3px) per mockups", () => {
   assert.equal(vars["radius-sm"], "3px");
   assert.equal(vars["radius-xs"], "2px");
   assert.equal(vars["radius-pill"], "999px");
+});
+
+test("radius tokens stay consistent across themes (no accidental overrides)", () => {
+  const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
+  const css = stripCssComments(fs.readFileSync(tokensPath, "utf8"));
+
+  /** @type {Record<string, string>} */
+  const expected = {
+    radius: "4px",
+    "radius-sm": "3px",
+    "radius-xs": "2px",
+    "radius-pill": "999px",
+  };
+
+  for (const [token, value] of Object.entries(expected)) {
+    const values = collectVarAssignments(css, token);
+    assert.ok(values.length > 0, `Expected tokens.css to define --${token}`);
+    for (const actual of values) {
+      assert.equal(actual, value, `Expected --${token} to always be ${value} (got ${actual})`);
+    }
+  }
 });
