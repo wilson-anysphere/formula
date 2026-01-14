@@ -805,8 +805,9 @@ export function registerBuiltinCommands(params: {
 
   // Page Layout → Arrange (Selection Pane).
   //
-  // The ribbon schema uses this id, so register it as a builtin command so the ribbon can rely on
-  // CommandRegistry (and we don't need `main.ts` ribbon switch-case wiring).
+  // The ribbon schema uses this id. Register it as a builtin command so:
+  // - the ribbon can rely on CommandRegistry (no `main.ts` switch-case wiring)
+  // - the command palette/keybindings can invoke it consistently
   commandRegistry.registerBuiltinCommand(
     "pageLayout.arrange.selectionPane",
     "Selection Pane",
