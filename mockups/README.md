@@ -153,14 +153,16 @@ Every pixel counts. Tighten spacing, add subtle shades for depth. No wasted whit
 
 ### Sizing
 
-```css
-/* Border radius - tight, modern */
---radius: 4px;      /* Panels, cards, buttons */
---radius-sm: 3px;   /* Small elements, tags */
+ ```css
+ /* Border radius - tight, modern */
+ --radius: 4px;        /* Panels, cards, buttons */
+ --radius-sm: 3px;     /* Small elements, tags */
+ --radius-xs: 2px;     /* Micro radius: tiny indicators, highlights */
+ --radius-pill: 999px; /* Pills, segmented controls */
 
-/* Heights - compact */
-20px  /* Small buttons, grid cells */
-22px  /* Standard small buttons */
+ /* Heights - compact */
+ 20px  /* Small buttons, grid cells */
+ 22px  /* Standard small buttons */
 24px  /* Primary buttons */
 26px  /* Large inputs */
 
