@@ -94,9 +94,9 @@ function createRoot(): HTMLElement {
 
 function createApp(root: HTMLElement, status: any): SpreadsheetApp {
   const app = new SpreadsheetApp(root, status);
-  // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. With canvas charts enabled by
-  // default, that chart would appear in `getDrawingObjects()` and break tests that assert on the
-  // number of pasted drawings. Remove it so these tests can focus on pasted images.
+  // Canvas charts are enabled by default, so any ChartStore charts appear in `getDrawingObjects()`
+  // alongside pasted images. Remove any charts so these tests can assert on the number of pasted
+  // image drawings deterministically.
   for (const chart of app.listCharts()) {
     (app as any).chartStore.deleteChart(chart.id);
   }

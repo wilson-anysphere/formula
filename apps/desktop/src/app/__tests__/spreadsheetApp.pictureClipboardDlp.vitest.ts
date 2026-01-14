@@ -125,8 +125,8 @@ describe("SpreadsheetApp picture clipboard DLP", () => {
     };
 
     const app = new SpreadsheetApp(root, status, { workbookId });
-    // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. With canvas charts enabled by
-    // default, that chart appears in `getDrawingObjects()`. Remove it so this test can focus on the
+    // Canvas charts are enabled by default, so any ChartStore charts appear in drawing-layer APIs
+    // (`getDrawingObjects`, Selection Pane, etc). Remove any charts so this test can focus on the
     // image drawing inserted below.
     for (const chart of app.listCharts()) {
       (app as any).chartStore.deleteChart(chart.id);

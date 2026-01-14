@@ -4,7 +4,9 @@ import { gotoDesktop } from "./helpers";
 
 test.describe("canvas chart overlay", () => {
   test("renders charts on the canvas overlay (no .chart-object DOM nodes) and keeps them anchored while scrolling", async ({ page }) => {
-    await gotoDesktop(page, "/?canvasCharts=1");
+    // Canvas charts are the default; this spec asserts the default path renders charts via the
+    // drawings overlay without legacy DOM chart hosts.
+    await gotoDesktop(page, "/");
 
     const chartId = await page.evaluate(() => {
       const app = (window as any).__formulaApp;

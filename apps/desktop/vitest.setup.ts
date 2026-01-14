@@ -6,14 +6,16 @@ import { afterEach, beforeEach } from "vitest";
 //
 // SpreadsheetApp supports both legacy (DOM/SVG) charts and unified canvas charts
 // (ChartStore charts render through the drawings overlay). Canvas charts can be
-// enabled via URL params (`?canvasCharts=1`) or env vars (`CANVAS_CHARTS=1`).
+// disabled via URL params (`?canvasCharts=0`) or env vars (`CANVAS_CHARTS=0`).
 //
-// Many unit tests exercise legacy chart/drawing behavior and assume canvas
-// charts are disabled unless explicitly enabled within the test. Keep the
-// default deterministic across the suite, and reset after each test so tests
-// that toggle/delete these env vars cannot leak state across files.
-const DEFAULT_CANVAS_CHARTS = "0";
-const DEFAULT_USE_CANVAS_CHARTS = "0";
+// Canvas charts are the default rendering path. Some unit tests still exercise
+// legacy chart rendering; those tests should explicitly opt out via
+// `process.env.CANVAS_CHARTS = "0"`.
+//
+// Keep the default deterministic across the suite, and reset after each test so
+// tests that toggle/delete these env vars cannot leak state across files.
+const DEFAULT_CANVAS_CHARTS = "1";
+const DEFAULT_USE_CANVAS_CHARTS = "1";
 
 beforeEach(() => {
   if (process.env.CANVAS_CHARTS === undefined) process.env.CANVAS_CHARTS = DEFAULT_CANVAS_CHARTS;

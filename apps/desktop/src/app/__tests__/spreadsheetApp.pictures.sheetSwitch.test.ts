@@ -94,9 +94,9 @@ function createRoot(): HTMLElement {
 }
 
 function deleteSeededCharts(app: SpreadsheetApp): void {
-  // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. With canvas charts enabled by
-  // default, that chart appears in drawings APIs (e.g. `getDrawingsDebugState`) and can break tests
-  // that assert on picture counts. Remove it so these tests can focus on sheet switching behavior.
+  // Canvas charts are enabled by default, so ChartStore charts appear in drawings APIs
+  // (e.g. `getDrawingsDebugState`). Remove any charts so these tests can focus on picture counts
+  // and sheet switching behavior without extra drawing-layer objects.
   for (const chart of app.listCharts()) {
     (app as any).chartStore.deleteChart(chart.id);
   }

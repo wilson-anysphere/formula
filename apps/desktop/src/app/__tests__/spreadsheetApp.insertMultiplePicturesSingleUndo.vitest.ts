@@ -73,9 +73,8 @@ function createRoot(): HTMLElement {
 
 function createApp(root: HTMLElement, status: { activeCell: HTMLElement; selectionRange: HTMLElement; activeValue: HTMLElement }): SpreadsheetApp {
   const app = new SpreadsheetApp(root, status);
-  // SpreadsheetApp seeds a demo ChartStore chart in non-collab mode. With canvas charts enabled by
-  // default, that chart appears in `getDrawingObjects()` and would interfere with picture-focused
-  // tests that assert object counts.
+  // Canvas charts are enabled by default, so any ChartStore charts appear in `getDrawingObjects()`
+  // alongside pictures. Remove any charts so these tests can assert picture counts deterministically.
   for (const chart of app.listCharts()) {
     (app as any).chartStore.deleteChart(chart.id);
   }

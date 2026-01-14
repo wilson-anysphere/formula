@@ -113,7 +113,7 @@ describe("SpreadsheetApp canvas charts (default)", () => {
     };
   });
 
-  it("renders ChartStore charts via the drawings overlay when canvas charts are enabled", () => {
+  it("defaults to canvas charts and renders ChartStore charts via the drawings overlay", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -121,8 +121,6 @@ describe("SpreadsheetApp canvas charts (default)", () => {
       activeValue: document.createElement("div"),
     };
 
-    // Canvas charts are opt-in (disabled by default in unit tests).
-    process.env.CANVAS_CHARTS = "1";
     const app = new SpreadsheetApp(root, status);
     expect((app as any).useCanvasCharts).toBe(true);
 
