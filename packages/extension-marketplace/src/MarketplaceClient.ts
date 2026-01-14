@@ -167,10 +167,16 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 type TauriInvoke = (cmd: string, args?: Record<string, any>) => Promise<any>;
 
 function getTauriInvoke(): TauriInvoke | null {
-  const tauri = (globalThis as any)?.__TAURI__;
-  const invoke: unknown = tauri?.core?.invoke ?? tauri?.invoke;
-  if (typeof invoke !== "function") return null;
-  return invoke.bind(tauri?.core ?? tauri);
+  try {
+    const tauri = (globalThis as any).__TAURI__ ?? null;
+    const invoke: unknown = tauri?.core?.invoke ?? tauri?.invoke;
+    if (typeof invoke !== "function") return null;
+    return invoke.bind(tauri?.core ?? tauri);
+  } catch {
+    // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
+    // Treat that as "unavailable" so marketplace requests can fall back to `fetch`.
+    return null;
+  }
 }
 
 function isAbsoluteHttpUrl(value: string): boolean {

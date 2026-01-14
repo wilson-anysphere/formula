@@ -41,7 +41,11 @@ const SKIPPED_OVERSIZED_PLAINTEXT = Symbol("skippedOversizedPlainText");
 const SKIPPED_OVERSIZED_IMAGE_PNG = "skippedOversizedImagePng";
 
 function hasTauri() {
-  return Boolean(globalThis.__TAURI__);
+  try {
+    return Boolean(globalThis.__TAURI__);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -584,7 +588,13 @@ export async function createClipboardProvider() {
  */
 function createTauriClipboardProvider() {
   const tauriInvoke = getTauriInvokeOrNull();
-  const tauriClipboard = globalThis.__TAURI__?.clipboard;
+  /** @type {any} */
+  let tauriClipboard = null;
+  try {
+    tauriClipboard = globalThis.__TAURI__?.clipboard ?? null;
+  } catch {
+    tauriClipboard = null;
+  }
 
   return {
     async read() {

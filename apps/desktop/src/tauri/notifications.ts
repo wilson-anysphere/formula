@@ -7,8 +7,19 @@ export type NotifyPayload = {
 
 type TauriNotify = (payload: { title: string; body?: string }) => Promise<void> | void;
 
+function getTauriGlobalOrNull(): any | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (globalThis as any).__TAURI__ ?? null;
+  } catch {
+    // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
+    // Treat that as "unavailable" so best-effort callsites can fall back cleanly.
+    return null;
+  }
+}
+
 function getTauriDirectNotify(): TauriNotify | null {
-  const tauri = (globalThis as any).__TAURI__;
+  const tauri = getTauriGlobalOrNull();
   const direct =
     (tauri?.notification?.notify as TauriNotify | undefined) ??
     (tauri?.notification?.sendNotification as TauriNotify | undefined) ??
@@ -34,7 +45,7 @@ export async function notify(payload: NotifyPayload): Promise<void> {
   const title = payload.title.trim();
   if (!title) return;
   const body = typeof payload.body === "string" ? payload.body : undefined;
-  const tauri = (globalThis as any).__TAURI__ ?? null;
+  const tauri = getTauriGlobalOrNull();
 
   const directNotify = getTauriDirectNotify();
   if (directNotify) {

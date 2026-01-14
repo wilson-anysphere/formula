@@ -11182,7 +11182,12 @@ try {
 
   void listen("menu-about", () => {
     void (async () => {
-      const tauri = (globalThis as any).__TAURI__;
+      let tauri: any = null;
+      try {
+        tauri = (globalThis as any).__TAURI__ ?? null;
+      } catch {
+        tauri = null;
+      }
       const appApi = tauri?.app;
       const getName = appApi?.getName as (() => Promise<unknown>) | undefined;
       const getVersion = appApi?.getVersion as (() => Promise<unknown>) | undefined;

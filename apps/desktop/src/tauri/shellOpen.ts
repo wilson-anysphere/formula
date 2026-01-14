@@ -2,6 +2,17 @@ import { getTauriInvokeOrNull } from "./api";
 
 const BLOCKED_PROTOCOLS = new Set(["javascript", "data", "file"]);
 
+function getTauriGlobalOrNull(): any | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (globalThis as any).__TAURI__ ?? null;
+  } catch {
+    // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
+    // Treat that as "unavailable" so best-effort callsites can fall back cleanly.
+    return null;
+  }
+}
+
 function parseUrlOrThrow(url: string): URL {
   try {
     return new URL(url);
@@ -13,7 +24,7 @@ function parseUrlOrThrow(url: string): URL {
 type TauriShellOpen = (url: string, options?: Record<string, unknown>) => Promise<unknown> | unknown;
 
 function getTauriShellOpenOrNull(): ((url: string) => Promise<void>) | null {
-  const tauri = (globalThis as any).__TAURI__;
+  const tauri = getTauriGlobalOrNull();
   const candidates: unknown[] = [
     // Tauri v1 style
     tauri?.shell?.open,
@@ -48,7 +59,7 @@ export async function shellOpen(url: string): Promise<void> {
     throw new Error(`Refusing to open URL with blocked protocol "${protocol}:"`);
   }
 
-  const tauri = (globalThis as any).__TAURI__;
+  const tauri = getTauriGlobalOrNull();
   const invoke = getTauriInvokeOrNull();
 
   if (invoke) {

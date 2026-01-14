@@ -14,6 +14,17 @@ export const UPDATER_DISMISSED_VERSION_KEY = "formula.updater.dismissedVersion";
 export const UPDATER_DISMISSED_AT_KEY = "formula.updater.dismissedAt";
 const UPDATER_DISMISSAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+function getTauriGlobalOrNull(): any | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (globalThis as any).__TAURI__ ?? null;
+  } catch {
+    // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
+    // Treat that as "unavailable" so best-effort callsites can fall back cleanly.
+    return null;
+  }
+}
+
 type UpdaterEventName =
   | "update-check-already-running"
   | "update-check-started"
@@ -330,7 +341,7 @@ function getUpdaterUpdateOrNull(raw: unknown): UpdaterUpdate | null {
 }
 
 function getUpdaterApiOrNull(): { check: () => Promise<UpdaterUpdate | null> } | null {
-  const tauri = (globalThis as any).__TAURI__;
+  const tauri = getTauriGlobalOrNull();
   const updater = tauri?.updater ?? tauri?.plugin?.updater ?? tauri?.plugins?.updater ?? null;
   if (!updater) return null;
 

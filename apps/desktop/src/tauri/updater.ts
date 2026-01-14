@@ -5,6 +5,17 @@ import { getTauriInvokeOrNull } from "./api";
 
 export type UpdateCheckSource = "manual";
 
+function getTauriGlobalOrNull(): any | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (globalThis as any).__TAURI__ ?? null;
+  } catch {
+    // Some hardened host environments (or tests) may define `__TAURI__` with a throwing getter.
+    // Treat that as "unavailable" so best-effort callsites can fall back cleanly.
+    return null;
+  }
+}
+
 /**
  * Thin wrapper around Tauri's updater plugin so the UI can trigger installation/restart
  * without importing `@tauri-apps/*` directly.
@@ -27,7 +38,7 @@ export async function installUpdateAndRestart(): Promise<void> {
   // We intentionally avoid importing `@tauri-apps/plugin-updater` because the desktop
   // frontend leans on global `__TAURI__` bindings (see `src/main.ts`).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tauri = (globalThis as any).__TAURI__;
+  const tauri = getTauriGlobalOrNull();
   // Tauri's global API shape can vary across versions/builds.
   const updater = tauri?.updater ?? tauri?.plugin?.updater ?? tauri?.plugins?.updater;
 

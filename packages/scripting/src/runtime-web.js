@@ -242,7 +242,15 @@ export class ScriptRuntime {
     switch (method) {
       case "ui.alert": {
         const message = params?.message ?? "";
-        const tauriMessage = globalThis?.__TAURI__?.dialog?.message ?? globalThis?.__TAURI__?.dialog?.alert;
+        /** @type {any} */
+        let tauriMessage = null;
+        try {
+          const tauri = globalThis.__TAURI__;
+          const dialog = tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog ?? null;
+          tauriMessage = dialog?.message ?? dialog?.alert ?? null;
+        } catch {
+          tauriMessage = null;
+        }
         if (typeof tauriMessage === "function") {
           try {
             await tauriMessage(String(message));
@@ -260,7 +268,15 @@ export class ScriptRuntime {
       }
       case "ui.confirm": {
         const message = params?.message ?? "";
-        const tauriConfirm = globalThis?.__TAURI__?.dialog?.confirm;
+        /** @type {any} */
+        let tauriConfirm = null;
+        try {
+          const tauri = globalThis.__TAURI__;
+          const dialog = tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog ?? null;
+          tauriConfirm = dialog?.confirm ?? null;
+        } catch {
+          tauriConfirm = null;
+        }
         if (typeof tauriConfirm === "function") {
           try {
             return Boolean(await tauriConfirm(String(message)));

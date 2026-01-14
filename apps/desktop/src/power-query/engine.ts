@@ -197,7 +197,12 @@ async function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<
 }
 
 function getTauriFs(): any {
-  const tauri = (globalThis as any).__TAURI__;
+  let tauri: any = null;
+  try {
+    tauri = (globalThis as any).__TAURI__ ?? null;
+  } catch {
+    tauri = null;
+  }
   return tauri?.fs ?? tauri?.plugin?.fs ?? null;
 }
 
