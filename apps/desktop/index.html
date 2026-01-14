@@ -6,7 +6,7 @@
     <title>Formula Desktop</title>
     <!-- Load startup instrumentation before the main app entrypoint so the webview can report
          "JS started executing" as early as possible (reduces startup metric skew). -->
-    <script type="module" src="/src/tauri/startupMetricsBootstrap.ts"></script>
+    <script type="module" async src="/src/tauri/startupMetricsBootstrap.ts"></script>
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
