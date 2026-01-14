@@ -222,6 +222,8 @@ function resolveSheetName(name, workbook) {
  *   - `Table1[Column]`
  *   - `Table1[#All]` / `Table1[#Headers]` / `Table1[#Data]` / `Table1[#Totals]`
  *   - `Table1[[#All],[Column]]` (and other selectors like `#Data`/`#Headers`/`#Totals`)
+ *   - `Table1[[#All],[Col1],[Col2]]` (multi-column; contiguous columns only)
+ *   - `Table1[[#All],[Col1]:[Col3]]` (column-range)
  */
 export function parseGoTo(input, { workbook, currentSheetName } = {}) {
   if (!workbook) throw new Error("parseGoTo: workbook is required");
