@@ -120,7 +120,9 @@ pub fn parse_chart_space(
 
     let Some(plot_area_node) = chart_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "plotArea")
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_plot_area_node))
+        .find(|n| n.tag_name().name() == "plotArea")
     else {
         warn(&mut diagnostics, "missing c:plotArea");
         return Ok(ChartModel {
@@ -650,6 +652,10 @@ fn is_external_data_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
 
 fn is_ser_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "ser"
+}
+
+fn is_plot_area_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "plotArea"
 }
 
 fn is_ext_lst_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
