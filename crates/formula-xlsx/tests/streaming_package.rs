@@ -274,6 +274,23 @@ fn streaming_package_enforce_workbook_kind_is_noop_when_already_correct() {
 }
 
 #[test]
+fn streaming_package_part_names_are_globally_sorted() {
+    let input = build_zip(&[
+        ("xl/z.xml", CompressionMethod::Deflated, b"z"),
+        ("xl/a.xml", CompressionMethod::Deflated, b"a"),
+    ]);
+
+    let mut pkg = StreamingXlsxPackage::from_reader(Cursor::new(input)).unwrap();
+    // Added part should participate in global ordering.
+    pkg.set_part("xl/m.xml", b"m".to_vec());
+    // Removed source part should be filtered out.
+    pkg.remove_part("xl/a.xml");
+
+    let names: Vec<&str> = pkg.part_names().collect();
+    assert_eq!(names, vec!["xl/m.xml", "xl/z.xml"]);
+}
+
+#[test]
 fn streaming_package_enforce_workbook_kind_addin_updates_only_workbook_override() {
     let (input, content_types) = streaming_pkg_fixture_with_prefixed_content_types();
 
