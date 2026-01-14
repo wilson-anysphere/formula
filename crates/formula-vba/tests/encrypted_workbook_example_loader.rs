@@ -1,10 +1,24 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::io::Read;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "../examples/shared/vba_project_bin.rs"]
 mod vba_project_bin;
+
+fn fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
+}
+
+fn read_zip_entry(path: &PathBuf, name: &str) -> Vec<u8> {
+    let zip_bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).expect("valid zip");
+    let mut entry = zip.by_name(name).expect("missing zip entry");
+    let mut buf = Vec::new();
+    entry.read_to_end(&mut buf).expect("read zip entry");
+    buf
+}
 
 #[test]
 fn example_loader_handles_encrypted_ooxml_workbooks() {
@@ -54,10 +68,41 @@ fn example_loader_handles_encrypted_ooxml_workbooks() {
         .by_name("xl/vbaProject.bin")
         .expect("expected vbaProject.bin in fixture");
     let mut expected = Vec::new();
-    entry.read_to_end(&mut expected).expect("read vbaProject.bin");
+    entry
+        .read_to_end(&mut expected)
+        .expect("read vbaProject.bin");
 
     assert_eq!(decrypted_vba_bin, expected);
 
     let _ = std::fs::remove_file(&path);
 }
 
+#[test]
+fn example_loader_decrypts_agile_encrypted_fixture() {
+    let plaintext_path = fixture_path("../../fixtures/encrypted/ooxml/plaintext-basic.xlsm");
+    let expected_vba = read_zip_entry(&plaintext_path, "xl/vbaProject.bin");
+
+    let encrypted_path = fixture_path("../../fixtures/encrypted/ooxml/agile-basic.xlsm");
+    let (vba, source) =
+        vba_project_bin::load_vba_project_bin(&encrypted_path, Some("password")).expect("decrypt");
+    assert!(
+        source.contains("encrypted workbook decrypted"),
+        "source={source}"
+    );
+    assert_eq!(vba, expected_vba);
+}
+
+#[test]
+fn example_loader_decrypts_standard_encrypted_fixture() {
+    let plaintext_path = fixture_path("../../fixtures/encrypted/ooxml/plaintext-basic.xlsm");
+    let expected_vba = read_zip_entry(&plaintext_path, "xl/vbaProject.bin");
+
+    let encrypted_path = fixture_path("../../fixtures/encrypted/ooxml/standard-basic.xlsm");
+    let (vba, source) =
+        vba_project_bin::load_vba_project_bin(&encrypted_path, Some("password")).expect("decrypt");
+    assert!(
+        source.contains("encrypted workbook decrypted"),
+        "source={source}"
+    );
+    assert_eq!(vba, expected_vba);
+}
