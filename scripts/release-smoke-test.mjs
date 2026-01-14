@@ -600,11 +600,11 @@ async function discoverLocalBundleValidators(scriptsDir, key) {
   // Stable, explicit fallback names (if the discovery heuristic misses).
   const explicitFallbacks =
     key === "macos"
-      ? ["validate-macos-bundle.sh"]
+          ? ["validate-macos-bundle.sh"]
       : key === "windows"
         ? ["validate-windows-bundles.ps1"]
         : key === "linux"
-          ? ["validate-linux-appimage.sh", "validate-linux-rpm.sh"]
+          ? ["validate-linux-appimage.sh", "validate-linux-deb.sh", "validate-linux-rpm.sh"]
           : [];
 
   const fallbacks = [

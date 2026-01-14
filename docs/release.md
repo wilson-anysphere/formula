@@ -1015,6 +1015,21 @@ These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` unde
 After building via `(cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)` (or after CI produces an artifact),
 verify the dependency list and shared library resolution.
 
+Recommended (repo script; runs static `dpkg-deb` metadata checks + optional installability check in an Ubuntu container):
+
+```bash
+# Auto-discovers DEB(s) under target/**/release/bundle/deb/*.deb
+bash scripts/validate-linux-deb.sh
+
+# Or validate a specific .deb file:
+deb_pkg="$(find apps/desktop/src-tauri/target apps/desktop/target target -type f -path '*/release/bundle/deb/*.deb' 2>/dev/null | head -n 1 || true)"
+test -n "$deb_pkg" || { echo "No .deb found under target/**/release/bundle/deb/*.deb" >&2; exit 1; }
+bash scripts/validate-linux-deb.sh --deb "$deb_pkg"
+
+# Skip the container step (static checks only):
+bash scripts/validate-linux-deb.sh --no-container
+```
+
 From `apps/desktop/src-tauri`:
 
 ```bash

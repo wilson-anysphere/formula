@@ -1,0 +1,521 @@
+#!/usr/bin/env bash
+#
+# Validate a Linux DEB bundle produced by the Tauri desktop build.
+#
+# This script is intended for CI (Ubuntu host + optional Docker), but can also be used
+# locally. It performs:
+#   1) Host "static" validation via dpkg-deb queries + payload inspection.
+#   2) Optional installability validation inside an Ubuntu container.
+#
+# Usage:
+#   ./scripts/validate-linux-deb.sh
+#   ./scripts/validate-linux-deb.sh --deb path/to/formula-desktop.deb
+#   ./scripts/validate-linux-deb.sh --no-container
+#
+set -euo pipefail
+
+SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ORIG_PWD="$(pwd)"
+
+# Ensure relative-path discovery works regardless of the caller's cwd.
+cd "$REPO_ROOT"
+
+usage() {
+  cat <<EOF
+${SCRIPT_NAME} - validate a formula-desktop DEB bundle
+
+Usage:
+  ${SCRIPT_NAME} [--deb <path>] [--no-container] [--image <ubuntu-image>]
+
+Options:
+  --deb <path>        Validate a specific .deb (or a directory containing .deb files).
+                      If omitted, the script searches common Tauri output locations:
+                        - \$CARGO_TARGET_DIR/**/release/bundle/deb/*.deb (if set)
+                        - apps/desktop/src-tauri/target/**/release/bundle/deb/*.deb
+                        - apps/desktop/target/**/release/bundle/deb/*.deb
+                        - target/**/release/bundle/deb/*.deb
+  --no-container      Skip the Ubuntu container installability check.
+  --image <image>     Ubuntu image to use for the container step (default: ubuntu:24.04).
+
+Environment variables:
+  DOCKER_PLATFORM             Optional docker --platform override (default: host architecture).
+  FORMULA_DEB_NAME_OVERRIDE   Override the expected Debian package name (defaults to tauri.conf.json mainBinaryName).
+  -h, --help                  Show this help text.
+EOF
+}
+
+err() {
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    echo "::error::${SCRIPT_NAME}: $*" >&2
+  else
+    echo "${SCRIPT_NAME}: ERROR: $*" >&2
+  fi
+}
+
+note() {
+  echo "${SCRIPT_NAME}: $*"
+}
+
+die() {
+  err "$@"
+  exit 1
+}
+
+DEB_OVERRIDE=""
+NO_CONTAINER=0
+UBUNTU_IMAGE="ubuntu:24.04"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --deb)
+      DEB_OVERRIDE="${2:-}"
+      [[ -n "${DEB_OVERRIDE}" ]] || die "--deb requires a path argument"
+      shift 2
+      ;;
+    --no-container)
+      NO_CONTAINER=1
+      shift
+      ;;
+    --image)
+      UBUNTU_IMAGE="${2:-}"
+      [[ -n "${UBUNTU_IMAGE}" ]] || die "--image requires an image argument"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown argument: $1 (use --help)"
+      ;;
+  esac
+done
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command not found in PATH: $1"
+}
+
+require_docker() {
+  command -v docker >/dev/null 2>&1 || die "docker is required for container validation (install docker or rerun with --no-container)"
+
+  set +e
+  docker info >/dev/null 2>&1
+  local info_status=$?
+  set -e
+  if [[ "${info_status}" -ne 0 ]]; then
+    die "docker is installed but the daemon is not available (docker info failed). Start Docker or rerun with --no-container."
+  fi
+}
+
+detect_docker_platform() {
+  local arch
+  arch="$(uname -m)"
+  case "${arch}" in
+    x86_64) echo "linux/amd64" ;;
+    aarch64|arm64) echo "linux/arm64" ;;
+    *) echo "" ;;
+  esac
+}
+
+# Force Docker to use the host architecture image variant by default. This avoids confusing
+# `exec format error` failures when a mismatched (e.g. ARM) image tag is present locally.
+DOCKER_PLATFORM="${DOCKER_PLATFORM:-$(detect_docker_platform)}"
+
+require_cmd dpkg-deb
+
+TAURI_CONF="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+if [[ ! -f "$TAURI_CONF" ]]; then
+  die "Missing Tauri config: $TAURI_CONF"
+fi
+
+read_tauri_conf_value() {
+  local key="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$TAURI_CONF" "$key" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+key = sys.argv[2]
+with open(path, "r", encoding="utf-8") as f:
+    conf = json.load(f)
+val = conf.get(key, "")
+if isinstance(val, str):
+    print(val.strip())
+PY
+    return 0
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    node -e '
+      const fs = require("fs");
+      const path = process.argv[1];
+      const key = process.argv[2];
+      const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+      const val = conf?.[key];
+      if (typeof val === "string") process.stdout.write(val.trim());
+    ' "$TAURI_CONF" "$key"
+    return 0
+  fi
+
+  die "Neither python3 nor node is available to parse ${TAURI_CONF} (required for version/name checks)."
+}
+
+EXPECTED_VERSION="$(read_tauri_conf_value version)"
+if [[ -z "$EXPECTED_VERSION" ]]; then
+  die "Expected $TAURI_CONF to contain a non-empty \"version\" field."
+fi
+
+EXPECTED_DEB_NAME="${FORMULA_DEB_NAME_OVERRIDE:-$(read_tauri_conf_value mainBinaryName)}"
+if [[ -z "$EXPECTED_DEB_NAME" ]]; then
+  EXPECTED_DEB_NAME="formula-desktop"
+fi
+
+abs_path() {
+  local p="$1"
+  if [[ "$p" != /* ]]; then
+    p="${REPO_ROOT}/${p}"
+  fi
+  local dir
+  dir="$(dirname "$p")"
+  if [[ -d "$dir" ]]; then
+    dir="$(cd "$dir" && pwd -P)"
+    echo "${dir}/$(basename "$p")"
+  else
+    echo "$p"
+  fi
+}
+
+find_debs() {
+  local -a debs=()
+
+  if [[ -n "${DEB_OVERRIDE}" ]]; then
+    # Resolve relative paths against the invocation directory, not the repo root.
+    if [[ "${DEB_OVERRIDE}" != /* ]]; then
+      DEB_OVERRIDE="${ORIG_PWD}/${DEB_OVERRIDE}"
+    fi
+    if [[ -d "${DEB_OVERRIDE}" ]]; then
+      while IFS= read -r -d '' f; do debs+=("$(abs_path "$f")"); done < <(find "${DEB_OVERRIDE}" -maxdepth 1 -type f -name '*.deb' -print0)
+    else
+      debs+=("$(abs_path "${DEB_OVERRIDE}")")
+    fi
+  else
+    local -a roots=()
+    if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+      cargo_target_dir="${CARGO_TARGET_DIR}"
+      if [[ "${cargo_target_dir}" != /* ]]; then
+        cargo_target_dir="${REPO_ROOT}/${cargo_target_dir}"
+      fi
+      if [[ -d "${cargo_target_dir}" ]]; then
+        roots+=("${cargo_target_dir}")
+      fi
+    fi
+    for root in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
+      if [[ -d "${root}" ]]; then
+        roots+=("${root}")
+      fi
+    done
+
+    # Canonicalize + de-dupe.
+    local -A seen_roots=()
+    local -a uniq_roots=()
+    for root in "${roots[@]}"; do
+      if [[ "${root}" != /* ]]; then
+        root="${REPO_ROOT}/${root}"
+      fi
+      [[ -d "${root}" ]] || continue
+      root="$(cd "${root}" && pwd -P)"
+      if [[ -n "${seen_roots[${root}]:-}" ]]; then
+        continue
+      fi
+      seen_roots["${root}"]=1
+      uniq_roots+=("${root}")
+    done
+    roots=("${uniq_roots[@]}")
+
+    local nullglob_was_set=0
+    if shopt -q nullglob; then
+      nullglob_was_set=1
+    fi
+    shopt -s nullglob
+    for root in "${roots[@]}"; do
+      debs+=("${root}/release/bundle/deb/"*.deb)
+      debs+=("${root}/"*/release/bundle/deb/*.deb)
+    done
+    if [[ "${nullglob_was_set}" -eq 0 ]]; then
+      shopt -u nullglob
+    fi
+
+    if [[ ${#debs[@]} -eq 0 ]]; then
+      for root in "${roots[@]}"; do
+        while IFS= read -r -d '' f; do debs+=("$(abs_path "$f")"); done < <(find "${root}" -type f -path '*/release/bundle/deb/*.deb' -print0 2>/dev/null || true)
+      done
+    fi
+  fi
+
+  if [[ ${#debs[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  local -A seen=()
+  local -a unique=()
+  local deb_path
+  for deb_path in "${debs[@]}"; do
+    seen["$deb_path"]=1
+  done
+  for deb_path in "${!seen[@]}"; do
+    unique+=("$deb_path")
+  done
+  IFS=$'\n' unique=($(printf '%s\n' "${unique[@]}" | sort))
+  unset IFS
+  printf '%s\n' "${unique[@]}"
+}
+
+assert_contains_any() {
+  local haystack="$1"
+  local label="$2"
+  shift 2
+  local matched=0
+  local needle
+  for needle in "$@"; do
+    if printf '%s\n' "$haystack" | grep -Eqi "$needle"; then
+      matched=1
+      break
+    fi
+  done
+  if [[ "$matched" -ne 1 ]]; then
+    die "DEB metadata missing required dependency (${label}); expected one of: $*"
+  fi
+}
+
+validate_desktop_integration_extracted() {
+  local package_root="$1"
+
+  local applications_dir="$package_root/usr/share/applications"
+  if [[ ! -d "$applications_dir" ]]; then
+    err "Extracted payload missing /usr/share/applications (expected at: ${applications_dir})"
+    return 1
+  fi
+
+  local -a desktop_files=()
+  while IFS= read -r -d '' desktop_file; do
+    desktop_files+=("$desktop_file")
+  done < <(find "$applications_dir" -type f -name '*.desktop' -print0 2>/dev/null || true)
+  if [[ ${#desktop_files[@]} -eq 0 ]]; then
+    err "No .desktop files found under extracted payload: ${applications_dir}"
+    return 1
+  fi
+
+  local required_xlsx_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  local required_scheme_mime="x-scheme-handler/formula"
+  local spreadsheet_mime_regex
+  spreadsheet_mime_regex='xlsx|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application/vnd\.ms-excel|application/vnd\.ms-excel\.sheet\.macroEnabled\.12|application/vnd\.ms-excel\.sheet\.binary\.macroEnabled\.12|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.template|application/vnd\.ms-excel\.template\.macroEnabled\.12|application/vnd\.ms-excel\.addin\.macroEnabled\.12|text/csv'
+
+  local has_any_mimetype=0
+  local has_spreadsheet_mime=0
+  local has_xlsx_integration=0
+  local has_scheme_mime=0
+  local bad_exec_count=0
+
+  local desktop_file
+  for desktop_file in "${desktop_files[@]}"; do
+    local mime_line
+    mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+    if [[ -z "$mime_line" ]]; then
+      continue
+    fi
+    has_any_mimetype=1
+    local mime_value
+    mime_value="$(printf '%s' "$mime_line" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//")"
+
+    if printf '%s' "$mime_value" | grep -Fqi "$required_scheme_mime"; then
+      has_scheme_mime=1
+      local exec_line
+      exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+      if [[ -z "$exec_line" ]]; then
+        err "Extracted desktop entry ${desktop_file#${package_root}/} is missing an Exec= entry (required for URL scheme handlers)"
+        bad_exec_count=$((bad_exec_count + 1))
+      elif ! printf '%s' "$exec_line" | grep -Eq '%[uUfF]'; then
+        err "Extracted desktop entry ${desktop_file#${package_root}/} Exec= does not include a URL placeholder (%U/%u/%F/%f): ${exec_line}"
+        bad_exec_count=$((bad_exec_count + 1))
+      fi
+    fi
+
+    if printf '%s' "$mime_value" | grep -Fqi "xlsx"; then
+      has_xlsx_integration=1
+    fi
+    if printf '%s' "$mime_value" | grep -Fqi "$required_xlsx_mime"; then
+      has_xlsx_integration=1
+    fi
+    if printf '%s' "$mime_value" | grep -Eqi "$spreadsheet_mime_regex"; then
+      has_spreadsheet_mime=1
+      local exec_line
+      exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+      if [[ -z "$exec_line" ]]; then
+        err "Extracted desktop entry ${desktop_file#${package_root}/} is missing an Exec= entry (required for file associations)"
+        bad_exec_count=$((bad_exec_count + 1))
+      elif ! printf '%s' "$exec_line" | grep -Eq '%[uUfF]'; then
+        err "Extracted desktop entry ${desktop_file#${package_root}/} Exec= does not include a file/URL placeholder (%U/%u/%F/%f): ${exec_line}"
+        bad_exec_count=$((bad_exec_count + 1))
+      fi
+    fi
+  done
+
+  if [[ "$has_any_mimetype" -ne 1 ]]; then
+    err "No extracted .desktop file contained a MimeType= entry (file associations missing)."
+    return 1
+  fi
+  if [[ "$has_xlsx_integration" -ne 1 ]]; then
+    err "No extracted .desktop MimeType= entry advertised xlsx support (expected substring 'xlsx' or MIME '${required_xlsx_mime}')."
+    return 1
+  fi
+  if [[ "$has_spreadsheet_mime" -ne 1 ]]; then
+    err "No extracted .desktop MimeType= entry advertised spreadsheet MIME types (expected xlsx/csv/etc)."
+    return 1
+  fi
+  if [[ "$has_scheme_mime" -ne 1 ]]; then
+    err "No extracted .desktop MimeType= entry advertised the expected URL scheme handler (${required_scheme_mime})."
+    return 1
+  fi
+  if [[ "$bad_exec_count" -ne 0 ]]; then
+    err "One or more extracted .desktop entries had invalid Exec= lines for file association / URL scheme handling."
+    return 1
+  fi
+}
+
+validate_static() {
+  local deb_path="$1"
+  [[ -f "${deb_path}" ]] || die "DEB not found: ${deb_path}"
+  [[ -s "${deb_path}" ]] || die "DEB is empty: ${deb_path}"
+
+  note "Static validation: ${deb_path}"
+
+  local deb_version
+  deb_version="$(dpkg-deb -f "${deb_path}" Version 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+  [[ -n "$deb_version" ]] || die "Failed to read DEB Version field (dpkg-deb -f) for: ${deb_path}"
+  if [[ "$deb_version" != "${EXPECTED_VERSION}" && "$deb_version" != "${EXPECTED_VERSION}-"* && "$deb_version" != "${EXPECTED_VERSION}+"* && "$deb_version" != "${EXPECTED_VERSION}~"* ]]; then
+    die "DEB version mismatch for ${deb_path}: expected ${EXPECTED_VERSION} (or ${EXPECTED_VERSION}-*), found ${deb_version}"
+  fi
+
+  local deb_pkg
+  deb_pkg="$(dpkg-deb -f "${deb_path}" Package 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+  [[ -n "$deb_pkg" ]] || die "Failed to read DEB Package field (dpkg-deb -f) for: ${deb_path}"
+  if [[ "$deb_pkg" != "$EXPECTED_DEB_NAME" ]]; then
+    die "DEB package name mismatch for ${deb_path}: expected ${EXPECTED_DEB_NAME}, found ${deb_pkg}"
+  fi
+
+  local depends
+  depends="$(dpkg-deb -f "${deb_path}" Depends 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+  [[ -n "$depends" ]] || die "Failed to read DEB Depends field (dpkg-deb -f) for: ${deb_path}"
+
+  # Runtime deps: keep checks fuzzy to allow t64 transitions (Ubuntu 24.04) and AppIndicator variants.
+  assert_contains_any "$depends" "shared-mime-info (MIME database integration)" "shared-mime-info"
+  assert_contains_any "$depends" "WebKitGTK 4.1 (webview)" "libwebkit2gtk-4\\.1"
+  assert_contains_any "$depends" "GTK3" "libgtk-3"
+  assert_contains_any "$depends" "AppIndicator/Ayatana (tray)" "appindicator"
+  assert_contains_any "$depends" "librsvg2 (icons)" "librsvg2"
+  assert_contains_any "$depends" "OpenSSL (libssl)" "libssl"
+
+  local contents
+  contents="$(dpkg-deb -c "${deb_path}")" || die "dpkg-deb -c failed for: ${deb_path}"
+  local file_list
+  file_list="$(printf '%s\n' "$contents" | awk '{print $NF}')"
+
+  if ! grep -qx "./usr/bin/${EXPECTED_DEB_NAME}" <<<"${file_list}"; then
+    die "DEB payload missing expected desktop binary path: ./usr/bin/${EXPECTED_DEB_NAME}"
+  fi
+  if ! grep -Eq '^\.?/usr/share/applications/[^/]+\.desktop$' <<<"${file_list}"; then
+    die "DEB payload missing expected .desktop file under: ./usr/share/applications/"
+  fi
+  for filename in LICENSE NOTICE; do
+    if ! grep -qx "./usr/share/doc/${EXPECTED_DEB_NAME}/${filename}" <<<"${file_list}"; then
+      die "DEB payload missing compliance file: ./usr/share/doc/${EXPECTED_DEB_NAME}/${filename}"
+    fi
+  done
+
+  # Extract payload and validate desktop integration metadata.
+  local tmpdir
+  tmpdir="$(mktemp -d)"
+  cleanup_tmpdir() {
+    rm -rf "${tmpdir}" >/dev/null 2>&1 || true
+  }
+  trap cleanup_tmpdir EXIT
+  dpkg-deb -x "${deb_path}" "${tmpdir}" || die "dpkg-deb -x failed for: ${deb_path}"
+
+  [[ -x "${tmpdir}/usr/bin/${EXPECTED_DEB_NAME}" ]] || die "Extracted payload missing executable: usr/bin/${EXPECTED_DEB_NAME}"
+  for filename in LICENSE NOTICE; do
+    [[ -f "${tmpdir}/usr/share/doc/${EXPECTED_DEB_NAME}/${filename}" ]] || die "Extracted payload missing compliance file: usr/share/doc/${EXPECTED_DEB_NAME}/${filename}"
+  done
+
+  if ! validate_desktop_integration_extracted "${tmpdir}"; then
+    die "Desktop integration validation failed (inspect .desktop MimeType/Exec entries)"
+  fi
+
+  cleanup_tmpdir
+  trap - EXIT
+}
+
+validate_container() {
+  local deb_path="$1"
+  require_docker
+
+  deb_path="$(abs_path "${deb_path}")"
+  local deb_basename
+  deb_basename="$(basename "${deb_path}")"
+
+  local -a docker_platform_args=()
+  if [[ -n "${DOCKER_PLATFORM}" ]]; then
+    docker_platform_args=(--platform "${DOCKER_PLATFORM}")
+  fi
+
+  local mount_dir
+  mount_dir="$(mktemp -d)"
+  if ! ln "${deb_path}" "${mount_dir}/${deb_basename}" 2>/dev/null; then
+    cp "${deb_path}" "${mount_dir}/${deb_basename}"
+  fi
+
+  note "Container validation (Ubuntu): ${deb_path}"
+  note "Using image: ${UBUNTU_IMAGE}"
+
+  docker run --rm "${docker_platform_args[@]}" -v "${mount_dir}:/deb:ro" "${UBUNTU_IMAGE}" bash -euxo pipefail -c '
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends /deb/*.deb
+    test -x /usr/bin/'"${EXPECTED_DEB_NAME}"'
+    test -f /usr/share/doc/'"${EXPECTED_DEB_NAME}"'/LICENSE
+    test -f /usr/share/doc/'"${EXPECTED_DEB_NAME}"'/NOTICE
+    ldd_out="$(ldd /usr/bin/'"${EXPECTED_DEB_NAME}"' 2>&1 || true)"
+    echo "${ldd_out}"
+    if echo "${ldd_out}" | grep -q "not found"; then
+      echo "Missing shared libraries detected:" >&2
+      echo "${ldd_out}" | grep "not found" >&2 || true
+      exit 1
+    fi
+    # Ensure deep link scheme handler is advertised.
+    grep -R "x-scheme-handler/formula" /usr/share/applications/*.desktop
+  '
+
+  rm -rf "${mount_dir}" >/dev/null 2>&1 || true
+}
+
+main() {
+  mapfile -t debs < <(find_debs)
+  if [[ ${#debs[@]} -eq 0 ]]; then
+    die "No .deb artifacts found. Build one with Tauri, or pass --deb <path>."
+  fi
+
+  note "Found ${#debs[@]} DEB artifact(s)."
+  local deb_path
+  for deb_path in "${debs[@]}"; do
+    validate_static "${deb_path}"
+    if [[ "${NO_CONTAINER}" -eq 0 ]]; then
+      validate_container "${deb_path}"
+    fi
+  done
+
+  note "OK"
+}
+
+main
