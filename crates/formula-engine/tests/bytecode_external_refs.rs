@@ -124,7 +124,7 @@ fn bytecode_indirect_external_cell_ref_compiles_and_evaluates_via_provider() {
     assert_eq!(
         engine.bytecode_program_count(),
         1,
-        "expected INDIRECT external workbook refs to compile to bytecode (stats={:?}, report={:?})",
+        "expected INDIRECT literal external workbook refs to compile to bytecode (stats={:?}, report={:?})",
         engine.bytecode_compile_stats(),
         engine.bytecode_compile_report(32)
     );

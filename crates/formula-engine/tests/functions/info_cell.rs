@@ -528,6 +528,20 @@ fn cell_width_name_ref_self_reference_is_not_a_circular_dependency() {
 }
 
 #[test]
+fn cell_width_implicit_intersection_self_reference_is_not_a_circular_dependency() {
+    // Like `CELL("width", A1)`, implicit-intersection wrappers should not introduce a spurious
+    // circular dependency when the formula is entered into the referenced cell.
+    //
+    // `@A1` evaluates to a value rather than a reference, so the function should surface `#VALUE!`
+    // (not a circular-reference error).
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=CELL(\"width\",@A1)");
+    sheet.recalculate();
+    assert_eq!(sheet.get("A1"), Value::Error(ErrorKind::Value));
+    assert_eq!(sheet.circular_reference_count(), 0);
+}
+
+#[test]
 fn cell_sheet_default_style_affects_format_prefix_and_protect() {
     use formula_engine::Engine;
     use formula_model::{Alignment, HorizontalAlignment, Protection};

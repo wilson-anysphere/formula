@@ -17612,6 +17612,46 @@ fn walk_calc_expr(
                 }
             }
 
+            if let Some(spec) = crate::functions::lookup_function(name) {
+                // `CELL("width", ref)` consults column metadata for `ref` but does not depend on the
+                // contents of `ref`. Avoid registering plain reference literals as calc precedents
+                // so formulas like `A1 = CELL("width", A1)` do not create spurious circular
+                // references.
+                if spec.name == "CELL"
+                    && args.len() >= 2
+                    && matches!(&args[0], Expr::Text(info) if info.trim().eq_ignore_ascii_case("width"))
+                    && {
+                        match &args[1] {
+                            Expr::CellRef(_)
+                            | Expr::RangeRef(_)
+                            | Expr::StructuredRef(_)
+                            | Expr::SpillRange(_) => true,
+                            Expr::ImplicitIntersection(inner) => matches!(
+                                inner.as_ref(),
+                                Expr::CellRef(_)
+                                    | Expr::RangeRef(_)
+                                    | Expr::StructuredRef(_)
+                                    | Expr::SpillRange(_)
+                            ),
+                            _ => false,
+                        }
+                    }
+                {
+                    for a in args.iter().skip(2) {
+                        walk_calc_expr(
+                            a,
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                    }
+                    return;
+                }
+            }
             for a in args {
                 walk_calc_expr(
                     a,

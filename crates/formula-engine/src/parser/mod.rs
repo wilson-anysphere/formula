@@ -3937,16 +3937,19 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
     // id so external sheet keys remain unique:
     // `C:\path\[Book.xlsx]Sheet1` -> workbook `C:\path\Book.xlsx`, sheet `Sheet1`.
     if name.starts_with('[') {
-        // Fast path for canonical sheet keys: `"[{workbook}]{sheet}"`.
-        if let Some(end) = name.rfind(']') {
-            // `end` is the index of the closing `]`; split after it.
-            let book = &name[1..end];
-            let sheet = &name[end + 1..];
-            if !book.is_empty() && !sheet.is_empty() {
-                return (Some(book.to_string()), sheet.to_string());
-            }
+        // Canonical external sheet keys: `"[{workbook}]{sheet}"`.
+        //
+        // Use the last closing bracket so bracket pairs inside the workbook id (e.g. a path
+        // prefix containing bracketed directory names) don't prematurely terminate parsing.
+        let Some(end) = name.rfind(']') else {
+            return (None, name.to_string());
+        };
+        let book = &name[1..end];
+        let sheet = &name[end + 1..];
+        if book.is_empty() || sheet.is_empty() {
+            return (None, name.to_string());
         }
-        return (None, name.to_string());
+        return (Some(book.to_string()), sheet.to_string());
     }
 
     let bytes = name.as_bytes();
