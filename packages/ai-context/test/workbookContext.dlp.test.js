@@ -238,7 +238,7 @@ test("buildWorkbookContext: attachments are redacted under DLP REDACT even when 
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
-test("buildWorkbookContext: structured DLP REDACT also drops attachment data for non-heuristic strings (no-op redactor)", async () => {
+test("buildWorkbookContext: structured DLP REDACT also drops attachment payload fields for non-heuristic strings (no-op redactor)", async () => {
   const workbook = {
     id: "wb-dlp-attachments-structured",
     sheets: [
@@ -262,7 +262,7 @@ test("buildWorkbookContext: structured DLP REDACT also drops attachment data for
     workbook,
     query: "ignore",
     topK: 0,
-    attachments: [{ type: "chart", reference: "Chart1", data: { note: "TopSecret" } }],
+    attachments: [{ type: "chart", reference: "Chart1", note: "TopSecret" }],
     dlp: {
       documentId: workbook.id,
       policy: makePolicy({ maxAllowed: "Public", redactDisallowed: true }),

@@ -113,7 +113,7 @@ test("buildContext: structured DLP selectors outside the origin window do not af
   assert.doesNotMatch(out.promptContext, /\[REDACTED\]/);
 });
 
-test("buildContext: structured DLP REDACT also drops attachment data for non-heuristic strings (no-op redactor)", async () => {
+test("buildContext: structured DLP REDACT also drops attachment payload fields for non-heuristic strings (no-op redactor)", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,
     redactor: (text) => text,
@@ -125,7 +125,11 @@ test("buildContext: structured DLP REDACT also drops attachment data for non-heu
       values: [["TopSecret"]],
     },
     query: "ignore",
-    attachments: [{ type: "chart", reference: "Chart1", data: { note: "TopSecret" } }],
+    attachments: [
+      // `note` is a top-level field (not under `.data`) to ensure structured DLP enforcement
+      // doesn't rely on heuristic redaction or specific attachment shapes.
+      { type: "chart", reference: "Chart1", note: "TopSecret" },
+    ],
     dlp: {
       documentId: "doc-1",
       sheetId: "Sheet1",

@@ -324,7 +324,14 @@ function compactAttachmentsForPrompt(attachments, options = {}) {
   return attachments.map((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return item;
     const type = item.type;
-    if (!dropAllData && type !== "range" && type !== "table") return item;
+    const reference = item.reference;
+    if (dropAllData) {
+      // Under structured DLP redaction, attachments may contain arbitrary nested payloads
+      // (including raw cell values) that are not reliably detectable by heuristic redaction.
+      // Keep only a minimal prompt-safe skeleton.
+      return { type, reference };
+    }
+    if (type !== "range" && type !== "table") return item;
     // Drop raw data (can contain copied workbook values).
     const { data: _data, ...rest } = /** @type {any} */ (item);
     return rest;
