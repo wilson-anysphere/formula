@@ -14,6 +14,23 @@ export type Cell = { input: string; value: SpreadsheetValue };
 
 const DEFAULT_SHEET_ID = "Sheet1";
 
+function currentFormulaLocaleId(): string {
+  // SpreadsheetModel is primarily used in tests, where the i18n locale is not
+  // always wired, but callers may still set `<html lang>`.
+  try {
+    const raw = typeof document !== "undefined" ? document.documentElement?.lang : "";
+    const trimmed = String(raw ?? "").trim();
+    if (trimmed) return trimmed;
+  } catch {
+    // ignore
+  }
+  try {
+    return getLocale();
+  } catch {
+    return "en-US";
+  }
+}
+
 export class SpreadsheetModel {
   readonly formulaBar = new FormulaBarModel();
   readonly #cells = new Map<string, Cell>();
@@ -73,7 +90,7 @@ export class SpreadsheetModel {
     const value = evaluateFormula(input, (ref) => this.getCellValue(ref), {
       ai: this.#aiCellFunctions,
       cellAddress: `${DEFAULT_SHEET_ID}!${address}`,
-      localeId: getLocale(),
+      localeId: currentFormulaLocaleId(),
     });
     this.#cells.set(address, { input, value });
     this.#cellsVersion += 1;
@@ -161,7 +178,7 @@ export class SpreadsheetModel {
         return cell.value;
       },
       // Include locale because parsing is locale-aware (argument separators, localized function names).
-      getCacheKey: () => `${this.#cellsVersion}:${this.#cells.size}:locale:${getLocale()}`,
+      getCacheKey: () => `${this.#cellsVersion}:${this.#cells.size}:locale:${currentFormulaLocaleId()}`,
     };
 
     this.#pendingCompletion = this.#completion
@@ -198,7 +215,7 @@ export class SpreadsheetModel {
       const value = evaluateFormula(cell.input, (ref) => this.getCellValue(ref), {
         ai: this.#aiCellFunctions,
         cellAddress: `${DEFAULT_SHEET_ID}!${address}`,
-        localeId: getLocale(),
+        localeId: currentFormulaLocaleId(),
       });
       if (value === cell.value) continue;
       this.#cells.set(address, { input: cell.input, value });

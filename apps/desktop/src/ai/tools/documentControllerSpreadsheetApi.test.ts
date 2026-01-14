@@ -939,6 +939,37 @@ describe("DocumentControllerSpreadsheetApi", () => {
     }
   });
 
+  it("clone() prefers document.documentElement.lang for locale-aware evaluation when i18n locale is not wired", () => {
+    const beforeLocale = getLocale();
+    const beforeDocument = (globalThis as any).document;
+    try {
+      (globalThis as any).document = { documentElement: { lang: "de_DE.UTF-8" } };
+      // Keep i18n locale at the default (en-US) while the document is set to a de locale.
+      setLocale("en-US");
+      (globalThis as any).document.documentElement.lang = "de_DE.UTF-8";
+
+      const controller = new DocumentController();
+      controller.setCellValue("Sheet1", "B1", 1);
+      controller.setCellValue("Sheet1", "C1", 2);
+      controller.setCellFormula("Sheet1", "A1", "SUMME(B1;C1)");
+
+      // Provide a dummy live provider so clone() will enable local evaluation. The clone should NOT use this.
+      const api = new DocumentControllerSpreadsheetApi(controller, {
+        getCellComputedValueForSheet: () => 999,
+      });
+      const cloned = api.clone() as any as DocumentControllerSpreadsheetApi;
+
+      expect(cloned.getCell({ sheet: "Sheet1", row: 1, col: 1 })).toMatchObject({ value: 3, formula: "=SUMME(B1;C1)" });
+    } finally {
+      setLocale(beforeLocale);
+      if (beforeDocument === undefined) {
+        delete (globalThis as any).document;
+      } else {
+        (globalThis as any).document = beforeDocument;
+      }
+    }
+  });
+
   it("read_range returns primitive values + formulas without per-cell controller.getCell calls", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 123);

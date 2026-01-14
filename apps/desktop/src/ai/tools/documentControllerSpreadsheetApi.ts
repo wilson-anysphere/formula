@@ -13,6 +13,25 @@ import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evalua
 
 type DocumentControllerStyle = Record<string, any>;
 
+function currentFormulaLocaleId(): string {
+  // Prefer the effective formula locale reflected on the root document. Some host
+  // environments set `<html lang>` without wiring the desktop i18n layer.
+  try {
+    const raw = typeof document !== "undefined" ? document.documentElement?.lang : "";
+    const trimmed = String(raw ?? "").trim();
+    if (trimmed) return trimmed;
+  } catch {
+    // ignore
+  }
+
+  // Fall back to i18n locale (used in tests/non-DOM environments).
+  try {
+    return getLocale();
+  } catch {
+    return "en-US";
+  }
+}
+
 function cloneCellValue(value: any): any {
   if (value == null || typeof value !== "object") return value;
   // `structuredClone` is available in modern browsers + Node, but TypeScript's DOM libs
@@ -478,7 +497,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     };
 
     const MAX_RANGE_CELLS = 200_000;
-    const localeId = getLocale();
+    const localeId = currentFormulaLocaleId();
 
     const getCellValueForSheet = (() => {
       const cache = new Map<string, (address: string) => SpreadsheetValue>();
