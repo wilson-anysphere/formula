@@ -1339,6 +1339,52 @@ mod tests {
         assert_eq!(shrfmla.rgce, rgce);
     }
 
+    #[test]
+    fn parses_continued_array_when_cce_and_rgce_cross_fragment_boundaries() {
+        // ARRAY record split across CONTINUE such that the `cce` length field and the `rgce` bytes
+        // both cross fragment boundaries.
+        let rgce: Vec<u8> = vec![0x1E, 0x02, 0x00]; // PtgInt(2)
+        let cce = rgce.len() as u16;
+
+        // ARRAY header: RefU (6 bytes) + reserved (2 bytes) + cce (2 bytes) + rgce...
+        let mut array_prefix = Vec::new();
+        array_prefix.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        array_prefix.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+        array_prefix.push(0); // colFirst
+        array_prefix.push(0); // colLast
+        array_prefix.extend_from_slice(&0u16.to_le_bytes()); // reserved
+
+        let cce_bytes = cce.to_le_bytes();
+
+        // Split so that:
+        // - the first CONTINUE boundary occurs after the first byte of cce (so cce crosses),
+        // - the second CONTINUE boundary splits the rgce bytes.
+        let array_frag1 = [array_prefix, vec![cce_bytes[0]]].concat();
+        let cont1 = vec![cce_bytes[1], rgce[0]];
+        let cont2 = vec![rgce[1], rgce[2]];
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_ARRAY, &array_frag1),
+            record(records::RECORD_CONTINUE, &cont1),
+            record(records::RECORD_CONTINUE, &cont2),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_worksheet_formulas(&stream, 0).expect("parse");
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+
+        let anchor = CellRef::new(0, 0);
+        let array = parsed.array.get(&anchor).expect("missing ARRAY");
+        assert_eq!(array.range, (anchor, anchor));
+        assert_eq!(array.rgce, rgce);
+    }
+
     fn formula_payload(row: u16, col: u16, grbit: u16, rgce: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&row.to_le_bytes());
