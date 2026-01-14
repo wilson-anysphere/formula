@@ -14,9 +14,11 @@ export interface MonteCarloWizardProps {
   api: WhatIfApi;
 }
 
-function defaultDistribution(): InputDistribution {
+type InputRow = InputDistribution & { distributionJson: string };
+
+function defaultInputRow(): InputRow {
   const dist: Distribution = { type: "normal", mean: 0, stdDev: 1 };
-  return { cell: "A1", distribution: dist };
+  return { cell: "A1", distribution: dist, distributionJson: JSON.stringify(dist) };
 }
 
 export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
@@ -24,7 +26,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
   const [seed, setSeed] = useState("1234");
   const [outputCells, setOutputCells] = useState("B1");
 
-  const [inputs, setInputs] = useState<InputDistribution[]>([defaultDistribution()]);
+  const [inputs, setInputs] = useState<InputRow[]>([defaultInputRow()]);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<SimulationProgress | null>(null);
   const [result, setResult] = useState<SimulationResult | null>(null);
@@ -37,7 +39,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
   const parsedIterations = useMemo(() => Number(iterations), [iterations]);
   const parsedSeed = useMemo(() => Number(seed), [seed]);
 
-  function updateInput(idx: number, patch: Partial<InputDistribution>) {
+  function updateInput(idx: number, patch: Partial<InputRow>) {
     setInputs((prev) => prev.map((v, i) => (i === idx ? { ...v, ...patch } : v)));
   }
 
@@ -67,10 +69,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
     const config: SimulationConfig = {
       iterations: Math.floor(parsedIterations),
       seed: Number.isFinite(parsedSeed) ? Math.floor(parsedSeed) : undefined,
-      inputDistributions: inputs.map((i) => ({
-        ...i,
-        cell: i.cell.trim(),
-      })),
+      inputDistributions: inputs.map(({ cell, distribution }) => ({ cell: cell.trim(), distribution })),
       outputCells: outputs,
     };
 
@@ -186,7 +185,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                                 : type === "poisson"
                                   ? { type, lambda: 1 }
                                   : { type: "normal", mean: 0, stdDev: 1 };
-                    updateInput(idx, { distribution });
+                    updateInput(idx, { distribution, distributionJson: JSON.stringify(distribution) });
                   }}
                   disabled={running}
                   aria-label={t("whatIf.monteCarlo.inputs.distributionTypeAriaLabel")}
@@ -203,14 +202,19 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
               <div className="what-if-monte-carlo__input-json">
                 <input
                   className="what-if__input what-if__input--mono"
-                  value={JSON.stringify(input.distribution)}
+                  value={input.distributionJson}
                   onChange={(e) => {
+                    const raw = e.target.value;
                     try {
-                      const parsed = JSON.parse(e.target.value) as Distribution;
-                      updateInput(idx, { distribution: parsed });
+                      const parsed = JSON.parse(raw) as unknown;
+                      if (parsed && typeof parsed === "object" && typeof (parsed as any).type === "string") {
+                        updateInput(idx, { distribution: parsed as Distribution, distributionJson: raw });
+                        return;
+                      }
                     } catch {
                       // Allow partial JSON edits.
                     }
+                    updateInput(idx, { distributionJson: raw });
                   }}
                   disabled={running}
                   aria-label={t("whatIf.monteCarlo.inputs.distributionJsonAriaLabel")}
@@ -233,7 +237,12 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
           ))}
 
           <div className="what-if__actions">
-            <button type="button" className="what-if__button" onClick={() => setInputs((prev) => [...prev, defaultDistribution()])} disabled={running}>
+            <button
+              type="button"
+              className="what-if__button"
+              onClick={() => setInputs((prev) => [...prev, defaultInputRow()])}
+              disabled={running}
+            >
               {t("whatIf.monteCarlo.addInput")}
             </button>
           </div>
