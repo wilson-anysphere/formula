@@ -65,9 +65,10 @@ fn derive_rc4_key_md5(h: &[u8], block: u32, key_len: usize) -> Vec<u8> {
     hasher.update(h);
     hasher.update(block.to_le_bytes());
     let digest = hasher.finalize();
-
-    // MS-OFFCRYPTO Standard RC4 uses raw digest truncation (`keyLen = keySize/8`). For
-    // `keySize == 0` (40-bit), that is a 5-byte key — *not* a 16-byte key padded with zeros.
+    // MS-OFFCRYPTO Standard RC4 uses raw digest truncation for the per-block key:
+    //   key = MD5(H || LE32(block))[0..key_len]
+    // where `key_len = keySize/8` (and `keySize == 0` is interpreted as 40-bit => 5 bytes; no
+    // zero-padding).
     digest[..key_len].to_vec()
 }
 

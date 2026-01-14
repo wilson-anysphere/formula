@@ -114,16 +114,28 @@ fn main() {
         std::process::exit(1);
     }
 
-    let Some(info_hdr) = encryption_info.get(..8) else {
-        eprintln!(
-            "error: failed to read EncryptionInfo header: expected 8 bytes, got {}",
-            encryption_info.len()
-        );
-        std::process::exit(1);
+    let mut r = Reader::new(&encryption_info);
+    let major = match r.read_u16_le("EncryptionVersionInfo.major") {
+        Ok(v) => v,
+        Err(err) => {
+            eprintln!("error: {err}");
+            std::process::exit(1);
+        }
     };
-    let major = u16::from_le_bytes([info_hdr[0], info_hdr[1]]);
-    let minor = u16::from_le_bytes([info_hdr[2], info_hdr[3]]);
-    let flags = u32::from_le_bytes([info_hdr[4], info_hdr[5], info_hdr[6], info_hdr[7]]);
+    let minor = match r.read_u16_le("EncryptionVersionInfo.minor") {
+        Ok(v) => v,
+        Err(err) => {
+            eprintln!("error: {err}");
+            std::process::exit(1);
+        }
+    };
+    let flags = match r.read_u32_le("EncryptionVersionInfo.flags") {
+        Ok(v) => v,
+        Err(err) => {
+            eprintln!("error: {err}");
+            std::process::exit(1);
+        }
+    };
 
     // MS-OFFCRYPTO identifies "Standard" encryption via `versionMinor == 2`, but real-world files
     // vary the major version across Office generations (2/3/4). Keep this diagnostic tool aligned
@@ -133,18 +145,6 @@ fn main() {
         (major, 2) if (2..=4).contains(&major) => "Standard",
         (major, 3) if (3..=4).contains(&major) => "Extensible",
         _ => "Unknown",
-    };
-
-    let standard_header = if verbose && kind == "Standard" {
-        match parse_standard_encryption_header_prefix(&encryption_info) {
-            Ok(hdr) => Some(hdr),
-            Err(err) => {
-                eprintln!("error: {err}");
-                std::process::exit(1);
-            }
-        }
-    } else {
-        None
     };
 
     let mut extra = String::new();
@@ -179,90 +179,39 @@ fn main() {
     if !verbose {
         return;
     }
-
-    if let Some(hdr) = standard_header {
-        let f_cryptoapi = hdr.flags & 0x0000_0004 != 0;
-        let f_aes = hdr.flags & 0x0000_0020 != 0;
-
-        println!(
-            "EncryptionHeader.flags=0x{:08x} fCryptoAPI={f_cryptoapi} fAES={f_aes}",
-            hdr.flags
-        );
-        println!("EncryptionHeader.algId=0x{:08x}", hdr.alg_id);
-        println!("EncryptionHeader.algIdHash=0x{:08x}", hdr.alg_id_hash);
-        println!("EncryptionHeader.keySize={}", hdr.key_size);
-        println!("EncryptionHeader.providerType=0x{:08x}", hdr.provider_type);
+    if kind == "Standard" {
+        match parse_standard_encryption_header_verbose(&encryption_info) {
+            Ok(hdr) => {
+                println!("EncryptionInfo.headerSize={}", hdr.header_size);
+                println!(
+                    "EncryptionHeader.flags=0x{:08x} fCryptoAPI={} fDocProps={} fExternal={} fAES={}",
+                    hdr.flags_raw,
+                    hdr.flags.f_cryptoapi,
+                    hdr.flags.f_doc_props,
+                    hdr.flags.f_external,
+                    hdr.flags.f_aes
+                );
+                println!("EncryptionHeader.algId=0x{:08x} ({})", hdr.alg_id, hdr.alg_id);
+                println!(
+                    "EncryptionHeader.algIdHash=0x{:08x} ({})",
+                    hdr.alg_id_hash, hdr.alg_id_hash
+                );
+                println!(
+                    "EncryptionHeader.keySize=0x{:08x} ({})",
+                    hdr.key_size, hdr.key_size
+                );
+                println!(
+                    "EncryptionHeader.providerType=0x{:08x} ({})",
+                    hdr.provider_type, hdr.provider_type
+                );
+                println!("EncryptionHeader.CSPName=\"{}\"", hdr.csp_name);
+            }
+            Err(err) => {
+                eprintln!("error: {err}");
+                std::process::exit(1);
+            }
+        }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct StandardEncryptionHeaderPrefix {
-    flags: u32,
-    #[allow(dead_code)]
-    size_extra: u32,
-    alg_id: u32,
-    alg_id_hash: u32,
-    /// Key size in *bits*.
-    key_size: u32,
-    provider_type: u32,
-    #[allow(dead_code)]
-    reserved1: u32,
-    #[allow(dead_code)]
-    reserved2: u32,
-}
-
-fn parse_standard_encryption_header_prefix(
-    encryption_info: &[u8],
-) -> Result<StandardEncryptionHeaderPrefix, String> {
-    const ENCRYPTION_HEADER_FIXED_LEN: usize = 8 * 4;
-
-    let payload = encryption_info.get(8..).unwrap_or(&[]);
-    if payload.len() < 4 {
-        return Err(format!(
-            "truncated Standard EncryptionInfo stream while reading headerSize: needed 4 bytes, only {} available",
-            payload.len()
-        ));
-    }
-
-    let header_size = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let header_size_usize = usize::try_from(header_size)
-        .map_err(|_| format!("invalid Standard EncryptionInfo headerSize {header_size}: too large"))?;
-    if header_size_usize < ENCRYPTION_HEADER_FIXED_LEN {
-        return Err(format!(
-            "invalid Standard EncryptionInfo headerSize {header_size}: must be at least {ENCRYPTION_HEADER_FIXED_LEN}"
-        ));
-    }
-
-    let needed = 4usize
-        .checked_add(header_size_usize)
-        .ok_or_else(|| format!("invalid Standard EncryptionInfo headerSize {header_size}: too large"))?;
-    if payload.len() < needed {
-        return Err(format!(
-            "truncated Standard EncryptionInfo stream while reading EncryptionHeader: headerSize={header_size} bytes, only {} available",
-            payload.len().saturating_sub(4)
-        ));
-    }
-
-    let header = &payload[4..4 + ENCRYPTION_HEADER_FIXED_LEN];
-    let flags = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
-    let size_extra = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
-    let alg_id = u32::from_le_bytes([header[8], header[9], header[10], header[11]]);
-    let alg_id_hash = u32::from_le_bytes([header[12], header[13], header[14], header[15]]);
-    let key_size = u32::from_le_bytes([header[16], header[17], header[18], header[19]]);
-    let provider_type = u32::from_le_bytes([header[20], header[21], header[22], header[23]]);
-    let reserved1 = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
-    let reserved2 = u32::from_le_bytes([header[28], header[29], header[30], header[31]]);
-
-    Ok(StandardEncryptionHeaderPrefix {
-        flags,
-        size_extra,
-        alg_id,
-        alg_id_hash,
-        key_size,
-        provider_type,
-        reserved1,
-        reserved2,
-    })
 }
 
 fn stream_exists<R: Read + Seek + std::io::Write>(
@@ -461,4 +410,131 @@ fn parse_standard_encryption_header_fixed_dwords(
 
 fn bool_to_u8(v: bool) -> u8 {
     if v { 1 } else { 0 }
+}
+
+#[derive(Debug, Clone)]
+struct StandardEncryptionHeaderVerbose {
+    header_size: u32,
+    flags_raw: u32,
+    flags: StandardEncryptionHeaderFlags,
+    alg_id: u32,
+    alg_id_hash: u32,
+    key_size: u32,
+    provider_type: u32,
+    csp_name: String,
+}
+
+fn parse_standard_encryption_header_verbose(
+    encryption_info: &[u8],
+) -> Result<StandardEncryptionHeaderVerbose, String> {
+    // Standard EncryptionInfo stream:
+    //   EncryptionVersionInfo (8 bytes)
+    //   headerSize (u32)
+    //   EncryptionHeader (headerSize bytes)
+    //
+    // EncryptionHeader begins with 8 DWORDs (32 bytes) of fixed fields, followed by UTF-16LE CSPName.
+    const ENCRYPTION_HEADER_FIXED_LEN: u32 = 8 * 4;
+    const MAX_STANDARD_HEADER_SIZE: u32 = 64 * 1024;
+
+    let mut r = Reader::new(encryption_info);
+    // Skip `EncryptionVersionInfo`.
+    r.read_u16_le("EncryptionVersionInfo.major")?;
+    r.read_u16_le("EncryptionVersionInfo.minor")?;
+    r.read_u32_le("EncryptionVersionInfo.flags")?;
+
+    let header_size = r.read_u32_le("EncryptionInfo.headerSize")?;
+    if header_size < ENCRYPTION_HEADER_FIXED_LEN {
+        return Err(format!(
+            "invalid Standard EncryptionHeader size {header_size}: must be at least {ENCRYPTION_HEADER_FIXED_LEN}"
+        ));
+    }
+    if header_size > MAX_STANDARD_HEADER_SIZE {
+        return Err(format!(
+            "invalid Standard EncryptionHeader size {header_size}: exceeds max {MAX_STANDARD_HEADER_SIZE}"
+        ));
+    }
+
+    let header_bytes = r.read_bytes(header_size as usize, "EncryptionHeader")?;
+    debug_assert!(header_bytes.len() >= ENCRYPTION_HEADER_FIXED_LEN as usize);
+
+    let flags_raw = u32::from_le_bytes(header_bytes[0..4].try_into().unwrap());
+    let _size_extra = u32::from_le_bytes(header_bytes[4..8].try_into().unwrap());
+    let alg_id = u32::from_le_bytes(header_bytes[8..12].try_into().unwrap());
+    let alg_id_hash = u32::from_le_bytes(header_bytes[12..16].try_into().unwrap());
+    let key_size = u32::from_le_bytes(header_bytes[16..20].try_into().unwrap());
+    let provider_type = u32::from_le_bytes(header_bytes[20..24].try_into().unwrap());
+    let _reserved1 = u32::from_le_bytes(header_bytes[24..28].try_into().unwrap());
+    let _reserved2 = u32::from_le_bytes(header_bytes[28..32].try_into().unwrap());
+
+    let flags = StandardEncryptionHeaderFlags::from_raw(flags_raw);
+    let csp_name = decode_utf16le_nul_terminated_best_effort(&header_bytes[32..]);
+
+    Ok(StandardEncryptionHeaderVerbose {
+        header_size,
+        flags_raw,
+        flags,
+        alg_id,
+        alg_id_hash,
+        key_size,
+        provider_type,
+        csp_name,
+    })
+}
+
+struct Reader<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, pos: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.bytes.len().saturating_sub(self.pos)
+    }
+
+    fn read_bytes(&mut self, len: usize, context: &'static str) -> Result<&'a [u8], String> {
+        let available = self.remaining();
+        if available < len {
+            return Err(format!(
+                "truncated EncryptionInfo stream while reading {context}: needed {len} bytes, only {available} available"
+            ));
+        }
+        let out = &self.bytes[self.pos..self.pos + len];
+        self.pos += len;
+        Ok(out)
+    }
+
+    fn read_u16_le(&mut self, context: &'static str) -> Result<u16, String> {
+        let b = self.read_bytes(2, context)?;
+        Ok(u16::from_le_bytes([b[0], b[1]]))
+    }
+
+    fn read_u32_le(&mut self, context: &'static str) -> Result<u32, String> {
+        let b = self.read_bytes(4, context)?;
+        Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+}
+
+fn decode_utf16le_nul_terminated_best_effort(bytes: &[u8]) -> String {
+    // Best-effort decode:
+    // - ignore trailing odd byte (UTF-16LE should be even-length)
+    // - stop at the first NUL terminator
+    // - strip trailing NULs if no terminator is present
+    // - use lossy UTF-16 decoding for robustness on malformed inputs
+    let len = bytes.len() - (bytes.len() % 2);
+    let mut code_units = Vec::with_capacity(len / 2);
+    for chunk in bytes[..len].chunks_exact(2) {
+        code_units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+    if let Some(end) = code_units.iter().position(|u| *u == 0) {
+        code_units.truncate(end);
+    } else {
+        while code_units.last() == Some(&0) {
+            code_units.pop();
+        }
+    }
+    String::from_utf16_lossy(&code_units)
 }

@@ -290,7 +290,7 @@ pub fn parse_encryption_info_standard(bytes: &[u8]) -> Result<StandardEncryption
             min_size: ENCRYPTION_HEADER_FIXED_LEN,
         });
     }
-    if header_size_u32 as usize > MAX_STANDARD_HEADER_SIZE || header_size_u32 as usize > r.remaining() {
+    if header_size_u32 as usize > MAX_STANDARD_HEADER_SIZE {
         return Err(OffcryptoError::InvalidHeaderSize {
             header_size: header_size_u32,
             min_size: ENCRYPTION_HEADER_FIXED_LEN,
@@ -1042,8 +1042,8 @@ mod tests {
         assert!(res.is_ok(), "parser should not panic");
         let err = res.unwrap().expect_err("expected error");
         assert!(
-            matches!(err, OffcryptoError::InvalidHeaderSize { .. }),
-            "expected InvalidHeaderSize, got {err:?}"
+            matches!(err, OffcryptoError::Truncated { .. }),
+            "expected Truncated, got {err:?}"
         );
     }
 

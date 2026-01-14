@@ -52,6 +52,10 @@ fn parses_encryption_info_and_verifies_password() {
     let info = parse_encryption_info_standard(&buf).expect("parse Standard EncryptionInfo");
 
     assert!(
+        info.header.flags.f_cryptoapi,
+        "expected EncryptionHeader.flags.fCryptoAPI to be set"
+    );
+    assert!(
         matches!(info.header.alg_id, CALG_AES_128 | CALG_AES_192 | CALG_AES_256 | CALG_RC4),
         "expected Standard encryption algId to be AES or RC4, got 0x{:08x}",
         info.header.alg_id

@@ -4164,7 +4164,6 @@ fn try_open_standard_aes_encrypted_ooxml_model_workbook(
     })?;
     Ok(Some(workbook))
 }
-
 /// Open a spreadsheet workbook with options.
 ///
 /// This is the password-aware variant of [`open_workbook`]. When a password is provided and the

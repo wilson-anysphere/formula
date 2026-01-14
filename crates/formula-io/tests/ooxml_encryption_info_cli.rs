@@ -300,11 +300,13 @@ fn cli_prints_standard_encryption_header_in_verbose_mode() {
         lines,
         vec![
             "Standard (3.2) flags=0x00000000 hdr_flags=0x00000024 fCryptoAPI=1 fAES=1 algId=0x0000660e algIdHash=0x00008004 keySize=128",
-            "EncryptionHeader.flags=0x00000024 fCryptoAPI=true fAES=true",
-            "EncryptionHeader.algId=0x0000660e",
-            "EncryptionHeader.algIdHash=0x00008004",
-            "EncryptionHeader.keySize=128",
-            "EncryptionHeader.providerType=0x00000018",
+            "EncryptionInfo.headerSize=32",
+            "EncryptionHeader.flags=0x00000024 fCryptoAPI=true fDocProps=false fExternal=false fAES=true",
+            "EncryptionHeader.algId=0x0000660e (26126)",
+            "EncryptionHeader.algIdHash=0x00008004 (32772)",
+            "EncryptionHeader.keySize=0x00000080 (128)",
+            "EncryptionHeader.providerType=0x00000018 (24)",
+            "EncryptionHeader.CSPName=\"\"",
         ],
         "unexpected stdout: {stdout}"
     );
