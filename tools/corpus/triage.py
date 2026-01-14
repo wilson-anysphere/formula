@@ -1238,6 +1238,8 @@ def _run_rust_triage(
     workbook_bytes: bytes,
     *,
     workbook_name: str,
+    password: str | None = None,
+    password_file: Path | None = None,
     diff_ignore: set[str],
     diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] | list[str] = (),
@@ -1281,6 +1283,10 @@ def _run_rust_triage(
             "--fail-on",
             round_trip_fail_on,
         ]
+        if password_file is not None:
+            cmd.extend(["--password-file", str(password_file)])
+        elif password is not None:
+            cmd.extend(["--password", password])
         for part in sorted(diff_ignore):
             cmd.extend(["--ignore-part", part])
         if diff_ignore_globs is None:
@@ -1327,6 +1333,8 @@ def triage_workbook(
     workbook: WorkbookInput,
     *,
     rust_exe: Path,
+    password: str | None = None,
+    password_file: Path | None = None,
     diff_ignore: set[str],
     diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] | list[str] = (),
@@ -1417,6 +1425,8 @@ def triage_workbook(
             # Use the privacy-mode-adjusted display name so the Rust helper never sees raw
             # filenames in private mode. The helper only uses this for extension/format inference.
             "workbook_name": display_name,
+            "password": password,
+            "password_file": password_file,
             "diff_ignore_globs": diff_ignore_globs,
             "diff_ignore_presets": diff_ignore_presets,
             "round_trip_fail_on": round_trip_fail_on,
@@ -1580,6 +1590,8 @@ def _triage_one_path(
     path_str: str,
     *,
     rust_exe: str,
+    password: str | None = None,
+    password_file: str | None = None,
     diff_ignore: tuple[str, ...],
     diff_ignore_globs: tuple[str, ...] = (),
     diff_ignore_path: tuple[str, ...] = (),
@@ -1627,6 +1639,8 @@ def _triage_one_path(
         return triage_workbook(
             wb,
             rust_exe=Path(rust_exe),
+            password=password,
+            password_file=Path(password_file) if password_file else None,
             diff_ignore=set(diff_ignore),
             diff_ignore_globs=set(diff_ignore_globs),
             diff_ignore_path=diff_ignore_path,
@@ -1714,6 +1728,8 @@ def _triage_paths(
     paths: list[Path],
     *,
     rust_exe: str,
+    password: str | None = None,
+    password_file: str | None = None,
     diff_ignore: set[str],
     diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] = (),
@@ -1766,6 +1782,8 @@ def _triage_paths(
             res = _triage_one_path(
                 str(path),
                 rust_exe=rust_exe,
+                password=password,
+                password_file=password_file,
                 diff_ignore=diff_ignore_tuple,
                 diff_ignore_globs=diff_ignore_globs_tuple,
                 diff_ignore_path=diff_ignore_path_tuple,
@@ -1806,6 +1824,8 @@ def _triage_paths(
                 _triage_one_path,
                 str(path),
                 rust_exe=rust_exe,
+                password=password,
+                password_file=password_file,
                 diff_ignore=diff_ignore_tuple,
                 diff_ignore_globs=diff_ignore_globs_tuple,
                 diff_ignore_path=diff_ignore_path_tuple,
@@ -1909,6 +1929,22 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default="CORPUS_ENCRYPTION_KEY",
         help="Env var containing Fernet key used to decrypt *.enc corpus files.",
     )
+    pw_group = parser.add_mutually_exclusive_group()
+    pw_group.add_argument(
+        "--password",
+        help=(
+            "Optional password for Office-encrypted workbooks (Excel 'Encrypt with Password'). "
+            "Prefer --password-file to avoid exposing secrets in process args."
+        ),
+    )
+    pw_group.add_argument(
+        "--password-file",
+        type=Path,
+        help=(
+            "Read Office workbook password from a file (first line). "
+            "Enables triaging Office-encrypted XLSX/XLSM/XLSB workbooks."
+        ),
+    )
     parser.add_argument(
         "--recalc",
         action="store_true",
@@ -2011,6 +2047,15 @@ def main() -> int:
     if args.jobs < 1:
         parser.error("--jobs must be >= 1")
 
+    password_file: Path | None = None
+    if args.password_file:
+        password_file = args.password_file.expanduser()
+        if not password_file.is_file():
+            parser.error(f"--password-file does not exist or is not a file: {password_file}")
+        # The Rust helper is invoked with `cwd=_repo_root()`, so resolve to an absolute path to
+        # avoid surprising relative-path behavior.
+        password_file = password_file.resolve()
+
     diff_ignore = _compute_diff_ignore(
         diff_ignore=args.diff_ignore, use_default=not args.no_default_diff_ignore
     )
@@ -2089,6 +2134,8 @@ def main() -> int:
     triage_out = _triage_paths(
         paths,
         rust_exe=str(rust_exe),
+        password=args.password,
+        password_file=str(password_file) if password_file else None,
         diff_ignore=diff_ignore,
         diff_ignore_globs=diff_ignore_globs,
         diff_ignore_path=tuple(diff_ignore_path_values),

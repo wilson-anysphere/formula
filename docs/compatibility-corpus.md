@@ -132,6 +132,21 @@ python -m tools.corpus.triage \
 Note: triage invokes a small Rust helper (built via `cargo`) to run the `formula-xlsx` / `formula-xlsb` round-trip and `xlsx-diff`
 structural comparison, so a Rust toolchain must be available.
 
+Encrypted workbook note (Excel “Encrypt with Password” / Office `EncryptionInfo` + `EncryptedPackage`):
+
+- By default, Office-encrypted `.xlsx`/`.xlsm`/`.xlsb` files are **skipped** (so private corpora don’t
+  accidentally attempt to decrypt unknown sensitive inputs).
+- To triage Office-encrypted workbooks, pass a password (recommended: read from a file so it isn’t
+  exposed in process args):
+
+```bash
+python -m tools.corpus.triage \
+  --corpus-dir tools/corpus/private \
+  --out-dir tools/corpus/out/private \
+  --privacy-mode private \
+  --password-file /path/to/workbook-password.txt
+```
+
 Triage output layout (`--out-dir`):
 
 - `index.json` – run metadata + an ordered list of reports (`id`, `display_name`, `file`)

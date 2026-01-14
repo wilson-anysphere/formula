@@ -43,6 +43,20 @@ preferring `sanitized/` when present (to avoid double-processing originals). Ove
 
 For large corpora, pass `--jobs N` (default `1`) to run per-workbook triage in parallel.
 
+Office-encrypted workbook note (Excel “Encrypt with Password” / `EncryptionInfo` + `EncryptedPackage`):
+
+- By default, Office-encrypted `.xlsx`/`.xlsm`/`.xlsb` inputs are **skipped**.
+- To triage Office-encrypted workbooks, pass a password (recommended: via `--password-file` so it
+  doesn’t appear in process args):
+
+```bash
+python -m tools.corpus.triage \
+  --corpus-dir tools/corpus/private \
+  --out-dir tools/corpus/out/private \
+  --privacy-mode private \
+  --password-file /path/to/workbook-password.txt
+```
+
 When triage outputs are uploaded as artifacts (e.g. scheduled CI runs), use `--privacy-mode private` to avoid leaking:
 
 - original filenames (`display_name` is anonymized to `workbook-<sha256[:16]>.{xlsx,xlsm,xlsb}`)
