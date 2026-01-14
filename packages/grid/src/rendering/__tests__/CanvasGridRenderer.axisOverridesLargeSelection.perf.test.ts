@@ -15,9 +15,9 @@ const EXCEL_MAX_ROWS = 1_048_576;
 const EXCEL_MAX_COLS = 16_384;
 const OVERRIDE_COUNT = 10_000;
 
-function buildIndexMap(size: number, value: number): Map<number, number> {
+function buildIndexMap(start: number, count: number, value: number): Map<number, number> {
   const out = new Map<number, number>();
-  for (let i = 0; i < size; i += 1) out.set(i, value);
+  for (let i = 0; i < count; i += 1) out.set(start + i, value);
   return out;
 }
 
@@ -168,10 +168,16 @@ describe("CanvasGridRenderer axis overrides large-selection perf characteristics
 
     const requestRenderSpy = vi.spyOn(renderer, "requestRender");
 
+    // Apply overrides near the end of the axis to ensure we don't accidentally do work proportional
+    // to `maxIndex` (e.g. allocating `new Array(maxIndex)`), not just proportional to the number of
+    // overridden indices.
+    const rowStart = EXCEL_MAX_ROWS - OVERRIDE_COUNT - 1;
+    const colStart = EXCEL_MAX_COLS - OVERRIDE_COUNT - 1;
+
     // "Hide": set a tiny non-default size for 10k rows/cols.
     // (We use size=1px as a proxy for hidden; the core concern is sparse override batching.)
-    const hideRows = buildIndexMap(OVERRIDE_COUNT, 1);
-    const hideCols = buildIndexMap(OVERRIDE_COUNT, 1);
+    const hideRows = buildIndexMap(rowStart, OVERRIDE_COUNT, 1);
+    const hideCols = buildIndexMap(colStart, OVERRIDE_COUNT, 1);
 
     const hideRun = withAllocationGuards(() => {
       renderer.applyAxisSizeOverrides({ rows: hideRows, cols: hideCols }, { resetUnspecified: true });
@@ -180,6 +186,8 @@ describe("CanvasGridRenderer axis overrides large-selection perf characteristics
     // After hide: the override maps should contain only the specified indices (O(10k), not O(maxRows/maxCols)).
     expect((renderer as any).rowHeightOverridesBase.size).toBe(OVERRIDE_COUNT);
     expect((renderer as any).colWidthOverridesBase.size).toBe(OVERRIDE_COUNT);
+    expect(renderer.getRowHeight(rowStart)).toBe(1);
+    expect(renderer.getColWidth(colStart)).toBe(1);
     expect((renderer.scroll.rows as any).overrides.size).toBe(OVERRIDE_COUNT);
     expect((renderer.scroll.cols as any).overrides.size).toBe(OVERRIDE_COUNT);
     expect((renderer.scroll.rows as any).overrideIndices.length).toBe(OVERRIDE_COUNT);
@@ -196,6 +204,8 @@ describe("CanvasGridRenderer axis overrides large-selection perf characteristics
     // - Virtual scroll structures must track only overridden indices.
     expect((renderer as any).rowHeightOverridesBase.size).toBe(0);
     expect((renderer as any).colWidthOverridesBase.size).toBe(0);
+    expect(renderer.getRowHeight(rowStart)).toBe(renderer.scroll.rows.defaultSize);
+    expect(renderer.getColWidth(colStart)).toBe(renderer.scroll.cols.defaultSize);
 
     const rowsAxis: any = renderer.scroll.rows as any;
     const colsAxis: any = renderer.scroll.cols as any;

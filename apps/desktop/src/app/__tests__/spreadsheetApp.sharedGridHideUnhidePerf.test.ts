@@ -281,6 +281,7 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       expect(sharedGrid).toBeTruthy();
       const renderer = sharedGrid.renderer;
       const provider = (app as any).sharedProvider;
+      const limits = app.getGridLimits();
 
       const baselineRowOverrides = (renderer as any).rowHeightOverridesBase.size as number;
       const baselineColOverrides = (renderer as any).colWidthOverridesBase.size as number;
@@ -298,9 +299,11 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
 
       const rowHeights: Record<string, number> = {};
       const colWidths: Record<string, number> = {};
+      const rowStart = limits.maxRows - OVERRIDE_COUNT - 1;
+      const colStart = limits.maxCols - OVERRIDE_COUNT - 1;
       for (let i = 0; i < OVERRIDE_COUNT; i += 1) {
-        rowHeights[String(i)] = HIDE_AXIS_SIZE_BASE;
-        colWidths[String(i)] = HIDE_AXIS_SIZE_BASE;
+        rowHeights[String(rowStart + i)] = HIDE_AXIS_SIZE_BASE;
+        colWidths[String(colStart + i)] = HIDE_AXIS_SIZE_BASE;
       }
 
       // "Hide": install sparse overrides for 10k rows/cols.
@@ -315,8 +318,8 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       const headerRows = (app as any).sharedHeaderRows?.() ?? 1;
       const headerCols = (app as any).sharedHeaderCols?.() ?? 1;
       const zoom = renderer.getZoom();
-      expect(renderer.getRowHeight(headerRows)).toBeCloseTo(HIDE_AXIS_SIZE_BASE * zoom, 6);
-      expect(renderer.getColWidth(headerCols)).toBeCloseTo(HIDE_AXIS_SIZE_BASE * zoom, 6);
+      expect(renderer.getRowHeight(rowStart + headerRows)).toBeCloseTo(HIDE_AXIS_SIZE_BASE * zoom, 6);
+      expect(renderer.getColWidth(colStart + headerCols)).toBeCloseTo(HIDE_AXIS_SIZE_BASE * zoom, 6);
 
       // Keep bounded by selection size. (Some implementations may store fewer overrides in the future.)
       expect((renderer as any).rowHeightOverridesBase.size).toBeLessThanOrEqual(baselineRowOverrides + OVERRIDE_COUNT);
@@ -341,8 +344,8 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       expect((renderer as any).rowHeightOverridesBase.size).toBe(baselineRowOverrides);
       expect((renderer as any).colWidthOverridesBase.size).toBe(baselineColOverrides);
 
-      expect(renderer.getRowHeight(headerRows)).toBeCloseTo(renderer.scroll.rows.defaultSize, 6);
-      expect(renderer.getColWidth(headerCols)).toBeCloseTo(renderer.scroll.cols.defaultSize, 6);
+      expect(renderer.getRowHeight(rowStart + headerRows)).toBeCloseTo(renderer.scroll.rows.defaultSize, 6);
+      expect(renderer.getColWidth(colStart + headerCols)).toBeCloseTo(renderer.scroll.cols.defaultSize, 6);
 
       // Two batch sync calls should schedule at most one invalidation per call (not per-index updates).
       expect(requestRenderSpy.mock.calls.length).toBeLessThanOrEqual(2);
@@ -413,13 +416,14 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       try {
         expect(app.getGridMode()).toBe("shared");
 
-        const sharedGrid = (app as any).sharedGrid;
-        expect(sharedGrid).toBeTruthy();
-        const renderer = sharedGrid.renderer;
-        const provider = (app as any).sharedProvider;
+         const sharedGrid = (app as any).sharedGrid;
+         expect(sharedGrid).toBeTruthy();
+         const renderer = sharedGrid.renderer;
+         const provider = (app as any).sharedProvider;
+         const limits = app.getGridLimits();
 
-        const baselineRowOverrides = (renderer as any).rowHeightOverridesBase.size as number;
-        const baselineColOverrides = (renderer as any).colWidthOverridesBase.size as number;
+         const baselineRowOverrides = (renderer as any).rowHeightOverridesBase.size as number;
+         const baselineColOverrides = (renderer as any).colWidthOverridesBase.size as number;
 
         const baselineOutlineRows = outline.rows.entries.size as number;
         const baselineOutlineCols = outline.cols.entries.size as number;
@@ -431,17 +435,17 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
         rowEntrySpy.mockClear();
         colEntrySpy.mockClear();
 
-        const requestRenderSpy = vi.spyOn(renderer, "requestRender");
-        requestRenderSpy.mockClear();
+         const requestRenderSpy = vi.spyOn(renderer, "requestRender");
+         requestRenderSpy.mockClear();
 
-        // Hide a block far away from the active cell so `ensureActiveCellVisible` / `scrollCellIntoView`
-        // should not trigger additional scroll/selection work.
-        const rowStart = 20_000;
-        const colStart = 2_000;
-        const rows: number[] = new Array<number>(OVERRIDE_COUNT);
-        const cols: number[] = new Array<number>(OVERRIDE_COUNT);
-        for (let i = 0; i < OVERRIDE_COUNT; i += 1) {
-          rows[i] = rowStart + i;
+         // Hide a block far away from the active cell so `ensureActiveCellVisible` / `scrollCellIntoView`
+         // should not trigger additional scroll/selection work.
+         const rowStart = limits.maxRows - OVERRIDE_COUNT - 1;
+         const colStart = limits.maxCols - OVERRIDE_COUNT - 1;
+         const rows: number[] = new Array<number>(OVERRIDE_COUNT);
+         const cols: number[] = new Array<number>(OVERRIDE_COUNT);
+         for (let i = 0; i < OVERRIDE_COUNT; i += 1) {
+           rows[i] = rowStart + i;
           cols[i] = colStart + i;
         }
 
