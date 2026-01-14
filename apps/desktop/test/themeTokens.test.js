@@ -194,7 +194,13 @@ test("core design tokens (--space-*, --radius*, --font-*) are only defined in to
       ) {
         continue;
       }
-      const line = getLineNumber(stripped, decl.index ?? 0);
+      const matchStart = decl.index ?? 0;
+      // `cssDeclaration` can match starting at the previous declaration's trailing `;`,
+      // so compute the line number from the actual property name inside the match.
+      const matchText = decl[0] ?? "";
+      const propOffset = matchText.indexOf(prop);
+      const propIndex = propOffset >= 0 ? matchStart + propOffset : matchStart;
+      const line = getLineNumber(stripped, propIndex);
       violations.push(`${rel}:L${line}: ${prop}`);
     }
     cssDeclaration.lastIndex = 0;
