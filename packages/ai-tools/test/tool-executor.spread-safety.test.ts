@@ -177,4 +177,58 @@ describe("ToolExecutor (spread safety)", () => {
       Array.prototype.push = originalPush;
     }
   });
+
+  it("compute_statistics mode handles large ranges without materializing values[]", async () => {
+    const cols = 200_000;
+    const endCol = columnIndexToLabel(cols);
+    const range = `Sheet1!A1:${endCol}1`;
+
+    // Alternate between two values so the mode frequency map remains small.
+    const cell: any = { value: 0 };
+    const row = new Proxy(
+      { length: cols } as any,
+      {
+        get(_target, prop) {
+          if (prop === "length") return cols;
+          const idx = Number(prop);
+          if (Number.isInteger(idx) && idx >= 0 && idx < cols) {
+            cell.value = idx % 2;
+            return cell;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const spreadsheet: any = {
+      readRange() {
+        return [row];
+      },
+    };
+
+    const originalPush = Array.prototype.push;
+    let pushCount = 0;
+    (Array.prototype as any).push = function (...args: any[]) {
+      pushCount++;
+      return originalPush.apply(this, args as any);
+    };
+    try {
+      const executor = new ToolExecutor(spreadsheet);
+      const result = await executor.execute({
+        name: "compute_statistics",
+        parameters: { range, measures: ["mode"] },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.tool).toBe("compute_statistics");
+      if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+
+      // Tie case (0 and 1 both occur 100k times). Mode tie-break should pick the first-seen value (0).
+      expect(result.data?.statistics.mode).toBe(0);
+      // Ensure we didn't build a per-cell `values[]` list.
+      expect(pushCount).toBeLessThan(1_000);
+    } finally {
+      Array.prototype.push = originalPush;
+    }
+  });
 });
