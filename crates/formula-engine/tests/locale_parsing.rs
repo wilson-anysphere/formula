@@ -331,11 +331,19 @@ fn field_access_function_names_are_not_translated() {
 }
 
 #[test]
-fn canonicalize_supports_nbsp_thousands_separator_in_fr_fr() {
+fn canonicalize_and_localize_supports_nbsp_thousands_separator_in_fr_fr() {
     // French Excel commonly uses NBSP (U+00A0) for thousands grouping.
     let fr = "=SOMME(1\u{00A0}234,56;0,5)";
     let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
     assert_eq!(canon, "=SUM(1234.56,0.5)");
+
+    // When localizing the canonical form, the engine should re-insert thousands grouping for
+    // readability. Accept either NBSP or narrow NBSP depending on the locale configuration.
+    let roundtrip = locale::localize_formula(&canon, &locale::FR_FR).unwrap();
+    assert!(
+        roundtrip == fr || roundtrip == "=SOMME(1\u{202F}234,56;0,5)",
+        "unexpected localized roundtrip: {roundtrip:?}"
+    );
 }
 
 #[test]
