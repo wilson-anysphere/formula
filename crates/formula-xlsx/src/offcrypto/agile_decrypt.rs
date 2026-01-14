@@ -1405,18 +1405,26 @@ mod tests {
 
     #[test]
     fn parse_encrypted_package_stream_does_not_fall_back_when_low_dword_is_zero() {
-        // Some files may store a true 64-bit size that is an exact multiple of 2^32 (lo=0, hi!=0).
-        // The compatibility fallback must not reinterpret that as 0.
+        // The "high DWORD reserved" fallback should not misinterpret true 64-bit sizes that are
+        // exact multiples of 2^32 (low DWORD = 0).
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&0u32.to_le_bytes()); // lo
         bytes.extend_from_slice(&1u32.to_le_bytes()); // hi
+        bytes.extend_from_slice(&[0u8; 16]); // ciphertext
 
-        let (declared_len, ciphertext) = parse_encrypted_package_stream(&bytes).expect("parse");
-        assert_eq!(ciphertext.len(), 0);
-        // On 64-bit targets we can represent 2^32 in usize. On 32-bit targets this would fail to
-        // parse due to `usize` conversion, but our test suite runs on 64-bit.
-        #[cfg(target_pointer_width = "64")]
-        assert_eq!(declared_len, (1u64 << 32) as usize);
+        let res = parse_encrypted_package_stream(&bytes);
+        if usize::BITS < 64 {
+            // 4GiB does not fit in usize on 32-bit targets.
+            match &res {
+                Err(OffCryptoError::InvalidAttribute { element, .. })
+                    if element == "EncryptedPackage" => {}
+                other => panic!("expected InvalidAttribute on 32-bit, got {other:?}"),
+            }
+        } else {
+            let (declared_len, ciphertext) = res.expect("parse");
+            assert_eq!(declared_len, (1u64 << 32) as usize);
+            assert_eq!(ciphertext.len(), 16);
+        }
     }
 
     fn encrypt_aes128_cbc_no_padding(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Vec<u8> {
