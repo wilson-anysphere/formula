@@ -243,8 +243,7 @@ export default defineConfig({
       // Command palette tests are `.test.ts` but historically ran via `*.vitest.ts` wrapper
       // entrypoints. Include them directly so we don't need wrapper files just to satisfy the
       // desktop-scoped Vitest include list.
-      "src/command-palette/__tests__/commandPalette.test.ts",
-      "src/command-palette/__tests__/shortcutSearch.test.ts",
+      "src/command-palette/__tests__/**/*.test.ts",
       // Some grid/shared and layout tests use the `.test.ts` suffix but are part of the
       // desktop package's unit suite. Include them directly so they don't need wrapper
       // `*.vitest.ts` entrypoints.
