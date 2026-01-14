@@ -89,8 +89,32 @@ test("release-smoke-test: supports --tag= and --repo= forms", () => {
 
 test("release-smoke-test: --local-bundles skips validators when bundle dirs exist but no artifacts", () => {
   const tag = currentDesktopTag();
-  const bundleDir = path.join(repoRoot, "target", "release", "bundle");
+  // This test relies on there being no existing Tauri bundle output directories
+  // under the standard search roots. On developer machines (or some CI caching
+  // setups) these may exist, and we don't want to delete/modify them.
+  const hasExistingBundleDirs = [
+    path.join(repoRoot, "apps", "desktop", "src-tauri", "target"),
+    path.join(repoRoot, "apps", "desktop", "target"),
+    path.join(repoRoot, "target"),
+  ].some((root) => {
+    try {
+      return (
+        fs.existsSync(path.join(root, "release", "bundle")) ||
+        fs.readdirSync(root, { withFileTypes: true })
+          .filter((d) => d.isDirectory())
+          .some((d) => fs.existsSync(path.join(root, d.name, "release", "bundle")))
+      );
+    } catch {
+      return false;
+    }
+  });
 
+  if (hasExistingBundleDirs) {
+    return;
+  }
+
+  const tmpRoot = path.join(repoRoot, "target", `release-smoke-test-empty-${process.pid}`);
+  const bundleDir = path.join(tmpRoot, "release", "bundle");
   fs.mkdirSync(bundleDir, { recursive: true });
 
   try {
@@ -108,6 +132,6 @@ test("release-smoke-test: --local-bundles skips validators when bundle dirs exis
     assert.match(child.stdout, /Release smoke test PASSED/i);
     assert.match(child.stdout, /\[SKIP\]/);
   } finally {
-    fs.rmSync(path.join(repoRoot, "target"), { recursive: true, force: true });
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
