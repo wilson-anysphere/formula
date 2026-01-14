@@ -281,9 +281,13 @@ node scripts/verify-tauri-updater-assets.mjs vX.Y.Z
 You can run the same checks locally (requires a GitHub token with access to the release assets):
 
 ```bash
+# Validates latest.json/latest.json.sig: required platform keys, version, signatures, and that
+# platforms[*].url references real release assets.
 GITHUB_REPOSITORY=owner/repo GH_TOKEN=... \
   node scripts/verify-tauri-latest-json.mjs vX.Y.Z
 
+# Validates the full set of installer artifacts + detached signature files (<asset>.sig) on the
+# GitHub Release.
 GITHUB_REPOSITORY=owner/repo GH_TOKEN=... \
   node scripts/verify-tauri-updater-assets.mjs vX.Y.Z
 ```
