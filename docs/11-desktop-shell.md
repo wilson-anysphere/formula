@@ -409,7 +409,14 @@ Tagged builds are expected to produce:
 - **Windows:** installers for **x64** and **ARM64** (`.msi` + `.exe`)
 - **Linux:** `.AppImage` + `.deb` + `.rpm` for **x86_64** and **ARM64**
 
-Auto-update is driven by the Tauri updater manifest (`latest.json`) uploaded to the release.
+Auto-update is driven by the Tauri updater manifest (`latest.json`) uploaded to the release. The
+in-app updater downloads whatever assets `latest.json.platforms[*].url` points at (not “an installer
+chosen from the Release page”):
+
+- macOS: `*.app.tar.gz` updater payload (not the `.dmg`)
+- Windows: `.msi` (preferred) or `.exe` (same files used for manual install)
+- Linux: `*.AppImage` updater payload (not `.deb`/`.rpm`)
+
 For the exact `latest.json.platforms` key names (multi-arch), see `docs/desktop-updater-target-mapping.md`.
 
 ### `plugins.updater`
