@@ -2152,6 +2152,7 @@ dependencies = [
  "roxmltree",
  "sha1",
  "sha2",
+ "subtle",
  "tempfile",
  "thiserror 1.0.69",
  "windows-sys 0.52.0",

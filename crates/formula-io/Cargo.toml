@@ -46,6 +46,7 @@ formula-xlsb = { path = "../formula-xlsb" }
 roxmltree = "0.20"
 sha1 = "0.10"
 sha2 = "0.10"
+subtle = "2.6"
 tempfile = "3.10"
 thiserror = "1.0"
 zip = { version = "2.1", default-features = false }
