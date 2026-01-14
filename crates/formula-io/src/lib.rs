@@ -3012,15 +3012,10 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
             ) {
                 Ok(bytes) => bytes,
                 Err(err) => match err {
-                    formula_office_crypto::OfficeCryptoError::InvalidPassword => {
+                    formula_office_crypto::OfficeCryptoError::InvalidPassword
+                    | formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed => {
                         return Err(Error::InvalidPassword {
                             path: path.to_path_buf(),
-                        })
-                    }
-                    err @ formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed => {
-                        return Err(Error::DecryptOoxml {
-                            path: path.to_path_buf(),
-                            source: Box::new(err),
                         })
                     }
                     formula_office_crypto::OfficeCryptoError::Io(source) => {
@@ -3051,15 +3046,9 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
             ) {
                 Ok(bytes) => bytes,
                 Err(err) => match err {
-                    xlsx::OffCryptoError::WrongPassword => {
+                    xlsx::OffCryptoError::WrongPassword | xlsx::OffCryptoError::IntegrityMismatch => {
                         return Err(Error::InvalidPassword {
                             path: path.to_path_buf(),
-                        })
-                    }
-                    err @ xlsx::OffCryptoError::IntegrityMismatch => {
-                        return Err(Error::DecryptOoxml {
-                            path: path.to_path_buf(),
-                            source: Box::new(err),
                         })
                     }
                     xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {

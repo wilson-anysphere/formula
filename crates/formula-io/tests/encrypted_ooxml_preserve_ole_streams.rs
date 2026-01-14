@@ -291,3 +291,45 @@ fn preserved_ole_open_reports_malformed_encryptedpackage_as_decrypt_error() {
         "expected Error::DecryptOoxml, got {err:?}"
     );
 }
+
+#[test]
+fn preserved_ole_open_maps_integrity_mismatch_to_invalid_password() {
+    // Regression: When the `EncryptedPackage` ciphertext is corrupted, the Agile decryptor reports
+    // an integrity mismatch (HMAC failure). For UI ergonomics, Formula treats this the same as an
+    // invalid password (retryable password prompt), matching the desktop + WASM semantics.
+    let password = "correct horse battery staple";
+    let plain_zip = build_tiny_zip();
+    let encrypted_cfb = encrypt_zip_with_password(&plain_zip, password);
+
+    // Flip one ciphertext byte inside the EncryptedPackage stream to trigger an integrity failure.
+    let cursor = Cursor::new(encrypted_cfb);
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open encrypted cfb");
+    {
+        let mut stream = ole
+            .open_stream("EncryptedPackage")
+            .or_else(|_| ole.open_stream("/EncryptedPackage"))
+            .expect("open EncryptedPackage stream");
+        stream
+            .seek(std::io::SeekFrom::Start(8 + 16))
+            .expect("seek into ciphertext");
+        let mut b = [0u8; 1];
+        stream.read_exact(&mut b).expect("read ciphertext byte");
+        b[0] ^= 0x01;
+        stream
+            .seek(std::io::SeekFrom::Start(8 + 16))
+            .expect("seek to ciphertext byte");
+        stream.write_all(&b).expect("write ciphertext byte");
+    }
+    let corrupted = ole.into_inner().into_inner();
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("corrupt-agile.xlsx");
+    std::fs::write(&path, corrupted).expect("write corrupt fixture");
+
+    let err = open_workbook_with_password_and_preserved_ole(&path, Some(password))
+        .expect_err("expected corrupted encrypted workbook to fail");
+    assert!(
+        matches!(err, Error::InvalidPassword { .. }),
+        "expected InvalidPassword, got {err:?}"
+    );
+}
