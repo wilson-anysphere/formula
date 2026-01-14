@@ -162,8 +162,9 @@ export function handleRibbonCommand(ctx: RibbonCommandHandlerContext, commandId:
   const doc = ctx.app.getDocument();
 
   // Allow invoking formatting toggles as plain commands (useful for keyboard shortcuts/tests).
-  // Note: ribbon toggle buttons also trigger `onToggle`, so `main.ts` must avoid calling this
-  // for toggle-originated `onCommand` events to prevent double-toggling.
+  // Note: Ribbon toggle buttons invoke `onToggle` with the next pressed state. Keeping these
+  // cases in `handleRibbonCommand` makes it possible to reuse the same ids for non-ribbon
+  // surfaces (e.g. keyboard shortcuts) that execute commands without a pressed boolean.
   switch (commandId) {
     case "home.font.bold":
     case "format.toggleBold":

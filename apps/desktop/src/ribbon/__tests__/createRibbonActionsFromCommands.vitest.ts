@@ -77,7 +77,7 @@ describe("createRibbonActionsFromCommands", () => {
 
     const actions = createRibbonActionsFromCommands({ commandRegistry: registry });
     actions.onToggle?.("ribbon.toggle", true);
-    // Ribbon toggles invoke both callbacks; simulate that contract.
+    // Legacy: some toggle surfaces invoke both callbacks; simulate that contract.
     actions.onCommand?.("ribbon.toggle");
     await flushMicrotasks();
 

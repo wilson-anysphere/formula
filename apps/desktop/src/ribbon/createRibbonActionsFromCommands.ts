@@ -30,16 +30,19 @@ export function createRibbonActionsFromCommands(params: {
    */
   onUnknownCommand?: (commandId: string) => void | Promise<void>;
   /**
-   * Fallback handler for unregistered toggle commands.
-   *
-   * NOTE: Ribbon toggles invoke both `onToggle` and `onCommand`. When this
-   * handler returns anything other than `false`, the subsequent `onCommand`
-   * callback will be suppressed to avoid double-executing toggle actions.
-   *
-   * To opt into the normal `onCommand` fallback behavior for unknown toggles
-   * (e.g. show the default toast / call `onUnknownCommand`), return `false`
-   * synchronously.
-   */
+    * Fallback handler for unregistered toggle commands.
+    *
+    * Toggle buttons should invoke `onToggle(id, pressed)` only.
+    *
+    * For backwards compatibility with legacy hosts that invoke `onCommand(id)`
+    * immediately after `onToggle`, when this handler returns anything other than
+    * `false` the follow-up `onCommand` callback will be suppressed to avoid
+    * double-executing toggle actions.
+    *
+    * To opt into the legacy `onCommand` fallback behavior for unknown toggles
+    * (e.g. show the default toast / call `onUnknownCommand`), return `false`
+    * synchronously.
+    */
   onUnknownToggle?: (commandId: string, pressed: boolean) => RibbonUnknownToggleResult;
 }): RibbonActions {
   const {
@@ -72,9 +75,9 @@ export function createRibbonActionsFromCommands(params: {
   };
 
   /**
-   * Ribbon toggle buttons invoke both `onToggle` and `onCommand`. The default
-   * bridge behavior is to handle toggle semantics via `onToggle` (so callers can
-   * receive the pressed state) and suppress the follow-up `onCommand` callback.
+   * Some hosts historically invoked `onCommand` immediately after `onToggle` for
+   * toggle buttons. Keep a short-lived suppression set so we can ignore the
+   * follow-up `onCommand` call and avoid double execution.
    */
   const pendingToggleSuppress = new Set<string>();
   const scheduleMicrotask =
@@ -151,16 +154,15 @@ export function createRibbonActionsFromCommands(params: {
 
         if (onUnknownToggle) {
           const handled = onUnknownToggle(commandId, pressed);
-          // `Ribbon` calls `onCommand` immediately after `onToggle`, so we must decide
+          // Legacy: some hosts call `onCommand` immediately after `onToggle`, so we must decide
           // whether to suppress synchronously. Returning `false` opts out of suppression.
           if (handled !== false) {
             markToggleHandled(commandId);
           }
           await handled;
         }
-        // If there's no handler for this toggle, intentionally do nothing: Ribbon toggles
-        // also invoke `onCommand`, which will fall back to `onUnknownCommand` and/or show
-        // the default toast for unknown commands.
+        // If there's no handler for this toggle, intentionally do nothing.
+        // (Legacy: if the host also calls `onCommand`, it can fall back to `onUnknownCommand`.)
       });
     },
   };
