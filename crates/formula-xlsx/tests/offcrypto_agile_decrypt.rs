@@ -11,6 +11,7 @@ use cbc::cipher::{BlockEncryptMut, KeyIvInit};
 use cfb::CompoundFile;
 use hmac::{Hmac, Mac as _};
 use ms_offcrypto_writer::Ecma376AgileWriter;
+use rand::{rngs::StdRng, SeedableRng};
 use sha1::Digest as _;
 use zip::write::FileOptions;
 
@@ -64,8 +65,10 @@ fn build_zip_with_padding() -> Vec<u8> {
 
 fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
     let mut cursor = Cursor::new(Vec::new());
-    let mut agile =
-        Ecma376AgileWriter::create(&mut rand::rng(), password, &mut cursor).expect("create agile");
+    // Use a deterministic RNG seed so these tests don't depend on OS entropy and remain
+    // reproducible across CI runs.
+    let mut rng = StdRng::from_seed([0u8; 32]);
+    let mut agile = Ecma376AgileWriter::create(&mut rng, password, &mut cursor).expect("create agile");
     agile
         .write_all(plain_zip)
         .expect("write plaintext zip to agile writer");
