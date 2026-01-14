@@ -50,6 +50,8 @@ test("validateLatestJson passes for a minimal manifest (version normalization + 
       "linux-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.AppImage", signature: "sig" },
       "windows-x86_64": { url: "https://example.com/Formula_0.1.0_x64.msi", signature: "sig" },
       "windows-aarch64": { url: "https://example.com/Formula_0.1.0_arm64.msi", signature: "sig" },
+      // macOS universal builds are published as a single updater archive but are referenced by
+      // both macOS arch updater keys.
       "darwin-x86_64": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
       "darwin-aarch64": { url: "https://example.com/Formula_0.1.0.app.tar.gz", signature: "sig" },
     },

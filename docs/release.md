@@ -745,9 +745,7 @@ alongside the installers. The file is structured roughly like:
 Expected `{{target}}` / `latest.json.platforms` keys for this repo’s **tagged release** matrix (CI
 enforced; see `docs/desktop-updater-target-mapping.md`):
 
-- **macOS (universal build):** `darwin-x86_64` and `darwin-aarch64`. Both keys should point at the
-  macOS updater payload (an `.app.tar.gz`). For universal builds, both keys will typically reference
-  the **same** archive URL.
+- **macOS (universal build):** `darwin-x86_64` and `darwin-aarch64` → macOS updater payload (an `.app.tar.gz`).
 - **Windows x64:** `windows-x86_64` → updater installer (currently the **`.msi`**).
 - **Windows ARM64:** `windows-aarch64` → updater installer (currently the **`.msi`**).
 - **Linux x86_64:** `linux-x86_64` → updater payload (typically the `.AppImage`).
@@ -1100,16 +1098,17 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
    and check the build job for the relevant platform/target (and whether the Tauri bundler step
    failed before uploading assets).
 2. Download `latest.json` and confirm `platforms` includes entries for:
-   - `darwin-x86_64` (macOS; points at the `.app.tar.gz` updater payload)
-   - `darwin-aarch64` (macOS; points at the `.app.tar.gz` updater payload)
+   - `darwin-x86_64` (macOS Intel; points at the `.app.tar.gz` updater payload)
+   - `darwin-aarch64` (macOS Apple Silicon; points at the `.app.tar.gz` updater payload)
    - `windows-x86_64` (Windows x64)
    - `windows-aarch64` (Windows ARM64)
    - `linux-x86_64` (Linux x86_64)
    - `linux-aarch64` (Linux ARM64)
 
-   Note: `latest.json` may also contain additional installer-specific keys of the form
-   `{os}-{arch}-{bundle}` (e.g. `windows-x86_64-msi`, `linux-x86_64-deb`). CI validates those keys
-   reference real release assets, but the keys above are the “primary” `{os}-{arch}` updater targets.
+   Note: tagged-release CI is intentionally **strict** about these platform key names (see
+   `docs/desktop-updater-target-mapping.md`). If `latest.json` ever ships with additional/unexpected
+   keys (due to a Tauri/tauri-action upgrade), CI is expected to fail loudly with an expected vs
+   actual diff so we update the docs + validator together.
 
    Quick check (after downloading `latest.json` to your current directory):
 
