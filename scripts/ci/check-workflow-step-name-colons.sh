@@ -32,9 +32,9 @@ fail=0
 # Note: this is intentionally a conservative regex; it will miss some exotic YAML quoting patterns,
 # but it's sufficient to prevent the common footgun that breaks workflow parsing.
 #
-# Only flag colons that would break YAML parsing for plain scalars: `: ` (colon followed by space).
+# Only flag colons that would break YAML parsing for plain scalars: `:` followed by whitespace (or end-of-line).
 # Colons that are part of a token (e.g. `node:test`) are valid YAML and should not be flagged.
-pattern='^[[:space:]]*-[[:space:]]+name:[[:space:]]+[^"'"'"'].*: '
+pattern='^[[:space:]]*-[[:space:]]+name:[[:space:]]+[^"'"'"'].*:([[:space:]]|$)'
 
 # Use `git grep` so we don't depend on ripgrep being installed in CI images.
 # `git grep` exits:
