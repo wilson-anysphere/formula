@@ -318,6 +318,8 @@ Current behavior:
   - XOR obfuscation (`wEncryptionType=0x0000`)
   - RC4 “standard” (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
   - RC4 CryptoAPI (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
+    - Some Excel-produced workbooks use an older FILEPASS layout where the second field is
+      `wEncryptionInfo=0x0004`; this is also supported.
   - (best-effort) BIFF5-era XOR obfuscation (Excel 5/95)
   Unsupported/unknown schemes surface as `ImportError::UnsupportedEncryption(..)`.
 
@@ -529,6 +531,8 @@ Current behavior in `formula-io`:
   - `Error::PasswordRequired` / `Error::InvalidPassword` via `open_workbook_with_password(..)` /
     `open_workbook_model_with_password(..)` (attempts the decrypting `.xls` importer; XOR, RC4
     “standard”, RC4 CryptoAPI).
+    `open_workbook_model_with_password(..)` (attempts the decrypting `.xls` importer; XOR, RC4
+    “standard”, RC4 CryptoAPI).
 
 ### Mapping to existing Rust error types
 
@@ -619,6 +623,10 @@ When implementing (or calling) encrypted-workbook support:
   See `fixtures/encrypted/ooxml/README.md` for more fixture details.
   These files are OLE/CFB wrappers (not ZIP/OPC), so they must not live under `fixtures/xlsx/`
   where the round-trip corpus is enumerated via `xlsx-diff::collect_fixture_paths`.
+- Encrypted legacy `.xls` fixtures for `formula-xls` tests live under:
+  - `crates/formula-xls/tests/fixtures/encrypted/` (deterministic, test-generated), and
+  - `crates/formula-xls/tests/fixtures/encrypted_rc4_cryptoapi_boundary.xls` (Microsoft Excel-produced;
+    exercises RC4 CryptoAPI legacy FILEPASS layout + 1024-byte rekey boundary behavior).
 - Encryption-focused tests reference these fixtures explicitly (they are not part of the ZIP/OPC
   round-trip corpus). See `fixtures/encrypted/ooxml/README.md` for the canonical list, passwords,
   provenance, and test references.

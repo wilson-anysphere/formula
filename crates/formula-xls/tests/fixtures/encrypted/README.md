@@ -20,8 +20,11 @@ Why a dedicated directory?
 
 ## Fixture inventory
 
-All fixtures are intentionally tiny **real encrypted workbooks** generated deterministically by
-`tests/regenerate_encrypted_xls_fixtures.rs`.
+All fixtures **in this directory** are intentionally tiny **real encrypted workbooks** generated
+deterministically by `tests/regenerate_encrypted_xls_fixtures.rs`.
+
+Some additional encrypted `.xls` edge-case fixtures live alongside this directory (for cases that
+the deterministic generator does not currently encode). Those fixtures are documented below.
 
 Each fixture contains:
 
@@ -62,6 +65,7 @@ Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` fi
 | `biff8_rc4_cryptoapi_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above; additionally used by `tests/import_encrypted_rc4_cryptoapi.rs` to validate `import_xls_path_with_password` | `correct horse battery staple` |
 | `biff8_rc4_cryptoapi_unicode_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above | `pässwörd` |
 | `biff8_rc4_cryptoapi_unicode_emoji_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above | `pässwörd🔒` |
+| `../encrypted_rc4_cryptoapi_boundary.xls` | RC4 (CryptoAPI, legacy FILEPASS layout) | BIFF8 | Microsoft Excel (real file; used by `tests/import_encrypted_rc4_boundary.rs` to exercise legacy CryptoAPI + 1024-byte rekey boundary behavior) | `password` |
 
 ## Regenerating fixtures
 
