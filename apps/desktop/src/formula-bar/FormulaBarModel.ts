@@ -626,26 +626,26 @@ export class FormulaBarModel {
     }
 
     const nextText = active.text;
-    const nextRange = {
-      start: { row: active.range.startRow, col: active.range.startCol },
-      end: { row: active.range.endRow, col: active.range.endCol },
-    };
+    const nextStartRow = active.range.startRow;
+    const nextStartCol = active.range.startCol;
+    const nextEndRow = active.range.endRow;
+    const nextEndCol = active.range.endCol;
 
     const prevText = this.#hoveredReferenceText;
     const prevRange = this.#hoveredReference;
     const sameRange =
       prevRange != null &&
-      prevRange.start.row === nextRange.start.row &&
-      prevRange.start.col === nextRange.start.col &&
-      prevRange.end.row === nextRange.end.row &&
-      prevRange.end.col === nextRange.end.col;
+      prevRange.start.row === nextStartRow &&
+      prevRange.start.col === nextStartCol &&
+      prevRange.end.row === nextEndRow &&
+      prevRange.end.col === nextEndCol;
 
     // When only the caret moves within the same active reference, the hover range/text
     // do not change. Avoid allocating new range objects in that hot path.
     if (prevText === nextText && sameRange) return;
 
     this.#hoveredReferenceText = nextText;
-    this.#hoveredReference = nextRange;
+    this.#hoveredReference = { start: { row: nextStartRow, col: nextStartCol }, end: { row: nextEndRow, col: nextEndCol } };
 
     // NOTE: `active.text` can be a sheet-qualified A1 reference, a named range, or
     // (when configured) a structured reference. Consumers that need sheet gating
