@@ -172,6 +172,28 @@ test(
 );
 
 test(
+  "validate-macos-bundle fails when DMG is empty",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-macos-bundle-test-"));
+    const binDir = join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+
+    const mountPoint = join(tmp, "mnt");
+    const devEntry = "/dev/disk99s1";
+    mkdirSync(mountPoint, { recursive: true });
+    writeFakeMacOsTooling(binDir, { mountPoint, devEntry });
+
+    const dmgPath = join(tmp, "Formula.dmg");
+    writeFileSync(dmgPath, "", { encoding: "utf8" });
+
+    const proc = runValidator({ dmgPath, binDir });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /empty/i);
+  },
+);
+
+test(
   "validate-macos-bundle artifact discovery prefers universal-apple-darwin DMGs",
   { skip: !hasBash },
   () => {

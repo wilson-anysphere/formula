@@ -853,6 +853,7 @@ validate_dmg_notarization() {
 validate_dmg() {
   local dmg="$1"
   [ -f "$dmg" ] || die "DMG not found: $dmg"
+  [ -s "$dmg" ] || die "DMG is empty (0 bytes): $dmg"
 
   CURRENT_DMG="$dmg"
   begin_group "validate-macos-bundle: DMG: $dmg"
@@ -877,6 +878,7 @@ validate_dmg() {
 validate_app_tarball() {
   local archive="$1"
   [ -f "$archive" ] || die "app archive not found: $archive"
+  [ -s "$archive" ] || die "app archive is empty (0 bytes): $archive"
 
   local extract_dir
   extract_dir="$(mktemp -d -t formula-app-archive)"
