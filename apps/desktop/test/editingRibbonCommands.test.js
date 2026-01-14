@@ -85,6 +85,17 @@ test("Desktop main.ts routes canonical Editing ribbon commands through the Comma
     );
   }
 
+  // The ribbon schema now uses the canonical `edit.fillUp`/`edit.fillLeft` ids, so the legacy
+  // `home.editing.fill.*` aliases should not be present in the builtin command catalog.
+  const disallowedBuiltinIds = ["home.editing.fill.up", "home.editing.fill.left"];
+  for (const id of disallowedBuiltinIds) {
+    assert.doesNotMatch(
+      builtins,
+      new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
+      `Expected registerBuiltinCommands.ts to not register legacy alias ${id}`,
+    );
+  }
+
   // Ensure the old ribbon-only ids are no longer mapped in main.ts.
   const legacyCases = [
     "home.editing.autoSum",

@@ -191,7 +191,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     const commandRegistry = createDesktopCommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
 
-    const ids = ["home.editing.fill.up", "home.editing.fill.left", "home.editing.fill.series"] as const;
+    const ids = ["edit.fillUp", "edit.fillLeft", "home.editing.fill.series"] as const;
     for (const id of ids) {
       expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
       expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);

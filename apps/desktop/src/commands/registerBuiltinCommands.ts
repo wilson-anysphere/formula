@@ -1935,32 +1935,6 @@ export function registerBuiltinCommands(params: {
       keywords: ["fill", "fill left", "excel"],
     },
   );
-
-  // Ribbon schema still uses `home.editing.fill.*` ids for Up/Left. Register them as aliases so the
-  // ribbon can rely on CommandRegistry (and so these actions are available to other UI surfaces).
-  commandRegistry.registerBuiltinCommand(
-    "home.editing.fill.up",
-    t("command.edit.fillUp"),
-    () => app.fillUp(),
-    {
-      category: t("commandCategory.editing"),
-      icon: null,
-      description: t("commandDescription.edit.fillUp"),
-      keywords: ["fill", "fill up", "excel"],
-    },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "home.editing.fill.left",
-    t("command.edit.fillLeft"),
-    () => app.fillLeft(),
-    {
-      category: t("commandCategory.editing"),
-      icon: null,
-      description: t("commandDescription.edit.fillLeft"),
-      keywords: ["fill", "fill left", "excel"],
-    },
-  );
   commandRegistry.registerBuiltinCommand(
     "edit.selectCurrentRegion",
     t("command.edit.selectCurrentRegion"),
