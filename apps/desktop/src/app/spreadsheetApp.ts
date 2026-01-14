@@ -21350,7 +21350,10 @@ export class SpreadsheetApp {
   }
 
   private shouldHandleSpreadsheetClipboardCommand(): boolean {
-    if (this.formulaBar?.isEditing() || this.formulaEditCell) return false;
+    // Excel-style: while any cell/formula edit is active (including split-view secondary editor),
+    // sheet-level clipboard commands should not run. This prevents "copy selection while editor is open"
+    // behavior when focus leaves the text editor (e.g. clicking ribbon/menus).
+    if (this.isSpreadsheetEditingIncludingSecondary()) return false;
     const target = document.activeElement as HTMLElement | null;
     if (!target) return true;
     const tag = target.tagName;
