@@ -31,9 +31,15 @@ test("applyFormatAsTablePreset applies header formatting, banded rows, and outli
   // Outline borders.
   assert.equal(headerA1.border?.top?.style, preset.borders.style);
   assert.equal(headerA1.border?.left?.style, preset.borders.style);
+  assert.equal(headerA1.border?.top?.color, preset.borders.outlineColor);
+  assert.equal(headerA1.border?.left?.color, preset.borders.outlineColor);
+  // Inner horizontal separators.
+  assert.equal(headerA1.border?.bottom?.style, preset.borders.style);
+  assert.equal(headerA1.border?.bottom?.color, preset.borders.innerHorizontalColor);
 
   const bottomRight = doc.getCellFormat("Sheet1", { row: 2, col: 1 });
   assert.equal(bottomRight.border?.bottom?.style, preset.borders.style);
   assert.equal(bottomRight.border?.right?.style, preset.borders.style);
+  assert.equal(bottomRight.border?.bottom?.color, preset.borders.outlineColor);
+  assert.equal(bottomRight.border?.right?.color, preset.borders.outlineColor);
 });
-
