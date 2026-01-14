@@ -62,15 +62,17 @@ test("Home → Cells ribbon commands are registered in CommandRegistry and not h
       new RegExp(`["']${escapeRegExp(id)}["']`),
       `Did not expect ribbonCommandRegistryDisabling.ts to exempt implemented command id ${id}`,
     );
+
+    // Sheet structure mutations should be guarded in read-only sessions (viewers/commenters) so
+    // CommandRegistry surfaces (e.g. command palette) can't bypass ribbon disabling.
+    const idx = commands.indexOf(`\"${id}\"`);
+    assert.notEqual(idx, -1, `Expected registerDesktopCommands.ts to include ${id} literal`);
+    assert.match(
+      commands.slice(idx, idx + 600),
+      /\bisReadOnly\(\)/,
+      `Expected ${id} command handler to guard read-only mode`,
+    );
   }
-  // Organize Sheets should remain unavailable in read-only sessions (viewers/commenters).
-  const organizeIdx = commands.indexOf('"home.cells.format.organizeSheets"');
-  assert.notEqual(organizeIdx, -1, "Expected registerDesktopCommands.ts to include Organize Sheets command registration");
-  assert.match(
-    commands.slice(organizeIdx, organizeIdx + 400),
-    /\bisReadOnly\(\)/,
-    "Expected Organize Sheets command handler to guard read-only mode",
-  );
 
   const insertDeleteCellsIds = ["home.cells.insert.insertCells", "home.cells.delete.deleteCells"];
   for (const id of insertDeleteCellsIds) {
