@@ -821,7 +821,34 @@ export class TabCompletionEngine {
      * @param {{ replacement: string, displayText?: string, confidence: number }} entry
      */
     const addReplacement = (entry) => {
-      const rawReplacement = entry.replacement;
+      let rawReplacement = entry.replacement;
+
+      // For numeric arguments, support completions inside unary `-` prefixes without producing
+      // semantically incorrect suggestions like:
+      //   typed "-" + replacement "1"  -> "-1"  (but label/meaning was "1")
+      //   typed "-" + replacement "-1" -> "--1" (double minus)
+      //
+      // We treat a leading unary `-` in `groupPrefix` as a sign operator and only allow
+      // completions that still evaluate to the intended numeric literal.
+      //
+      // Example:
+      //   TAKE(..., -<tab>) should suggest -1 (by inserting "1" after the typed "-"),
+      //   but should not suggest the positive "1" option (it would evaluate to -1).
+      if (argType === "number") {
+        const minusCount = countChar(groupPrefix, "-");
+        const hasOddMinusPrefix = minusCount % 2 === 1;
+        const isNegative = typeof rawReplacement === "string" && rawReplacement.startsWith("-");
+
+        // If the user has started a negative unary expression (odd number of leading `-`),
+        // avoid suggesting positive-only literals which would evaluate to negative values.
+        if (hasOddMinusPrefix && !isNegative) return;
+
+        // If both the typed prefix and the literal are negative, drop one leading '-' from the
+        // literal so we don't produce `--1` (which would flip the sign).
+        if (isNegative && hasOddMinusPrefix) {
+          rawReplacement = rawReplacement.slice(1);
+        }
+      }
 
       // Only suggest values that are a completion of what the user has already
       // typed (pure insertion constraint).
@@ -2201,6 +2228,21 @@ function isInUnclosedDoubleQuotedString(text) {
 function ratioBoost(prefix, full) {
   if (!prefix || !full) return 0;
   return Math.min(1, prefix.length / full.length);
+}
+
+/**
+ * Count occurrences of `ch` in `text`.
+ * @param {string} text
+ * @param {string} ch
+ */
+function countChar(text, ch) {
+  if (typeof text !== "string" || text.length === 0) return 0;
+  if (typeof ch !== "string" || ch.length !== 1) return 0;
+  let count = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === ch) count += 1;
+  }
+  return count;
 }
 
 /**

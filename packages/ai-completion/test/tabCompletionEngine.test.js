@@ -2580,6 +2580,27 @@ test("TAKE rows suggests 1 and -1", async () => {
   );
 });
 
+test("TAKE rows enum suggestions work with a unary '-' prefix (no '--1')", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=TAKE(A1:A10,-";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=TAKE(A1:A10,-1"),
+    `Expected TAKE to suggest rows=-1 after '-', got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    !suggestions.some((s) => s.text === "=TAKE(A1:A10,--1"),
+    `Did not expect TAKE to suggest '--1' after '-', got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("CHOOSECOLS col_num suggests 1 and -1", async () => {
   const engine = new TabCompletionEngine();
 
