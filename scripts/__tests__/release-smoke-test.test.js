@@ -56,3 +56,33 @@ test("release-smoke-test: defaults --tag from GITHUB_REF_NAME", () => {
   assert.match(child.stdout, /Release smoke test PASSED/i);
 });
 
+test("release-smoke-test: defaults --repo from GITHUB_REPOSITORY", () => {
+  const tag = currentDesktopTag();
+  const child = spawnSync(process.execPath, [smokeTestPath, "--tag", tag, "--", "--help"], {
+    cwd: repoRoot,
+    env: { ...process.env, GITHUB_REPOSITORY: "owner/repo" },
+    encoding: "utf8",
+  });
+
+  assert.equal(
+    child.status,
+    0,
+    `expected exit 0, got ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+  );
+  assert.match(child.stdout, /Release smoke test PASSED/i);
+});
+
+test("release-smoke-test: supports --tag= and --repo= forms", () => {
+  const tag = currentDesktopTag();
+  const child = spawnSync(process.execPath, [smokeTestPath, `--tag=${tag}`, "--repo=owner/repo", "--", "--help"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+
+  assert.equal(
+    child.status,
+    0,
+    `expected exit 0, got ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+  );
+  assert.match(child.stdout, /Release smoke test PASSED/i);
+});
