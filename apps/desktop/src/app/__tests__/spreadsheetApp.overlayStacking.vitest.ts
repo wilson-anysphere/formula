@@ -252,9 +252,8 @@ describe("SpreadsheetApp overlay stacking", () => {
   beforeEach(() => {
     priorCanvasCharts = process.env.CANVAS_CHARTS;
     priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
-    // These tests assert overlay stacking for the default (legacy charts) behavior. Ensure the
-    // feature flag env vars do not enable canvas charts (which would omit the legacy chart
-    // canvases entirely).
+    // These tests assert overlay stacking for the default behavior (canvas charts enabled).
+    // Clear any env overrides so SpreadsheetApp resolves the default path consistently.
     delete process.env.CANVAS_CHARTS;
     delete process.env.USE_CANVAS_CHARTS;
 
