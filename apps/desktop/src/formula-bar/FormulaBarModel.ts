@@ -576,13 +576,17 @@ export class FormulaBarModel {
 
     // When the formula text changes, rebuild the highlight list from the colored reference metadata.
     if (!cached || cachedRefs !== refs) {
-      cached = refs.map((ref) => ({
-        range: ref.range,
-        color: ref.color,
-        text: ref.text,
-        index: ref.index,
-        active: activeIndex === ref.index,
-      }));
+      cached = new Array(refs.length);
+      for (let i = 0; i < refs.length; i += 1) {
+        const ref = refs[i]!;
+        cached[i] = {
+          range: ref.range,
+          color: ref.color,
+          text: ref.text,
+          index: ref.index,
+          active: activeIndex === ref.index,
+        };
+      }
       this.#referenceHighlightsCache = cached;
       this.#referenceHighlightsCacheRefs = refs;
       this.#referenceHighlightsCacheActiveIndex = activeIndex;
@@ -1202,12 +1206,13 @@ function explainFormulaError(value: unknown): ErrorExplanation | null {
 }
 
 function highlightFormula(input: string): HighlightSpan[] {
-  return tokenizeFormula(input).map((token) => ({
-    kind: token.type,
-    text: token.text,
-    start: token.start,
-    end: token.end,
-  }));
+  const tokens = tokenizeFormula(input);
+  const spans = new Array<HighlightSpan>(tokens.length);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!;
+    spans[i] = { kind: token.type, text: token.text, start: token.start, end: token.end };
+  }
+  return spans;
 }
 
 function highlightFromEngineTokens(formula: string, tokens: EngineFormulaToken[]): HighlightSpan[] {
