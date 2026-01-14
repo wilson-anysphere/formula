@@ -318,14 +318,8 @@ fn duplicate_sheet_duplicates_pivots_and_updates_destinations_and_sources() {
                     }
         })
         .expect("expected duplicated range-based pivot");
-    let duplicated_range_cache_id = duplicated_range_pivot
-        .cache_id
-        .expect("duplicated pivot should have its own cache id");
-    assert!(wb.pivot_caches.iter().any(|cache| {
-        cache.id == duplicated_range_cache_id
-            && cache.needs_refresh
-            && cache.source == duplicated_range_pivot.source
-    }));
+    // Only pivots that already had a cache id should receive a duplicated cache id.
+    assert!(duplicated_range_pivot.cache_id.is_none());
 
-    assert_eq!(wb.pivot_caches.len(), 2);
+    assert_eq!(wb.pivot_caches.len(), 1);
 }
