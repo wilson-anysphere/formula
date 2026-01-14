@@ -376,6 +376,7 @@ This section documents the “wiring points” for hosts.
   - `EngineClient.setWorkbookFileMetadata(directory, filename)`
     - `CELL("filename")` returns `""` until `filename` is known (Excel unsaved behavior)
     - `INFO("directory")` returns `#N/A` unless `EngineInfo.directory` is set, or both `filename` and a non-empty `directory` are known
+    - Note: in older/minimal WASM builds, `WasmWorkbook.setWorkbookFileMetadata` may be missing; the worker treats this as a no-op.
 
 - Formatting metadata (`CELL("protect")`, `CELL("prefix")`, `CELL("format")`, `CELL("color")`, `CELL("parentheses")`):
   - `EngineClient.internStyle(stylePatch)` → `styleId`
