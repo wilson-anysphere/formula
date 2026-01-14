@@ -494,6 +494,26 @@ fn cell_metadata_keys_return_ref_for_out_of_bounds_reference() {
 }
 
 #[test]
+fn cell_width_name_ref_self_reference_is_not_a_circular_dependency() {
+    use formula_engine::{Engine, NameDefinition, NameScope};
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CELL(\"width\",X)")
+        .unwrap();
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!A1".to_string()),
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "A1"), 8.0);
+    assert_eq!(engine.circular_reference_count(), 0);
+}
+
+#[test]
 fn cell_sheet_default_style_affects_format_prefix_and_protect() {
     use formula_engine::Engine;
     use formula_model::{Alignment, HorizontalAlignment, Protection};

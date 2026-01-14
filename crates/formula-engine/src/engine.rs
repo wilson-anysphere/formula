@@ -16104,6 +16104,45 @@ fn walk_calc_expr(
             // cell values. Avoid introducing calc-graph precedents for direct references so
             // self-referential formulas like `=ROW(A1)` in `A1` aren't treated as circular.
             Expr::CellRef(_) | Expr::RangeRef(_) | Expr::StructuredRef(_) => {}
+            Expr::NameRef(nref) => {
+                let Some(sheet) = resolve_single_sheet(&nref.sheet, current_cell.sheet) else {
+                    return;
+                };
+                let name_key = normalize_defined_name(&nref.name);
+                if name_key.is_empty() {
+                    return;
+                }
+                // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
+                // Explicit sheet-qualified names (e.g. `Sheet1!X`) should still resolve as defined
+                // names for dependency analysis and dirty propagation.
+                if matches!(nref.sheet, SheetReference::Current)
+                    && name_is_local(lexical_scopes, &name_key)
+                {
+                    return;
+                }
+                let visit_key = (sheet, name_key.clone());
+                if !visiting_names.insert(visit_key.clone()) {
+                    return;
+                }
+                if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
+                    if let Some(expr) = def.compiled.as_ref() {
+                        walk_calc_expr_reference_context(
+                            expr,
+                            CellKey {
+                                sheet,
+                                addr: current_cell.addr,
+                            },
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                    }
+                }
+                visiting_names.remove(&visit_key);
+            }
             Expr::ImplicitIntersection(inner) => {
                 // Treat implicit-intersection wrappers over direct references like the references
                 // themselves so `ROW(@A1)` (or similar compiler-inserted wrappers) doesn't create
