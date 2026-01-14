@@ -36,7 +36,10 @@ fn wrong_password_returns_error() {
 
     let err = decrypt_standard_ooxml_from_bytes(encrypted, "not-the-password")
         .expect_err("expected wrong password to error");
-    assert!(matches!(err, formula_offcrypto::OffcryptoError::InvalidPassword));
+    assert!(
+        matches!(err, formula_offcrypto::OffcryptoError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
+    );
 }
 
 #[test]
@@ -69,10 +72,9 @@ fn missing_encryptioninfo_stream_returns_error() {
     assert!(
         matches!(
             &err,
-            OffcryptoError::InvalidStructure(msg)
-                if msg.contains("missing `EncryptionInfo` stream")
+            OffcryptoError::InvalidStructure(msg) if msg.contains("missing `EncryptionInfo` stream")
         ),
-        "expected InvalidStructure(missing `EncryptionInfo` stream), got {err:?}"
+        "expected InvalidStructure missing EncryptionInfo, got {err:?}"
     );
 }
 
@@ -83,10 +85,9 @@ fn invalid_ole_container_returns_error() {
     assert!(
         matches!(
             &err,
-            OffcryptoError::InvalidStructure(msg)
-                if msg.contains("failed to open OLE compound file")
+            OffcryptoError::InvalidStructure(msg) if msg.contains("failed to open OLE compound file")
         ),
-        "expected InvalidStructure(failed to open OLE compound file), got {err:?}"
+        "expected InvalidStructure for invalid OLE container, got {err:?}"
     );
 }
 
@@ -151,10 +152,9 @@ fn missing_encryptedpackage_stream_returns_error() {
     assert!(
         matches!(
             &err,
-            OffcryptoError::InvalidStructure(msg)
-                if msg.contains("missing `EncryptedPackage` stream")
+            OffcryptoError::InvalidStructure(msg) if msg.contains("missing `EncryptedPackage` stream")
         ),
-        "expected InvalidStructure(missing EncryptedPackage), got {err:?}"
+        "expected InvalidStructure missing EncryptedPackage, got {err:?}"
     );
 }
 
