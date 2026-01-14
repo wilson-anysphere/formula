@@ -118,6 +118,10 @@ pub(crate) fn decrypt_encrypted_package(
 }
 
 #[derive(Debug, Clone, Copy)]
+/// Candidate `EncryptedPackage` cipher/layout schemes we try for Standard/CryptoAPI AES.
+///
+/// Baseline MS-OFFCRYPTO/ECMA-376 Standard AES uses **AES-ECB** (no IV). The AES-CBC variants below
+/// are compatibility fallbacks for some non-Excel producers.
 enum StandardAesScheme {
     /// Baseline MS-OFFCRYPTO Standard AES: decrypt with AES-ECB using the block-0 key.
     Ecb,
@@ -564,6 +568,12 @@ fn derive_standard_segment_iv(
     salt: &[u8],
     segment_index: u32,
 ) -> Result<[u8; 16], DecryptError> {
+    // Segment IV derivation used by some non-standard AES-CBC Standard/CryptoAPI `EncryptedPackage`
+    // layouts:
+    //
+    //   iv_i = Hash(salt || LE32(i))[0..16]
+    //
+    // Note: this is not used by the baseline Standard AES-ECB scheme.
     let mut iv = [0u8; 16];
     match alg_id_hash {
         crate::offcrypto::CALG_SHA1 => {

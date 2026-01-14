@@ -16,7 +16,10 @@ const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
 const ENCRYPTED_PACKAGE_RC4_BLOCK_LEN: usize = 0x200;
 const CRYPTOAPI_SPIN_COUNT: u32 = 50_000;
 
-/// Hash algorithm used for Standard (CryptoAPI) `EncryptedPackage` IV derivation (`AlgIDHash`).
+/// Hash algorithm used for IV derivation in the **non-standard CBC-segmented** Standard/CryptoAPI
+/// AES `EncryptedPackage` fallback scheme (`AlgIDHash`).
+///
+/// Baseline MS-OFFCRYPTO/ECMA-376 Standard AES uses **AES-ECB** and has **no IV**.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlg {
     Sha1,
