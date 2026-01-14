@@ -232,10 +232,104 @@ NODE
   printf '%s\n' "${val}"
 }
 
+read_file_association_mime_ext_pairs() {
+  local conf="${TAURI_CONF_PATH}"
+  local val=""
+  if [[ -f "${conf}" ]] && command -v python3 >/dev/null 2>&1; then
+    val="$(
+      python3 - "${conf}" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+
+assocs = conf.get("bundle", {}).get("fileAssociations", [])
+pairs = {}
+
+for assoc in assocs:
+    if not isinstance(assoc, dict):
+        continue
+    mt = assoc.get("mimeType")
+    if not isinstance(mt, str) or not mt.strip():
+        continue
+    mime = mt.strip().lower()
+    exts = assoc.get("ext")
+    if isinstance(exts, str):
+        exts = [exts]
+    if not isinstance(exts, list):
+        continue
+    for ext in exts:
+        if not isinstance(ext, str):
+            continue
+        e = ext.strip().lower().lstrip(".")
+        if not e:
+            continue
+        if e in pairs and pairs[e] != mime:
+            print(f"ERROR: conflicting mimeType mapping for .{e}: {pairs[e]} vs {mime}", file=sys.stderr)
+            sys.exit(2)
+        pairs[e] = mime
+
+items = [f"{mime}:{ext}" for ext, mime in sorted(pairs.items())]
+print(",".join(items))
+PY
+    )"
+  elif [[ -f "${conf}" ]] && command -v node >/dev/null 2>&1; then
+    val="$(
+      node - <<'NODE' "${conf}" 2>/dev/null || true
+const fs = require("node:fs");
+const confPath = process.argv[2];
+let conf;
+try {
+  conf = JSON.parse(fs.readFileSync(confPath, "utf8"));
+} catch {
+  process.exit(0);
+}
+
+const assocs = Array.isArray(conf?.bundle?.fileAssociations) ? conf.bundle.fileAssociations : [];
+const map = new Map(); // ext -> mimeType
+for (const assoc of assocs) {
+  if (!assoc || typeof assoc !== "object") continue;
+  const rawMime = assoc.mimeType;
+  const mime = typeof rawMime === "string" ? rawMime.trim().toLowerCase() : "";
+  if (!mime) continue;
+  const rawExt = assoc.ext;
+  const exts = typeof rawExt === "string" ? [rawExt] : Array.isArray(rawExt) ? rawExt : [];
+  for (const extVal of exts) {
+    if (typeof extVal !== "string") continue;
+    const ext = extVal.trim().replace(/^\\./, "").toLowerCase();
+    if (!ext) continue;
+    const existing = map.get(ext);
+    if (existing && existing !== mime) {
+      console.error(`ERROR: conflicting mimeType mapping for .${ext}: ${existing} vs ${mime}`);
+      process.exit(2);
+    }
+    map.set(ext, mime);
+  }
+}
+const items = Array.from(map.entries())
+  .sort((a, b) => a[0].localeCompare(b[0]))
+  .map(([ext, mime]) => `${mime}:${ext}`);
+process.stdout.write(items.join(","));
+NODE
+    )"
+  fi
+
+  if [[ -z "${val}" ]]; then
+    # Best-effort fallback: validate at least xlsx (+ parquet when enabled).
+    val="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:xlsx"
+    if [[ "${PARQUET_ASSOCIATION:-0}" -eq 1 ]]; then
+      val="${val},application/vnd.apache.parquet:parquet"
+    fi
+  fi
+  printf '%s\n' "${val}"
+}
+
 MAIN_BINARY_NAME="$(read_main_binary_name)"
 TAURI_IDENTIFIER="$(read_tauri_identifier)"
 DEEP_LINK_SCHEMES="$(read_deep_link_schemes)"
 PARQUET_ASSOCIATION="$(read_parquet_association)"
+FILE_ASSOCIATION_MIME_EXT_PAIRS="$(read_file_association_mime_ext_pairs)"
 
 if [[ "${PARQUET_ASSOCIATION}" -eq 1 && -z "${TAURI_IDENTIFIER}" ]]; then
   echo "linux-package-install-smoke: Parquet file association configured but tauri.conf.json identifier is missing/empty (required for /usr/share/mime/packages/<identifier>.xml)" >&2
@@ -418,6 +512,7 @@ deb_smoke_test_dir() {
     -e "FORMULA_TAURI_IDENTIFIER=${TAURI_IDENTIFIER}" \
     -e "FORMULA_EXPECT_PARQUET_ASSOCIATION=${PARQUET_ASSOCIATION}" \
     -e "FORMULA_DEEP_LINK_SCHEMES=${DEEP_LINK_SCHEMES}" \
+    -e "FORMULA_FILE_ASSOCIATION_MIME_EXT_PAIRS=${FILE_ASSOCIATION_MIME_EXT_PAIRS}" \
     -v "${deb_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
@@ -426,6 +521,7 @@ deb_smoke_test_dir() {
       ident="${FORMULA_TAURI_IDENTIFIER:-}"
       parquet="${FORMULA_EXPECT_PARQUET_ASSOCIATION:-0}"
       schemes_csv="${FORMULA_DEEP_LINK_SCHEMES:-formula}"
+      pairs_csv="${FORMULA_FILE_ASSOCIATION_MIME_EXT_PAIRS:-}"
       mime_xml="/usr/share/mime/packages/${ident}.xml"
       echo "Container OS:"; cat /etc/os-release
       echo "Mounted artifacts:"; ls -lah /mounted
@@ -528,20 +624,39 @@ deb_smoke_test_dir() {
           fi
         fi
       done
-      required_xlsx_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      if [ -z "${mime_set["$required_xlsx_mime"]+x}" ]; then
-        echo "Missing xlsx MIME type in desktop entry MimeType=: ${required_xlsx_mime}" >&2
-        echo "Observed MimeType= value: ${mime_value}" >&2
-        exit 1
+
+      if [ -z "${pairs_csv}" ]; then
+        pairs_csv="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:xlsx"
+        if [[ "${parquet}" == "1" ]]; then
+          pairs_csv="${pairs_csv},application/vnd.apache.parquet:parquet"
+        fi
       fi
-      if [[ "${parquet}" == "1" ]]; then
-        required_parquet_mime="application/vnd.apache.parquet"
-        if [ -z "${mime_set["$required_parquet_mime"]+x}" ]; then
-          echo "Missing Parquet MIME type in desktop entry MimeType=: ${required_parquet_mime}" >&2
+      IFS="," read -r -a pairs <<<"${pairs_csv}"
+      for pair in "${pairs[@]}"; do
+        mime="${pair%%:*}"
+        ext="${pair#*:}"
+        mime="$(printf "%s" "${mime}" | tr "[:upper:]" "[:lower:]")"
+        ext="$(printf "%s" "${ext}" | tr "[:upper:]" "[:lower:]" | sed -E "s/^\\.+//")"
+        if [ -z "${mime}" ] || [ -z "${ext}" ]; then
+          continue
+        fi
+        if [[ "${ext}" == "parquet" && "${parquet}" != "1" ]]; then
+          continue
+        fi
+        if [ -z "${mime_set["$mime"]+x}" ]; then
+          echo "Missing expected file association MIME type in desktop entry MimeType=: ${mime} (for .${ext})" >&2
           echo "Observed MimeType= value: ${mime_value}" >&2
           exit 1
         fi
-      fi
+        if [[ "${parquet}" == "1" ]]; then
+          if ! grep -Fqi "${mime}:*.${ext}" /usr/share/mime/globs2; then
+            echo "Missing MIME mapping in /usr/share/mime/globs2 (expected ${mime} -> *.${ext})" >&2
+            echo "Observed matching globs2 lines (first 200):" >&2
+            grep -ni "${ext}" /usr/share/mime/globs2 | head -n 200 || true
+            exit 1
+          fi
+        fi
+      done
       set +e
       out="$(ldd "/usr/bin/${bin}" 2>&1)"
       status=$?
@@ -578,6 +693,7 @@ rpm_smoke_test_dir() {
     -e "FORMULA_TAURI_IDENTIFIER=${TAURI_IDENTIFIER}" \
     -e "FORMULA_EXPECT_PARQUET_ASSOCIATION=${PARQUET_ASSOCIATION}" \
     -e "FORMULA_DEEP_LINK_SCHEMES=${DEEP_LINK_SCHEMES}" \
+    -e "FORMULA_FILE_ASSOCIATION_MIME_EXT_PAIRS=${FILE_ASSOCIATION_MIME_EXT_PAIRS}" \
     -v "${rpm_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
@@ -585,6 +701,7 @@ rpm_smoke_test_dir() {
       ident="${FORMULA_TAURI_IDENTIFIER:-}"
       parquet="${FORMULA_EXPECT_PARQUET_ASSOCIATION:-0}"
       schemes_csv="${FORMULA_DEEP_LINK_SCHEMES:-formula}"
+      pairs_csv="${FORMULA_FILE_ASSOCIATION_MIME_EXT_PAIRS:-}"
       mime_xml="/usr/share/mime/packages/${ident}.xml"
       echo "Container OS:"; cat /etc/os-release
       echo "Mounted artifacts:"; ls -lah /mounted
@@ -697,20 +814,39 @@ rpm_smoke_test_dir() {
           fi
         fi
       done
-      required_xlsx_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      if [ -z "${mime_set["$required_xlsx_mime"]+x}" ]; then
-        echo "Missing xlsx MIME type in desktop entry MimeType=: ${required_xlsx_mime}" >&2
-        echo "Observed MimeType= value: ${mime_value}" >&2
-        exit 1
+
+      if [ -z "${pairs_csv}" ]; then
+        pairs_csv="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:xlsx"
+        if [[ "${parquet}" == "1" ]]; then
+          pairs_csv="${pairs_csv},application/vnd.apache.parquet:parquet"
+        fi
       fi
-      if [[ "${parquet}" == "1" ]]; then
-        required_parquet_mime="application/vnd.apache.parquet"
-        if [ -z "${mime_set["$required_parquet_mime"]+x}" ]; then
-          echo "Missing Parquet MIME type in desktop entry MimeType=: ${required_parquet_mime}" >&2
+      IFS="," read -r -a pairs <<<"${pairs_csv}"
+      for pair in "${pairs[@]}"; do
+        mime="${pair%%:*}"
+        ext="${pair#*:}"
+        mime="$(printf "%s" "${mime}" | tr "[:upper:]" "[:lower:]")"
+        ext="$(printf "%s" "${ext}" | tr "[:upper:]" "[:lower:]" | sed -E "s/^\\.+//")"
+        if [ -z "${mime}" ] || [ -z "${ext}" ]; then
+          continue
+        fi
+        if [[ "${ext}" == "parquet" && "${parquet}" != "1" ]]; then
+          continue
+        fi
+        if [ -z "${mime_set["$mime"]+x}" ]; then
+          echo "Missing expected file association MIME type in desktop entry MimeType=: ${mime} (for .${ext})" >&2
           echo "Observed MimeType= value: ${mime_value}" >&2
           exit 1
         fi
-      fi
+        if [[ "${parquet}" == "1" ]]; then
+          if ! grep -Fqi "${mime}:*.${ext}" /usr/share/mime/globs2; then
+            echo "Missing MIME mapping in /usr/share/mime/globs2 (expected ${mime} -> *.${ext})" >&2
+            echo "Observed matching globs2 lines (first 200):" >&2
+            grep -ni "${ext}" /usr/share/mime/globs2 | head -n 200 || true
+            exit 1
+          fi
+        fi
+      done
       set +e
       out="$(ldd "/usr/bin/${bin}" 2>&1)"
       status=$?
