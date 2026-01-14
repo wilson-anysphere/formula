@@ -30,7 +30,7 @@ Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook glo
 | Format | Scheme | Marker | Implemented crypto | Notes / entry points |
 |---|---|---|---|---|
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm`/`.xlsb`) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
-| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES + RC4)** | `EncryptionInfo` **3.2** (minor=2; major ∈ {2,3,4} in the wild) | ✅ decrypt (library); ✅ open in `formula-io` behind `encrypted-workbooks` for `.xlsx`/`.xlsm` (via streaming `open_workbook_with_options`); ❌ not yet for `.xlsb` | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + Standard key derivation + verifier + AES-ECB `EncryptedPackage` decrypt; stricter alg gating), `crates/formula-io/src/offcrypto/encrypted_package.rs` (AES-CBC segmented compatibility helper; used by `standard-large.xlsx`), `docs/offcrypto-standard-encryptedpackage.md` |
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES + RC4)** | `EncryptionInfo` **3.2** (minor=2; major ∈ {2,3,4} in the wild) | ✅ decrypt (library); ✅ open in `formula-io` behind `encrypted-workbooks` for `.xlsx`/`.xlsm` (via streaming `open_workbook_with_options`); ❌ not yet for `.xlsb` | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + Standard key derivation + verifier + AES-ECB `EncryptedPackage` decrypt; stricter alg gating), `docs/offcrypto-standard-encryptedpackage.md` |
 | Legacy `.xls` (BIFF8) | **FILEPASS RC4 CryptoAPI** | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
 Important: `formula-io`’s public open APIs **detect** encryption and surface dedicated errors
@@ -284,91 +284,40 @@ key = keyMaterial[0..keySizeBytes]          // keySizeBytes = keySizeBits/8
 
 Verifier nuances (very common bug source):
 
-Standard/CryptoAPI AES is not perfectly uniform across producers; in the wild we see both ECB-style
-and CBC-style verifier encryption. Using the wrong mode/IV/key derivation will make *every password*
-look wrong.
+- `EncryptionVerifier.encryptedVerifier` and `EncryptionVerifier.encryptedVerifierHash` are
+  encrypted with **AES-ECB** (no IV) using the derived key.
+- The verifier hash is `EncryptionHeader.algIdHash` (commonly SHA-1, 20 bytes) and the encrypted
+  blob is padded to an AES block boundary (for SHA-1, typically **32 bytes** on disk).
 
-In this repo we have encountered:
+Implementation note: in this repo (matching `crates/formula-offcrypto`), Standard/CryptoAPI **AES**
+uses **AES-ECB** (no IV) for both the verifier fields **and** `EncryptedPackage`. Any per-segment IV
+derivation is Agile-only.
 
-- **AES-ECB** (no IV): Excel/`msoffcrypto-tool`-style Standard AES (`crates/formula-offcrypto`)
-- **AES-CBC** with a producer-specific IV choice (often IV=0 or IV derived from the verifier salt):
-  handled via compatibility fallbacks in `crates/formula-office-crypto`
+### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-ECB, no IV)
 
-The verifier hash plaintext is `EncryptionHeader.algIdHash` (commonly SHA-1, 20 bytes) and the
-ciphertext blob is padded to an AES block boundary (for SHA-1, typically **32 bytes** on disk).
+Standard/CryptoAPI AES `EncryptedPackage` decryption is **AES-ECB** (no IV) over the ciphertext
+bytes (after the 8-byte `orig_size` prefix):
 
-Compatibility note:
+```text
+plaintext = AES-ECB-Decrypt(key, ciphertext)
+plaintext = plaintext[0..orig_size]   // truncate to the declared size
+```
 
-- The ECMA-376/MS-OFFCRYPTO Standard AES-ECB scheme decrypts the repo’s
-  `fixtures/encrypted/ooxml/standard.xlsx`.
-- Some producers (and some in-repo fixtures) use different Standard-like verifier encryption and/or
-  `EncryptedPackage` layouts. See [Standard variants in this repo](#standard-variants-in-this-repo)
-  for details.
+Where:
 
-### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-ECB vs CBC variants)
+- `orig_size` is the 8-byte little-endian size prefix at the start of the `EncryptedPackage` stream.
+- `ciphertext` is the remaining bytes after the prefix and must be a multiple of 16 bytes.
+- Do **not** “unpad” decrypted bytes; always truncate to `orig_size` (padding/trailing bytes are
+  not reliable PKCS#7).
 
-The `EncryptedPackage` stream always begins with an 8-byte `u64` plaintext size prefix and must be
-truncated to that size after decryption.
+See `docs/offcrypto-standard-encryptedpackage.md` for framing/padding/truncation edge cases.
 
-However, the *cipher mode / segmentation strategy* used for Standard/CryptoAPI AES varies by
-producer. In this repo we commonly see:
+Implementation nuance:
 
-- **AES-ECB** (no IV): decrypt all ciphertext blocks with AES-ECB using the derived file key, then
-  truncate to the declared `orig_size`. (`crates/formula-offcrypto`)
-- **Segmented AES-CBC variants**: decrypt in 4096-byte chunks with CBC and a producer-specific key/IV
-  scheme, then truncate to `orig_size`. (`crates/formula-io` streaming decryptor + other helpers)
-
-After decryption, **truncate** to the `u64` `orig_size` prefix at the start of the
-`EncryptedPackage` stream.
-
-- Baseline AES-ECB shape:
-
-  ```text
-  orig_size = U64LE(stream[0:8])
-  ciphertext = stream[8:]
-  require len(ciphertext) % 16 == 0
-  plaintext = AES-ECB-Decrypt(key, ciphertext)
-  return plaintext[0:orig_size]
-  ```
-
-- The physical `EncryptedPackage` stream can be **larger** than `orig_size` due to block padding
-  and/or OLE sector slack. Always decrypt the ciphertext you have and then **truncate** to
-  `orig_size`.
-  - Example: our `msoffcrypto-tool`-generated `fixtures/encrypted/ooxml/standard.xlsx` has an
-    `EncryptedPackage` ciphertext length of **4096 bytes** even though the decrypted ZIP is much
-    smaller.
-- See `docs/offcrypto-standard-encryptedpackage.md` for a breakdown of the observed Standard AES
-  variants (ECB vs CBC) and a compact checklist (framing, alignment, truncation).
-- Implementation pointers:
-  - `crates/formula-offcrypto`: `decrypt_encrypted_package_ecb` (and the convenience wrapper
-    `decrypt_from_bytes`) implements the AES-ECB variant.
-  - `crates/formula-io`’s streaming decryptor (`open_workbook_with_options`) implements a Standard
-    **AES-CBC (segmented)** variant.
-  - `crates/formula-office-crypto`: attempts multiple Standard/CryptoAPI AES variants and validates
-    by checking the decrypted ZIP magic bytes (`PK`) for broader real-world compatibility (see
-    `StandardScheme`).
-
-### Standard variants in this repo
-This repo includes multiple Standard-encrypted OOXML fixtures under `fixtures/encrypted/ooxml/`.
-The `.xlsx` fixtures intentionally cover **two** different Standard AES behaviors:
-
-1. `standard.xlsx` — ECMA-376/MS-OFFCRYPTO Standard (Excel 2007-era):
-   - Password KDF: **50,000** iterations
-   - Verifier encryption: **AES-ECB**
-   - `EncryptedPackage` encryption: **AES-ECB**
-   - Decryptors: `crates/formula-offcrypto`, `crates/formula-office-crypto`
-
-2. `standard-large.xlsx` — *non-standard* compatibility fixture (used to exercise multi-segment
-   decryption paths):
-   - Password KDF: **1,000** iterations (intentionally low to keep tests fast)
-   - Verifier encryption: **AES-CBC** with per-block IV derivation
-   - `EncryptedPackage` encryption: **AES-CBC**, segmented into 4096-byte plaintext segments with
-     per-segment IV derivation:
-     `iv_i = SHA1(salt || LE32(i))[0..16]`
-   - Decryptor: `crates/formula-xlsx::offcrypto` (hardcodes the reduced spin count)
-
-Additionally, `standard-basic.xlsm` is a macro-enabled Standard-encrypted workbook used to ensure
-the decrypted package is routed/typed as `.xlsm` and preserves `xl/vbaProject.bin`.
+- `crates/formula-offcrypto/src/encrypted_package.rs` implements Standard AES `EncryptedPackage`
+  decryption via AES-ECB and truncation to `orig_size`.
+- `crates/formula-office-crypto` implements end-to-end Standard decryption and is intentionally more
+  permissive about Standard parameter variants for compatibility.
 
 ## Interop notes / fixture generation
 
@@ -438,9 +387,9 @@ otherwise:
   defaults are:
   - AES-128 (`CALG_AES_128`) + SHA-1 (`CALG_SHA1`)
   - Iteration count is effectively fixed at 50,000 in the key derivation.
-  - `EncryptedPackage` encryption mode: for Excel-style Standard AES, use **AES-ECB (no IV)**; pad
-    plaintext to 16-byte blocks when encrypting and rely on the `orig_size` prefix for truncation.
-    (See `docs/offcrypto-standard-encryptedpackage.md` for the observed mode split.)
+  - `EncryptedPackage` encryption: **AES-ECB** (no IV). Ciphertext is block-aligned (pad plaintext to
+    16-byte blocks when encrypting), and plaintext is truncated to the 8-byte `orig_size` prefix
+    after decrypting (see `docs/offcrypto-standard-encryptedpackage.md`).
 
 These defaults are intended for **interoperability** with Excel, not for novel cryptographic
 design.
@@ -511,8 +460,8 @@ To support streaming readers (don’t materialize the entire decrypted ZIP in me
 * Cache the **derived package key** (Agile) or **derived AES key** (Standard) after password
   verification.
 * Do **not** cache the user password or its UTF-16LE encoding.
-* Compute IVs per segment deterministically; caching IVs is unnecessary and increases secret
-  surface area.
+* For **Agile**, compute per-segment IVs deterministically; caching IVs is unnecessary and increases
+  secret surface area. (Standard AES-ECB uses no IV.)
 
 ### Spin count DoS limits
 Spin counts are attacker-controlled and can be set extremely high to cause CPU denial of service.
@@ -563,7 +512,7 @@ Other useful keywords inside MS-OFFCRYPTO:
   `EncryptedPackage` stream bytes, including the size prefix)
 
 Additional repo-specific references:
-- `docs/offcrypto-standard-encryptedpackage.md` (Standard `EncryptedPackage` framing + ECB/CBC mode variants + truncation)
+- `docs/offcrypto-standard-encryptedpackage.md` (Standard `EncryptedPackage` framing + AES-ECB decrypt + truncation)
 - `docs/offcrypto-standard-cryptoapi.md` (Standard key derivation + verifier validation, from-scratch)
 - `docs/offcrypto-standard-cryptoapi-rc4.md` (Standard CryptoAPI RC4 reference + test vectors)
 - `docs/21-encrypted-workbooks.md` (detection + UX/API semantics; fixture locations)

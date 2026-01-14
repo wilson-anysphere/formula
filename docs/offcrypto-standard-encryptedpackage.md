@@ -25,7 +25,7 @@ This document focuses on the `EncryptedPackage` stream itself, because the most 
 cluster around:
 
 - the 8-byte plaintext length prefix,
-- **cipher mode mismatches** (ECB vs CBC-style variants),
+- AES block alignment requirements,
 - and **padding/truncation** (do **not** PKCS#7-unpad; always truncate to the declared size).
 
 For Agile (4.4) OOXML decryption details (and `dataIntegrity` gotchas), see
@@ -52,55 +52,16 @@ For Agile (4.4) OOXML decryption details (and `dataIntegrity` gotchas), see
 Spec note (MS-OFFCRYPTO §2.3.4.4): the *physical* stream length can be **larger** than `orig_size`
 because the encrypted data is padded to a cipher block boundary.
 
-## Decrypting `EncryptedPackage`: observed Standard/CryptoAPI AES variants
-
-The Standard/CryptoAPI header does not reliably communicate “which AES mode” was used for
-`EncryptedPackage`. In this repo we have encountered at least:
-
-- **AES-ECB** (no IV), implemented by `crates/formula-offcrypto` (see also
-  `fixtures/encrypted/ooxml/standard.xlsx`).
-- **Segmented AES-CBC variants**, implemented by the streaming decryptor in
-  `crates/formula-io/src/encrypted_package_reader.rs` (and by some lower-level helpers).
-
-If you are implementing Standard decryption for real-world compatibility, expect to need **mode
-fallback**.
-
-### Variant A: AES-ECB (no IV)
+## AES decryption (Standard/CryptoAPI AES is AES-ECB, no IV)
 
 Decrypt the ciphertext bytes (everything after the `u64` prefix) with **AES-ECB(key)**:
 
 * AES key: derived from the password and `EncryptionInfo` (out of scope for this note).
-* Mode: ECB.
+* Mode: ECB (no IV).
 * Padding: none at the crypto layer (ciphertext is block-aligned).
 * Ciphertext length must be a **multiple of 16** bytes.
 
 Implementation pointer: `crates/formula-offcrypto/src/lib.rs` (`decrypt_standard_only`).
-
-### Variant B: segmented AES-CBC (`0x1000` chunks; per-segment IV)
-
-Some Standard/CryptoAPI AES producers reuse an Agile-like “encrypt in 4096-byte segments” layout:
-
-- Plaintext is processed in **0x1000 (4096) byte segments**; segment index `i` is **0-based**.
-- Each segment is encrypted independently with AES-CBC (no chaining across segments).
-- Each segment’s ciphertext is padded to a 16-byte boundary.
-- The final ciphertext “segment” is often “whatever bytes remain” (can include an extra full padding
-  block and/or trailing OLE stream slack).
-
-The Standard/CryptoAPI AES-CBC implementation used by `crates/formula-io` derives IVs as:
-
-```text
-iv_full = SHA1(salt || LE32(i))
-iv = iv_full[0..16]  // truncate to 16 bytes for AES
-```
-
-Where:
-
-* `salt` is the 16-byte salt (`EncryptionVerifier.Salt`).
-* `LE32(i)` is the segment index encoded as a little-endian `u32`.
-
-Other CBC-style Standard variants exist (e.g. per-segment keys with IV=0). In this repo,
-`crates/formula-office-crypto/src/standard.rs` tries a small set of these schemes (`StandardScheme`)
-for compatibility.
 
 ## Padding + truncation (do not trust PKCS#7)
 

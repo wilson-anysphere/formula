@@ -16,7 +16,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 - [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md) — Agile (4.4) OOXML decryption details
   (HMAC target bytes, IV/salt gotchas).
 - [`docs/offcrypto-standard-encryptedpackage.md`](./offcrypto-standard-encryptedpackage.md) —
-  Standard/CryptoAPI AES `EncryptedPackage` decryption notes (ECB vs CBC variants; padding/truncation).
+  Standard/CryptoAPI AES `EncryptedPackage` decryption notes (AES-ECB framing + truncation).
 
 ## Status (current behavior vs intended behavior)
 
@@ -149,14 +149,10 @@ Implementation notes:
   - Standard (CryptoAPI; `versionMinor == 2`) header + verifier structures, and
   - Agile (4.4) XML (password key-encryptor subset),
   and implements Standard password→key derivation + verifier checks.
-- Standard/CryptoAPI `EncryptedPackage` decryption varies by producer (baseline AES-ECB vs CBC-style
-  layouts). In this repo:
-  - Baseline **AES-ECB** (no IV): `crates/formula-offcrypto` (`decrypt_standard_ooxml_from_bytes`,
-    `decrypt_standard_only`, and the low-level `decrypt_encrypted_package_ecb`).
-  - A **CBC-segmented compatibility layout** (IV derived from verifier salt + segment index): see
-    `crates/formula-io/src/offcrypto/encrypted_package.rs` (buffer-based) and
-    `crates/formula-io/src/encrypted_package_reader.rs` (streaming).
-  See `docs/offcrypto-standard-encryptedpackage.md` and `docs/office-encryption.md`.
+- Standard/CryptoAPI AES `EncryptedPackage` decryption (ECMA-376 baseline) uses **AES-ECB** (no IV),
+  with plaintext truncated to the `u64` size prefix. In this repo, see `crates/formula-offcrypto`
+  (`decrypt_standard_ooxml_from_bytes` / `decrypt_encrypted_package_ecb`) and
+  `docs/offcrypto-standard-encryptedpackage.md`.
 - For Agile (4.4) decryption details (HMAC target bytes + IV/salt usage gotchas), see
   [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
@@ -189,14 +185,11 @@ archive containing `xl/workbook.bin` for `.xlsb`).
 
 The encryption *mode* differs by scheme:
 
-- **Standard (CryptoAPI; `versionMinor == 2`):** baseline ECMA-376/MS-OFFCRYPTO uses **AES-ECB**
-  (no IV) for `EncryptedPackage` decryption; ciphertext must be AES block-aligned (multiple of 16).
-  Decrypt the ciphertext blocks and truncate to `original_package_size` (see
-  `docs/offcrypto-standard-encryptedpackage.md`).
-  - Compatibility note: some producers use Standard-like **AES-CBC** variants (including a
-    0x1000-segmented CBC scheme with `IV = SHA1(salt || LE32(i))[0..16]`). This repo’s
-    `fixtures/encrypted/ooxml/standard-large.xlsx` exercises such a variant; see
-    `docs/office-encryption.md` for details.
+- **Standard (CryptoAPI; `versionMinor == 2`):** decrypt the ciphertext bytes (after the 8-byte size
+  prefix) with **AES-ECB** (no IV). The ciphertext is block-aligned (`len % 16 == 0`); after
+  decrypting, **truncate the plaintext to `original_package_size`** (see
+  `docs/offcrypto-standard-encryptedpackage.md`). Standard has **no per-segment IV**; per-segment IV
+  derivation is Agile-only.
 - **Agile (4.4):** encrypted in **4096-byte plaintext segments** with a per-segment IV derived from
   `keyData/@saltValue` and the segment index, and cipher/chaining parameters specified by the XML
   descriptor.
@@ -262,8 +255,6 @@ Useful entrypoints when working on encrypted workbook support:
     `crates/formula-offcrypto`
   - Decrypt `EncryptedPackage`:
     - Standard AES-ECB (baseline): `crates/formula-offcrypto/src/lib.rs` (`decrypt_encrypted_package_ecb`)
-    - CBC-segmented compatibility helper (IV derived from verifier salt + segment index):
-      `crates/formula-io/src/offcrypto/encrypted_package.rs`
   - Segment framing helper (size prefix + 0x1000 segment boundaries):
     `crates/formula-offcrypto/src/encrypted_package.rs`
 - **Agile (4.4) OOXML decryption details (HMAC target bytes + IV usage gotchas):**
