@@ -119,7 +119,7 @@ describe("CanvasGridRenderer axis overrides large-selection perf characteristics
     const hideCols = buildIndexMap(OVERRIDE_COUNT, 1);
 
     const hideRun = withAllocationGuards(() => {
-      renderer.applyAxisSizeOverrides({ rows: hideRows, cols: hideCols }, { resetUnspecified: false });
+      renderer.applyAxisSizeOverrides({ rows: hideRows, cols: hideCols }, { resetUnspecified: true });
     });
 
     // After hide: the override maps should contain only the specified indices (O(10k), not O(maxRows/maxCols)).
@@ -130,14 +130,10 @@ describe("CanvasGridRenderer axis overrides large-selection perf characteristics
     expect((renderer.scroll.rows as any).overrideIndices.length).toBe(OVERRIDE_COUNT);
     expect((renderer.scroll.cols as any).overrideIndices.length).toBe(OVERRIDE_COUNT);
 
-    // "Unhide": clear the overrides by applying default-sized entries for the same indices.
-    const defaultRow = renderer.scroll.rows.defaultSize;
-    const defaultCol = renderer.scroll.cols.defaultSize;
-    const unhideRows = buildIndexMap(OVERRIDE_COUNT, defaultRow);
-    const unhideCols = buildIndexMap(OVERRIDE_COUNT, defaultCol);
-
+    // "Unhide": clear the overrides by applying an empty override set with `resetUnspecified=true`.
+    // This mirrors shared-grid's "re-sync from document state" behavior.
     const unhideRun = withAllocationGuards(() => {
-      renderer.applyAxisSizeOverrides({ rows: unhideRows, cols: unhideCols }, { resetUnspecified: false });
+      renderer.applyAxisSizeOverrides({ rows: new Map(), cols: new Map() }, { resetUnspecified: true });
     });
 
     // Structural assertions:
