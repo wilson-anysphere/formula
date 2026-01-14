@@ -913,12 +913,13 @@ fn decode_rgce_impl(
             }
             // PtgName: [nameId: u32][reserved: u16]
             0x23 | 0x43 | 0x63 => {
-                if rgce.len().saturating_sub(i) < 6 {
+                let remaining = rgce.len().saturating_sub(i);
+                if remaining < 6 {
                     return Err(DecodeRgceError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -950,12 +951,13 @@ fn decode_rgce_impl(
             }
             // PtgNameX: [ixti: u16][nameIndex: u16]
             0x39 | 0x59 | 0x79 => {
-                if rgce.len().saturating_sub(i) < 4 {
+                let remaining = rgce.len().saturating_sub(i);
+                if remaining < 4 {
                     return Err(DecodeRgceError::UnexpectedEof {
                         offset: ptg_offset,
                         ptg,
                         needed: 4,
-                        remaining: rgce.len().saturating_sub(i),
+                        remaining,
                     });
                 }
 
@@ -963,11 +965,9 @@ fn decode_rgce_impl(
                 let name_index = u16::from_le_bytes([rgce[i + 2], rgce[i + 3]]);
                 i += 4;
 
-                // Best-effort: emit a stable placeholder identifier for the extern name.
-                //
-                // Excel add-in / UDF calls typically reference extern names via `PtgNameX`
-                // followed by `PtgFuncVar(0x00FF)`. We keep the format stable for tests and
-                // downstream diagnostics.
+                // Best-effort: emit a stable placeholder identifier. Avoid characters like `:` and
+                // `{}` which would be treated as operators / invalid names by Excel formula
+                // parsers.
                 let is_value_class = (ptg & 0x60) == 0x40;
                 let mut text = String::new();
                 let mut precedence = 100;
@@ -975,7 +975,7 @@ fn decode_rgce_impl(
                     text.push('@');
                     precedence = 70;
                 }
-                text.push_str(&format!("ExternName{ixti}:{name_index}"));
+                text.push_str(&format!("ExternName_IXTI{ixti}_N{name_index}"));
 
                 stack.push(ExprFragment {
                     text,
