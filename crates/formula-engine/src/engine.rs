@@ -8236,6 +8236,10 @@ pub trait ExternalValueProvider: Send + Sync {
     /// Implementations should return sheet names in workbook order (without the `[Book.xlsx]`
     /// prefix). Endpoint matching (`Sheet1` / `Sheet3`) is case-insensitive.
     ///
+    /// Spans are resolved by workbook sheet order regardless of whether the user writes them
+    /// “forward” or “reversed” in the formula (e.g. `Sheet3:Sheet1` is treated the same as
+    /// `Sheet1:Sheet3`).
+    ///
     /// The returned sheet names are used to form per-sheet keys passed to [`ExternalValueProvider::get`]
     /// (e.g. `"[Book.xlsx]{sheet_name}"`), so the casing/spelling in this list should correspond
     /// to the provider's `get` keying strategy.

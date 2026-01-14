@@ -176,6 +176,8 @@ Expansion rules:
 * Endpoint matching (`Sheet1` / `Sheet3`) is **case-insensitive**.
 * The returned sheet names are used **verbatim** (including case) when constructing per-sheet keys
   for `get` calls.
+* Spans are resolved by workbook sheet order regardless of whether the user writes them “forward”
+  or “reversed” in the formula (e.g. `Sheet3:Sheet1` expands the same as `Sheet1:Sheet3`).
 * If `sheet_order(...)` returns `None` **or** either endpoint is missing from the returned order, the
   3D span evaluates to `#REF!`.
 * Degenerate spans where start and end are the same sheet (case-insensitive) are canonicalized to a
