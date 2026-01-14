@@ -30,6 +30,7 @@ describe("pickLocalImageFiles (Tauri)", () => {
     const files = await pickLocalImageFiles({ multiple: true });
 
     expect(open).toHaveBeenCalledTimes(1);
+    expect((open.mock.calls[0]?.[0] as any)?.multiple).toBe(true);
     const filters = (open.mock.calls[0]?.[0] as any)?.filters ?? [];
     expect(filters[0]?.extensions).toEqual(["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
 
@@ -38,6 +39,35 @@ describe("pickLocalImageFiles (Tauri)", () => {
     expect(files[0]!.name).toBe("a.png");
     expect(files[0]!.type).toBe("image/png");
     expect(files[0]!.size).toBe(3);
+  });
+
+  it("passes multiple=false to the Tauri dialog when requested", async () => {
+    const calls: Array<{ cmd: string; args: any }> = [];
+
+    const open = vi.fn(async () => "/tmp/one.png");
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      // Rust `stat_file` returns camelCase (`sizeBytes`); keep tests aligned with the real API shape.
+      if (cmd === "stat_file") return { sizeBytes: 1 };
+      if (cmd === "read_binary_file") {
+        // eslint-disable-next-line no-undef
+        return Buffer.from([7]).toString("base64");
+      }
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).__TAURI__ = { dialog: { open }, core: { invoke } };
+
+    const files = await pickLocalImageFiles({ multiple: false });
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect((open.mock.calls[0]?.[0] as any)?.multiple).toBe(false);
+    expect(calls.map((c) => c.cmd)).toEqual(["stat_file", "read_binary_file"]);
+    expect(files).toHaveLength(1);
+    expect(files[0]!.name).toBe("one.png");
+    expect(files[0]!.type).toBe("image/png");
+    expect(files[0]!.size).toBe(1);
   });
 
   it("uses read_binary_file_range for larger payloads", async () => {

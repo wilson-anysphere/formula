@@ -99,7 +99,7 @@ export function pickLocalImageFiles(options: PickLocalImageFilesOptions = {}): P
 
 async function pickLocalImageFilesViaTauriDialog(options: PickLocalImageFilesOptions): Promise<File[]> {
   const multiple = options.multiple ?? true;
-  const paths = await pickImagesFromTauriDialog();
+  const paths = await pickImagesFromTauriDialog({ multiple });
   const selected = multiple ? paths : paths.slice(0, 1);
   if (selected.length === 0) return [];
 

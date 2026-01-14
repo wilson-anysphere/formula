@@ -42,6 +42,7 @@ import { createDrawingObjectId, type Anchor as DrawingAnchor, type DrawingObject
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { duplicateSelected as duplicateDrawingSelected } from "../drawings/commands";
 import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFromFile } from "../drawings/insertImage";
+import { pickLocalImageFiles } from "../drawings/pickLocalImageFiles.js";
 import { MAX_INSERT_IMAGE_BYTES } from "../drawings/insertImageLimits.js";
 import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
@@ -129,6 +130,7 @@ import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../grid/shared/desktopSharedGrid.js";
 import { DesktopImageStore } from "../images/imageStore.js";
 import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
+import { getTauriDialogOpenOrNull } from "../tauri/api";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
 import {
@@ -7708,6 +7710,26 @@ export class SpreadsheetApp {
     }
     if (this.isEditing()) return;
     if (typeof document === "undefined") return;
+
+    // Desktop/Tauri: prefer native dialog + backend reads (avoids `<input type=file>` sandbox quirks).
+    // Web fallback below retains the persistent `<input>` element so unit tests can interact with it.
+    const tauriDialogOpenAvailable = getTauriDialogOpenOrNull() != null;
+    const tauriInvokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+    if (tauriDialogOpenAvailable && tauriInvokeAvailable) {
+      void (async () => {
+        const files = await pickLocalImageFiles({ multiple: false });
+        const file = files[0] ?? null;
+        if (!file) {
+          this.focus();
+          return;
+        }
+        await this.insertImageFromPickedFile(file);
+      })().catch((err) => {
+        console.warn("Insert image failed", err);
+        this.focus();
+      });
+      return;
+    }
 
     const input = this.ensureInsertImageInput();
     // Allow selecting the same file repeatedly.

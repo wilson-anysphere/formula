@@ -5,6 +5,10 @@ export const IMAGE_FILE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"
 
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
+export type PickImagesFromTauriDialogOptions = {
+  multiple?: boolean;
+};
+
 function getTauriInvoke(): TauriInvoke {
   const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
   if (typeof invoke !== "function") {
@@ -83,14 +87,15 @@ function normalizeFileSize(payload: unknown): number {
  *
  * Returns absolute paths on disk.
  */
-export async function pickImagesFromTauriDialog(): Promise<string[]> {
+export async function pickImagesFromTauriDialog(options: PickImagesFromTauriDialogOptions = {}): Promise<string[]> {
   const open = getTauriDialogOpenOrNull();
   if (!open) {
     throw new Error("Tauri dialog.open API not available");
   }
 
+  const multiple = options.multiple ?? true;
   const payload = await open({
-    multiple: true,
+    multiple,
     filters: [
       {
         name: "Images",
