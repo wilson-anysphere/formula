@@ -161,6 +161,35 @@ test("CollabSession setCells ignorePermissions allows writing to unparseable cel
   doc.destroy();
 });
 
+test("CollabSession setCells ignorePermissions still respects encryption invariants for unparseable cell keys", async () => {
+  const docId = "collab-session-setCells-encryption-invalid-cellKey";
+  const doc = new Y.Doc({ guid: docId });
+
+  // Encryption enabled => setCells requires a parseable cell address so AAD can be bound to coordinates.
+  const keyBytes = new Uint8Array(32).fill(7);
+  const session = createCollabSession({
+    doc,
+    schema: { autoInit: false },
+    encryption: { keyForCell: () => ({ keyId: "k1", keyBytes }) },
+  });
+  session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });
+
+  const before = Y.encodeStateAsUpdate(doc);
+
+  await assert.rejects(
+    session.setCells([{ cellKey: "bad-key", value: "hacked" }], { ignorePermissions: true }),
+    /Invalid cellKey/,
+  );
+
+  assert.equal(session.cells.has("bad-key"), false);
+
+  const after = Y.encodeStateAsUpdate(doc);
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession setCells only bypasses permissions when ignorePermissions is explicitly true", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc, schema: { autoInit: false } });
