@@ -31,6 +31,56 @@ fn copy_range_delta_updates_relative_but_not_absolute_refs() {
 }
 
 #[test]
+fn copy_delta_shifts_external_cell_ref() {
+    let origin = CellAddr::new(2, 2);
+    let (out, changed) =
+        rewrite_formula_for_copy_delta("=[Book.xlsx]Sheet1!A1", "Sheet1", origin, 1, 1);
+
+    assert!(changed);
+    assert_eq!(out, "=[Book.xlsx]Sheet1!B2");
+}
+
+#[test]
+fn copy_delta_preserves_absolute_external_cell_ref() {
+    let origin = CellAddr::new(2, 2);
+    let (out, changed) =
+        rewrite_formula_for_copy_delta("=[Book.xlsx]Sheet1!$A$1", "Sheet1", origin, 5, 5);
+
+    assert!(!changed);
+    assert_eq!(out, "=[Book.xlsx]Sheet1!$A$1");
+}
+
+#[test]
+fn copy_delta_shifts_external_rectangular_range() {
+    let origin = CellAddr::new(2, 2);
+    let (out, changed) = rewrite_formula_for_copy_delta(
+        "=SUM([Book.xlsx]Sheet1!A1:B2)",
+        "Sheet1",
+        origin,
+        1,
+        1,
+    );
+
+    assert!(changed);
+    assert_eq!(out, "=SUM([Book.xlsx]Sheet1!B2:C3)");
+}
+
+#[test]
+fn copy_delta_shifts_external_row_and_col_ranges() {
+    let origin = CellAddr::new(0, 0);
+
+    let (out, changed) =
+        rewrite_formula_for_copy_delta("=SUM([Book.xlsx]Sheet1!A:A)", "Sheet1", origin, 0, 1);
+    assert!(changed);
+    assert_eq!(out, "=SUM([Book.xlsx]Sheet1!B:B)");
+
+    let (out, changed) =
+        rewrite_formula_for_copy_delta("=SUM([Book.xlsx]Sheet1!1:1)", "Sheet1", origin, 1, 0);
+    assert!(changed);
+    assert_eq!(out, "=SUM([Book.xlsx]Sheet1!2:2)");
+}
+
+#[test]
 fn sheet_qualified_refs_only_rewrite_for_the_target_sheet() {
     let edit = StructuralEdit::InsertRows {
         sheet: "My Sheet".to_string(),

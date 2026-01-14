@@ -288,9 +288,6 @@ fn rewrite_expr_for_copy_delta(expr: &Expr, delta_row: i32, delta_col: i32) -> (
         Expr::RowRef(r) => rewrite_row_ref_for_copy_delta(r, delta_row),
         Expr::ColRef(r) => rewrite_col_ref_for_copy_delta(r, delta_col),
         Expr::Binary(b) if b.op == BinaryOp::Range => {
-            if range_has_external_workbook(&b.left) || range_has_external_workbook(&b.right) {
-                return (expr.clone(), false);
-            }
             if let Some(result) = rewrite_range_for_copy_delta(expr, b, delta_row, delta_col) {
                 return result;
             }
@@ -489,15 +486,6 @@ where
             (Expr::Array(ArrayLiteral { rows }), true)
         }
         _ => (expr.clone(), false),
-    }
-}
-
-fn range_has_external_workbook(expr: &Expr) -> bool {
-    match expr {
-        Expr::CellRef(r) => r.workbook.is_some(),
-        Expr::RowRef(r) => r.workbook.is_some(),
-        Expr::ColRef(r) => r.workbook.is_some(),
-        _ => false,
     }
 }
 
@@ -1444,10 +1432,6 @@ fn rewrite_col_range_for_copy_delta(
 }
 
 fn rewrite_cell_ref_for_copy_delta(r: &AstCellRef, delta_row: i32, delta_col: i32) -> (Expr, bool) {
-    if r.workbook.is_some() {
-        return (expr_ref(r.clone()), false);
-    }
-
     let Some((col, col_abs)) = coord_a1(&r.col) else {
         return (expr_ref(r.clone()), false);
     };
@@ -1488,10 +1472,6 @@ fn rewrite_cell_ref_for_copy_delta(r: &AstCellRef, delta_row: i32, delta_col: i3
 }
 
 fn rewrite_row_ref_for_copy_delta(r: &AstRowRef, delta_row: i32) -> (Expr, bool) {
-    if r.workbook.is_some() {
-        return (Expr::RowRef(r.clone()), false);
-    }
-
     let Some((row, abs)) = coord_a1(&r.row) else {
         return (Expr::RowRef(r.clone()), false);
     };
@@ -1519,10 +1499,6 @@ fn rewrite_row_ref_for_copy_delta(r: &AstRowRef, delta_row: i32) -> (Expr, bool)
 }
 
 fn rewrite_col_ref_for_copy_delta(r: &AstColRef, delta_col: i32) -> (Expr, bool) {
-    if r.workbook.is_some() {
-        return (Expr::ColRef(r.clone()), false);
-    }
-
     let Some((col, abs)) = coord_a1(&r.col) else {
         return (Expr::ColRef(r.clone()), false);
     };
