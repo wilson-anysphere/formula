@@ -492,6 +492,7 @@ pub fn pivot_table_to_engine_config(
                     .get(base_field_idx as usize)
                     .map(|f| PivotFieldRef::CacheFieldName(f.name.clone()))
             });
+            let base_field = base_field.map(PivotFieldRef::CacheFieldName);
 
             // `dataField@baseItem` refers to an item within `baseField`'s shared-items table.
             let base_item = df
