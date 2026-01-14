@@ -371,9 +371,13 @@ export class FormulaBarModel {
 
   functionHint(): FunctionHint | null {
     const hasEngineLocaleForDraft = this.#engineToolingFormula === this.#draft;
-    const localeId = hasEngineLocaleForDraft
+    const rawLocaleId = hasEngineLocaleForDraft
       ? this.#engineToolingLocaleId
       : (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() || "en-US";
+    // Function hint semantics (localized function names + argument separators) follow the formula
+    // engine's supported locale set. Treat unsupported/variant locale IDs as their canonical
+    // formula locale ids to keep caching stable.
+    const localeId = normalizeFormulaLocaleId(rawLocaleId) ?? "en-US";
     const argSeparator = inferArgSeparator(localeId);
 
     let ctxName: string | null = null;
