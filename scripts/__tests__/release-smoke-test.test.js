@@ -72,6 +72,25 @@ test("release-smoke-test: defaults --repo from GITHUB_REPOSITORY", () => {
   assert.match(child.stdout, /Release smoke test PASSED/i);
 });
 
+test("release-smoke-test: defaults --repo from git remote origin (when GITHUB_REPOSITORY is unset)", () => {
+  const tag = currentDesktopTag();
+  const env = { ...process.env };
+  delete env.GITHUB_REPOSITORY;
+
+  const child = spawnSync(process.execPath, [smokeTestPath, "--tag", tag, "--", "--help"], {
+    cwd: repoRoot,
+    env,
+    encoding: "utf8",
+  });
+
+  assert.equal(
+    child.status,
+    0,
+    `expected exit 0, got ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+  );
+  assert.match(child.stdout, /Release smoke test PASSED/i);
+});
+
 test("release-smoke-test: supports --tag= and --repo= forms", () => {
   const tag = currentDesktopTag();
   const child = spawnSync(process.execPath, [smokeTestPath, `--tag=${tag}`, "--repo=owner/repo", "--", "--help"], {
