@@ -108,6 +108,32 @@ fn from_xlsx_bytes_imports_styles_for_cells_rows_and_cols() {
         None,
     )
     .unwrap();
+    // Column-style alignment/protection should apply to cells without an explicit cell style.
+    wb.set_cell(
+        "D12".to_string(),
+        JsValue::from_str("=CELL(\"prefix\",C1)"),
+        None,
+    )
+    .unwrap();
+    wb.set_cell(
+        "D13".to_string(),
+        JsValue::from_str("=CELL(\"protect\",C1)"),
+        None,
+    )
+    .unwrap();
+    // Row-style alignment/protection should apply even for style-only rows (no stored cells).
+    wb.set_cell(
+        "D14".to_string(),
+        JsValue::from_str("=CELL(\"prefix\",A3)"),
+        None,
+    )
+    .unwrap();
+    wb.set_cell(
+        "D15".to_string(),
+        JsValue::from_str("=CELL(\"protect\",A3)"),
+        None,
+    )
+    .unwrap();
 
     wb.recalculate(None).unwrap();
 
@@ -133,6 +159,14 @@ fn from_xlsx_bytes_imports_styles_for_cells_rows_and_cols() {
         serde_wasm_bindgen::from_value(wb.get_cell("D10".to_string(), None).unwrap()).unwrap();
     let d11: CellData =
         serde_wasm_bindgen::from_value(wb.get_cell("D11".to_string(), None).unwrap()).unwrap();
+    let d12: CellData =
+        serde_wasm_bindgen::from_value(wb.get_cell("D12".to_string(), None).unwrap()).unwrap();
+    let d13: CellData =
+        serde_wasm_bindgen::from_value(wb.get_cell("D13".to_string(), None).unwrap()).unwrap();
+    let d14: CellData =
+        serde_wasm_bindgen::from_value(wb.get_cell("D14".to_string(), None).unwrap()).unwrap();
+    let d15: CellData =
+        serde_wasm_bindgen::from_value(wb.get_cell("D15".to_string(), None).unwrap()).unwrap();
 
     assert_eq!(d1.value, JsonValue::String("F2".to_string()));
     assert_eq!(d2.value, JsonValue::String("F2".to_string()));
@@ -145,4 +179,8 @@ fn from_xlsx_bytes_imports_styles_for_cells_rows_and_cols() {
     assert_json_number(&d9.value, 1.0);
     assert_json_number(&d10.value, 1.0);
     assert_json_number(&d11.value, 9.0);
+    assert_eq!(d12.value, JsonValue::String("\"".to_string()));
+    assert_json_number(&d13.value, 0.0);
+    assert_eq!(d14.value, JsonValue::String("\"".to_string()));
+    assert_json_number(&d15.value, 0.0);
 }
