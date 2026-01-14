@@ -116,9 +116,7 @@ pub(crate) fn parse_biff8_supbook_table(workbook_stream: &[u8], codepage: u16) -
             Err(err) => {
                 push_warning(
                     &mut out,
-                    format!(
-                    "malformed BIFF record while scanning for SUPBOOK/EXTERNNAME: {err}"
-                    ),
+                    format!("malformed BIFF record while scanning for SUPBOOK/EXTERNNAME: {err}"),
                 );
                 break;
             }
@@ -470,24 +468,79 @@ impl<'a> FragmentCursor<'a> {
         Ok(())
     }
 
+    fn advance_fragment_in_biff8_string(&mut self, is_unicode: &mut bool) -> Result<(), String> {
+        self.advance_fragment()?;
+        // When a BIFF8 string spans a CONTINUE boundary, Excel inserts a 1-byte option flags prefix
+        // at the start of the continued fragment. The only relevant bit is `fHighByte` (unicode vs
+        // compressed).
+        let cont_flags = self.read_u8()?;
+        *is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+        Ok(())
+    }
+
+    fn read_biff8_string_bytes(
+        &mut self,
+        mut n: usize,
+        is_unicode: &mut bool,
+    ) -> Result<Vec<u8>, String> {
+        // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
+        // continuation flags prefix that appears at the start of each continued fragment.
+        let mut out = Vec::with_capacity(n);
+        while n > 0 {
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment_in_biff8_string(is_unicode)?;
+                continue;
+            }
+            let available = self.remaining_in_fragment();
+            let take = n.min(available);
+            let bytes = self.read_exact_from_current(take)?;
+            out.extend_from_slice(bytes);
+            n -= take;
+        }
+        Ok(out)
+    }
+
+    fn skip_biff8_string_bytes(
+        &mut self,
+        mut n: usize,
+        is_unicode: &mut bool,
+    ) -> Result<(), String> {
+        // Skip `n` canonical bytes from a BIFF8 continued string payload, consuming any inserted
+        // continuation flags bytes at fragment boundaries.
+        while n > 0 {
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment_in_biff8_string(is_unicode)?;
+                continue;
+            }
+            let available = self.remaining_in_fragment();
+            let take = n.min(available);
+            self.offset += take;
+            n -= take;
+        }
+        Ok(())
+    }
+
     fn read_biff8_unicode_string(&mut self, codepage: u16) -> Result<String, String> {
         // XLUnicodeString [MS-XLS 2.5.268]
         let cch = self.read_u16_le()? as usize;
         let flags = self.read_u8()?;
 
+        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+
         let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
-            self.read_u16_le()? as usize
+            let bytes = self.read_biff8_string_bytes(2, &mut is_unicode)?;
+            u16::from_le_bytes([bytes[0], bytes[1]]) as usize
         } else {
             0
         };
 
         let ext_size = if flags & STR_FLAG_EXT != 0 {
-            self.read_u32_le()? as usize
+            let bytes = self.read_biff8_string_bytes(4, &mut is_unicode)?;
+            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize
         } else {
             0
         };
 
-        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
         let mut remaining_chars = cch;
         let mut out = String::new();
 
@@ -495,9 +548,7 @@ impl<'a> FragmentCursor<'a> {
             if self.remaining_in_fragment() == 0 {
                 // Continuing character bytes into a new CONTINUE fragment: first byte is option
                 // flags for the continued segment (fHighByte).
-                self.advance_fragment()?;
-                let cont_flags = self.read_u8()?;
-                is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+                self.advance_fragment_in_biff8_string(&mut is_unicode)?;
                 continue;
             }
 
@@ -528,7 +579,10 @@ impl<'a> FragmentCursor<'a> {
         let richtext_bytes = richtext_runs
             .checked_mul(4)
             .ok_or_else(|| "rich text run count overflow".to_string())?;
-        self.skip_bytes(richtext_bytes + ext_size)?;
+        let extra_len = richtext_bytes
+            .checked_add(ext_size)
+            .ok_or_else(|| "string ext payload length overflow".to_string())?;
+        self.skip_biff8_string_bytes(extra_len, &mut is_unicode)?;
 
         Ok(out)
     }
@@ -541,27 +595,28 @@ impl<'a> FragmentCursor<'a> {
         // XLUnicodeStringNoCch [MS-XLS 2.5.277] (used by NAME/EXTERNNAME).
         let flags = self.read_u8()?;
 
+        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+
         let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
-            self.read_u16_le()? as usize
+            let bytes = self.read_biff8_string_bytes(2, &mut is_unicode)?;
+            u16::from_le_bytes([bytes[0], bytes[1]]) as usize
         } else {
             0
         };
 
         let ext_size = if flags & STR_FLAG_EXT != 0 {
-            self.read_u32_le()? as usize
+            let bytes = self.read_biff8_string_bytes(4, &mut is_unicode)?;
+            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize
         } else {
             0
         };
 
-        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
         let mut remaining_chars = cch;
         let mut out = String::new();
 
         while remaining_chars > 0 {
             if self.remaining_in_fragment() == 0 {
-                self.advance_fragment()?;
-                let cont_flags = self.read_u8()?;
-                is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+                self.advance_fragment_in_biff8_string(&mut is_unicode)?;
                 continue;
             }
 
@@ -592,7 +647,10 @@ impl<'a> FragmentCursor<'a> {
         let richtext_bytes = richtext_runs
             .checked_mul(4)
             .ok_or_else(|| "rich text run count overflow".to_string())?;
-        self.skip_bytes(richtext_bytes + ext_size)?;
+        let extra_len = richtext_bytes
+            .checked_add(ext_size)
+            .ok_or_else(|| "string ext payload length overflow".to_string())?;
+        self.skip_biff8_string_bytes(extra_len, &mut is_unicode)?;
 
         Ok(out)
     }
@@ -897,9 +955,74 @@ mod tests {
         let parsed = parse_biff8_supbook_table(&stream, 1252);
         assert_eq!(parsed.warnings.len(), MAX_SUPBOOK_WARNINGS);
         assert!(
-            parsed.warnings.iter().any(|w| w == SUPBOOK_WARNINGS_SUPPRESSED_MSG),
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w == SUPBOOK_WARNINGS_SUPPRESSED_MSG),
             "warnings={:?}",
             parsed.warnings
         );
+    }
+
+    #[test]
+    fn parses_biff8_unicode_string_continued_richtext_with_crun_split_across_fragments() {
+        let s = "ABCDE";
+        let rg_run = [0x11u8, 0x22, 0x33, 0x44];
+
+        // First fragment contains the header and the first byte of cRun.
+        let mut frag1 = Vec::new();
+        frag1.extend_from_slice(&(s.len() as u16).to_le_bytes());
+        frag1.push(STR_FLAG_RICH_TEXT); // flags (compressed + rich text)
+        frag1.push(0x01); // cRun low byte (cRun=1)
+
+        // Continuation fragment begins with option flags byte (fHighByte), then remaining bytes:
+        // cRun high byte + character bytes + rgRun bytes.
+        let mut frag2 = Vec::new();
+        frag2.push(0); // continued segment compressed
+        frag2.push(0x00); // cRun high byte
+        frag2.extend_from_slice(s.as_bytes());
+        frag2.extend_from_slice(&rg_run);
+
+        let fragments: [&[u8]; 2] = [&frag1, &frag2];
+        let mut cursor = FragmentCursor::new(&fragments, 0, 0);
+        let out = cursor.read_biff8_unicode_string(1252).expect("parse");
+        assert_eq!(out, s);
+    }
+
+    #[test]
+    fn parses_biff8_unicode_string_continued_ext_payload_split_preserves_following_string() {
+        // Two back-to-back XLUnicodeString values in a single fragment stream.
+        // The first has `fExtSt=1` and its ext payload is split across fragments; the second should
+        // still be parsed correctly.
+        let s1 = "abc";
+        let ext = [0xDEu8, 0xAD, 0xBE, 0xEF];
+        let s2 = "Z";
+
+        // First fragment: header + char bytes + first 2 ext bytes.
+        let mut frag1 = Vec::new();
+        frag1.extend_from_slice(&(s1.len() as u16).to_le_bytes());
+        frag1.push(STR_FLAG_EXT); // flags (compressed + ext)
+        frag1.extend_from_slice(&(ext.len() as u32).to_le_bytes()); // cbExtRst
+        frag1.extend_from_slice(s1.as_bytes());
+        frag1.extend_from_slice(&ext[..2]);
+
+        // Continuation fragment: cont_flags + remaining ext bytes + second string.
+        let mut frag2 = Vec::new();
+        frag2.push(0); // continued segment compressed
+        frag2.extend_from_slice(&ext[2..]);
+        frag2.extend_from_slice(&(s2.len() as u16).to_le_bytes());
+        frag2.push(0); // flags (compressed)
+        frag2.extend_from_slice(s2.as_bytes());
+
+        let fragments: [&[u8]; 2] = [&frag1, &frag2];
+        let mut cursor = FragmentCursor::new(&fragments, 0, 0);
+        let out1 = cursor
+            .read_biff8_unicode_string(1252)
+            .expect("parse first string");
+        let out2 = cursor
+            .read_biff8_unicode_string(1252)
+            .expect("parse second string");
+        assert_eq!(out1, s1);
+        assert_eq!(out2, s2);
     }
 }

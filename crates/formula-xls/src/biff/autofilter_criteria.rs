@@ -225,10 +225,7 @@ enum DoperValue {
     Empty,
     Bool(bool),
     Number(f64),
-    Text {
-        value: String,
-        type_known: bool,
-    },
+    Text { value: String, type_known: bool },
     Unknown,
 }
 
@@ -248,7 +245,10 @@ fn parse_autofilter_record(
 ) -> Result<Option<FilterColumn>, String> {
     let data = record.data.as_ref();
     if data.len() < 20 {
-        return Err(format!("AUTOFILTER record too short (expected >=20 bytes, got {})", data.len()));
+        return Err(format!(
+            "AUTOFILTER record too short (expected >=20 bytes, got {})",
+            data.len()
+        ));
     }
 
     // AUTOFILTER layout (best-effort):
@@ -276,8 +276,7 @@ fn parse_autofilter_record(
     let mut trailing_strings: Vec<String> = Vec::new();
     if data.len() > 20 {
         let fragments: Vec<&[u8]> = record.fragments().collect();
-        if let Some((frag_idx, frag_off)) =
-            locate_fragment_offset(&record.fragment_sizes, 20usize)
+        if let Some((frag_idx, frag_off)) = locate_fragment_offset(&record.fragment_sizes, 20usize)
         {
             let mut cursor = FragmentCursor::new(&fragments, frag_idx, frag_off);
             for _ in 0..2 {
@@ -298,7 +297,11 @@ fn parse_autofilter_record(
 
     // Top10 and other advanced filter types are not currently modeled; preserve via raw XML.
     if (grbit & AUTOFILTER_FLAG_TOP10) != 0 {
-        let top = if (grbit & AUTOFILTER_FLAG_TOP) != 0 { 1 } else { 0 };
+        let top = if (grbit & AUTOFILTER_FLAG_TOP) != 0 {
+            1
+        } else {
+            0
+        };
         let percent = if (grbit & AUTOFILTER_FLAG_PERCENT) != 0 {
             1
         } else {
@@ -375,7 +378,11 @@ fn parse_autofilter_record(
 
     Ok(Some(FilterColumn {
         col_id,
-        join: if criteria.len() > 1 { join } else { FilterJoin::Any },
+        join: if criteria.len() > 1 {
+            join
+        } else {
+            FilterJoin::Any
+        },
         criteria,
         values: Vec::new(),
         raw_xml: Vec::new(),
@@ -423,10 +430,7 @@ fn parse_doper(bytes: &[u8]) -> ParsedDoper {
     // Some producers have been observed to store the operator in the second byte instead of
     // `wOper`; decode both forms best-effort.
     let vt = *bytes.first().unwrap_or(&0);
-    let op_u16 = u16::from_le_bytes([
-        *bytes.get(2).unwrap_or(&0),
-        *bytes.get(3).unwrap_or(&0),
-    ]);
+    let op_u16 = u16::from_le_bytes([*bytes.get(2).unwrap_or(&0), *bytes.get(3).unwrap_or(&0)]);
     let op_byte = *bytes.get(1).unwrap_or(&0);
 
     let op_code = if op_u16 <= 14 {
@@ -534,7 +538,10 @@ fn criterion_from_doper(doper: &ParsedDoper) -> Option<FilterCriterion> {
     // known**. Unknown operator strings would produce invalid OOXML.
     let opaque = |op: AutoFilterOp, value: Option<String>| -> Option<FilterCriterion> {
         let operator = op.to_ooxml_operator_name()?.to_string();
-        Some(FilterCriterion::OpaqueCustom(OpaqueCustomFilter { operator, value }))
+        Some(FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
+            operator,
+            value,
+        }))
     };
 
     match doper.op {
@@ -567,8 +574,12 @@ fn criterion_from_doper(doper: &ParsedDoper) -> Option<FilterCriterion> {
             DoperValue::Unknown => opaque(AutoFilterOp::NotEqual, None),
         },
         AutoFilterOp::GreaterThan => match doper.value {
-            DoperValue::Number(n) => Some(FilterCriterion::Number(NumberComparison::GreaterThan(n))),
-            DoperValue::Text { ref value, .. } => opaque(AutoFilterOp::GreaterThan, Some(value.clone())),
+            DoperValue::Number(n) => {
+                Some(FilterCriterion::Number(NumberComparison::GreaterThan(n)))
+            }
+            DoperValue::Text { ref value, .. } => {
+                opaque(AutoFilterOp::GreaterThan, Some(value.clone()))
+            }
             _ => opaque(AutoFilterOp::GreaterThan, None),
         },
         AutoFilterOp::GreaterThanOrEqual => match doper.value {
@@ -582,7 +593,9 @@ fn criterion_from_doper(doper: &ParsedDoper) -> Option<FilterCriterion> {
         },
         AutoFilterOp::LessThan => match doper.value {
             DoperValue::Number(n) => Some(FilterCriterion::Number(NumberComparison::LessThan(n))),
-            DoperValue::Text { ref value, .. } => opaque(AutoFilterOp::LessThan, Some(value.clone())),
+            DoperValue::Text { ref value, .. } => {
+                opaque(AutoFilterOp::LessThan, Some(value.clone()))
+            }
             _ => opaque(AutoFilterOp::LessThan, None),
         },
         AutoFilterOp::LessThanOrEqual => match doper.value {
@@ -612,7 +625,10 @@ fn criterion_from_doper(doper: &ParsedDoper) -> Option<FilterCriterion> {
     }
 }
 
-fn locate_fragment_offset(fragment_sizes: &[usize], global_offset: usize) -> Option<(usize, usize)> {
+fn locate_fragment_offset(
+    fragment_sizes: &[usize],
+    global_offset: usize,
+) -> Option<(usize, usize)> {
     let mut remaining = global_offset;
     for (idx, &size) in fragment_sizes.iter().enumerate() {
         if remaining < size {
@@ -694,14 +710,6 @@ impl<'a> FragmentCursor<'a> {
         Ok(u16::from_le_bytes([lo, hi]))
     }
 
-    fn read_u32_le(&mut self) -> Result<u32, String> {
-        let b0 = self.read_u8()?;
-        let b1 = self.read_u8()?;
-        let b2 = self.read_u8()?;
-        let b3 = self.read_u8()?;
-        Ok(u32::from_le_bytes([b0, b1, b2, b3]))
-    }
-
     fn read_exact_from_current(&mut self, n: usize) -> Result<&'a [u8], String> {
         let frag = self
             .fragments
@@ -719,13 +727,51 @@ impl<'a> FragmentCursor<'a> {
         Ok(out)
     }
 
-    fn skip_bytes(&mut self, mut n: usize) -> Result<(), String> {
+    fn advance_fragment_in_biff8_string(&mut self, is_unicode: &mut bool) -> Result<(), String> {
+        self.advance_fragment()?;
+        // When a BIFF8 string spans a CONTINUE boundary, Excel inserts a 1-byte option flags prefix
+        // at the start of the continued fragment. The only relevant bit is `fHighByte` (unicode vs
+        // compressed).
+        let cont_flags = self.read_u8()?;
+        *is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+        Ok(())
+    }
+
+    fn read_biff8_string_bytes(
+        &mut self,
+        mut n: usize,
+        is_unicode: &mut bool,
+    ) -> Result<Vec<u8>, String> {
+        // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
+        // continuation flags prefix that appears at the start of each continued fragment.
+        let mut out = Vec::with_capacity(n);
         while n > 0 {
-            let available = self.remaining_in_fragment();
-            if available == 0 {
-                self.advance_fragment()?;
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment_in_biff8_string(is_unicode)?;
                 continue;
             }
+            let available = self.remaining_in_fragment();
+            let take = n.min(available);
+            let bytes = self.read_exact_from_current(take)?;
+            out.extend_from_slice(bytes);
+            n -= take;
+        }
+        Ok(out)
+    }
+
+    fn skip_biff8_string_bytes(
+        &mut self,
+        mut n: usize,
+        is_unicode: &mut bool,
+    ) -> Result<(), String> {
+        // Skip `n` canonical bytes from a BIFF8 continued string payload, consuming any inserted
+        // continuation flags bytes at fragment boundaries.
+        while n > 0 {
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment_in_biff8_string(is_unicode)?;
+                continue;
+            }
+            let available = self.remaining_in_fragment();
             let take = n.min(available);
             self.offset += take;
             n -= take;
@@ -738,19 +784,22 @@ impl<'a> FragmentCursor<'a> {
         let cch = self.read_u16_le()? as usize;
         let flags = self.read_u8()?;
 
+        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+
         let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
-            self.read_u16_le()? as usize
+            let bytes = self.read_biff8_string_bytes(2, &mut is_unicode)?;
+            u16::from_le_bytes([bytes[0], bytes[1]]) as usize
         } else {
             0
         };
 
         let ext_size = if flags & STR_FLAG_EXT != 0 {
-            self.read_u32_le()? as usize
+            let bytes = self.read_biff8_string_bytes(4, &mut is_unicode)?;
+            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize
         } else {
             0
         };
 
-        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
         let mut remaining_chars = cch;
         let mut out = String::new();
 
@@ -758,9 +807,7 @@ impl<'a> FragmentCursor<'a> {
             if self.remaining_in_fragment() == 0 {
                 // Continuing character bytes into a new CONTINUE fragment: first byte is option
                 // flags for the continued segment (fHighByte).
-                self.advance_fragment()?;
-                let cont_flags = self.read_u8()?;
-                is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+                self.advance_fragment_in_biff8_string(&mut is_unicode)?;
                 continue;
             }
 
@@ -791,7 +838,10 @@ impl<'a> FragmentCursor<'a> {
         let richtext_bytes = richtext_runs
             .checked_mul(4)
             .ok_or_else(|| "rich text run count overflow".to_string())?;
-        self.skip_bytes(richtext_bytes + ext_size)?;
+        let extra_len = richtext_bytes
+            .checked_add(ext_size)
+            .ok_or_else(|| "string ext payload length overflow".to_string())?;
+        self.skip_biff8_string_bytes(extra_len, &mut is_unicode)?;
 
         Ok(out)
     }
@@ -872,14 +922,9 @@ mod tests {
         ]
         .concat();
 
-        let parsed = parse_biff_sheet_autofilter_criteria(
-            &stream,
-            0,
-            BiffVersion::Biff8,
-            1252,
-            range,
-        )
-        .expect("parse");
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
 
         assert_eq!(parsed.filter_columns.len(), 1);
         let col = &parsed.filter_columns[0];
@@ -919,14 +964,9 @@ mod tests {
         ]
         .concat();
 
-        let parsed = parse_biff_sheet_autofilter_criteria(
-            &stream,
-            0,
-            BiffVersion::Biff8,
-            1252,
-            range,
-        )
-        .expect("parse");
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
 
         assert_eq!(parsed.filter_columns.len(), 1);
         let col = &parsed.filter_columns[0];
@@ -987,20 +1027,144 @@ mod tests {
         ]
         .concat();
 
-        let parsed = parse_biff_sheet_autofilter_criteria(
-            &stream,
-            0,
-            BiffVersion::Biff8,
-            1252,
-            range,
-        )
-        .expect("parse");
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
 
         assert_eq!(parsed.filter_columns.len(), 1);
         let col = &parsed.filter_columns[0];
         assert_eq!(
             col.criteria,
             vec![FilterCriterion::Equals(FilterValue::Text("ABCDE".into()))]
+        );
+    }
+
+    #[test]
+    fn parses_continued_richtext_string_with_crun_split_across_continue_records() {
+        let range = Range::new(CellRef::new(0, 0), CellRef::new(10, 0)); // A
+
+        // Build AUTOFILTER record with a rich-text string that will be split across CONTINUE such
+        // that the `cRun` field spans the boundary.
+        let mut af_full = Vec::new();
+        af_full.extend_from_slice(&0u16.to_le_bytes()); // col
+        af_full.extend_from_slice(&0u16.to_le_bytes()); // grbit
+
+        // DOPER1.
+        af_full.push(8); // vt string
+        af_full.push(0); // grbit
+        af_full.extend_from_slice(&3u16.to_le_bytes()); // wOper equal
+        af_full.extend_from_slice(&0u32.to_le_bytes());
+        // DOPER2 unused.
+        af_full.extend_from_slice(&[0u8; 8]);
+
+        // XLUnicodeString "ABCDE" with richtext flag set.
+        let s = "ABCDE";
+        let mut str_bytes = Vec::new();
+        str_bytes.extend_from_slice(&(s.len() as u16).to_le_bytes());
+        str_bytes.push(STR_FLAG_RICH_TEXT); // flags (compressed + rich text)
+        str_bytes.extend_from_slice(&1u16.to_le_bytes()); // cRun=1
+        str_bytes.extend_from_slice(s.as_bytes());
+        str_bytes.extend_from_slice(&[0x11, 0x22, 0x33, 0x44]); // rgRun (4 bytes)
+        af_full.extend_from_slice(&str_bytes);
+
+        // Split such that we cut between the two bytes of `cRun`. The CONTINUE fragment begins with
+        // the required continued-segment option flags byte.
+        let string_start = 20usize;
+        let split_at = string_start + 3 + 1; // header (3) + first byte of cRun
+        let first_payload = &af_full[..split_at];
+        let remaining = &af_full[split_at..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment flags (compressed)
+        continue_payload.extend_from_slice(remaining);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_worksheet()),
+            record(RECORD_AUTOFILTER, first_payload),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
+
+        assert_eq!(parsed.filter_columns.len(), 1);
+        let col = &parsed.filter_columns[0];
+        assert_eq!(
+            col.criteria,
+            vec![FilterCriterion::Equals(FilterValue::Text("ABCDE".into()))]
+        );
+    }
+
+    #[test]
+    fn parses_continued_ext_string_with_ext_payload_split_across_continue_records() {
+        let range = Range::new(CellRef::new(0, 0), CellRef::new(10, 0)); // A
+
+        let mut af_full = Vec::new();
+        af_full.extend_from_slice(&0u16.to_le_bytes()); // col
+        af_full.extend_from_slice(&0u16.to_le_bytes()); // grbit
+
+        // DOPER1: string equals.
+        af_full.push(8); // vt string
+        af_full.push(0); // grbit
+        af_full.extend_from_slice(&3u16.to_le_bytes()); // wOper equal
+        af_full.extend_from_slice(&0u32.to_le_bytes());
+
+        // DOPER2: another string equals.
+        af_full.push(8); // vt string
+        af_full.push(0); // grbit
+        af_full.extend_from_slice(&3u16.to_le_bytes()); // wOper equal
+        af_full.extend_from_slice(&0u32.to_le_bytes());
+
+        // First XLUnicodeString "abc" with ext payload.
+        let s1 = "abc";
+        let ext = [0xDEu8, 0xAD, 0xBE, 0xEF];
+        let mut str1_bytes = Vec::new();
+        str1_bytes.extend_from_slice(&(s1.len() as u16).to_le_bytes());
+        str1_bytes.push(STR_FLAG_EXT); // flags (compressed + ext)
+        str1_bytes.extend_from_slice(&(ext.len() as u32).to_le_bytes()); // cbExtRst
+        str1_bytes.extend_from_slice(s1.as_bytes());
+        str1_bytes.extend_from_slice(&ext);
+
+        // Second XLUnicodeString "Z" (simple).
+        let s2 = "Z";
+        let str2_bytes = xl_unicode_string_compressed(s2);
+
+        af_full.extend_from_slice(&str1_bytes);
+        af_full.extend_from_slice(&str2_bytes);
+
+        // Split so the first string's ext payload spans a CONTINUE record (after 2 ext bytes).
+        let string_start = 20usize;
+        let split_at = string_start + 3 + 4 + s1.len() + 2; // header(3) + cbExtRst(4) + chars + 2 ext bytes
+        let first_payload = &af_full[..split_at];
+        let remaining = &af_full[split_at..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment flags (compressed)
+        continue_payload.extend_from_slice(remaining);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_worksheet()),
+            record(RECORD_AUTOFILTER, first_payload),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
+
+        assert_eq!(parsed.filter_columns.len(), 1);
+        let col = &parsed.filter_columns[0];
+        assert_eq!(
+            col.criteria,
+            vec![
+                FilterCriterion::Equals(FilterValue::Text(s1.into())),
+                FilterCriterion::Equals(FilterValue::Text(s2.into()))
+            ]
         );
     }
 
@@ -1041,14 +1205,9 @@ mod tests {
         ]
         .concat();
 
-        let parsed = parse_biff_sheet_autofilter_criteria(
-            &stream,
-            0,
-            BiffVersion::Biff8,
-            1252,
-            range,
-        )
-        .expect("parse");
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
 
         assert_eq!(parsed.filter_columns.len(), 1);
         let col = &parsed.filter_columns[0];
@@ -1062,11 +1221,15 @@ mod tests {
     fn truncated_autofilter_payload_emits_warning_and_skips_record() {
         let range = Range::new(CellRef::new(0, 0), CellRef::new(10, 0)); // A
 
-        let stream = [record(RECORD_AUTOFILTER, &[1, 2, 3]), record(records::RECORD_EOF, &[])]
-            .concat();
+        let stream = [
+            record(RECORD_AUTOFILTER, &[1, 2, 3]),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
 
-        let parsed = parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
-            .expect("parse");
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
         assert!(parsed.filter_columns.is_empty());
         assert!(
             parsed
@@ -1101,7 +1264,11 @@ mod tests {
         af.extend_from_slice(&xl_unicode_string_compressed("foo"));
         af.extend_from_slice(&xl_unicode_string_compressed("bar"));
 
-        let stream = [record(RECORD_AUTOFILTER, &af), record(records::RECORD_EOF, &[])].concat();
+        let stream = [
+            record(RECORD_AUTOFILTER, &af),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
 
         let parsed =
             parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
@@ -1120,7 +1287,8 @@ mod tests {
             parsed
                 .warnings
                 .iter()
-                .any(|w| w.contains("unknown AUTOFILTER operator code 0xFF") && w.contains("offset 0")),
+                .any(|w| w.contains("unknown AUTOFILTER operator code 0xFF")
+                    && w.contains("offset 0")),
             "expected unknown-op warning, got {:?}",
             parsed.warnings
         );
@@ -1151,14 +1319,9 @@ mod tests {
         ]
         .concat();
 
-        let parsed = parse_biff_sheet_autofilter_criteria(
-            &stream,
-            0,
-            BiffVersion::Biff8,
-            1252,
-            range,
-        )
-        .expect("parse");
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
 
         assert_eq!(parsed.filter_columns.len(), 1);
         assert_eq!(parsed.filter_columns[0].col_id, 0);
@@ -1189,14 +1352,9 @@ mod tests {
         ]
         .concat();
 
-        let parsed = parse_biff_sheet_autofilter_criteria(
-            &stream,
-            0,
-            BiffVersion::Biff8,
-            1252,
-            range,
-        )
-        .expect("parse");
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
 
         assert_eq!(parsed.filter_columns.len(), 1);
         assert_eq!(parsed.filter_columns[0].col_id, 0);
@@ -1228,14 +1386,9 @@ mod tests {
         ]
         .concat();
 
-        let parsed = parse_biff_sheet_autofilter_criteria(
-            &stream,
-            0,
-            BiffVersion::Biff8,
-            1252,
-            range,
-        )
-        .expect("parse");
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
 
         let col = &parsed.filter_columns[0];
         assert_eq!(col.join, FilterJoin::All);
@@ -1274,14 +1427,9 @@ mod tests {
         ]
         .concat();
 
-        let parsed = parse_biff_sheet_autofilter_criteria(
-            &stream,
-            0,
-            BiffVersion::Biff8,
-            1252,
-            range,
-        )
-        .expect("parse");
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
 
         let col = &parsed.filter_columns[0];
         assert_eq!(col.join, FilterJoin::Any);
