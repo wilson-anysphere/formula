@@ -141,18 +141,16 @@ Current state in this repo (important nuance):
       - For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world producers omit
         it.
     - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
-      is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` depending on the decrypted payload;
-      Standard AES may return `Workbook::Model` via the streaming decrypt path).
+      is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` depending on the decrypted payload).
   - `open_workbook_model_with_options` can also decrypt encrypted OOXML wrappers when
     `formula-io/encrypted-workbooks` is enabled (and surfaces `PasswordRequired` when
     `OpenOptions.password` is `None`). Without that feature, encrypted OOXML containers surface
     `UnsupportedEncryption`. `open_workbook_model_with_password` is a convenience wrapper around it.
   - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
     `crates/formula-io/src/encrypted_package_reader.rs`.
-    - This is used by `open_workbook_with_options` to open Standard/CryptoAPI AES workbooks into a
-      model without materializing the decrypted ZIP bytes.
-    - Other encrypted-open paths (Agile, Standard RC4, and the `_with_password` helpers) still
-      decrypt `EncryptedPackage` into an in-memory buffer first.
+    - This is used for some compatibility fallbacks (for example Agile files that omit
+      `<dataIntegrity>`).
+    - Other encrypted-open paths still decrypt `EncryptedPackage` into an in-memory buffer first.
 
 When triaging user reports, the most important thing is to capture the `EncryptionInfo` version
 because it determines which scheme you’re dealing with:

@@ -46,7 +46,7 @@ callers can decide whether to prompt for a password vs report “unsupported enc
     - For Agile, `dataIntegrity` (HMAC) is validated when present; some real-world producers omit it.
     - Decrypted packages containing `xl/workbook.bin` are routed to the XLSB open path.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
-    is provided (typically returns `Workbook::Xlsx`; Standard AES may return `Workbook::Model`).
+    is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` depending on the decrypted payload).
   - `open_workbook_model_with_options` can also decrypt encrypted OOXML wrappers when
     `formula-io/encrypted-workbooks` is enabled (and surfaces `PasswordRequired` when
     `OpenOptions.password` is `None`). Without that feature, encrypted OOXML containers surface
@@ -284,7 +284,7 @@ Implementation status:
   - The streaming decrypt reader (`crates/formula-io/src/encrypted_ooxml.rs`) does not validate
     `dataIntegrity`.
     - It is used for some compatibility fallbacks (for example Agile files that omit
-      `<dataIntegrity>`) and for Standard AES streaming opens in `open_workbook_with_options`.
+      `<dataIntegrity>`).
     - Other encrypted-open paths still decrypt `EncryptedPackage` into an in-memory buffer first.
 - `crates/formula-offcrypto` can validate `dataIntegrity` when decrypting Agile packages via
   `decrypt_encrypted_package` with `DecryptOptions.verify_integrity = true` (default: `false`).

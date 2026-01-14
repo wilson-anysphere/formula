@@ -19,11 +19,11 @@ High-level behavior in `formula-io`:
     **Standard/CryptoAPI** (minor=2; commonly `3.2`/`4.2`) encrypted `.xlsx`/`.xlsm`/`.xlsb`.
     - Decrypted packages containing `xl/workbook.bin` are routed to the XLSB open path.
   - `open_workbook_with_options` can also decrypt and open encrypted OOXML wrappers when a password
-    is provided (typically returns `Workbook::Xlsx`; Standard AES may return `Workbook::Model`).
+    is provided (returns `Workbook::Xlsx` / `Workbook::Xlsb` depending on the decrypted payload).
   - A streaming decrypt reader exists in `crates/formula-io/src/encrypted_ooxml.rs` +
     `crates/formula-io/src/encrypted_package_reader.rs`.
-    - This is used by `open_workbook_with_options` for Standard/CryptoAPI AES to avoid materializing
-      decrypted ZIP bytes.
+    - This is used for some compatibility fallbacks (for example Agile files that omit
+      `<dataIntegrity>`).
     - Other encrypted-open paths still decrypt into an in-memory buffer first.
 
 Standard/CryptoAPI decryption primitives also exist in lower-level crates (notably
