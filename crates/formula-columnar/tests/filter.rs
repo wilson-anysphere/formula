@@ -271,6 +271,48 @@ fn filter_number_canonicalizes_negative_zero_and_nans_for_equality() {
 }
 
 #[test]
+fn filter_number_range_comparisons_against_nan_are_false() {
+    let schema = vec![ColumnSchema {
+        name: "n".to_owned(),
+        column_type: ColumnType::Number,
+    }];
+    let mut builder = ColumnarTableBuilder::new(schema, options());
+    let rows = [Value::Number(0.0), Value::Number(1.0), Value::Number(f64::NAN), Value::Null];
+    for v in rows {
+        builder.append_row(&[v]);
+    }
+    let table = builder.finalize();
+
+    for op in [CmpOp::Lt, CmpOp::Lte, CmpOp::Gt, CmpOp::Gte] {
+        let mask = table
+            .filter_mask(&FilterExpr::Cmp {
+                col: 0,
+                op,
+                value: FilterValue::Number(f64::NAN),
+            })
+            .unwrap();
+        assert_eq!(mask_to_bools(&mask), vec![false, false, false, false]);
+    }
+}
+
+#[test]
+fn filter_number_ne_outside_range_matches_is_not_null() {
+    let table = build_table();
+    let ne = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Ne,
+            value: FilterValue::Number(999.0),
+        })
+        .unwrap();
+    // All non-null numeric values are != 999.0.
+    assert_eq!(
+        mask_to_bools(&ne),
+        vec![true, true, true, false, true, true]
+    );
+}
+
+#[test]
 fn filter_boolean_and_nulls() {
     let table = build_table();
 
