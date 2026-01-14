@@ -1081,7 +1081,10 @@ fn build_parts(
             let cols_xml = render_cols(sheet, worksheet_prefix.as_deref(), &style_to_xf);
             sheet_xml = update_cols_xml(&sheet_xml, &cols_xml)?;
         }
-        if conditional_formatting_changed {
+        // `write_worksheet_xml` already serializes conditional formatting for synthesized sheet
+        // parts. Only run the streaming rewrite for existing worksheets (where we need to inject
+        // `<conditionalFormatting>` blocks into preserved XML that previously had none).
+        if conditional_formatting_changed && !is_new_sheet {
             sheet_xml = crate::conditional_formatting::update_worksheet_conditional_formatting_xml(
                 &sheet_xml,
                 &sheet.conditional_formatting_rules,
