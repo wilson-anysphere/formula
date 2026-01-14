@@ -2565,13 +2565,20 @@ export class SpreadsheetApp {
 
     // Avoid allocating a fresh `{row,col}` object for every chart cell lookup.
     const chartCoordScratch = { row: 0, col: 0 };
+    // Read cells without materializing missing sheets. Charts can hold onto stale sheet ids
+    // (e.g. from a stale sheetNameResolver mapping) even after a sheet has been deleted.
+    // Using `peekCell` keeps chart refreshes side-effect free and prevents resurrecting
+    // deleted sheets via `DocumentController.getCell()`.
+    const getChartCellState =
+      typeof (this.document as any).peekCell === "function"
+        ? (sheetId: string, coord: { row: number; col: number }) =>
+            ((this.document as any).peekCell(sheetId, coord) as { value: unknown; formula: string | null })
+        : (sheetId: string, coord: { row: number; col: number }) =>
+            (this.document.getCell(sheetId, coord) as { value: unknown; formula: string | null });
     const getChartCellValue = (sheetId: string, row: number, col: number): unknown => {
       chartCoordScratch.row = row;
       chartCoordScratch.col = col;
-      const state = this.document.getCell(sheetId, chartCoordScratch) as {
-        value: unknown;
-        formula: string | null;
-      };
+      const state = getChartCellState(sheetId, chartCoordScratch);
       if (state?.formula != null) {
         // Charts should use computed values for formulas (show-formulas is a display-only toggle).
         const computed = this.getCellComputedValueForSheetInternal(sheetId, chartCoordScratch);
