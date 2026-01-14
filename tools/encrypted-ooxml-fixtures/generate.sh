@@ -38,19 +38,25 @@ if [[ $# -ne 4 ]]; then
   exit 2
 fi
 
-MODE="$1"
+MODE_RAW="$1"
+MODE="$(printf '%s' "${MODE_RAW}" | tr '[:upper:]' '[:lower:]')"
 PASSWORD="$2"
 IN_PLAINTEXT_XLSX="$3"
 OUT_ENCRYPTED_XLSX="$4"
 
 if [[ "${MODE}" != "agile" && "${MODE}" != "standard" ]]; then
-  echo "ERROR: mode must be 'agile' or 'standard' (got: ${MODE})" >&2
+  echo "ERROR: mode must be 'agile' or 'standard' (got: ${MODE_RAW})" >&2
   usage
   exit 2
 fi
 
 if [[ ! -f "${IN_PLAINTEXT_XLSX}" ]]; then
   echo "ERROR: input plaintext xlsx not found: ${IN_PLAINTEXT_XLSX}" >&2
+  exit 2
+fi
+
+if [[ "${IN_PLAINTEXT_XLSX}" == "${OUT_ENCRYPTED_XLSX}" ]]; then
+  echo "ERROR: output path must be different from input path (${IN_PLAINTEXT_XLSX})" >&2
   exit 2
 fi
 
