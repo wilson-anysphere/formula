@@ -8854,25 +8854,6 @@ function handleRibbonCommand(commandId: string): void {
     }
 
     switch (commandId) {
-      case "pageLayout.arrange.selectionPane": {
-        // Excel-style: "Selection Pane" should be idempotent. If the panel is already open,
-        // activate/focus it instead of toggling it closed.
-        openRibbonPanel(PanelIds.SELECTION_PANE);
-        // The panel is a React mount; wait a frame so DOM nodes exist before focusing.
-        if (typeof document !== "undefined" && typeof requestAnimationFrame === "function") {
-          requestAnimationFrame(() =>
-            requestAnimationFrame(() => {
-              const el = document.querySelector<HTMLElement>("[data-testid=\"selection-pane\"]");
-              try {
-                el?.focus();
-              } catch {
-                // Best-effort.
-              }
-            }),
-          );
-        }
-        return;
-      }
       case "insert.illustrations.pictures":
       case "insert.illustrations.pictures.thisDevice":
       case "insert.illustrations.pictures.stockImages":

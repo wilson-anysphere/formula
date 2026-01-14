@@ -4,6 +4,8 @@ import { mergeAcross, mergeCells, mergeCenter, unmergeCells } from "../document/
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import { showInputBox, showToast, type QuickPickItem } from "../extensions/ui.js";
 import type { LayoutController } from "../layout/layoutController.js";
+import { getPanelPlacement } from "../layout/layoutState.js";
+import { PanelIds } from "../panels/panelRegistry.js";
 import { t } from "../i18n/index.js";
 import type { ThemeController } from "../theme/themeController.js";
 
@@ -558,6 +560,52 @@ export function registerDesktopCommands(params: {
       icon: null,
       description: "Send the selected drawing backward",
       keywords: ["arrange", "drawing", "send backward", "z order", "layer"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "pageLayout.arrange.selectionPane",
+    "Selection Pane",
+    () => {
+      if (!layoutController) {
+        try {
+          app.focus();
+        } catch {
+          // ignore (tests/minimal harnesses)
+        }
+        return;
+      }
+
+      // Excel-style: "Selection Pane" should be idempotent. If the panel is already open,
+      // activate/focus it instead of toggling it closed.
+      const panelId = PanelIds.SELECTION_PANE;
+      const placement = getPanelPlacement(layoutController.layout, panelId);
+      layoutController.openPanel(panelId);
+
+      // Floating panels can be minimized; opening should restore them.
+      if (placement.kind === "floating" && (layoutController.layout as any)?.floating?.[panelId]?.minimized) {
+        layoutController.setFloatingPanelMinimized(panelId, false);
+      }
+
+      // The panel is a React mount; wait a frame (or two) so DOM nodes exist before focusing.
+      if (typeof document !== "undefined" && typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const el = document.querySelector<HTMLElement>('[data-testid="selection-pane"]');
+            try {
+              el?.focus();
+            } catch {
+              // Best-effort.
+            }
+          }),
+        );
+      }
+    },
+    {
+      category: commandCategoryPageLayout,
+      icon: null,
+      description: "Open the Selection Pane panel",
+      keywords: ["selection pane", "arrange", "drawing", "objects"],
     },
   );
 

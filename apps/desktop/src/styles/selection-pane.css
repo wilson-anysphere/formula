@@ -34,7 +34,7 @@
 }
 
 .selection-pane__row--selected {
-  background: var(--selection-fill, rgba(60, 120, 255, 0.12));
+  background: var(--formula-grid-selection-fill, var(--selection-fill, var(--selection-bg)));
 }
 
 .selection-pane__icon {

@@ -302,6 +302,7 @@ test("validate-linux-rpm accepts when RPM %{NAME} is overridden for validation",
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
+      "/usr/share/mime/packages/app.formula.desktop.xml",
       `/usr/share/doc/${overrideName}/LICENSE`,
       `/usr/share/doc/${overrideName}/NOTICE`,
     ].join("\n"),
@@ -619,6 +620,7 @@ test("validate-linux-rpm fails when extracted .desktop lacks URL scheme handler 
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
+      "/usr/share/mime/packages/app.formula.desktop.xml",
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
