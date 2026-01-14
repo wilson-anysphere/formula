@@ -19,9 +19,8 @@ fn open_stream_case_tolerant<R: std::io::Read + std::io::Write + std::io::Seek>(
 }
 
 fn read_stream(path: &Path, stream_name: &str) -> Vec<u8> {
-    let file = std::fs::File::open(path).unwrap_or_else(|err| {
-        panic!("open fixture file {} failed: {err}", path.display())
-    });
+    let file = std::fs::File::open(path)
+        .unwrap_or_else(|err| panic!("open fixture file {} failed: {err}", path.display()));
     let mut ole = cfb::CompoundFile::open(file)
         .unwrap_or_else(|err| panic!("open cfb (OLE) container {} failed: {err}", path.display()));
 
@@ -33,9 +32,12 @@ fn read_stream(path: &Path, stream_name: &str) -> Vec<u8> {
     });
 
     let mut buf = Vec::new();
-    stream
-        .read_to_end(&mut buf)
-        .unwrap_or_else(|err| panic!("read {stream_name} stream from {} failed: {err}", path.display()));
+    stream.read_to_end(&mut buf).unwrap_or_else(|err| {
+        panic!(
+            "read {stream_name} stream from {} failed: {err}",
+            path.display()
+        )
+    });
     buf
 }
 
@@ -56,7 +58,8 @@ fn assert_standard_fixture_encryption_params(path: &Path, expected: ExpectedStan
     let version =
         EncryptionVersionInfo::parse(&encryption_info).expect("parse EncryptionVersionInfo");
     assert_eq!(
-        version.minor, 2,
+        version.minor,
+        2,
         "expected Standard EncryptionInfo versionMinor==2, got {} for {}",
         version.minor,
         path.display()
@@ -82,17 +85,20 @@ fn assert_standard_fixture_encryption_params(path: &Path, expected: ExpectedStan
     };
 
     assert_eq!(
-        header.alg_id, expected.alg_id,
+        header.alg_id,
+        expected.alg_id,
         "cipher algId changed for {}",
         path.display()
     );
     assert_eq!(
-        header.alg_id_hash, expected.alg_id_hash,
+        header.alg_id_hash,
+        expected.alg_id_hash,
         "hash algIdHash changed for {}",
         path.display()
     );
     assert_eq!(
-        header.key_size_bits, expected.key_size_bits,
+        header.key_size_bits,
+        expected.key_size_bits,
         "keySize changed for {}",
         path.display()
     );
@@ -103,7 +109,8 @@ fn assert_standard_fixture_encryption_params(path: &Path, expected: ExpectedStan
         path.display()
     );
     assert_eq!(
-        verifier.verifier_hash_size, expected.verifier_hash_size,
+        verifier.verifier_hash_size,
+        expected.verifier_hash_size,
         "verifierHashSize changed for {}",
         path.display()
     );
