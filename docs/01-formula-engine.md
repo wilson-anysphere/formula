@@ -367,8 +367,8 @@ restrictions (notably: no `]`), so this split is unambiguous.
   * For external-workbook 3D spans (`[Book.xlsx]Sheet1:Sheet3!A1`), `precedents(...)` expands into
     per-sheet precedents when a provider is configured and `sheet_order(...)` is available.
   * If no provider is configured (or `sheet_order(...)` is unavailable/missing endpoints),
-    `precedents(...)` reports the raw span key as a single external precedent
-    (e.g. `"[Book.xlsx]Sheet1:Sheet3"`), since it cannot determine the intermediate sheets.
+    `precedents(...)` cannot expand the span and therefore **omits** it (it does not report a single
+    external precedent for the raw span key).
 * **External 3D spans as formula results:** `=[Book.xlsx]Sheet1:Sheet3!A1` is a multi-area reference
   union. Since the engine cannot spill multi-area unions as a single rectangular array, it evaluates
   to `#VALUE!` when the span can be expanded (or `#REF!` when `sheet_order` is unavailable/missing
