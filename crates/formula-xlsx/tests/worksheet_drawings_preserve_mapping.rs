@@ -236,3 +236,52 @@ fn xlsx_document_roundtrip_preserves_multi_sheet_drawing_relationship_mapping() 
     let out_parts = drawing_part_names(&saved);
     assert_eq!(out_parts, in_parts, "drawing part names should be preserved");
 }
+
+#[test]
+fn xlsx_document_roundtrip_preserves_drawing_mapping_after_sheet_reorder() {
+    let input = build_two_sheet_drawing_workbook();
+    let mut doc = load_from_bytes(&input).expect("load synthetic workbook");
+
+    let sheet2_id = doc
+        .workbook
+        .sheets
+        .iter()
+        .find(|s| s.name == "Sheet2")
+        .expect("Sheet2")
+        .id;
+    assert!(
+        doc.workbook.reorder_sheet(sheet2_id, 0),
+        "expected reorder_sheet to succeed"
+    );
+    assert_eq!(
+        doc.workbook.sheets[0].name, "Sheet2",
+        "sanity check: sheet order should change in the in-memory model"
+    );
+
+    let saved = doc.save_to_vec().expect("save");
+    let workbook_xml = zip_part_string(&saved, "xl/workbook.xml").expect("workbook.xml");
+    let sheet1_pos = workbook_xml
+        .find("name=\"Sheet1\"")
+        .expect("Sheet1 in workbook.xml");
+    let sheet2_pos = workbook_xml
+        .find("name=\"Sheet2\"")
+        .expect("Sheet2 in workbook.xml");
+    assert!(
+        sheet2_pos < sheet1_pos,
+        "expected Sheet2 to appear before Sheet1 after reordering"
+    );
+
+    let sheet1_rels = zip_part_string(&saved, "xl/worksheets/_rels/sheet1.xml.rels")
+        .expect("output sheet1 rels");
+    let (sheet1_out_id, sheet1_out_target) =
+        sheet_drawing_relationship(&sheet1_rels).expect("output sheet1 drawing rel");
+    let sheet2_rels = zip_part_string(&saved, "xl/worksheets/_rels/sheet2.xml.rels")
+        .expect("output sheet2 rels");
+    let (sheet2_out_id, sheet2_out_target) =
+        sheet_drawing_relationship(&sheet2_rels).expect("output sheet2 drawing rel");
+
+    assert_eq!(sheet1_out_id, "rId1");
+    assert_eq!(sheet1_out_target, "../drawings/drawing1.xml");
+    assert_eq!(sheet2_out_id, "rId1");
+    assert_eq!(sheet2_out_target, "../drawings/drawing2.xml");
+}
