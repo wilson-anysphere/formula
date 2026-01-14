@@ -503,7 +503,9 @@ export class CellStructuralConflictMonitor {
 
     this._agePruneTimer = setTimeout(() => {
       this._agePruneTimer = null;
-      this._pruneOpLogByAge();
+      // Force to ensure we actually run even if the timer fires slightly early
+      // (and therefore the normal throttle window hasn't fully elapsed yet).
+      this._pruneOpLogByAge({ force: true });
     }, minIntervalMs);
 
     // In Node tests, avoid keeping the process alive solely for best-effort
