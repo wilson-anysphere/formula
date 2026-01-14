@@ -3698,7 +3698,7 @@ impl Engine {
                 );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) =
-                analyze_external_dependencies(&ast, key, &self.workbook);
+                analyze_external_dependencies(&ast, key, &self.workbook, self.external_value_provider.as_deref());
             self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
             let calc_precedents =
@@ -3998,7 +3998,12 @@ impl Engine {
                 );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) =
-                analyze_external_dependencies(&compiled_ast, key, &self.workbook);
+                analyze_external_dependencies(
+                    &compiled_ast,
+                    key,
+                    &self.workbook,
+                    self.external_value_provider.as_deref(),
+                );
             self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
             let calc_precedents = analyze_calc_precedents(
@@ -4300,7 +4305,12 @@ impl Engine {
             );
         self.set_cell_name_refs(key, names);
         let (external_sheets, external_workbooks) =
-            analyze_external_dependencies(&compiled, key, &self.workbook);
+            analyze_external_dependencies(
+                &compiled,
+                key,
+                &self.workbook,
+                self.external_value_provider.as_deref(),
+            );
         self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
         // Optimized precedents for calculation ordering (range nodes are not expanded).
@@ -5732,8 +5742,10 @@ impl Engine {
                     .collect();
                 for reference in traced_precedents {
                     let crate::functions::SheetId::Local(sheet_id) = reference.sheet_id else {
-                        // External references can't be represented in the internal dependency graph yet.
-                        // They are treated as volatile and surfaced via the precedents API instead.
+                        // External references can't be represented in the internal dependency graph
+                        // yet. By default they are handled via the engine's volatile external-ref
+                        // semantics; when external refs are configured as non-volatile, callers
+                        // must explicitly invalidate dependents via `mark_external_*_dirty`.
                         continue;
                     };
                     let sheet_id = sheet_id_for_graph(sheet_id);
@@ -7619,7 +7631,7 @@ impl Engine {
                 );
             self.set_cell_name_refs(key, names);
             let (external_sheets, external_workbooks) =
-                analyze_external_dependencies(&ast, key, &self.workbook);
+                analyze_external_dependencies(&ast, key, &self.workbook, self.external_value_provider.as_deref());
             self.set_cell_external_refs(key, external_sheets, external_workbooks);
 
             let calc_precedents =
@@ -11225,7 +11237,8 @@ fn rewrite_defined_name_constants_for_bytecode(
 /// [`Engine::mark_external_workbook_dirty`].
 ///
 /// The engine does not track dependencies to individual external cells; invalidation is coarse
-/// (sheet key / workbook id), and external 3D spans are not expanded for invalidation.
+/// (sheet key / workbook id). External-workbook 3D spans are expanded to per-sheet keys for
+/// invalidation when the provider supplies `sheet_order(workbook)`.
 ///
 /// Note: Excel compares sheet names case-insensitively across Unicode and applies compatibility
 /// normalization (NFKC). The engine preserves the formula's casing in the sheet key for single-sheet
@@ -14404,6 +14417,7 @@ fn analyze_external_dependencies(
     expr: &CompiledExpr,
     current_cell: CellKey,
     workbook: &Workbook,
+    external_value_provider: Option<&dyn ExternalValueProvider>,
 ) -> (HashSet<String>, HashSet<String>) {
     let mut external_sheets: HashSet<String> = HashSet::new();
     let mut external_workbooks: HashSet<String> = HashSet::new();
@@ -14413,6 +14427,7 @@ fn analyze_external_dependencies(
         expr,
         current_cell,
         workbook,
+        external_value_provider,
         &mut external_sheets,
         &mut external_workbooks,
         &mut visiting_names,
@@ -14425,6 +14440,7 @@ fn walk_external_dependencies(
     expr: &CompiledExpr,
     current_cell: CellKey,
     workbook: &Workbook,
+    external_value_provider: Option<&dyn ExternalValueProvider>,
     external_sheets: &mut HashSet<String>,
     external_workbooks: &mut HashSet<String>,
     visiting_names: &mut HashSet<(SheetId, String)>,
@@ -14451,6 +14467,14 @@ fn walk_external_dependencies(
                 }
                 if crate::eval::is_valid_external_sheet_key(key) {
                     external_sheets.insert(key.clone());
+                } else if crate::eval::split_external_sheet_span_key(key).is_some() {
+                    if let Some(expanded) =
+                        expand_external_sheet_span_key(key, external_value_provider)
+                    {
+                        for sheet_key in expanded {
+                            external_sheets.insert(sheet_key);
+                        }
+                    }
                 }
             }
         }
@@ -14461,6 +14485,14 @@ fn walk_external_dependencies(
                 }
                 if crate::eval::is_valid_external_sheet_key(key) {
                     external_sheets.insert(key.clone());
+                } else if crate::eval::split_external_sheet_span_key(key).is_some() {
+                    if let Some(expanded) =
+                        expand_external_sheet_span_key(key, external_value_provider)
+                    {
+                        for sheet_key in expanded {
+                            external_sheets.insert(sheet_key);
+                        }
+                    }
                 }
             }
         }
@@ -14494,6 +14526,7 @@ fn walk_external_dependencies(
                             addr: current_cell.addr,
                         },
                         workbook,
+                        external_value_provider,
                         external_sheets,
                         external_workbooks,
                         visiting_names,
@@ -14507,6 +14540,7 @@ fn walk_external_dependencies(
             base,
             current_cell,
             workbook,
+            external_value_provider,
             external_sheets,
             external_workbooks,
             visiting_names,
@@ -14519,6 +14553,7 @@ fn walk_external_dependencies(
             expr,
             current_cell,
             workbook,
+            external_value_provider,
             external_sheets,
             external_workbooks,
             visiting_names,
@@ -14529,6 +14564,7 @@ fn walk_external_dependencies(
                 left,
                 current_cell,
                 workbook,
+                external_value_provider,
                 external_sheets,
                 external_workbooks,
                 visiting_names,
@@ -14538,6 +14574,7 @@ fn walk_external_dependencies(
                 right,
                 current_cell,
                 workbook,
+                external_value_provider,
                 external_sheets,
                 external_workbooks,
                 visiting_names,
@@ -14562,6 +14599,7 @@ fn walk_external_dependencies(
                                 &pair[1],
                                 current_cell,
                                 workbook,
+                                external_value_provider,
                                 external_sheets,
                                 external_workbooks,
                                 visiting_names,
@@ -14577,6 +14615,7 @@ fn walk_external_dependencies(
                             &args[args.len() - 1],
                             current_cell,
                             workbook,
+                            external_value_provider,
                             external_sheets,
                             external_workbooks,
                             visiting_names,
@@ -14605,6 +14644,7 @@ fn walk_external_dependencies(
                             &args[args.len() - 1],
                             current_cell,
                             workbook,
+                            external_value_provider,
                             external_sheets,
                             external_workbooks,
                             visiting_names,
@@ -14633,6 +14673,7 @@ fn walk_external_dependencies(
                                         addr: current_cell.addr,
                                     },
                                     workbook,
+                                    external_value_provider,
                                     external_sheets,
                                     external_workbooks,
                                     visiting_names,
@@ -14650,6 +14691,7 @@ fn walk_external_dependencies(
                     a,
                     current_cell,
                     workbook,
+                    external_value_provider,
                     external_sheets,
                     external_workbooks,
                     visiting_names,
@@ -14662,6 +14704,7 @@ fn walk_external_dependencies(
                 callee,
                 current_cell,
                 workbook,
+                external_value_provider,
                 external_sheets,
                 external_workbooks,
                 visiting_names,
@@ -14672,6 +14715,7 @@ fn walk_external_dependencies(
                     a,
                     current_cell,
                     workbook,
+                    external_value_provider,
                     external_sheets,
                     external_workbooks,
                     visiting_names,
@@ -14685,6 +14729,7 @@ fn walk_external_dependencies(
                     el,
                     current_cell,
                     workbook,
+                    external_value_provider,
                     external_sheets,
                     external_workbooks,
                     visiting_names,

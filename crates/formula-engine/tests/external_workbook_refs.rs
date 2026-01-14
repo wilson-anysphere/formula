@@ -279,6 +279,8 @@ fn indirect_external_range_ref_is_ref_error() {
         .unwrap();
     engine.recalculate();
 
+    // Excel's INDIRECT cannot resolve references into external workbooks, so the INDIRECT returns
+    // `#REF!` and SUM propagates it.
     assert_eq!(
         engine.get_cell_value("Sheet1", "A1"),
         Value::Error(formula_engine::ErrorKind::Ref)
@@ -539,6 +541,43 @@ fn external_sheet_invalidation_only_dirties_dependents_of_that_sheet() {
     engine.mark_external_sheet_dirty("[Book.xlsx]Sheet2");
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(20.0));
+}
+
+#[test]
+fn external_sheet_invalidation_dirties_external_3d_span_dependents() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet2", CellAddr { row: 0, col: 0 }, 10.0);
+    provider.set("[Book.xlsx]Sheet3", CellAddr { row: 0, col: 0 }, 100.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_external_refs_volatile(false);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(111.0));
+
+    provider.set("[Book.xlsx]Sheet2", CellAddr { row: 0, col: 0 }, 20.0);
+
+    // Without invalidation, the 3D span should not be refreshed because external refs are
+    // configured as non-volatile.
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(111.0));
+
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet2");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(121.0));
 }
 
 #[test]
