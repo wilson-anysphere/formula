@@ -68,6 +68,15 @@ describe("tokenizeFormula", () => {
     ]);
   });
 
+  it("treats whitespace between function names and '(' as a function token", () => {
+    const tokens = tokenizeFormula("=SUM (A1, B1)").filter((t) => t.type !== "whitespace");
+    expect(tokens.slice(0, 3).map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["function", "SUM"],
+      ["punctuation", "("],
+    ]);
+  });
+
   it("does not include trailing brackets in error literals", () => {
     const tokens = tokenizeFormula("=[#REF!]").filter((t) => t.type !== "whitespace");
     expect(tokens.map((t) => [t.type, t.text])).toEqual([

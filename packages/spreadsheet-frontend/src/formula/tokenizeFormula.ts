@@ -730,7 +730,11 @@ export function tokenizeFormula(input: string): FormulaToken[] {
         i = next.nextIndex;
       }
       const ident = input.slice(start, i);
-      if (input[i] === "(") {
+      // Excel permits whitespace between a function name and the opening paren (e.g. `SUM (A1)`).
+      // Treat that as a function token for highlighting/autocomplete parity with the engine lexer.
+      let scan = i;
+      while (scan < input.length && isWhitespace(input[scan] ?? "")) scan += 1;
+      if (input[scan] === "(") {
         tokens.push({ type: "function", text: ident, start, end: i });
       } else {
         tokens.push({ type: "identifier", text: ident, start, end: i });
