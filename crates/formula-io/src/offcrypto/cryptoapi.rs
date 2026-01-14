@@ -164,6 +164,9 @@ pub fn final_hash(h: &[u8], block: u32, hash_alg: HashAlg) -> Vec<u8> {
 /// key = Hash(ipad) || Hash(opad)
 /// return key[..key_len_bytes]
 /// ```
+///
+/// Note: For MS-OFFCRYPTO Standard AES encryption, Office/CryptoAPI use this derivation even when
+/// `key_len_bytes <= hash_len` (i.e. AES-128 keys are **not** a direct truncation of the digest).
 pub fn crypt_derive_key(hash_value: &[u8], key_len_bytes: usize, hash_alg: HashAlg) -> Vec<u8> {
     let hash_len = hash_alg.hash_len();
     debug_assert_eq!(
@@ -209,6 +212,7 @@ mod tests {
 
         let key = crypt_derive_key(&hash_value, 16, HashAlg::Sha1);
         let expected: [u8; 16] = [
+            // Prefix of the expanded key material (see `crypt_derive_key_sha1_expands_for_aes256`).
             0xB1, 0xBF, 0x85, 0x34, 0x6E, 0xCA, 0xE4, 0x29, 0xC0, 0xB3, 0x50, 0x63, 0x5B,
             0xAA, 0x3F, 0x25,
         ];
