@@ -16,6 +16,9 @@ function createStubCanvasContext(): {
     save: () => calls.push({ method: "save", args: [] }),
     restore: () => calls.push({ method: "restore", args: [] }),
     beginPath: () => calls.push({ method: "beginPath", args: [] }),
+    moveTo: (...args: unknown[]) => calls.push({ method: "moveTo", args }),
+    lineTo: (...args: unknown[]) => calls.push({ method: "lineTo", args }),
+    closePath: () => calls.push({ method: "closePath", args: [] }),
     rect: (...args: unknown[]) => calls.push({ method: "rect", args }),
     clip: () => calls.push({ method: "clip", args: [] }),
     setLineDash: (...args: unknown[]) => calls.push({ method: "setLineDash", args }),
@@ -228,5 +231,32 @@ describe("DrawingOverlay viewport transforms", () => {
       )
       .map((call) => call.args);
     expect(handleRects[0]).toEqual([-halfHandle, -halfHandle, RESIZE_HANDLE_SIZE_PX, RESIZE_HANDLE_SIZE_PX]);
+  });
+
+  it("renders objects whose transformed AABB intersects the viewport even when the raw rect is offscreen", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    // Without rotation, this rect is completely outside the 0..511 viewport on the X axis.
+    // With rotation, its AABB overlaps the viewport, so it should still render (clipped).
+    const rotated: DrawingObject = {
+      id: 1,
+      kind: { type: "unknown", label: "rotated" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(520), yEmu: pxToEmu(0) },
+        size: { cx: pxToEmu(100), cy: pxToEmu(100) },
+      },
+      zOrder: 0,
+      transform: { rotationDeg: 45, flipH: false, flipV: false },
+    };
+
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 511, height: 511, dpr: 1 };
+    await overlay.render([rotated], viewport);
+
+    // For transformed objects we draw a path (moveTo/lineTo) and call `stroke`, rather than `strokeRect`.
+    expect(calls.some((call) => call.method === "stroke")).toBe(true);
+    expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
   });
 });

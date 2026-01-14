@@ -3,7 +3,7 @@ import { ImageBitmapCache } from "./imageBitmapCache";
 import { graphicFramePlaceholderLabel, isGraphicFrame, parseShapeRenderSpec, type ShapeRenderSpec } from "./shapeRenderer";
 import { parseDrawingMLShapeText, type ShapeTextLayout, type ShapeTextRun } from "./drawingml/shapeText";
 import { getResizeHandleCenters, getRotationHandleCenter, RESIZE_HANDLE_SIZE_PX, ROTATION_HANDLE_SIZE_PX } from "./selectionHandles";
-import { applyTransformVector, degToRad } from "./transform";
+import { degToRad } from "./transform";
 import { DrawingSpatialIndex } from "./spatialIndex";
 
 import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
@@ -1055,37 +1055,62 @@ function hasNonIdentityTransform(transform: DrawingTransform | undefined): boole
   return transform.rotationDeg !== 0 || transform.flipH || transform.flipV;
 }
 
-type CornerPoint = { x: number; y: number };
+type CachedTrig = { rotationDeg: number; cos: number; sin: number };
 
-function getTransformedCorners(rect: Rect, transform: DrawingTransform): CornerPoint[] {
+const overlayTrigCache = new WeakMap<DrawingTransform, CachedTrig>();
+
+function getTransformTrig(transform: DrawingTransform): CachedTrig {
+  const cached = overlayTrigCache.get(transform);
+  const rot = transform.rotationDeg;
+  if (cached && cached.rotationDeg === rot) return cached;
+  const radians = degToRad(rot);
+  const next: CachedTrig = { rotationDeg: rot, cos: Math.cos(radians), sin: Math.sin(radians) };
+  overlayTrigCache.set(transform, next);
+  return next;
+}
+
+function rectToAabb(rect: Rect, transform: DrawingTransform): Rect {
   const cx = rect.x + rect.width / 2;
   const cy = rect.y + rect.height / 2;
   const hw = rect.width / 2;
   const hh = rect.height / 2;
-  const local = [
-    applyTransformVector(-hw, -hh, transform),
-    applyTransformVector(hw, -hh, transform),
-    applyTransformVector(hw, hh, transform),
-    applyTransformVector(-hw, hh, transform),
-  ];
-  return local.map((p) => ({ x: cx + p.x, y: cy + p.y }));
+
+  const trig = getTransformTrig(transform);
+  const cos = trig.cos;
+  const sin = trig.sin;
+
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  const visitCorner = (dx: number, dy: number) => {
+    let x = dx;
+    let y = dy;
+    if (transform.flipH) x = -x;
+    if (transform.flipV) y = -y;
+    // Forward transform: scale(flip) then rotate(theta).
+    const tx = x * cos - y * sin;
+    const ty = x * sin + y * cos;
+    const wx = cx + tx;
+    const wy = cy + ty;
+    if (wx < minX) minX = wx;
+    if (wx > maxX) maxX = wx;
+    if (wy < minY) minY = wy;
+    if (wy > maxY) maxY = wy;
+  };
+
+  visitCorner(-hw, -hh);
+  visitCorner(hw, -hh);
+  visitCorner(hw, hh);
+  visitCorner(-hw, hh);
+
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
 function getAabbForObject(rect: Rect, transform: DrawingTransform | undefined): Rect {
   if (!hasNonIdentityTransform(transform)) return rect;
-  const corners = getTransformedCorners(rect, transform!);
-  let minX = corners[0]!.x;
-  let maxX = corners[0]!.x;
-  let minY = corners[0]!.y;
-  let maxY = corners[0]!.y;
-  for (let i = 1; i < corners.length; i += 1) {
-    const p = corners[i]!;
-    if (p.x < minX) minX = p.x;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.y > maxY) maxY = p.y;
-  }
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  return rectToAabb(rect, transform!);
 }
 
 function withObjectTransform(
@@ -1114,12 +1139,39 @@ function withObjectTransform(
 }
 
 function drawTransformedRect(ctx: CanvasRenderingContext2D, rect: Rect, transform: DrawingTransform): void {
-  const corners = getTransformedCorners(rect, transform);
+  const cx = rect.x + rect.width / 2;
+  const cy = rect.y + rect.height / 2;
+  const hw = rect.width / 2;
+  const hh = rect.height / 2;
+
+  const trig = getTransformTrig(transform);
+  const cos = trig.cos;
+  const sin = trig.sin;
+
   ctx.beginPath();
-  ctx.moveTo(corners[0]!.x, corners[0]!.y);
-  for (let i = 1; i < corners.length; i += 1) {
-    ctx.lineTo(corners[i]!.x, corners[i]!.y);
-  }
+  let x = -hw;
+  let y = -hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  ctx.moveTo(cx + (x * cos - y * sin), cy + (x * sin + y * cos));
+
+  x = hw;
+  y = -hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  ctx.lineTo(cx + (x * cos - y * sin), cy + (x * sin + y * cos));
+
+  x = hw;
+  y = hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  ctx.lineTo(cx + (x * cos - y * sin), cy + (x * sin + y * cos));
+
+  x = -hw;
+  y = hh;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  ctx.lineTo(cx + (x * cos - y * sin), cy + (x * sin + y * cos));
   ctx.closePath();
   ctx.stroke();
 }
