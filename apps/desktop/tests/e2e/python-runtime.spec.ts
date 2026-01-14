@@ -1,10 +1,28 @@
 import { expect, test } from "@playwright/test";
 
+async function gotoPythonRuntime(page: import("@playwright/test").Page): Promise<void> {
+  // Vite may occasionally trigger a one-time full reload after dependency optimization. Retry once
+  // if the execution context is destroyed during startup.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await page.goto("/python-runtime-test.html", { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => Boolean((globalThis as any).__formulaPythonRuntime));
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (attempt === 0 && message.includes("Execution context was destroyed")) {
+        await page.waitForLoadState("domcontentloaded");
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 test("python-runtime: runs Pyodide with SharedArrayBuffer-backed formula bridge", async ({ page }) => {
   test.setTimeout(120_000);
 
-  await page.goto("/python-runtime-test.html", { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => Boolean((globalThis as any).__formulaPythonRuntime));
+  await gotoPythonRuntime(page);
 
   const runInPage = async () => {
     const { PyodideRuntime, MockWorkbook } = (globalThis as any).__formulaPythonRuntime;

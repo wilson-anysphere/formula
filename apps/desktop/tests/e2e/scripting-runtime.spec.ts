@@ -1,8 +1,26 @@
 import { expect, test } from "@playwright/test";
 
+async function gotoScriptingTestPage(page: import("@playwright/test").Page): Promise<void> {
+  // Vite may occasionally trigger a one-time full reload after dependency optimization. Retry once
+  // if the execution context is destroyed during startup.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await page.goto("/scripting-test.html", { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => Boolean((globalThis as any).__formulaScripting));
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (attempt === 0 && message.includes("Execution context was destroyed")) {
+        await page.waitForLoadState("domcontentloaded");
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 test("scripting: runs TypeScript in a WebWorker with RPC + network sandbox", async ({ page }) => {
-  await page.goto("/scripting-test.html", { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => Boolean((globalThis as any).__formulaScripting));
+  await gotoScriptingTestPage(page);
 
   const runInPage = async () => {
     const { ScriptRuntime, Workbook } = (globalThis as any).__formulaScripting;
@@ -171,8 +189,7 @@ export default async function main(ctx) {
 });
 
 test("scripting: times out hung scripts and ignores spoofed worker messages", async ({ page }) => {
-  await page.goto("/scripting-test.html", { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => Boolean((globalThis as any).__formulaScripting));
+  await gotoScriptingTestPage(page);
 
   const runInPage = async () => {
     const { ScriptRuntime, Workbook } = (globalThis as any).__formulaScripting;
@@ -216,8 +233,7 @@ await new Promise(() => {});
 });
 
 test("scripting: forwards ctx.confirm/prompt/alert via RPC", async ({ page }) => {
-  await page.goto("/scripting-test.html", { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => Boolean((globalThis as any).__formulaScripting));
+  await gotoScriptingTestPage(page);
 
   const dialogs: Array<{ type: string; message: string }> = [];
   page.on("dialog", async (dialog) => {
