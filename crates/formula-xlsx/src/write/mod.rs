@@ -6596,7 +6596,18 @@ fn append_cell_xml(
                     }
                     out.push('>');
                     out.push_str(&escape_text(s));
-                    out.push_str("</t></is>");
+                    out.push_str("</t>");
+                    if let Some(phonetic) = cell.phonetic.as_deref() {
+                        let base_len = s.chars().count();
+                        out.push_str(&format!(r#"<rPh sb="0" eb="{base_len}"><t"#));
+                        if needs_space_preserve(phonetic) {
+                            out.push_str(r#" xml:space="preserve""#);
+                        }
+                        out.push('>');
+                        out.push_str(&escape_text(phonetic));
+                        out.push_str("</t></rPh>");
+                    }
+                    out.push_str("</is>");
                 }
                 CellValueKind::Str => {
                     out.push_str("<v>");
@@ -6627,7 +6638,18 @@ fn append_cell_xml(
                         }
                         out.push('>');
                         out.push_str(&escape_text(s));
-                        out.push_str("</t></is>");
+                        out.push_str("</t>");
+                        if let Some(phonetic) = cell.phonetic.as_deref() {
+                            let base_len = s.chars().count();
+                            out.push_str(&format!(r#"<rPh sb="0" eb="{base_len}"><t"#));
+                            if needs_space_preserve(phonetic) {
+                                out.push_str(r#" xml:space="preserve""#);
+                            }
+                            out.push('>');
+                            out.push_str(&escape_text(phonetic));
+                            out.push_str("</t></rPh>");
+                        }
+                        out.push_str("</is>");
                     }
                     CellValueKind::Str => {
                         out.push_str("<v>");
@@ -6659,7 +6681,18 @@ fn append_cell_xml(
                         }
                         out.push('>');
                         out.push_str(&escape_text(&s));
-                        out.push_str("</t></is>");
+                        out.push_str("</t>");
+                        if let Some(phonetic) = cell.phonetic.as_deref() {
+                            let base_len = s.chars().count();
+                            out.push_str(&format!(r#"<rPh sb="0" eb="{base_len}"><t"#));
+                            if needs_space_preserve(phonetic) {
+                                out.push_str(r#" xml:space="preserve""#);
+                            }
+                            out.push('>');
+                            out.push_str(&escape_text(phonetic));
+                            out.push_str("</t></rPh>");
+                        }
+                        out.push_str("</is>");
                     }
                     CellValueKind::Str => {
                         out.push_str("<v>");
@@ -6691,7 +6724,18 @@ fn append_cell_xml(
                             }
                             out.push('>');
                             out.push_str(&escape_text(alt));
-                            out.push_str("</t></is>");
+                            out.push_str("</t>");
+                            if let Some(phonetic) = cell.phonetic.as_deref() {
+                                let base_len = alt.chars().count();
+                                out.push_str(&format!(r#"<rPh sb="0" eb="{base_len}"><t"#));
+                                if needs_space_preserve(phonetic) {
+                                    out.push_str(r#" xml:space="preserve""#);
+                                }
+                                out.push('>');
+                                out.push_str(&escape_text(phonetic));
+                                out.push_str("</t></rPh>");
+                            }
+                            out.push_str("</is>");
                         }
                         CellValueKind::Str => {
                             out.push_str("<v>");
@@ -6746,6 +6790,12 @@ fn effective_value_kind(
     meta: Option<&crate::CellMeta>,
     cell: &formula_model::Cell,
 ) -> CellValueKind {
+    // If the cell has phonetic guide metadata, we must use an inline string so we can emit
+    // SpreadsheetML `<rPh>` runs in the `<is>` payload.
+    if cell.phonetic.is_some() && matches!(&cell.value, CellValue::String(_)) {
+        return CellValueKind::InlineString;
+    }
+
     if let Some(meta) = meta {
         if let Some(kind) = meta.value_kind.clone() {
             // Cells with less-common or unknown `t=` attributes require the original `<v>` payload

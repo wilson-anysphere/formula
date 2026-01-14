@@ -18,6 +18,7 @@ struct SheetMlTags {
     v: String,
     is_: String,
     t: String,
+    r_ph: String,
 }
 
 impl SheetMlTags {
@@ -29,6 +30,7 @@ impl SheetMlTags {
             v: super::prefixed_tag(prefix, "v"),
             is_: super::prefixed_tag(prefix, "is"),
             t: super::prefixed_tag(prefix, "t"),
+            r_ph: super::prefixed_tag(prefix, "rPh"),
         }
     }
 }
@@ -609,6 +611,7 @@ fn patch_or_copy_cell<W: Write>(
                 let desired_value_kind = super::effective_value_kind(meta, desired_cell);
                 let preserved_inline_is = (original_cell_type.as_deref() == Some("inlineStr")
                     && desired_semantics.value == original.value
+                    && desired_semantics.phonetic == original.phonetic
                     && matches!(desired_value_kind, CellValueKind::InlineString))
                 .then(|| extract_is_subtree(&cell_events))
                 .flatten();
@@ -927,6 +930,10 @@ fn write_updated_cell<W: Write>(
         .as_ref()
         .map(|t| t.t.as_str())
         .unwrap_or(tags.t.as_str());
+    let r_ph_tag = cell_tags
+        .as_ref()
+        .map(|t| t.r_ph.as_str())
+        .unwrap_or(tags.r_ph.as_str());
 
     let mut original_has_vm = false;
     let mut original_has_cm = false;
@@ -1177,6 +1184,22 @@ fn write_updated_cell<W: Write>(
                         writer.write_event(Event::Start(t_start))?;
                         writer.write_event(Event::Text(BytesText::new(s)))?;
                         writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                        if let Some(phonetic) = cell.phonetic.as_deref() {
+                            let base_len = s.chars().count().to_string();
+                            let mut rph_start = BytesStart::new(r_ph_tag);
+                            rph_start.push_attribute(("sb", "0"));
+                            rph_start.push_attribute(("eb", base_len.as_str()));
+                            writer.write_event(Event::Start(rph_start))?;
+
+                            let mut ph_t_start = BytesStart::new(t_tag);
+                            if super::needs_space_preserve(phonetic) {
+                                ph_t_start.push_attribute(("xml:space", "preserve"));
+                            }
+                            writer.write_event(Event::Start(ph_t_start))?;
+                            writer.write_event(Event::Text(BytesText::new(phonetic)))?;
+                            writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                            writer.write_event(Event::End(BytesEnd::new(r_ph_tag)))?;
+                        }
                         writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                     }
                 }
@@ -1216,6 +1239,22 @@ fn write_updated_cell<W: Write>(
                             writer.write_event(Event::Start(t_start))?;
                             writer.write_event(Event::Text(BytesText::new(s)))?;
                             writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                            if let Some(phonetic) = cell.phonetic.as_deref() {
+                                let base_len = s.chars().count().to_string();
+                                let mut rph_start = BytesStart::new(r_ph_tag);
+                                rph_start.push_attribute(("sb", "0"));
+                                rph_start.push_attribute(("eb", base_len.as_str()));
+                                writer.write_event(Event::Start(rph_start))?;
+
+                                let mut ph_t_start = BytesStart::new(t_tag);
+                                if super::needs_space_preserve(phonetic) {
+                                    ph_t_start.push_attribute(("xml:space", "preserve"));
+                                }
+                                writer.write_event(Event::Start(ph_t_start))?;
+                                writer.write_event(Event::Text(BytesText::new(phonetic)))?;
+                                writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                                writer.write_event(Event::End(BytesEnd::new(r_ph_tag)))?;
+                            }
                             writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                         }
                     }
@@ -1257,6 +1296,22 @@ fn write_updated_cell<W: Write>(
                             writer.write_event(Event::Start(t_start))?;
                             writer.write_event(Event::Text(BytesText::new(s)))?;
                             writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                            if let Some(phonetic) = cell.phonetic.as_deref() {
+                                let base_len = s.chars().count().to_string();
+                                let mut rph_start = BytesStart::new(r_ph_tag);
+                                rph_start.push_attribute(("sb", "0"));
+                                rph_start.push_attribute(("eb", base_len.as_str()));
+                                writer.write_event(Event::Start(rph_start))?;
+
+                                let mut ph_t_start = BytesStart::new(t_tag);
+                                if super::needs_space_preserve(phonetic) {
+                                    ph_t_start.push_attribute(("xml:space", "preserve"));
+                                }
+                                writer.write_event(Event::Start(ph_t_start))?;
+                                writer.write_event(Event::Text(BytesText::new(phonetic)))?;
+                                writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                                writer.write_event(Event::End(BytesEnd::new(r_ph_tag)))?;
+                            }
                             writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                         }
                     }
@@ -1297,6 +1352,22 @@ fn write_updated_cell<W: Write>(
                                 writer.write_event(Event::Start(t_start))?;
                                 writer.write_event(Event::Text(BytesText::new(s)))?;
                                 writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                                if let Some(phonetic) = cell.phonetic.as_deref() {
+                                    let base_len = s.chars().count().to_string();
+                                    let mut rph_start = BytesStart::new(r_ph_tag);
+                                    rph_start.push_attribute(("sb", "0"));
+                                    rph_start.push_attribute(("eb", base_len.as_str()));
+                                    writer.write_event(Event::Start(rph_start))?;
+
+                                    let mut ph_t_start = BytesStart::new(t_tag);
+                                    if super::needs_space_preserve(phonetic) {
+                                        ph_t_start.push_attribute(("xml:space", "preserve"));
+                                    }
+                                    writer.write_event(Event::Start(ph_t_start))?;
+                                    writer.write_event(Event::Text(BytesText::new(phonetic)))?;
+                                    writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                                    writer.write_event(Event::End(BytesEnd::new(r_ph_tag)))?;
+                                }
                                 writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
                             }
                         }
@@ -1464,6 +1535,7 @@ struct CellSemantics {
     style_xf: u32,
     formula: Option<String>,
     value: CellValue,
+    phonetic: Option<String>,
 }
 
 impl CellSemantics {
@@ -1486,6 +1558,10 @@ impl CellSemantics {
             },
             other => other.clone(),
         };
+        let phonetic = match &cell.value {
+            CellValue::String(_) => cell.phonetic.clone(),
+            _ => None,
+        };
         Self {
             style_xf,
             formula: cell
@@ -1494,11 +1570,15 @@ impl CellSemantics {
                 .map(crate::formula_text::normalize_display_formula)
                 .filter(|f| !f.is_empty()),
             value,
+            phonetic,
         }
     }
 
     fn is_truly_empty(&self) -> bool {
-        self.style_xf == 0 && self.formula.is_none() && matches!(self.value, CellValue::Empty)
+        self.style_xf == 0
+            && self.formula.is_none()
+            && matches!(self.value, CellValue::Empty)
+            && self.phonetic.is_none()
     }
 }
 
@@ -1516,6 +1596,7 @@ fn parse_cell_semantics(
                 style_xf: 0,
                 formula: None,
                 value: CellValue::Empty,
+                phonetic: None,
             })
         }
     };
@@ -1536,15 +1617,19 @@ fn parse_cell_semantics(
             style_xf,
             formula: None,
             value: CellValue::Empty,
+            phonetic: None,
         });
     }
 
     let mut v_text: Option<String> = None;
     let mut f_text: Option<String> = None;
     let mut inline_text: Option<String> = None;
+    let mut phonetic_text: Option<String> = None;
     let mut in_v = false;
     let mut in_f = false;
     let mut in_inline_t = false;
+    let mut in_phonetic_t = false;
+
     let is_inline_str = cell_type.as_deref() == Some("inlineStr");
 
     // Track the local-name path so we only treat `<t>` as visible text when:
@@ -1563,19 +1648,27 @@ fn parse_cell_semantics(
                 match local {
                     b"v" => in_v = true,
                     b"f" => in_f = true,
+                    b"rPh" if is_inline_str => {
+                        // Presence of `<rPh>` implies phonetic metadata even if it contains no text.
+                        phonetic_text.get_or_insert_with(String::new);
+                    }
                     b"t" if is_inline_str => {
-                        let visible = match tag_stack.as_slice() {
-                            // `<is><t>`
-                            [.., parent] if parent.as_slice() == b"is" => true,
-                            // `<is><r><t>`
-                            [.., grandparent, parent]
-                                if grandparent.as_slice() == b"is" && parent.as_slice() == b"r" =>
-                            {
-                                true
-                            }
-                            _ => false,
-                        };
-                        in_inline_t = visible;
+                        if tag_stack.iter().any(|n| n.as_slice() == b"rPh") {
+                            in_phonetic_t = true;
+                        } else {
+                            let visible = match tag_stack.as_slice() {
+                                // `<is><t>`
+                                [.., parent] if parent.as_slice() == b"is" => true,
+                                // `<is><r><t>`
+                                [.., grandparent, parent]
+                                    if grandparent.as_slice() == b"is" && parent.as_slice() == b"r" =>
+                                {
+                                    true
+                                }
+                                _ => false,
+                            };
+                            in_inline_t = visible;
+                        }
                     }
                     _ => {}
                 }
@@ -1587,7 +1680,10 @@ fn parse_cell_semantics(
                 match local {
                     b"v" => in_v = false,
                     b"f" => in_f = false,
-                    b"t" if is_inline_str => in_inline_t = false,
+                    b"t" if is_inline_str => {
+                        in_inline_t = false;
+                        in_phonetic_t = false;
+                    }
                     _ => {}
                 }
                 tag_stack.pop();
@@ -1596,6 +1692,8 @@ fn parse_cell_semantics(
                 if super::local_name(e.name().as_ref()) == b"f" {
                     // Shared formulas may be represented as <f .../> with no text.
                     f_text.get_or_insert_with(String::new);
+                } else if is_inline_str && super::local_name(e.name().as_ref()) == b"rPh" {
+                    phonetic_text.get_or_insert_with(String::new);
                 }
             }
             Event::Text(t) => {
@@ -1611,6 +1709,11 @@ fn parse_cell_semantics(
                     match inline_text.as_mut() {
                         Some(existing) => existing.push_str(&text),
                         None => inline_text = Some(text),
+                    }
+                } else if in_phonetic_t {
+                    match phonetic_text.as_mut() {
+                        Some(existing) => existing.push_str(&text),
+                        None => phonetic_text = Some(text),
                     }
                 }
             }
@@ -1628,6 +1731,11 @@ fn parse_cell_semantics(
                         Some(existing) => existing.push_str(&text),
                         None => inline_text = Some(text),
                     }
+                } else if in_phonetic_t {
+                    match phonetic_text.as_mut() {
+                        Some(existing) => existing.push_str(&text),
+                        None => phonetic_text = Some(text),
+                    }
                 }
             }
             _ => {}
@@ -1644,6 +1752,7 @@ fn parse_cell_semantics(
         style_xf,
         formula,
         value,
+        phonetic: phonetic_text,
     })
 }
 

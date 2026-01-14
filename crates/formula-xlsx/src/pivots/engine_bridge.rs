@@ -488,7 +488,7 @@ pub fn pivot_table_to_engine_config_with_styles(
             let default_name = format!(
                 "{} of {}",
                 aggregation_display_name(aggregation),
-                source_field_name
+                &source_field_name
             );
             let name = df
                 .name

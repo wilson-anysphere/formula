@@ -207,8 +207,8 @@ impl Cell {
     pub fn is_truly_empty(&self) -> bool {
         self.value == CellValue::Empty
             && self.formula.is_none()
-            && self.style_id == 0
             && self.phonetic.is_none()
+            && self.style_id == 0
     }
 
     /// Returns the phonetic guide text (furigana) for this cell, if any.

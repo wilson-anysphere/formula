@@ -4546,7 +4546,6 @@ fn extract_cell_inline_string_text(
                 if !in_is {
                     continue;
                 }
-
                 let name = local_name(e.name().as_ref()).to_vec();
                 if name.as_slice() == b"t" && in_visible_t {
                     in_visible_t = false;
