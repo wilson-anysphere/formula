@@ -1,5 +1,4 @@
 import { expect, test, type Page } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
 
 import { gotoDesktop } from "./helpers";
 
@@ -47,7 +46,7 @@ async function getImageDrawingCount(page: Page): Promise<number> {
 }
 
 test.describe("Insert → Pictures", () => {
-  test("Insert → Pictures → This Device opens file picker and inserts image drawings", async ({ page }, testInfo) => {
+  test("Insert → Pictures → This Device opens file picker and inserts image drawings", async ({ page }) => {
     await gotoDesktop(page);
     await whenIdle(page);
 
@@ -62,10 +61,7 @@ test.describe("Insert → Pictures", () => {
     await expect(thisDevice).toBeVisible();
     await expect(thisDevice).toBeEnabled();
 
-    const image1Path = testInfo.outputPath("tiny-1.png");
-    const image2Path = testInfo.outputPath("tiny-2.png");
     const pngBytes = Buffer.from(TINY_PNG_BASE64, "base64");
-    await Promise.all([writeFile(image1Path, pngBytes), writeFile(image2Path, pngBytes)]);
 
     const beforeCount = await getImageDrawingCount(page);
 
@@ -82,8 +78,13 @@ test.describe("Insert → Pictures", () => {
       throw err;
     }
 
-    const selectedPaths = fileChooser.isMultiple() ? [image1Path, image2Path] : [image1Path];
-    await fileChooser.setFiles(selectedPaths);
+    const selectedFiles = fileChooser.isMultiple()
+      ? [
+          { name: "tiny-1.png", mimeType: "image/png", buffer: pngBytes },
+          { name: "tiny-2.png", mimeType: "image/png", buffer: pngBytes },
+        ]
+      : [{ name: "tiny.png", mimeType: "image/png", buffer: pngBytes }];
+    await fileChooser.setFiles(selectedFiles);
 
     await expect
       .poll(
@@ -93,9 +94,9 @@ test.describe("Insert → Pictures", () => {
         },
         {
           timeout: 20_000,
-          message: `Expected inserting ${selectedPaths.length} image file(s) to create ${selectedPaths.length} image drawing(s).`,
+          message: `Expected inserting ${selectedFiles.length} image file(s) to create ${selectedFiles.length} image drawing(s).`,
         },
       )
-      .toBe(beforeCount + selectedPaths.length);
+      .toBe(beforeCount + selectedFiles.length);
   });
 });
