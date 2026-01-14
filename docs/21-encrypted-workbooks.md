@@ -704,6 +704,8 @@ When implementing (or calling) encrypted-workbook support:
   See `fixtures/encrypted/ooxml/README.md` for more fixture details.
   These files are OLE/CFB wrappers (not ZIP/OPC), so they must not live under `fixtures/xlsx/`
   where the round-trip corpus is enumerated via `xlsx-diff::collect_fixture_paths`.
+- Additional “real-world” encrypted workbook fixtures (including encrypted `.xlsb` and legacy
+  encrypted `.xls`) live under `fixtures/encrypted/`; see `fixtures/encrypted/README.md`.
 - Encrypted legacy `.xls` fixtures for `formula-xls` tests live under:
   - `crates/formula-xls/tests/fixtures/encrypted/` (deterministic, test-generated), and
   - `crates/formula-xls/tests/fixtures/encrypted_rc4_cryptoapi_boundary.xls` (Microsoft Excel-produced;
