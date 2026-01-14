@@ -435,7 +435,7 @@ a:visited {
 
 .formula-bar--function-autocomplete-open .formula-bar-highlight .formula-bar-ghost,
 .formula-bar--function-autocomplete-open .formula-bar-highlight .formula-bar-preview {
-  opacity: 0;
+  display: none;
 }
 
 .formula-bar-expand-button {
