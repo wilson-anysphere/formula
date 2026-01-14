@@ -1956,19 +1956,42 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Prefer the universal build output path, but fall back to any `.app` under the bundle dirs.
-          app_path="$(
-            find apps/desktop/src-tauri/target -type d -path '*/release/bundle/macos/*.app' -prune -print 2>/dev/null | head -n 1 || true
-          )"
-          if [[ -z "${app_path}" ]]; then
-            app_path="$(
-              find target -type d -path '*/release/bundle/macos/*.app' -prune -print 2>/dev/null | head -n 1 || true
-            )"
+          # Cargo workspaces typically emit bundle outputs under `<repo>/target/**`, but standalone
+          # Tauri projects may use `<src-tauri>/target/**`, and some CI/caching setups override
+          # CARGO_TARGET_DIR. Search all common roots so this check doesn't fail due to layout
+          # differences.
+          search_roots=()
+          if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+            cargo_target_dir="${CARGO_TARGET_DIR}"
+            if [[ "${cargo_target_dir}" != /* ]]; then
+              cargo_target_dir="${PWD}/${cargo_target_dir}"
+            fi
+            if [[ -d "${cargo_target_dir}" ]]; then
+              search_roots+=("${cargo_target_dir}")
+            fi
           fi
+          for root in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
+            if [[ -d "${root}" ]]; then
+              search_roots+=("${root}")
+            fi
+          done
+
+          app_path=""
+          for root in "${search_roots[@]}"; do
+            candidate="$(find "$root" -type d -path '*/release/bundle/macos/*.app' -prune -print 2>/dev/null | head -n 1 || true)"
+            if [[ -n "$candidate" ]]; then
+              app_path="$candidate"
+              break
+            fi
+          done
+
           if [[ -z "${app_path}" ]]; then
-            echo "::error::Could not find a built .app bundle under apps/desktop/src-tauri/target/**/release/bundle/macos" >&2
-            find apps/desktop/src-tauri/target -maxdepth 12 -type d -name '*.app' -print | head -n 20 || true
-            find target -maxdepth 12 -type d -name '*.app' -print | head -n 20 || true
+            echo "::error::Could not find a built .app bundle under expected target roots." >&2
+            echo "Searched roots: ${search_roots[*]}" >&2
+            for root in "${search_roots[@]}"; do
+              echo "Available .app directories under $root (first 20):" >&2
+              find "$root" -maxdepth 12 -type d -name '*.app' -print 2>/dev/null | head -n 20 || true
+            done
             exit 1
           fi
 
