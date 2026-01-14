@@ -15,7 +15,7 @@ use desktop::commands;
 use desktop::ed25519_verifier;
 use desktop::ipc_limits::{
     LimitedString, MAX_IPC_NOTIFICATION_BODY_BYTES, MAX_IPC_NOTIFICATION_TITLE_BYTES,
-    MAX_IPC_URL_BYTES,
+    MAX_IPC_URL_BYTES, MAX_OAUTH_REDIRECT_URI_BYTES,
 };
 use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
 use desktop::macros::{workbook_before_close_timeout_ms, MacroExecutionOptions};
@@ -779,7 +779,7 @@ async fn show_system_notification(
 async fn oauth_loopback_listen(
     window: tauri::WebviewWindow,
     state: State<'_, SharedOauthLoopbackState>,
-    redirect_uri: LimitedString<MAX_IPC_URL_BYTES>,
+    redirect_uri: LimitedString<MAX_OAUTH_REDIRECT_URI_BYTES>,
 ) -> Result<(), String> {
     let url = window.url().map_err(|err| err.to_string())?;
     desktop::ipc_origin::ensure_main_window(

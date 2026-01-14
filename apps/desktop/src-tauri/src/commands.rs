@@ -9893,7 +9893,9 @@ mod tests {
 
         std::fs::write(&path, &ole_bytes).expect("write encrypted workbook");
 
-        let summary = inspect_workbook_encryption(path.to_string_lossy().to_string())
+        let summary = inspect_workbook_encryption(LimitedString::<MAX_IPC_PATH_BYTES>(
+            path.to_string_lossy().to_string(),
+        ))
             .expect("inspect_workbook_encryption should succeed")
             .expect("expected encryption summary");
 
