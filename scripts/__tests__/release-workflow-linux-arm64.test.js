@@ -11,20 +11,48 @@ async function readReleaseWorkflow() {
   return await readFile(releaseWorkflowPath, "utf8");
 }
 
+/**
+ * Extracts a YAML list item's block by scanning forward until either:
+ * - the next list item at the same indentation, or
+ * - an outdent (indentation decreases), which indicates the list ended.
+ *
+ * This keeps tests resilient to harmless workflow formatting churn (e.g. inserting
+ * extra keys like `env:` before an `if:` guard) without needing a YAML parser.
+ *
+ * @param {string[]} lines
+ * @param {number} startIdx
+ */
+function yamlListItemBlock(lines, startIdx) {
+  const startLine = lines[startIdx] ?? "";
+  const indent = startLine.match(/^\s*/)?.[0]?.length ?? 0;
+  const nextItemRe = new RegExp(`^\\s{${indent}}-\\s+`);
+ 
+  let endIdx = startIdx + 1;
+  for (; endIdx < lines.length; endIdx += 1) {
+    const line = lines[endIdx] ?? "";
+    if (line.trim() === "") continue;
+    const lineIndent = line.match(/^\s*/)?.[0]?.length ?? 0;
+    if (lineIndent < indent) break;
+    if (nextItemRe.test(line)) break;
+  }
+  return lines.slice(startIdx, endIdx).join("\n");
+}
+
 test("release workflow includes a Linux ARM64 (aarch64) build runner in the matrix", async () => {
   const text = await readReleaseWorkflow();
 
-  const armRunnerRe = /platform:\s*ubuntu-24\.04-arm(?:64)?\b/;
+  const armRunnerRe = /^\s*-\s*platform:\s*ubuntu-24\.04-arm(?:64)?\b/m;
   assert.match(
     text,
     armRunnerRe,
     `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to include an Ubuntu ARM64 runner (ubuntu-24.04-arm64).`,
   );
 
-  const idx = text.search(armRunnerRe);
+  const lines = text.split(/\r?\n/);
+  const idx = lines.findIndex((line) => /^\s*-\s*platform:\s*ubuntu-24\.04-arm(?:64)?\b/.test(line));
   assert.ok(idx >= 0);
-  const window = text.slice(idx, idx + 600);
-  assert.match(window, /cache_target:\s*aarch64-unknown-linux-gnu\b/);
+  const snippet = yamlListItemBlock(lines, idx);
+  assert.match(snippet, /cache_target:\s*aarch64-unknown-linux-gnu\b/);
 });
 
 test("release workflow validates .deb packages on all Linux runners (x86_64 + arm64)", async () => {
@@ -38,8 +66,7 @@ test("release workflow validates .deb packages on all Linux runners (x86_64 + ar
     `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to contain a step named: ${stepNeedle}`,
   );
 
-  // Scan the next few lines to find the step's `if:` guard.
-  const snippet = lines.slice(idx, idx + 15).join("\n");
+  const snippet = yamlListItemBlock(lines, idx);
   const runnerOsGuard = /if:\s*runner\.os\s*==\s*['"]Linux['"]/;
   const ubuntuPrefixGuard = /if:\s*startsWith\(matrix\.platform,\s*['"]ubuntu-24\.04['"]\)/;
   const x86OnlyGuard = /if:\s*matrix\.platform\s*==\s*['"]ubuntu-24\.04['"]/;
@@ -66,7 +93,7 @@ test("release workflow validates .deb packages on all Linux runners (x86_64 + ar
 function snippetAfter(lines, needle, windowSize = 40) {
   const idx = lines.findIndex((line) => needle.test(line));
   assert.ok(idx >= 0, `Expected to find line matching ${needle}`);
-  return lines.slice(idx, idx + windowSize).join("\n");
+  return yamlListItemBlock(lines, idx);
 }
 
 /**
@@ -117,7 +144,7 @@ test("release workflow verifies Linux artifacts include .AppImage + .deb + .rpm 
     `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to contain a step named: ${stepNeedle}`,
   );
 
-  const snippet = lines.slice(idx, idx + 20).join("\n");
+  const snippet = yamlListItemBlock(lines, idx);
   const runnerOsGuard = /if:\s*runner\.os\s*==\s*['"]Linux['"]/;
   const ubuntuPrefixGuard = /if:\s*startsWith\(matrix\.platform,\s*['"]ubuntu-24\.04['"]\)/;
   const x86OnlyGuard = /if:\s*matrix\.platform\s*==\s*['"]ubuntu-24\.04['"]/;
@@ -144,7 +171,7 @@ test("release workflow installs required Linux build deps for both x86_64 and AR
     `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to contain a step named: ${stepNeedle}`,
   );
 
-  const snippet = lines.slice(idx, idx + 60).join("\n");
+  const snippet = yamlListItemBlock(lines, idx);
 
   // This must run for both ubuntu-24.04 (x86_64) and ubuntu-24.04-arm64.
   const runnerOsGuard = /if:\s*runner\.os\s*==\s*['"]Linux['"]/;
