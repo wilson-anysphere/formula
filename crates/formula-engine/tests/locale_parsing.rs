@@ -323,6 +323,29 @@ fn canonicalize_and_localize_boolean_literals() {
 }
 
 #[test]
+fn canonicalize_and_localize_true_false_functions() {
+    for (locale, localized_true, localized_false) in [
+        (&locale::DE_DE, "=WAHR()", "=FALSCH()"),
+        (&locale::FR_FR, "=VRAI()", "=FAUX()"),
+        (&locale::ES_ES, "=VERDADERO()", "=FALSO()"),
+    ] {
+        let canon_true = locale::canonicalize_formula(localized_true, locale).unwrap();
+        assert_eq!(canon_true, "=TRUE()");
+        assert_eq!(
+            locale::localize_formula(&canon_true, locale).unwrap(),
+            localized_true
+        );
+
+        let canon_false = locale::canonicalize_formula(localized_false, locale).unwrap();
+        assert_eq!(canon_false, "=FALSE()");
+        assert_eq!(
+            locale::localize_formula(&canon_false, locale).unwrap(),
+            localized_false
+        );
+    }
+}
+
+#[test]
 fn localized_boolean_keywords_are_not_translated_inside_structured_refs() {
     // `WAHR` is the de-DE TRUE keyword, but table names can still be identifiers; separators
     // inside structured refs should never be touched by translation.
