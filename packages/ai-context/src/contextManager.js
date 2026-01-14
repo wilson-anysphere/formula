@@ -1322,7 +1322,7 @@ export class ContextManager {
           if (!item || typeof item !== "object" || Array.isArray(item)) return item;
           const type = /** @type {any} */ (item).type;
           const reference = /** @type {any} */ (item).reference;
-          if (typeof reference !== "string") return item;
+          if (typeof reference !== "string") return { ...item, reference: "[REDACTED]" };
 
           if (type === "range") {
             let parsed;
@@ -2362,7 +2362,7 @@ export class ContextManager {
           if (!item || typeof item !== "object" || Array.isArray(item)) return item;
           const type = item.type;
           const reference = item.reference;
-          if (typeof reference !== "string") return item;
+          if (typeof reference !== "string") return { ...item, reference: "[REDACTED]" };
 
           if (type === "range") {
             let parsed;

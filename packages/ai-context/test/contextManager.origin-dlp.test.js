@@ -188,6 +188,44 @@ test("buildContext: structured DLP REDACT also redacts non-heuristic attachment 
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildContext: structured DLP REDACT also redacts non-string attachment references (no-op redactor)", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Hello"]],
+    },
+    query: "ignore",
+    // `reference` should be a string, but callers may accidentally pass objects. Under structured
+    // DLP redaction, treat it as disallowed metadata and redact it deterministically.
+    attachments: [{ type: "chart", reference: { token: "TopSecret" } }],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc-1",
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.match(out.promptContext, /## attachments/i);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildContext: structured DLP REDACT also redacts non-heuristic table/namedRange names (no-op redactor)", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,
