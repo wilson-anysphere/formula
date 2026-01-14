@@ -477,6 +477,24 @@ impl Workbook {
         }
     }
 
+    fn reorder_sheet(&mut self, sheet: SheetId, new_index: usize) -> bool {
+        if !self.sheet_exists(sheet) {
+            return false;
+        }
+        if new_index >= self.sheet_order.len() {
+            return false;
+        }
+        let Some(current) = self.sheet_order_index(sheet) else {
+            return false;
+        };
+        if current == new_index {
+            return true;
+        }
+        self.sheet_order.remove(current);
+        self.sheet_order.insert(new_index, sheet);
+        true
+    }
+
     fn get_cell(&self, key: CellKey) -> Option<&Cell> {
         if !self.sheet_exists(key.sheet) {
             return None;
