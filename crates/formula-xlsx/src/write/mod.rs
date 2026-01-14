@@ -916,8 +916,34 @@ fn build_parts(
                 }
                 _ => false,
             });
+        let drawings_changed = if has_drawings && has_existing_drawing_part && !missing_drawing_media
+        {
+            // Only rewrite the drawing part when the in-memory object list diverges from the
+            // source package. This keeps no-op round-trips byte-for-byte for chart fixtures,
+            // while allowing user edits (e.g. moving/duplicating drawings) to persist even when
+            // no new media is introduced.
+            //
+            // Best-effort: if we fail to parse the existing drawing part, do not attempt to
+            // regenerate it (preserve the original bytes instead).
+            existing_drawing_part_path
+                .as_deref()
+                .and_then(|drawing_path| {
+                    let mut tmp_workbook = formula_model::Workbook::new();
+                    crate::drawings::DrawingPart::parse_from_parts(
+                        sheet_index,
+                        drawing_path,
+                        &parts,
+                        &mut tmp_workbook,
+                    )
+                    .ok()
+                    .map(|part| part.objects != sheet.drawings)
+                })
+                .unwrap_or(false)
+        } else {
+            false
+        };
         let drawings_need_emit =
-            has_drawings && (!has_existing_drawing_part || missing_drawing_media);
+            has_drawings && (!has_existing_drawing_part || missing_drawing_media || drawings_changed);
 
         if has_drawings && !drawings_need_emit {
             if let Some(drawing_part_path) = existing_drawing_part_path.as_deref() {

@@ -170,3 +170,72 @@ fn xlsxdocument_can_append_image_to_existing_sheet_drawing() {
         "expected worksheet.drawings to contain the appended image object"
     );
 }
+
+#[test]
+fn xlsxdocument_can_duplicate_image_without_adding_new_media() {
+    let fixture = include_bytes!("../../../fixtures/xlsx/basic/image.xlsx");
+
+    let mut doc = load_from_bytes(fixture).expect("load fixture");
+
+    let sheet = doc
+        .workbook
+        .sheets
+        .get_mut(0)
+        .expect("fixture has at least one sheet");
+
+    let existing_image_id = sheet
+        .drawings
+        .iter()
+        .find_map(|o| match &o.kind {
+            DrawingObjectKind::Image { image_id } => Some(image_id.clone()),
+            _ => None,
+        })
+        .expect("fixture should contain at least one image drawing");
+
+    // Duplicate the existing image drawing, reusing the same `image_id` (no new `xl/media/*`
+    // part is introduced). This should still cause the drawing part to be rewritten.
+    let next_id = sheet
+        .drawings
+        .iter()
+        .map(|o| o.id.0)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+
+    let ext = EmuSize::new(914_400, 914_400);
+    let anchor = Anchor::OneCell {
+        from: AnchorPoint::new(CellRef::new(2, 2), CellOffset::new(0, 0)),
+        ext,
+    };
+    sheet.drawings.push(DrawingObject {
+        id: DrawingObjectId(next_id),
+        kind: DrawingObjectKind::Image {
+            image_id: existing_image_id.clone(),
+        },
+        anchor,
+        z_order: sheet.drawings.len() as i32,
+        size: Some(ext),
+        preserved: HashMap::new(),
+    });
+
+    let saved = doc.save_to_vec().expect("save");
+
+    // Original media should still exist (no new media part should be required).
+    let pkg = XlsxPackage::from_bytes(&saved).expect("open saved workbook");
+    assert!(
+        pkg.part("xl/media/image1.png").is_some(),
+        "expected original image media part to remain present"
+    );
+
+    let reloaded = load_from_bytes(&saved).expect("reload");
+    let sheet = &reloaded.workbook.sheets[0];
+    let image_count = sheet
+        .drawings
+        .iter()
+        .filter(|o| matches!(&o.kind, DrawingObjectKind::Image { image_id } if image_id == &existing_image_id))
+        .count();
+    assert!(
+        image_count >= 2,
+        "expected duplicated image to round-trip; got {image_count} occurrences of {existing_image_id:?}"
+    );
+}
