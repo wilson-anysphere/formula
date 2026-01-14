@@ -959,7 +959,8 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
         })();
         const sheetId = anchorSheetId ?? defaultSheetId;
 
-        const kind = convertDocumentDrawingKindToUiKind(pick(raw, ["kind"]));
+        const kindValue = pick(raw, ["kind"]);
+        const kind = convertDocumentDrawingKindToUiKind(kindValue);
         if (kind) {
           const id = parseDrawingObjectId(pick(raw, ["id"]));
           const zOrder = readOptionalNumber(pick(raw, ["zOrder", "z_order"])) ?? 0;
@@ -979,6 +980,56 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
           //
           // If the anchor doesn't match the DocumentController schema, fall through to the
           // formula-model adapter rather than dropping the object entirely.
+        }
+
+        // Some DocumentController drawings store `kind` in the formula-model/Rust enum encoding
+        // (e.g. `{ Image: {...} }`) while storing anchors in the simplified DocumentController
+        // schema (including legacy `{ type: "cell" }` anchors). The formula-model adapter cannot
+        // parse legacy anchors, so try a mixed-mode conversion: model kind + DocumentController
+        // anchor.
+        {
+          const id = parseDrawingObjectId(pick(raw, ["id"]));
+          const zOrder = readOptionalNumber(pick(raw, ["zOrder", "z_order"])) ?? 0;
+          const size = convertDocumentDrawingSizeToEmu(pick(raw, ["size"]));
+          const anchor = convertDocumentDrawingAnchorToUiAnchor(anchorValue, size);
+          if (anchor) {
+            try {
+              const modelKind = convertModelDrawingObjectKind(kindValue, { sheetId: sheetId ?? undefined, drawingObjectId: id });
+              const label = isRecord(kindValue) ? readOptionalString(pick(kindValue, ["label"])) : undefined;
+              const patchedKind: DrawingObjectKind =
+                label &&
+                (modelKind.type === "shape" || modelKind.type === "chart" || modelKind.type === "unknown") &&
+                !(typeof (modelKind as any).label === "string" && String((modelKind as any).label).trim() !== "")
+                  ? ({ ...modelKind, label } as DrawingObjectKind)
+                  : modelKind;
+
+              const derivedTransform =
+                transform ??
+                (() => {
+                  if (patchedKind.type === "image") {
+                    const picXml = preserved?.["xlsx.pic_xml"];
+                    if (typeof picXml !== "string" || picXml.length === 0) return undefined;
+                    const parsed = parseDrawingTransformFromRawXml(picXml);
+                    if (!parsed) return undefined;
+                    return parsed.rotationDeg !== 0 || parsed.flipH || parsed.flipV ? parsed : undefined;
+                  }
+
+                  const rawXml = (patchedKind as any).rawXml ?? (patchedKind as any).raw_xml;
+                  if (typeof rawXml !== "string" || rawXml.length === 0) return undefined;
+                  const parsed = parseDrawingTransformFromRawXml(rawXml);
+                  if (!parsed) return undefined;
+                  return parsed.rotationDeg !== 0 || parsed.flipH || parsed.flipV ? parsed : undefined;
+                })();
+
+              const obj: DrawingObject = { id, kind: patchedKind, anchor, zOrder, ...(size ? { size } : {}) };
+              if (preserved) obj.preserved = preserved;
+              if (derivedTransform) obj.transform = derivedTransform;
+              out.push(obj);
+              continue;
+            } catch {
+              // ignore
+            }
+          }
         }
 
         // If the drawing doesn't match the DocumentController schema, fall through to the

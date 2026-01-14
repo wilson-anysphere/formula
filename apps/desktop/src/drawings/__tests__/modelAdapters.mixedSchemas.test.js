@@ -1,0 +1,27 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { convertDocumentSheetDrawingsToUiDrawingObjects } from "../modelAdapters.ts";
+
+test("convertDocumentSheetDrawingsToUiDrawingObjects accepts mixed schema: model kind enum + legacy DocumentController cell anchor", () => {
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { Image: { image_id: "img1" } },
+      anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+      // Provide an explicit size so the legacy cell anchor can be promoted to a oneCell anchor.
+      size: { cx: 789, cy: 321 },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.deepEqual(ui[0]?.kind, { type: "image", imageId: "img1" });
+  assert.deepEqual(ui[0]?.anchor, {
+    type: "oneCell",
+    from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+    size: { cx: 789, cy: 321 },
+  });
+});
+
