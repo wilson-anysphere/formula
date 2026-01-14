@@ -780,9 +780,27 @@ fn eval_filter_is_null(table: &ColumnarTable, col: usize, is_null: bool) -> Resu
             EncodedChunk::Dict(c) => c.validity.as_ref(),
         };
 
-        for i in 0..chunk_rows {
-            let row_is_null = validity.as_ref().is_some_and(|v| !v.get(i));
-            out.push(if is_null { row_is_null } else { !row_is_null });
+        match validity {
+            None => {
+                // No validity bitmap => all values are non-null in this chunk.
+                out.extend_constant(!is_null, chunk_rows);
+            }
+            Some(validity) => {
+                if validity.count_ones() == 0 {
+                    // All null.
+                    out.extend_constant(is_null, chunk_rows);
+                    continue;
+                }
+                if validity.all_true() {
+                    out.extend_constant(!is_null, chunk_rows);
+                    continue;
+                }
+
+                for i in 0..chunk_rows {
+                    // Validity bitmap uses `true` for non-null.
+                    out.push(if is_null { !validity.get(i) } else { validity.get(i) });
+                }
+            }
         }
     }
 
