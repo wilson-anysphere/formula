@@ -1231,13 +1231,13 @@ function extractTransactionChanges(events, cells) {
       before = normalizeCell(entry.mapChange.oldValue);
     } else if (entry.propChanges.size > 0) {
       const seed = after
-        ? { value: after.value ?? null, formula: after.formula ?? null, enc: after.enc ?? null, format: after.format ?? null }
-        : { value: null, formula: null, enc: null, format: null };
+        ? { value: after.value ?? null, formula: after.formula ?? null, enc: after.enc, format: after.format ?? null }
+        : { value: null, formula: null, enc: undefined, format: null };
 
       for (const [prop, change] of entry.propChanges.entries()) {
         if (prop === "value") seed.value = change.oldValue ?? null;
         if (prop === "formula") seed.formula = change.oldValue ?? null;
-        if (prop === "enc") seed.enc = change.oldValue ?? null;
+        if (prop === "enc") seed.enc = change.oldValue;
         if (prop === "format" || prop === "style") seed.format = change.oldValue ?? null;
       }
 
@@ -1444,7 +1444,7 @@ function cellFingerprint(cell) {
   return stableStringify({
     value: normalized.value ?? null,
     formula: normalizeFormula(normalized.formula) ?? null,
-    enc: normalized.enc ?? null,
+    enc: normalized.enc,
     format: normalized.format ?? null
   });
 }
@@ -1498,12 +1498,12 @@ function didContentChange(a, b) {
     stableStringify({
       value: na?.value ?? null,
       formula: normalizeFormula(na?.formula) ?? null,
-      enc: na?.enc ?? null
+      enc: na?.enc
     }) !==
     stableStringify({
       value: nb?.value ?? null,
       formula: normalizeFormula(nb?.formula) ?? null,
-      enc: nb?.enc ?? null
+      enc: nb?.enc
     })
   );
 }
