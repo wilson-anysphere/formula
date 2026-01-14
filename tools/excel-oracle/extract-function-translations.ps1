@@ -259,9 +259,16 @@ function Parse-LocalizedFunctionName {
   }
 
   # Some older Excel builds prefix unknown/new functions with `_xlfn.`.
+  #
+  # IMPORTANT: When extracting translations for committed locale sources, treating `_xlfn.` as a
+  # normal identifier causes unknown functions to degrade into identity mappings (English), which
+  # looks "complete" but is wrong. If we see `_xlfn.`, treat it as unsupported in this Excel build
+  # and surface it as a skipped function so callers can retry on a modern Excel 365 install.
+  $sawXlfn = $false
   while ($true) {
     if ($s.StartsWith("_xlfn.")) {
       $s = $s.Substring(6)
+      $sawXlfn = $true
       continue
     }
     # Some Excel builds use `_xlws.` in compatibility wrappers (commonly nested
@@ -271,6 +278,10 @@ function Parse-LocalizedFunctionName {
       continue
     }
     break
+  }
+
+  if ($sawXlfn) {
+    throw "Excel prefixed function with _xlfn. (unsupported/unknown in this Excel build). FormulaLocal=$FormulaLocal"
   }
 
   # Some Excel builds use `_xludf.` for user-defined / unknown functions.

@@ -93,7 +93,8 @@ From repo root on Windows (requires Excel desktop installed and configured for t
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-translations.ps1 `
   -LocaleId de-DE `
-  -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
+  -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json `
+  -FailOnSkipped
 ```
 
 Example for Spanish (`es-ES`):
