@@ -48,8 +48,9 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
-import { buildBenchmarkResultFromValues, type BenchmarkResult } from './benchmark.ts';
 import {
+  buildBenchmarkResultFromValues,
+  type BenchmarkResult,
   defaultDesktopBinPath,
   findPidForExecutableLinux,
   getProcessRssMbLinux,

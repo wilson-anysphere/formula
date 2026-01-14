@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { buildBenchmarkResultFromValues } from './benchmark.ts';
 import {
+  buildBenchmarkResultFromValues,
   defaultDesktopBinPath,
   findPidForExecutableLinux,
   formatPerfPath,

@@ -21,8 +21,9 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { buildBenchmarkResultFromValues, type BenchmarkResult } from './benchmark.ts';
 import {
+  buildBenchmarkResultFromValues,
+  type BenchmarkResult,
   defaultDesktopBinPath,
   findPidForExecutableLinux,
   formatPerfPath,

@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import { buildBenchmarkResultFromValues } from "./benchmark.ts";
 import {
+  buildBenchmarkResultFromValues,
   defaultDesktopBinPath,
   buildDesktopStartupProfileRoot,
   parseDesktopStartupMode,
