@@ -2115,82 +2115,51 @@ export function registerBuiltinCommands(params: {
 
   if (themeController) {
     const categoryView = t("commandCategory.view");
-    const refresh = () => {
-      try {
-        refreshRibbonUiState?.();
-      } catch {
-        // ignore
-      }
-    };
-
-    const focusApp = () => {
-      try {
-        (app as any)?.focus?.();
-      } catch {
-        // ignore
-      }
-    };
 
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.system",
-      "Theme: System",
-      () => {
-        themeController.setThemePreference("system");
-        refresh();
-        focusApp();
-      },
+      t("command.view.theme.system"),
+      () => applyThemePreference("system"),
       {
         category: categoryView,
         icon: null,
-        description: "Use the system theme",
+        description: t("commandDescription.view.theme.system"),
         keywords: ["theme", "appearance", "system", "auto", "os", "dark mode", "light mode"],
       },
     );
 
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.light",
-      "Theme: Light",
-      () => {
-        themeController.setThemePreference("light");
-        refresh();
-        focusApp();
-      },
+      t("command.view.theme.light"),
+      () => applyThemePreference("light"),
       {
         category: categoryView,
         icon: null,
-        description: "Use the light theme",
+        description: t("commandDescription.view.theme.light"),
         keywords: ["theme", "appearance", "light", "light mode"],
       },
     );
 
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.dark",
-      "Theme: Dark",
-      () => {
-        themeController.setThemePreference("dark");
-        refresh();
-        focusApp();
-      },
+      t("command.view.theme.dark"),
+      () => applyThemePreference("dark"),
       {
         category: categoryView,
         icon: null,
-        description: "Use the dark theme",
+        description: t("commandDescription.view.theme.dark"),
         keywords: ["theme", "appearance", "dark", "dark mode"],
       },
     );
 
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.highContrast",
-      "Theme: High Contrast",
-      () => {
-        themeController.setThemePreference("high-contrast");
-        refresh();
-        focusApp();
-      },
+      t("command.view.theme.highContrast"),
+      () => applyThemePreference("high-contrast"),
       {
         category: categoryView,
         icon: null,
-        description: "Use the high contrast theme",
+        description: t("commandDescription.view.theme.highContrast"),
         keywords: ["theme", "appearance", "high contrast", "contrast", "accessibility", "a11y"],
       },
     );

@@ -22,6 +22,17 @@ test("number format command strings are localizable", () => {
   assert.equal(t("command.format.numberFormat.general"), "عام");
 });
 
+test("theme command strings are localizable", () => {
+  setLocale("en-US");
+  assert.equal(t("command.view.theme.light"), "Theme: Light");
+
+  setLocale("de-DE");
+  assert.equal(t("command.view.theme.light"), "Design: Hell");
+
+  setLocale("ar");
+  assert.equal(t("command.view.theme.light"), "السمة: فاتح");
+});
+
 test("rtl locale exposes rtl direction hook", () => {
   setLocale("ar");
   assert.equal(getDirection(), "rtl");
