@@ -2179,7 +2179,10 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             let mut key_candidates: Vec<Vec<u8>> = Vec::new();
             key_candidates.push(key_cryptoapi);
             if let Some(key) = key_trunc {
-                if !key_candidates.iter().any(|k| k.as_slice() == key.as_slice()) {
+                if !key_candidates
+                    .iter()
+                    .any(|k| crate::offcrypto::standard::ct_eq(k.as_slice(), key.as_slice()))
+                {
                     key_candidates.push(key);
                 }
             }
