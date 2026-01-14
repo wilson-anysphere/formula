@@ -1213,6 +1213,16 @@ function spliceReferenceSpans(
   let pos = 0;
   let spanIndex = 0;
 
+  const pushSpan = (span: HighlightSpan): void => {
+    const prev = out[out.length - 1];
+    if (prev && prev.end === span.start && prev.kind === span.kind && (prev.className ?? "") === (span.className ?? "")) {
+      prev.end = span.end;
+      prev.text += span.text;
+      return;
+    }
+    out.push(span);
+  };
+
   const emitSlice = (sliceStart: number, sliceEnd: number): void => {
     if (sliceEnd <= sliceStart) return;
     while (spanIndex < spans.length && spans[spanIndex]!.end <= sliceStart) spanIndex += 1;
@@ -1222,7 +1232,7 @@ function spliceReferenceSpans(
       const s = Math.max(span.start, sliceStart);
       const e = Math.min(span.end, sliceEnd);
       if (e > s) {
-        out.push({
+        pushSpan({
           kind: span.kind,
           start: s,
           end: e,
@@ -1250,7 +1260,7 @@ function spliceReferenceSpans(
     if (start > pos) {
       emitSlice(pos, start);
     }
-    out.push({ kind: "reference", start, end, text: formula.slice(start, end) });
+    pushSpan({ kind: "reference", start, end, text: formula.slice(start, end) });
     pos = Math.max(pos, end);
   }
 
@@ -1258,22 +1268,6 @@ function spliceReferenceSpans(
     emitSlice(pos, formula.length);
   }
 
-  return mergeAdjacent(out);
-}
-
-function mergeAdjacent(spans: HighlightSpan[]): HighlightSpan[] {
-  if (spans.length === 0) return spans;
-  const out: HighlightSpan[] = [spans[0]!];
-  for (let i = 1; i < spans.length; i += 1) {
-    const prev = out[out.length - 1]!;
-    const next = spans[i]!;
-    if (prev.end === next.start && prev.kind === next.kind && (prev.className ?? "") === (next.className ?? "")) {
-      prev.end = next.end;
-      prev.text += next.text;
-      continue;
-    }
-    out.push(next);
-  }
   return out;
 }
 
@@ -1284,19 +1278,29 @@ function applyErrorSpan(formula: string, spans: HighlightSpan[], errorSpan: Form
   if (end <= start) return spans;
 
   const out: HighlightSpan[] = [];
+
+  const pushSpan = (span: HighlightSpan): void => {
+    const prev = out[out.length - 1];
+    if (prev && prev.end === span.start && prev.kind === span.kind && (prev.className ?? "") === (span.className ?? "")) {
+      prev.end = span.end;
+      prev.text += span.text;
+      return;
+    }
+    out.push(span);
+  };
   for (const span of spans) {
     if (span.end <= start || span.start >= end) {
-      out.push(span);
+      pushSpan(span);
       continue;
     }
 
     if (span.start < start) {
-      out.push({ ...span, end: start, text: formula.slice(span.start, start) });
+      pushSpan({ ...span, end: start, text: formula.slice(span.start, start) });
     }
 
     const overlapStart = Math.max(span.start, start);
     const overlapEnd = Math.min(span.end, end);
-    out.push({
+    pushSpan({
       ...span,
       start: overlapStart,
       end: overlapEnd,
@@ -1305,9 +1309,9 @@ function applyErrorSpan(formula: string, spans: HighlightSpan[], errorSpan: Form
     });
 
     if (span.end > end) {
-      out.push({ ...span, start: end, text: formula.slice(end, span.end) });
+      pushSpan({ ...span, start: end, text: formula.slice(end, span.end) });
     }
   }
 
-  return mergeAdjacent(out);
+  return out;
 }
