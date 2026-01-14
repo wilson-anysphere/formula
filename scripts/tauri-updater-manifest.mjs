@@ -1,5 +1,10 @@
 import crypto from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import {
+  ed25519PublicKeyFromRaw,
+  parseTauriUpdaterPubkey,
+  parseTauriUpdaterSignature,
+} from "./ci/tauri-minisign.mjs";
 
 /**
  * Normalize a version string so `vX.Y.Z`, `refs/tags/vX.Y.Z`, and `X.Y.Z` compare equal.
@@ -189,34 +194,38 @@ export function validateTauriUpdaterManifest(manifest, opts = {}) {
 }
 
 /**
- * Verify an Ed25519 signature over a UTF-8 manifest string using a base64 raw public key.
+ * Verify a Tauri updater manifest signature.
  *
- * The public key format matches `plugins.updater.pubkey` in `tauri.conf.json` (base64-encoded
- * raw Ed25519 public key bytes).
+ * This supports the key/signature formats used by `cargo tauri signer generate` and by
+ * `tauri-action` updater uploads:
+ * - `publicKeyBase64` matches `plugins.updater.pubkey` in `tauri.conf.json` (base64-encoded minisign
+ *   public key file/payload, or less commonly raw Ed25519 bytes).
+ * - `signatureText` matches `latest.json.sig` contents (raw base64 signature, minisign payload,
+ *   or minisign signature file).
  *
  * @param {string} manifestText
- * @param {string} signatureBase64
+ * @param {string} signatureText
  * @param {string} publicKeyBase64
  */
-export function verifyTauriManifestSignature(manifestText, signatureBase64, publicKeyBase64) {
+export function verifyTauriManifestSignature(manifestText, signatureText, publicKeyBase64) {
   if (typeof manifestText !== "string") throw new TypeError("manifestText must be a string");
-  if (typeof signatureBase64 !== "string") throw new TypeError("signatureBase64 must be a string");
+  if (typeof signatureText !== "string") throw new TypeError("signatureText must be a string");
   if (typeof publicKeyBase64 !== "string") throw new TypeError("publicKeyBase64 must be a string");
 
-  const signature = Buffer.from(signatureBase64.trim(), "base64");
-  if (signature.length !== 64) {
-    throw new Error(`Expected Ed25519 signature to be 64 bytes, got ${signature.length}.`);
+  const { signatureBytes, keyId: signatureKeyId } = parseTauriUpdaterSignature(
+    signatureText,
+    "manifest signature",
+  );
+  const { publicKeyBytes, keyId: pubkeyKeyId } = parseTauriUpdaterPubkey(publicKeyBase64);
+  if (signatureKeyId && pubkeyKeyId && signatureKeyId !== pubkeyKeyId) {
+    throw new Error(
+      `Manifest signature key id mismatch: signature uses ${signatureKeyId}, but public key is ${pubkeyKeyId}.`,
+    );
   }
 
-  const pubBytes = Buffer.from(publicKeyBase64.trim(), "base64");
-  if (pubBytes.length !== 32) {
-    throw new Error(`Expected Ed25519 public key to be 32 bytes (base64), got ${pubBytes.length}.`);
-  }
+  const key = ed25519PublicKeyFromRaw(publicKeyBytes);
 
-  const jwk = { kty: "OKP", crv: "Ed25519", x: pubBytes.toString("base64url") };
-  const key = crypto.createPublicKey({ key: jwk, format: "jwk" });
-
-  return crypto.verify(null, Buffer.from(manifestText, "utf8"), key, signature);
+  return crypto.verify(null, Buffer.from(manifestText, "utf8"), key, signatureBytes);
 }
 
 /**

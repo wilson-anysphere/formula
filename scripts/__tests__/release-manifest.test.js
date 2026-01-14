@@ -16,6 +16,7 @@ import {
   mergeTauriUpdaterManifests,
   normalizeVersion as normalizeVersionForMerge,
 } from "../merge-tauri-updater-manifests.mjs";
+import { verifyTauriManifestSignature } from "../tauri-updater-manifest.mjs";
 import {
   ActionableError,
   filenameFromUrl,
@@ -180,6 +181,42 @@ test("tauri-minisign: verifies latest.json.sig with a test Ed25519 keypair", asy
   // Wrong public key should fail.
   const wrongPub = ed25519PublicKeyFromRaw(Buffer.alloc(32));
   assert.equal(crypto.verify(null, manifestBytes, wrongPub, parsedSig.signatureBytes), false);
+});
+
+test("tauri-updater-manifest: verifyTauriManifestSignature supports minisign key/signature formats", async () => {
+  const manifestText = await readTextFixture("latest.multi-platform.json");
+  const keypair = await readJsonFixture("test-keypair.json");
+
+  const seed = Buffer.from(keypair.privateKeySeedBase64, "base64");
+  const privateKey = ed25519PrivateKeyFromSeed(seed);
+  const signatureBytes = crypto.sign(null, Buffer.from(manifestText, "utf8"), privateKey);
+
+  const rawPubkey = Buffer.from(keypair.publicKeyBase64, "base64");
+
+  // Synthetic minisign key id for the test (little-endian bytes in payload; printed key id is big-endian hex).
+  const keyIdLe = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
+  const keyIdHex = Buffer.from(keyIdLe).reverse().toString("hex").toUpperCase();
+
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyIdLe, rawPubkey]); // "Ed" + keyId + pubkey
+  const pubkeyText = `untrusted comment: minisign public key: ${keyIdHex}\n${pubPayload.toString("base64")}\n`;
+  const pubkeyBase64 = Buffer.from(pubkeyText, "utf8").toString("base64");
+
+  // 1) Raw base64 signature (64 bytes)
+  assert.equal(
+    verifyTauriManifestSignature(manifestText, signatureBytes.toString("base64"), pubkeyBase64),
+    true,
+  );
+
+  // 2) Minisign payload (base64 of 74 bytes)
+  const sigPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyIdLe, signatureBytes]); // "Ed" + keyId + sig
+  assert.equal(
+    verifyTauriManifestSignature(manifestText, sigPayload.toString("base64"), pubkeyBase64),
+    true,
+  );
+
+  // 3) Minisign signature file (comment + payload line)
+  const sigFileText = `untrusted comment: minisign signature: ${keyIdHex}\n${sigPayload.toString("base64")}\n`;
+  assert.equal(verifyTauriManifestSignature(manifestText, sigFileText, pubkeyBase64), true);
 });
 
 test("verify-updater-manifest-signature.mjs verifies latest.json.sig against a test tauri.conf.json pubkey", async () => {
