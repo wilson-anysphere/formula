@@ -139,6 +139,9 @@ const XF_FLAG_STYLE: u16 = 0x0004;
 
 const COLOR_AUTOMATIC: u16 = 0x7FFF;
 
+// FORMULA.grbit flag indicating a shared formula (`SHRFMLA` follows the base FORMULA record).
+const FORMULA_FLAG_SHARED: u16 = 0x0008;
+
 // ExtRst "rt" type for phonetic blocks inside BIFF8 `XLUnicodeRichExtendedString.ExtRst`.
 const EXT_RST_TYPE_PHONETIC: u16 = 0x0001;
 
@@ -964,6 +967,29 @@ pub fn build_shared_formula_ptgexp_u32_row_u16_col_fixture_xls() -> Vec<u8> {
 /// syntax like `{1,2;3,4}` instead of degrading to `#UNKNOWN!`.
 pub fn build_formula_array_constant_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_formula_array_constant_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a shared formula range at the BIFF8 row limit.
+///
+/// Shared formulas are stored once (in `SHRFMLA`) and referenced via `PtgExp` tokens in follower
+/// cells. When the shared token stream contains relative references (`PtgRefN` / `PtgAreaN`) that
+/// become out-of-bounds after shifting, Excel renders them as `#REF!` in the affected cells.
+///
+/// This fixture encodes a shared formula range `B65535:B65536` where the second cell's shifted
+/// reference points beyond BIFF8's max row (65536 in 1-based A1 terms), so the follower should
+/// materialize to `#REF!+1` rather than being dropped/unresolved.
+pub fn build_shared_formula_out_of_bounds_relative_refs_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_out_of_bounds_relative_refs_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -8622,6 +8648,12 @@ fn build_shared_formula_shrfmla_only_ptgref_relative_flags_sheet_stream(xf_cell:
     sheet
 }
 
+fn build_shared_formula_out_of_bounds_relative_refs_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_out_of_bounds_relative_refs_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedOutOfBounds", &sheet_stream, 1252)
+}
+
 fn build_merged_formatted_blank_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -12694,6 +12726,105 @@ fn build_shared_formula_ptgmemarean_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut b2 = formula_cell(1, 1, xf_cell, 0.0, &exp_rgce);
     b2[14..16].copy_from_slice(&0x0008u16.to_le_bytes());
     push_record(&mut sheet, RECORD_FORMULA, &b2);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_out_of_bounds_relative_refs_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // BIFF8 max row index (0-based).
+    const MAX_ROW0: u32 = u16::MAX as u32;
+    let base_row: u32 = MAX_ROW0 - 1;
+    let base_col: u16 = 1; // column B
+
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: cover rows [base_row, MAX_ROW0+1) and cols [0, 2) (A..B).
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&base_row.to_le_bytes()); // first row
+    dims.extend_from_slice(&(MAX_ROW0 + 1).to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col (A)
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    let base_row_u16: u16 = base_row as u16;
+    let max_row_u16: u16 = MAX_ROW0 as u16;
+    let base_col_u8: u8 = base_col as u8;
+
+    // Shared formula definition (SHRFMLA) for B65535:B65536:
+    //   B65535: A65536+1
+    //   B65536: #REF!+1 (because A65537 is out of bounds in BIFF8)
+    //
+    // Base rgce stored in SHRFMLA: PtgRefN(row_off=+1,col_off=-1) + 1 + +
+    let shared_rgce: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x2C); // PtgRefN
+        v.extend_from_slice(&1u16.to_le_bytes()); // row_off=+1 (stored in rw when row-relative)
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col_off=-1 (0x3FFF) with row+col relative bits set
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+
+    // Base cell (B65535) formula record, marked as a shared formula anchor.
+    //
+    // Use a full formula rgce so calamine can decode B65535 even if SHRFMLA resolution fails.
+    // `A65536+1` => PtgRef(A65536, relative row/col) + 1 + +
+    let base_full_rgce: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x24); // PtgRef
+        v.extend_from_slice(&max_row_u16.to_le_bytes()); // row = 65535 (A65536)
+        v.extend_from_slice(&0xC000u16.to_le_bytes()); // col = A, row+col relative
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(
+            base_row_u16,
+            base_col,
+            xf_cell,
+            0.0,
+            FORMULA_FLAG_SHARED,
+            &base_full_rgce,
+        ),
+    );
+
+    // SHRFMLA record must immediately follow the base FORMULA record.
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(
+            base_row_u16,
+            max_row_u16,
+            base_col_u8,
+            base_col_u8,
+            &shared_rgce,
+        ),
+    );
+
+    // Follower cell (B65536) uses PtgExp to reference the shared formula base cell (B65535).
+    let ptgexp: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x01); // PtgExp
+        v.extend_from_slice(&base_row_u16.to_le_bytes()); // base row
+        v.extend_from_slice(&base_col.to_le_bytes()); // base col
+        v
+    };
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(max_row_u16, base_col, xf_cell, 0.0, &ptgexp),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet

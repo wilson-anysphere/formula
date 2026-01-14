@@ -1072,6 +1072,16 @@ fn cell_in_bounds(row: i64, col: i64) -> bool {
     row >= 0 && row <= BIFF8_MAX_ROW0 && col >= 0 && col <= BIFF8_MAX_COL0
 }
 
+fn sign_extend_14(v: u16) -> i16 {
+    debug_assert!(v <= COL_INDEX_MASK);
+    // 14-bit two's complement. If bit13 is set, treat as negative.
+    if (v & 0x2000) != 0 {
+        (v | 0xC000) as i16
+    } else {
+        v as i16
+    }
+}
+
 fn pack_col_with_flags(col0: u16, flags: u16) -> u16 {
     (col0 & COL_INDEX_MASK) | (flags & RELATIVE_MASK)
 }
@@ -1116,6 +1126,8 @@ pub(crate) fn materialize_biff8_rgce(
 ) -> Option<Vec<u8>> {
     let delta_row = row as i64 - base_row as i64;
     let delta_col = col as i64 - base_col as i64;
+    let cell_row = row as i64;
+    let cell_col = col as i64;
 
     let mut out = Vec::with_capacity(base.len());
     let mut i = 0usize;
@@ -1301,17 +1313,85 @@ pub(crate) fn materialize_biff8_rgce(
                 i += 8;
             }
 
-            // PtgRefN: keep verbatim (relative offsets resolved at decode time).
+            // PtgRefN: offsets are resolved relative to the *current* formula cell at decode time.
+            // Keep the token verbatim unless the resulting reference would be out-of-bounds, in
+            // which case Excel materializes it as `PtgRefErr*`.
             0x2C | 0x4C | 0x6C => {
-                out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 4)?);
+                let payload = base.get(i..i + 4)?;
+                let row_raw = u16::from_le_bytes(payload.get(0..2)?.try_into().ok()?);
+                let col_field = u16::from_le_bytes(payload.get(2..4)?.try_into().ok()?);
+
+                let row_rel = (col_field & ROW_RELATIVE_BIT) != 0;
+                let col_rel = (col_field & COL_RELATIVE_BIT) != 0;
+                let col_raw = col_field & COL_INDEX_MASK;
+
+                let abs_row = if row_rel {
+                    cell_row.saturating_add(row_raw as i16 as i64)
+                } else {
+                    row_raw as i64
+                };
+                let abs_col = if col_rel {
+                    cell_col.saturating_add(sign_extend_14(col_raw) as i64)
+                } else {
+                    col_raw as i64
+                };
+
+                if cell_in_bounds(abs_row, abs_col) {
+                    out.push(ptg);
+                } else {
+                    // Excel materializes out-of-bounds `PtgRefN` / `PtgAreaN` refs in shared formulas
+                    // as `#REF!` error ptgs (`PtgRefErr*` / `PtgAreaErr*`).
+                    out.push(ptg.saturating_sub(0x02));
+                }
+                out.extend_from_slice(payload);
                 i += 4;
             }
 
-            // PtgAreaN: keep verbatim.
+            // PtgAreaN: like `PtgRefN`, keep verbatim unless out-of-bounds (then materialize as
+            // `PtgAreaErr*`).
             0x2D | 0x4D | 0x6D => {
-                out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 8)?);
+                let payload = base.get(i..i + 8)?;
+                let row1_raw = u16::from_le_bytes(payload.get(0..2)?.try_into().ok()?);
+                let row2_raw = u16::from_le_bytes(payload.get(2..4)?.try_into().ok()?);
+                let col1_field = u16::from_le_bytes(payload.get(4..6)?.try_into().ok()?);
+                let col2_field = u16::from_le_bytes(payload.get(6..8)?.try_into().ok()?);
+
+                let row1_rel = (col1_field & ROW_RELATIVE_BIT) != 0;
+                let col1_rel = (col1_field & COL_RELATIVE_BIT) != 0;
+                let row2_rel = (col2_field & ROW_RELATIVE_BIT) != 0;
+                let col2_rel = (col2_field & COL_RELATIVE_BIT) != 0;
+
+                let col1_raw = col1_field & COL_INDEX_MASK;
+                let col2_raw = col2_field & COL_INDEX_MASK;
+
+                let abs_row1 = if row1_rel {
+                    cell_row.saturating_add(row1_raw as i16 as i64)
+                } else {
+                    row1_raw as i64
+                };
+                let abs_row2 = if row2_rel {
+                    cell_row.saturating_add(row2_raw as i16 as i64)
+                } else {
+                    row2_raw as i64
+                };
+
+                let abs_col1 = if col1_rel {
+                    cell_col.saturating_add(sign_extend_14(col1_raw) as i64)
+                } else {
+                    col1_raw as i64
+                };
+                let abs_col2 = if col2_rel {
+                    cell_col.saturating_add(sign_extend_14(col2_raw) as i64)
+                } else {
+                    col2_raw as i64
+                };
+
+                if cell_in_bounds(abs_row1, abs_col1) && cell_in_bounds(abs_row2, abs_col2) {
+                    out.push(ptg);
+                } else {
+                    out.push(ptg.saturating_sub(0x02));
+                }
+                out.extend_from_slice(payload);
                 i += 8;
             }
 

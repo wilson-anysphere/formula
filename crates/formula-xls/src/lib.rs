@@ -1643,7 +1643,7 @@ fn import_xls_with_biff_reader(
             }
         }
 
-        let mut calamine_formula_failed = false;
+        let mut calamine_formula_failed = calamine_formulas_disabled;
 
         if !calamine_formulas_disabled {
             // Best-effort: calamine's `.xls` formula decoding can error or panic on token streams it
