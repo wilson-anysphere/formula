@@ -56,6 +56,7 @@ export class SecondaryGridView {
   readonly grid: DesktopSharedGrid;
 
   private disposed = false;
+  private uiReady = false;
   private readonly document: DocumentController;
   private readonly getSheetId: () => string;
   private readonly getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
@@ -306,10 +307,15 @@ export class SecondaryGridView {
 
           const zoom = this.grid.renderer.getZoom();
           this.container.dataset.zoom = String(zoom);
-         if (Math.abs(zoom - this.lastZoom) > 1e-6) {
-           this.lastZoom = zoom;
-           this.schedulePersistZoom(zoom);
-         }
+          if (Math.abs(zoom - this.lastZoom) > 1e-6) {
+            this.lastZoom = zoom;
+            this.schedulePersistZoom(zoom);
+          }
+
+          if (!this.uiReady) {
+            externalCallbacks.onScroll?.(scroll, viewport);
+            return;
+          }
 
           const rowsVersion = this.grid.renderer.scroll.rows.getVersion();
           const colsVersion = this.grid.renderer.scroll.cols.getVersion();
@@ -455,6 +461,11 @@ export class SecondaryGridView {
       this.container.dataset.scrollX = String(scroll.x);
       this.container.dataset.scrollY = String(scroll.y);
     }
+
+    // From this point on, viewport callbacks can safely render overlays.
+    this.rowsVersion = this.grid.renderer.scroll.rows.getVersion();
+    this.colsVersion = this.grid.renderer.scroll.cols.getVersion();
+    this.uiReady = true;
     void this.renderDrawings();
 
     // Re-apply view state when the document emits sheet view deltas (freeze panes, row/col sizes).

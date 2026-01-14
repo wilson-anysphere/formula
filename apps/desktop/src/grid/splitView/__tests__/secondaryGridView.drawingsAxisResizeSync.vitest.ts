@@ -77,10 +77,14 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
 
-    // Prevent DesktopSharedGrid from delivering rAF-batched scroll callbacks during construction.
+    // Many grid behaviors (viewport notifications, axis resize drags) are rAF-batched. Use a
+    // synchronous rAF stub so tests can deterministically observe redraws without timers.
     Object.defineProperty(globalThis, "requestAnimationFrame", {
       configurable: true,
-      value: () => 0,
+      value: (cb: FrameRequestCallback) => {
+        cb(0);
+        return 0;
+      },
     });
     Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
 
@@ -170,6 +174,83 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
 
     expect(renderSpy).toHaveBeenCalled();
     // Wait for the async overlay render triggered by the axis-size callback.
+    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
+
+    const secondStroke = calls.find((call) => call.method === "strokeRect");
+    expect(secondStroke).toBeTruthy();
+    const x2 = Number(secondStroke!.args[0]);
+    expect(x2).toBeCloseTo(x1 + (nextSize - prevSize), 6);
+
+    gridView.destroy();
+    container.remove();
+  });
+
+  it("updates drawings during interactive column resize (viewport changes)", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+    document.body.appendChild(container);
+
+    const calls: CtxCall[] = [];
+    const drawingsCtx = createRecordingCanvasContext(calls);
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement) {
+        if (this.classList.contains("grid-canvas--drawings")) return drawingsCtx;
+        return createMockCanvasContext();
+      },
+    });
+
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    const images: ImageStore = { get: () => undefined, set: () => {} };
+
+    // Anchor at B1 so its x-position depends on the width of column A.
+    const objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "image", imageId: "missing" },
+        zOrder: 0,
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 1 }, offset: { xEmu: 0, yEmu: 0 } }, // B1
+          size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+        },
+      },
+    ];
+
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => sheetId,
+      rowCount: 20,
+      colCount: 20,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => objects,
+      images,
+    });
+
+    calls.splice(0, calls.length);
+    await (gridView as any).renderDrawings();
+
+    const firstStroke = calls.find((call) => call.method === "strokeRect");
+    expect(firstStroke).toBeTruthy();
+    const x1 = Number(firstStroke!.args[0]);
+    expect(Number.isFinite(x1)).toBe(true);
+
+    // Interactive drag path: update the renderer sizes directly without calling onAxisSizeChange.
+    const renderer = gridView.grid.renderer;
+    const index = 1; // grid col 1 => doc col 0 (A)
+    const prevSize = renderer.getColWidth(index);
+    const nextSize = prevSize + 50;
+
+    calls.splice(0, calls.length);
+    renderer.setColWidth(index, nextSize);
+
+    // Wait for the async overlay render triggered by the viewport notification.
     await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
 
     const secondStroke = calls.find((call) => call.method === "strokeRect");
