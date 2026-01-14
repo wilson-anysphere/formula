@@ -1059,3 +1059,66 @@ fn delete_cols_overlapping_table_and_before_start_shifts_and_shrinks_table() {
     let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, vec!["Col2", "Col3", "Col4"]);
 }
+
+#[test]
+fn insert_cols_at_table_right_edge_appends_column_and_preserves_refs() {
+    let mut engine = setup_engine_with_table();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SUM(Table1[Col2])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    engine
+        .apply_operation(EditOp::InsertCols {
+            sheet: "Sheet1".into(),
+            col: 4, // Insert at the right edge of the table (table is A:D).
+            count: 1,
+        })
+        .expect("insert cols");
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(table.range, Range::from_a1("A1:E4").unwrap());
+    assert_eq!(table.columns.len(), table.range.width() as usize);
+    let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["Col1", "Col2", "Col3", "Col4", "Column1"]);
+    let ids: Vec<u32> = table.columns.iter().map(|c| c.id).collect();
+    assert_eq!(ids, vec![1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn delete_cols_at_table_right_edge_removes_column_and_yields_ref_error() {
+    let mut engine = setup_engine_with_table();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SUM(Table1[Col4])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(0.0));
+
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".into(),
+            col: 3, // Delete the last table column (Col4).
+            count: 1,
+        })
+        .expect("delete cols");
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet2", "A1"),
+        Value::Error(formula_engine::ErrorKind::Ref)
+    );
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(table.range, Range::from_a1("A1:C4").unwrap());
+    assert_eq!(table.columns.len(), table.range.width() as usize);
+    let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["Col1", "Col2", "Col3"]);
+}

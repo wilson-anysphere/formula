@@ -8312,8 +8312,12 @@ fn update_tables_for_insert_cols(sheet: &mut Sheet, col: u32, count: u32) {
             // columns.
             table.range.start.col = start_col.saturating_add(count);
             table.range.end.col = end_col.saturating_add(count);
-        } else if col <= end_col {
+        } else if col <= end_col.saturating_add(1) {
             // Inserting within the table adds columns to the table at the insertion point.
+            //
+            // We treat inserting at `end_col + 1` as inserting at the table's right edge (i.e.
+            // appending new columns), matching how Excel expands tables when inserting columns at
+            // the boundary.
             let insert_idx = (col - start_col) as usize;
             insert_default_table_columns(table, insert_idx, count);
             table.range.end.col = end_col.saturating_add(count);
