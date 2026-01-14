@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -90,5 +91,24 @@ test("generate-release-checksums rejects Linux AppImage tarballs as macOS update
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  }
+});
+
+test("generate-release-checksums.sh remains compatible with macOS default Bash 3.x (no Bash 4-only syntax)", () => {
+  const text = readFileSync(scriptPath, "utf8");
+  const lines = text.split(/\r?\n/);
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Ignore comments (including the explanatory “avoid mapfile” comments).
+    if (trimmed.startsWith("#")) continue;
+
+    // `mapfile` is Bash 4+ (macOS runners still ship Bash 3.x by default).
+    assert.doesNotMatch(line, /\bmapfile\b/);
+    // `${var,,}` is Bash 4+.
+    assert.doesNotMatch(line, /\$\{[^}]*,,\}/);
+    // Associative arrays (`declare -A`) are Bash 4+.
+    assert.doesNotMatch(line, /\bdeclare\s+-A\b/);
   }
 });
