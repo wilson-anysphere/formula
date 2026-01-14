@@ -583,7 +583,8 @@ pub fn pivot(
 `PivotResult` contains:
 
 - `columns`: group-by columns formatted as `"Table[Column]"`, followed by `PivotMeasure.name`
-- `rows`: one row per group, sorted lexicographically by group keys (with `BLANK` sorting first)
+- `rows`: one row per group, sorted lexicographically by group keys using an Excel-like cross-type
+  ordering (`Number` < `Text` < `Boolean` < `BLANK`)
 
 ### Performance paths
 
@@ -672,14 +673,22 @@ configurations:
 
 ### Debugging / tracing
 
-Set `FORMULA_DAX_PIVOT_TRACE=1` to print which pivot execution path was used (once per process).
-Current labels include `columnar_group_by`, `columnar_groups_with_measure_eval`, `planned_row_group_by`,
-and `row_scan`.
+Set `FORMULA_DAX_PIVOT_TRACE=1` to print which pivot execution path was used (once per path per process).
+Current labels include `columnar_group_by`, `columnar_groups_with_measure_eval`,
+`columnar_star_schema_group_by`, `planned_row_group_by`, and `row_scan`.
+
+To force the engine to skip the star-schema fast path (useful for debugging), set
+`FORMULA_DAX_PIVOT_DISABLE_STAR_SCHEMA=1`.
 
 ### Rendering integration
 
-If built with the crate feature `pivot-model`, `PivotResultGrid::to_pivot_scalars()` converts the grid
-into `formula_model::pivots::ScalarValue` values for rendering via higher-level pivot structures.
+If built with the crate feature `pivot-model`, the pivot results can be converted into
+`formula-model` scalar types:
+
+- `PivotResult::into_pivot_values()` / `PivotResultGrid::into_pivot_values()` → `PivotValue` (the
+  canonical pivot scalar representation used across IPC/XLSX/model layers)
+- `PivotResultGrid::to_pivot_scalars()` → `ScalarValue` (a legacy helper used by some in-memory
+  pivot structures)
 
 ---
 
