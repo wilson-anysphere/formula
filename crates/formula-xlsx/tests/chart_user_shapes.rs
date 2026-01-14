@@ -1,6 +1,8 @@
 use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Chart, ChartType, Workbook};
 
+const FIXTURE: &[u8] = include_bytes!("../../../fixtures/xlsx/charts/chart-user-shapes.xlsx");
+
 fn build_workbook_with_chart() -> Vec<u8> {
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
@@ -211,3 +213,100 @@ fn detects_chart_user_shapes_part_via_drawing_target_heuristic_when_type_missing
     assert_eq!(user_shapes.path, "xl/drawings/drawing99.xml");
     assert_eq!(user_shapes.bytes, user_shapes_xml);
 }
+
+#[test]
+fn extracts_chart_user_shapes_part_from_fixture_and_preserves_bytes() {
+    let pkg = XlsxPackage::from_bytes(FIXTURE).expect("open xlsx fixture");
+    let charts = pkg.extract_chart_objects().expect("extract chart objects");
+    assert!(
+        !charts.is_empty(),
+        "expected fixture to contain at least one chart object"
+    );
+
+    let chart = &charts[0];
+    let user_shapes = chart
+        .parts
+        .user_shapes
+        .as_ref()
+        .expect("expected chartUserShapes part to be detected");
+    assert_eq!(user_shapes.path, "xl/drawings/drawing2.xml");
+    assert!(
+        !user_shapes.bytes.is_empty(),
+        "expected chartUserShapes part to have bytes"
+    );
+    assert_eq!(
+        user_shapes.rels_path.as_deref(),
+        Some("xl/drawings/_rels/drawing2.xml.rels"),
+        "expected chartUserShapes rels path to be captured"
+    );
+    let user_shapes_rels_path = user_shapes.rels_path.as_deref().unwrap();
+    assert_eq!(
+        user_shapes.rels_bytes.as_deref(),
+        pkg.part(user_shapes_rels_path),
+        "expected chartUserShapes rels bytes to be embedded on the extracted OpcPart"
+    );
+
+    // No-op round-trip should preserve the part bytes byte-for-byte.
+    let roundtrip = pkg.write_to_bytes().expect("round-trip write");
+    let pkg2 = XlsxPackage::from_bytes(&roundtrip).expect("parse round-trip package");
+    assert_eq!(
+        pkg.part(&user_shapes.path),
+        pkg2.part(&user_shapes.path),
+        "chartUserShapes xml should round-trip losslessly"
+    );
+    assert_eq!(
+        pkg.part(user_shapes_rels_path),
+        pkg2.part(user_shapes_rels_path),
+        "chartUserShapes rels should round-trip losslessly"
+    );
+
+    // The drawing-parts preservation pipeline should also keep chartUserShapes reachable from the
+    // chart's relationship graph.
+    let preserved = pkg.preserve_drawing_parts().expect("preserve drawing parts");
+    assert!(
+        preserved.parts.contains_key(&user_shapes.path),
+        "expected preserved drawing parts to include chartUserShapes part"
+    );
+    assert!(
+        preserved.parts.contains_key(user_shapes_rels_path),
+        "expected preserved drawing parts to include chartUserShapes rels part"
+    );
+
+    // Apply preserved parts to a regenerated workbook and verify the userShapes part survives.
+    let mut workbook = Workbook::new();
+    workbook.add_worksheet();
+    let regenerated_bytes = workbook.save_to_buffer().expect("write regenerated workbook");
+    let mut regenerated_pkg =
+        XlsxPackage::from_bytes(&regenerated_bytes).expect("parse regenerated workbook");
+    regenerated_pkg
+        .apply_preserved_drawing_parts(&preserved)
+        .expect("apply preserved drawing parts");
+
+    let merged_bytes = regenerated_pkg
+        .write_to_bytes()
+        .expect("write merged workbook");
+    let merged_pkg = XlsxPackage::from_bytes(&merged_bytes).expect("parse merged workbook");
+    let merged_charts = merged_pkg
+        .extract_chart_objects()
+        .expect("extract charts from merged workbook");
+    assert!(
+        !merged_charts.is_empty(),
+        "expected merged workbook to contain charts"
+    );
+    let merged_user_shapes = merged_charts[0]
+        .parts
+        .user_shapes
+        .as_ref()
+        .expect("expected merged workbook to contain chartUserShapes part");
+    assert_eq!(
+        merged_pkg.part(&merged_user_shapes.path),
+        pkg.part(&user_shapes.path),
+        "expected merged workbook to preserve chartUserShapes bytes"
+    );
+    assert_eq!(
+        merged_pkg.part(merged_user_shapes.rels_path.as_deref().unwrap()),
+        pkg.part(user_shapes_rels_path),
+        "expected merged workbook to preserve chartUserShapes rels bytes"
+    );
+}
+
