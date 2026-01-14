@@ -284,3 +284,85 @@ fn pivot_reference_rewrite_helpers_are_case_insensitive() {
         }
     );
 }
+
+#[test]
+fn dax_column_ref_parser_handles_basic_and_quoted_tables() {
+    assert_eq!(
+        parse_dax_column_ref("Table[Column]"),
+        Some(("Table".to_string(), "Column".to_string()))
+    );
+    assert_eq!(
+        parse_dax_column_ref("  Table [ Column ]  "),
+        Some(("Table".to_string(), "Column".to_string()))
+    );
+    assert_eq!(
+        parse_dax_column_ref("'My Table'[Column]"),
+        Some(("My Table".to_string(), "Column".to_string()))
+    );
+    assert_eq!(
+        parse_dax_column_ref("'O''Reilly'[Col]"),
+        Some(("O'Reilly".to_string(), "Col".to_string()))
+    );
+
+    // Invalid shapes.
+    assert_eq!(parse_dax_column_ref(""), None);
+    assert_eq!(parse_dax_column_ref("[Column]"), None);
+    assert_eq!(parse_dax_column_ref("Table[]"), None);
+    assert_eq!(parse_dax_column_ref("Table[Column"), None);
+    assert_eq!(parse_dax_column_ref("Table[Column] trailing"), None);
+    assert_eq!(parse_dax_column_ref("'Table'X[Column]"), None);
+}
+
+#[test]
+fn dax_measure_ref_parser_handles_basic_and_rejects_nested_brackets() {
+    assert_eq!(parse_dax_measure_ref("[Measure]"), Some("Measure".to_string()));
+    assert_eq!(parse_dax_measure_ref(" [ Measure ] "), Some("Measure".to_string()));
+
+    assert_eq!(parse_dax_measure_ref("[]"), None);
+    assert_eq!(parse_dax_measure_ref("[Table[Column]]"), None);
+    assert_eq!(parse_dax_measure_ref("[Measure] trailing"), None);
+}
+
+#[test]
+fn pivot_field_ref_deserializes_dax_refs_from_strings() {
+    assert_eq!(
+        serde_json::from_value::<PivotFieldRef>(json!("Table[Column]")).unwrap(),
+        PivotFieldRef::DataModelColumn {
+            table: "Table".to_string(),
+            column: "Column".to_string(),
+        }
+    );
+    assert_eq!(
+        serde_json::from_value::<PivotFieldRef>(json!("'My Table'[Column]")).unwrap(),
+        PivotFieldRef::DataModelColumn {
+            table: "My Table".to_string(),
+            column: "Column".to_string(),
+        }
+    );
+    assert_eq!(
+        serde_json::from_value::<PivotFieldRef>(json!("[Measure]")).unwrap(),
+        PivotFieldRef::DataModelMeasure("Measure".to_string())
+    );
+    assert_eq!(
+        serde_json::from_value::<PivotFieldRef>(json!("Regular Field")).unwrap(),
+        PivotFieldRef::CacheFieldName("Regular Field".to_string())
+    );
+}
+
+#[test]
+fn pivot_field_ref_serializes_data_model_refs_as_structured_objects() {
+    let column = PivotFieldRef::DataModelColumn {
+        table: "Sales".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(
+        serde_json::to_value(&column).unwrap(),
+        json!({ "table": "Sales", "column": "Amount" })
+    );
+
+    let measure = PivotFieldRef::DataModelMeasure("Total Sales".to_string());
+    assert_eq!(
+        serde_json::to_value(&measure).unwrap(),
+        json!({ "measure": "Total Sales" })
+    );
+}
