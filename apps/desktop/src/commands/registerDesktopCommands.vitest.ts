@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../extensions/commandRegistry.js";
 import { registerEncryptionUiCommands } from "../collab/encryption-ui/registerEncryptionUiCommands.js";
+import { t } from "../i18n/index.js";
 
 import { registerDesktopCommands } from "./registerDesktopCommands.js";
 
@@ -77,6 +78,17 @@ describe("registerDesktopCommands", () => {
     // `main.ts` registers some additional desktop-only commands outside `registerDesktopCommands(...)`.
     // Ensure these don't introduce duplicate command palette entries either.
     registerEncryptionUiCommands({ commandRegistry, app: {} as any });
+    // A few desktop-only commands are still registered inline in `main.ts`. Mirror their titles/categories
+    // here so this regression test covers command palette duplication across the full desktop catalog.
+    commandRegistry.registerBuiltinCommand("ui.openContextMenu", t("command.ui.openContextMenu"), () => {}, {
+      category: t("commandCategory.view"),
+    });
+    commandRegistry.registerBuiltinCommand("checkForUpdates", t("commandPalette.command.checkForUpdates"), () => {}, {
+      category: t("commandCategory.help"),
+    });
+    commandRegistry.registerBuiltinCommand("debugShowSystemNotification", t("command.debugShowSystemNotification"), () => {}, {
+      category: t("commandCategory.debug"),
+    });
 
     // Treat `when: "false"` as "hidden from context-aware surfaces (command palette)".
     const visible = commandRegistry.listCommands().filter((cmd) => cmd.when !== "false");
