@@ -119,19 +119,34 @@ EncryptionInfoStream =
 
 ### 2.3) `EncryptionHeader` (variable length, `HeaderSize` bytes)
 
-The header starts with eight DWORDs, followed by a UTF‑16LE NUL‑terminated CSP name string.
+The header starts with eight DWORDs (**32 bytes**) and then contains a variable-length CSP name string.
+
+Important: the `SizeExtra` field means the CSP name does **not** necessarily consume all remaining
+`EncryptionHeader` bytes. Real-world producers exist where `SizeExtra != 0` and **opaque trailing
+bytes** follow the CSP name inside the header blob. Tolerant parsers must not interpret these extra
+bytes as UTF‑16LE text.
+
+Byte layout:
+
+```text
+EncryptionHeaderBytes (HeaderSize bytes) =
+  FixedFields[32] ||
+  CSPNameBytes[HeaderSize - 32 - SizeExtra] ||   // UTF-16LE (often NUL-terminated)
+  Extra[SizeExtra]                               // opaque / unused
+```
 
 ```text
 struct EncryptionHeader {
   u32 Flags;
-  u32 SizeExtra;      // should be 0
+  u32 SizeExtra;      // number of trailing bytes after CSPName (often 0, but not guaranteed)
   u32 AlgID;          // cipher ALG_ID (RC4 / AES_*)
   u32 AlgIDHash;      // hash ALG_ID (SHA1 / MD5)
   u32 KeySize;        // in *bits*
   u32 ProviderType;   // typically PROV_RSA_FULL (1) or PROV_RSA_AES (24)
   u32 Reserved1;      // should be 0
   u32 Reserved2;      // should be 0
-  u16 CSPName[];      // UTF-16LE string including NUL terminator; consumes the remaining bytes
+  u8  CSPNameBytes[]; // UTF-16LE bytes (length = HeaderSize - 32 - SizeExtra; often includes a NUL terminator)
+  u8  Extra[];        // trailing SizeExtra bytes (opaque; ignore)
 }
 ```
 
@@ -139,8 +154,17 @@ Notes:
 
 * `CSPName` is only metadata (e.g. `Microsoft Enhanced RSA and AES Cryptographic Provider`) and is not
   required to derive keys.
-* Prefer parsing the header as: fixed 32 bytes + “the rest is CSPName”.
-  Do **not** search for the NUL terminator to determine header length; use `HeaderSize`.
+* Correct parsing rule (using the enclosing `HeaderSize`):
+  * `csp_name_bytes_len = headerSize - 32 - sizeExtra` (validate `headerSize >= 32` and
+    `sizeExtra <= headerSize - 32`)
+  * Decode the CSP name from `header[32 : 32 + csp_name_bytes_len]` **only**.
+  * Ignore the remaining `sizeExtra` bytes; do not treat them as UTF‑16.
+* Do **not** scan for the NUL terminator to determine header length. Use `HeaderSize` (and
+  `SizeExtra`) to compute the CSP-name slice, then (optionally) truncate at the first NUL *within that
+  slice* when decoding.
+* Interoperability motivation: some producers set `SizeExtra` non-zero and include non-text bytes
+  after the CSP name. Treating “the rest of the header” as UTF‑16 can lead to decode failures or
+  spurious provider names.
 
 ### 2.4) `EncryptionVerifier` (remainder of stream)
 
