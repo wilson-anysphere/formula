@@ -16,8 +16,8 @@
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
-  padding: 12px;
-  gap: 12px;
+  padding: var(--space-5);
+  gap: var(--space-5);
   box-sizing: border-box;
   overflow: auto;
 }
@@ -34,10 +34,10 @@
 .vba-migrate-panel__body {
   flex: 1;
   min-height: 0;
-  padding: 12px;
+  padding: var(--space-5);
   box-sizing: border-box;
   display: flex;
-  gap: 12px;
+  gap: var(--space-5);
 }
 
 .vba-migrate-panel__card {
@@ -54,18 +54,18 @@
 }
 
 .vba-migrate-panel__card-header {
-  padding: 10px;
+  padding: calc(var(--space-4) + var(--space-1));
   border-bottom: 1px solid var(--border);
 }
 
 .vba-migrate-panel__card-header--row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .vba-migrate-panel__section {
-  padding: 10px;
+  padding: calc(var(--space-4) + var(--space-1));
 }
 
 .vba-migrate-panel__section--divider {
@@ -78,13 +78,13 @@
 
 .vba-migrate-panel__details-summary {
   cursor: pointer;
-  padding: 10px;
+  padding: calc(var(--space-4) + var(--space-1));
   font-weight: 600;
 }
 
 .vba-migrate-panel__details-pre {
   margin: 0;
-  padding: 10px;
+  padding: calc(var(--space-4) + var(--space-1));
   border-top: 1px solid var(--border);
   white-space: pre-wrap;
 }
@@ -102,7 +102,7 @@
   min-height: 0;
   border: none;
   outline: none;
-  padding: 10px;
+  padding: calc(var(--space-4) + var(--space-1));
   resize: none;
   background: transparent;
   color: inherit;
@@ -118,13 +118,13 @@
 }
 
 .vba-migrate-panel__module-item {
-  margin-bottom: 6px;
+  margin-bottom: var(--space-3);
 }
 
 .vba-migrate-panel__module-button {
   width: 100%;
   text-align: left;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   background: transparent;
   border: 1px solid var(--border);
   cursor: pointer;
@@ -141,13 +141,13 @@
 
 .vba-migrate-panel__entrypoint-label {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
   align-items: center;
   font-size: 12px;
 }
 
 .vba-migrate-panel__entrypoint-control {
-  padding: 4px 6px;
+  padding: var(--space-2) var(--space-3);
 }
 
 .vba-migrate-panel__subheader {
@@ -157,7 +157,7 @@
 
 .vba-migrate-panel__row {
   display: flex;
-  gap: 8px;
+  gap: var(--space-4);
   align-items: center;
 }
 
@@ -170,11 +170,11 @@
 }
 
 .vba-migrate-panel__heading--mb-6 {
-  margin-bottom: 6px;
+  margin-bottom: var(--space-3);
 }
 
 .vba-migrate-panel__heading--mb-8 {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-4);
 }
 
 .vba-migrate-panel__text-sm {
@@ -184,11 +184,11 @@
 .vba-migrate-panel__stack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-5);
 }
 
 .vba-migrate-panel__stack--gap-8 {
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .vba-migrate-panel__summary {
@@ -202,40 +202,40 @@
 
 .vba-migrate-panel__list {
   margin: 0;
-  padding-left: 18px;
+  padding-left: calc(var(--space-6) + var(--space-1));
 }
 
 .vba-migrate-panel__list--mt-8 {
-  margin: 8px 0 0;
+  margin: var(--space-4) 0 0;
 }
 
 .vba-migrate-panel__pre {
-  margin: 8px 0 0;
+  margin: var(--space-4) 0 0;
   white-space: pre-wrap;
 }
 
 .vba-migrate-panel__raw-pre {
   margin: 0;
-  padding-top: 8px;
+  padding-top: var(--space-4);
   white-space: pre-wrap;
 }
 
 .vba-migrate-panel__empty {
   flex: 1;
-  padding: 16px;
+  padding: var(--space-6);
   box-sizing: border-box;
 }
 
 .vba-migrate-panel__empty-title {
   font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-4);
 }
 
 .vba-migrate-panel__card-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 10px;
+  padding: calc(var(--space-4) + var(--space-1));
   box-sizing: border-box;
 }
 
