@@ -482,7 +482,7 @@ back into a generic “encrypted workbook” error:
 - `formula_io::Error::PasswordRequired { .. }` → **Password required**
 - `formula_io::Error::InvalidPassword { .. }` → **Invalid password**
 - `formula_io::Error::UnsupportedOoxmlEncryption { .. }` → **Unsupported encryption scheme**
-- `formula_io::Error::EncryptedWorkbook { .. }` → **Encrypted workbook (unsupported at this layer)**
+- `formula_io::Error::EncryptedWorkbook { .. }` → **Password required (legacy `.xls` encryption / FILEPASS)**
 
 - `formula_xlsx::offcrypto::OffCryptoError::WrongPassword` → **Invalid password**
 - `formula_xlsx::offcrypto::OffCryptoError::IntegrityMismatch` → **Invalid password** *or* **corrupt file**

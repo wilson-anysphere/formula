@@ -6,7 +6,6 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use rand::rngs::OsRng;
 use rand::RngCore;
-use md5::Md5;
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
 

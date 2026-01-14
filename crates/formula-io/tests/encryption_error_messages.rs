@@ -13,6 +13,10 @@ fn password_error_messages_are_actionable() {
         "expected password-required error to mention that a password is required; got: {required_msg}"
     );
     assert!(
+        required_msg.contains("open_workbook_with_password"),
+        "expected password-required error to hint how to provide a password; got: {required_msg}"
+    );
+    assert!(
         !required_msg.contains("remove password protection"),
         "password-required error should not ask users to remove password protection; got: {required_msg}"
     );
@@ -27,5 +31,21 @@ fn password_error_messages_are_actionable() {
         !invalid_msg.contains("remove password protection"),
         "invalid-password error should not ask users to remove password protection; got: {invalid_msg}"
     );
-}
 
+    let xls = Error::EncryptedWorkbook {
+        path: PathBuf::from("legacy.xls"),
+    };
+    let xls_msg = xls.to_string().to_lowercase();
+    assert!(
+        xls_msg.contains("password required"),
+        "expected legacy encrypted-workbook error to mention that a password is required; got: {xls_msg}"
+    );
+    assert!(
+        xls_msg.contains("open_workbook_with_password"),
+        "expected legacy encrypted-workbook error to hint how to provide a password; got: {xls_msg}"
+    );
+    assert!(
+        !xls_msg.contains("remove password protection"),
+        "legacy encrypted-workbook error should not ask users to remove password protection; got: {xls_msg}"
+    );
+}
