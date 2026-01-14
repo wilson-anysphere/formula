@@ -31,3 +31,17 @@ test("sheet position status bar string is localizable", () => {
   setLocale("ar");
   assert.equal(tWithVars("statusBar.sheetPosition", { position: 1, total: 3 }), "ورقة 1 من 3");
 });
+
+test("Version History Compare strings are localizable", () => {
+  setLocale("en-US");
+  assert.equal(t("versionHistory.compare.title"), "Compare");
+  assert.equal(tWithVars("versionHistory.compare.badge.added", { count: 2 }), "Added: 2");
+
+  setLocale("de-DE");
+  assert.equal(t("versionHistory.compare.title"), "Vergleichen");
+  assert.equal(tWithVars("versionHistory.compare.badge.added", { count: 2 }), "Hinzugefügt: 2");
+
+  setLocale("ar");
+  assert.equal(t("versionHistory.compare.title"), "مقارنة");
+  assert.equal(tWithVars("versionHistory.compare.badge.added", { count: 2 }), "تمت الإضافة: 2");
+});
