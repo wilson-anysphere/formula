@@ -13,6 +13,9 @@
 //!
 //! Scope: password verification only (not full package decryption).
 
+use aes::cipher::generic_array::GenericArray;
+use aes::cipher::{BlockDecrypt, KeyInit};
+use aes::{Aes128, Aes192, Aes256};
 use md5::Md5;
 use sha1::Sha1;
 
@@ -83,7 +86,7 @@ pub enum OffcryptoError {
     #[error("invalid key size {key_size_bits} bits")]
     InvalidKeySize { key_size_bits: u32 },
 
-    #[error("AES-CBC ciphertext length {len} is not a multiple of the block size ({AES_BLOCK_SIZE})")]
+    #[error("AES ciphertext length {len} is not a multiple of the block size ({AES_BLOCK_SIZE})")]
     InvalidAesCiphertextLength { len: usize },
 
     #[error("cryptographic error: {message}")]
@@ -388,7 +391,7 @@ pub fn verify_password_standard(
     ciphertext.extend_from_slice(&info.verifier.encrypted_verifier);
     ciphertext.extend_from_slice(&info.verifier.encrypted_verifier_hash);
 
-    let plaintext = match info.header.alg_id {
+    match info.header.alg_id {
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
             if ciphertext.len() % AES_BLOCK_SIZE != 0 {
                 return Err(OffcryptoError::InvalidAesCiphertextLength {
@@ -396,6 +399,16 @@ pub fn verify_password_standard(
                 });
             }
 
+            // Baseline MS-OFFCRYPTO Standard AES uses AES-ECB (no IV) for verifier fields.
+            // However, some producers use CBC-style variants; fall back to the derived-IV CBC
+            // scheme if ECB does not verify.
+            let mut ecb_plaintext = ciphertext.clone();
+            aes_ecb_decrypt_in_place(&key, &mut ecb_plaintext)?;
+            if verifier_hash_matches(info, &ecb_plaintext)? {
+                return Ok(true);
+            }
+
+            // Compatibility fallback: AES-CBC (no padding) with a derived IV.
             let iv = derive_standard_aes_iv(info)?;
             decrypt_aes_cbc_no_padding_in_place(&key, &iv, &mut ciphertext).map_err(|err| {
                 let msg = match err {
@@ -405,15 +418,20 @@ pub fn verify_password_standard(
                 };
                 OffcryptoError::crypto(msg)
             })?;
-            ciphertext.as_slice()
+            verifier_hash_matches(info, &ciphertext)
         }
         CALG_RC4 => {
             rc4_apply_keystream(&key, &mut ciphertext)?;
-            ciphertext.as_slice()
+            verifier_hash_matches(info, &ciphertext)
         }
-        other => return Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
-    };
+        other => Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
+    }
+}
 
+fn verifier_hash_matches(
+    info: &StandardEncryptionInfo,
+    plaintext: &[u8],
+) -> Result<bool, OffcryptoError> {
     let verifier_hash_size = info.verifier.verifier_hash_size as usize;
     if verifier_hash_size == 0 {
         return Err(OffcryptoError::InvalidVerifierHashSize {
@@ -440,6 +458,32 @@ pub fn verify_password_standard(
     Ok(expected_full[0..verifier_hash_size] == *verifier_hash)
 }
 
+fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError> {
+    if buf.len() % AES_BLOCK_SIZE != 0 {
+        return Err(OffcryptoError::InvalidAesCiphertextLength { len: buf.len() });
+    }
+
+    fn decrypt_with<C>(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError>
+    where
+        C: BlockDecrypt + KeyInit,
+    {
+        let cipher = C::new_from_slice(key).map_err(|_| OffcryptoError::crypto("unsupported AES key length"))?;
+        for block in buf.chunks_mut(AES_BLOCK_SIZE) {
+            cipher.decrypt_block(GenericArray::from_mut_slice(block));
+        }
+        Ok(())
+    }
+
+    match key.len() {
+        16 => decrypt_with::<Aes128>(key, buf),
+        24 => decrypt_with::<Aes192>(key, buf),
+        32 => decrypt_with::<Aes256>(key, buf),
+        other => Err(OffcryptoError::crypto(format!(
+            "unsupported AES key length {other} bytes"
+        ))),
+    }
+}
+
 fn derive_file_key_standard(
     info: &StandardEncryptionInfo,
     password: &str,
@@ -454,9 +498,26 @@ fn derive_file_key_standard(
     let h = hash_password_fixed_spin(&password_utf16le, &info.verifier.salt, info.header.alg_id_hash)?;
 
     let block = 0u32.to_le_bytes();
-    let h_final = hash(info.header.alg_id_hash, &[&h, &block])?;
+    let h_block0 = hash(info.header.alg_id_hash, &[&h, &block])?;
 
-    crypt_derive_key(&h_final, key_len, info.header.alg_id_hash)
+    match info.header.alg_id {
+        CALG_RC4 => {
+            if key_len > h_block0.len() {
+                return Err(OffcryptoError::InvalidKeySize { key_size_bits });
+            }
+            // Standard RC4 key derivation truncates H_block0 directly. CryptoAPI/Office represent a
+            // "40-bit" RC4 key as a padded 16-byte key (high 88 bits zero).
+            let mut key = h_block0[..key_len].to_vec();
+            if key_len == 5 {
+                key.resize(16, 0);
+            }
+            Ok(key)
+        }
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            crypt_derive_key(&h_block0, key_len, info.header.alg_id_hash)
+        }
+        other => Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
+    }
 }
 
 fn derive_standard_aes_iv(info: &StandardEncryptionInfo) -> Result<[u8; AES_BLOCK_SIZE], OffcryptoError> {
@@ -509,11 +570,11 @@ fn crypt_derive_key(
     if key_len == 0 {
         return Err(OffcryptoError::InvalidKeySize { key_size_bits: 0 });
     }
-    if key_len <= hash_value.len() {
-        return Ok(hash_value[..key_len].to_vec());
-    }
 
-    // CryptoAPI `CryptDeriveKey` semantics when the key size exceeds the hash output size.
+    // CryptoAPI `CryptDeriveKey` (MD5/SHA1): expand with an ipad/opad construction and truncate.
+    //
+    // This is **not** "truncate the hash": for Standard AES, Office uses this expansion even when
+    // the requested key length is smaller than the digest length.
     //
     // Given H (hash_value), build a 64-byte buffer: H || 0x00.., then:
     //   X1 = Hash((buffer XOR 0x36..))
@@ -643,21 +704,22 @@ mod tests {
 
     #[test]
     fn verify_password_standard_aes_sha1() {
-        let password = "Password123";
-        let wrong_password = "Password124";
+        // Test vector from `docs/offcrypto-standard-cryptoapi.md` (§8.2).
+        let password = "Password1234_";
+        let wrong_password = "Password1234!";
         let salt: [u8; 16] = [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
-            0x0D, 0x0E, 0x0F,
+            0xE8, 0x82, 0x66, 0x49, 0x0C, 0x5B, 0xD1, 0xEE, 0xBD, 0x2B, 0x43, 0x94, 0xE3,
+            0xF8, 0x30, 0xEF,
         ];
 
         // Expected values computed from the MS-OFFCRYPTO Standard key/IV derivation.
         let expected_key: [u8; 16] = [
-            0xED, 0xED, 0x20, 0x92, 0x8D, 0xAE, 0x81, 0xB6, 0xA9, 0x94, 0xAB, 0x8E, 0xEC,
-            0xED, 0x9C, 0x3E,
+            0x40, 0xB1, 0x3A, 0x71, 0xF9, 0x0B, 0x96, 0x6E, 0x37, 0x54, 0x08, 0xF2, 0xD1,
+            0x81, 0xA1, 0xAA,
         ];
         let expected_iv: [u8; 16] = [
-            0x71, 0x9E, 0xA7, 0x50, 0xA6, 0x5A, 0x93, 0xD8, 0x0E, 0x1E, 0x0B, 0xA3, 0x3A,
-            0x2B, 0xA0, 0xE7,
+            0xA1, 0xCD, 0xC2, 0x53, 0x36, 0x96, 0x4D, 0x31, 0x4D, 0xD9, 0x68, 0xDA, 0x99,
+            0x8D, 0x05, 0xB8,
         ];
 
         let header = EncryptionHeader {
@@ -731,7 +793,10 @@ mod tests {
             0x1D, 0x1E, 0x1F,
         ];
 
-        let expected_key: [u8; 5] = [0x8F, 0x5C, 0x2B, 0x8A, 0xD0];
+        let expected_key: [u8; 16] = [
+            0x8F, 0x5C, 0x2B, 0x8A, 0xD0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00,
+        ];
 
         let header = EncryptionHeader {
             flags: 0,
@@ -755,7 +820,8 @@ mod tests {
         let h = hash_password_fixed_spin(&password_utf16le, &salt, CALG_SHA1).unwrap();
         let block = 0u32.to_le_bytes();
         let h_final = hash(CALG_SHA1, &[&h, &block]).unwrap();
-        let key = crypt_derive_key(&h_final, 5, CALG_SHA1).unwrap();
+        let mut key = h_final[..5].to_vec();
+        key.resize(16, 0);
         assert_eq!(key.as_slice(), expected_key);
 
         // Encrypt verifier || verifier_hash using RC4 (symmetric).
