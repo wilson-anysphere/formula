@@ -853,7 +853,6 @@ export class SpreadsheetApp {
   private drawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
   private selectedDrawingId: number | null = null;
   private readonly formulaChartModelStore = new FormulaChartModelStore();
-  private readonly drawingGeom: DrawingGridGeometry;
   private drawingInteraction: DrawingInteractionController;
   private readonly drawingObjectsBySheetId = new Map<string, DrawingObject[]>();
   private nextDrawingObjectId = 1;
@@ -925,8 +924,6 @@ export class SpreadsheetApp {
   private readonly cellHeight = 24;
   private readonly rowHeaderWidth = 48;
   private readonly colHeaderHeight = 24;
-
-  private readonly drawingGeom: DrawingGridGeometry;
 
   // Precomputed "visual" (i.e. not hidden) row/col indices.
   // Rebuilt only when outline visibility changes.
@@ -1028,7 +1025,6 @@ export class SpreadsheetApp {
   private dragPointerPos: { x: number; y: number } | null = null;
   private dragAutoScrollRaf: number | null = null;
 
-  private selectedDrawingId: number | null = null;
   private drawingGesture: DrawingGestureState | null = null;
 
   private resizeObserver: ResizeObserver;
