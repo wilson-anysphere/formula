@@ -63,3 +63,50 @@ fn locale_parsing_es_es_financial_function_spellings_match_excel() {
         "=XNPV(0.1,1,2)"
     );
 }
+
+/// Regression test: the es-ES locale strongly localizes many common statistical and forecasting
+/// function spellings. These are high-signal sentinels because missing entries silently degrade to
+/// identity mappings (English).
+#[test]
+fn locale_parsing_es_es_statistical_and_forecasting_spellings_match_excel() {
+    let mappings = [
+        // Forecasting
+        ("FORECAST", "PRONOSTICO"),
+        ("FORECAST.LINEAR", "PRONOSTICO.LINEAL"),
+        ("FORECAST.ETS", "PRONOSTICO.ETS"),
+        // Statistical distributions + tests
+        ("CHISQ.DIST", "DISTR.CHI.CUAD.N"),
+        ("F.DIST", "DISTR.F.N"),
+        ("T.DIST.2T", "DISTR.T.2C.N"),
+        ("Z.TEST", "PRUEBA.Z.N"),
+        // Bond/coupon functions (commonly missing when Excel treats them as _xludf)
+        ("COUPDAYBS", "DIAS.CUPON.INI"),
+        ("COUPPCD", "FECHA.CUPON.ANT"),
+        // Other common regression candidates
+        ("INTERCEPT", "INTERSECCION.EJE"),
+        ("IPMT", "PAGOINT"),
+        ("MIRR", "TIRM"),
+        ("MINVERSE", "MINVERSA"),
+    ];
+
+    for (canonical, localized) in mappings {
+        assert_ne!(
+            canonical, localized,
+            "test setup error: expected a non-identity mapping"
+        );
+
+        assert_eq!(locale::ES_ES.localized_function_name(canonical), localized);
+        assert_eq!(locale::ES_ES.canonical_function_name(localized), canonical);
+
+        let canonical_formula = format!("={}()", canonical);
+        let localized_formula = format!("={}()", localized);
+        assert_eq!(
+            locale::localize_formula(&canonical_formula, &locale::ES_ES).unwrap(),
+            localized_formula
+        );
+        assert_eq!(
+            locale::canonicalize_formula(&localized_formula, &locale::ES_ES).unwrap(),
+            canonical_formula
+        );
+    }
+}

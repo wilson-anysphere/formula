@@ -438,6 +438,46 @@ fn de_de_locale_function_tsv_is_not_mostly_identity_mappings() {
 }
 
 #[test]
+fn es_es_locale_function_tsv_is_not_mostly_identity_mappings() {
+    // Regression guard: `es-ES.tsv` is generated from `sources/es-ES.json`. If the source mapping
+    // is accidentally replaced with a partial extract (e.g. from an older Excel build that treats
+    // many functions as `_xludf.`), the generator will silently fall back to identity mappings
+    // (canonical == localized) for many functions.
+    //
+    // Like `de-DE`, allow some identity mappings since many functions are not localized in Spanish
+    // Excel (e.g. `ABS`, `COS`, etc).
+    //
+    // Thresholds are tuned to the currently committed `es-ES.tsv`:
+    // - A percentage-based threshold to catch "almost everything became English again".
+    // - An absolute minimum so the test stays stable if the function catalog grows substantially.
+    let tsv = include_str!("../src/locale/data/es-ES.tsv");
+    let mut total = 0usize;
+    let mut identity = 0usize;
+
+    for line in tsv.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
+            panic!("invalid TSV line in es-ES.tsv (expected `Canonical<TAB>Localized`): {line:?}")
+        });
+        total += 1;
+        if canon == loc {
+            identity += 1;
+        }
+    }
+
+    let non_identity = total - identity;
+    let passes_ratio = non_identity * 100 >= total * 65;
+    let passes_absolute = non_identity >= 340;
+    assert!(
+        passes_ratio || passes_absolute,
+        "expected es-ES.tsv to contain many localized function spellings; got {non_identity}/{total} non-identity entries (identity={identity})"
+    );
+}
+
+#[test]
 fn locale_function_tsv_completeness_error_tsvs_are_complete_and_unique() {
     let expected: BTreeSet<String> = [
         ErrorKind::Null,
