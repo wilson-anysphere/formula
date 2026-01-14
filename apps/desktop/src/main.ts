@@ -2200,15 +2200,14 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
       const compact = normalized.toLowerCase().replace(/\s+/g, "");
 
-      if (/^[$€£¥]#,##0\\.00$/.test(normalized)) return "Currency";
-      if (compact === NUMBER_FORMATS.currency.toLowerCase()) return "Currency";
+      if (/^[$€£¥]#,##0(\.[0]+)?$/.test(compact)) return "Currency";
       if (compact.includes("yyyy-mm-dd")) return "Long Date";
       if (compact.includes("m/d/yyyy")) return "Short Date";
       if (compact === NUMBER_FORMATS.date.toLowerCase()) return "Short Date";
       if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact)) return "Time";
       if (compact.includes("%")) return "Percent";
-      if (compact === "#,##0.00") return "Comma";
-      if (compact === "0.00") return "Number";
+      if (/^#,##0(\.[0]+)?$/.test(compact)) return "Comma";
+      if (/^0(\.[0]+)?$/.test(compact)) return "Number";
       if (compact.includes("e")) return "Scientific";
       if (compact.includes("/")) return "Fraction";
       if (compact === "@") return "Text";
