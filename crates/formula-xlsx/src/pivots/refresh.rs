@@ -600,7 +600,8 @@ fn resolve_worksheet_part(package: &XlsxPackage, sheet_name: &str) -> Result<Str
     let sheets = package.workbook_sheets()?;
     let sheet = sheets
         .iter()
-        .find(|s| s.name == sheet_name)
+        // Sheet names are case-insensitive in Excel formulas.
+        .find(|s| s.name.eq_ignore_ascii_case(sheet_name))
         .ok_or_else(|| XlsxError::Invalid(format!("sheet {sheet_name:?} not found in workbook")))?;
 
     let rels_part = rels_part_name("xl/workbook.xml");

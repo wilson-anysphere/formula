@@ -504,11 +504,11 @@ fn refreshes_pivot_cache_records_with_absolute_a1_range_in_ref() {
     let mut pkg = XlsxPackage::from_bytes(fixture).expect("read fixture");
 
     // Excel often writes A1 ranges with `$` absolute markers. Ensure we can still parse the
-    // worksheetSource ref when the sheet name is embedded.
+    // worksheetSource ref when the sheet name is embedded (and casing differs from workbook.xml).
     let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" refreshOnLoad="1" recordCount="4">
   <cacheSource type="worksheet">
-    <worksheetSource ref="Sheet1!$A$1:$C$6"/>
+    <worksheetSource ref="sheet1!$A$1:$C$6"/>
   </cacheSource>
   <cacheFields count="3">
     <cacheField name="Region" numFmtId="0"/>
