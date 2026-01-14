@@ -428,6 +428,9 @@ u8    EncryptedBytes[...]
 
 After decryption, truncate the plaintext to exactly `OriginalPackageSize` bytes (the ciphertext is padded).
 
+For additional `EncryptedPackage` framing/padding guidance and known non-Excel variants, see
+`docs/offcrypto-standard-encryptedpackage.md`.
+
 ### 7.2) Encryption model (AES vs RC4)
 
 #### 7.2.1) AES (`CALG_AES_*`): AES-ECB (no IV, no segmenting)
@@ -522,7 +525,62 @@ iv0 (segmentIndex=0) =
   719ea750a65a93d80e1e0ba33a2ba0e7
 ```
 
-### 8.1) AES-128 key derivation sanity check (shows `CryptDeriveKey` is not truncation)
+### 8.1) AES-128 + AES-ECB `EncryptedPackage` sanity check (real file bytes)
+
+This vector matches a real Standard-encrypted workbook in this repo:
+`fixtures/encrypted/ooxml/standard.xlsx` (password: `password`).
+
+Parameters:
+
+* Hash algorithm: SHA‑1
+* Cipher: AES‑128
+* KeySize: 128 bits → 16 bytes
+* spinCount: 50,000
+* `block = 0`
+
+Inputs:
+
+```text
+password = "password"
+passwordUtf16le =
+  70 00 61 00 73 00 73 00 77 00 6f 00 72 00 64 00
+
+salt =
+  00 11 22 33 44 55 66 77 88 99 aa bb cc dd ee ff
+```
+
+Derived values:
+
+```text
+H_final  = 5ac2afc2a117ec25f449be1993cbe67c068458d8
+H_block0 = 11958e53fc62fdebc0107e2fae8650147de123e8
+
+key (AES-128, 16 bytes) =
+  5e8727d6c94408a903aececf1382b380
+```
+
+`EncryptedPackage` bytes:
+
+```text
+origSize (u64le) = 6b 0c 00 00 00 00 00 00   // 3179 bytes
+
+ciphertext[0:32] =
+  dcb1367fc380378657fc11e7b968b3a6
+  28bff7d8aca261ceca0591bcd81b0075
+```
+
+Decrypting `ciphertext[0:32]` with AES-ECB using the derived key yields:
+
+```text
+plaintext[0:32] =
+  50 4b 03 04 14 00 00 00 08 00 00 00 21 00 ae 40
+  8d 88 30 01 00 00 ad 03 00 00 13 00 00 00 5b 43
+```
+
+The first 4 bytes are `50 4b 03 04` (`PK\x03\x04`), confirming the Standard AES `EncryptedPackage`
+payload is **AES-ECB** encrypted ZIP bytes (then truncated to `origSize`).
+
+### 8.2) AES-128 key derivation sanity check (shows `CryptDeriveKey` is not truncation)
 
 This second vector is useful because it demonstrates a common bug:
 **for AES-128, you still must run the `CryptDeriveKey` ipad/opad step**, even though the desired key
@@ -573,7 +631,7 @@ H_block0[0:16] =
 This is **not** the AES-128 key; if your code uses `H_block0[0:16]` directly, you will derive the
 wrong key.
 
-### 8.2) RC4 per-block key example (128-bit)
+### 8.3) RC4 per-block key example (128-bit)
 
 If the file uses **RC4** (`AlgID = CALG_RC4`) with a 128-bit key (`KeySize = 128` bits → 16 bytes),
 then (for SHA‑1) the per-block RC4 key is simply the first 16 bytes of `H_block`:
@@ -589,7 +647,7 @@ rc4_key(block=1) = H_block1[0:16] =
   2ed4e8825cd48aa4a47994cda7415b4a
 ```
 
-### 8.3) Verifier check example (AES-ECB)
+### 8.4) Verifier check example (AES-ECB)
 
 The following values are a *synthetic* verifier example that is consistent with the derivation above
 (AES-256 + SHA-1). It is useful as an end-to-end unit test for the verifier logic.
