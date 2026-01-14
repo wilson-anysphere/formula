@@ -18,6 +18,29 @@ function resolvePath(value, fallback) {
   return fallback;
 }
 
+/**
+ * @param {string} p
+ * @param {string} dir
+ */
+function isPathWithinDir(p, dir) {
+  const rel = path.relative(dir, p);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/**
+ * Prefer displaying repo-relative paths (more readable in CI logs), but fall back to
+ * absolute paths when the file lives outside the repo.
+ *
+ * @param {string} p
+ */
+function displayPath(p) {
+  if (isPathWithinDir(p, repoRoot)) {
+    const rel = path.relative(repoRoot, p);
+    return rel || p;
+  }
+  return p;
+}
+
 const tauriConfigPath = resolvePath(
   process.env.FORMULA_TAURI_CONF_PATH,
   path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"),
@@ -26,6 +49,8 @@ const infoPlistPath = resolvePath(
   process.env.FORMULA_INFO_PLIST_PATH,
   path.join(repoRoot, "apps", "desktop", "src-tauri", "Info.plist"),
 );
+const tauriConfigDisplayPath = displayPath(tauriConfigPath);
+const infoPlistDisplayPath = displayPath(infoPlistPath);
 
 const REQUIRED_SCHEME = "formula";
 // Desktop builds are expected to open common spreadsheet/data file formats.
@@ -470,7 +495,7 @@ function validateParquetMimeDefinition(config) {
   const identifier = getTauriIdentifier(config);
   if (!identifier) {
     errBlock("Parquet file association configured, but identifier is missing (tauri.conf.json)", [
-      "Expected a non-empty top-level `identifier` field in apps/desktop/src-tauri/tauri.conf.json.",
+      `Expected a non-empty top-level \`identifier\` field in ${tauriConfigDisplayPath}.`,
       "This is used as the shared-mime-info XML filename under:",
       "  - /usr/share/mime/packages/<identifier>.xml",
     ]);
@@ -484,7 +509,7 @@ function validateParquetMimeDefinition(config) {
     errBlock("Parquet file association configured, but identifier is not a valid filename (tauri.conf.json)", [
       `identifier=${JSON.stringify(identifier)}`,
       "Expected identifier to be a reverse-DNS string (no '/' or '\\\\' path separators).",
-      "Fix: update the top-level `identifier` field in apps/desktop/src-tauri/tauri.conf.json.",
+      `Fix: update the top-level \`identifier\` field in ${tauriConfigDisplayPath}.`,
     ]);
     return;
   }
@@ -558,7 +583,7 @@ function validateParquetMimeDefinition(config) {
         ...missing
           .sort((a, b) => a.ext.localeCompare(b.ext))
           .map(({ ext, mimeType, expectedGlob }) => `Missing: .${ext} -> ${mimeType} (expected glob ${expectedGlob})`),
-        "Fix: update apps/desktop/src-tauri/mime/<identifier>.xml to include <glob pattern=\"*.ext\" /> entries for each extension in bundle.fileAssociations.",
+        `Fix: update ${parquetMimeDefinitionPath} to include <glob pattern="*.ext" /> entries for each extension in bundle.fileAssociations.`,
       ]);
     }
   } catch (e) {
@@ -670,7 +695,7 @@ function main() {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     errBlock("Desktop URL scheme preflight failed", [
-      "Failed to read/parse apps/desktop/src-tauri/tauri.conf.json.",
+      `Failed to read/parse ${tauriConfigDisplayPath}.`,
       `Error: ${msg}`,
     ]);
     return;
@@ -700,13 +725,13 @@ function main() {
       errBlock("Invalid macOS URL scheme registration (Info.plist)", [
         "Expected CFBundleURLSchemes entries to be scheme names (no ':' or '/' characters).",
         `Invalid scheme value(s): ${invalidObservedSchemes.sort().join(", ")}`,
-        "Fix: update apps/desktop/src-tauri/Info.plist CFBundleURLTypes/CFBundleURLSchemes.",
+        `Fix: update ${infoPlistDisplayPath} CFBundleURLTypes/CFBundleURLSchemes.`,
       ]);
     }
     const missingSchemes = Array.from(expectedSchemes).filter((s) => !observedSchemes.has(s));
     if (schemeBlocks.length === 0 || missingSchemes.length > 0) {
       errBlock("Missing macOS URL scheme registration (Info.plist)", [
-        "Expected apps/desktop/src-tauri/Info.plist to declare CFBundleURLSchemes including:",
+        `Expected ${infoPlistDisplayPath} to declare CFBundleURLSchemes including:`,
         ...Array.from(expectedSchemes)
           .sort()
           .map((s) => `  - ${s}`),
@@ -723,7 +748,7 @@ function main() {
 
     if (!docTypesBlock || missingExts.length > 0) {
       errBlock("Missing macOS file association registration (Info.plist)", [
-        "Expected apps/desktop/src-tauri/Info.plist to register handlers for all extensions in bundle.fileAssociations (tauri.conf.json).",
+        `Expected ${infoPlistDisplayPath} to register handlers for all extensions in bundle.fileAssociations (${tauriConfigDisplayPath}).`,
         "Acceptable forms:",
         "  - CFBundleDocumentTypes / CFBundleTypeExtensions includes the extension",
         "  - CFBundleDocumentTypes / LSItemContentTypes references a UTI whose UT*TypeDeclarations defines public.filename-extension",
@@ -739,7 +764,7 @@ function main() {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     errBlock("Desktop URL scheme preflight failed", [
-      "Failed to read apps/desktop/src-tauri/Info.plist.",
+      `Failed to read ${infoPlistDisplayPath}.`,
       `Error: ${msg}`,
     ]);
   }
@@ -757,17 +782,17 @@ function main() {
       "Expected plugins[\"deep-link\"].desktop.schemes entries to normalize to scheme names (no ':' or '/' characters).",
       "We accept values like \"formula://\" and normalize them to \"formula\", but embedded characters are invalid (e.g. \"formula://evil\").",
       `Invalid scheme value(s): ${invalidSchemeConfig.join(", ")}`,
-      "Fix: update apps/desktop/src-tauri/tauri.conf.json plugins[\"deep-link\"].desktop.schemes.",
+      `Fix: update ${tauriConfigDisplayPath} plugins[\"deep-link\"].desktop.schemes.`,
     ]);
   }
 
   if (!normalizedSchemes.includes(REQUIRED_SCHEME)) {
     const found = normalizedSchemes.length > 0 ? normalizedSchemes.join(", ") : "(none)";
     errBlock("Missing desktop deep-link scheme configuration (tauri.conf.json)", [
-      "Expected apps/desktop/src-tauri/tauri.conf.json to include:",
+      `Expected ${tauriConfigDisplayPath} to include:`,
       `  plugins[\"deep-link\"].desktop.schemes = [\"${REQUIRED_SCHEME}\"]`,
       `Found schemes: ${found}`,
-      "Fix: add the deep-link plugin config so installers register the URL scheme.",
+      `Fix: update ${tauriConfigDisplayPath} so installers register the URL scheme.`,
     ]);
   }
 
@@ -775,7 +800,7 @@ function main() {
   const fileAssociations = config?.bundle?.fileAssociations;
   if (!Array.isArray(fileAssociations) || fileAssociations.length === 0) {
     errBlock("Missing bundle.fileAssociations (tauri.conf.json)", [
-      "Expected apps/desktop/src-tauri/tauri.conf.json to include bundle.fileAssociations so Linux .desktop metadata can include file MIME types.",
+      `Expected ${tauriConfigDisplayPath} to include bundle.fileAssociations so Linux .desktop metadata can include file MIME types.`,
     ]);
   } else {
     validateFileAssociationsShape(fileAssociations);
@@ -784,7 +809,7 @@ function main() {
 
     if (missingRequiredExts.length > 0) {
       errBlock("Missing required desktop file associations (tauri.conf.json)", [
-        "Expected apps/desktop/src-tauri/tauri.conf.json bundle.fileAssociations to include entries for:",
+        `Expected ${tauriConfigDisplayPath} bundle.fileAssociations to include entries for:`,
         ...REQUIRED_FILE_EXTS.map((ext) => `  - .${ext}`),
         `Missing extension(s): ${missingRequiredExts.join(", ")}`,
         "Fix: add/update bundle.fileAssociations so these types are registered with the OS.",
