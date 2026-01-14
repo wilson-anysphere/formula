@@ -17,6 +17,7 @@ import { handleHomeCellsInsertDeleteCommand } from "../ribbon/homeCellsCommands.
 import { handleInsertPicturesRibbonCommand } from "../main.insertPicturesRibbonCommand.js";
 import { exportDocumentRangeToCsv } from "../import-export/csv/export.js";
 import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../collab/permissionGuards.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
 import { registerAxisSizingCommands } from "./registerAxisSizingCommands.js";
@@ -378,21 +379,33 @@ export function registerDesktopCommands(params: {
         }
         let committed = false;
         try {
+          let applied = true;
           switch (args.kind) {
             case "mergeCenter":
-              mergeCenter(doc, sheetId, rect, { label: args.title });
+              applied = mergeCenter(doc, sheetId, rect, { label: args.title });
               break;
             case "mergeAcross":
-              mergeAcross(doc, sheetId, rect, { label: args.title });
+              applied = mergeAcross(doc, sheetId, rect, { label: args.title });
               break;
             case "mergeCells":
-              mergeCells(doc, sheetId, rect, { label: args.title });
+              applied = mergeCells(doc, sheetId, rect, { label: args.title });
               break;
             case "unmergeCells":
               unmergeCells(doc, sheetId, rect, { label: args.title });
               break;
             default:
               break;
+          }
+
+          // `mergeCells` helpers return `false` when a merge is blocked by `DocumentController.canEditCell`
+          // (permissions, missing encryption key, etc). Without a UX signal this looks like a silent no-op.
+          // Only toast for multi-cell selections; single-cell "merges" are a no-op in Excel semantics.
+          if (!applied && (rows > 1 || cols > 1)) {
+            showCollabEditRejectedToast([
+              { sheetId, row: rect.startRow, col: rect.startCol, rejectionKind: "cell", rejectionReason: "permission" },
+            ]);
+            focusGrid();
+            return;
           }
           committed = true;
         } finally {

@@ -4,6 +4,12 @@ import { cellToA1, rangeToA1 } from "../selection/a1";
 type RejectionReason = "permission" | "encryption" | "unknown";
 type RejectionKind = "cell" | "format" | "rangeRun" | "unknown";
 
+// Editing surfaces may call this helper in response to every key press (e.g. typing into a
+// read-only sheet). To avoid spamming users with identical warnings, throttle repeated toasts.
+const REJECTION_TOAST_THROTTLE_MS = 1_000;
+let lastToastMessage: string | null = null;
+let lastToastTime = 0;
+
 function isCellDelta(delta: any): delta is { sheetId?: string; row: number; col: number } {
   return delta != null && typeof delta === "object" && Number.isInteger(delta.row) && Number.isInteger(delta.col);
 }
@@ -104,10 +110,17 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
     return target ? `Read-only: you don't have permission to edit that cell (${target})` : "Read-only: you don't have permission to edit that cell";
   })();
 
+  const now = Date.now();
+  const canThrottle = now > 0 && lastToastTime > 0;
+  if (canThrottle && message === lastToastMessage && now - lastToastTime < REJECTION_TOAST_THROTTLE_MS) {
+    return;
+  }
+  lastToastMessage = message;
+  lastToastTime = now;
+
   try {
     showToast(message, "warning");
   } catch {
     // `showToast` requires a #toast-root; some test-only contexts don't include it.
   }
 }
-
