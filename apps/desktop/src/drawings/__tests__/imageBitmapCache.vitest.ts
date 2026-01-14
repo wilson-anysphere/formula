@@ -339,6 +339,18 @@ describe("ImageBitmapCache", () => {
     expect(createImageBitmapMock).not.toHaveBeenCalled();
   });
 
+  it("rejects PNG images with truncated IHDR without invoking createImageBitmap", async () => {
+    const createImageBitmapMock = vi.fn(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    // Width/height are valid, but the byte payload is too short to include a full IHDR chunk + CRC.
+    const entry: ImageEntry = { id: "png_truncated_ihdr", bytes: createPngHeaderBytes(1, 1), mimeType: "image/png" };
+
+    await expect(cache.get(entry)).rejects.toThrow(/Invalid PNG: truncated IHDR/);
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+
   it("negativeCacheMs prevents tight retry loops after decode failures", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
