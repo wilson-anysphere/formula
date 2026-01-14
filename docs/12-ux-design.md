@@ -592,7 +592,7 @@ Formula is designed **light-first**. The default theme preference is **Light**, 
 
 ### Theme switching
 
-- **Ribbon:** `View → Theme` (System / Light / Dark / High Contrast)
+- **Ribbon:** `View → Appearance → Theme` (System / Light / Dark / High Contrast)
 - **Command palette:** search for `Theme` and run either:
   - `Theme…` (opens a picker)
   - `Theme: System` / `Theme: Light` / `Theme: Dark` / `Theme: High Contrast`
