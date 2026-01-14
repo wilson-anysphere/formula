@@ -78,6 +78,37 @@ export interface PanelBodyRendererOptions {
    * Manager can use the shared Y.Doc as their backend.
    */
   getCollabSession?: () => import("@formula/collab-session").CollabSession | null;
+  /**
+   * Optional factory for the Version History panel's VersionStore.
+   *
+   * Reserved-root-guard deployments (SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED)
+   * reject Yjs updates touching reserved roots like `versions*`. The default
+   * in-doc store used by `@formula/collab-versioning` (YjsVersionStore) writes to
+   * those roots, which can cause the sync server to close the websocket (1008).
+   *
+   * Provide an out-of-doc store implementation (e.g. ApiVersionStore, SQLite) to
+   * keep version history out of the collaborative document.
+   */
+  createVersionStore?: (
+    session: import("@formula/collab-session").CollabSession,
+  ) =>
+    | import("../../../../packages/collab/versioning/src/index.ts").VersionStore
+    | Promise<import("../../../../packages/collab/versioning/src/index.ts").VersionStore>;
+  /**
+   * Optional factory for the Branch Manager panel's BranchStore.
+   *
+   * Reserved-root-guard deployments reject Yjs updates touching reserved roots
+   * like `branching:*`. The default in-doc store (YjsBranchStore) writes to those
+   * roots.
+   *
+   * Provide an out-of-doc store implementation to avoid reserved root
+   * mutations.
+   */
+  createBranchStore?: (
+    session: import("@formula/collab-session").CollabSession,
+  ) =>
+    | import("./branch-manager/branchStoreTypes.js").BranchStore
+    | Promise<import("./branch-manager/branchStoreTypes.js").BranchStore>;
   renderMacrosPanel?: (body: HTMLDivElement) => void;
   createChart?: SpreadsheetApi["createChart"];
   panelRegistry?: PanelRegistry;
@@ -414,7 +445,11 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderReactPanel(
         panelId,
         body,
-        <CollabVersionHistoryPanel session={session} sheetNameResolver={options.sheetNameResolver ?? null} />,
+        <CollabVersionHistoryPanel
+          session={session}
+          sheetNameResolver={options.sheetNameResolver ?? null}
+          createVersionStore={options.createVersionStore}
+        />,
       );
       return;
     }
@@ -433,7 +468,11 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderReactPanel(
         panelId,
         body,
-        <CollabBranchManagerPanel session={session} sheetNameResolver={options.sheetNameResolver ?? null} />,
+        <CollabBranchManagerPanel
+          session={session}
+          sheetNameResolver={options.sheetNameResolver ?? null}
+          createBranchStore={options.createBranchStore}
+        />,
       );
       return;
     }

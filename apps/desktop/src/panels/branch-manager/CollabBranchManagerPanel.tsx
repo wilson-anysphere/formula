@@ -7,13 +7,15 @@ import { t } from "../../i18n/index.js";
 import { BranchManagerPanel, type Actor as BranchActor } from "./BranchManagerPanel.js";
 import { MergeBranchPanel } from "./MergeBranchPanel.js";
 import { clearReservedRootGuardError, useReservedRootGuardError } from "../collabReservedRootGuard.js";
+import { useCollabSessionSyncState } from "../useCollabSessionSyncState.js";
+import type { BranchStore, CreateBranchStore } from "./branchStoreTypes.js";
+import { resolveBranchStoreForPanel } from "./resolveBranchStoreForPanel.js";
 import { commitIfDocumentStateChanged } from "./commitIfChanged.js";
 
 // Import branching helpers from the browser-safe entrypoint so bundlers don't
 // accidentally pull Node-only stores (e.g. SQLite) into the WebView bundle.
 import {
   BranchService,
-  YjsBranchStore,
   applyDocumentStateToYjsDoc,
   yjsDocToDocumentState,
 } from "../../../../../packages/versioning/branches/src/browser.js";
@@ -22,12 +24,29 @@ import { BRANCHING_APPLY_ORIGIN } from "../../collab/conflict-monitors.js";
 export function CollabBranchManagerPanel({
   session,
   sheetNameResolver,
+  createBranchStore,
+  branchStore,
 }: {
   session: CollabSession;
   sheetNameResolver?: SheetNameResolver | null;
+  /**
+   * Optional BranchStore provider. Use this to inject an out-of-doc store so the
+   * panel does not write to reserved Yjs roots (`branching:*`).
+   */
+  createBranchStore?: CreateBranchStore;
+  /**
+   * Optional pre-constructed BranchStore instance. Prefer {@link createBranchStore}
+   * to keep store construction lazy.
+   */
+  branchStore?: BranchStore;
 }) {
+  const syncState = useCollabSessionSyncState(session);
+  const hasInjectedStore = Boolean(createBranchStore || branchStore);
   const reservedRootGuardError = useReservedRootGuardError((session as any)?.provider ?? null);
-  const mutationsDisabled = Boolean(reservedRootGuardError);
+  // Reserved root guard disconnects are sticky (we remember them per provider) so
+  // panels opened later can show the banner. When using an out-of-doc store, we
+  // only need to disable actions if the provider is currently disconnected.
+  const mutationsDisabled = Boolean(reservedRootGuardError) && (!hasInjectedStore || !syncState.connected);
 
   const localPresenceId = session.presence?.localPresence?.id;
   const sessionPermissions = (session as any)?.permissions as { role?: unknown; userId?: unknown } | null | undefined;
@@ -52,58 +71,20 @@ export function CollabBranchManagerPanel({
   }, [localPresenceId, permissionsRole, permissionsUserId]);
   const docId = session.doc.guid;
 
-  const { store, storeWarning } = useMemo(() => {
-    if (mutationsDisabled) {
-      return { store: null as any, storeWarning: null as string | null };
-    }
-    // Conservative defaults so large branching commits don't exceed common sync-server
-    // websocket message limits (close code 1009). Smaller chunks mean more Yjs updates,
-    // but keeps the feature usable even when `SYNC_SERVER_MAX_MESSAGE_BYTES` is tuned low.
-    const chunkSize = 8 * 1024;
-    const maxChunksPerTransaction = 2;
- 
-    const proc = (globalThis as any).process;
-    const isNodeRuntime = Boolean(proc?.versions?.node) && proc?.release?.name === "node";
-    const CompressionStreamCtor = (globalThis as any).CompressionStream as any;
-    const DecompressionStreamCtor = (globalThis as any).DecompressionStream as any;
-
-    try {
-      if (!isNodeRuntime) {
-        if (typeof CompressionStreamCtor === "undefined" || typeof DecompressionStreamCtor === "undefined") {
-          throw new Error("CompressionStream is unavailable");
-        }
-        // Some runtimes expose the constructor but don't support gzip.
-        // (If either throws, fall back to JSON payloads.)
-        void new CompressionStreamCtor("gzip");
-        void new DecompressionStreamCtor("gzip");
-      }
-      return {
-        store: new YjsBranchStore({
-          ydoc: session.doc,
-          payloadEncoding: "gzip-chunks",
-          chunkSize,
-          maxChunksPerTransaction,
-        }),
-        storeWarning: null as string | null,
-      };
-    } catch {
-      return {
-        store: new YjsBranchStore({ ydoc: session.doc, payloadEncoding: "json" }),
-        storeWarning: t("branchManager.compressionFallbackWarning"),
-      };
-    }
-  }, [session.doc, mutationsDisabled]);
+  const [store, setStore] = useState<BranchStore | null>(null);
+  const [storeWarning, setStoreWarning] = useState<string | null>(null);
 
   const branchService = useMemo(() => {
     if (!store) return null;
+    if (mutationsDisabled) return null;
     return new BranchService({ docId, store });
-  }, [docId, store]);
+  }, [docId, mutationsDisabled, store]);
 
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [mergeSource, setMergeSource] = useState<string | null>(null);
 
-  const banner = reservedRootGuardError ? (
+  const banner = mutationsDisabled && reservedRootGuardError ? (
     <div className="collab-panel__message collab-panel__message--error" data-testid="reserved-root-guard-error">
       <div>{reservedRootGuardError}</div>
       <button
@@ -125,6 +106,40 @@ export function CollabBranchManagerPanel({
       </button>
     </div>
   ) : null;
+
+  useEffect(() => {
+    if (mutationsDisabled) {
+      setStore(null);
+      setStoreWarning(null);
+      return;
+    }
+    let cancelled = false;
+    setError(null);
+    setReady(false);
+    setStore(null);
+    setStoreWarning(null);
+
+    void (async () => {
+      try {
+        const resolved = await resolveBranchStoreForPanel({
+          session,
+          store: branchStore,
+          createBranchStore,
+          compressionFallbackWarning: t("branchManager.compressionFallbackWarning"),
+        });
+        if (cancelled) return;
+        setStore(resolved.store);
+        setStoreWarning(resolved.storeWarning);
+      } catch (e) {
+        if (cancelled) return;
+        setError((e as Error).message);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [branchStore, createBranchStore, mutationsDisabled, session]);
 
   useEffect(() => {
     // If the sync server has disconnected due to reserved root mutations, branch

@@ -8,6 +8,9 @@ import { t, tWithVars } from "../../i18n/index.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 import { clearReservedRootGuardError, useReservedRootGuardError } from "../collabReservedRootGuard.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
+import { useCollabSessionSyncState } from "../useCollabSessionSyncState.js";
+import { createCollabVersioningForPanel, type CreateVersionStore } from "./createCollabVersioningForPanel.js";
+import type { VersionStore } from "../../../../../packages/collab/versioning/src/index.ts";
 
 function formatVersionTimestamp(timestampMs: number): string {
   try {
@@ -20,12 +23,29 @@ function formatVersionTimestamp(timestampMs: number): string {
 export function CollabVersionHistoryPanel({
   session,
   sheetNameResolver = null,
+  createVersionStore,
+  versionStore,
 }: {
   session: CollabSession;
   sheetNameResolver?: SheetNameResolver | null;
+  /**
+   * Optional VersionStore provider. Use this to inject an out-of-doc store so the
+   * panel does not write to reserved Yjs roots (`versions*`).
+   */
+  createVersionStore?: CreateVersionStore;
+  /**
+   * Optional pre-constructed VersionStore instance. Prefer {@link createVersionStore}
+   * to keep store construction lazy.
+   */
+  versionStore?: VersionStore;
 }) {
+  const syncState = useCollabSessionSyncState(session);
+  const hasInjectedStore = Boolean(createVersionStore || versionStore);
   const reservedRootGuardError = useReservedRootGuardError((session as any)?.provider ?? null);
-  const mutationsDisabled = Boolean(reservedRootGuardError);
+  // Reserved root guard disconnects are sticky (we remember them per provider) so
+  // panels opened later can show the banner. When using an out-of-doc store, we
+  // only need to disable actions if the provider is currently disconnected.
+  const mutationsDisabled = Boolean(reservedRootGuardError) && (!hasInjectedStore || !syncState.connected);
   // `@formula/collab-versioning` depends on the core versioning subsystem, which can pull in
   // Node-only modules (e.g. `node:events`). Avoid importing it at desktop shell startup so
   // split-view/grid e2e can boot without requiring those polyfills; load it lazily when the
@@ -38,7 +58,7 @@ export function CollabVersionHistoryPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const banner = reservedRootGuardError ? (
+  const banner = mutationsDisabled && reservedRootGuardError ? (
     <div className="collab-panel__message collab-panel__message--error" data-testid="reserved-root-guard-error">
       <div>{reservedRootGuardError}</div>
       <button
@@ -72,7 +92,7 @@ export function CollabVersionHistoryPanel({
   const [checkpointLocked, setCheckpointLocked] = useState(false);
 
   useEffect(() => {
-    if (!reservedRootGuardError) return;
+    if (!mutationsDisabled) return;
     try {
       // Stop auto snapshot timers so we don't keep mutating the in-doc version store
       // after the sync server has rejected reserved root updates.
@@ -80,7 +100,7 @@ export function CollabVersionHistoryPanel({
     } catch {
       // ignore
     }
-  }, [reservedRootGuardError, collabVersioning]);
+  }, [mutationsDisabled, collabVersioning]);
 
   useEffect(() => {
     if (mutationsDisabled) return;
@@ -91,13 +111,8 @@ export function CollabVersionHistoryPanel({
       try {
         setLoadError(null);
         setCollabVersioning(null);
-        const mod = await import("../../../../../packages/collab/versioning/src/index.js");
         if (disposed) return;
-        const localPresence = session.presence?.localPresence ?? null;
-        instance = mod.createCollabVersioning({
-          session,
-          user: localPresence ? { userId: localPresence.id, userName: localPresence.name } : undefined,
-        });
+        instance = await createCollabVersioningForPanel({ session, store: versionStore, createVersionStore });
         setCollabVersioning(instance);
       } catch (e) {
         if (disposed) return;
@@ -109,7 +124,7 @@ export function CollabVersionHistoryPanel({
       disposed = true;
       instance?.destroy();
     };
-  }, [session, mutationsDisabled]);
+  }, [session, mutationsDisabled, createVersionStore, versionStore]);
 
   const refresh = async () => {
     try {
