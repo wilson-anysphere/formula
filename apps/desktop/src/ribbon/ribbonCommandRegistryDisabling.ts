@@ -106,7 +106,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.editing.fill.up",
   "home.editing.fill.left",
   "home.editing.fill.series",
-
   // Find & Select dropdown menu items are canonical commands; keep these legacy ids enabled in case
   // older ribbon schemas emit them (the current schema uses `edit.find` / `edit.replace` / `navigation.goTo`).
   "home.editing.findSelect.find",
@@ -117,7 +116,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.editing.sortFilter.customSort",
   "home.editing.sortFilter.sortAtoZ",
   "home.editing.sortFilter.sortZtoA",
-
   // Data → Sort & Filter (same implementations as Home tab).
   "data.sortFilter.sortAtoZ",
   "data.sortFilter.sortZtoA",
