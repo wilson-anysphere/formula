@@ -263,7 +263,6 @@ impl PivotField {
         }
     }
 }
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ScalarValue {
     Text(String),
@@ -298,7 +297,6 @@ pub enum AggregationType {
     Var,
     VarP,
 }
-
 impl AggregationType {
     /// Returns whether this aggregation is currently supported for Data Model pivots.
     pub fn is_supported_for_data_model(&self) -> bool {

@@ -24,7 +24,6 @@ const KEY_ENCRYPTOR_URI_PASSWORD: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
 const KEY_ENCRYPTOR_URI_CERTIFICATE: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/certificate";
-
 #[derive(Debug, Clone)]
 struct KeyData {
     salt_value: Vec<u8>,
@@ -78,7 +77,6 @@ fn decrypt_agile_package_key_from_password(
     iv_derivation: PasswordKeyIvDerivation,
 ) -> Result<Vec<u8>> {
     let password_key = &info.password_key;
-
     // MS-OFFCRYPTO spec behavior: for the password key encryptor (`p:encryptedKey`), the AES-CBC
     // IV used for `encryptedVerifierHashInput`, `encryptedVerifierHashValue`, and
     // `encryptedKeyValue` is the password `saltValue` itself (truncated to blockSize).
@@ -445,6 +443,7 @@ fn decrypt_agile_encrypted_package_impl(
     let key_encrypt_key_len =
         key_len_bytes(info.password_key.key_bits, "p:encryptedKey", "keyBits")?;
     let package_key_len = key_len_bytes(info.key_data.key_bits, "keyData", "keyBits")?;
+
     // Some producers vary how the AES-CBC IV is derived for the password-key-encryptor blobs.
     // Try both strategies for compatibility.
     let key_value = decrypt_agile_package_key_from_password_best_effort(

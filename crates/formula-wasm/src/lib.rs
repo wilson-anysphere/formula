@@ -1200,7 +1200,9 @@ fn pivot_subtotals_model_to_engine(
         }
         formula_model::pivots::SubtotalPosition::Top => pivot_engine::SubtotalPosition::Top,
         formula_model::pivots::SubtotalPosition::Bottom => pivot_engine::SubtotalPosition::Bottom,
-        formula_model::pivots::SubtotalPosition::None => pivot_engine::SubtotalPosition::None,
+        // `Automatic` and other variants are not currently modeled by the pivot engine; treat them
+        // as "no subtotals" for now.
+        _ => pivot_engine::SubtotalPosition::None,
     }
 }
 
@@ -3827,7 +3829,17 @@ impl WasmWorkbook {
 
         let model = formula_xlsx::read_workbook_model_from_bytes(bytes)
             .map_err(|err| js_err(err.to_string()))?;
+        Self::from_workbook_model(model)
+    }
 
+    #[wasm_bindgen(js_name = "fromModelJson")]
+    pub fn from_model_json(model_json: String) -> Result<WasmWorkbook, JsValue> {
+        let model: formula_model::Workbook = serde_json::from_str(&model_json)
+            .map_err(|err| js_err(format!("invalid workbook model json: {err}")))?;
+        Self::from_workbook_model(model)
+    }
+
+    fn from_workbook_model(model: formula_model::Workbook) -> Result<WasmWorkbook, JsValue> {
         let mut wb = WorkbookState::new_empty();
 
         // Import workbook calculation settings before seeding any values/formulas so features like
@@ -3849,6 +3861,8 @@ impl WasmWorkbook {
         // Import the workbook style table so style ids used by row/column formatting layers can be
         // resolved by worksheet information functions like `CELL("protect")`.
         wb.engine.set_style_table(model.styles.clone());
+        // DBCS / byte-count text functions (LENB, etc) depend on the workbook codepage.
+        wb.engine.set_text_codepage(model.codepage);
 
         // Create all sheets up-front so formulas can resolve cross-sheet references.
         for sheet in &model.sheets {
@@ -4007,7 +4021,8 @@ impl WasmWorkbook {
                 // Skip style-only cells (not representable in this WASM DTO surface).
                 let has_formula = cell.formula.is_some();
                 let has_value = !cell.value.is_empty();
-                if !has_formula && !has_value {
+                let has_phonetic = cell.phonetic.is_some();
+                if !has_formula && !has_value && !has_phonetic {
                     continue;
                 }
 
@@ -4058,6 +4073,12 @@ impl WasmWorkbook {
                             .set_cell_style_id(&sheet_name, &address, mapped)
                             .map_err(|err| js_err(err.to_string()))?;
                     }
+                }
+
+                if let Some(p) = cell.phonetic.as_ref() {
+                    wb.engine
+                        .set_cell_phonetic(&sheet_name, &address, Some(p.clone()))
+                        .map_err(|err| js_err(err.to_string()))?;
                 }
 
                 if let Some(formula) = cell.formula.as_deref() {
@@ -4559,6 +4580,21 @@ impl WasmWorkbook {
         let input: JsonValue =
             serde_wasm_bindgen::from_value(input).map_err(|err| js_err(err.to_string()))?;
         self.inner.set_cell_internal(sheet, &address, input)
+    }
+
+    #[wasm_bindgen(js_name = "setCellPhonetic")]
+    pub fn set_cell_phonetic(
+        &mut self,
+        address: String,
+        phonetic: Option<String>,
+        sheet: Option<String>,
+    ) -> Result<(), JsValue> {
+        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
+        let sheet = self.inner.ensure_sheet(sheet);
+        self.inner
+            .engine
+            .set_cell_phonetic(&sheet, &address, phonetic)
+            .map_err(|err| js_err(err.to_string()))
     }
 
     #[wasm_bindgen(js_name = "setCellRich")]
@@ -5964,6 +6000,37 @@ mod tests {
         assert_eq!(
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "F1"),
             EngineValue::Error(ErrorKind::Unknown)
+        );
+    }
+
+    #[test]
+    fn from_model_json_propagates_codepage_and_cell_phonetic_metadata() {
+        let mut model = formula_model::Workbook::new();
+        model.codepage = 932;
+
+        let sheet_id = model.add_sheet("Sheet1").unwrap();
+        let sheet = model.sheet_mut(sheet_id).unwrap();
+
+        let mut cell = formula_model::Cell::new(formula_model::CellValue::String("漢字".to_string()));
+        cell.phonetic = Some("かんじ".to_string());
+        sheet.set_cell(formula_model::CellRef::from_a1("A1").unwrap(), cell);
+
+        sheet.set_formula_a1("B1", Some("PHONETIC(A1)".to_string()))
+            .unwrap();
+        sheet.set_formula_a1("C1", Some("LENB(\"あ\")".to_string()))
+            .unwrap();
+
+        let json = serde_json::to_string(&model).unwrap();
+        let mut wb = WasmWorkbook::from_model_json(json).unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Text("かんじ".to_string())
+        );
+        assert_eq!(
+            wb.inner.engine.get_cell_value(DEFAULT_SHEET, "C1"),
+            EngineValue::Number(2.0)
         );
     }
 

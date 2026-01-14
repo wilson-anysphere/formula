@@ -2153,6 +2153,7 @@ dependencies = [
  "chrono",
  "criterion",
  "dashmap",
+ "encoding_rs",
  "formula-columnar",
  "formula-format",
  "formula-model",

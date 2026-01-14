@@ -28,6 +28,7 @@ unicode-ident = "1.0"
 unicode-normalization = "0.1"
 libm = "0.2"
 num-complex = "0.4"
+encoding_rs = "0.8"
 
 # Bytecode cache + SIMD kernels for bulk range evaluation.
 ahash = "0.8"

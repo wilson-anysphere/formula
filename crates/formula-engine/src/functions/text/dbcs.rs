@@ -5,9 +5,9 @@
 //! operate on *byte counts* instead of character counts, and the definition of a
 //! "byte" depends on the active workbook locale / code page.
 //!
-//! The formula engine currently assumes an en-US workbook locale and Unicode
-//! strings. Under that single-byte locale, the `*B` functions behave identically
-//! to their non-`B` equivalents.
+//! The engine models a workbook-level "text codepage" (default: 1252 / en-US). Under
+//! single-byte codepages, the `*B` functions behave identically to their non-`B`
+//! equivalents.
 //!
 //! `ASC` / `DBCS` perform half-width / full-width conversions in Japanese locales.
 //! We implement these conversions only when the active workbook text codepage is
@@ -29,6 +29,11 @@ use crate::eval::MAX_MATERIALIZED_ARRAY_CELLS;
 use crate::functions::array_lift;
 use crate::functions::{call_function, ArgValue, FunctionContext, Reference};
 use crate::value::{Array, ErrorKind, Value};
+use encoding_rs::{
+    Encoding, BIG5, EUC_KR, GBK, SHIFT_JIS, UTF_8, WINDOWS_1250, WINDOWS_1251, WINDOWS_1252,
+    WINDOWS_1253, WINDOWS_1254, WINDOWS_1255, WINDOWS_1256, WINDOWS_1257, WINDOWS_1258,
+    WINDOWS_874,
+};
 
 pub(crate) fn findb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // en-US: byte counts match character counts.
@@ -61,8 +66,13 @@ pub(crate) fn midb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
 }
 
 pub(crate) fn lenb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    // en-US: byte counts match character counts.
-    call_function(ctx, "LEN", args)
+    let text = array_lift::eval_arg(ctx, &args[0]);
+    let codepage = ctx.text_codepage();
+    array_lift::lift1(text, |text| {
+        let s = text.coerce_to_string_with_ctx(ctx)?;
+        let bytes = encode_bytes_len(codepage, &s);
+        Ok(Value::Number(bytes as f64))
+    })
 }
 
 pub(crate) fn asc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
@@ -338,6 +348,27 @@ fn fullwidth_katakana_to_halfwidth(ch: char) -> Option<&'static str> {
     })
 }
 
+fn encoding_for_codepage(codepage: u16) -> Option<&'static Encoding> {
+    Some(match codepage as u32 {
+        874 => WINDOWS_874,
+        932 => SHIFT_JIS,
+        936 => GBK,
+        949 => EUC_KR,
+        950 => BIG5,
+        1250 => WINDOWS_1250,
+        1251 => WINDOWS_1251,
+        1252 => WINDOWS_1252,
+        1253 => WINDOWS_1253,
+        1254 => WINDOWS_1254,
+        1255 => WINDOWS_1255,
+        1256 => WINDOWS_1256,
+        1257 => WINDOWS_1257,
+        1258 => WINDOWS_1258,
+        65001 => UTF_8,
+        _ => return None,
+    })
+}
+
 fn halfwidth_katakana_to_fullwidth(ch: char) -> Option<char> {
     Some(match ch {
         '\u{FF61}' => '。', // ｡
@@ -446,4 +477,13 @@ fn compose_halfwidth_katakana(base: char, mark: char) -> Option<char> {
 
         _ => return None,
     })
+}
+
+fn encode_bytes_len(codepage: u16, text: &str) -> usize {
+    let Some(encoding) = encoding_for_codepage(codepage) else {
+        // Best-effort fallback: treat byte count as character count.
+        return text.chars().count();
+    };
+    let (cow, _, _) = encoding.encode(text);
+    cow.len()
 }

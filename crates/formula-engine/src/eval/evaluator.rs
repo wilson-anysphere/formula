@@ -145,6 +145,12 @@ pub trait ValueResolver {
     fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
         Some(sheet_id)
     }
+    /// Workbook legacy text codepage used for DBCS (`*B`) text functions.
+    ///
+    /// Defaults to Excel's en-US codepage (1252).
+    fn text_codepage(&self) -> u16 {
+        1252
+    }
     /// Return the number of worksheets available in the workbook.
     ///
     /// This is used by worksheet information functions like `INFO("numfile")`.

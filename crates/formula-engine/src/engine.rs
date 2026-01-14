@@ -355,6 +355,8 @@ struct Workbook {
     workbook_filename: Option<String>,
     pivots: HashMap<PivotTableId, PivotTableDefinition>,
     next_pivot_id: PivotTableId,
+    /// Legacy text code page used for DBCS (`*B`) text functions.
+    text_codepage: u16,
 }
 
 #[cfg(test)]
@@ -752,8 +754,12 @@ impl Engine {
     /// To opt into Excel-like automatic calculation semantics, set
     /// [`CalcSettings::calculation_mode`] via [`Engine::set_calc_settings`].
     pub fn new() -> Self {
+        let mut workbook = Workbook::default();
+        // Excel default (en-US) code page / ANSI.
+        workbook.text_codepage = 1252;
+
         Self {
-            workbook: Workbook::default(),
+            workbook,
             bytecode_cache: bytecode::BytecodeCache::new(),
             bytecode_enabled: true,
             external_refs_volatile: true,
@@ -2570,6 +2576,7 @@ impl Engine {
             return;
         }
         self.text_codepage = text_codepage;
+        self.workbook.text_codepage = text_codepage;
         self.mark_all_compiled_cells_dirty();
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
@@ -9426,9 +9433,10 @@ struct Snapshot {
     sheet_default_style_ids: Vec<Option<u32>>,
     sheet_default_col_width: Vec<Option<f32>>,
     format_runs_by_col: Vec<BTreeMap<u32, Vec<FormatRun>>>,
+    text_codepage: u16,
     values: HashMap<CellKey, Value>,
-    phonetics: HashMap<CellKey, String>,
     style_ids: HashMap<CellKey, u32>,
+    phonetics: HashMap<CellKey, String>,
     formulas: HashMap<CellKey, String>,
     /// Stable ordering of stored cell keys (sheet, row, col) for deterministic sparse iteration.
     ///
@@ -9643,9 +9651,10 @@ impl Snapshot {
             sheet_default_style_ids,
             sheet_default_col_width,
             format_runs_by_col,
+            text_codepage: workbook.text_codepage,
             values,
-            phonetics,
             style_ids,
+            phonetics,
             formulas,
             ordered_cells,
             spill_end_by_origin,
@@ -9681,6 +9690,10 @@ impl crate::eval::ValueResolver for Snapshot {
 
     fn sheet_order_index(&self, sheet_id: usize) -> Option<usize> {
         self.sheet_order.iter().position(|&id| id == sheet_id)
+    }
+
+    fn text_codepage(&self) -> u16 {
+        self.text_codepage
     }
 
     fn expand_sheet_span(&self, start_sheet_id: usize, end_sheet_id: usize) -> Option<Vec<usize>> {
