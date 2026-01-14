@@ -1621,6 +1621,58 @@ fn range_contains_cell(range: (CellRef, CellRef), cell: CellRef) -> bool {
         && cell.col <= range.1.col
 }
 
+fn range_area(range: (CellRef, CellRef)) -> u64 {
+    let (start, end) = range;
+    let rows = end.row.saturating_sub(start.row).saturating_add(1) as u64;
+    let cols = end.col.saturating_sub(start.col).saturating_add(1) as u64;
+    rows.saturating_mul(cols)
+}
+
+fn resolve_definition_anchor_for_base_cell<T>(
+    records: &HashMap<CellRef, T>,
+    base_cell: CellRef,
+    cell: CellRef,
+    range_of: impl Fn(&T) -> (CellRef, CellRef),
+) -> Option<CellRef> {
+    // Fast path: canonical BIFF8 uses the range anchor as the PtgExp/PtgTbl base cell.
+    if let Some(record) = records.get(&base_cell) {
+        let range = range_of(record);
+        if range_contains_cell(range, cell) {
+            return Some(base_cell);
+        }
+    }
+
+    // Best-effort: some `.xls` producers point at a non-anchor cell within the range. Scan for a
+    // definition whose range contains both the current cell and the referenced base cell.
+    let mut matches: Vec<(CellRef, (CellRef, CellRef))> = records
+        .iter()
+        .filter_map(|(anchor, record)| {
+            let range = range_of(record);
+            if range_contains_cell(range, cell) && range_contains_cell(range, base_cell) {
+                Some((*anchor, range))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if matches.is_empty() {
+        return None;
+    }
+
+    // Deterministic tie-breaking: smallest range area, then top-left ordering.
+    matches.sort_by_key(|(anchor, range)| {
+        (
+            range_area(*range),
+            anchor.row,
+            anchor.col,
+            range.1.row,
+            range.1.col,
+        )
+    });
+    matches.first().map(|(anchor, _)| *anchor)
+}
+
 fn parse_formula_record_for_wide_ptgexp(
     record: &records::LogicalBiffRecord<'_>,
 ) -> Result<Option<PendingExp>, String> {
@@ -1834,26 +1886,20 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
 
             let has_match = match exp.kind {
                 ExpKind::Exp => {
-                    shrfmla
-                        .get(&base_cell)
-                        .is_some_and(|d| range_contains_cell(d.range, exp.cell))
-                        || array
-                            .get(&base_cell)
-                            .is_some_and(|d| range_contains_cell(d.range, exp.cell))
-                        || table
-                            .get(&base_cell)
-                            .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                    resolve_definition_anchor_for_base_cell(&shrfmla, base_cell, exp.cell, |d| d.range)
+                        .is_some()
+                        || resolve_definition_anchor_for_base_cell(&array, base_cell, exp.cell, |d| d.range)
+                            .is_some()
+                        || resolve_definition_anchor_for_base_cell(&table, base_cell, exp.cell, |d| d.range)
+                            .is_some()
                 }
                 ExpKind::Tbl => {
-                    table
-                        .get(&base_cell)
-                        .is_some_and(|d| range_contains_cell(d.range, exp.cell))
-                        || shrfmla
-                            .get(&base_cell)
-                            .is_some_and(|d| range_contains_cell(d.range, exp.cell))
-                        || array
-                            .get(&base_cell)
-                            .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                    resolve_definition_anchor_for_base_cell(&table, base_cell, exp.cell, |d| d.range)
+                        .is_some()
+                        || resolve_definition_anchor_for_base_cell(&shrfmla, base_cell, exp.cell, |d| d.range)
+                            .is_some()
+                        || resolve_definition_anchor_for_base_cell(&array, base_cell, exp.cell, |d| d.range)
+                            .is_some()
                 }
             };
 
@@ -1888,18 +1934,20 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
         let base_cell = CellRef::new(base_row, base_col);
         let decoded = match exp.kind {
             ExpKind::Exp => {
-                if let Some(def) = shrfmla
-                    .get(&base_cell)
-                    .filter(|d| range_contains_cell(d.range, exp.cell))
+                if let Some(anchor) =
+                    resolve_definition_anchor_for_base_cell(&shrfmla, base_cell, exp.cell, |d| d.range)
                 {
-                    let base_coord = rgce::CellCoord::new(base_row, base_col);
+                    let def = shrfmla
+                        .get(&anchor)
+                        .expect("resolved SHRFMLA anchor missing");
+                    let base_coord = rgce::CellCoord::new(anchor.row, anchor.col);
                     let target_coord = rgce::CellCoord::new(exp.cell.row, exp.cell.col);
 
                     let analysis = shrfmla_analysis_by_base
-                        .entry(base_cell)
+                        .entry(anchor)
                         .or_insert_with(|| rgce::analyze_biff8_shared_formula_rgce(&def.rgce).ok());
 
-                    let delta_is_zero = exp.cell == base_cell;
+                    let delta_is_zero = exp.cell == anchor;
                     let needs_materialization = analysis
                         .as_ref()
                         .is_some_and(|analysis| !delta_is_zero && analysis.has_abs_refs_with_relative_flags)
@@ -1918,7 +1966,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                                 out.warnings.push(format!(
                                     "cell {}: failed to materialize shared formula base {}: {err}",
                                     exp.cell.to_a1(),
-                                    base_cell.to_a1()
+                                    anchor.to_a1()
                                 ));
                                 std::borrow::Cow::Borrowed(&def.rgce)
                             }
@@ -1937,10 +1985,10 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                             Some(target_coord),
                         )
                     }
-                } else if let Some(def) = array
-                    .get(&base_cell)
-                    .filter(|d| range_contains_cell(d.range, exp.cell))
+                } else if let Some(anchor) =
+                    resolve_definition_anchor_for_base_cell(&array, base_cell, exp.cell, |d| d.range)
                 {
+                    let def = array.get(&anchor).expect("resolved ARRAY anchor missing");
                     if def.rgcb.is_empty() {
                         rgce::decode_biff8_rgce_with_base(
                             &def.rgce,
@@ -1955,9 +2003,8 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                             Some(rgce::CellCoord::new(def.range.0.row, def.range.0.col)),
                         )
                     }
-                } else if table
-                    .get(&base_cell)
-                    .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                } else if resolve_definition_anchor_for_base_cell(&table, base_cell, exp.cell, |d| d.range)
+                    .is_some()
                 {
                     warn_string(
                         &mut out.warnings,
@@ -1981,9 +2028,7 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                 }
             }
             ExpKind::Tbl => {
-                if table
-                    .get(&base_cell)
-                    .is_some_and(|d| range_contains_cell(d.range, exp.cell))
+                if resolve_definition_anchor_for_base_cell(&table, base_cell, exp.cell, |d| d.range).is_some()
                 {
                     warn_string(
                         &mut out.warnings,
@@ -1994,10 +2039,12 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                     );
                     out.formulas.insert(exp.cell, "#UNKNOWN!".to_string());
                     continue;
-                } else if let Some(def) = shrfmla
-                    .get(&base_cell)
-                    .filter(|d| range_contains_cell(d.range, exp.cell))
+                } else if let Some(anchor) =
+                    resolve_definition_anchor_for_base_cell(&shrfmla, base_cell, exp.cell, |d| d.range)
                 {
+                    let def = shrfmla
+                        .get(&anchor)
+                        .expect("resolved SHRFMLA anchor missing");
                     if def.rgcb.is_empty() {
                         rgce::decode_biff8_rgce_with_base(
                             &def.rgce,
@@ -2012,10 +2059,10 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                             Some(rgce::CellCoord::new(exp.cell.row, exp.cell.col)),
                         )
                     }
-                } else if let Some(def) = array
-                    .get(&base_cell)
-                    .filter(|d| range_contains_cell(d.range, exp.cell))
+                } else if let Some(anchor) =
+                    resolve_definition_anchor_for_base_cell(&array, base_cell, exp.cell, |d| d.range)
                 {
+                    let def = array.get(&anchor).expect("resolved ARRAY anchor missing");
                     if def.rgcb.is_empty() {
                         rgce::decode_biff8_rgce_with_base(
                             &def.rgce,
@@ -3064,6 +3111,48 @@ mod tests {
             warnings.is_empty(),
             "expected no warnings, got: {warnings:?}"
         );
+    }
+
+    #[test]
+    fn resolves_wide_ptgexp_when_base_cell_is_not_range_anchor() {
+        // Like `resolves_ptgexp_when_base_cell_is_not_range_anchor`, but using a non-canonical
+        // PtgExp payload width (row u32 + col u16) so it is handled by the dedicated wide-payload
+        // recovery path (`parse_biff8_worksheet_ptgexp_formulas`).
+        fn ptgexp_row_u32_col_u16(row: u32, col: u16) -> Vec<u8> {
+            let mut out = Vec::new();
+            out.push(0x01);
+            out.extend_from_slice(&row.to_le_bytes());
+            out.extend_from_slice(&col.to_le_bytes());
+            out
+        }
+
+        // Shared range: B1:B2 (anchor = B1). Cell B2 uses `PtgExp(B2)` (non-anchor) with a wide
+        // payload.
+        let stream = [
+            record(RECORD_SHRFMLA, &shrfmla_payload(0, 1, 1, 1)),
+            record(
+                RECORD_FORMULA,
+                &formula_payload(1, 1, 0, &ptgexp_row_u32_col_u16(1, 1)),
+            ),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let ctx = rgce::RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &[],
+            externsheet: &[],
+            supbooks: &[],
+            defined_names: &[],
+        };
+
+        let parsed = parse_biff8_worksheet_ptgexp_formulas(&stream, 0, &ctx).expect("parse");
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+        assert_eq!(parsed.formulas.get(&CellRef::new(1, 1)).map(|s| s.as_str()), Some("1"));
     }
 
     #[test]
