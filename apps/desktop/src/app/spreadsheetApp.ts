@@ -21657,10 +21657,16 @@ export class SpreadsheetApp {
         const cached = sheetCache.get(key);
         // `computedValuesByCoord` never stores `undefined`; a missing entry always returns undefined.
         if (cached !== undefined) {
-          if (flags) {
-            const state = this.document.getCell(sheetId, cell) as { formula: string | null };
-            if (state?.formula != null) flags.sawFormula = true;
+          // `computedValuesByCoord` is an engine-facing cache and can lag behind direct value edits.
+          // Only trust it for formula cells; for plain values read from the DocumentController.
+          const state = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
+          if (state?.formula == null) {
+            if (state?.value != null) {
+              return isRichTextValue(state.value) ? state.value.text : (state.value as SpreadsheetValue);
+            }
+            return null;
           }
+          if (flags) flags.sawFormula = true;
           return cached;
         }
       }
