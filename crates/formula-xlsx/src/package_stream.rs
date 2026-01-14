@@ -195,14 +195,15 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
     /// Remove a part from the output package.
     pub fn remove_part(&mut self, name: &str) {
         let canonical_input = canonical_part_name(name);
-        let (canonical, exists_in_source) = match self.resolve_source_part_name(&canonical_input) {
-            Some(found) => (found.to_string(), true),
-            None => (canonical_input, false),
-        };
-        self.part_overrides.insert(canonical.clone(), PartOverride::Remove);
-        if !exists_in_source {
-            self.added_part_names.remove(&canonical);
-        }
+        let canonical = self
+            .resolve_source_part_name(&canonical_input)
+            .unwrap_or(canonical_input.as_str())
+            .to_string();
+        self.part_overrides
+            .insert(canonical.clone(), PartOverride::Remove);
+        // Removing a part should ensure it no longer shows up in the "added" view even if callers
+        // previously `set_part`'d it.
+        self.added_part_names.remove(&canonical);
     }
 
     /// Access the raw part override map (useful for debugging/testing).
@@ -251,8 +252,12 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
     pub fn read_part(&self, name: &str) -> Result<Option<Vec<u8>>, XlsxError> {
         let canonical_input = canonical_part_name(name);
 
-        // Overrides are keyed by canonical part name directly.
-        if let Some(override_op) = self.part_overrides.get(&canonical_input) {
+        let canonical = self
+            .resolve_source_part_name(&canonical_input)
+            .map(|s| s.to_string())
+            .unwrap_or(canonical_input);
+
+        if let Some(override_op) = self.part_overrides.get(&canonical) {
             match override_op {
                 PartOverride::Remove => return Ok(None),
                 PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
@@ -261,20 +266,7 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
             }
         }
 
-        let Some(canonical) = self.resolve_source_part_name(&canonical_input) else {
-            return Ok(None);
-        };
-
-        if let Some(override_op) = self.part_overrides.get(canonical) {
-            match override_op {
-                PartOverride::Remove => return Ok(None),
-                PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
-                    return Ok(Some(bytes.clone()))
-                }
-            }
-        }
-
-        let Some(&idx) = self.source_part_name_to_index.get(canonical) else {
+        let Some(&idx) = self.source_part_name_to_index.get(&canonical) else {
             return Ok(None);
         };
 
@@ -286,7 +278,7 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
             return Ok(None);
         }
         let buf =
-            read_zip_file_bytes_with_limit(&mut file, canonical, MAX_XLSX_PACKAGE_PART_BYTES)?;
+            read_zip_file_bytes_with_limit(&mut file, &canonical, MAX_XLSX_PACKAGE_PART_BYTES)?;
         Ok(Some(buf))
     }
 

@@ -76,23 +76,36 @@ fn writes_full_sheet_view_state() -> Result<(), Box<dyn std::error::Error>> {
     let out = doc.save_to_vec()?;
     let sheet_xml = read_sheet_xml(&out)?;
 
-    assert!(
-        sheet_xml.contains(r#"zoomScale="125""#),
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let sheet_view = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "sheetView")
+        .expect("expected sheetView element");
+
+    assert_eq!(
+        sheet_view.attribute("zoomScale"),
+        Some("125"),
         "expected zoomScale=125, got:\n{sheet_xml}"
     );
-    assert!(
-        sheet_xml.contains(r#"showGridLines="0" showHeadings="0" showZeros="0""#),
-        "expected showGridLines/showHeadings/showZeros flags, got:\n{sheet_xml}"
-    );
-    assert!(
-        sheet_xml.contains(r#"<pane state="frozen" xSplit="1" ySplit="2" topLeftCell="B3""#),
-        "expected frozen pane with topLeftCell, got:\n{sheet_xml}"
-    );
-    assert!(
-        sheet_xml.contains(r#"<selection activeCell="D5" sqref="D5:E6""#),
-        "expected selection activeCell+sqref, got:\n{sheet_xml}"
-    );
+    assert_eq!(sheet_view.attribute("showGridLines"), Some("0"));
+    assert_eq!(sheet_view.attribute("showRowColHeaders"), Some("0"));
+    assert_eq!(sheet_view.attribute("showZeros"), Some("0"));
+
+    let pane = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "pane")
+        .expect("expected pane element");
+    assert_eq!(pane.attribute("state"), Some("frozen"));
+    assert_eq!(pane.attribute("xSplit"), Some("1"));
+    assert_eq!(pane.attribute("ySplit"), Some("2"));
+    assert_eq!(pane.attribute("topLeftCell"), Some("B3"));
+
+    let selection = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "selection")
+        .expect("expected selection element");
+    assert_eq!(selection.attribute("activeCell"), Some("D5"));
+    assert_eq!(selection.attribute("sqref"), Some("D5:E6"));
 
     Ok(())
 }
-

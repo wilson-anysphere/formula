@@ -10,7 +10,8 @@ use formula_model::{
     CellIsOperator, CellRef, CellValue, CfRule, CfRuleKind, Comment, CommentKind,
     DataValidationAssignment, DataValidationErrorStyle, DataValidationKind, DataValidationOperator,
     ErrorValue, Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range, SheetProtection,
-    SheetVisibility, WorkbookProtection, WorkbookWindowState, Worksheet, WorksheetId,
+    SheetSelection, SheetView, SheetVisibility, WorkbookProtection, WorkbookWindowState, Worksheet,
+    WorksheetId,
 };
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::Event;
@@ -817,8 +818,8 @@ fn build_parts(
             orig_hyperlinks,
             orig_drawing_rel_id,
             orig_data_validations,
-            orig_views,
             orig_sheet_format,
+            orig_view,
             orig_cols,
             orig_autofilter,
             orig_sheet_protection,
@@ -830,9 +831,9 @@ fn build_parts(
             })?;
             let orig_tab_color = parse_sheet_tab_color(orig_xml)?;
 
-            let orig_views = parse_sheet_view_settings(orig_xml)?;
             let orig_sheet_format = parse_sheet_format_settings(orig_xml)?;
             let orig_cols = parse_col_properties(orig_xml, &styles_editor)?;
+            let orig_view = parse_sheet_view(orig_xml)?;
             let orig_sheet_protection = parse_sheet_protection(orig_xml)?;
             let orig_has_data_validations = worksheet_has_data_validations(orig_xml)?;
 
@@ -890,8 +891,8 @@ fn build_parts(
                 orig_hyperlinks,
                 orig_drawing_rel_id,
                 orig_data_validations,
-                orig_views,
                 orig_sheet_format,
+                orig_view,
                 orig_cols,
                 orig_autofilter,
                 orig_sheet_protection,
@@ -905,8 +906,8 @@ fn build_parts(
                 Vec::new(),
                 None,
                 Vec::new(),
-                SheetViewSettings::default(),
                 SheetFormatSettings::default(),
+                None,
                 BTreeMap::new(),
                 None,
                 None,
@@ -927,8 +928,11 @@ fn build_parts(
         let orig_hyperlinks = normalize_hyperlinks(&orig_hyperlinks);
         let hyperlinks_changed = current_hyperlinks != orig_hyperlinks;
 
-        let desired_views = SheetViewSettings::from_sheet(sheet);
-        let views_changed = desired_views != orig_views;
+        let desired_view = desired_sheet_view(sheet);
+        let views_changed = match orig_view.as_ref() {
+            Some(orig) => orig != &desired_view,
+            None => !sheet_view_is_default(&desired_view),
+        };
 
         let desired_sheet_format = SheetFormatSettings::from_sheet(sheet);
         let sheet_format_changed = sheet_format_needs_patch(desired_sheet_format, orig_sheet_format);
@@ -1121,7 +1125,7 @@ fn build_parts(
             sheet_xml = write_sheet_tab_color(&sheet_xml, sheet.tab_color.as_ref())?;
         }
         if is_new_sheet || views_changed {
-            sheet_xml = update_sheet_views_xml(&sheet_xml, desired_views)?;
+            sheet_xml = update_sheet_views_xml(&sheet_xml, &desired_view)?;
         }
         if is_new_sheet || sheet_format_changed {
             sheet_xml = update_sheet_format_pr_xml(&sheet_xml, desired_sheet_format)?;
@@ -1875,133 +1879,6 @@ fn normalize_parsed_data_validations(
     out
 }
 
-#[derive(Clone, Debug, PartialEq)]
-struct SheetViewSelectionSettings {
-    active_cell: CellRef,
-    sqref: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct SheetViewSettings {
-    /// Zoom scale as an integer percentage (100 = 100%).
-    zoom_scale: u32,
-
-    /// Frozen pane row count (top).
-    frozen_rows: u32,
-    /// Frozen pane column count (left).
-    frozen_cols: u32,
-
-    /// Horizontal split position (non-freeze panes).
-    x_split: Option<f32>,
-    /// Vertical split position (non-freeze panes).
-    y_split: Option<f32>,
-
-    /// Top-left visible cell for the bottom-right pane (`pane/@topLeftCell`).
-    top_left_cell: Option<CellRef>,
-
-    show_grid_lines: bool,
-    show_headings: bool,
-    show_zeros: bool,
-
-    selection: Option<SheetViewSelectionSettings>,
-}
-
-impl Default for SheetViewSettings {
-    fn default() -> Self {
-        Self {
-            zoom_scale: 100,
-            frozen_rows: 0,
-            frozen_cols: 0,
-            x_split: None,
-            y_split: None,
-            top_left_cell: None,
-            show_grid_lines: true,
-            show_headings: true,
-            show_zeros: true,
-            selection: None,
-        }
-    }
-}
-
-impl SheetViewSettings {
-    fn from_sheet(sheet: &Worksheet) -> Self {
-        let view_is_default = sheet.view == formula_model::SheetView::default();
-
-        let zoom = if view_is_default {
-            sheet.zoom
-        } else {
-            sheet.view.zoom
-        };
-
-        // Excel stores this as an integer percentage (`zoomScale="120"`).
-        let mut zoom_scale = (zoom * 100.0).round() as i64;
-        zoom_scale = zoom_scale.max(10).min(400);
-
-        let (frozen_rows, frozen_cols) = if view_is_default {
-            (sheet.frozen_rows, sheet.frozen_cols)
-        } else {
-            (sheet.view.pane.frozen_rows, sheet.view.pane.frozen_cols)
-        };
-
-        // We only serialize split offsets when there is no frozen pane state.
-        let (x_split, y_split) = if view_is_default || frozen_rows > 0 || frozen_cols > 0 {
-            (None, None)
-        } else {
-            (sheet.view.pane.x_split, sheet.view.pane.y_split)
-        };
-
-        let mut top_left_cell = if view_is_default {
-            None
-        } else {
-            sheet.view.pane.top_left_cell
-        };
-        if top_left_cell.is_none() && (frozen_rows > 0 || frozen_cols > 0) {
-            top_left_cell = Some(CellRef::new(frozen_rows, frozen_cols));
-        }
-
-        let (show_grid_lines, show_headings, show_zeros, selection) = if view_is_default {
-            (true, true, true, None)
-        } else {
-            let selection = sheet.view.selection.as_ref().map(|sel| SheetViewSelectionSettings {
-                active_cell: sel.active_cell,
-                sqref: sel.sqref(),
-            });
-            (
-                sheet.view.show_grid_lines,
-                sheet.view.show_headings,
-                sheet.view.show_zeros,
-                selection,
-            )
-        };
-
-        Self {
-            zoom_scale: zoom_scale as u32,
-            frozen_rows,
-            frozen_cols,
-            x_split,
-            y_split,
-            top_left_cell,
-            show_grid_lines,
-            show_headings,
-            show_zeros,
-            selection,
-        }
-    }
-
-    fn is_default(&self) -> bool {
-        self.zoom_scale == 100
-            && self.frozen_rows == 0
-            && self.frozen_cols == 0
-            && self.x_split.is_none()
-            && self.y_split.is_none()
-            && self.top_left_cell.is_none()
-            && self.show_grid_lines
-            && self.show_headings
-            && self.show_zeros
-            && self.selection.is_none()
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SheetFormatSettings {
     default_col_width: Option<f32>,
@@ -2025,125 +1902,341 @@ impl SheetFormatSettings {
     }
 }
 
-fn parse_sheet_view_settings(xml: &str) -> Result<SheetViewSettings, WriteError> {
+fn desired_sheet_view(sheet: &Worksheet) -> SheetView {
+    let mut view = sheet.view.clone();
+
+    // `formula-model` now exposes a full `SheetView` model, but we still maintain legacy
+    // `Worksheet.zoom` / `Worksheet.frozen_*` fields for backward compatibility. When the newer
+    // `Worksheet.view` field is untouched (default), treat the legacy fields as authoritative.
+    if view == SheetView::default() {
+        view.zoom = sheet.zoom;
+        view.pane.frozen_rows = sheet.frozen_rows;
+        view.pane.frozen_cols = sheet.frozen_cols;
+    }
+
+    // If we're frozen, split positions are ignored.
+    if view.pane.frozen_rows > 0 || view.pane.frozen_cols > 0 {
+        view.pane.x_split = None;
+        view.pane.y_split = None;
+    }
+    view
+}
+
+fn sheet_view_is_default(view: &SheetView) -> bool {
+    view == &SheetView::default()
+}
+
+fn zoom_scale_from_zoom(zoom: f32) -> u32 {
+    // Excel stores this as an integer percentage (`zoomScale="120"`).
+    let mut zoom_scale = (zoom * 100.0).round() as i64;
+    zoom_scale = zoom_scale.max(10).min(400);
+    zoom_scale as u32
+}
+
+fn render_sheet_view_element(view: &SheetView, prefix: Option<&str>) -> String {
+    let sheet_view_tag = crate::xml::prefixed_tag(prefix, "sheetView");
+
+    let zoom_scale = zoom_scale_from_zoom(view.zoom);
+    let pane_xml = render_pane_element(&view.pane, prefix);
+    let selection_xml = render_selection_element(view.selection.as_ref(), prefix);
+
+    let mut out = String::new();
+    out.push('<');
+    out.push_str(&sheet_view_tag);
+    out.push_str(" workbookViewId=\"0\"");
+    if zoom_scale != 100 {
+        out.push_str(&format!(r#" zoomScale="{zoom_scale}""#));
+    }
+    if !view.show_grid_lines {
+        out.push_str(r#" showGridLines="0""#);
+    }
+    if !view.show_headings {
+        out.push_str(r#" showRowColHeaders="0""#);
+    }
+    if !view.show_zeros {
+        out.push_str(r#" showZeros="0""#);
+    }
+
+    if pane_xml.is_none() && selection_xml.is_none() {
+        out.push_str("/>");
+        return out;
+    }
+
+    out.push('>');
+    if let Some(pane) = pane_xml {
+        out.push_str(&pane);
+    }
+    if let Some(selection) = selection_xml {
+        out.push_str(&selection);
+    }
+    out.push_str("</");
+    out.push_str(&sheet_view_tag);
+    out.push('>');
+    out
+}
+
+fn render_sheet_views_section(view: &SheetView, prefix: Option<&str>) -> String {
+    if sheet_view_is_default(view) {
+        return String::new();
+    }
+
+    let sheet_views_tag = crate::xml::prefixed_tag(prefix, "sheetViews");
+    let sheet_view_xml = render_sheet_view_element(view, prefix);
+
+    let mut out = String::new();
+    out.push('<');
+    out.push_str(&sheet_views_tag);
+    out.push('>');
+    out.push_str(&sheet_view_xml);
+    out.push_str("</");
+    out.push_str(&sheet_views_tag);
+    out.push('>');
+    out
+}
+
+fn render_pane_element(pane: &formula_model::SheetPane, prefix: Option<&str>) -> Option<String> {
+    if pane == &formula_model::SheetPane::default() {
+        return None;
+    }
+
+    let pane_tag = crate::xml::prefixed_tag(prefix, "pane");
+    let mut out = String::new();
+    out.push('<');
+    out.push_str(&pane_tag);
+
+    let is_frozen = pane.frozen_rows > 0 || pane.frozen_cols > 0;
+    if is_frozen {
+        if pane.frozen_cols > 0 {
+            out.push_str(&format!(r#" xSplit="{}""#, pane.frozen_cols));
+        }
+        if pane.frozen_rows > 0 {
+            out.push_str(&format!(r#" ySplit="{}""#, pane.frozen_rows));
+        }
+
+        let top_left = pane
+            .top_left_cell
+            .unwrap_or_else(|| CellRef::new(pane.frozen_rows, pane.frozen_cols))
+            .to_a1();
+        out.push_str(&format!(r#" topLeftCell="{}""#, escape_attr(&top_left)));
+
+        let active_pane = if pane.frozen_rows > 0 && pane.frozen_cols > 0 {
+            "bottomRight"
+        } else if pane.frozen_rows > 0 {
+            "bottomLeft"
+        } else {
+            "topRight"
+        };
+        out.push_str(&format!(r#" activePane="{active_pane}" state="frozen"/>"#));
+        return Some(out);
+    }
+
+    if let Some(x) = pane.x_split {
+        out.push_str(&format!(r#" xSplit="{x}""#));
+    }
+    if let Some(y) = pane.y_split {
+        out.push_str(&format!(r#" ySplit="{y}""#));
+    }
+    if let Some(cell) = pane.top_left_cell {
+        out.push_str(&format!(r#" topLeftCell="{}""#, escape_attr(&cell.to_a1())));
+    }
+    out.push_str("/>");
+    Some(out)
+}
+
+fn render_selection_element(
+    selection: Option<&SheetSelection>,
+    prefix: Option<&str>,
+) -> Option<String> {
+    let selection = selection?;
+    let selection_tag = crate::xml::prefixed_tag(prefix, "selection");
+
+    let mut out = String::new();
+    out.push('<');
+    out.push_str(&selection_tag);
+    out.push_str(&format!(
+        r#" activeCell="{}""#,
+        escape_attr(&selection.active_cell.to_a1())
+    ));
+    out.push_str(&format!(r#" sqref="{}""#, escape_attr(&selection.sqref())));
+    out.push_str("/>");
+    Some(out)
+}
+
+fn parse_sheet_view(xml: &str) -> Result<Option<SheetView>, WriteError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
-    let mut settings = SheetViewSettings::default();
+    let mut in_sheet_views = false;
     let mut in_sheet_view = false;
+    let mut in_first_sheet_view = false;
+    let mut sheet_view_idx: usize = 0;
+    let mut view: Option<SheetView> = None;
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Eof => break,
-            Event::Start(e) if e.local_name().as_ref() == b"sheetView" => {
-                in_sheet_view = true;
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    let val = attr.unescape_value()?.into_owned();
-                    match attr.key.as_ref() {
-                        b"zoomScale" => {
-                            if let Ok(scale) = val.parse::<u32>() {
-                                settings.zoom_scale = scale;
-                            }
-                        }
-                        b"showGridLines" => settings.show_grid_lines = parse_xml_bool(&val),
-                        b"showHeadings" | b"showRowColHeaders" => {
-                            settings.show_headings = parse_xml_bool(&val)
-                        }
-                        b"showZeros" => settings.show_zeros = parse_xml_bool(&val),
-                        _ => {}
-                    }
-                }
+            Event::Start(e) if e.local_name().as_ref() == b"sheetViews" => {
+                in_sheet_views = true;
             }
-            Event::Empty(e) if e.local_name().as_ref() == b"sheetView" => {
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    let val = attr.unescape_value()?.into_owned();
-                    match attr.key.as_ref() {
-                        b"zoomScale" => {
-                            if let Ok(scale) = val.parse::<u32>() {
-                                settings.zoom_scale = scale;
-                            }
-                        }
-                        b"showGridLines" => settings.show_grid_lines = parse_xml_bool(&val),
-                        b"showHeadings" | b"showRowColHeaders" => {
-                            settings.show_headings = parse_xml_bool(&val)
-                        }
-                        b"showZeros" => settings.show_zeros = parse_xml_bool(&val),
-                        _ => {}
-                    }
-                }
-            }
-            Event::End(e) if e.local_name().as_ref() == b"sheetView" => {
+            Event::End(e) if e.local_name().as_ref() == b"sheetViews" => {
+                in_sheet_views = false;
                 in_sheet_view = false;
+                in_first_sheet_view = false;
                 drop(e);
             }
-            Event::Start(e) | Event::Empty(e) if in_sheet_view && e.local_name().as_ref() == b"pane" => {
-                let mut state: Option<String> = None;
-                let mut x_split: Option<String> = None;
-                let mut y_split: Option<String> = None;
-                let mut top_left_cell: Option<CellRef> = None;
-
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    let val = attr.unescape_value()?.into_owned();
-                    match attr.key.as_ref() {
-                        b"state" => state = Some(val),
-                        b"xSplit" => x_split = Some(val),
-                        b"ySplit" => y_split = Some(val),
-                        b"topLeftCell" => {
-                            top_left_cell = CellRef::from_a1(&val).ok();
-                        }
-                        _ => {}
-                    }
-                }
-
-                match state.as_deref() {
-                    Some("frozen") | Some("frozenSplit") => {
-                        settings.frozen_cols = x_split.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0);
-                        settings.frozen_rows = y_split.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0);
-                        settings.x_split = None;
-                        settings.y_split = None;
-                        settings.top_left_cell = top_left_cell.or_else(|| {
-                            if settings.frozen_rows > 0 || settings.frozen_cols > 0 {
-                                Some(CellRef::new(settings.frozen_rows, settings.frozen_cols))
-                            } else {
-                                None
+            Event::Start(e) if in_sheet_views && e.local_name().as_ref() == b"sheetView" => {
+                in_sheet_view = true;
+                in_first_sheet_view = sheet_view_idx == 0;
+                sheet_view_idx += 1;
+                if in_first_sheet_view {
+                    let mut parsed = SheetView::default();
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let val = attr.unescape_value()?.into_owned();
+                        match attr.key.as_ref() {
+                            b"zoomScale" => {
+                                if let Ok(scale) = val.parse::<f32>() {
+                                    parsed.zoom = scale / 100.0;
+                                }
                             }
-                        });
+                            b"showGridLines" => parsed.show_grid_lines = parse_xml_bool(&val),
+                            b"showRowColHeaders" | b"showHeadings" => {
+                                parsed.show_headings = parse_xml_bool(&val)
+                            }
+                            b"showZeros" => parsed.show_zeros = parse_xml_bool(&val),
+                            _ => {}
+                        }
                     }
-                    Some("split") => {
-                        settings.x_split = x_split.as_deref().and_then(|v| v.parse().ok());
-                        settings.y_split = y_split.as_deref().and_then(|v| v.parse().ok());
-                        settings.top_left_cell = top_left_cell;
+                    view = Some(parsed);
+                }
+            }
+            Event::Empty(e) if in_sheet_views && e.local_name().as_ref() == b"sheetView" => {
+                let is_first = sheet_view_idx == 0;
+                sheet_view_idx += 1;
+                if is_first {
+                    let mut parsed = SheetView::default();
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let val = attr.unescape_value()?.into_owned();
+                        match attr.key.as_ref() {
+                            b"zoomScale" => {
+                                if let Ok(scale) = val.parse::<f32>() {
+                                    parsed.zoom = scale / 100.0;
+                                }
+                            }
+                            b"showGridLines" => parsed.show_grid_lines = parse_xml_bool(&val),
+                            b"showRowColHeaders" | b"showHeadings" => {
+                                parsed.show_headings = parse_xml_bool(&val)
+                            }
+                            b"showZeros" => parsed.show_zeros = parse_xml_bool(&val),
+                            _ => {}
+                        }
                     }
-                    _ => {
-                        // Best-effort: if no explicit state is set, treat the presence of split
-                        // offsets as a split pane.
-                        settings.x_split = x_split.as_deref().and_then(|v| v.parse().ok());
-                        settings.y_split = y_split.as_deref().and_then(|v| v.parse().ok());
-                        settings.top_left_cell = top_left_cell;
+                    view = Some(parsed);
+                }
+                // Self-closing `<sheetView/>` does not establish an active parse context.
+                in_sheet_view = false;
+                in_first_sheet_view = false;
+                drop(e);
+            }
+            Event::End(e) if in_sheet_view && e.local_name().as_ref() == b"sheetView" => {
+                in_sheet_view = false;
+                in_first_sheet_view = false;
+                drop(e);
+            }
+            Event::Start(e) | Event::Empty(e)
+                if in_sheet_view && in_first_sheet_view && e.local_name().as_ref() == b"pane" =>
+            {
+                if let Some(parsed) = view.as_mut() {
+                    let mut state: Option<String> = None;
+                    let mut x_split: Option<String> = None;
+                    let mut y_split: Option<String> = None;
+                    let mut top_left_cell: Option<String> = None;
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let val = attr.unescape_value()?.into_owned();
+                        match attr.key.as_ref() {
+                            b"state" => state = Some(val),
+                            b"xSplit" => x_split = Some(val),
+                            b"ySplit" => y_split = Some(val),
+                            b"topLeftCell" => top_left_cell = Some(val),
+                            _ => {}
+                        }
+                    }
+
+                    if let Some(a1) = top_left_cell.as_deref() {
+                        if let Ok(cell) = CellRef::from_a1(a1) {
+                            parsed.pane.top_left_cell = Some(cell);
+                        }
+                    }
+
+                    if matches!(state.as_deref(), Some("frozen") | Some("frozenSplit")) {
+                        parsed.pane.frozen_cols = x_split
+                            .as_deref()
+                            .and_then(|s| s.parse::<u32>().ok())
+                            .or_else(|| {
+                                x_split
+                                    .as_deref()
+                                    .and_then(|s| s.parse::<f32>().ok())
+                                    .map(|f| f.round() as u32)
+                            })
+                            .unwrap_or(0);
+                        parsed.pane.frozen_rows = y_split
+                            .as_deref()
+                            .and_then(|s| s.parse::<u32>().ok())
+                            .or_else(|| {
+                                y_split
+                                    .as_deref()
+                                    .and_then(|s| s.parse::<f32>().ok())
+                                    .map(|f| f.round() as u32)
+                            })
+                            .unwrap_or(0);
+                        parsed.pane.x_split = None;
+                        parsed.pane.y_split = None;
+                    } else {
+                        parsed.pane.frozen_cols = 0;
+                        parsed.pane.frozen_rows = 0;
+                        parsed.pane.x_split =
+                            x_split.as_deref().and_then(|s| s.parse::<f32>().ok());
+                        parsed.pane.y_split =
+                            y_split.as_deref().and_then(|s| s.parse::<f32>().ok());
                     }
                 }
             }
             Event::Start(e) | Event::Empty(e)
-                if in_sheet_view && e.local_name().as_ref() == b"selection" =>
+                if in_sheet_view
+                    && in_first_sheet_view
+                    && e.local_name().as_ref() == b"selection" =>
             {
-                let mut active_cell: Option<CellRef> = None;
-                let mut sqref: Option<String> = None;
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    let val = attr.unescape_value()?.into_owned();
-                    match attr.key.as_ref() {
-                        b"activeCell" => active_cell = CellRef::from_a1(&val).ok(),
-                        b"sqref" => sqref = Some(val),
-                        _ => {}
+                if let Some(parsed) = view.as_mut() {
+                    // Excel can emit multiple selections (one per pane). We only model the first.
+                    if parsed.selection.is_some() {
+                        drop(e);
+                    } else {
+                        let mut active_cell: Option<CellRef> = None;
+                        let mut sqref: Option<String> = None;
+                        for attr in e.attributes() {
+                            let attr = attr?;
+                            let val = attr.unescape_value()?.into_owned();
+                            match attr.key.as_ref() {
+                                b"activeCell" => {
+                                    if let Ok(cell) = CellRef::from_a1(&val) {
+                                        active_cell = Some(cell);
+                                    }
+                                }
+                                b"sqref" => sqref = Some(val),
+                                _ => {}
+                            }
+                        }
+
+                        if let Some(active_cell) = active_cell {
+                            parsed.selection = match sqref.as_deref() {
+                                Some(sqref) => SheetSelection::from_sqref(active_cell, sqref).ok(),
+                                None => Some(SheetSelection::new(active_cell, Vec::new())),
+                            };
+                        }
                     }
-                }
-                if let Some(active_cell) = active_cell {
-                    let sqref = sqref.unwrap_or_else(|| active_cell.to_a1());
-                    settings.selection = Some(SheetViewSelectionSettings { active_cell, sqref });
                 }
             }
             _ => {}
@@ -2151,7 +2244,7 @@ fn parse_sheet_view_settings(xml: &str) -> Result<SheetViewSettings, WriteError>
         buf.clear();
     }
 
-    Ok(settings)
+    Ok(view)
 }
 
 fn parse_sheet_format_settings(xml: &str) -> Result<SheetFormatSettings, WriteError> {
@@ -2219,149 +2312,262 @@ fn sheet_format_needs_patch(desired: SheetFormatSettings, original: SheetFormatS
     false
 }
 
-fn render_sheet_views_section(views: SheetViewSettings, prefix: Option<&str>) -> String {
-    if views.is_default() {
-        return String::new();
-    }
+fn patch_sheet_view_start(
+    e: &quick_xml::events::BytesStart<'_>,
+    desired: &SheetView,
+) -> Result<quick_xml::events::BytesStart<'static>, WriteError> {
+    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+    let mut out = quick_xml::events::BytesStart::new(tag.as_str());
 
-    let sheet_views_tag = crate::xml::prefixed_tag(prefix, "sheetViews");
-    let sheet_view_tag = crate::xml::prefixed_tag(prefix, "sheetView");
-    let pane_tag = crate::xml::prefixed_tag(prefix, "pane");
-    let selection_tag = crate::xml::prefixed_tag(prefix, "selection");
+    let desired_zoom_scale = zoom_scale_from_zoom(desired.zoom);
+    let mut had_zoom_scale = false;
+    let mut kept_zoom_scale = false;
+    let mut had_show_grid_lines = false;
+    let mut kept_show_grid_lines = false;
+    let mut had_show_headings = false;
+    let mut kept_show_headings = false;
+    let mut had_show_zeros = false;
+    let mut kept_show_zeros = false;
 
-    let mut out = String::new();
-    out.push('<');
-    out.push_str(&sheet_views_tag);
-    out.push('>');
-    out.push('<');
-    out.push_str(&sheet_view_tag);
-    out.push_str(" workbookViewId=\"0\"");
-    if !views.show_grid_lines {
-        out.push_str(r#" showGridLines="0""#);
-    }
-    if !views.show_headings {
-        out.push_str(r#" showHeadings="0""#);
-    }
-    if !views.show_zeros {
-        out.push_str(r#" showZeros="0""#);
-    }
-    if views.zoom_scale != 100 {
-        out.push_str(&format!(r#" zoomScale="{}""#, views.zoom_scale));
-    }
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key = attr.key.as_ref();
 
-    let has_pane = views.frozen_rows > 0
-        || views.frozen_cols > 0
-        || views.x_split.is_some()
-        || views.y_split.is_some();
-    let has_selection = views.selection.is_some();
-
-    if !has_pane && !has_selection {
-        out.push_str("/></");
-        out.push_str(&sheet_views_tag);
-        out.push('>');
-        return out;
-    }
-
-    out.push('>');
-
-    if has_pane {
-        out.push('<');
-        out.push_str(&pane_tag);
-
-        let frozen = views.frozen_rows > 0 || views.frozen_cols > 0;
-        let x_present = if frozen {
-            views.frozen_cols > 0
-        } else {
-            views.x_split.is_some()
-        };
-        let y_present = if frozen {
-            views.frozen_rows > 0
-        } else {
-            views.y_split.is_some()
-        };
-
-        let state = if frozen { "frozen" } else { "split" };
-        out.push_str(&format!(r#" state="{state}""#));
-
-        if frozen {
-            if views.frozen_cols > 0 {
-                out.push_str(&format!(r#" xSplit="{}""#, views.frozen_cols));
+        match key {
+            b"zoomScale" => {
+                had_zoom_scale = true;
+                let parsed = attr
+                    .unescape_value()
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok());
+                if parsed == Some(desired_zoom_scale) {
+                    kept_zoom_scale = true;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
             }
-            if views.frozen_rows > 0 {
-                out.push_str(&format!(r#" ySplit="{}""#, views.frozen_rows));
+            b"showGridLines" => {
+                had_show_grid_lines = true;
+                let parsed = attr
+                    .unescape_value()
+                    .ok()
+                    .map(|v| parse_xml_bool(v.as_ref()))
+                    .unwrap_or(true);
+                if parsed == desired.show_grid_lines {
+                    kept_show_grid_lines = true;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
             }
-        } else {
-            if let Some(x_split) = views.x_split {
-                out.push_str(&format!(r#" xSplit="{}""#, format_sheet_view_split(x_split)));
+            b"showRowColHeaders" => {
+                had_show_headings = true;
+                let parsed = attr
+                    .unescape_value()
+                    .ok()
+                    .map(|v| parse_xml_bool(v.as_ref()))
+                    .unwrap_or(true);
+                if parsed == desired.show_headings {
+                    kept_show_headings = true;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
             }
-            if let Some(y_split) = views.y_split {
-                out.push_str(&format!(r#" ySplit="{}""#, format_sheet_view_split(y_split)));
+            b"showZeros" => {
+                had_show_zeros = true;
+                let parsed = attr
+                    .unescape_value()
+                    .ok()
+                    .map(|v| parse_xml_bool(v.as_ref()))
+                    .unwrap_or(true);
+                if parsed == desired.show_zeros {
+                    kept_show_zeros = true;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
+            }
+            _ => {
+                out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
             }
         }
-
-        if let Some(top_left_cell) = views.top_left_cell.or_else(|| {
-            if frozen {
-                Some(CellRef::new(views.frozen_rows, views.frozen_cols))
-            } else {
-                None
-            }
-        }) {
-            let top_left = top_left_cell.to_a1();
-            out.push_str(&format!(r#" topLeftCell="{}""#, escape_attr(&top_left)));
-        }
-
-        let active_pane = if x_present && y_present {
-            "bottomRight"
-        } else if y_present {
-            "bottomLeft"
-        } else {
-            "topRight"
-        };
-        out.push_str(&format!(r#" activePane="{active_pane}"/>"#));
     }
 
-    if let Some(selection) = &views.selection {
-        out.push('<');
-        out.push_str(&selection_tag);
-        out.push_str(&format!(
-            r#" activeCell="{}" sqref="{}"/>"#,
-            escape_attr(&selection.active_cell.to_a1()),
-            escape_attr(&selection.sqref)
+    if !kept_zoom_scale && (had_zoom_scale || desired_zoom_scale != 100) {
+        let s = desired_zoom_scale.to_string();
+        out.push_attribute(("zoomScale", s.as_str()));
+    }
+
+    if !kept_show_grid_lines && (had_show_grid_lines || !desired.show_grid_lines) {
+        out.push_attribute((
+            "showGridLines",
+            if desired.show_grid_lines { "1" } else { "0" },
         ));
     }
+    if !kept_show_headings && (had_show_headings || !desired.show_headings) {
+        out.push_attribute((
+            "showRowColHeaders",
+            if desired.show_headings { "1" } else { "0" },
+        ));
+    }
+    if !kept_show_zeros && (had_show_zeros || !desired.show_zeros) {
+        out.push_attribute(("showZeros", if desired.show_zeros { "1" } else { "0" }));
+    }
 
-    out.push_str("</");
-    out.push_str(&sheet_view_tag);
-    out.push_str("></");
-    out.push_str(&sheet_views_tag);
-    out.push('>');
-    out
+    Ok(out.into_owned())
 }
 
-fn format_sheet_view_split(val: f32) -> String {
-    if !val.is_finite() {
-        return "0".to_string();
-    }
-    // For deterministic fixtures, trim trailing zeros (e.g. `1.0` -> `1`).
-    let mut s = format!("{val}");
-    if s.contains('.') {
-        while s.ends_with('0') {
-            s.pop();
-        }
-        if s.ends_with('.') {
-            s.pop();
-        }
-    }
-    if s.is_empty() {
-        "0".to_string()
+fn patch_pane_start(
+    e: &quick_xml::events::BytesStart<'_>,
+    desired: &formula_model::SheetPane,
+) -> Result<quick_xml::events::BytesStart<'static>, WriteError> {
+    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+    let mut out = quick_xml::events::BytesStart::new(tag.as_str());
+
+    let desired_is_frozen = desired.frozen_rows > 0 || desired.frozen_cols > 0;
+    let desired_state: Option<&str> = if desired_is_frozen {
+        Some("frozen")
     } else {
-        s
+        None
+    };
+    let desired_x_split = if desired_is_frozen {
+        (desired.frozen_cols > 0).then(|| desired.frozen_cols.to_string())
+    } else {
+        desired.x_split.map(|v| v.to_string())
+    };
+    let desired_y_split = if desired_is_frozen {
+        (desired.frozen_rows > 0).then(|| desired.frozen_rows.to_string())
+    } else {
+        desired.y_split.map(|v| v.to_string())
+    };
+    let desired_top_left_cell = desired.top_left_cell.map(|c| c.to_a1());
+
+    let mut had_state = false;
+    let mut kept_state = false;
+    let mut had_x_split = false;
+    let mut kept_x_split = false;
+    let mut had_y_split = false;
+    let mut kept_y_split = false;
+    let mut had_top_left_cell = false;
+    let mut kept_top_left_cell = false;
+
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key = attr.key.as_ref();
+        match key {
+            b"state" => {
+                had_state = true;
+                let parsed = attr.unescape_value().ok().map(|v| v.into_owned());
+                let desired_match = match (&parsed, desired_state) {
+                    (Some(s), Some("frozen")) => s == "frozen" || s == "frozenSplit",
+                    (Some(s), None) => s != "frozen" && s != "frozenSplit",
+                    _ => false,
+                };
+                if desired_match {
+                    kept_state = true;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
+            }
+            b"xSplit" => {
+                had_x_split = true;
+                let parsed = attr.unescape_value().ok().map(|v| v.into_owned());
+                if parsed.as_deref() == desired_x_split.as_deref() {
+                    kept_x_split = true;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
+            }
+            b"ySplit" => {
+                had_y_split = true;
+                let parsed = attr.unescape_value().ok().map(|v| v.into_owned());
+                if parsed.as_deref() == desired_y_split.as_deref() {
+                    kept_y_split = true;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
+            }
+            b"topLeftCell" => {
+                had_top_left_cell = true;
+                let parsed = attr.unescape_value().ok().map(|v| v.into_owned());
+                if parsed.as_deref() == desired_top_left_cell.as_deref() {
+                    kept_top_left_cell = true;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
+            }
+            _ => out.push_attribute((attr.key.as_ref(), attr.value.as_ref())),
+        }
     }
+
+    if !kept_state && (had_state || desired_state.is_some()) {
+        if let Some(state) = desired_state {
+            out.push_attribute(("state", state));
+        } else if had_state {
+            out.push_attribute(("state", "split"));
+        }
+    }
+
+    if !kept_x_split && (had_x_split || desired_x_split.is_some()) {
+        if let Some(x) = desired_x_split.as_deref() {
+            out.push_attribute(("xSplit", x));
+        }
+    }
+    if !kept_y_split && (had_y_split || desired_y_split.is_some()) {
+        if let Some(y) = desired_y_split.as_deref() {
+            out.push_attribute(("ySplit", y));
+        }
+    }
+    if !kept_top_left_cell && (had_top_left_cell || desired_top_left_cell.is_some()) {
+        if let Some(cell) = desired_top_left_cell.as_deref() {
+            out.push_attribute(("topLeftCell", cell));
+        }
+    }
+
+    Ok(out.into_owned())
 }
 
-fn update_sheet_views_xml(sheet_xml: &str, views: SheetViewSettings) -> Result<String, WriteError> {
+fn patch_selection_start(
+    e: &quick_xml::events::BytesStart<'_>,
+    desired: &SheetSelection,
+) -> Result<quick_xml::events::BytesStart<'static>, WriteError> {
+    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+    let mut out = quick_xml::events::BytesStart::new(tag.as_str());
+
+    let desired_active = desired.active_cell.to_a1();
+    let desired_sqref = desired.sqref();
+
+    let mut had_active = false;
+    let mut kept_active = false;
+    let mut had_sqref = false;
+    let mut kept_sqref = false;
+
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"activeCell" => {
+                had_active = true;
+                let parsed = attr.unescape_value().ok().map(|v| v.into_owned());
+                if parsed.as_deref() == Some(desired_active.as_str()) {
+                    kept_active = true;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
+            }
+            b"sqref" => {
+                had_sqref = true;
+                let parsed = attr.unescape_value().ok().map(|v| v.into_owned());
+                if parsed.as_deref() == Some(desired_sqref.as_str()) {
+                    kept_sqref = true;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
+            }
+            _ => out.push_attribute((attr.key.as_ref(), attr.value.as_ref())),
+        }
+    }
+
+    if !kept_active && (had_active || true) {
+        out.push_attribute(("activeCell", desired_active.as_str()));
+    }
+    if !kept_sqref && (had_sqref || true) {
+        out.push_attribute(("sqref", desired_sqref.as_str()));
+    }
+
+    Ok(out.into_owned())
+}
+
+fn update_sheet_views_xml(sheet_xml: &str, desired: &SheetView) -> Result<String, WriteError> {
     let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(sheet_xml)?;
-    let new_section = render_sheet_views_section(views, worksheet_prefix.as_deref());
+    let new_section = render_sheet_views_section(desired, worksheet_prefix.as_deref());
 
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
@@ -2369,58 +2575,310 @@ fn update_sheet_views_xml(sheet_xml: &str, views: SheetViewSettings) -> Result<S
     let mut writer = Writer::new(Vec::new());
     let mut buf = Vec::new();
 
+    let needs_sheet_views_insertion = !new_section.is_empty();
+    let desired_pane_needed = desired.pane != formula_model::SheetPane::default();
+    let desired_selection_needed = desired.selection.is_some();
+
+    let mut found_sheet_views = false;
+    let mut inserted_sheet_views = false;
+    let mut in_sheet_views = false;
+    let mut processed_first_sheet_view = false;
+
+    let mut in_target_sheet_view = false;
+    let mut target_depth: usize = 0;
+    let mut pending_pane = false;
+    let mut pending_selection = false;
+    let mut pane_patched = false;
+    let mut selection_patched = false;
     let mut skip_depth: usize = 0;
-    let mut replaced = false;
-    let mut inserted = false;
 
     loop {
-        let event = reader.read_event_into(&mut buf)?;
-        match event {
+        let ev = reader.read_event_into(&mut buf)?;
+        match ev {
             Event::Eof => break,
-            _ if skip_depth > 0 => match event {
-                Event::Start(_) => skip_depth += 1,
-                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
-                Event::Empty(_) => {}
-                _ => {}
-            },
-            Event::Start(ref e) if e.local_name().as_ref() == b"sheetViews" => {
-                replaced = true;
-                if !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
-                }
-                skip_depth = 1;
-            }
-            Event::Empty(ref e) if e.local_name().as_ref() == b"sheetViews" => {
-                replaced = true;
-                if !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+
+            ev if skip_depth > 0 => {
+                // Skip over nested content that we're deleting (e.g. removing `<pane>...</pane>`).
+                match ev {
+                    Event::Start(_) => {
+                        skip_depth += 1;
+                        target_depth += 1;
+                    }
+                    Event::End(_) => {
+                        skip_depth = skip_depth.saturating_sub(1);
+                        target_depth = target_depth.saturating_sub(1);
+                    }
+                    Event::Empty(_) => {}
+                    _ => {}
                 }
             }
+
+            // `<sheetViews>` insertion when absent (schema-valid position: before sheetData).
             Event::Start(ref e)
-                if e.local_name().as_ref() == b"sheetFormatPr"
-                    || e.local_name().as_ref() == b"cols"
-                    || e.local_name().as_ref() == b"sheetData" =>
+                if !found_sheet_views
+                    && !inserted_sheet_views
+                    && needs_sheet_views_insertion
+                    && (e.local_name().as_ref() == b"sheetFormatPr"
+                        || e.local_name().as_ref() == b"cols"
+                        || e.local_name().as_ref() == b"sheetData") =>
             {
-                if !replaced && !inserted && !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
-                    inserted = true;
-                }
+                writer.get_mut().extend_from_slice(new_section.as_bytes());
+                inserted_sheet_views = true;
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
             Event::Empty(ref e)
-                if e.local_name().as_ref() == b"sheetFormatPr"
-                    || e.local_name().as_ref() == b"cols"
-                    || e.local_name().as_ref() == b"sheetData" =>
+                if !found_sheet_views
+                    && !inserted_sheet_views
+                    && needs_sheet_views_insertion
+                    && (e.local_name().as_ref() == b"sheetFormatPr"
+                        || e.local_name().as_ref() == b"cols"
+                        || e.local_name().as_ref() == b"sheetData") =>
             {
-                if !replaced && !inserted && !new_section.is_empty() {
-                    writer.get_mut().extend_from_slice(new_section.as_bytes());
-                    inserted = true;
+                writer.get_mut().extend_from_slice(new_section.as_bytes());
+                inserted_sheet_views = true;
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+
+            // `<sheetViews>` container.
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheetViews" => {
+                found_sheet_views = true;
+                in_sheet_views = true;
+                processed_first_sheet_view = false;
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheetViews" => {
+                found_sheet_views = true;
+                if needs_sheet_views_insertion {
+                    // Convert `<sheetViews/>` to `<sheetViews>...`.
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                    let view_xml = render_sheet_view_element(desired, worksheet_prefix.as_deref());
+                    writer.get_mut().extend_from_slice(view_xml.as_bytes());
+                    let end_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.write_event(Event::End(quick_xml::events::BytesEnd::new(
+                        end_name.as_str(),
+                    )))?;
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+            }
+            Event::End(ref e) if in_sheet_views && e.local_name().as_ref() == b"sheetViews" => {
+                // If the sheetViews container had no sheetView entries, insert one now.
+                if !processed_first_sheet_view && !sheet_view_is_default(desired) {
+                    let view_xml = render_sheet_view_element(desired, worksheet_prefix.as_deref());
+                    writer.get_mut().extend_from_slice(view_xml.as_bytes());
+                }
+                in_sheet_views = false;
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+
+            // `<sheetView>` elements inside the `<sheetViews>` container.
+            Event::Start(ref e) if in_sheet_views && e.local_name().as_ref() == b"sheetView" => {
+                if processed_first_sheet_view {
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                } else {
+                    processed_first_sheet_view = true;
+                    in_target_sheet_view = true;
+                    target_depth = 0;
+                    pending_pane = desired_pane_needed;
+                    pending_selection = desired_selection_needed;
+                    pane_patched = false;
+                    selection_patched = false;
+
+                    let patched = patch_sheet_view_start(e, desired)?;
+                    writer.write_event(Event::Start(patched))?;
+                }
+            }
+            Event::Empty(ref e) if in_sheet_views && e.local_name().as_ref() == b"sheetView" => {
+                if processed_first_sheet_view {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                } else {
+                    processed_first_sheet_view = true;
+                    let needs_children = desired_pane_needed || desired_selection_needed;
+                    let patched = patch_sheet_view_start(e, desired)?;
+                    if !needs_children {
+                        writer.write_event(Event::Empty(patched))?;
+                    } else {
+                        let end_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                        writer.write_event(Event::Start(patched))?;
+                        if let Some(pane) =
+                            render_pane_element(&desired.pane, worksheet_prefix.as_deref())
+                        {
+                            writer.get_mut().extend_from_slice(pane.as_bytes());
+                        }
+                        if let Some(selection) = render_selection_element(
+                            desired.selection.as_ref(),
+                            worksheet_prefix.as_deref(),
+                        ) {
+                            writer.get_mut().extend_from_slice(selection.as_bytes());
+                        }
+                        writer.write_event(Event::End(quick_xml::events::BytesEnd::new(
+                            end_name.as_str(),
+                        )))?;
+                    }
+                }
+            }
+            Event::End(ref e)
+                if in_target_sheet_view && e.local_name().as_ref() == b"sheetView" =>
+            {
+                if pending_pane {
+                    if let Some(pane) =
+                        render_pane_element(&desired.pane, worksheet_prefix.as_deref())
+                    {
+                        writer.get_mut().extend_from_slice(pane.as_bytes());
+                    }
+                    pending_pane = false;
+                }
+                if pending_selection {
+                    if let Some(selection) = render_selection_element(
+                        desired.selection.as_ref(),
+                        worksheet_prefix.as_deref(),
+                    ) {
+                        writer.get_mut().extend_from_slice(selection.as_bytes());
+                    }
+                    pending_selection = false;
+                }
+                in_target_sheet_view = false;
+                target_depth = 0;
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+
+            // Direct children of the first `<sheetView>` that we manage.
+            Event::Start(ref e)
+                if in_target_sheet_view
+                    && target_depth == 0
+                    && e.local_name().as_ref() == b"pane" =>
+            {
+                pending_pane = false;
+                pane_patched = true;
+                if desired_pane_needed {
+                    let patched = patch_pane_start(e, &desired.pane)?;
+                    writer.write_event(Event::Start(patched))?;
+                    target_depth += 1;
+                } else {
+                    // Remove the pane element.
+                    skip_depth = 1;
+                    target_depth += 1;
+                }
+            }
+            Event::Empty(ref e)
+                if in_target_sheet_view
+                    && target_depth == 0
+                    && e.local_name().as_ref() == b"pane" =>
+            {
+                pending_pane = false;
+                pane_patched = true;
+                if desired_pane_needed {
+                    let patched = patch_pane_start(e, &desired.pane)?;
+                    writer.write_event(Event::Empty(patched))?;
+                } else {
+                    // Remove the pane element (empty).
+                }
+            }
+            Event::Start(ref e)
+                if in_target_sheet_view
+                    && target_depth == 0
+                    && e.local_name().as_ref() == b"selection" =>
+            {
+                if !selection_patched {
+                    selection_patched = true;
+                    pending_selection = false;
+                    if let Some(desired_sel) = desired.selection.as_ref() {
+                        let patched = patch_selection_start(e, desired_sel)?;
+                        writer.write_event(Event::Start(patched))?;
+                        target_depth += 1;
+                    } else {
+                        skip_depth = 1;
+                        target_depth += 1;
+                    }
+                } else {
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                    target_depth += 1;
+                }
+            }
+            Event::Empty(ref e)
+                if in_target_sheet_view
+                    && target_depth == 0
+                    && e.local_name().as_ref() == b"selection" =>
+            {
+                if !selection_patched {
+                    selection_patched = true;
+                    pending_selection = false;
+                    if let Some(desired_sel) = desired.selection.as_ref() {
+                        let patched = patch_selection_start(e, desired_sel)?;
+                        writer.write_event(Event::Empty(patched))?;
+                    } else {
+                        // Remove empty selection.
+                    }
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+            }
+
+            // Any other element within the first `<sheetView>` (insert pending pane/selection if
+            // they're missing).
+            Event::Start(ref e) if in_target_sheet_view => {
+                if target_depth == 0
+                    && !pane_patched
+                    && pending_pane
+                    && e.local_name().as_ref() != b"pane"
+                {
+                    if let Some(pane) =
+                        render_pane_element(&desired.pane, worksheet_prefix.as_deref())
+                    {
+                        writer.get_mut().extend_from_slice(pane.as_bytes());
+                    }
+                    pending_pane = false;
+                }
+                if target_depth == 0
+                    && !selection_patched
+                    && pending_selection
+                    && e.local_name().as_ref() != b"selection"
+                {
+                    if let Some(selection) = render_selection_element(
+                        desired.selection.as_ref(),
+                        worksheet_prefix.as_deref(),
+                    ) {
+                        writer.get_mut().extend_from_slice(selection.as_bytes());
+                    }
+                    pending_selection = false;
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+                target_depth += 1;
+            }
+            Event::Empty(ref e) if in_target_sheet_view => {
+                if target_depth == 0
+                    && !pane_patched
+                    && pending_pane
+                    && e.local_name().as_ref() != b"pane"
+                {
+                    if let Some(pane) =
+                        render_pane_element(&desired.pane, worksheet_prefix.as_deref())
+                    {
+                        writer.get_mut().extend_from_slice(pane.as_bytes());
+                    }
+                    pending_pane = false;
+                }
+                if target_depth == 0
+                    && !selection_patched
+                    && pending_selection
+                    && e.local_name().as_ref() != b"selection"
+                {
+                    if let Some(selection) = render_selection_element(
+                        desired.selection.as_ref(),
+                        worksheet_prefix.as_deref(),
+                    ) {
+                        writer.get_mut().extend_from_slice(selection.as_bytes());
+                    }
+                    pending_selection = false;
                 }
                 writer.write_event(Event::Empty(e.to_owned()))?;
             }
-            _ => {
-                writer.write_event(event.to_owned())?;
+            Event::End(ref e) if in_target_sheet_view => {
+                writer.write_event(Event::End(e.to_owned()))?;
+                target_depth = target_depth.saturating_sub(1);
             }
+
+            other => writer.write_event(other.to_owned())?,
         }
         buf.clear();
     }

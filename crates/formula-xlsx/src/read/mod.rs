@@ -15,8 +15,8 @@ use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, Comment, CommentKind, DataValidation,
     DataValidationErrorAlert, DataValidationErrorStyle, DataValidationInputMessage,
     DataValidationKind, DataValidationOperator, DefinedNameScope, ErrorValue, Range,
-    SheetProtection, SheetVisibility, Workbook, WorkbookProtection, WorkbookWindow,
-    WorkbookWindowState,
+    SheetProtection, SheetSelection, SheetView, SheetVisibility, Workbook, WorkbookProtection,
+    WorkbookWindow, WorkbookWindowState,
 };
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::{BytesStart, Event};
@@ -2721,6 +2721,9 @@ fn parse_worksheet_into_model(
     let mut in_cols = false;
     let mut in_sheet_views = false;
     let mut in_sheet_view = false;
+    let mut in_first_sheet_view = false;
+    let mut sheet_view_idx: usize = 0;
+    let mut parsed_view = SheetView::default();
 
     // Data validations can appear anywhere in the worksheet XML (typically after `<sheetData>`).
     // Parse them inline so both the full and streaming readers materialize validations.
@@ -2861,142 +2864,165 @@ fn parse_worksheet_into_model(
             Event::End(e) if e.local_name().as_ref() == b"sheetViews" => {
                 in_sheet_views = false;
                 in_sheet_view = false;
+                in_first_sheet_view = false;
                 drop(e);
             }
             Event::Empty(e) if e.local_name().as_ref() == b"sheetViews" => {
                 in_sheet_views = false;
                 in_sheet_view = false;
+                in_first_sheet_view = false;
                 drop(e);
             }
 
             Event::Start(e) if in_sheet_views && e.local_name().as_ref() == b"sheetView" => {
                 in_sheet_view = true;
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    let val = attr.unescape_value()?.into_owned();
-                    match attr.key.as_ref() {
-                        b"zoomScale" => {
-                            if let Ok(scale) = val.parse::<f32>() {
-                                let zoom = scale / 100.0;
-                                worksheet.zoom = zoom;
-                                worksheet.view.zoom = zoom;
+                in_first_sheet_view = sheet_view_idx == 0;
+                sheet_view_idx += 1;
+                if in_first_sheet_view {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let val = attr.unescape_value()?.into_owned();
+                        match attr.key.as_ref() {
+                            b"zoomScale" => {
+                                if let Ok(scale) = val.parse::<f32>() {
+                                    parsed_view.zoom = scale / 100.0;
+                                }
                             }
+                            b"showGridLines" => parsed_view.show_grid_lines = parse_xml_bool(&val),
+                            b"showRowColHeaders" | b"showHeadings" => {
+                                parsed_view.show_headings = parse_xml_bool(&val)
+                            }
+                            b"showZeros" => parsed_view.show_zeros = parse_xml_bool(&val),
+                            _ => {}
                         }
-                        b"showGridLines" => worksheet.view.show_grid_lines = parse_xml_bool(&val),
-                        b"showHeadings" => worksheet.view.show_headings = parse_xml_bool(&val),
-                        b"showZeros" => worksheet.view.show_zeros = parse_xml_bool(&val),
-                        _ => {}
                     }
                 }
             }
             Event::Empty(e) if in_sheet_views && e.local_name().as_ref() == b"sheetView" => {
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    let val = attr.unescape_value()?.into_owned();
-                    match attr.key.as_ref() {
-                        b"zoomScale" => {
-                            if let Ok(scale) = val.parse::<f32>() {
-                                let zoom = scale / 100.0;
-                                worksheet.zoom = zoom;
-                                worksheet.view.zoom = zoom;
+                let is_first = sheet_view_idx == 0;
+                sheet_view_idx += 1;
+                if is_first {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let val = attr.unescape_value()?.into_owned();
+                        match attr.key.as_ref() {
+                            b"zoomScale" => {
+                                if let Ok(scale) = val.parse::<f32>() {
+                                    parsed_view.zoom = scale / 100.0;
+                                }
                             }
+                            b"showGridLines" => parsed_view.show_grid_lines = parse_xml_bool(&val),
+                            b"showRowColHeaders" | b"showHeadings" => {
+                                parsed_view.show_headings = parse_xml_bool(&val)
+                            }
+                            b"showZeros" => parsed_view.show_zeros = parse_xml_bool(&val),
+                            _ => {}
                         }
-                        b"showGridLines" => worksheet.view.show_grid_lines = parse_xml_bool(&val),
-                        b"showHeadings" => worksheet.view.show_headings = parse_xml_bool(&val),
-                        b"showZeros" => worksheet.view.show_zeros = parse_xml_bool(&val),
-                        _ => {}
                     }
                 }
+                // Self-closing `<sheetView/>` does not establish an active parse context.
+                in_sheet_view = false;
+                in_first_sheet_view = false;
+                drop(e);
             }
             Event::End(e) if in_sheet_view && e.local_name().as_ref() == b"sheetView" => {
                 in_sheet_view = false;
+                in_first_sheet_view = false;
                 drop(e);
             }
 
             Event::Start(e) | Event::Empty(e)
-                if in_sheet_view && e.local_name().as_ref() == b"pane" =>
+                if in_sheet_view && in_first_sheet_view && e.local_name().as_ref() == b"pane" =>
             {
                 let mut state: Option<String> = None;
-                let mut x_split: Option<String> = None;
-                let mut y_split: Option<String> = None;
-                let mut top_left_cell: Option<CellRef> = None;
+                let mut x_split_raw: Option<String> = None;
+                let mut y_split_raw: Option<String> = None;
+                let mut top_left_cell: Option<String> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     let val = attr.unescape_value()?.into_owned();
                     match attr.key.as_ref() {
                         b"state" => state = Some(val),
-                        b"xSplit" => x_split = Some(val),
-                        b"ySplit" => y_split = Some(val),
-                        b"topLeftCell" => {
-                            if let Ok(cell_ref) = CellRef::from_a1(&val) {
-                                top_left_cell = Some(cell_ref);
-                            }
-                        }
+                        b"xSplit" => x_split_raw = Some(val),
+                        b"ySplit" => y_split_raw = Some(val),
+                        b"topLeftCell" => top_left_cell = Some(val),
                         _ => {}
                     }
                 }
-                if top_left_cell.is_some() {
-                    worksheet.view.pane.top_left_cell = top_left_cell;
-                }
-                if matches!(state.as_deref(), Some("frozen") | Some("frozenSplit")) {
-                    let frozen_cols = x_split
-                        .as_deref()
-                        .and_then(|s| s.parse::<u32>().ok())
-                        .unwrap_or(0);
-                    let frozen_rows = y_split
-                        .as_deref()
-                        .and_then(|s| s.parse::<u32>().ok())
-                        .unwrap_or(0);
 
-                    worksheet.frozen_cols = frozen_cols;
-                    worksheet.frozen_rows = frozen_rows;
-                    worksheet.view.pane.frozen_cols = frozen_cols;
-                    worksheet.view.pane.frozen_rows = frozen_rows;
-                    // `xSplit`/`ySplit` are interpreted as frozen counts in this mode.
-                    worksheet.view.pane.x_split = None;
-                    worksheet.view.pane.y_split = None;
+                if let Some(a1) = top_left_cell.as_deref() {
+                    if let Ok(cell) = CellRef::from_a1(a1) {
+                        parsed_view.pane.top_left_cell = Some(cell);
+                    }
+                }
+
+                if matches!(state.as_deref(), Some("frozen") | Some("frozenSplit")) {
+                    let frozen_cols = x_split_raw
+                        .as_deref()
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .or_else(|| {
+                            x_split_raw
+                                .as_deref()
+                                .and_then(|s| s.parse::<f32>().ok())
+                                .map(|f| f.round() as u32)
+                        })
+                        .unwrap_or(0);
+                    let frozen_rows = y_split_raw
+                        .as_deref()
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .or_else(|| {
+                            y_split_raw
+                                .as_deref()
+                                .and_then(|s| s.parse::<f32>().ok())
+                                .map(|f| f.round() as u32)
+                        })
+                        .unwrap_or(0);
+                    parsed_view.pane.frozen_cols = frozen_cols;
+                    parsed_view.pane.frozen_rows = frozen_rows;
+                    parsed_view.pane.x_split = None;
+                    parsed_view.pane.y_split = None;
                 } else {
-                    // In split-pane mode, `xSplit`/`ySplit` are floating-point offsets (twips).
-                    if let Some(x_split) = x_split.and_then(|v| v.parse::<f32>().ok()) {
-                        worksheet.view.pane.x_split = Some(x_split);
-                    }
-                    if let Some(y_split) = y_split.and_then(|v| v.parse::<f32>().ok()) {
-                        worksheet.view.pane.y_split = Some(y_split);
-                    }
+                    parsed_view.pane.frozen_cols = 0;
+                    parsed_view.pane.frozen_rows = 0;
+                    parsed_view.pane.x_split =
+                        x_split_raw.as_deref().and_then(|s| s.parse::<f32>().ok());
+                    parsed_view.pane.y_split =
+                        y_split_raw.as_deref().and_then(|s| s.parse::<f32>().ok());
                 }
             }
 
             Event::Start(e) | Event::Empty(e)
-                if in_sheet_view && e.local_name().as_ref() == b"selection" =>
+                if in_sheet_view
+                    && in_first_sheet_view
+                    && e.local_name().as_ref() == b"selection" =>
             {
-                let mut active_cell: Option<CellRef> = None;
-                let mut sqref: Option<String> = None;
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    let val = attr.unescape_value()?.into_owned();
-                    match attr.key.as_ref() {
-                        b"activeCell" => {
-                            if let Ok(cell_ref) = CellRef::from_a1(&val) {
-                                active_cell = Some(cell_ref);
+                // Excel can emit multiple `<selection>` blocks (one per pane). We only model the
+                // first one.
+                if parsed_view.selection.is_some() {
+                    drop(e);
+                } else {
+                    let mut active_cell: Option<CellRef> = None;
+                    let mut sqref: Option<String> = None;
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let val = attr.unescape_value()?.into_owned();
+                        match attr.key.as_ref() {
+                            b"activeCell" => {
+                                if let Ok(cell) = CellRef::from_a1(&val) {
+                                    active_cell = Some(cell);
+                                }
                             }
+                            b"sqref" => sqref = Some(val),
+                            _ => {}
                         }
-                        b"sqref" => sqref = Some(val),
-                        _ => {}
                     }
-                }
 
-                let Some(active_cell) = active_cell else {
-                    continue;
-                };
-
-                let selection = match sqref.as_deref() {
-                    Some(sqref) => {
-                        formula_model::SheetSelection::from_sqref(active_cell, sqref).ok()
+                    if let Some(active_cell) = active_cell {
+                        parsed_view.selection = match sqref.as_deref() {
+                            Some(sqref) => SheetSelection::from_sqref(active_cell, sqref).ok(),
+                            None => Some(SheetSelection::new(active_cell, Vec::new())),
+                        };
                     }
-                    None => Some(formula_model::SheetSelection::new(active_cell, Vec::new())),
-                };
-                if selection.is_some() {
-                    worksheet.view.selection = selection;
                 }
             }
 
@@ -3412,6 +3438,15 @@ fn parse_worksheet_into_model(
         }
         buf.clear();
     }
+
+    // If the worksheet XML included `<sheetViews>`, use the parsed view model. Otherwise keep the
+    // default view state.
+    worksheet.view = parsed_view;
+
+    // Keep legacy fields in sync for backward compatibility.
+    worksheet.zoom = worksheet.view.zoom;
+    worksheet.frozen_rows = worksheet.view.pane.frozen_rows;
+    worksheet.frozen_cols = worksheet.view.pane.frozen_cols;
 
     // Resolve `c/@vm` values to rich value record indices after parsing the sheet.
     //
