@@ -499,7 +499,7 @@ fn decrypt_biff_xor_obfuscation(
         return Err(DecryptError::WrongPassword);
     }
 
-    let xor_array = derive_xor_array(password);
+    let xor_array = Zeroizing::new(derive_xor_array(password));
     apply_xor_obfuscation_in_place(workbook_stream, encrypted_start, key, &xor_array)
 }
 
@@ -507,7 +507,7 @@ fn decrypt_biff_xor_obfuscation(
 // XOR obfuscation (MS-OFFCRYPTO/MS-XLS) implementation ("Method 1")
 // -------------------------------------------------------------------------------------------------
 
-fn xor_password_byte_candidates(password: &str) -> Vec<Vec<u8>> {
+fn xor_password_byte_candidates(password: &str) -> Vec<Zeroizing<Vec<u8>>> {
     use encoding_rs::WINDOWS_1252;
 
     let mut out = Vec::new();
@@ -515,14 +515,17 @@ fn xor_password_byte_candidates(password: &str) -> Vec<Vec<u8>> {
     // 1) Windows-1252 encoding (common Excel default on Windows).
     {
         let (cow, _, _) = WINDOWS_1252.encode(password);
-        let mut bytes = cow.into_owned();
-        bytes.truncate(15);
+        let mut bytes = Zeroizing::new(cow.into_owned());
+        if bytes.len() > 15 {
+            bytes[15..].zeroize();
+            bytes.truncate(15);
+        }
         out.push(bytes);
     }
 
     // 2) MS-OFFCRYPTO 2.3.7.4 "method 2": copy low byte unless zero, else high byte.
     {
-        let mut bytes = Vec::new();
+        let mut bytes = Zeroizing::new(Vec::with_capacity(15));
         for ch in password.encode_utf16() {
             if bytes.len() >= 15 {
                 break;
@@ -566,7 +569,8 @@ fn xor_ror(byte1: u8, byte2: u8) -> u8 {
 
 fn create_password_verifier_method1(password: &[u8]) -> u16 {
     let mut verifier: u16 = 0;
-    let mut password_array = Vec::<u8>::with_capacity(password.len().saturating_add(1));
+    let mut password_array =
+        Zeroizing::new(Vec::<u8>::with_capacity(password.len().saturating_add(1)));
     password_array.push(password.len() as u8);
     password_array.extend_from_slice(password);
 
@@ -666,7 +670,11 @@ fn create_xor_array_method1(password: &[u8], xor_key: u16) -> [u8; 16] {
     out
 }
 
-fn xor_array_method1_for_password(password: &str, stored_key: u16, stored_verifier: u16) -> Option<[u8; 16]> {
+fn xor_array_method1_for_password(
+    password: &str,
+    stored_key: u16,
+    stored_verifier: u16,
+) -> Option<Zeroizing<[u8; 16]>> {
     for candidate in xor_password_byte_candidates(password) {
         // Passwords are limited to 15 bytes, but some writers can emit an empty password (length 0).
         if candidate.len() > 15 {
@@ -674,12 +682,18 @@ fn xor_array_method1_for_password(password: &str, stored_key: u16, stored_verifi
         }
         let key = create_xor_key_method1(&candidate);
         let verifier = create_password_verifier_method1(&candidate);
-        let key_bytes = key.to_le_bytes();
+
+        let mut key_bytes = key.to_le_bytes();
         let stored_key_bytes = stored_key.to_le_bytes();
-        let verifier_bytes = verifier.to_le_bytes();
+        let mut verifier_bytes = verifier.to_le_bytes();
         let stored_verifier_bytes = stored_verifier.to_le_bytes();
-        if ct_eq(&key_bytes, &stored_key_bytes) & ct_eq(&verifier_bytes, &stored_verifier_bytes) {
-            return Some(create_xor_array_method1(&candidate, key));
+
+        let ok = ct_eq(&key_bytes, &stored_key_bytes) & ct_eq(&verifier_bytes, &stored_verifier_bytes);
+        key_bytes.zeroize();
+        verifier_bytes.zeroize();
+
+        if ok {
+            return Some(Zeroizing::new(create_xor_array_method1(&candidate, key)));
         }
     }
     None
