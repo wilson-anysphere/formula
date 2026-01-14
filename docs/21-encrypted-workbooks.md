@@ -13,6 +13,8 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
   parameter subsets, KDF nuances, writer defaults).
 - [`docs/21-offcrypto.md`](./21-offcrypto.md) — short MS-OFFCRYPTO overview focused on “what the file
   looks like”, scheme detection, and `formula-io` password APIs.
+- [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md) — Agile (4.4) OOXML decryption details
+  (HMAC target bytes, IV/salt gotchas).
 - [`docs/offcrypto-standard-encryptedpackage.md`](./offcrypto-standard-encryptedpackage.md) —
   Standard/CryptoAPI AES `EncryptedPackage` segmenting + IV derivation notes.
 
@@ -45,7 +47,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 
 | File type | Encryption marker | Schemes (common) | Current behavior | Planned/target behavior |
 |---|---|---|---|---|
-| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (minor=2; commonly 3.2) | `PasswordRequired` (and `UnsupportedOoxmlEncryption` for unknown versions; `open_workbook_with_password` surfaces `InvalidPassword`) | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption` (or a more specific “unsupported scheme” error) |
+| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (minor=2; commonly 3.2/4.2) | `PasswordRequired` (and `UnsupportedOoxmlEncryption` for unknown versions; `open_workbook_with_password` surfaces `InvalidPassword`) | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption` (or a more specific “unsupported scheme” error) |
 | `.xls` (BIFF) | BIFF `FILEPASS` record in workbook stream | XOR, RC4, CryptoAPI | `formula-io`: `EncryptedWorkbook` when no password is provided. `open_workbook_with_password` / `open_workbook_model_with_password` route to `formula-xls`’s decrypting importer (BIFF8 RC4 CryptoAPI only). | Expand scheme coverage as needed (see [Legacy `.xls` encryption](#legacy-xls-encryption-biff-filepass)) |
 
 ---
@@ -116,7 +118,7 @@ In practice:
 
 | Scheme | `major.minor` | Notes |
 |--------|---------------|------|
-| **Standard** | `*.2` (`versionMinor == 2`, `versionMajor ∈ {2,3,4}` in the wild; commonly `3.2`) | CryptoAPI-style header/verifier structures (binary). |
+| **Standard** | `*.2` (`versionMinor == 2`, `versionMajor ∈ {2,3,4}` in the wild; commonly `3.2`/`4.2`) | CryptoAPI-style header/verifier structures (binary). |
 | **Agile** | `4.4` | XML-based encryption descriptor. |
 
 Implementation notes:
