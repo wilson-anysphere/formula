@@ -143,6 +143,16 @@ export class ChartStore {
     return this.charts;
   }
 
+  deleteChart(chartId: string): void {
+    const id = String(chartId ?? "").trim();
+    if (!id) return;
+    const prev = this.charts;
+    const next = prev.filter((chart) => chart.id !== id);
+    if (next.length === prev.length) return;
+    this.charts = next;
+    this.options.onChange?.();
+  }
+
   updateChartAnchor(chartId: string, anchor: ChartAnchor): void {
     const id = String(chartId ?? "");
     if (!id) return;

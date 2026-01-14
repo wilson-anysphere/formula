@@ -2088,36 +2088,45 @@ export class SpreadsheetApp {
       return isRichTextValue(value) ? value.text : value;
     };
 
-    // `ChartStore.onChange` fires for anchor updates as well as chart create/delete. Prune cached
-    // chart models only when the chart count decreases to avoid allocating on every drag tick.
-    let chartCountForCanvasModelPrune = 0;
-    this.chartStore = new ChartStore({
+       // `ChartStore.onChange` fires for anchor updates as well as chart create/delete. Prune cached
+       // chart models only when the chart count decreases to avoid allocating on every drag tick.
+       let chartCountForCanvasModelPrune = 0;
+       this.chartStore = new ChartStore({
       defaultSheet: this.sheetId,
       sheetNameResolver: this.sheetNameResolver,
       getCellValue: getChartCellValue,
       // Creating/removing charts should not force a full data re-scan for *every* existing chart.
       // `renderCharts(false)` updates chart positioning and ensures newly-created charts have a
       // cached ChartModel. Data refreshes happen only for charts marked dirty by cell/computed
-      // changes (see `dirtyChartIds`).
-      onChange: () => {
-        // Keep ChartCanvasStoreAdapter memory bounded by dropping entries for charts that were deleted.
-        // (Without this, deleting many charts over a long session can leave their cached models alive
-        // indefinitely because the adapter is only queried for charts that are still rendered.)
-        const charts = this.chartStore.listCharts();
-        if (charts.length < chartCountForCanvasModelPrune) {
-          try {
-            const keep = new Set(charts.map((chart) => chart.id));
-            this.chartCanvasStoreAdapter.pruneEntries(keep);
-          } catch {
-            // Best-effort: ignore pruning failures.
-          }
-        }
-        chartCountForCanvasModelPrune = charts.length;
+         // changes (see `dirtyChartIds`).
+         onChange: () => {
+           // Keep ChartCanvasStoreAdapter memory bounded by dropping entries for charts that were deleted.
+           // (Without this, deleting many charts over a long session can leave their cached models alive
+           // indefinitely because the adapter is only queried for charts that are still rendered.)
+           const charts = this.chartStore.listCharts();
+           const prevCount = chartCountForCanvasModelPrune;
+           const countChanged = charts.length !== prevCount;
+           if (charts.length < prevCount) {
+             try {
+               const keep = new Set(charts.map((chart) => chart.id));
+               this.chartCanvasStoreAdapter.pruneEntries(keep);
+             } catch {
+               // Best-effort: ignore pruning failures.
+             }
+           }
+           chartCountForCanvasModelPrune = charts.length;
 
-        if (this.useCanvasCharts) this.renderDrawings();
-        else this.renderCharts(false);
-      }
-    });
+           if (this.useCanvasCharts) {
+             this.renderDrawings();
+             // In `?canvasCharts=1` mode ChartStore charts are rendered as drawing objects, so
+             // consumers like Selection Pane + split view need a drawings-changed signal when
+             // charts are created or deleted (but *not* for per-tick anchor updates).
+             if (countChanged) this.dispatchDrawingsChanged();
+           } else {
+             this.renderCharts(false);
+           }
+         }
+       });
     chartCountForCanvasModelPrune = this.chartStore.listCharts().length;
 
     this.chartCanvasStoreAdapter = new ChartCanvasStoreAdapter({
@@ -2927,29 +2936,15 @@ export class SpreadsheetApp {
                 this.editor.commit("command");
               }
             },
-            onSelectionChange: (selectedId) => {
-              const selected =
-                selectedId != null ? this.listCanvasChartDrawingObjectsForSheet(this.sheetId).find((o) => o.id === selectedId) : null;
-              const nextChartId =
-                selected?.kind.type === "chart" && typeof selected.kind.chartId === "string" ? selected.kind.chartId : null;
-
-              // Drawings and charts are mutually exclusive selections. Selecting a chart
-              // should clear any drawing selection so selection handles don't double-render.
-              if (nextChartId != null && this.selectedDrawingId != null) {
-                this.selectedDrawingId = null;
-                this.selectedDrawingIndex = null;
-                this.drawingInteractionController?.setSelectedId(null);
-                this.dispatchDrawingSelectionChanged();
-                // In legacy grid mode, drawing selection chrome is rendered on the selection canvas.
-                // Ensure it clears immediately when switching the active selection to a chart.
-                this.renderSelection();
-              }
-
-              this.selectedChartId = nextChartId;
-              this.renderDrawings();
-            },
-            requestFocus: () => this.focus(),
-          },
+             onSelectionChange: (selectedId) => {
+               const selected =
+                 selectedId != null ? this.listCanvasChartDrawingObjectsForSheet(this.sheetId).find((o) => o.id === selectedId) : null;
+               const nextChartId =
+                 selected?.kind.type === "chart" && typeof selected.kind.chartId === "string" ? selected.kind.chartId : null;
+               this.setSelectedChartId(nextChartId);
+             },
+             requestFocus: () => this.focus(),
+           },
           { capture: true },
         );
       }
@@ -7354,9 +7349,11 @@ export class SpreadsheetApp {
   listDrawingsForSheet(sheetId?: string): DrawingObject[] {
     const resolvedSheetId = sheetId ? String(sheetId) : this.sheetId;
     if (!resolvedSheetId) return [];
-    const objects = this.listDrawingObjectsForSheet(resolvedSheetId);
+    // Include any drawing-layer objects that are rendered via the drawings overlay. In
+    // `?canvasCharts=1` mode this includes ChartStore charts rendered as drawing objects.
+    const objects = this.getDrawingObjects(resolvedSheetId);
     if (objects.length === 0) return [];
-    // `listDrawingObjectsForSheet` returns drawings sorted for rendering (back-to-front, ascending).
+    // `getDrawingObjects` returns objects sorted for rendering (back-to-front, ascending).
     // For a Selection Pane / command UI we want topmost-first, which corresponds to reverse render
     // order (including reversing within zOrder ties).
     const out = new Array<DrawingObject>(objects.length);
@@ -7419,6 +7416,16 @@ export class SpreadsheetApp {
     const prevSelected = this.getSelectedDrawingId();
     const sheetId = this.sheetId;
     const drawingId = id;
+
+    const canvasChartId = this.getCanvasChartIdForDrawingId(drawingId, sheetId);
+    if (canvasChartId) {
+      // Keep selection state consistent when deleting the currently-selected chart.
+      if (this.selectedChartId === canvasChartId) {
+        this.setSelectedChartId(null);
+      }
+      this.chartStore.deleteChart(canvasChartId);
+      return;
+    }
 
     const target = this.listDrawingObjectsForSheet(sheetId).find((obj) => obj.id === drawingId) ?? null;
     if (!target) return;
@@ -7573,6 +7580,23 @@ export class SpreadsheetApp {
     return chartStoreIdToDrawingId(this.selectedChartId);
   }
 
+  private getCanvasChartIdForDrawingId(drawingId: DrawingObjectId, sheetId: string = this.sheetId): string | null {
+    if (!this.useCanvasCharts) return null;
+    const id = Number.isFinite(drawingId) ? drawingId : null;
+    if (id == null) return null;
+    // Canvas-chart ids live in a separate negative namespace (see `chartIdToDrawingId`).
+    if (id >= 0) return null;
+    const objects = this.listCanvasChartDrawingObjectsForSheet(sheetId);
+    for (const obj of objects) {
+      if (obj.id !== id) continue;
+      const chartId = obj.kind.type === "chart" ? obj.kind.chartId : undefined;
+      if (typeof chartId !== "string") return null;
+      const trimmed = chartId.trim();
+      return trimmed ? trimmed : null;
+    }
+    return null;
+  }
+
   /**
    * Returns true when the current drawing selection is an image.
    *
@@ -7593,6 +7617,14 @@ export class SpreadsheetApp {
    * the active selection without changing the active cell.
    */
   selectDrawingById(id: DrawingObjectId | null): void {
+    if (id != null) {
+      const canvasChartId = this.getCanvasChartIdForDrawingId(id);
+      if (canvasChartId) {
+        this.setSelectedChartId(canvasChartId);
+        return;
+      }
+    }
+
     const prev = this.selectedDrawingId;
     this.selectedDrawingId = id;
     if (id == null) {
@@ -12687,19 +12719,36 @@ export class SpreadsheetApp {
     const next = id && String(id).trim() !== "" ? String(id) : null;
     // Selecting a chart should clear any drawing selection so selection handles don't
     // double-render and split-view panes can mirror a single "active object" selection.
-    if (next != null && this.selectedDrawingId != null) {
+    const clearedDrawingSelection = next != null && this.selectedDrawingId != null;
+    if (clearedDrawingSelection) {
       this.selectedDrawingId = null;
       this.selectedDrawingIndex = null;
       this.drawingsInteraction?.setSelectedId(null);
       this.drawingInteractionController?.setSelectedId(null);
       this.drawingOverlay.setSelectedId(null);
-      this.renderDrawings();
+      // In non-canvas chart mode, chart selection is rendered on a separate overlay and
+      // won't repaint the drawings overlay. Ensure we clear any drawing selection chrome
+      // immediately so it doesn't linger until the next scroll/resize.
+      if (!this.useCanvasCharts) {
+        this.renderDrawings();
+      }
       // Legacy grid mode renders drawing selection handles on the selection canvas layer, so
       // ensure we repaint it when chart selection clears a drawing selection.
       this.renderSelection();
     }
-    if (next !== this.selectedChartId) {
+    const prevChartId = this.selectedChartId;
+    if (next !== prevChartId) {
       this.selectedChartId = next;
+    }
+
+    if (this.useCanvasCharts) {
+      // Charts are rendered + selected through the drawings overlay; keep the interaction
+      // controller selection in sync so resize handles can be grabbed after selecting
+      // via non-pointer UI (e.g. Selection Pane).
+      this.chartDrawingInteraction?.setSelectedId(next != null ? chartStoreIdToDrawingId(next) : null);
+      this.renderDrawings();
+    } else if (next !== prevChartId || clearedDrawingSelection) {
+      // In legacy DOM/SVG chart mode, chart selection is rendered on the chart selection overlay.
       this.renderChartSelectionOverlay();
     }
     if (this.getSelectedDrawingId() !== prevSelected) {

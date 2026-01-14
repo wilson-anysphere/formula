@@ -4,6 +4,7 @@ import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../../../app/spreadsheetApp";
+import { chartIdToDrawingId } from "../../../charts/chartDrawingAdapter";
 import type { DrawingObject } from "../../../drawings/types";
 
 // React 18 relies on this flag to suppress act() warnings in test runners.
@@ -78,6 +79,16 @@ function createRoot(): HTMLElement {
 describe("Selection Pane panel", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
+
+    // Avoid leaking URL params (e.g. `?canvasCharts=1`) between tests.
+    try {
+      const url = new URL(window.location.href);
+      url.search = "";
+      url.hash = "";
+      window.history.replaceState(null, "", url.toString());
+    } catch {
+      // ignore history errors
+    }
 
     const storage = createInMemoryLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
@@ -527,6 +538,82 @@ describe("Selection Pane panel", () => {
       unmountRibbon?.();
       panelBodyRenderer.cleanup([]);
     });
+    app.destroy();
+    sheetRoot.remove();
+  });
+
+  it("lists ChartStore charts in ?canvasCharts=1 mode; clicking selects and delete removes them", async () => {
+    const [{ createPanelBodyRenderer }, { PanelIds }, { mountRibbon }] = await Promise.all([
+      import("../../panelBodyRenderer.js"),
+      import("../../panelRegistry.js"),
+      import("../../../ribbon/index.js"),
+    ]);
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("canvasCharts", "1");
+    window.history.replaceState(null, "", url.toString());
+
+    const sheetRoot = createRoot();
+    const app = new SpreadsheetApp(sheetRoot, {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    });
+
+    const { chart_id: chartId } = app.addChart({ chart_type: "bar", data_range: "A1:B2", title: "Test Chart" });
+    const drawingId = chartIdToDrawingId(chartId);
+
+    const panelBody = document.createElement("div");
+    document.body.appendChild(panelBody);
+
+    const panelBodyRenderer = createPanelBodyRenderer({
+      getDocumentController: () => app.getDocument(),
+      getSpreadsheetApp: () => app,
+    });
+
+    const ribbonRoot = document.createElement("div");
+    document.body.appendChild(ribbonRoot);
+
+    const unmountRibbon = mountRibbon(
+      ribbonRoot,
+      {
+        onCommand: (commandId: string) => {
+          if (commandId !== "pageLayout.arrange.selectionPane") return;
+          panelBodyRenderer.renderPanelBody(PanelIds.SELECTION_PANE, panelBody);
+        },
+      },
+      { initialTabId: "pageLayout" },
+    );
+
+    const commandButton = ribbonRoot.querySelector<HTMLButtonElement>('button[data-command-id="pageLayout.arrange.selectionPane"]');
+    expect(commandButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      commandButton!.click();
+    });
+
+    const chartRow = panelBody.querySelector<HTMLElement>(`[data-testid="selection-pane-item-${drawingId}"]`);
+    expect(chartRow).toBeInstanceOf(HTMLElement);
+
+    await act(async () => {
+      chartRow!.click();
+    });
+
+    expect(app.getSelectedChartId()).toBe(chartId);
+    expect(app.getSelectedDrawingId()).toBe(drawingId);
+    expect(panelBody.querySelector(`[data-testid="selection-pane-item-${drawingId}"]`)?.getAttribute("aria-selected")).toBe("true");
+
+    const deleteBtn = panelBody.querySelector<HTMLButtonElement>(`[data-testid="selection-pane-delete-${drawingId}"]`);
+    expect(deleteBtn).toBeInstanceOf(HTMLButtonElement);
+    await act(async () => {
+      deleteBtn!.click();
+    });
+
+    expect(app.listCharts().some((c) => c.id === chartId)).toBe(false);
+    expect(panelBody.querySelector(`[data-testid="selection-pane-item-${drawingId}"]`)).toBeNull();
+
+    unmountRibbon();
+    panelBodyRenderer.cleanup([]);
     app.destroy();
     sheetRoot.remove();
   });
