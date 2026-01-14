@@ -2563,9 +2563,15 @@ export function bindYjsToDocumentController(options) {
   function canWriteCellWithEncryption(cellRef) {
     const canonicalKey = makeCellKey(cellRef);
     const rawKeys = yjsKeysByCell.get(canonicalKey);
-    const targets = rawKeys && rawKeys.size > 0 ? Array.from(rawKeys) : [canonicalKey];
+    const targets =
+      rawKeys && rawKeys.size > 0
+        ? rawKeys.has(canonicalKey)
+          ? [canonicalKey, ...Array.from(rawKeys).filter((k) => k !== canonicalKey)]
+          : Array.from(rawKeys)
+        : [canonicalKey];
 
     let existingEnc = false;
+    let existingEncPayload = undefined;
     for (const rawKey of targets) {
       const cellData = cells.get(rawKey);
       const cell = getYMapCell(cellData);
@@ -2573,6 +2579,7 @@ export function bindYjsToDocumentController(options) {
       const encRaw = typeof cell.has === "function" ? (cell.has("enc") ? cell.get("enc") : undefined) : cell.get("enc");
       if (encRaw !== undefined) {
         existingEnc = true;
+        existingEncPayload = encRaw;
         break;
       }
     }
@@ -2590,6 +2597,15 @@ export function bindYjsToDocumentController(options) {
     // If the cell is encrypted (or must be encrypted by config) we need a key to
     // avoid writing plaintext into the shared CRDT.
     if (!key) return false;
+
+    // If a cell already contains an `enc` payload, require that the key resolver returns
+    // a *matching* key id (and reject unknown payload schemas). This prevents an older
+    // client from overwriting encrypted content it cannot decrypt (including newer
+    // encryption versions) just because it happens to have *some* key material.
+    if (existingEnc) {
+      if (!isEncryptedCellPayload(existingEncPayload)) return false;
+      if (key.keyId !== existingEncPayload.keyId) return false;
+    }
 
     return true;
   }

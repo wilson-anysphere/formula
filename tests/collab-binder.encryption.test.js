@@ -211,6 +211,76 @@ test("Yjs↔DocumentController binder uses maskCellValue hook when encrypted cel
   assert.equal(controllerB.getCell("Sheet1", "A1").formula, null);
 });
 
+test("Yjs↔DocumentController binder refuses writes when encryption key id does not match existing enc payload", async (t) => {
+  const docId = "collab-binder-encryption-test-doc-keyid-mismatch";
+  const docA = new Y.Doc({ guid: docId });
+  const docB = new Y.Doc({ guid: docId });
+  const disconnect = connectDocs(docA, docB);
+
+  const keyBytesA = new Uint8Array(32).fill(5);
+  const keyBytesB = new Uint8Array(32).fill(6);
+  const keyForA1Correct = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes: keyBytesA };
+    }
+    return null;
+  };
+  const keyForA1Wrong = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-2", keyBytes: keyBytesB };
+    }
+    return null;
+  };
+
+  const controllerA = new DocumentController();
+  const controllerB = new DocumentController();
+
+  const binderA = bindYjsToDocumentController({
+    ydoc: docA,
+    documentController: controllerA,
+    defaultSheetId: "Sheet1",
+    userId: "u-a",
+    encryption: { keyForCell: keyForA1Correct },
+  });
+
+  const binderB = bindYjsToDocumentController({
+    ydoc: docB,
+    documentController: controllerB,
+    defaultSheetId: "Sheet1",
+    userId: "u-b",
+    encryption: { keyForCell: keyForA1Wrong },
+    // Ensure masked encrypted cells still show a fixed placeholder even when masking isn't
+    // applied due to read restrictions.
+    maskCellValue: (value) => value,
+  });
+
+  t.after(() => {
+    binderA.destroy();
+    binderB.destroy();
+    disconnect();
+    docA.destroy();
+    docB.destroy();
+  });
+
+  controllerA.setCellValue("Sheet1", "A1", "top-secret");
+
+  // B has a key, but it does not match the payload key id, so it should still see a mask.
+  await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value === "###", 10_000);
+  assert.equal(controllerB.getCell("Sheet1", "A1").value, "###");
+
+  // Attempt an unauthorized overwrite from B. This should be rejected and must not clobber
+  // the encrypted payload (or make A lose the ability to decrypt).
+  controllerB.setCellValue("Sheet1", "A1", "hacked");
+  await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value === "###", 10_000);
+  assert.equal(controllerA.getCell("Sheet1", "A1").value, "top-secret");
+
+  const cellMap = docA.getMap("cells").get("Sheet1:0:0");
+  assert.ok(cellMap, "expected Yjs cell map to exist");
+  assert.ok(cellMap.get("enc"), "expected encrypted payload under `enc`");
+  assert.equal(cellMap.get("enc").keyId, "k-range-1");
+  assert.equal(JSON.stringify(cellMap.toJSON()).includes("hacked"), false);
+});
+
 test("Yjs↔DocumentController binder prefers encrypted payloads over plaintext duplicates across legacy key encodings", async (t) => {
   const docId = "collab-binder-encryption-test-doc-legacy-keys";
   const docA = new Y.Doc({ guid: docId });
