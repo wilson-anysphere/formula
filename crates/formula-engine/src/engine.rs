@@ -3762,17 +3762,28 @@ impl Engine {
                 let needs_update = if in_spill {
                     true
                 } else if let Some(cell) = self.workbook.get_cell(key) {
-                    if is_blank {
-                        cell.formula.is_some()
-                            || cell.compiled.is_some()
-                            || cell.phonetic.is_some()
-                            || cell.value != Value::Blank
-                    } else {
-                        cell.formula.is_some()
-                            || cell.compiled.is_some()
-                            || cell.phonetic.is_some()
-                            || cell.value != value
-                    }
+                    // Mirror `set_cell_value`: even if the scalar value is unchanged, setting a
+                    // value should clear any formula/bytecode state and reset per-cell evaluation
+                    // metadata.
+                    //
+                    // Also keep sparse semantics: clearing a default-style blank cell should remove
+                    // its storage entry.
+                    let should_prune_default_blank_cell = is_blank
+                        && cell.value == Value::Blank
+                        && cell.formula.is_none()
+                        && cell.style_id == 0
+                        && cell.phonetic.is_none()
+                        && cell.number_format.is_none();
+
+                    cell.formula.is_some()
+                        || cell.compiled.is_some()
+                        || cell.bytecode_compile_reason.is_some()
+                        || cell.volatile
+                        || !cell.thread_safe
+                        || cell.dynamic_deps
+                        || cell.phonetic.is_some()
+                        || cell.value != value
+                        || should_prune_default_blank_cell
                 } else {
                     !is_blank
                 };
@@ -18395,6 +18406,76 @@ mod tests {
         assert_eq!(
             engine.get_cell_style_id("Sheet1", "A1").unwrap(),
             Some(style_id)
+        );
+    }
+
+    #[test]
+    fn set_range_values_clears_stale_cell_metadata_even_when_value_is_unchanged() {
+        let mut engine = Engine::new();
+        engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").unwrap();
+        let key = CellKey { sheet: sheet_id, addr };
+
+        // Simulate an inconsistent state (e.g. stale bytecode flags left behind after a refactor).
+        {
+            let cell = engine.workbook.get_or_create_cell_mut(key);
+            cell.bytecode_compile_reason = Some(BytecodeCompileReason::Disabled);
+            cell.volatile = true;
+            cell.thread_safe = false;
+            cell.dynamic_deps = true;
+        }
+
+        let range = Range::from_a1("A1:A1").expect("range");
+        let values = vec![vec![Value::Number(1.0)]];
+        engine
+            .set_range_values("Sheet1", range, &values, false)
+            .unwrap();
+
+        let cell = engine.workbook.get_cell(key).expect("cell exists");
+        assert_eq!(cell.value, Value::Number(1.0));
+        assert!(cell.bytecode_compile_reason.is_none());
+        assert!(!cell.volatile);
+        assert!(cell.thread_safe);
+        assert!(!cell.dynamic_deps);
+    }
+
+    #[test]
+    fn set_range_values_blank_prunes_default_blank_cells_from_sparse_storage() {
+        let mut engine = Engine::new();
+        let sheet_id = engine.workbook.ensure_sheet("Sheet1");
+        let addr = parse_a1("A1").unwrap();
+        let key = CellKey { sheet: sheet_id, addr };
+
+        // Insert a "default blank" cell that should not remain in sparse storage.
+        {
+            let cell = engine.workbook.get_or_create_cell_mut(key);
+            cell.value = Value::Blank;
+            cell.formula = None;
+            cell.compiled = None;
+            cell.bytecode_compile_reason = None;
+            cell.volatile = false;
+            cell.thread_safe = true;
+            cell.dynamic_deps = false;
+            cell.phonetic = None;
+            cell.style_id = 0;
+            cell.number_format = None;
+        }
+        assert!(
+            engine.workbook.sheets[sheet_id].cells.contains_key(&addr),
+            "expected setup to create a sparse cell entry"
+        );
+
+        let range = Range::from_a1("A1:A1").expect("range");
+        let values = vec![vec![Value::Blank]];
+        engine
+            .set_range_values("Sheet1", range, &values, false)
+            .unwrap();
+
+        assert!(
+            engine.workbook.sheets[sheet_id].cells.get(&addr).is_none(),
+            "expected bulk blank write to prune default blank cell entries"
         );
     }
 
