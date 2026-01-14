@@ -91,6 +91,8 @@ jobs:
       - run: |
           echo ubuntu-latest
           echo windows-latest
+          
+          echo macos-latest
 `);
   assert.equal(proc.status, 0, proc.stderr);
 });

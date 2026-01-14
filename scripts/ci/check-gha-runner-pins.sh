@@ -43,6 +43,11 @@ matches="$(
       ind = indent(raw);
 
       if (in_block) {
+        # Blank/whitespace-only lines can appear inside block scalars with any indentation.
+        # Treat them as part of the scalar so we do not accidentally stop skipping early.
+        if (raw ~ /^[[:space:]]*$/) {
+          next;
+        }
         if (ind > block_indent) {
           next;
         }
