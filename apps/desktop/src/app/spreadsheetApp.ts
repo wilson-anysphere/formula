@@ -20982,6 +20982,13 @@ export class SpreadsheetApp {
         }
         return;
       }
+      // When an object (drawing/chart) is selected, treat printable key presses as object-level
+      // input, not as "edit the active cell". This matches Excel-like behavior and avoids
+      // surprising cell edits while the user is interacting with an object selection.
+      if (this.selectedDrawingId != null || this.selectedChartId != null) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       if (this.isReadOnly()) return;
       const cell = this.selection.active;
