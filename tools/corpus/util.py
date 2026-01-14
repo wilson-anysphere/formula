@@ -94,16 +94,27 @@ def iter_workbook_paths(corpus_dir: Path, *, include_xlsb: bool = False) -> Iter
     `.xlsb` (and `.xlsb.b64`/`.xlsb.enc`) fixtures.
     """
 
-    for path in sorted(corpus_dir.rglob("*")):
-        if not path.is_file():
-            continue
-        name = path.name.lower()
-        endings = (".xlsx", ".xlsm", ".xlsx.b64", ".xlsm.b64", ".xlsx.enc", ".xlsm.enc")
-        if include_xlsb:
-            endings = endings + (".xlsb", ".xlsb.b64", ".xlsb.enc")
+    endings = (".xlsx", ".xlsm", ".xlsx.b64", ".xlsm.b64", ".xlsx.enc", ".xlsm.enc")
+    if include_xlsb:
+        endings = endings + (".xlsb", ".xlsb.b64", ".xlsb.enc")
 
-        if name.endswith(endings):
-            yield path
+    # Safety/perf: avoid walking huge directories if the caller accidentally points us at a repo
+    # root or other build output directory.
+    skip_dir_names = {".git", "node_modules", "target"}
+
+    matches: list[Path] = []
+    for root, dirs, files in os.walk(corpus_dir):
+        # Prune in-place so os.walk doesn't descend into these directories.
+        dirs[:] = [d for d in dirs if d not in skip_dir_names]
+        for filename in files:
+            if not filename.lower().endswith(endings):
+                continue
+            path = Path(root) / filename
+            if path.is_file():
+                matches.append(path)
+
+    for path in sorted(matches):
+        yield path
 
 
 @lru_cache(maxsize=1)

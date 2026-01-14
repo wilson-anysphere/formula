@@ -32,7 +32,26 @@ class IterWorkbookPathsTests(unittest.TestCase):
             paths = [p.name for p in iter_workbook_paths(corpus_dir, include_xlsb=True)]
             self.assertEqual(paths, ["a.xlsx", "b.xlsm", "c.xlsb", "d.xlsb.b64", "e.xlsb.enc"])
 
+    def test_iter_workbook_paths_skips_common_build_dirs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="corpus-iter-paths-") as td:
+            corpus_dir = Path(td)
+            (corpus_dir / "a.xlsx").write_text("", encoding="utf-8")
+
+            # These directories can be huge in real repos; ensure we don't accidentally traverse
+            # them when callers misconfigure --corpus-dir.
+            (corpus_dir / "target").mkdir(parents=True)
+            (corpus_dir / "target" / "b.xlsx").write_text("", encoding="utf-8")
+            (corpus_dir / "node_modules").mkdir(parents=True)
+            (corpus_dir / "node_modules" / "c.xlsx").write_text("", encoding="utf-8")
+            (corpus_dir / ".git").mkdir(parents=True)
+            (corpus_dir / ".git" / "d.xlsx").write_text("", encoding="utf-8")
+
+            rel_paths = [
+                p.relative_to(corpus_dir).as_posix()
+                for p in iter_workbook_paths(corpus_dir, include_xlsb=True)
+            ]
+            self.assertEqual(rel_paths, ["a.xlsx"])
+
 
 if __name__ == "__main__":
     unittest.main()
-
