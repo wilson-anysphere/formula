@@ -1,12 +1,13 @@
 import type { DrawingTransform, Rect } from "./types";
 import { applyTransformVector } from "./transform";
+import { DRAWING_HANDLE_SIZE_PX } from "./constants";
 
 /**
  * Resize handles are drawn in the drawing overlay's screen-space coordinate system
  * (post-zoom, pre-DPR). Keeping these sizes in px ensures the handles remain a
  * consistent on-screen size across zoom levels.
  */
-export const RESIZE_HANDLE_SIZE_PX = 8;
+export const RESIZE_HANDLE_SIZE_PX = DRAWING_HANDLE_SIZE_PX;
 
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 

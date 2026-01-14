@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./constants";
 export * from "./imageBitmapCache";
 export * from "./overlay";
 export * from "./hitTest";
