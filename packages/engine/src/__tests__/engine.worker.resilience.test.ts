@@ -26,6 +26,7 @@ class MockWorkerGlobal {
 
 class MockMessagePort {
   onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+  closed = false;
   private listeners = new Set<(event: MessageEvent<unknown>) => void>();
   private other: MockMessagePort | null = null;
 
@@ -42,6 +43,7 @@ class MockMessagePort {
   start(): void {}
 
   close(): void {
+    this.closed = true;
     this.listeners.clear();
     this.onmessage = null;
     this.other = null;
@@ -164,6 +166,50 @@ describe("engine.worker resilience", () => {
 
     channel.port1.close();
   });
+
+  it("clears cancellation state and closes the previous port on re-init", async () => {
+    await loadWorkerModule();
+
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+
+    const channel1 = createMockChannel();
+    workerGlobal.dispatchMessage({
+      type: "init",
+      port: channel1.port2 as unknown as MessagePort,
+      wasmModuleUrl,
+    } satisfies InitMessage);
+    await waitForMessage(channel1.port1, (msg) => msg.type === "ready");
+
+    // Send a cancel for an id that will never be requested on this connection.
+    channel1.port1.postMessage({ type: "cancel", id: 42 } satisfies RpcCancel);
+    // Allow the cancel microtask to be processed so it actually registers in worker state.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const channel2 = createMockChannel();
+    workerGlobal.dispatchMessage({
+      type: "init",
+      port: channel2.port2 as unknown as MessagePort,
+      wasmModuleUrl,
+    } satisfies InitMessage);
+    await waitForMessage(channel2.port1, (msg) => msg.type === "ready");
+
+    // The new init should close the previous port so it doesn't leak or keep delivering messages.
+    expect(channel1.port2.closed).toBe(true);
+
+    // Reuse the cancelled id on the new connection. If cancellation state wasn't reset, this request
+    // would be dropped without a response.
+    const response = await Promise.race([
+      sendRequest(channel2.port1, { type: "request", id: 42, method: "ping", params: {} }),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 250)),
+    ]);
+
+    expect(response).not.toBe("timeout");
+    expect((response as RpcResponseOk).ok).toBe(true);
+    expect((response as RpcResponseOk).result).toBe("pong");
+
+    channel1.port1.close();
+    channel2.port1.close();
+  });
 });
 
 const previousSelf = (globalThis as any).self;
@@ -178,4 +224,3 @@ function loadWorkerModule(): Promise<unknown> {
   }
   return workerModulePromise;
 }
-

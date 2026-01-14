@@ -171,6 +171,7 @@ type WasmModule = {
 };
 
 let port: MessagePort | null = null;
+let portListener: ((event: MessageEvent<unknown>) => void) | null = null;
 let wasmModuleUrl: string | null = null;
 let wasmBinaryUrl: string | null = null;
 let workbook: WasmWorkbookInstance | null = null;
@@ -1192,6 +1193,47 @@ function isWorkerInboundMessage(data: unknown): data is WorkerInboundMessage {
 
 let requestQueue: Promise<void> = Promise.resolve();
 
+function resetTransportForInit(): void {
+  // This worker is intended to be initialized exactly once, but tests (and some hot-reload/dev
+  // environments) can dispatch multiple init messages into the same module instance. Tear down any
+  // prior MessagePort/listeners so old ports don't leak and old cancellation state can't poison the
+  // new connection.
+  const existing = port;
+  const existingListener = portListener;
+  port = null;
+  portListener = null;
+
+  if (existing && existingListener) {
+    try {
+      existing.removeEventListener("message", existingListener);
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    existing?.close();
+  } catch {
+    // ignore
+  }
+
+  // Drop the workbook instance eagerly so its WASM allocations can be reclaimed.
+  freeWorkbook(workbook);
+  workbook = null;
+
+  // Clear cancellation + request tracking state so cancels from a previous connection don't apply
+  // to a newly initialized port (request ids are reused across connections).
+  cancelledRequests = new Set<number>();
+  pendingRequestIds.clear();
+  preCancelledRequestIds.clear();
+  preCancelledRequestQueue.length = 0;
+  completedRequestIds.clear();
+  completedRequestQueue.length = 0;
+
+  // Reset the serialized request queue so new connections don't block forever on an abandoned/hung
+  // request chain.
+  requestQueue = Promise.resolve();
+}
+
 self.addEventListener("message", (event: MessageEvent<unknown>) => {
   const data = event.data;
 
@@ -1200,11 +1242,13 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
     return;
   }
 
+  resetTransportForInit();
+
   port = msg.port;
   wasmModuleUrl = msg.wasmModuleUrl;
   wasmBinaryUrl = msg.wasmBinaryUrl ?? null;
 
-  port.addEventListener("message", (inner: MessageEvent<unknown>) => {
+  const listener = (inner: MessageEvent<unknown>) => {
     const inbound = inner.data;
     if (!isWorkerInboundMessage(inbound)) {
       return;
@@ -1234,7 +1278,9 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
           // ignore
         }
       });
-  });
+  };
+  portListener = listener;
+  port.addEventListener("message", listener);
   port.start?.();
 
   postMessageToMain({ type: "ready" });
