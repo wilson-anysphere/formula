@@ -4,6 +4,10 @@ This document covers **file encryption** (a password is required to *open* the f
 differs from Excel’s **workbook/worksheet protection** features (a password is required to *edit*
 certain parts of the workbook, but the file contents are not encrypted).
 
+If you just need a short overview and entrypoints, see:
+
+- [`docs/encrypted-workbooks.md`](./encrypted-workbooks.md)
+
 Formula’s goal is to open encrypted spreadsheets when possible, surface **actionable** errors when
 not, and avoid security pitfalls (like accidentally persisting decrypted bytes to disk).
 

@@ -148,3 +148,11 @@ full mapping table and remediation suggestions.
   - do not include them in telemetry/crash reports
 - Large encrypted OOXML workbooks decrypt to a full ZIP/OPC package; this can have significant peak
   memory usage. Prefer model/streaming APIs when possible.
+
+## Limitations
+
+- **Not all encryption schemes are supported.** Files using unknown `EncryptionInfo` versions or
+  unsupported legacy `.xls` `FILEPASS` variants will return an “unsupported encryption” error.
+- **Encryption may be dropped on save** unless the caller explicitly re-encrypts the output (Formula
+  generally operates on plaintext workbook bytes once opened). See
+  [`docs/21-encrypted-workbooks.md#saving--round-trip-limitations`](./21-encrypted-workbooks.md#saving--round-trip-limitations).
