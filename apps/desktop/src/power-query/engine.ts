@@ -92,6 +92,15 @@ const PERMISSION_KIND_TO_DLP_ACTION: Record<string, string> = {
   "database:query": DLP_ACTION.EXTERNAL_CONNECTOR,
 };
 
+function safeGetProp(obj: any, prop: string): any | undefined {
+  if (!obj) return undefined;
+  try {
+    return obj[prop];
+  } catch {
+    return undefined;
+  }
+}
+
 function createEphemeralObjectId(): (value: unknown) => string | null {
   const ids = new WeakMap<object, string>();
   let counter = 0;
@@ -203,14 +212,6 @@ function getTauriFs(): any {
   } catch {
     tauri = null;
   }
-  const safeGetProp = (obj: any, prop: string): any | undefined => {
-    if (!obj) return undefined;
-    try {
-      return obj[prop];
-    } catch {
-      return undefined;
-    }
-  };
 
   // Prefer `__TAURI__.fs`, but fall back to plugin container shapes. Some hardened environments
   // (or tests) may define getters that throw for blocked namespaces; treat those as unavailable.
@@ -552,17 +553,17 @@ function createDefaultFileAdapter(): FileAdapter {
   }
 
   const fs = getTauriFs();
-  const readTextFile = fs?.readTextFile;
-  const readFile = fs?.readFile ?? fs?.readBinaryFile;
-  const statFile = fs?.stat ?? fs?.metadata;
-  const readDir = fs?.readDir;
+  const readTextFile = safeGetProp(fs, "readTextFile");
+  const readFile = safeGetProp(fs, "readFile") ?? safeGetProp(fs, "readBinaryFile");
+  const statFile = safeGetProp(fs, "stat") ?? safeGetProp(fs, "metadata");
+  const readDir = safeGetProp(fs, "readDir");
 
   if (typeof readTextFile === "function" && typeof readFile === "function") {
     const enforceMaxFileSize = async (path: string): Promise<void> => {
       if (typeof statFile !== "function") return;
       let payload: unknown;
       try {
-        payload = await statFile(path);
+        payload = await statFile.call(fs, path);
       } catch {
         // Best-effort: if we can't stat the file, fall back to reading and checking the result size.
         return;
@@ -585,7 +586,7 @@ function createDefaultFileAdapter(): FileAdapter {
       // Best-effort: the FS plugin does not currently expose a streamable file handle, so fall back
       // to an in-memory Blob.
       await enforceMaxFileSize(path);
-      const bytes = normalizeBinaryPayload(await readFile(path));
+      const bytes = normalizeBinaryPayload(await readFile.call(fs, path));
       if (bytes.length > MAX_IN_MEMORY_FILE_BYTES) {
         throw new Error(
           `File is too large to read into memory (${bytes.length} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}). Use streaming reads instead.`,
@@ -597,11 +598,11 @@ function createDefaultFileAdapter(): FileAdapter {
     return {
       readText: async (path) => {
         await enforceMaxFileSize(path);
-        return readTextFile(path);
+        return readTextFile.call(fs, path);
       },
       readBinary: async (path) => {
         await enforceMaxFileSize(path);
-        const bytes = normalizeBinaryPayload(await readFile(path));
+        const bytes = normalizeBinaryPayload(await readFile.call(fs, path));
         if (bytes.length > MAX_IN_MEMORY_FILE_BYTES) {
           throw new Error(
             `File is too large to read into memory (${bytes.length} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}). Use streaming reads instead.`,
@@ -611,7 +612,7 @@ function createDefaultFileAdapter(): FileAdapter {
       },
       readBinaryStream: async function* (path) {
         await enforceMaxFileSize(path);
-        const bytes = normalizeBinaryPayload(await readFile(path));
+        const bytes = normalizeBinaryPayload(await readFile.call(fs, path));
         if (bytes.length > MAX_IN_MEMORY_FILE_BYTES) {
           throw new Error(
             `File is too large to read into memory (${bytes.length} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}). Use streaming reads instead.`,
@@ -623,7 +624,7 @@ function createDefaultFileAdapter(): FileAdapter {
       stat:
         typeof statFile === "function"
           ? async (path) => {
-              const payload = await statFile(path);
+              const payload = await statFile.call(fs, path);
               return {
                 mtimeMs: normalizeMtimeMs(payload),
                 size: (() => {
@@ -676,7 +677,7 @@ function createDefaultFileAdapter(): FileAdapter {
 
         // The FS plugin does not include mtime/size, so gather metadata for each entry.
         const statFn = typeof statFile === "function" ? statFile : null;
-        const raw = await readDir(path, { recursive });
+        const raw = await readDir.call(fs, path, { recursive });
 
         /** @type {Array<{ path: string; name?: string; size?: number; mtimeMs?: number; isDir?: boolean }>} */
         const out = [];
@@ -697,7 +698,7 @@ function createDefaultFileAdapter(): FileAdapter {
             let size: number | undefined;
             if (statFn) {
               try {
-                const payload = await statFn(entryPath);
+                const payload = await statFn.call(fs, entryPath);
                 mtimeMs = normalizeMtimeMs(payload);
                 try {
                   size = normalizeFileSize(payload);
