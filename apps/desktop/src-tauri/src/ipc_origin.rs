@@ -15,7 +15,7 @@ use tauri::Manager as _;
 /// - production: `tauri://localhost` (macOS/Linux) or `http(s)://tauri.localhost` (Windows)
 /// - dev: the configured `build.devUrl` origin (typically `http://localhost:<port>`)
 ///
-/// Loopback variants (`127.0.0.1`, `::1`) are also allowed.
+/// In debug builds, loopback variants (`127.0.0.1`, `::1`) are also allowed (for local dev servers).
 ///
 /// NOTE:
 /// Prefer [`matches_stable_webview_origin`] for privileged IPC commands. This helper is intentionally
@@ -33,17 +33,40 @@ pub fn is_trusted_app_origin(url: &Url) -> bool {
         _ => {}
     }
 
+    // Always trust the internal Tauri origin for packaged builds.
+    //
+    // Note: some code paths may still surface the underlying `tauri://localhost` URL even on
+    // Windows, so we accept it there too.
+    if url.scheme() == "tauri" && matches!(url.host_str(), Some("localhost")) {
+        return true;
+    }
+
+    // On Windows, WebView2 maps custom schemes (like `tauri:`) onto `http(s)://<scheme>.localhost`.
+    // Restrict this to the specific host we expect (Tauri's internal scheme is `tauri:` =>
+    // `tauri.localhost`) and fail closed on port mismatches.
+    if cfg!(target_os = "windows")
+        && matches!(url.host_str(), Some("tauri.localhost"))
+        && url.port().is_none()
+        && (url.scheme() == "http" || url.scheme() == "https")
+    {
+        return true;
+    }
+
+    // Dev-only: allow loopback dev-server origins.
+    if !cfg!(debug_assertions) {
+        return false;
+    }
+
     match url.host() {
         Some(url::Host::Domain(host)) => {
-            // `localhost` is used for dev-server origins (`build.devUrl`) across platforms.
-            host == "localhost"
-                // On Windows, WebView2 maps custom schemes (like `tauri:`) onto
-                // `http(s)://<scheme>.localhost`. Restrict this to the specific host we expect
-                // (Tauri's internal scheme is `tauri:` => `tauri.localhost`).
-                || (cfg!(target_os = "windows") && host == "tauri.localhost")
+            host == "localhost" && (url.scheme() == "http" || url.scheme() == "https")
         }
-        Some(url::Host::Ipv4(ip)) => ip == std::net::Ipv4Addr::LOCALHOST,
-        Some(url::Host::Ipv6(ip)) => ip == std::net::Ipv6Addr::LOCALHOST,
+        Some(url::Host::Ipv4(ip)) => {
+            ip == std::net::Ipv4Addr::LOCALHOST && (url.scheme() == "http" || url.scheme() == "https")
+        }
+        Some(url::Host::Ipv6(ip)) => {
+            ip == std::net::Ipv6Addr::LOCALHOST && (url.scheme() == "http" || url.scheme() == "https")
+        }
         None => false,
     }
 }
@@ -215,6 +238,13 @@ mod tests {
     #[test]
     fn allows_localhost() {
         let url = Url::parse("http://localhost:1420/").unwrap();
+        // Loopback `http://localhost:*` should only be trusted for dev builds.
+        assert_eq!(is_trusted_app_origin(&url), cfg!(debug_assertions));
+    }
+
+    #[test]
+    fn allows_tauri_scheme_localhost() {
+        let url = Url::parse("tauri://localhost/index.html").unwrap();
         assert!(is_trusted_app_origin(&url));
     }
 
@@ -244,10 +274,10 @@ mod tests {
     #[test]
     fn allows_loopback_hosts() {
         let url = Url::parse("http://127.0.0.1:1234/").unwrap();
-        assert!(is_trusted_app_origin(&url));
+        assert_eq!(is_trusted_app_origin(&url), cfg!(debug_assertions));
 
         let url = Url::parse("http://[::1]:1234/").unwrap();
-        assert!(is_trusted_app_origin(&url));
+        assert_eq!(is_trusted_app_origin(&url), cfg!(debug_assertions));
     }
 
     #[test]
