@@ -11,7 +11,14 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .triage import _PRIVACY_PRIVATE, _PRIVACY_PUBLIC, _redact_run_url, infer_round_trip_failure_kind
+from .triage import (
+    _PRIVACY_PRIVATE,
+    _PRIVACY_PUBLIC,
+    _load_known_function_names,
+    _redact_run_url,
+    _sha256_text,
+    infer_round_trip_failure_kind,
+)
 from .util import ensure_dir, github_commit_sha, github_run_url, utc_now_iso, write_json
 
 
@@ -378,11 +385,45 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
     return entry
 
 
+def _redact_function_name(name: str, *, privacy_mode: str) -> str:
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return name
+    if name.startswith("sha256="):
+        return name
+    known = _load_known_function_names()
+    if name.upper() in known:
+        return name
+    return f"sha256={_sha256_text(name)}"
+
+
+def _redact_trend_entry(entry: dict[str, Any], *, privacy_mode: str) -> dict[str, Any]:
+    """Redact sensitive strings in persisted trend entries (defense in depth)."""
+
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return entry
+
+    run_url = entry.get("run_url")
+    if isinstance(run_url, str) and run_url and not run_url.startswith("sha256="):
+        entry["run_url"] = _redact_run_url(run_url, privacy_mode=privacy_mode)
+
+    top_functions = entry.get("top_functions_in_failures")
+    if isinstance(top_functions, list):
+        for row in top_functions:
+            if not isinstance(row, dict):
+                continue
+            fn = row.get("function")
+            if isinstance(fn, str) and fn:
+                row["function"] = _redact_function_name(fn, privacy_mode=privacy_mode)
+
+    return entry
+
+
 def _append_trend_file(
     trend_path: Path,
     *,
     summary: dict[str, Any],
     max_entries: int = TREND_MAX_ENTRIES,
+    privacy_mode: str = _PRIVACY_PUBLIC,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """Append a trend entry for this run and write back the updated JSON list.
 
@@ -410,10 +451,15 @@ def _append_trend_file(
             )
             raw = []
         entries = [e for e in raw if isinstance(e, dict)]
+        if privacy_mode == _PRIVACY_PRIVATE:
+            for e in entries:
+                _redact_trend_entry(e, privacy_mode=privacy_mode)
         if entries:
             prev = entries[-1]
 
-    entries.append(_trend_entry(summary))
+    entry = _trend_entry(summary)
+    _redact_trend_entry(entry, privacy_mode=privacy_mode)
+    entries.append(entry)
     if max_entries > 0 and len(entries) > max_entries:
         entries = entries[-max_entries:]
 
@@ -1179,7 +1225,12 @@ def main() -> int:
     )
 
     if args.append_trend:
-        _append_trend_file(args.append_trend, summary=summary, max_entries=args.trend_max_entries)
+        _append_trend_file(
+            args.append_trend,
+            summary=summary,
+            max_entries=args.trend_max_entries,
+            privacy_mode=args.privacy_mode,
+        )
 
     gate_failures: list[str] = []
     if args.gate_load_p90_ms is not None:

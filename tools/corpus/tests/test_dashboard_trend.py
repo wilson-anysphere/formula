@@ -250,6 +250,59 @@ class DashboardTrendTests(unittest.TestCase):
             entries, _ = _append_trend_file(trend_path, summary=summary, max_entries=0)
             self.assertEqual(len(entries), 4)
 
+    def test_append_trend_file_private_mode_redacts_existing_run_urls_and_functions(self) -> None:
+        summary = {
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "commit": "abc",
+            "run_url": "https://github.corp.example.com/corp/repo/actions/runs/123",
+            "counts": {"total": 1, "open_ok": 1, "round_trip_ok": 1},
+            "rates": {"open": 1.0, "round_trip": 1.0},
+            "top_functions_in_failures": [
+                {"function": "SUM", "count": 2},
+                {"function": "CORP.ADDIN.FOO", "count": 1},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            trend_path = Path(td) / "trend.json"
+            trend_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "timestamp": "t0",
+                            "run_url": "https://github.corp.example.com/corp/repo/actions/runs/1",
+                            "top_functions_in_failures": [
+                                {"function": "SUM", "count": 1},
+                                {"function": "CORP.ADDIN.BAR", "count": 1},
+                            ],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            entries, _ = _append_trend_file(
+                trend_path, summary=summary, max_entries=90, privacy_mode="private"
+            )
+            self.assertEqual(len(entries), 2)
+
+            on_disk = json.loads(trend_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(on_disk), 2)
+
+            # Existing entry should be sanitized.
+            self.assertTrue(on_disk[0]["run_url"].startswith("sha256="))
+            self.assertNotIn("github.corp.example.com", on_disk[0]["run_url"])
+            fns0 = {row["function"] for row in on_disk[0]["top_functions_in_failures"]}
+            self.assertIn("SUM", fns0)
+            self.assertTrue(any(fn.startswith("sha256=") for fn in fns0))
+
+            # New entry should be sanitized too.
+            self.assertTrue(on_disk[1]["run_url"].startswith("sha256="))
+            self.assertNotIn("github.corp.example.com", on_disk[1]["run_url"])
+            fns1 = {row["function"] for row in on_disk[1]["top_functions_in_failures"]}
+            self.assertIn("SUM", fns1)
+            self.assertTrue(any(fn.startswith("sha256=") for fn in fns1))
+
 
 if __name__ == "__main__":
     unittest.main()
