@@ -390,8 +390,10 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
     return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
   };
 
+  // Keep this below Playwright's default per-test timeout (60s) so we have room to surface
+  // useful diagnostics instead of hitting the global test timeout first.
+  const appReadyTimeout = 55_000;
   const maxAttempts = 3;
-
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const requestStart = requestFailures.length;
     let networkChanged = false;
@@ -406,7 +408,10 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
     };
 
     try {
-      const appWait = page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 60_000 });
+      const appWait = page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: appReadyTimeout });
+      // If we abandon this attempt due to a Vite reload, `appWait` can reject later (after its
+      // own timeout) and trigger unhandled rejection noise. Attach a handler now so retries remain
+      // clean.
       void appWait.catch(() => {});
       await Promise.race([
         appWait,
@@ -417,6 +422,7 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
           throw new Error("net::ERR_NETWORK_CHANGED");
         }),
       ]);
+
       await page.evaluate(async () => {
         const app = window.__formulaApp as any;
         if (app && typeof app.whenIdle === "function") {
@@ -449,6 +455,7 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
         consoleErrors.length = 0;
         pageErrors.length = 0;
         requestFailures.length = 0;
+
         try {
           // If Vite restarted mid-load we can end up in a state where module requests fail and the
           // app never boots. Force a reload so the next attempt has a clean slate.
@@ -465,7 +472,9 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
         await page.waitForTimeout(250 * (attempt + 1));
         continue;
       }
+
       const diag = await formatStartupDiagnostics();
+      signalNetworkChanged = null;
       page.off("console", onConsole);
       page.off("pageerror", onPageError);
       page.off("requestfailed", onRequestFailed);
