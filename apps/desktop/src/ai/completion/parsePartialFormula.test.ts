@@ -168,6 +168,24 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     expect(result.currentArg?.text).toBe("1");
   });
 
+  it("does not treat separators inside external workbook name refs as function args (semicolon locales)", async () => {
+    setLocale("de-DE");
+
+    const parser = createLocaleAwarePartialFormulaParser({});
+    const fnRegistry = new FunctionRegistry();
+
+    // External workbook-scoped name ref where the workbook id contains a literal `[` character.
+    // The semicolon after the name ref must still be interpreted as an argument separator.
+    const input = "=SUMME([A1[Name.xlsx]MyName; 1";
+    const result = await parser(input, input.length, fnRegistry);
+
+    expect(result.isFormula).toBe(true);
+    expect(result.inFunctionCall).toBe(true);
+    expect(result.functionName).toBe("SUM");
+    expect(result.argIndex).toBe(1);
+    expect(result.currentArg?.text).toBe("1");
+  });
+
   it("does not treat decimal commas as argument separators for A1-like function names (LOG10)", async () => {
     setLocale("de-DE");
 

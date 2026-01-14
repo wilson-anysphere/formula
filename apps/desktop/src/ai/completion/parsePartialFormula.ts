@@ -575,23 +575,80 @@ function findWorkbookPrefixEndIfValid(src: string, startIndex: number, max: numb
   const end = findWorkbookPrefixEnd(src, startIndex, max);
   if (!end) return null;
 
-  // Heuristic: only treat this as an external workbook prefix if it is immediately followed by
-  // an unquoted sheet name and `!` (e.g. `[Book.xlsx]Sheet1!A1`). This avoids incorrectly treating
-  // incomplete structured references as workbook prefixes.
-  if (end >= max) return null;
-  const first = src[end] ?? "";
-  if (!(first === "_" || isUnicodeAlphabetic(first))) return null;
+  const skipWs = (idx: number): number => {
+    let i = idx;
+    while (i < max && /\s/.test(src[i] ?? "")) i += 1;
+    return i;
+  };
 
-  let i = end + 1;
-  while (i < max) {
-    const ch = src[i] ?? "";
-    if (ch === "!") return end;
-    if (ch === "_" || ch === "." || ch === ":" || isUnicodeAlphanumeric(ch)) {
+  const scanQuotedSheetName = (idx: number): number | null => {
+    if (src[idx] !== "'") return null;
+    let i = idx + 1;
+    while (i < max) {
+      const ch = src[i] ?? "";
+      if (ch === "'") {
+        // Excel escapes apostrophes inside quoted sheet names by doubling: '' -> '
+        if (i + 1 < max && src[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        return i + 1;
+      }
       i += 1;
-      continue;
     }
-    break;
+    return null;
+  };
+
+  const scanUnquotedName = (idx: number): number | null => {
+    if (idx >= max) return null;
+    const first = src[idx] ?? "";
+    if (!(first === "_" || isUnicodeAlphabetic(first))) return null;
+
+    let i = idx + 1;
+    while (i < max) {
+      const ch = src[i] ?? "";
+      // Be conservative: align with the Rust parser's unquoted identifier rules.
+      // (Names and unquoted sheet identifiers share similar constraints in formula text.)
+      if (ch === "_" || ch === "." || ch === "$" || isUnicodeAlphanumeric(ch)) {
+        i += 1;
+        continue;
+      }
+      break;
+    }
+    return i;
+  };
+
+  const scanSheetNameToken = (idx: number): number | null => {
+    const i = skipWs(idx);
+    if (i >= max) return null;
+    if (src[i] === "'") return scanQuotedSheetName(i);
+    return scanUnquotedName(i);
+  };
+
+  // Heuristic: only treat this as an external workbook prefix if it is immediately followed by:
+  // - a sheet spec and `!` (e.g. `[Book.xlsx]Sheet1!A1`), OR
+  // - a defined name identifier (e.g. `[Book.xlsx]MyName`).
+  //
+  // This avoids incorrectly treating nested structured references (which *are* nested) as workbook
+  // prefixes while still supporting workbook names that contain `[` characters (Excel treats `[` as
+  // plain text within workbook ids).
+  const sheetEnd = scanSheetNameToken(end);
+  if (sheetEnd != null) {
+    let i = skipWs(sheetEnd);
+
+    // External 3D span: `[Book.xlsx]Sheet1:Sheet3!A1`
+    if (i < max && src[i] === ":") {
+      i = scanSheetNameToken(i + 1) ?? i;
+      i = skipWs(i);
+    }
+
+    if (i < max && src[i] === "!") return end;
   }
+
+  // Workbook-scoped external defined name: `[Book.xlsx]MyName`.
+  const nameStart = skipWs(end);
+  if (scanUnquotedName(nameStart) != null) return end;
+
   return null;
 }
 
