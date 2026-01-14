@@ -12,6 +12,7 @@ Key files:
   - `apps/desktop/src/commands/registerBuiltinCommands.ts` (edit/clipboard/view/audit/etc.)
   - `apps/desktop/src/commands/registerDesktopCommands.ts` (desktop command catalog, including formatting + Format Cells)
   - `apps/desktop/src/commands/registerNumberFormatCommands.ts` (number-format preset commands used by ribbon + shortcuts)
+  - `apps/desktop/src/commands/registerDataQueriesCommands.ts` (Data → Queries & Connections ribbon actions)
 - Keybindings: `apps/desktop/src/commands/builtinKeybindings.ts`
 - Keybinding dispatcher: `apps/desktop/src/extensions/keybindingService.ts`
 - Ribbon UI state overrides: `apps/desktop/src/ribbon/ribbonUiState.ts`
@@ -57,6 +58,8 @@ Examples of real command ids already in use:
 - `clipboard.copy`, `clipboard.paste`, `clipboard.pasteSpecial.values` (registered in `apps/desktop/src/commands/registerBuiltinCommands.ts`)
 - `edit.undo`, `edit.redo` (registered in `apps/desktop/src/commands/registerBuiltinCommands.ts`)
 - `format.toggleBold`, `format.numberFormat.currency` (registered in `apps/desktop/src/main.ts`)
+- Data → Queries & Connections ribbon actions (currently non-canonical ribbon ids, but registered as commands):\
+  `data.queriesConnections.queriesConnections`, `data.queriesConnections.refreshAll` (registered in `apps/desktop/src/commands/registerDataQueriesCommands.ts`)
 
 ---
 
