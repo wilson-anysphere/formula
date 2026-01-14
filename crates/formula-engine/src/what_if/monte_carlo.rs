@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::what_if::{CellRef, CellValue, WhatIfError, WhatIfModel};
 use serde::{Deserialize, Serialize};
+use statrs::distribution::{Beta as StatrsBeta, ContinuousCDF};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,8 +13,22 @@ pub struct SimulationConfig {
     pub seed: u64,
     /// Optional correlation matrix between input distributions.
     ///
-    /// When supplied, correlated sampling is currently supported only for
-    /// [`Distribution::Normal`] inputs.
+    /// When supplied, correlated sampling uses a Gaussian copula:
+    ///
+    /// 1. Generate correlated standard normals using the provided correlation matrix.
+    /// 2. Convert each normal sample `z` into a uniform sample `u = Φ(z)`.
+    /// 3. Transform `u` through the inverse CDF of each input distribution.
+    ///
+    /// Correlated sampling is currently supported for the following distributions:
+    /// - [`Distribution::Normal`]
+    /// - [`Distribution::Uniform`]
+    /// - [`Distribution::Triangular`]
+    /// - [`Distribution::Lognormal`]
+    /// - [`Distribution::Exponential`]
+    /// - [`Distribution::Beta`]
+    ///
+    /// Discrete distributions (e.g. [`Distribution::Discrete`], [`Distribution::Poisson`])
+    /// are not yet supported with correlations.
     pub correlations: Option<CorrelationMatrix>,
     pub histogram_bins: usize,
 }
@@ -81,25 +96,43 @@ pub enum Distribution {
 impl Distribution {
     fn validate(&self) -> Result<(), &'static str> {
         match self {
-            Distribution::Normal { std_dev, .. } => {
+            Distribution::Normal { mean, std_dev } => {
+                if !mean.is_finite() {
+                    return Err("normal mean must be finite");
+                }
+                if !std_dev.is_finite() {
+                    return Err("normal std_dev must be finite");
+                }
                 if !(*std_dev >= 0.0) {
                     return Err("normal std_dev must be >= 0");
                 }
                 Ok(())
             }
             Distribution::Uniform { min, max } => {
+                if !min.is_finite() || !max.is_finite() {
+                    return Err("uniform min and max must be finite");
+                }
                 if !(*min <= *max) {
                     return Err("uniform min must be <= max");
                 }
                 Ok(())
             }
             Distribution::Triangular { min, mode, max } => {
+                if !min.is_finite() || !mode.is_finite() || !max.is_finite() {
+                    return Err("triangular min, mode, and max must be finite");
+                }
                 if !(*min <= *mode && *mode <= *max) {
                     return Err("triangular requires min <= mode <= max");
                 }
                 Ok(())
             }
-            Distribution::Lognormal { std_dev, .. } => {
+            Distribution::Lognormal { mean, std_dev } => {
+                if !mean.is_finite() {
+                    return Err("lognormal mean must be finite");
+                }
+                if !std_dev.is_finite() {
+                    return Err("lognormal std_dev must be finite");
+                }
                 if !(*std_dev >= 0.0) {
                     return Err("lognormal std_dev must be >= 0");
                 }
@@ -114,6 +147,12 @@ impl Distribution {
                 }
                 if values.len() != probabilities.len() {
                     return Err("discrete values and probabilities must have equal length");
+                }
+                if values.iter().any(|v| !v.is_finite()) {
+                    return Err("discrete values must be finite");
+                }
+                if probabilities.iter().any(|p| !p.is_finite()) {
+                    return Err("discrete probabilities must be finite");
                 }
                 if probabilities.iter().any(|p| *p < 0.0) {
                     return Err("discrete probabilities must be >= 0");
@@ -130,10 +169,16 @@ impl Distribution {
                 min,
                 max,
             } => {
+                if !alpha.is_finite() || !beta.is_finite() {
+                    return Err("beta alpha and beta must be finite");
+                }
                 if !(*alpha > 0.0 && *beta > 0.0) {
                     return Err("beta alpha and beta must be > 0");
                 }
                 if let (Some(min), Some(max)) = (min, max) {
+                    if !min.is_finite() || !max.is_finite() {
+                        return Err("beta min and max must be finite");
+                    }
                     if !(*min <= *max) {
                         return Err("beta min must be <= max");
                     }
@@ -141,16 +186,104 @@ impl Distribution {
                 Ok(())
             }
             Distribution::Exponential { rate } => {
+                if !rate.is_finite() {
+                    return Err("exponential rate must be finite");
+                }
                 if !(*rate > 0.0) {
                     return Err("exponential rate must be > 0");
                 }
                 Ok(())
             }
             Distribution::Poisson { lambda } => {
+                if !lambda.is_finite() {
+                    return Err("poisson lambda must be finite");
+                }
                 if !(*lambda >= 0.0) {
                     return Err("poisson lambda must be >= 0");
                 }
                 Ok(())
+            }
+        }
+    }
+
+    fn correlated_sampling_validation_error(&self) -> Option<&'static str> {
+        match self {
+            Distribution::Discrete { .. } => {
+                Some("correlated sampling is not supported for discrete distributions")
+            }
+            Distribution::Poisson { .. } => {
+                Some("correlated sampling is not supported for poisson distributions")
+            }
+            _ => None,
+        }
+    }
+
+    fn from_standard_normal(&self, z: f64) -> f64 {
+        match self {
+            Distribution::Normal { mean, std_dev } => {
+                if *std_dev == 0.0 {
+                    *mean
+                } else {
+                    *mean + *std_dev * z
+                }
+            }
+            Distribution::Uniform { min, max } => {
+                if min == max {
+                    *min
+                } else {
+                    let u = standard_normal_cdf(z);
+                    min + (max - min) * u
+                }
+            }
+            Distribution::Triangular { min, mode, max } => {
+                if min == max {
+                    *min
+                } else {
+                    let u = standard_normal_cdf(z);
+                    let f = (mode - min) / (max - min);
+                    if u < f {
+                        min + (u * (max - min) * (mode - min)).sqrt()
+                    } else {
+                        max - ((1.0 - u) * (max - min) * (max - mode)).sqrt()
+                    }
+                }
+            }
+            Distribution::Lognormal { mean, std_dev } => {
+                if *std_dev == 0.0 {
+                    mean.exp()
+                } else {
+                    (mean + std_dev * z).exp()
+                }
+            }
+            Distribution::Discrete { .. } => {
+                unreachable!("discrete distributions are rejected for correlated sampling")
+            }
+            Distribution::Beta {
+                alpha,
+                beta,
+                min,
+                max,
+            } => {
+                let u = standard_normal_cdf(z).clamp(f64::MIN_POSITIVE, 1.0 - f64::EPSILON);
+                let raw = if *alpha == 1.0 && *beta == 1.0 {
+                    // Uniform(0, 1) shortcut.
+                    u
+                } else {
+                    // `StatrsBeta::new` should not fail after `validate`, but we avoid panics
+                    // here since this pathway is only used when correlations are requested.
+                    let dist =
+                        StatrsBeta::new(*alpha, *beta).expect("validated beta parameters");
+                    dist.inverse_cdf(u)
+                };
+                scale_unit_interval(raw, *min, *max)
+            }
+            Distribution::Exponential { rate } => {
+                let u = standard_normal_cdf(z);
+                let tail = (1.0 - u).max(f64::MIN_POSITIVE);
+                -tail.ln() / rate
+            }
+            Distribution::Poisson { .. } => {
+                unreachable!("poisson distributions are rejected for correlated sampling")
             }
         }
     }
@@ -388,13 +521,9 @@ impl MonteCarloEngine {
             corr.validate(config.input_distributions.len())
                 .map_err(WhatIfError::InvalidParams)?;
 
-            // Keep the first iteration error message simple by rejecting
-            // non-normal inputs up-front.
             for input in &config.input_distributions {
-                if !matches!(input.distribution, Distribution::Normal { .. }) {
-                    return Err(WhatIfError::InvalidParams(
-                        "correlated sampling is currently supported only for normal distributions",
-                    ));
+                if let Some(msg) = input.distribution.correlated_sampling_validation_error() {
+                    return Err(WhatIfError::InvalidParams(msg));
                 }
             }
 
@@ -413,10 +542,7 @@ impl MonteCarloEngine {
             if let Some(l) = &correlated {
                 let z = generate_correlated_normals(&mut rng, l);
                 for (input, zi) in config.input_distributions.iter().zip(z.into_iter()) {
-                    let value = match input.distribution {
-                        Distribution::Normal { mean, std_dev } => mean + std_dev * zi,
-                        _ => unreachable!("validated correlated distributions are normal"),
-                    };
+                    let value = input.distribution.from_standard_normal(zi);
                     model.set_cell_value(&input.cell, CellValue::Number(value))?;
                 }
             } else {
@@ -665,6 +791,11 @@ fn standard_normal(rng: &mut SeededRng) -> f64 {
     let r = (-2.0 * u1.ln()).sqrt();
     let theta = 2.0 * std::f64::consts::PI * u2;
     r * theta.cos()
+}
+
+fn standard_normal_cdf(z: f64) -> f64 {
+    // Φ(z) = 0.5 * (1 + erf(z / sqrt(2))).
+    0.5 * (1.0 + libm::erf(z / std::f64::consts::SQRT_2))
 }
 
 fn sample_gamma(rng: &mut SeededRng, shape: f64) -> f64 {

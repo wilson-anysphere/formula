@@ -443,6 +443,9 @@ impl Workbook {
     ///
     /// This only affects `sheet_order` (sheet ids are stable and do not change).
     fn reorder_sheet(&mut self, sheet: SheetId, new_index: usize) -> bool {
+        if !self.sheet_exists(sheet) {
+            return false;
+        }
         if new_index >= self.sheet_order.len() {
             return false;
         }
