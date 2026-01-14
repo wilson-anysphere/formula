@@ -3375,6 +3375,8 @@ impl WasmWorkbook {
         struct WorkbookJson {
             #[serde(default, rename = "localeId")]
             locale_id: Option<String>,
+            #[serde(default, rename = "sheetOrder")]
+            sheet_order: Option<Vec<String>>,
             sheets: BTreeMap<String, SheetJson>,
         }
 
@@ -3402,8 +3404,29 @@ impl WasmWorkbook {
         }
 
         // Create all sheets up-front so cross-sheet formula references resolve correctly.
+        //
+        // When `sheetOrder` is provided, preserve the tab ordering by creating sheets in that order
+        // before importing cells. This is important for 3D references (e.g. `Sheet1:Sheet3!A1`) and
+        // worksheet functions that consult sheet indices like `SHEET()`.
+        let mut ensured: BTreeSet<String> = BTreeSet::new();
+        if let Some(order) = parsed.sheet_order.as_ref() {
+            for name in order {
+                if ensured.contains(name) {
+                    continue;
+                }
+                if !parsed.sheets.contains_key(name) {
+                    continue;
+                }
+                wb.ensure_sheet(name);
+                ensured.insert(name.clone());
+            }
+        }
         for sheet_name in parsed.sheets.keys() {
+            if ensured.contains(sheet_name) {
+                continue;
+            }
             wb.ensure_sheet(sheet_name);
+            ensured.insert(sheet_name.clone());
         }
 
         for (sheet_name, sheet) in parsed.sheets {
@@ -4452,6 +4475,46 @@ impl WasmWorkbook {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn from_json_sheet_order_controls_3d_reference_semantics() {
+        // 3D references (`Sheet1:Sheet3!A1`) depend on sheet tab order. The JSON workbook schema is
+        // map-based, so without an explicit order hint the key iteration order is lost during parse
+        // (BTreeMap). Verify that `sheetOrder` preserves the intended semantics.
+
+        let workbook = json!({
+            "sheets": {
+                "A": { "cells": { "A1": 10 } },
+                "B": { "cells": { "A1": 1, "A2": "=SUM(B:C!A1)" } },
+                "C": { "cells": { "A1": 100 } },
+            }
+        })
+        .to_string();
+
+        // Default behavior: sheets are created in sorted-key order (A, B, C), so `B:C` includes
+        // only B and C.
+        let mut wb = WasmWorkbook::from_json(&workbook).unwrap();
+        wb.inner.recalculate_internal(None).unwrap();
+        let value = wb.inner.get_cell_data("B", "A2").unwrap().value;
+        assert_eq!(value.as_f64().unwrap(), 101.0);
+
+        // With `sheetOrder`, sheets are created in the specified tab order (B, A, C), so `B:C`
+        // includes B, A, and C.
+        let workbook_with_order = json!({
+            "sheetOrder": ["B", "A", "C"],
+            "sheets": {
+                "A": { "cells": { "A1": 10 } },
+                "B": { "cells": { "A1": 1, "A2": "=SUM(B:C!A1)" } },
+                "C": { "cells": { "A1": 100 } },
+            }
+        })
+        .to_string();
+
+        let mut wb_ordered = WasmWorkbook::from_json(&workbook_with_order).unwrap();
+        wb_ordered.inner.recalculate_internal(None).unwrap();
+        let value_ordered = wb_ordered.inner.get_cell_data("B", "A2").unwrap().value;
+        assert_eq!(value_ordered.as_f64().unwrap(), 111.0);
+    }
 
     #[test]
     fn set_cell_rich_entity_roundtrips_and_degrades_in_get_cell() {

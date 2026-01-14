@@ -40,6 +40,17 @@ export type EngineWorkbookJson = {
    */
   localeId?: string;
   /**
+   * Optional sheet tab order (array of sheet identifiers).
+   *
+   * When present, `crates/formula-wasm` should create sheets in this order so sheet-indexed
+   * semantics (notably 3D references like `Sheet1:Sheet3!A1` and worksheet functions like
+   * `SHEET()`) match the UI's sheet ordering.
+   *
+   * The identifiers in this list must match the keys in `sheets` (i.e. the engine-facing sheet id,
+   * which for the desktop app is the **sheet display name**, not the DocumentController stable id).
+   */
+  sheetOrder?: string[];
+  /**
    * Worksheet map keyed by sheet identifier.
    *
    * In the desktop app, this should match the user-facing sheet display name
@@ -319,11 +330,17 @@ function exportDocumentToEngineWorkbookJsonWithOptions(
   options: { localeId?: string | null } = {},
 ): EngineWorkbookJson {
   const sheets: Record<string, EngineSheetJson> = {};
+  const sheetOrder: string[] = [];
+  const seenSheetsInOrder = new Set<string>();
 
   const ids = getDocumentSheetIds(doc);
 
   for (const sheetId of ids) {
     const engineSheetId = resolveEngineSheetNameForDocumentSheetId(doc, sheetId);
+    if (!seenSheetsInOrder.has(engineSheetId)) {
+      seenSheetsInOrder.add(engineSheetId);
+      sheetOrder.push(engineSheetId);
+    }
     const cells: Record<string, EngineCellScalar> = {};
     const sheet = doc?.model?.sheets?.get?.(sheetId);
 
@@ -368,7 +385,7 @@ function exportDocumentToEngineWorkbookJsonWithOptions(
   const localeIdRaw = options.localeId;
   const localeId = typeof localeIdRaw === "string" && localeIdRaw.trim() !== "" ? localeIdRaw.trim() : undefined;
 
-  return { ...(localeId ? { localeId } : {}), sheets };
+  return { ...(localeId ? { localeId } : {}), sheetOrder, sheets };
 }
 
 export type EngineHydrateFromDocumentOptions = {
