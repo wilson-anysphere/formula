@@ -766,13 +766,11 @@ impl Engine {
             return true;
         }
         let before_order = self.workbook.sheet_order.clone();
-        if !self.workbook.reorder_sheet(sheet_id, new_index) {
-            return false;
-        }
+        let moved = self.workbook.sheet_order.remove(current);
+        self.workbook.sheet_order.insert(new_index, moved);
         if self.workbook.sheet_order == before_order {
             return true;
         }
-
         if self.rebuild_graph().is_err() {
             // Reordering should not introduce new parse errors (formulas are unchanged), but if
             // rebuilding fails for any reason, restore the previous order and best-effort rebuild
@@ -15193,6 +15191,63 @@ mod tests {
             Some(vec![sheet1, sheet3])
         );
         assert_eq!(engine.workbook.sheet_span_ids(sheet2, sheet3), None);
+    }
+
+    #[test]
+    fn index_area_num_over_sheet_span_uses_tab_order_after_reorder() {
+        fn setup(engine: &mut Engine) {
+            for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
+                engine.ensure_sheet(sheet);
+            }
+            engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+            engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+            engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+            // Reorder tabs to [Sheet3, Sheet2, Sheet1].
+            let sheet1_id = engine.workbook.sheet_id("Sheet1").unwrap();
+            let sheet2_id = engine.workbook.sheet_id("Sheet2").unwrap();
+            let sheet3_id = engine.workbook.sheet_id("Sheet3").unwrap();
+            engine
+                .workbook
+                .set_sheet_order(vec![sheet3_id, sheet2_id, sheet1_id]);
+
+            engine
+                .set_cell_formula(
+                    "Sheet1",
+                    "B1",
+                    "=SUM(INDEX(Sheet1:Sheet3!A1,1,1,1))",
+                )
+                .unwrap();
+            engine
+                .set_cell_formula(
+                    "Sheet1",
+                    "B2",
+                    "=SUM(INDEX(Sheet1:Sheet3!A1,1,1,2))",
+                )
+                .unwrap();
+            engine
+                .set_cell_formula(
+                    "Sheet1",
+                    "B3",
+                    "=SUM(INDEX(Sheet1:Sheet3!A1,1,1,3))",
+                )
+                .unwrap();
+        }
+
+        let mut engine = Engine::new();
+        setup(&mut engine);
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::Number(1.0));
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+        ast_engine.recalculate_single_threaded();
+        assert_eq!(ast_engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+        assert_eq!(ast_engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+        assert_eq!(ast_engine.get_cell_value("Sheet1", "B3"), Value::Number(1.0));
     }
 
     #[test]
