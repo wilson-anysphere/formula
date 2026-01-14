@@ -68,6 +68,11 @@ test("pnpm check:coi script builds via cargo_agent and targets the desktop tauri
   );
   assert.match(
     src,
+    /FORMULA_COI_TIMEOUT_SECS/,
+    "expected COI smoke-check script to support FORMULA_COI_TIMEOUT_SECS for CI timeout control",
+  );
+  assert.match(
+    src,
     /--bin/,
     "expected COI smoke-check script to support an explicit --bin override path",
   );
