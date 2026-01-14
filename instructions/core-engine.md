@@ -42,6 +42,7 @@ Build the computational heart of Formula: the formula parser, dependency graph, 
 1. **Parse all Excel formula syntax:**
    - A1, R1C1, structured references, dynamic arrays
    - Locale-specific separators (`,` vs `;`)
+   - Locale-specific **function identifiers** (localized function names); engine persists canonical en-US formulas and translates via locale tables (see [`src/locale/data/README.md`](../crates/formula-engine/src/locale/data/README.md), including `es-ES` completeness requirements)
    - External workbook references `[Book.xlsx]Sheet!A1`
    - 3D sheet references `Sheet1:Sheet3!A1`
 
