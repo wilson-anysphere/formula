@@ -1059,6 +1059,9 @@ export class FormulaBarView {
   #lastActiveReferenceIndex: number | null = null;
   #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
   #lastColoredReferences: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
+  #lastHintRenderKey: string | null = null;
+  // Use a non-null sentinel so the first render always syncs the error panel state.
+  #lastErrorExplanationKey: string | null = "__init__";
   #referenceElsByIndex: Map<number, HTMLElement[]> | null = null;
   #lastAdjustedHeightDraft: string | null = null;
   #lastAdjustedHeightIsEditing = false;
@@ -3052,137 +3055,164 @@ export class FormulaBarView {
     this.root.classList.toggle("formula-bar--editing", this.model.isEditing);
 
     const syntaxError = isFormulaEditing ? this.model.syntaxError() : null;
-    this.#hintEl.classList.toggle("formula-bar-hint--syntax-error", Boolean(syntaxError));
+    const hasSyntaxError = Boolean(syntaxError);
+    this.#hintEl.classList.toggle("formula-bar-hint--syntax-error", hasSyntaxError);
     const hint = isFormulaEditing ? this.model.functionHint() : null;
-    this.#hintEl.replaceChildren();
-    if (syntaxError) {
-      this.#clearArgumentPreviewState();
-      const message = document.createElement("div");
-      message.className = "formula-bar-hint-error";
-      message.textContent = syntaxError.message;
-      this.#hintEl.appendChild(message);
-    }
 
-    if (!hint) {
+    // Keep argument preview state up to date, but avoid re-rendering the entire hint panel unless
+    // the visible hint content actually changed (cursor moves within the same argument are common
+    // on long formulas).
+    let wantsArgPreview = false;
+    let activeArgForPreview: ReturnType<FormulaBarModel["activeArgumentSpan"]> | null = null;
+    let argPreviewKey: string | null = null;
+
+    if (!hint || hasSyntaxError) {
       this.#clearArgumentPreviewState();
     } else {
-      const panel = document.createElement("div");
-      panel.className = "formula-bar-hint-panel";
+      const provider = this.#argumentPreviewProvider;
+      let activeArg = typeof provider === "function" ? this.model.activeArgumentSpan() : null;
 
-      const title = document.createElement("div");
-      title.className = "formula-bar-hint-title";
-      title.textContent = "PARAMETERS";
-
-      const body = document.createElement("div");
-      body.className = "formula-bar-hint-body";
-
-      const signature = document.createElement("span");
-      signature.className = "formula-bar-hint-signature";
-
-      for (const part of hint.parts) {
-        const token = document.createElement("span");
-        token.className = `formula-bar-hint-token formula-bar-hint-token--${part.kind}`;
-        token.dataset.kind = part.kind;
-        token.textContent = part.text;
-        signature.appendChild(token);
+      // Keep the argument preview in sync with the hint behavior when the caret is
+      // positioned just after a closing paren, e.g. `=ROUND(1,2)|`. In that case
+      // `activeArgumentSpan()` returns null because the tokenizer-based parser has
+      // already consumed the closing `)`, but the hint panel still treats the last
+      // argument as active (Excel UX).
+      if (!activeArg && typeof provider === "function" && this.model.cursorStart === this.model.cursorEnd && this.model.cursorStart > 0) {
+        let scan = this.model.cursorStart - 1;
+        while (scan >= 0 && isWhitespaceChar(draft[scan] ?? "")) scan -= 1;
+        if (scan >= 0 && draft[scan] === ")") {
+          activeArg = this.model.activeArgumentSpan(scan);
+        }
       }
 
-      body.appendChild(signature);
-
-      const summary = hint.signature.summary?.trim?.() ?? "";
-      if (summary) {
-        const sep = document.createElement("span");
-        sep.className = "formula-bar-hint-summary-separator";
-        sep.textContent = " — ";
-
-        const summaryEl = document.createElement("span");
-        summaryEl.className = "formula-bar-hint-summary";
-        summaryEl.textContent = summary;
-
-        body.appendChild(sep);
-        body.appendChild(summaryEl);
+      if (activeArg && typeof provider === "function" && typeof activeArg.argText === "string" && activeArg.argText.trim() !== "") {
+        wantsArgPreview = true;
+        activeArgForPreview = activeArg;
+        argPreviewKey = `${activeArg.fnName}|${activeArg.argIndex}|${activeArg.span.start}:${activeArg.span.end}|${activeArg.argText}`;
+        if (this.#argumentPreviewKey !== argPreviewKey) {
+          this.#argumentPreviewKey = argPreviewKey;
+          this.#argumentPreviewValue = null;
+          this.#argumentPreviewPending = true;
+          this.#scheduleArgumentPreviewEvaluation(activeArg, argPreviewKey);
+        }
+      } else {
+        this.#clearArgumentPreviewState();
       }
+    }
+
+    const syntaxKey = syntaxError ? `${syntaxError.span?.start ?? ""}:${syntaxError.span?.end ?? ""}:${syntaxError.message}` : "";
+    const hintKey = hint
+      ? `${hint.parts.map((part) => `${part.kind}:${part.text}`).join("")}|${hint.signature.summary?.trim?.() ?? ""}`
+      : "";
+    const previewKey =
+      wantsArgPreview && argPreviewKey
+        ? `${argPreviewKey}|${this.#argumentPreviewPending ? "pending" : "ready"}|${
+            this.#argumentPreviewPending ? "" : formatArgumentPreviewValue(this.#argumentPreviewValue)
+          }`
+        : "nopreview";
+    const nextHintRenderKey = `${isFormulaEditing ? "1" : "0"}|${syntaxKey}|${hintKey}|${previewKey}`;
+
+    if (nextHintRenderKey !== this.#lastHintRenderKey) {
+      this.#lastHintRenderKey = nextHintRenderKey;
+      this.#hintEl.replaceChildren();
 
       if (syntaxError) {
-        this.#clearArgumentPreviewState();
-      } else {
-        const provider = this.#argumentPreviewProvider;
-        let activeArg = this.model.activeArgumentSpan();
+        const message = document.createElement("div");
+        message.className = "formula-bar-hint-error";
+        message.textContent = syntaxError.message;
+        this.#hintEl.appendChild(message);
+      }
 
-        // Keep the argument preview in sync with the hint behavior when the caret is
-        // positioned just after a closing paren, e.g. `=ROUND(1,2)|`. In that case
-        // `activeArgumentSpan()` returns null because the tokenizer-based parser has
-        // already consumed the closing `)`, but the hint panel still treats the last
-        // argument as active (Excel UX).
-        if (!activeArg && this.model.cursorStart === this.model.cursorEnd && this.model.cursorStart > 0) {
-          let scan = this.model.cursorStart - 1;
-          while (scan >= 0 && isWhitespaceChar(draft[scan] ?? "")) scan -= 1;
-          if (scan >= 0 && draft[scan] === ")") {
-            activeArg = this.model.activeArgumentSpan(scan);
-          }
+      if (hint) {
+        const panel = document.createElement("div");
+        panel.className = "formula-bar-hint-panel";
+
+        const title = document.createElement("div");
+        title.className = "formula-bar-hint-title";
+        title.textContent = "PARAMETERS";
+
+        const body = document.createElement("div");
+        body.className = "formula-bar-hint-body";
+
+        const signature = document.createElement("span");
+        signature.className = "formula-bar-hint-signature";
+
+        for (const part of hint.parts) {
+          const token = document.createElement("span");
+          token.className = `formula-bar-hint-token formula-bar-hint-token--${part.kind}`;
+          token.dataset.kind = part.kind;
+          token.textContent = part.text;
+          signature.appendChild(token);
         }
-        const wantsArgPreview = Boolean(
-          activeArg &&
-            typeof provider === "function" &&
-            typeof activeArg.argText === "string" &&
-            activeArg.argText.trim() !== ""
-        );
 
-        if (wantsArgPreview && activeArg) {
-          const key = `${activeArg.fnName}|${activeArg.argIndex}|${activeArg.span.start}:${activeArg.span.end}|${activeArg.argText}`;
-          if (this.#argumentPreviewKey !== key) {
-            this.#argumentPreviewKey = key;
-            this.#argumentPreviewValue = null;
-            this.#argumentPreviewPending = true;
-            this.#scheduleArgumentPreviewEvaluation(activeArg, key);
-          }
+        body.appendChild(signature);
 
+        const summary = hint.signature.summary?.trim?.() ?? "";
+        if (summary) {
+          const sep = document.createElement("span");
+          sep.className = "formula-bar-hint-summary-separator";
+          sep.textContent = " — ";
+
+          const summaryEl = document.createElement("span");
+          summaryEl.className = "formula-bar-hint-summary";
+          summaryEl.textContent = summary;
+
+          body.appendChild(sep);
+          body.appendChild(summaryEl);
+        }
+
+        if (wantsArgPreview && activeArgForPreview) {
           const previewEl = document.createElement("div");
           previewEl.className = "formula-bar-hint-arg-preview";
           previewEl.dataset.testid = "formula-hint-arg-preview";
-          previewEl.dataset.argStart = String(activeArg.span.start);
-          previewEl.dataset.argEnd = String(activeArg.span.end);
+          previewEl.dataset.argStart = String(activeArgForPreview.span.start);
+          previewEl.dataset.argEnd = String(activeArgForPreview.span.end);
 
           const rhs = this.#argumentPreviewPending ? "…" : formatArgumentPreviewValue(this.#argumentPreviewValue);
-          const displayArgText = formatArgumentPreviewExpression(activeArg.argText);
+          const displayArgText = formatArgumentPreviewExpression(activeArgForPreview.argText);
           previewEl.textContent = `↳ ${displayArgText}  →  ${rhs}`;
           body.appendChild(previewEl);
         } else {
           this.#clearArgumentPreviewState();
         }
+        panel.appendChild(title);
+        panel.appendChild(body);
+        this.#hintEl.appendChild(panel);
       }
-
-      panel.appendChild(title);
-      panel.appendChild(body);
-      this.#hintEl.appendChild(panel);
     }
 
     const explanation = this.model.errorExplanation();
-    if (!explanation) {
-      this.root.classList.toggle("formula-bar--has-error", false);
-      this.#errorButton.hidden = true;
-      this.#errorButton.disabled = true;
-      this.#errorTitleEl.textContent = "";
-      this.#errorDescEl.textContent = "";
-      this.#errorSuggestionsEl.replaceChildren();
-      this.#setErrorPanelOpen(false, { restoreFocus: false });
-    } else {
-      const address = this.model.activeCell.address;
-      this.root.classList.toggle("formula-bar--has-error", true);
-      this.#errorButton.hidden = false;
-      this.#errorButton.disabled = false;
-      this.#errorTitleEl.textContent = `${explanation.code} (${address}): ${explanation.title}`;
-      this.#errorDescEl.textContent = explanation.description;
-      this.#errorSuggestionsEl.replaceChildren(
-        ...explanation.suggestions.map((s) => {
-          const li = document.createElement("li");
-          li.textContent = s;
-          return li;
-        })
-      );
+    const explanationKey = explanation
+      ? `${this.model.activeCell.address}|${explanation.code}|${explanation.title}|${explanation.description}|${explanation.suggestions.join("\n")}`
+      : null;
+    if (explanationKey !== this.#lastErrorExplanationKey) {
+      this.#lastErrorExplanationKey = explanationKey;
+      if (!explanation) {
+        this.root.classList.toggle("formula-bar--has-error", false);
+        this.#errorButton.hidden = true;
+        this.#errorButton.disabled = true;
+        this.#errorTitleEl.textContent = "";
+        this.#errorDescEl.textContent = "";
+        this.#errorSuggestionsEl.replaceChildren();
+        this.#setErrorPanelOpen(false, { restoreFocus: false });
+      } else {
+        const address = this.model.activeCell.address;
+        this.root.classList.toggle("formula-bar--has-error", true);
+        this.#errorButton.hidden = false;
+        this.#errorButton.disabled = false;
+        this.#errorTitleEl.textContent = `${explanation.code} (${address}): ${explanation.title}`;
+        this.#errorDescEl.textContent = explanation.description;
+        this.#errorSuggestionsEl.replaceChildren(
+          ...explanation.suggestions.map((s) => {
+            const li = document.createElement("li");
+            li.textContent = s;
+            return li;
+          })
+        );
+      }
     }
 
-    this.#syncErrorPanelActions();
+    this.#syncErrorPanelActions(explanation);
 
     this.#syncScroll();
     this.#adjustHeight();
@@ -3200,6 +3230,15 @@ export class FormulaBarView {
   }
 
   #clearArgumentPreviewState(): void {
+    if (
+      this.#argumentPreviewKey === null &&
+      this.#argumentPreviewValue === null &&
+      this.#argumentPreviewTimer == null &&
+      !this.#argumentPreviewPending
+    ) {
+      // Already cleared; avoid bumping the request id on every render when no hint/preview is shown.
+      return;
+    }
     this.#argumentPreviewKey = null;
     this.#argumentPreviewValue = null;
     this.#argumentPreviewPending = false;
@@ -3595,9 +3634,9 @@ export class FormulaBarView {
     this.#emitOverlays();
   }
 
-  #syncErrorPanelActions(): void {
-    const explanation = this.model.errorExplanation();
-    const canFix = Boolean(explanation) && typeof this.#callbacks.onFixFormulaErrorWithAi === "function";
+  #syncErrorPanelActions(explanation?: ReturnType<FormulaBarModel["errorExplanation"]> | null): void {
+    const resolved = explanation === undefined ? this.model.errorExplanation() : explanation;
+    const canFix = Boolean(resolved) && typeof this.#callbacks.onFixFormulaErrorWithAi === "function";
     this.#errorFixAiButton.disabled = !canFix;
 
     const isFormula = this.model.draft.trimStart().startsWith("=");
