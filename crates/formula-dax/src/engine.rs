@@ -6391,14 +6391,23 @@ fn virtual_blank_row_exists(
     let table = normalize_ident(table);
     // Tabular models materialize an "unknown" (blank) row on the one-side of relationships when
     // there are fact-side rows whose foreign key is BLANK or has no match in the dimension. We
-    // model that row virtually (at `row_count()`), so we need to know whether it exists for a
-    // given table under the currently active relationship set (including `USERELATIONSHIP`).
+    // model that row virtually (at `row_count()`), so we need to know whether it exists (and is
+    // visible) for a given table under the currently active relationship set (including
+    // `USERELATIONSHIP`).
 
     let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
     for &idx in &filter.active_relationship_overrides {
         if let Some(rel) = model.relationships().get(idx) {
             override_pairs.insert((rel.from_table_key.as_str(), rel.to_table_key.as_str()));
         }
+    }
+
+    // If BLANK is filtered out (directly or indirectly through snowflake relationships), the
+    // relationship-generated blank member should not be considered visible even if unmatched rows
+    // exist further down the chain.
+    let blank_allowed = compute_blank_row_allowed_map(model, filter, &override_pairs);
+    if !blank_allowed.get(&table).copied().unwrap_or(true) {
+        return Ok(false);
     }
 
     let computed_sets;
@@ -6411,53 +6420,106 @@ fn virtual_blank_row_exists(
         Some(&computed_sets)
     };
 
-    for (idx, rel) in model.relationships().iter().enumerate() {
-        if rel.to_table_key != table {
-            continue;
-        }
-
+    let is_relationship_active = |idx: usize, rel: &RelationshipInfo| {
         let pair = (rel.from_table_key.as_str(), rel.to_table_key.as_str());
         let is_active = if override_pairs.contains(&pair) {
             filter.active_relationship_overrides.contains(&idx)
         } else {
             rel.rel.is_active
         };
-
-        if !is_active
-            || matches!(
+        is_active
+            && !matches!(
                 filter.cross_filter_overrides.get(&idx).copied(),
                 Some(RelationshipOverride::Disabled)
             )
+    };
+
+    // Compute virtual blank member existence for all tables under the current filter context.
+    //
+    // This is a fixed-point computation because the blank member can cascade across snowflake
+    // relationships:
+    //   Sales (unmatched ProductId) -> Products(blank member) -> Categories(blank member)
+    //
+    // We seed the set with tables that have any *currently visible* unmatched fact rows and then
+    // repeatedly propagate blank-member existence from `from_table -> to_table` along active
+    // relationships, treating the from-table's virtual blank row as a BLANK foreign key to the
+    // related to-table.
+    let mut exists: HashMap<String, bool> = model
+        .tables
+        .keys()
+        .map(|t| (t.clone(), false))
+        .collect();
+
+    // 1) Seed from direct unmatched physical rows.
+    for (idx, rel) in model.relationships().iter().enumerate() {
+        if !is_relationship_active(idx, rel) {
+            continue;
+        }
+
+        if !blank_allowed
+            .get(rel.to_table_key.as_str())
+            .copied()
+            .unwrap_or(true)
         {
             continue;
         }
 
-        // A virtual blank row exists if the relationship has any *currently visible* `from_table`
-        // row whose key is BLANK or has no match in `to_table`.
-        if filter.is_empty() {
-            if matches!(rel.unmatched_fact_rows.as_ref(), Some(unmatched) if !unmatched.is_empty())
-            {
-                return Ok(true);
-            }
-            continue;
-        }
-
-        let Some(sets) = sets else {
-            continue;
+        let has_unmatched = if filter.is_empty() {
+            matches!(
+                rel.unmatched_fact_rows.as_ref(),
+                Some(unmatched) if !unmatched.is_empty()
+            )
+        } else {
+            let sets = sets.expect("row sets are computed when filter is not empty");
+            let from_set = sets.get(rel.from_table_key.as_str()).ok_or_else(|| {
+                DaxError::UnknownTable(rel.rel.from_table.clone())
+            })?;
+            matches!(
+                rel.unmatched_fact_rows.as_ref(),
+                Some(unmatched) if unmatched.any_row_allowed(from_set)
+            )
         };
-        let from_set = sets.get(rel.from_table_key.as_str()).ok_or_else(|| {
-            DaxError::UnknownTable(rel.rel.from_table.clone())
-        })?;
 
-        if matches!(
-            rel.unmatched_fact_rows.as_ref(),
-            Some(unmatched) if unmatched.any_row_allowed(from_set)
-        ) {
-            return Ok(true);
+        if has_unmatched {
+            exists.insert(rel.to_table_key.clone(), true);
         }
     }
 
-    Ok(false)
+    // 2) Propagate across snowflake hops.
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (idx, rel) in model.relationships().iter().enumerate() {
+            if !is_relationship_active(idx, rel) {
+                continue;
+            }
+
+            if !blank_allowed
+                .get(rel.to_table_key.as_str())
+                .copied()
+                .unwrap_or(true)
+            {
+                continue;
+            }
+
+            if !blank_allowed
+                .get(rel.from_table_key.as_str())
+                .copied()
+                .unwrap_or(true)
+            {
+                continue;
+            }
+
+            if exists.get(rel.from_table_key.as_str()).copied().unwrap_or(false)
+                && !exists.get(rel.to_table_key.as_str()).copied().unwrap_or(false)
+            {
+                exists.insert(rel.to_table_key.clone(), true);
+                changed = true;
+            }
+        }
+    }
+
+    Ok(exists.get(table.as_str()).copied().unwrap_or(false))
 }
 
 #[cfg(test)]

@@ -1150,3 +1150,171 @@ fn snowflake_filter_excludes_unmatched_fact_rows_when_blank_category_filtered_ou
 
     assert_eq!(result.rows, vec![vec![Value::from("A"), 10.0.into()]]);
 }
+
+#[test]
+fn snowflake_values_includes_blank_category_member_for_unmatched_fact_keys() {
+    // Scenario:
+    // - Sales contains an unknown ProductId (no matching Products row), which creates a virtual
+    //   blank member in Products.
+    // - That blank Products member should in turn belong to the blank Categories member through
+    //   the Products -> Categories relationship.
+    //
+    // The blank Categories member should therefore be visible in VALUES/COUNTBLANK.
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories.push_row(vec![1.into(), Value::from("A")]).unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![10.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["SaleId", "ProductId", "Amount"]);
+    sales.push_row(vec![100.into(), 10.into(), 10.0.into()]).unwrap(); // A
+    sales
+        .push_row(vec![101.into(), 999.into(), 5.0.into()])
+        .unwrap(); // unknown product -> Products blank row -> Categories blank row
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(VALUES(Categories[CategoryName]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 2.into());
+
+    let blanks = engine
+        .evaluate(
+            &model,
+            "COUNTBLANK(Categories[CategoryName])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(blanks, 1.into());
+}
+
+#[test]
+fn snowflake_values_excludes_blank_intermediate_member_when_upstream_blank_filtered_out_even_with_crossfilter_reverse()
+{
+    // Regression: BLANK exclusion on an upstream snowflake dimension should hide the relationship-
+    // generated blank member of intermediate dimensions, even if a downstream relationship has
+    // been reversed with CROSSFILTER so unmatched fact keys remain visible.
+    //
+    // Without the effective blank-allowance cascade, `VALUES(Products[ProductId])` would incorrectly
+    // include the virtual blank Products member under `Categories[CategoryName] = "A"` when the
+    // `Sales -> Products` relationship is reversed.
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories.push_row(vec![1.into(), Value::from("A")]).unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![10.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["SaleId", "ProductId", "Amount"]);
+    sales.push_row(vec![100.into(), 10.into(), 10.0.into()]).unwrap(); // A
+    sales
+        .push_row(vec![101.into(), 999.into(), 5.0.into()])
+        .unwrap(); // unknown product -> Products blank row -> Categories blank row
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+
+    let filter = engine
+        .apply_calculate_filters(
+            &model,
+            &FilterContext::empty(),
+            &[
+                "Categories[CategoryName] = \"A\"",
+                // Reverse the default `Products -> Sales` filter direction so the Categories filter
+                // does not restrict Sales, keeping the unmatched Sales row visible.
+                "CROSSFILTER(Sales[ProductId], Products[ProductId], ONEWAY_LEFTFILTERSRIGHT)",
+            ],
+        )
+        .unwrap();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(VALUES(Products[ProductId]))",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 1.into());
+
+    let blanks = engine
+        .evaluate(
+            &model,
+            "COUNTBLANK(Products[ProductId])",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(blanks, 0.into());
+}
