@@ -2522,6 +2522,9 @@ jobs:
               local other_arch_re="$3"
               echo "$json" | jq -r --arg ext "$ext_re" --arg arch "$arch_re" --arg other "$other_arch_re" '[.[].name
                 | select(test($ext; "i"))
+                # Exclude embedded helper installers (notably WebView2 bootstrapper/runtime executables),
+                # which are not the Formula installer artifacts we ship on GitHub Releases.
+                | select(test("microsoftedgewebview2"; "i") | not)
                 | select(test($arch; "i"))
                 | select(test($other; "i") | not)
               ] | length'
@@ -2601,6 +2604,7 @@ jobs:
 
             windows_archless_count="$(echo "$json" | jq -r --arg x64 "$win_x64_re" --arg arm64 "$win_arm64_re" '[.[].name
               | select(test("\\.(msi|exe)$"; "i"))
+              | select(test("microsoftedgewebview2"; "i") | not)
               | select((test($x64; "i") or test($arm64; "i")) | not)
             ] | length')"
             if [[ "$windows_archless_count" -ne 0 ]]; then
@@ -2610,6 +2614,7 @@ jobs:
 
             windows_ambiguous_count="$(echo "$json" | jq -r --arg x64 "$win_x64_re" --arg arm64 "$win_arm64_re" '[.[].name
               | select(test("\\.(msi|exe)$"; "i"))
+              | select(test("microsoftedgewebview2"; "i") | not)
               | select(test($x64; "i"))
               | select(test($arm64; "i"))
             ] | length')"
@@ -2655,6 +2660,7 @@ jobs:
                 ([.[].name] | unique) as $names |
                 [ $names[]
                   | select(test("\\.(msi|exe)$"; "i"))
+                  | select(test("microsoftedgewebview2"; "i") | not)
                   | select(test($arch; "i"))
                   | select(test($other; "i") | not)
                   | select(($names | index(. + ".sig")) == null)
