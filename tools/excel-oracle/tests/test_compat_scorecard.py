@@ -488,6 +488,84 @@ class CompatScorecardTests(unittest.TestCase):
                 md,
             )
 
+    def test_privacy_mode_hashes_custom_oracle_tags(self) -> None:
+        scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
+        self.assertTrue(scorecard_py.is_file(), f"compat_scorecard.py not found at {scorecard_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            corpus_path = tmp_path / "corpus-summary.json"
+            oracle_path = tmp_path / "mismatch-report.json"
+            out_md = tmp_path / "scorecard.md"
+            out_json = tmp_path / "scorecard.json"
+
+            corpus_payload = {
+                "timestamp": "unit-test",
+                "counts": {
+                    "total": 10,
+                    "open_ok": 10,
+                    "calculate_ok": 10,
+                    "render_ok": 10,
+                    "round_trip_ok": 10,
+                },
+                "rates": {"open": 1.0, "calculate": 1.0, "render": 1.0, "round_trip": 1.0},
+            }
+            corpus_path.write_text(
+                json.dumps(corpus_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            custom_tag = "CORP.ADDIN.FOO"
+            oracle_payload = {
+                "schemaVersion": 1,
+                "summary": {
+                    "totalCases": 100,
+                    "mismatches": 0,
+                    "includeTags": [custom_tag, "SUM"],
+                    "excludeTags": [],
+                },
+            }
+            oracle_path.write_text(
+                json.dumps(oracle_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(scorecard_py),
+                    "--corpus-summary",
+                    str(corpus_path),
+                    "--oracle-report",
+                    str(oracle_path),
+                    "--out-md",
+                    str(out_md),
+                    "--out-json",
+                    str(out_json),
+                    "--privacy-mode",
+                    "private",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode != 0:
+                self.fail(
+                    f"compat_scorecard.py exited {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+
+            hashed = hashlib.sha256(custom_tag.encode("utf-8")).hexdigest()
+
+            md = out_md.read_text(encoding="utf-8")
+            self.assertNotIn(custom_tag, md)
+            self.assertIn(f"sha256={hashed}", md)
+            self.assertIn("SUM", md)
+
+            payload = json.loads(out_json.read_text(encoding="utf-8"))
+            tags = payload.get("inputs", {}).get("oracle", {}).get("includeTags")
+            self.assertEqual(tags, [f"sha256={hashed}", "SUM"])
+
     def test_privacy_mode_keeps_relative_oracle_paths_readable(self) -> None:
         scorecard_py = Path(__file__).resolve().parents[2] / "compat_scorecard.py"
         self.assertTrue(scorecard_py.is_file(), f"compat_scorecard.py not found at {scorecard_py}")

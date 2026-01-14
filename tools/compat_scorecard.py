@@ -55,9 +55,62 @@ _SAFE_RUN_URL_HOST_SUFFIXES = {
     "github.com",
 }
 
+_KNOWN_FUNCTION_NAMES: set[str] | None = None
+
 
 def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _load_known_function_names() -> set[str]:
+    global _KNOWN_FUNCTION_NAMES
+    if _KNOWN_FUNCTION_NAMES is not None:
+        return _KNOWN_FUNCTION_NAMES
+
+    names: set[str] = set()
+    try:
+        repo_root = Path(__file__).resolve().parents[1]
+        catalog_path = repo_root / "shared" / "functionCatalog.json"
+        data = json.loads(catalog_path.read_text(encoding="utf-8"))
+        funcs = data.get("functions") if isinstance(data, dict) else None
+        if isinstance(funcs, list):
+            for entry in funcs:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name")
+                if isinstance(name, str) and name:
+                    names.add(name.upper())
+    except Exception:  # noqa: BLE001 (best-effort; privacy mode still works without allowlist)
+        names = set()
+
+    _KNOWN_FUNCTION_NAMES = names
+    return names
+
+
+def _redact_tag_name(tag: str, *, privacy_mode: str) -> str:
+    """Redact oracle tag names that may embed custom/UDF identifiers."""
+
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return tag
+    if not tag or tag.startswith("sha256="):
+        return tag
+
+    raw = tag.strip()
+    normalized = raw.upper()
+    if normalized.startswith("_XLFN."):
+        normalized = normalized[len("_XLFN.") :]
+
+    # Heuristic:
+    # - Category tags are typically lowercase (`arith`, `spill`); keep them readable.
+    # - Function-like tags are typically uppercase (`SUM`, `XLOOKUP`). Hash unknown ones in private
+    #   mode so custom/UDF tags don't leak internal identifiers.
+    if "." not in raw and any(ch.islower() for ch in raw):
+        return tag
+
+    if normalized in _load_known_function_names():
+        return tag
+
+    return f"sha256={_sha256_text(normalized)}"
 
 
 def _is_safe_run_url_host(host: str | None) -> bool:
@@ -394,10 +447,10 @@ def _rate_status(rate: float | None, *, target: float) -> str:
     return "PASS" if rate >= target else "FAIL"
 
 
-def _fmt_tags(tags: list[str] | None, *, empty_text: str) -> str:
+def _fmt_tags(tags: list[str] | None, *, empty_text: str, privacy_mode: str) -> str:
     if tags is None:
         return "—"
-    tags = [t for t in tags if t]
+    tags = [_redact_tag_name(t, privacy_mode=privacy_mode) for t in tags if t]
     if not tags:
         return empty_text
     return ", ".join(tags)
@@ -620,8 +673,12 @@ def main() -> int:
         oracle_meta_parts.append(f"mismatches: {oracle.mismatches}")
         if oracle.cases_sha256:
             oracle_meta_parts.append(f"casesSha256: `{oracle.cases_sha256[:8]}`")
-        oracle_meta_parts.append(f"includeTags: {_fmt_tags(oracle.include_tags, empty_text='<all>')}")
-        oracle_meta_parts.append(f"excludeTags: {_fmt_tags(oracle.exclude_tags, empty_text='<none>')}")
+        oracle_meta_parts.append(
+            f"includeTags: {_fmt_tags(oracle.include_tags, empty_text='<all>', privacy_mode=args.privacy_mode)}"
+        )
+        oracle_meta_parts.append(
+            f"excludeTags: {_fmt_tags(oracle.exclude_tags, empty_text='<none>', privacy_mode=args.privacy_mode)}"
+        )
         oracle_meta_parts.append(f"maxCases: {_fmt_max_cases(oracle.max_cases)}")
         if oracle.expected_path:
             oracle_meta_parts.append(
@@ -727,8 +784,16 @@ def main() -> int:
                     else None,
                 },
                 "oracle": {
-                    "includeTags": oracle.include_tags if oracle else None,
-                    "excludeTags": oracle.exclude_tags if oracle else None,
+                    "includeTags": (
+                        [_redact_tag_name(t, privacy_mode=args.privacy_mode) for t in (oracle.include_tags or [])]
+                        if oracle
+                        else None
+                    ),
+                    "excludeTags": (
+                        [_redact_tag_name(t, privacy_mode=args.privacy_mode) for t in (oracle.exclude_tags or [])]
+                        if oracle
+                        else None
+                    ),
                     "maxCases": oracle.max_cases if oracle else None,
                     "casesSha256": oracle.cases_sha256 if oracle else None,
                     "expectedPath": _redact_text(oracle.expected_path, privacy_mode=args.privacy_mode)
