@@ -3147,6 +3147,23 @@ fn push_a1_col_name(col: u32, out: &mut String) {
     }
 }
 
+fn push_u64_decimal(mut n: u64, out: &mut String) {
+    let mut buf = [0u8; 20];
+    let mut len = 0usize;
+    loop {
+        let digit = (n % 10) as u8;
+        buf[len] = b'0' + digit;
+        len += 1;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
+    }
+    for b in buf[..len].iter().rev() {
+        out.push(*b as char);
+    }
+}
+
 fn object_set(obj: &Object, key: &str, value: &JsValue) -> Result<(), JsValue> {
     Reflect::set(obj, &JsValue::from_str(key), value).map(|_| ())
 }
@@ -4690,16 +4707,15 @@ impl WasmWorkbook {
             .get_range_values(sheet, range)
             .map_err(|err| js_err(err.to_string()))?;
 
-        let outer = Array::new();
+        let outer = Array::new_with_length(values.len() as u32);
         // Reuse buffers to avoid per-cell string allocations while looking up sparse inputs.
         let mut addr_buf = String::with_capacity(16);
         let mut row_buf = String::with_capacity(16);
         for (row_off, row_values) in values.into_iter().enumerate() {
             let row = start_row + row_off as u32;
             row_buf.clear();
-            use std::fmt::Write as _;
-            write!(&mut row_buf, "{}", u64::from(row).saturating_add(1)).expect("write to string");
-            let inner = Array::new();
+            push_u64_decimal(u64::from(row).saturating_add(1), &mut row_buf);
+            let inner = Array::new_with_length(row_values.len() as u32);
             for (col_off, engine_value) in row_values.into_iter().enumerate() {
                 let col = start_col + col_off as u32;
                 let input = if let Some(cells) = sheet_cells {
@@ -4715,12 +4731,12 @@ impl WasmWorkbook {
                 };
                 let value = engine_value_to_js_scalar(engine_value);
 
-                let cell = Array::new();
-                cell.push(&input);
-                cell.push(&value);
-                inner.push(&cell);
+                let cell = Array::new_with_length(2);
+                cell.set(0, input);
+                cell.set(1, value);
+                inner.set(col_off as u32, cell.into());
             }
-            outer.push(&inner);
+            outer.set(row_off as u32, inner.into());
         }
 
         Ok(outer.into())
