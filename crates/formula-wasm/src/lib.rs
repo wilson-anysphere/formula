@@ -4516,9 +4516,13 @@ impl WasmWorkbook {
         origin_a1: Option<String>,
     ) -> Result<(), JsValue> {
         let sheet_name = sheet_name.trim();
-        if sheet_name.is_empty() {
-            return Err(js_err("sheet must be a non-empty string"));
-        }
+        // For parity with `setSheetOrigin`, treat empty/whitespace sheet names as the default
+        // worksheet.
+        let sheet_name = if sheet_name.is_empty() {
+            DEFAULT_SHEET
+        } else {
+            sheet_name
+        };
         let origin_trimmed = origin_a1
             .as_deref()
             .map(str::trim)
