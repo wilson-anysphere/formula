@@ -46,8 +46,7 @@
  * failing the timing benchmarks.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
-import { readFile, readlink, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { type BenchmarkResult } from './benchmark.ts';
@@ -66,6 +65,7 @@ import {
   stdDev,
   type StartupMetrics,
 } from './desktopStartupUtil.ts';
+import { findPidForExecutableLinux, getProcessRssMbLinux } from './linuxProcUtil.ts';
 
 // Benchmark environment knobs:
 // - `FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1` prevents the release updater from running a
@@ -123,120 +123,6 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       signal.addEventListener('abort', onAbort);
     }
   });
-}
-
-function parseProcChildrenPids(content: string): number[] {
-  const trimmed = content.trim();
-  if (!trimmed) return [];
-  return trimmed
-    .split(/\s+/g)
-    .map((x) => Number(x))
-    .filter((n) => Number.isInteger(n) && n > 0);
-}
-
-function parseProcStatusVmRssKb(content: string): number | null {
-  const match = content.match(/^VmRSS:\s+(\d+)\s+kB\s*$/m);
-  if (!match) return null;
-  const kb = Number(match[1]);
-  if (!Number.isFinite(kb)) return null;
-  return kb;
-}
-
-async function readUtf8(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, 'utf8');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ESRCH' || code === 'EACCES') return null;
-    throw err;
-  }
-}
-
-async function readProcExeLinux(pid: number): Promise<string | null> {
-  try {
-    const target = await readlink(`/proc/${pid}/exe`);
-    // If the binary was replaced/cleaned up mid-run, Linux appends " (deleted)".
-    return target.replace(/ \(deleted\)$/, '');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ESRCH' || code === 'EACCES') return null;
-    throw err;
-  }
-}
-
-async function getChildPidsLinux(pid: number): Promise<number[]> {
-  // `/proc/<pid>/task/<tid>/children` is per-thread (not per-process). Union children across
-  // all tasks so we don't miss descendants spawned by worker threads.
-  let tids: string[];
-  try {
-    tids = await readdir(`/proc/${pid}/task`);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ESRCH' || code === 'EACCES') return [];
-    throw err;
-  }
-
-  const out = new Set<number>();
-  for (const tid of tids) {
-    const content = await readUtf8(`/proc/${pid}/task/${tid}/children`);
-    if (!content) continue;
-    for (const child of parseProcChildrenPids(content)) {
-      out.add(child);
-    }
-  }
-
-  return [...out];
-}
-
-async function collectProcessTreePidsLinux(rootPid: number): Promise<number[]> {
-  const seen = new Set<number>();
-  const stack: number[] = [rootPid];
-  while (stack.length > 0) {
-    const pid = stack.pop()!;
-    if (seen.has(pid)) continue;
-    seen.add(pid);
-    const children = await getChildPidsLinux(pid);
-    for (const child of children) {
-      if (!seen.has(child)) stack.push(child);
-    }
-  }
-  return [...seen];
-}
-
-async function findPidForExecutableLinux(
-  rootPid: number,
-  binPath: string,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<number | null> {
-  const binResolved = resolve(binPath);
-  let binReal = binResolved;
-  try {
-    binReal = realpathSync(binResolved);
-  } catch {
-    // Best-effort; realpath can fail in some sandbox setups.
-  }
-
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (signal?.aborted) return null;
-    const pids = await collectProcessTreePidsLinux(rootPid);
-    for (const pid of pids) {
-      const exe = await readProcExeLinux(pid);
-      if (!exe) continue;
-      if (exe === binReal || exe === binResolved) return pid;
-    }
-    await sleep(50, signal);
-  }
-  return null;
-}
-
-async function getProcessRssMbLinux(pid: number): Promise<number | null> {
-  const status = await readUtf8(`/proc/${pid}/status`);
-  if (!status) return null;
-  const kb = parseProcStatusVmRssKb(status);
-  if (kb == null) return null;
-  return kb / 1024;
 }
 
 function getRssMbViaPs(pid: number): number | null {

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
-import { parseProcChildrenPids, parseProcStatusVmRssKb } from './desktopMemoryBench.ts';
+import { parseProcChildrenPids, parseProcStatusVmRssKb } from './linuxProcUtil.ts';
 
-describe('desktopMemoryBench /proc parsing', () => {
+describe('linuxProcUtil /proc parsing', () => {
   test('parseProcChildrenPids parses an empty children file', () => {
     expect(parseProcChildrenPids('\n')).toEqual([]);
     expect(parseProcChildrenPids('   \n')).toEqual([]);
@@ -31,4 +31,3 @@ describe('desktopMemoryBench /proc parsing', () => {
     expect(parseProcStatusVmRssKb(status)).toBeNull();
   });
 });
-
