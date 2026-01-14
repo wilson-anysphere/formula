@@ -8412,6 +8412,7 @@ const ribbonCommandHandlersCtx = {
 // on very large selections.
 
 const DEFAULT_RIBBON_AUTOFILTER_ROW_LIMIT = 50_000;
+const DEFAULT_RIBBON_AUTOFILTER_UNIQUE_VALUE_LIMIT = 5_000;
 
 function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: number }): string {
   const doc = app.getDocument();
@@ -8576,7 +8577,23 @@ async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
   const getValue = (row: number, col: number) => getRibbonAutoFilterCellText(sheetId, { row, col });
   // Build the dialog list from distinct values only. Avoid allocating a row entry per data row,
   // which can be expensive for large selections.
-  const uniqueValues = computeUniqueFilterValues({ range, headerRows, colId, getValue });
+  const uniqueValues = computeUniqueFilterValues({
+    range,
+    headerRows,
+    colId,
+    getValue,
+    maxValues: DEFAULT_RIBBON_AUTOFILTER_UNIQUE_VALUE_LIMIT,
+  });
+  if (uniqueValues.length > DEFAULT_RIBBON_AUTOFILTER_UNIQUE_VALUE_LIMIT) {
+    showToast(
+      `Too many unique values to filter (more than ${DEFAULT_RIBBON_AUTOFILTER_UNIQUE_VALUE_LIMIT.toLocaleString()}). ` +
+        "Select a smaller range and try again.",
+      "warning",
+    );
+    scheduleRibbonSelectionFormatStateUpdate();
+    app.focus();
+    return false;
+  }
   const dialogRows: TableViewRow[] = uniqueValues.map((value, idx) => ({ row: idx, values: [value] }));
 
   const existing = ribbonAutoFilterStore.get(sheetId, rangeA1);

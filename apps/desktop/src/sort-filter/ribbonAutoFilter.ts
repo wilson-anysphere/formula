@@ -200,6 +200,14 @@ export function computeUniqueFilterValues(args: {
    */
   colId: number;
   getValue: (row: number, col: number) => string;
+  /**
+   * Optional cap on how many unique values to collect.
+   *
+   * When provided, the function stops scanning once `maxValues + 1` distinct
+   * values have been observed. This is useful for UI call sites that want to
+   * guard against rendering extremely large filter lists.
+   */
+  maxValues?: number;
 }): string[] {
   const range = normalizeRange(args.range);
   const headerRows = clampNonNegativeInt(args.headerRows);
@@ -212,9 +220,17 @@ export function computeUniqueFilterValues(args: {
   const absCol = range.startCol + colId;
   if (absCol < range.startCol || absCol > range.endCol) return [];
 
+  const maxValues = (() => {
+    const raw = args.maxValues;
+    if (raw == null) return null;
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return null;
+    return Math.trunc(raw);
+  })();
+
   const set = new Set<string>();
   for (let row = dataStartRow; row <= range.endRow; row += 1) {
     set.add(args.getValue(row, absCol));
+    if (maxValues != null && set.size > maxValues) break;
   }
   return Array.from(set).sort((a, b) => {
     // Match Excel-like ordering where blanks appear last.
