@@ -3893,7 +3893,15 @@ export class SpreadsheetApp {
       if (hasBackgroundImageDelta) {
         // Sheet background images are stored as external image references (not drawings).
         // Keep workbook-level image refcounts in sync so GC doesn't evict background bytes.
-        this.workbookImageManager.setExternalImageIds(this.listWorkbookExternalImageIds());
+        const sheetIds =
+          source === "applyState"
+            ? (() => {
+                const docAny = this.document as any;
+                const sheetMeta: unknown = docAny?.sheetMeta;
+                return sheetMeta instanceof Map ? Array.from(sheetMeta.keys()) : undefined;
+              })()
+            : undefined;
+        this.workbookImageManager.setExternalImageIds(this.listWorkbookExternalImageIds(sheetIds));
       }
       if (hasActiveSheetViewDelta) {
         if (source !== "sharedGridAxis") {

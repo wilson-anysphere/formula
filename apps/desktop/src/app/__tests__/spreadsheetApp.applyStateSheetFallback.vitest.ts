@@ -155,6 +155,14 @@ describe("SpreadsheetApp applyState active sheet fallback", () => {
         },
       ]);
       expect(workbookImageManager.imageRefCount.get(imageId)).toBe(1);
+
+      const backgroundImageId = "test_background_image";
+      doc.setSheetBackgroundImageId("Sheet2", backgroundImageId);
+      expect(workbookImageManager.imageRefCount.get(backgroundImageId)).toBe(1);
+
+      const cellImageId = "test_cell_image";
+      doc.setCellValue("Sheet2", { row: 0, col: 0 }, { imageId: cellImageId });
+      expect(workbookImageManager.imageRefCount.get(cellImageId)).toBe(1);
       activateSpy.mockClear();
 
       const snapshotDoc = new DocumentController();
@@ -172,6 +180,8 @@ describe("SpreadsheetApp applyState active sheet fallback", () => {
       // The workbook image ref counter should also drop image refs that were only present on the
       // removed sheet.
       expect(workbookImageManager.imageRefCount.get(imageId) ?? 0).toBe(0);
+      expect(workbookImageManager.imageRefCount.get(backgroundImageId) ?? 0).toBe(0);
+      expect(workbookImageManager.imageRefCount.get(cellImageId) ?? 0).toBe(0);
     } finally {
       app.destroy();
     }
