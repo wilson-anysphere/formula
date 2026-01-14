@@ -13,8 +13,9 @@ use roxmltree::Document;
 use crate::encrypted_package_reader::{DecryptedPackageReader, EncryptionMethod};
 
 use formula_xlsx::offcrypto::{
-    decrypt_aes_cbc_no_padding_in_place, derive_key, hash_password, CryptoError, HashAlgorithm,
-    DEFAULT_MAX_SPIN_COUNT, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
+    decrypt_aes_cbc_no_padding_in_place, derive_iv, derive_key, hash_password, CryptoError,
+    HashAlgorithm, DEFAULT_MAX_SPIN_COUNT, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,
+    VERIFIER_HASH_VALUE_BLOCK,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +45,8 @@ pub(crate) fn decrypted_package_reader<R: Read + Seek>(
     let major = u16::from_le_bytes([encryption_info[0], encryption_info[1]]);
     let minor = u16::from_le_bytes([encryption_info[2], encryption_info[3]]);
 
+    // MS-OFFCRYPTO identifies "Standard" encryption by `versionMinor == 2`, but real-world files
+    // vary the major version across Office generations (2/3/4).
     match (major, minor) {
         (4, 4) => decrypted_package_reader_agile(
             ciphertext_reader,
@@ -302,7 +305,6 @@ fn agile_decrypt_package_key(
     let key_encrypt_key_len = key_len_bytes(password_key.key_bits, "encryptedKey", "keyBits")?;
     let package_key_len = key_len_bytes(info.key_data.key_bits, "keyData", "keyBits")?;
 
-    // Password key encryptor uses IV = saltValue (truncated to blockSize).
     if password_key.block_size != formula_xlsx::offcrypto::AES_BLOCK_SIZE {
         return Err(DecryptError::InvalidInfo(format!(
             "unsupported encryptedKey.blockSize {} (expected {})",
@@ -310,81 +312,123 @@ fn agile_decrypt_package_key(
             formula_xlsx::offcrypto::AES_BLOCK_SIZE
         )));
     }
-    let verifier_iv = password_key
-        .salt_value
-        .get(..password_key.block_size)
-        .ok_or_else(|| {
-            DecryptError::InvalidInfo("encryptedKey.saltValue shorter than blockSize".into())
-        })?;
-
-    let verifier_input = {
-        let k = derive_key(
-            &password_hash,
-            &VERIFIER_HASH_INPUT_BLOCK,
-            key_encrypt_key_len,
-            password_key.hash_algorithm,
-        )
-        .map_err(map_crypto_err("derive_key(verifierHashInput)"))?;
-        let mut decrypted = password_key.encrypted_verifier_hash_input.clone();
-        decrypt_aes_cbc_no_padding_in_place(&k, verifier_iv, &mut decrypted)
-            .map_err(|e| DecryptError::InvalidInfo(format!("decrypt verifierHashInput: {e}")))?;
-        decrypted
-            .get(..password_key.block_size)
-            .ok_or_else(|| {
-                DecryptError::InvalidInfo(
-                    "decrypted verifierHashInput shorter than blockSize".into(),
-                )
-            })?
-            .to_vec()
-    };
-
-    let verifier_hash = {
-        let k = derive_key(
-            &password_hash,
-            &VERIFIER_HASH_VALUE_BLOCK,
-            key_encrypt_key_len,
-            password_key.hash_algorithm,
-        )
-        .map_err(map_crypto_err("derive_key(verifierHashValue)"))?;
-        let mut decrypted = password_key.encrypted_verifier_hash_value.clone();
-        decrypt_aes_cbc_no_padding_in_place(&k, verifier_iv, &mut decrypted)
-            .map_err(|e| DecryptError::InvalidInfo(format!("decrypt verifierHashValue: {e}")))?;
-        decrypted
-            .get(..password_key.hash_size)
-            .ok_or_else(|| {
-                DecryptError::InvalidInfo(
-                    "decrypted verifierHashValue shorter than hashSize".into(),
-                )
-            })?
-            .to_vec()
-    };
-
-    let expected_hash_full = hash_bytes(password_key.hash_algorithm, &verifier_input);
-    let expected_hash = expected_hash_full
-        .get(..password_key.hash_size)
-        .ok_or_else(|| DecryptError::InvalidInfo("hash output shorter than hashSize".into()))?;
-
-    if expected_hash != verifier_hash.as_slice() {
-        return Err(DecryptError::InvalidPassword);
+    enum PasswordKeyIvDerivation {
+        SaltValue,
+        Derived,
     }
 
-    let key_value = {
-        let k = derive_key(
-            &password_hash,
-            &KEY_VALUE_BLOCK,
-            key_encrypt_key_len,
-            password_key.hash_algorithm,
-        )
-        .map_err(map_crypto_err("derive_key(keyValue)"))?;
-        let mut decrypted = password_key.encrypted_key_value.clone();
-        decrypt_aes_cbc_no_padding_in_place(&k, verifier_iv, &mut decrypted)
-            .map_err(|e| DecryptError::InvalidInfo(format!("decrypt encryptedKeyValue: {e}")))?;
-        decrypted
-            .get(..package_key_len)
-            .ok_or_else(|| {
-                DecryptError::InvalidInfo("decrypted keyValue shorter than keyData.keyBits".into())
-            })?
-            .to_vec()
+    let decrypt_with_iv_derivation =
+        |iv_derivation: PasswordKeyIvDerivation| -> Result<Vec<u8>, DecryptError> {
+            let iv_for = |block_key: &[u8]| -> Result<Vec<u8>, DecryptError> {
+                match iv_derivation {
+                    PasswordKeyIvDerivation::SaltValue => Ok(password_key
+                        .salt_value
+                        .get(..password_key.block_size)
+                        .ok_or_else(|| {
+                            DecryptError::InvalidInfo(
+                                "encryptedKey.saltValue shorter than blockSize".into(),
+                            )
+                        })?
+                        .to_vec()),
+                    PasswordKeyIvDerivation::Derived => derive_iv(
+                        &password_key.salt_value,
+                        block_key,
+                        password_key.block_size,
+                        password_key.hash_algorithm,
+                    )
+                    .map_err(map_crypto_err("derive_iv(encryptedKey)")),
+                }
+            };
+
+            let verifier_input = {
+                let k = derive_key(
+                    &password_hash,
+                    &VERIFIER_HASH_INPUT_BLOCK,
+                    key_encrypt_key_len,
+                    password_key.hash_algorithm,
+                )
+                .map_err(map_crypto_err("derive_key(verifierHashInput)"))?;
+                let iv = iv_for(&VERIFIER_HASH_INPUT_BLOCK)?;
+                let mut decrypted = password_key.encrypted_verifier_hash_input.clone();
+                decrypt_aes_cbc_no_padding_in_place(&k, &iv, &mut decrypted).map_err(|e| {
+                    DecryptError::InvalidInfo(format!("decrypt verifierHashInput: {e}"))
+                })?;
+                decrypted
+                    .get(..password_key.block_size)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidInfo(
+                            "decrypted verifierHashInput shorter than blockSize".into(),
+                        )
+                    })?
+                    .to_vec()
+            };
+
+            let verifier_hash = {
+                let k = derive_key(
+                    &password_hash,
+                    &VERIFIER_HASH_VALUE_BLOCK,
+                    key_encrypt_key_len,
+                    password_key.hash_algorithm,
+                )
+                .map_err(map_crypto_err("derive_key(verifierHashValue)"))?;
+                let iv = iv_for(&VERIFIER_HASH_VALUE_BLOCK)?;
+                let mut decrypted = password_key.encrypted_verifier_hash_value.clone();
+                decrypt_aes_cbc_no_padding_in_place(&k, &iv, &mut decrypted).map_err(|e| {
+                    DecryptError::InvalidInfo(format!("decrypt verifierHashValue: {e}"))
+                })?;
+                decrypted
+                    .get(..password_key.hash_size)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidInfo(
+                            "decrypted verifierHashValue shorter than hashSize".into(),
+                        )
+                    })?
+                    .to_vec()
+            };
+
+            let expected_hash_full = hash_bytes(password_key.hash_algorithm, &verifier_input);
+            let expected_hash = expected_hash_full.get(..password_key.hash_size).ok_or_else(|| {
+                DecryptError::InvalidInfo("hash output shorter than hashSize".into())
+            })?;
+
+            if expected_hash != verifier_hash.as_slice() {
+                return Err(DecryptError::InvalidPassword);
+            }
+
+            let key_value = {
+                let k = derive_key(
+                    &password_hash,
+                    &KEY_VALUE_BLOCK,
+                    key_encrypt_key_len,
+                    password_key.hash_algorithm,
+                )
+                .map_err(map_crypto_err("derive_key(keyValue)"))?;
+                let iv = iv_for(&KEY_VALUE_BLOCK)?;
+                let mut decrypted = password_key.encrypted_key_value.clone();
+                decrypt_aes_cbc_no_padding_in_place(&k, &iv, &mut decrypted).map_err(|e| {
+                    DecryptError::InvalidInfo(format!("decrypt encryptedKeyValue: {e}"))
+                })?;
+                decrypted
+                    .get(..package_key_len)
+                    .ok_or_else(|| {
+                        DecryptError::InvalidInfo(
+                            "decrypted keyValue shorter than keyData.keyBits".into(),
+                        )
+                    })?
+                    .to_vec()
+            };
+
+            Ok(key_value)
+        };
+
+    // Some producers vary how the AES-CBC IV is derived for the password-key-encryptor fields. Try
+    // both strategies, falling back when the verifier hash doesn't match.
+    let key_value = match decrypt_with_iv_derivation(PasswordKeyIvDerivation::SaltValue) {
+        Ok(key) => key,
+        Err(DecryptError::InvalidPassword) => {
+            decrypt_with_iv_derivation(PasswordKeyIvDerivation::Derived)?
+        }
+        Err(other) => return Err(other),
     };
 
     Ok(key_value)

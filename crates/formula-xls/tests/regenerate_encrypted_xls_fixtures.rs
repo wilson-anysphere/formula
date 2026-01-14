@@ -728,4 +728,11 @@ fn regenerate_encrypted_xls_fixtures() {
     std::fs::write(&cryptoapi_path, cryptoapi_bytes).unwrap_or_else(|err| {
         panic!("write encrypted fixture {cryptoapi_path:?} failed: {err}");
     });
+
+    // Unicode-password variant (non-ASCII).
+    let cryptoapi_unicode_path = fixtures_dir.join("biff8_rc4_cryptoapi_unicode_pw_open.xls");
+    let cryptoapi_unicode_bytes = build_cryptoapi_encrypted_xls_bytes("pässwörd");
+    std::fs::write(&cryptoapi_unicode_path, cryptoapi_unicode_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {cryptoapi_unicode_path:?} failed: {err}");
+    });
 }

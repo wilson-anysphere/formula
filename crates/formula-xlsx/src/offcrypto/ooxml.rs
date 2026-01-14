@@ -39,6 +39,10 @@ pub fn decrypt_ooxml_encrypted_package(
     let major = u16::from_le_bytes([encryption_info_stream[0], encryption_info_stream[1]]);
     let minor = u16::from_le_bytes([encryption_info_stream[2], encryption_info_stream[3]]);
 
+    // MS-OFFCRYPTO identifies "Standard" encryption by `versionMinor == 2`, but real-world files
+    // vary the major version across Office generations (2/3/4). Keep this aligned with our
+    // detection logic (`formula-io` / `ooxml-encryption-info`) so we can decrypt 2.2/3.2/4.2
+    // Standard-encrypted workbooks.
     match (major, minor) {
         (4, 4) => decrypt_agile_encrypted_package(
             encryption_info_stream,

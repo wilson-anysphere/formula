@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use formula_model::CellValue;
 
 const PASSWORD: &str = "correct horse battery staple";
+const UNICODE_PASSWORD: &str = "pässwörd";
 
 fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -11,6 +12,14 @@ fn fixture_path() -> PathBuf {
         .join("fixtures")
         .join("encrypted")
         .join("biff8_rc4_cryptoapi_pw_open.xls")
+}
+
+fn unicode_fixture_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("encrypted")
+        .join("biff8_rc4_cryptoapi_unicode_pw_open.xls")
 }
 
 fn read_workbook_stream_from_xls_bytes(data: &[u8]) -> Vec<u8> {
@@ -163,6 +172,24 @@ fn decrypts_rc4_cryptoapi_biff8_xls() {
 #[test]
 fn rc4_cryptoapi_wrong_password_errors() {
     let err = formula_xls::import_xls_path_with_password(fixture_path(), "wrong password")
+        .expect_err("expected wrong password error");
+    assert!(matches!(
+        err,
+        formula_xls::ImportError::Decrypt(formula_xls::DecryptError::WrongPassword)
+    ));
+}
+
+#[test]
+fn decrypts_rc4_cryptoapi_biff8_xls_with_unicode_password() {
+    let result = formula_xls::import_xls_path_with_password(unicode_fixture_path(), UNICODE_PASSWORD)
+        .expect("expected decrypt + import to succeed");
+    let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
+}
+
+#[test]
+fn rc4_cryptoapi_unicode_password_wrong_password_errors() {
+    let err = formula_xls::import_xls_path_with_password(unicode_fixture_path(), "wrong password")
         .expect_err("expected wrong password error");
     assert!(matches!(
         err,

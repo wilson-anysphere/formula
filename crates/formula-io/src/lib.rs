@@ -1540,7 +1540,10 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
         });
     };
 
-    let decrypted = match xlsx::decrypt_agile_encrypted_package(
+    // Agile (4.4): prefer the strict decryptor in `formula-xlsx` because it validates
+    // `dataIntegrity` when present. Some producers omit `dataIntegrity`; fall back to a more
+    // tolerant decryption path in that case.
+    let decrypted = match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
         &encryption_info,
         &encrypted_package,
         password,
@@ -1558,6 +1561,58 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                     version_major: major,
                     version_minor: minor,
                 })
+            }
+            xlsx::OffCryptoError::MissingRequiredElement { ref element }
+                if element.eq_ignore_ascii_case("dataIntegrity") =>
+            {
+                // The `EncryptedPackage` stream starts with an 8-byte plaintext length prefix.
+                if encrypted_package.len() < 8 {
+                    return Err(Error::UnsupportedOoxmlEncryption {
+                        path: path.to_path_buf(),
+                        version_major,
+                        version_minor,
+                    });
+                }
+                let mut len_bytes = [0u8; 8];
+                len_bytes.copy_from_slice(&encrypted_package[..8]);
+                let plaintext_len = u64::from_le_bytes(len_bytes);
+                let ciphertext = &encrypted_package[8..];
+
+                let reader = encrypted_ooxml::decrypted_package_reader(
+                    std::io::Cursor::new(ciphertext),
+                    plaintext_len,
+                    &encryption_info,
+                    password,
+                )
+                .map_err(|err| match err {
+                    encrypted_ooxml::DecryptError::InvalidPassword => Error::InvalidPassword {
+                        path: path.to_path_buf(),
+                    },
+                    encrypted_ooxml::DecryptError::UnsupportedVersion { major, minor } => {
+                        Error::UnsupportedOoxmlEncryption {
+                            path: path.to_path_buf(),
+                            version_major: major,
+                            version_minor: minor,
+                        }
+                    }
+                    // Preserve historical "unsupported encryption" semantics for malformed/partial
+                    // encrypted containers.
+                    encrypted_ooxml::DecryptError::InvalidInfo(_)
+                    | encrypted_ooxml::DecryptError::Io(_) => Error::UnsupportedOoxmlEncryption {
+                        path: path.to_path_buf(),
+                        version_major,
+                        version_minor,
+                    },
+                })?;
+
+                let mut buf = Vec::new();
+                let mut reader = reader;
+                reader.read_to_end(&mut buf).map_err(|_source| Error::UnsupportedOoxmlEncryption {
+                    path: path.to_path_buf(),
+                    version_major,
+                    version_minor,
+                })?;
+                buf
             }
             _ => {
                 return Err(Error::UnsupportedOoxmlEncryption {
@@ -1611,6 +1666,13 @@ fn sniff_ooxml_zip_workbook_kind(decrypted_bytes: &[u8]) -> Option<WorkbookForma
         });
     }
     None
+}
+
+fn zip_contains_workbook_bin(decrypted_bytes: &[u8]) -> bool {
+    matches!(
+        sniff_ooxml_zip_workbook_kind(decrypted_bytes),
+        Some(WorkbookFormat::Xlsb)
+    )
 }
 
 fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> {

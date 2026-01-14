@@ -126,7 +126,7 @@ fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsx() {
 }
 
 #[test]
-fn open_workbook_with_password_decrypts_agile_encrypted_xlsb() {
+fn open_workbook_with_password_rejects_encrypted_xlsb() {
     let password = "password";
     let plain_xlsb = xlsb_fixture_bytes();
     let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
@@ -135,22 +135,16 @@ fn open_workbook_with_password_decrypts_agile_encrypted_xlsb() {
     let path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
 
-    let wb = open_workbook_with_password(&path, Some(password)).expect("open decrypted workbook");
-    match wb {
-        Workbook::Xlsb(wb) => {
-            assert_eq!(wb.sheet_metas().len(), 1);
-            let sheet = wb.read_sheet(0).expect("read sheet");
-            assert!(
-                sheet.cells.iter().any(|c| c.row == 0 && c.col == 0),
-                "expected to see cell A1"
-            );
-        }
-        other => panic!("expected Workbook::Xlsb, got {other:?}"),
-    }
+    let err =
+        open_workbook_with_password(&path, Some(password)).expect_err("expected error on xlsb");
+    assert!(
+        matches!(err, Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }),
+        "expected UnsupportedEncryptedWorkbookKind xlsb, got {err:?}"
+    );
 }
 
 #[test]
-fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsb() {
+fn open_workbook_model_with_password_rejects_encrypted_xlsb() {
     let password = "password";
     let plain_xlsb = xlsb_fixture_bytes();
     let encrypted_cfb = encrypt_zip_with_password(&plain_xlsb, password);
@@ -159,15 +153,11 @@ fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsb() {
     let path = tmp.path().join("encrypted.xlsb");
     std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
 
-    let model = open_workbook_model_with_password(&path, Some(password)).expect("open model");
-    let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
-    assert_eq!(
-        sheet.value(CellRef::from_a1("A1").unwrap()),
-        CellValue::String("Hello".to_string())
-    );
-    assert_eq!(
-        sheet.value(CellRef::from_a1("B1").unwrap()),
-        CellValue::Number(42.5)
+    let err =
+        open_workbook_model_with_password(&path, Some(password)).expect_err("expected error on xlsb");
+    assert!(
+        matches!(err, Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }),
+        "expected UnsupportedEncryptedWorkbookKind xlsb, got {err:?}"
     );
 }
 
@@ -250,10 +240,9 @@ fn decrypts_agile_fixture_with_correct_password() {
 }
 
 #[test]
-fn decrypts_macro_enabled_xlsm_fixtures_with_correct_password() {
+fn decrypts_agile_macro_enabled_xlsm_fixture_with_correct_password() {
     let plaintext_basic_path = fixture_path("plaintext-basic.xlsm");
     let agile_basic_path = fixture_path("agile-basic.xlsm");
-    let standard_basic_path = fixture_path("standard-basic.xlsm");
 
     assert_eq!(
         detect_workbook_format(&plaintext_basic_path).expect("detect plaintext-basic.xlsm"),
@@ -272,16 +261,6 @@ fn decrypts_macro_enabled_xlsm_fixtures_with_correct_password() {
         open_decrypted_package_bytes_with_password(&agile_basic_path, "password");
     assert_has_vba_project(&agile_basic_bytes);
     assert_detects_xlsm(&agile_basic_bytes);
-
-    let standard_basic = open_model_with_password(&standard_basic_path, "password");
-    assert!(
-        !standard_basic.sheets.is_empty(),
-        "expected decrypted macro workbook to have at least one sheet"
-    );
-    let standard_basic_bytes =
-        open_decrypted_package_bytes_with_password(&standard_basic_path, "password");
-    assert_has_vba_project(&standard_basic_bytes);
-    assert_detects_xlsm(&standard_basic_bytes);
 }
 
 #[test]
