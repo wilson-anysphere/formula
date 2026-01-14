@@ -425,6 +425,8 @@ export class FormulaBarFunctionAutocompleteController {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "formula-bar-function-autocomplete-item";
+      // Keep focus on the textarea; options are managed via aria-activedescendant.
+      button.tabIndex = -1;
       button.setAttribute("role", "option");
       button.dataset.testid = "formula-function-autocomplete-item";
       button.dataset.name = item.name;
