@@ -758,6 +758,9 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     const dropdown = queryFunctionAutocomplete(host);
     expect(dropdown.hasAttribute("hidden")).toBe(false);
+    expect(view.root.classList.contains("formula-bar--function-autocomplete-open")).toBe(true);
+    expect(view.textarea.getAttribute("aria-expanded")).toBe("true");
+    expect(view.textarea.hasAttribute("aria-activedescendant")).toBe(true);
 
     view.commitEdit();
 
@@ -766,6 +769,9 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.model.isEditing).toBe(false);
     expect(view.model.activeCell.input).toBe("=VLO");
     expect(dropdown.hasAttribute("hidden")).toBe(true);
+    expect(view.root.classList.contains("formula-bar--function-autocomplete-open")).toBe(false);
+    expect(view.textarea.getAttribute("aria-expanded")).toBe("false");
+    expect(view.textarea.hasAttribute("aria-activedescendant")).toBe(false);
 
     host.remove();
   });
@@ -786,6 +792,9 @@ describe("FormulaBarView commit/cancel UX", () => {
 
     const dropdown = queryFunctionAutocomplete(host);
     expect(dropdown.hasAttribute("hidden")).toBe(false);
+    expect(view.root.classList.contains("formula-bar--function-autocomplete-open")).toBe(true);
+    expect(view.textarea.getAttribute("aria-expanded")).toBe("true");
+    expect(view.textarea.hasAttribute("aria-activedescendant")).toBe(true);
 
     view.cancelEdit();
 
@@ -794,6 +803,9 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.model.isEditing).toBe(false);
     expect(view.textarea.value).toBe("orig");
     expect(dropdown.hasAttribute("hidden")).toBe(true);
+    expect(view.root.classList.contains("formula-bar--function-autocomplete-open")).toBe(false);
+    expect(view.textarea.getAttribute("aria-expanded")).toBe("false");
+    expect(view.textarea.hasAttribute("aria-activedescendant")).toBe(false);
 
     host.remove();
   });
