@@ -328,6 +328,33 @@ fn structured_reference_items_are_not_translated() {
 }
 
 #[test]
+fn structured_reference_escaped_brackets_are_not_translated() {
+    // Excel escapes `]` inside structured references as `]]` (e.g. column name `A]B` is written
+    // as `A]]B`). Locale translation must preserve these escapes by treating `[...]` as opaque.
+    let canonical = "=SUM(Table1[[#Headers],[A]]B]],1)";
+    let localized = locale::localize_formula(canonical, &locale::DE_DE).unwrap();
+    assert_eq!(localized, "=SUMME(Table1[[#Headers],[A]]B]];1)");
+
+    let canonical_roundtrip = locale::canonicalize_formula(&localized, &locale::DE_DE).unwrap();
+    assert_eq!(canonical_roundtrip, canonical);
+}
+
+#[test]
+fn external_workbook_prefixes_inside_brackets_are_not_translated() {
+    // External workbook references use `[...]` for the workbook name, and the sheet name follows
+    // the closing bracket: `[Book.xlsx]Sheet1!A1`.
+    //
+    // Locale translation must never rewrite workbook/sheet identifiers inside references; only the
+    // surrounding formula syntax is localized.
+    let canonical = "=SUM([Book1.xlsx]Sheet1!A1,1)";
+    let localized = locale::localize_formula(canonical, &locale::DE_DE).unwrap();
+    assert_eq!(localized, "=SUMME([Book1.xlsx]Sheet1!A1;1)");
+
+    let canonical_roundtrip = locale::canonicalize_formula(&localized, &locale::DE_DE).unwrap();
+    assert_eq!(canonical_roundtrip, canonical);
+}
+
+#[test]
 fn de_de_translation_table_covers_function_catalog() {
     let mut covered = HashSet::new();
     let tsv = include_str!("../src/locale/data/de-DE.tsv");
