@@ -138,7 +138,8 @@ Notes:
     - per-OS artifacts: `desktop-perf-<os>`
     - cross-OS merged artifact: `desktop-perf-platform-matrix` (`desktop-perf-platform-matrix.json`)
     - includes best-effort WebView runtime metadata (WebKitGTK / WKWebView / WebView2 version) to help attribute regressions to runner image updates
- 
+    - manual `workflow_dispatch` runs can override run counts/timeouts via inputs: `startupRuns`, `startupTimeoutMs`, `memoryRuns`, `memoryTimeoutMs`, `memorySettleMs`
+  
   For on-demand PR runs (same-repo PRs only), maintainers can apply the `desktop-perf-matrix` / `run-desktop-perf` label to trigger:
   - `.github/workflows/desktop-perf-platform-matrix-pr.yml`
     - runs the same matrix on the PR head SHA and posts a summary comment to the PR
