@@ -104,7 +104,7 @@ pub(crate) fn maybe_decrypt_office_encrypted_package<'a>(
     )
     .map_err(map_offcrypto_error)?;
 
-    // The decrypted content should be the underlying ZIP package (`.xlsx`/`.xlsm`). Sanity check
+    // The decrypted content should be the underlying ZIP package (`.xlsx`/`.xlsm`/`.xlsb`). Sanity check
     // with ZIP parsing so callers get a clearer error than "unexpected EOF" later.
     if zip::ZipArchive::new(Cursor::new(decrypted.as_slice())).is_err() {
         return Err(EncryptedOoxmlError::InvalidEncryptedWorkbook(
