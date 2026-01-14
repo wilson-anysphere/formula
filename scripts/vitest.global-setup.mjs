@@ -4,6 +4,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export default async function globalSetup() {
+  // Keep `pnpm test:vitest --silent` readable by default. Individual suites can
+  // override by setting LOG_LEVEL explicitly (or by constructing a logger with an
+  // explicit level/stream).
+  if (!process.env.LOG_LEVEL) {
+    process.env.LOG_LEVEL = "silent";
+  }
+
   if (process.env.FORMULA_SKIP_WASM_BUILD === "1" || process.env.FORMULA_SKIP_WASM_BUILD === "true") {
     return;
   }
