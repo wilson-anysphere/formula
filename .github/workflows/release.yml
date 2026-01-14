@@ -755,6 +755,9 @@ jobs:
           # bounded for tagged releases. rust-cache still provides fast restores for the Cargo
           # registry/git index and respects our CARGO_HOME override above.
           cache-targets: "false"
+          # We cache cargo-installed tools explicitly (wasm-pack/cargo-tauri) with versioned keys
+          # below, so skip caching ~/.cargo/bin here to avoid duplicate cache uploads/downloads.
+          cache-bin: "false"
           # Save the registry/git cache even when later release steps fail, so reruns
           # don't start from a cold dependency download.
           cache-on-failure: "true"
