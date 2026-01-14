@@ -1132,6 +1132,14 @@ impl Engine {
     }
 
     /// Rename a worksheet by its stable [`SheetId`].
+    ///
+    /// This matches [`Engine::rename_sheet`] semantics:
+    /// - Stored formula text is rewritten across the workbook (cells, tables, and defined names).
+    /// - External workbook references (`[Book.xlsx]Sheet1!A1`) are **not** rewritten.
+    ///
+    /// If `id` is invalid or already deleted, this is a no-op and returns `Ok(())`.
+    ///
+    /// Renaming does not change the stable sheet id.
     pub fn rename_sheet_by_id(
         &mut self,
         id: SheetId,
@@ -2048,6 +2056,11 @@ impl Engine {
     }
 
     /// Delete a worksheet by its stable [`SheetId`].
+    ///
+    /// This matches [`Engine::delete_sheet`] semantics (including formula rewrites and dependency
+    /// graph rebuilds).
+    ///
+    /// If `id` is invalid or already deleted, this is a no-op and returns `Ok(())`.
     pub fn delete_sheet_by_id(&mut self, id: SheetId) -> Result<(), SheetLifecycleError> {
         if !self.workbook.sheet_exists(id) {
             return Ok(());

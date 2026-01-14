@@ -30,6 +30,9 @@ fn sheet_lifecycle_by_id_rename_reorder_delete() {
     engine.rename_sheet_by_id(sheet2_id, "Renamed").unwrap();
     assert_eq!(engine.sheet_id("Renamed"), Some(sheet2_id));
     assert_eq!(engine.sheet_name(sheet2_id), Some("Renamed"));
+    // Old display-name lookups should no longer resolve, but stable sheet keys remain usable.
+    assert_eq!(engine.sheet_id("Sheet2"), None);
+    assert_eq!(engine.sheet_id("sheet2_key"), Some(sheet2_id));
 
     // Delete by id should tombstone the sheet and invalidate lookups by id and name.
     engine.delete_sheet_by_id(sheet1_id).unwrap();
@@ -116,6 +119,7 @@ fn sheet_lifecycle_by_id_rewrites_formulas_and_preserves_external_refs() {
     engine.rename_sheet_by_id(sheet1_id, "Renamed").unwrap();
     assert_eq!(engine.sheet_name(sheet1_id), Some("Renamed"));
     assert_eq!(engine.sheet_id("Renamed"), Some(sheet1_id));
+    assert_eq!(engine.sheet_id("Sheet1"), None);
 
     assert_eq!(
         engine.get_cell_formula("Sheet2", "A1"),
