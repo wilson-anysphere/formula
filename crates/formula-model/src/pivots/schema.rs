@@ -241,36 +241,6 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     }
 }
 
-fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    // DAX identifiers that contain spaces/punctuation (or that start with a non-identifier char)
-    // must be single-quoted: `'Table Name'`.
-    //
-    // We use a conservative ASCII-only rule here: if the identifier is not `[_A-Za-z][_0-9A-Za-z]*`,
-    // quote it. This matches common DAX usage and avoids emitting invalid references for
-    // user-provided table names.
-    let mut chars = raw.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return true,
-    }
-
-    chars.any(|c| !(c.is_ascii_alphanumeric() || c == '_'))
-}
-
-fn quote_dax_identifier(raw: &str) -> String {
-    // In DAX, single quotes inside a quoted identifier are escaped by doubling them.
-    let mut out = String::with_capacity(raw.len() + 2);
-    out.push('\'');
-    for ch in raw.chars() {
-        if ch == '\'' {
-            out.push('\'');
-        }
-        out.push(ch);
-    }
-    out.push('\'');
-    out
-}
-
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
