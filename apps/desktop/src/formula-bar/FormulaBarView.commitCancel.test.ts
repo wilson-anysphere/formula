@@ -220,6 +220,38 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("does not commit/cancel on Enter/Escape while focused for copy in read-only mode", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    view.setActiveCell({ address: "A1", input: "orig", value: null });
+
+    view.setReadOnly(true);
+    view.focus({ cursor: "end" });
+
+    expect(document.activeElement).toBe(view.textarea);
+    expect(view.model.isEditing).toBe(false);
+
+    const enter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+
+    const escape = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.activeCell.input).toBe("orig");
+    expect(view.textarea.value).toBe("orig");
+
+    host.remove();
+  });
+
   it("setReadOnly(false) re-enables focus-to-edit behavior after being read-only", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
