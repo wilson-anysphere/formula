@@ -86,7 +86,8 @@ Why:
 Update guidance:
 
 - When updating a pinned action, keep the ref as a full 40-character SHA and keep a trailing comment
-  with the upstream version tag for maintainability.
+  with the upstream ref (usually a version tag like `v4.3.1`; sometimes a branch like `master`) for
+  maintainability.
 - To resolve a tag to a commit SHA (handles annotated tags), run:
 
   ```bash
