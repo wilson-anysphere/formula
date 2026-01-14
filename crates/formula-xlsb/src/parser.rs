@@ -397,11 +397,20 @@ impl<'a> RecordReader<'a> {
             .ok_or(Error::UnexpectedEof)?;
         self.offset += byte_len;
 
-        let mut units = Vec::with_capacity(len_chars);
-        for chunk in raw.chunks_exact(2) {
-            units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+        // Avoid allocating a full `Vec<u16>` for attacker-controlled string lengths; decode
+        // UTF-16LE directly into a `String`. This keeps peak memory closer to the final UTF-8
+        // output size (the record payload bytes are already buffered elsewhere).
+        let mut out = String::with_capacity(raw.len());
+        let iter = raw
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+        for decoded in std::char::decode_utf16(iter) {
+            match decoded {
+                Ok(ch) => out.push(ch),
+                Err(_) => out.push('\u{FFFD}'),
+            }
         }
-        Ok(String::from_utf16_lossy(&units))
+        Ok(out)
     }
 
     pub(crate) fn read_slice(&mut self, len: usize) -> Result<&'a [u8], Error> {
