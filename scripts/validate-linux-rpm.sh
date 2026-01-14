@@ -143,7 +143,7 @@ fi
 read_tauri_conf_value() {
   local key="$1"
   if command -v python3 >/dev/null 2>&1; then
-    python3 - "$TAURI_CONF" "$key" <<'PY'
+    python3 - "$TAURI_CONF" "$key" <<'PY' 2>/dev/null || true
 import json
 import sys
 
@@ -159,14 +159,19 @@ PY
   fi
 
   if command -v node >/dev/null 2>&1; then
-    node -e '
-      const fs = require("fs");
-      const path = process.argv[1];
-      const key = process.argv[2];
-      const conf = JSON.parse(fs.readFileSync(path, "utf8"));
-      const val = conf?.[key];
-      if (typeof val === "string") process.stdout.write(val.trim());
-    ' "$TAURI_CONF" "$key"
+    # Best-effort fallback when python is unavailable.
+    node - "$TAURI_CONF" "$key" <<'NODE' 2>/dev/null || true
+const fs = require("node:fs");
+const path = process.argv[2];
+const key = process.argv[3];
+try {
+  const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+  const val = conf?.[key];
+  if (typeof val === "string") process.stdout.write(val.trim());
+} catch {
+  // ignore
+}
+NODE
     return 0
   fi
 
