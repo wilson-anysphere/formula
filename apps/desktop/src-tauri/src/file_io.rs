@@ -1028,7 +1028,9 @@ fn read_encrypted_ooxml_workbook_blocking(
     let decrypted_zip = match formula_office_crypto::decrypt_encrypted_package(&raw_ole, password) {
         Ok(bytes) => bytes,
         Err(err) => match err {
-            OfficeCryptoError::InvalidPassword => anyhow::bail!("{INVALID_PASSWORD_PREFIX} {err}"),
+            OfficeCryptoError::InvalidPassword | OfficeCryptoError::IntegrityCheckFailed => {
+                anyhow::bail!("{INVALID_PASSWORD_PREFIX} {err}")
+            }
             other => anyhow::bail!("encrypted workbook not supported: {other}"),
         },
     };
@@ -4677,6 +4679,61 @@ mod tests {
             .expect("Sheet1 should exist");
         let cell = sheet.get_cell(0, 0);
         assert_eq!(cell.computed_value, CellScalar::Number(123.0));
+    }
+
+    #[test]
+    fn encrypted_open_maps_integrity_check_failed_to_invalid_password_error() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("tampered.xlsx");
+        let password = "password";
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.ensure_sheet_ids();
+        workbook.sheets[0].set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
+
+        // Encrypt a valid ZIP package, then tamper with the ciphertext to trigger an HMAC mismatch.
+        let zip_bytes = build_xlsx_bytes_blocking(&out_path, &workbook).expect("build xlsx bytes");
+        let ole_bytes = encrypt_package_to_ole_bytes(zip_bytes.as_ref(), password)
+            .expect("encrypt package to ole");
+
+        let mut ole = cfb::CompoundFile::open(Cursor::new(ole_bytes)).expect("open cfb");
+        let mut encryption_info = Vec::new();
+        ole.open_stream("EncryptionInfo")
+            .expect("open EncryptionInfo stream")
+            .read_to_end(&mut encryption_info)
+            .expect("read EncryptionInfo bytes");
+        let mut encrypted_package = Vec::new();
+        ole.open_stream("EncryptedPackage")
+            .expect("open EncryptedPackage stream")
+            .read_to_end(&mut encrypted_package)
+            .expect("read EncryptedPackage bytes");
+        assert!(
+            encrypted_package.len() > 8,
+            "expected EncryptedPackage to include ciphertext bytes"
+        );
+        encrypted_package[8] ^= 0x01;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut out = cfb::CompoundFile::create(cursor).expect("create cfb");
+        out.create_stream("EncryptionInfo")
+            .expect("create EncryptionInfo stream")
+            .write_all(&encryption_info)
+            .expect("write EncryptionInfo bytes");
+        out.create_stream("EncryptedPackage")
+            .expect("create EncryptedPackage stream")
+            .write_all(&encrypted_package)
+            .expect("write EncryptedPackage bytes");
+        let tampered_ole = out.into_inner().into_inner();
+
+        write_file_atomic(&out_path, &tampered_ole).expect("write tampered encrypted workbook");
+
+        let err = read_xlsx_blocking_with_password(&out_path, Some(password))
+            .expect_err("expected integrity check failure to error");
+        assert!(
+            err.to_string().starts_with(INVALID_PASSWORD_PREFIX),
+            "expected integrity failures to map to invalid-password prefix, got: {err}"
+        );
     }
 
     fn find_xlsb_cell_record(
