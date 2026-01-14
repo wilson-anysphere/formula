@@ -907,10 +907,19 @@ export interface GoalSeekParams {
   targetValue: number;
   changingCell: CellRef;
 
+  // Default: 100 (from `GoalSeekParams::new`).
   maxIterations: number;
+  // Default: 0.001 (from `GoalSeekParams::new`).
   tolerance: number;
+  /**
+   * Finite-difference derivative step.
+   *
+   * - Default: `null` (auto), in which case Rust uses `(abs(input)*0.001).max(0.001)` per-iteration.
+   */
   derivativeStep?: number | null;
+  // Default: 1e-10 (from `GoalSeekParams::new`).
   minDerivative: number;
+  // Default: 50 (from `GoalSeekParams::new`).
   maxBracketExpansions: number;
 }
 
