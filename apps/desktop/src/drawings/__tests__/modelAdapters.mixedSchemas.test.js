@@ -25,3 +25,25 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects accepts mixed schema: model
   });
 });
 
+test("convertDocumentSheetDrawingsToUiDrawingObjects accepts mixed schema: internally-tagged kind enum + DocumentController anchor", () => {
+  const rawXml = "<xdr:sp><a:xfrm rot=\"60000\"/></xdr:sp>";
+  const drawings = [
+    {
+      id: "7",
+      zOrder: 0,
+      kind: { type: "Shape", value: { raw_xml: rawXml } },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 0, yEmu: 0 },
+        size: { cx: 100, cy: 50 },
+      },
+    },
+  ];
+
+  const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings);
+  assert.equal(ui.length, 1);
+  assert.equal(ui[0]?.kind?.type, "shape");
+  assert.equal(ui[0]?.kind?.rawXml ?? ui[0]?.kind?.raw_xml, rawXml);
+  // The formula-model kind includes a raw transform; ensure it can be extracted.
+  assert.equal(ui[0]?.transform?.rotationDeg, 1);
+});

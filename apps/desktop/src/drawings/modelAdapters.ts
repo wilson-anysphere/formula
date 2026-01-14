@@ -869,6 +869,12 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
 
 function convertDocumentDrawingKindToUiKind(kindJson: unknown): DrawingObjectKind | null {
   if (!isRecord(kindJson)) return null;
+  // If the kind is stored as an internally-tagged enum (e.g. `{ type: "Shape", value: {...} }`),
+  // prefer the formula-model adapter. DocumentController drawings should store kind metadata in a
+  // flat shape; treating a tagged enum as a DocumentController kind can accidentally drop nested
+  // payloads like `raw_xml`.
+  const contentCandidate = pick(kindJson, ["value", "content"]);
+  if (isRecord(contentCandidate)) return null;
   const type = normalizeEnumTag(readOptionalString(pick(kindJson, ["type"])) ?? "");
   const rawXml = readOptionalString(pick(kindJson, ["rawXml", "raw_xml"]));
   const label = readOptionalString(pick(kindJson, ["label"]));
