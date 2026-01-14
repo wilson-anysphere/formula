@@ -35,3 +35,10 @@ of the collab stack doesn’t have to re-implement it.
   `yjs` import. If the entire document was created by a foreign Yjs build, mixing
   local types into it is unsafe; in that case the helpers fall back to returning
   the existing foreign types.
+- `Y.Text` has an extra caveat: even when the `Y.Text` instance itself is from the
+  local module, applying updates via a foreign module instance can leave its internal
+  `Item.content` objects (ContentString/ContentFormat/ContentEmbed/ContentType) with
+  foreign constructors. Because Yjs uses constructor equality checks for rich-text
+  operations, this can make `toString()` / `toDelta()` return empty results. The
+  helpers in this package patch content prototypes (by internal `getRef()` ids) in
+  `getTextRoot`, `replaceForeignRootType`, and `yjsValueToJson` to keep reads stable.
