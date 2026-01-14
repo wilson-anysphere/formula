@@ -37,6 +37,14 @@
   font-weight: 700;
 }
 
+.dialog__loading {
+  padding: var(--space-5);
+}
+
+.dialog__loading .dialog__controls {
+  --dialog-controls-margin-top: var(--space-4);
+}
+
 .dialog__controls {
   --dialog-controls-gap: var(--space-3);
   --dialog-controls-margin-top: var(--space-5);

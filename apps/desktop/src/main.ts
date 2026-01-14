@@ -9052,7 +9052,7 @@ function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (ne
         "div",
         { className: "dialog__loading" },
         React.createElement("div", null, "Failed to load Page Setup dialog."),
-        React.createElement("button", { type: "button", onClick: close }, "Close"),
+        React.createElement("div", { className: "dialog__controls" }, React.createElement("button", { type: "button", onClick: close }, "Close")),
       );
     }
 
@@ -9363,7 +9363,7 @@ function showPrintPreviewDialogModal(args: { bytes: Uint8Array; filename: string
   // `data-keybinding-barrier` prevents global spreadsheet keybindings from firing while the
   // user is interacting with the modal (e.g. Cmd+P should not re-trigger Print).
   dialog.className = "dialog print-preview-dialog";
-  dialog.dataset.keybindingBarrier = "true";
+  markKeybindingBarrier(dialog);
   dialog.setAttribute("aria-label", "Print Preview");
 
   const container = document.createElement("div");
@@ -9397,7 +9397,7 @@ function showPrintPreviewDialogModal(args: { bytes: Uint8Array; filename: string
         "div",
         { className: "dialog__loading" },
         React.createElement("div", null, "Failed to load Print Preview."),
-        React.createElement("button", { type: "button", onClick: close }, "Close"),
+        React.createElement("div", { className: "dialog__controls" }, React.createElement("button", { type: "button", onClick: close }, "Close")),
       );
     }
 
