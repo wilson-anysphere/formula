@@ -13,6 +13,8 @@ use sha1::{Digest as _, Sha1};
 const CALG_RC4: u32 = 0x0000_6801;
 const CALG_SHA1: u32 = 0x0000_8004;
 const PROV_RSA_FULL: u32 = 1;
+const F_CRYPTOAPI: u32 = 0x0000_0004;
+const F_AES: u32 = 0x0000_0020;
 const SPIN_COUNT: u32 = 50_000;
 const RC4_BLOCK_SIZE: usize = 0x200;
 
@@ -128,7 +130,9 @@ fn build_encryption_info_standard_rc4_keysize_zero(
     // EncryptionVersionInfo (Standard): 3.2
     out.extend_from_slice(&3u16.to_le_bytes()); // major
     out.extend_from_slice(&2u16.to_le_bytes()); // minor
-    out.extend_from_slice(&0u32.to_le_bytes()); // flags
+    // Standard/CryptoAPI EncryptionInfo commonly uses 0x0000_0040 for this outer flags field.
+    // The critical bits for decryptors are in the inner `EncryptionHeader.flags`.
+    out.extend_from_slice(&0x0000_0040u32.to_le_bytes()); // flags
 
     // EncryptionHeader
     let csp_name = "Microsoft Enhanced Cryptographic Provider v1.0";
@@ -139,7 +143,10 @@ fn build_encryption_info_standard_rc4_keysize_zero(
     csp_utf16le.extend_from_slice(&0u16.to_le_bytes()); // NUL terminator
 
     let mut header = Vec::new();
-    header.extend_from_slice(&0u32.to_le_bytes()); // Flags
+    // MS-OFFCRYPTO Standard `EncryptionHeader.flags`:
+    // - fCryptoAPI must be set for Standard/CryptoAPI encryption.
+    // - fAES must be unset for RC4.
+    header.extend_from_slice(&(F_CRYPTOAPI & !F_AES).to_le_bytes()); // Flags
     header.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
     header.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgID
     header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // AlgIDHash
@@ -238,4 +245,3 @@ fn decrypts_standard_cryptoapi_rc4_with_keysize_zero() {
         CellValue::String("Hello".to_string())
     );
 }
-
