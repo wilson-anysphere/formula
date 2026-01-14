@@ -221,6 +221,27 @@ describe("createDefaultAIAuditStore", () => {
     expect((store as any).store).toBeInstanceOf(LocalStorageAIAuditStore);
   });
 
+  it('prefer: "indexeddb" wraps MemoryAIAuditStore fallback in BoundedAIAuditStore by default when localStorage is unavailable', async () => {
+    const win: any = {};
+    Object.defineProperty(win, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("no localStorage");
+      }
+    });
+    Object.defineProperty(globalThis, "window", { value: win, configurable: true });
+    (globalThis as any).indexedDB = {
+      open() {
+        throw new Error("indexedDB.open failed");
+      }
+    };
+
+    const store = await createDefaultAIAuditStore({ prefer: "indexeddb" });
+    expect(store).toBeInstanceOf(BoundedAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).store).toBeInstanceOf(MemoryAIAuditStore);
+  });
+
   it('prefer: "indexeddb" falls back to LocalStorageAIAuditStore when IndexedDB open errors (onerror)', async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
