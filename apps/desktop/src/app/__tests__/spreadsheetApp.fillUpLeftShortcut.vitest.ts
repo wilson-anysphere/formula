@@ -291,6 +291,69 @@ describe("SpreadsheetApp fill up/left shortcuts", () => {
     root.remove();
   });
 
+  it("shifts formulas with negative deltas without wasm engine (fill-engine fallback shifter)", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+
+    // Fill Up: copy row 2 into row 1; formula should shift row refs by -1.
+    doc.setRangeValues(
+      sheetId,
+      "A1",
+      [
+        [null, 10],
+        [{ formula: "=B2" }, 20],
+      ],
+      { label: "Seed" },
+    );
+
+    (app as any).selection = {
+      type: "range",
+      ranges: [{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }], // A1:B2
+      active: { row: 0, col: 0 },
+      anchor: { row: 0, col: 0 },
+      activeRangeIndex: 0,
+    };
+
+    app.fillUp();
+    await app.whenIdle();
+
+    const a1 = doc.getCell(sheetId, { row: 0, col: 0 }) as any;
+    const b1 = doc.getCell(sheetId, { row: 0, col: 1 }) as any;
+    expect(a1.formula).toBe("=B1");
+    expect(b1.value).toBe(20);
+
+    // Fill Left: copy column C into columns A:B; formula should shift col refs by -1/-2.
+    doc.setRangeValues(sheetId, "A1", [[null, null, { formula: "=D1" }]], { label: "Seed2" });
+    (app as any).selection = {
+      type: "range",
+      ranges: [{ startRow: 0, endRow: 0, startCol: 0, endCol: 2 }], // A1:C1
+      active: { row: 0, col: 0 },
+      anchor: { row: 0, col: 0 },
+      activeRangeIndex: 0,
+    };
+
+    app.fillLeft();
+    await app.whenIdle();
+
+    const leftA1 = doc.getCell(sheetId, { row: 0, col: 0 }) as any;
+    const leftB1 = doc.getCell(sheetId, { row: 0, col: 1 }) as any;
+    const leftC1 = doc.getCell(sheetId, { row: 0, col: 2 }) as any;
+    expect(leftA1.formula).toBe("=B1");
+    expect(leftB1.formula).toBe("=C1");
+    expect(leftC1.formula).toBe("=D1");
+
+    app.destroy();
+    root.remove();
+  });
+
   it("blocks fill up when the target area is extremely large", () => {
     const root = createRoot();
     const status = {
