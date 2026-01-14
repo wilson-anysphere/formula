@@ -4206,6 +4206,42 @@ test("WORKDAY days suggests a left-cell reference (value-like)", async () => {
   );
 });
 
+test("RANK.EQ number suggests a left-cell reference (value-like)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=RANK.EQ(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in B1 so the left-cell heuristic suggests A1.
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANK.EQ(A1"),
+    `Expected RANK.EQ to suggest a left-cell reference for number, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("PERCENTRANK x suggests a left-cell reference (value-like)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=PERCENTRANK(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=PERCENTRANK(A1:A10, B1"),
+    `Expected PERCENTRANK to suggest a left-cell reference for x, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("QUARTILE.EXC quart suggests 1, 2, 3 (no 0/4)", async () => {
   const engine = new TabCompletionEngine();
 

@@ -1309,7 +1309,7 @@ const CURATED_FUNCTIONS = [
     name: "RANK.EQ",
     description: "Returns the rank of a number in a list of numbers.",
     args: [
-      { name: "number", type: "number" },
+      { name: "number", type: "value" },
       { name: "ref", type: "range" },
       { name: "order", type: "number", optional: true },
     ],
@@ -1318,7 +1318,7 @@ const CURATED_FUNCTIONS = [
     name: "RANK",
     description: "Returns the rank of a number in a list of numbers (legacy).",
     args: [
-      { name: "number", type: "number" },
+      { name: "number", type: "value" },
       { name: "ref", type: "range" },
       { name: "order", type: "number", optional: true },
     ],
@@ -1327,7 +1327,7 @@ const CURATED_FUNCTIONS = [
     name: "RANK.AVG",
     description: "Returns the rank of a number in a list of numbers, with ties averaged.",
     args: [
-      { name: "number", type: "number" },
+      { name: "number", type: "value" },
       { name: "ref", type: "range" },
       { name: "order", type: "number", optional: true },
     ],
@@ -1337,7 +1337,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the rank of a value in a data set as a percentage of the data set.",
     args: [
       { name: "array", type: "range" },
-      { name: "x", type: "number" },
+      { name: "x", type: "value" },
       { name: "significance", type: "number", optional: true },
     ],
   },
@@ -1346,7 +1346,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the rank of a value in a data set as a percentage of the data set, inclusive.",
     args: [
       { name: "array", type: "range" },
-      { name: "x", type: "number" },
+      { name: "x", type: "value" },
       { name: "significance", type: "number", optional: true },
     ],
   },
@@ -1355,7 +1355,7 @@ const CURATED_FUNCTIONS = [
     description: "Returns the rank of a value in a data set as a percentage of the data set, exclusive.",
     args: [
       { name: "array", type: "range" },
-      { name: "x", type: "number" },
+      { name: "x", type: "value" },
       { name: "significance", type: "number", optional: true },
     ],
   },

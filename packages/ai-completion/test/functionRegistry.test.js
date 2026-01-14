@@ -258,10 +258,15 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("PERCENTILE.EXC", 1), "number", "Expected PERCENTILE.EXC k to be numeric");
   assert.equal(registry.getArgType("PERCENTILE", 1), "number", "Expected PERCENTILE k to be numeric");
   assert.ok(registry.isRangeArg("QUARTILE.EXC", 0), "Expected QUARTILE.EXC array to be a range");
+  assert.equal(registry.getArgType("RANK.EQ", 0), "value", "Expected RANK.EQ number to be value-like");
   assert.ok(registry.isRangeArg("RANK.AVG", 1), "Expected RANK.AVG ref to be a range");
+  assert.equal(registry.getArgType("RANK.AVG", 0), "value", "Expected RANK.AVG number to be value-like");
   assert.ok(registry.isRangeArg("MODE.SNGL", 0), "Expected MODE.SNGL arg1 to be a range");
   assert.ok(registry.isRangeArg("TRIMMEAN", 0), "Expected TRIMMEAN array to be a range");
   assert.equal(registry.getArgType("TRIMMEAN", 1), "value", "Expected TRIMMEAN percent to be value-like");
+  assert.equal(registry.getArgType("PERCENTRANK", 1), "value", "Expected PERCENTRANK x to be value-like");
+  assert.equal(registry.getArgType("PERCENTRANK.INC", 1), "value", "Expected PERCENTRANK.INC x to be value-like");
+  assert.equal(registry.getArgType("PERCENTRANK.EXC", 1), "value", "Expected PERCENTRANK.EXC x to be value-like");
 
   // Dynamic array helpers
   assert.ok(registry.isRangeArg("BYROW", 0), "Expected BYROW array to be a range");
@@ -315,6 +320,7 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("PERCENTILE", 0), "Expected PERCENTILE array to be a range");
   assert.ok(registry.isRangeArg("QUARTILE", 0), "Expected QUARTILE array to be a range");
   assert.ok(registry.isRangeArg("RANK", 1), "Expected RANK ref to be a range");
+  assert.equal(registry.getArgType("RANK", 0), "value", "Expected RANK number to be value-like");
   assert.ok(registry.isRangeArg("PERCENTRANK", 0), "Expected PERCENTRANK array to be a range");
   assert.ok(registry.isRangeArg("PERCENTRANK.INC", 0), "Expected PERCENTRANK.INC array to be a range");
   assert.ok(registry.isRangeArg("PERCENTRANK.EXC", 0), "Expected PERCENTRANK.EXC array to be a range");
