@@ -21232,8 +21232,16 @@ export class SpreadsheetApp {
     }
 
     const docAny = this.document as any;
-    if (typeof docAny.insertDrawing !== "function") {
-      return false;
+    const canInsertDrawing = typeof docAny.insertDrawing === "function";
+    const canSetSheetDrawings =
+      typeof docAny.getSheetDrawings === "function" && typeof docAny.setSheetDrawings === "function";
+    if (!canInsertDrawing && !canSetSheetDrawings) {
+      try {
+        showToast("Pasting pictures is not supported in this build.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return true;
     }
 
     const uuid = (): string => {
@@ -21310,7 +21318,19 @@ export class SpreadsheetApp {
 
     this.document.beginBatch({ label: "Paste Picture" });
     try {
-      docAny.insertDrawing(sheetId, drawing);
+      if (canInsertDrawing) {
+        docAny.insertDrawing(sheetId, drawing);
+      } else {
+        const baseDrawings = (() => {
+          try {
+            const raw = docAny.getSheetDrawings(sheetId);
+            return Array.isArray(raw) ? raw : [];
+          } catch {
+            return [];
+          }
+        })();
+        docAny.setSheetDrawings(sheetId, [...baseDrawings, drawing], { label: "Paste Picture" });
+      }
       this.document.endBatch();
     } catch (err) {
       this.document.cancelBatch();

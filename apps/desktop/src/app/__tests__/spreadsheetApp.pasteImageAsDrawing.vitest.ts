@@ -353,6 +353,49 @@ describe("SpreadsheetApp paste image clipboard", () => {
     root.remove();
   });
 
+  it("pastes an image even when insertDrawing is unavailable (fallback to setSheetDrawings)", async () => {
+    // 1x1 transparent PNG.
+    const pngBytes = new Uint8Array(
+      // eslint-disable-next-line no-undef
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+FeAAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
+
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: vi.fn(async () => ({ width: 64, height: 32 })),
+    });
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const docAny = app.getDocument() as any;
+    // Simulate an older DocumentController surface without insertDrawing.
+    docAny.insertDrawing = undefined;
+
+    const provider = {
+      read: vi.fn(async () => ({ imagePng: pngBytes })),
+      write: vi.fn(async () => {}),
+    };
+    (app as any).clipboardProviderPromise = Promise.resolve(provider);
+
+    await app.pasteClipboardToSelection();
+
+    const objects = app.getDrawingObjects();
+    expect(objects).toHaveLength(1);
+    expect(objects[0]!.kind.type).toBe("image");
+
+    app.destroy();
+    root.remove();
+  });
+
   it("pastes images into the original sheet even if the user switches sheets mid-paste", async () => {
     // 1x1 transparent PNG.
     const pngBytes = new Uint8Array(
