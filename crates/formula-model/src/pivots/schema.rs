@@ -213,6 +213,7 @@ impl fmt::Display for PivotFieldRef {
         match self {
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
             PivotFieldRef::DataModelColumn { table, column } => {
+                let table = format_dax_table_identifier(table);
                 let column = escape_dax_bracket_identifier(column);
                 let table = if dax_identifier_requires_quotes(table) {
                     Cow::Owned(quote_dax_identifier(table))
@@ -227,6 +228,18 @@ impl fmt::Display for PivotFieldRef {
             }
         }
     }
+}
+
+fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
+    let Some(first) = raw.chars().next() else {
+        return Cow::Borrowed("''");
+    };
+    let is_simple = (first.is_ascii_alphabetic() || first == '_')
+        && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if is_simple {
+        return Cow::Borrowed(raw);
+    }
+    Cow::Owned(format!("'{}'", raw.replace('\'', "''")))
 }
 
 fn escape_dax_bracket_identifier(raw: &str) -> String {
