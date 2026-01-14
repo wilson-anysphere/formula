@@ -82,12 +82,15 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("ROUNDUP", 1), "value", "Expected ROUNDUP num_digits to be value-like");
   assert.equal(registry.getArgType("ROUNDDOWN", 0), "value", "Expected ROUNDDOWN number to be value-like");
   assert.equal(registry.getArgType("ROUNDDOWN", 1), "value", "Expected ROUNDDOWN num_digits to be value-like");
+  assert.equal(registry.getArgType("ROUNDBAHTDOWN", 0), "value", "Expected ROUNDBAHTDOWN number to be value-like");
+  assert.equal(registry.getArgType("ROUNDBAHTUP", 0), "value", "Expected ROUNDBAHTUP number to be value-like");
   assert.equal(registry.getArgType("INT", 0), "value", "Expected INT number to be value-like");
   assert.ok(registry.getFunction("TRUNC")?.args?.[1]?.optional, "Expected TRUNC num_digits to be optional");
   assert.equal(registry.getArgType("TRUNC", 1), "value", "Expected TRUNC num_digits to be value-like");
   assert.equal(registry.getArgType("POWER", 0), "value", "Expected POWER number to be value-like");
   assert.equal(registry.getArgType("POWER", 1), "value", "Expected POWER power to be value-like");
   assert.equal(registry.getArgType("SQRT", 0), "value", "Expected SQRT number to be value-like");
+  assert.equal(registry.getArgType("SQRTPI", 0), "value", "Expected SQRTPI number to be value-like");
   assert.equal(registry.getArgType("LOG", 0), "value", "Expected LOG number to be value-like");
   assert.ok(registry.getFunction("LOG")?.args?.[1]?.optional, "Expected LOG base to be optional");
   assert.equal(registry.getArgType("SIN", 0), "value", "Expected SIN number to be value-like");
@@ -206,6 +209,11 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.getFunction("ROMAN")?.args?.[1]?.optional, "Expected ROMAN form to be optional");
   assert.ok(registry.isRangeArg("ASC", 0), "Expected ASC text to be a range");
   assert.ok(registry.isRangeArg("PHONETIC", 0), "Expected PHONETIC reference to be a range");
+  assert.equal(registry.getArgType("THAIDAYOFWEEK", 0), "value", "Expected THAIDAYOFWEEK serial_number to be value-like");
+  assert.equal(registry.getArgType("THAIMONTHOFYEAR", 0), "value", "Expected THAIMONTHOFYEAR serial_number to be value-like");
+  assert.equal(registry.getArgType("THAINUMSOUND", 0), "value", "Expected THAINUMSOUND number to be value-like");
+  assert.equal(registry.getArgType("THAINUMSTRING", 0), "value", "Expected THAINUMSTRING number to be value-like");
+  assert.equal(registry.getArgType("THAIYEAR", 0), "value", "Expected THAIYEAR serial_number to be value-like");
   assert.equal(registry.getArgType("COMPLEX", 0), "value", "Expected COMPLEX real_num to be value-like");
   assert.equal(registry.getArgType("COMPLEX", 1), "value", "Expected COMPLEX i_num to be value-like");
   assert.equal(registry.getArgType("COMPLEX", 2), "string", "Expected COMPLEX suffix to be string-like");

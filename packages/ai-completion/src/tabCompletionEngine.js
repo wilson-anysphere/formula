@@ -1567,6 +1567,12 @@ const COLUMN_COUNT_ENUM_1_2_3 = [
   { replacement: "3", displayText: "3 (3 columns)", confidence: 0.64 },
 ];
 
+const MUNIT_DIM_ENUM_1_2_3 = [
+  { replacement: "1", displayText: "1 (1×1)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (2×2)", confidence: 0.65 },
+  { replacement: "3", displayText: "3 (3×3)", confidence: 0.64 },
+];
+
 const PERCENTILE_K_ENUM_INC = [
   { replacement: "0.5", displayText: "0.5 (median / 50%)", confidence: 0.66 },
   { replacement: "0.25", displayText: "0.25 (25th percentile)", confidence: 0.65 },
@@ -1690,6 +1696,10 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     0: ROW_COUNT_ENUM_1_2_3,
     // columns
     1: COLUMN_COUNT_ENUM_1_2_3,
+  },
+  MUNIT: {
+    // dimension
+    0: MUNIT_DIM_ENUM_1_2_3,
   },
   SEQUENCE: {
     // rows

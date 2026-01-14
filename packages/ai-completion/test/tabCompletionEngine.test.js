@@ -3512,6 +3512,7 @@ test("Positive count args suggest 1, 2, 3 (no 0)", async () => {
     { name: "SEQUENCE columns", currentInput: "=SEQUENCE(5, " },
     { name: "MAKEARRAY rows", currentInput: "=MAKEARRAY(" },
     { name: "MAKEARRAY columns", currentInput: "=MAKEARRAY(5, " },
+    { name: "MUNIT dimension", currentInput: "=MUNIT(" },
     { name: "RANDARRAY rows", currentInput: "=RANDARRAY(" },
     { name: "RANDARRAY columns", currentInput: "=RANDARRAY(5, " },
     { name: "EXPAND rows", currentInput: "=EXPAND(A1:A10, " },
@@ -5601,6 +5602,24 @@ test("BITLSHIFT shift_amount suggests a left-cell reference (value-like arg)", a
   assert.ok(
     suggestions.some((s) => s.text === "=BITLSHIFT(A1, B1"),
     `Expected BITLSHIFT to suggest B1 for shift_amount, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("SQRTPI number suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SQRTPI(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in B1 so the left-cell heuristic suggests A1.
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SQRTPI(A1"),
+    `Expected SQRTPI to suggest A1 for number, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 

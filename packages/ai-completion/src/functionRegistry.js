@@ -208,6 +208,20 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ROUNDBAHTDOWN",
+    description: "Rounds a number down to the nearest multiple of 0.05.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "ROUNDBAHTUP",
+    description: "Rounds a number up to the nearest multiple of 0.05.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
     name: "INT",
     description: "Rounds a number down to the nearest integer.",
     args: [
@@ -233,6 +247,13 @@ const CURATED_FUNCTIONS = [
   {
     name: "SQRT",
     description: "Returns the positive square root of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "SQRTPI",
+    description: "Returns the square root of (number * pi).",
     args: [
       { name: "number", type: "value" },
     ],
@@ -3573,6 +3594,41 @@ const CURATED_FUNCTIONS = [
     description: "Returns the length of a Thai text string.",
     args: [
       { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "THAIDAYOFWEEK",
+    description: "Converts a serial number to a Thai day-of-week name.",
+    args: [
+      { name: "serial_number", type: "value" },
+    ],
+  },
+  {
+    name: "THAIMONTHOFYEAR",
+    description: "Converts a serial number to a Thai month-of-year name.",
+    args: [
+      { name: "serial_number", type: "value" },
+    ],
+  },
+  {
+    name: "THAINUMSOUND",
+    description: "Converts a number to Thai text using Thai phonetics.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "THAINUMSTRING",
+    description: "Converts a number to Thai text.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "THAIYEAR",
+    description: "Converts a serial number to a year in the Thai Buddhist calendar.",
+    args: [
+      { name: "serial_number", type: "value" },
     ],
   },
   {
