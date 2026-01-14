@@ -542,7 +542,10 @@ try {
     $xlsxEntry = @(
       $fileAssociations |
         Where-Object {
-          ($_.PSObject.Properties.Name -contains "ext") -and ($_.ext -contains "xlsx" -or $_.ext -contains ".xlsx")
+          if (-not ($_.PSObject.Properties.Name -contains "ext")) { return $false }
+          # `ext` can be either a string or an array of strings.
+          $exts = @($_.ext)
+          return ($exts -contains "xlsx" -or $exts -contains ".xlsx")
         }
     ) | Select-Object -First 1
     $mime = $default.XlsxMimeType
