@@ -65,32 +65,34 @@ describe("AiCellFunctionEngine DLP indexing", () => {
       return instrumenter.wrap(out);
     });
 
-    const llmClient = {
-      chat: vi.fn(async () => ({
-        message: { role: "assistant", content: "ok" },
-        usage: { promptTokens: 1, completionTokens: 1 },
-      })),
-    };
+    try {
+      const llmClient = {
+        chat: vi.fn(async () => ({
+          message: { role: "assistant", content: "ok" },
+          usage: { promptTokens: 1, completionTokens: 1 },
+        })),
+      };
 
-    const engine = new AiCellFunctionEngine({ llmClient: llmClient as any, workbookId, model: "test-model" });
+      const engine = new AiCellFunctionEngine({ llmClient: llmClient as any, workbookId, model: "test-model" });
 
-    const refs = Array.from({ length: 200 }, (_v, idx) => `A${idx + 1}`);
-    const formula = `=AI(\"summarize\", ${refs.join(", ")})`;
+      const refs = Array.from({ length: 200 }, (_v, idx) => `A${idx + 1}`);
+      const formula = `=AI(\"summarize\", ${refs.join(", ")})`;
 
-    const getCellValue = (addr: string) => (addr === "A1" ? "top secret" : addr.startsWith("A") ? "x" : null);
-    const value = evaluateFormula(formula, getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+      const getCellValue = (addr: string) => (addr === "A1" ? "top secret" : addr.startsWith("A") ? "x" : null);
+      const value = evaluateFormula(formula, getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
 
-    expect(value).toBe(AI_CELL_PLACEHOLDER);
+      expect(value).toBe(AI_CELL_PLACEHOLDER);
 
-    // Perf proxy: building the index and hashing records can require a handful of linear scans.
-    // A per-referenced-cell scan regression would multiply this by ~200.
-    expect(instrumenter.getPasses()).toBeLessThan(50);
-    expect(instrumenter.getElementGets()).toBeLessThan(20_000);
+      // Perf proxy: building the index and hashing records can require a handful of linear scans.
+      // A per-referenced-cell scan regression would multiply this by ~200.
+      expect(instrumenter.getPasses()).toBeLessThan(50);
+      expect(instrumenter.getElementGets()).toBeLessThan(20_000);
 
-    await engine.waitForIdle();
-    expect(llmClient.chat).toHaveBeenCalledTimes(1);
-
-    listSpy.mockRestore();
+      await engine.waitForIdle();
+      expect(llmClient.chat).toHaveBeenCalledTimes(1);
+    } finally {
+      listSpy.mockRestore();
+    }
   });
 
   it("memoizes DLP cell indices across evaluations and invalidates on record changes", async () => {
