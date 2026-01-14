@@ -135,6 +135,9 @@ pub enum DecodeWarning {
     UnknownStructuredRefFlags { flags: u32, offset: usize },
     /// The decoder encountered a hard failure and could not produce formula text.
     ///
+    /// When this warning is present, the returned formula text may be missing (`None`) or may
+    /// contain best-effort placeholders (e.g. `_UNKNOWN_FUNC_0XFFFF(...)`).
+    ///
     /// This is surfaced as a warning (rather than bubbling up an error) because the
     /// [`decode_formula_rgce*`] APIs are intended to be best-effort for diagnostics.
     DecodeFailed {
@@ -1575,19 +1578,72 @@ fn decode_rgce_impl(
                 let iftab = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
                 i += 2;
 
-                let spec =
-                    formula_biff::function_spec_from_id(iftab).ok_or(DecodeError::UnknownPtg {
-                        offset: ptg_offset,
-                        ptg,
-                    })?;
-                if spec.min_args != spec.max_args {
-                    return Err(DecodeError::UnknownPtg {
-                        offset: ptg_offset,
-                        ptg,
-                    });
-                }
+                // `PtgFunc` does not store argc; it is implicit and requires fixed-arity function
+                // metadata to decode.
+                //
+                // For strict decode APIs (`decode_rgce*`), missing/variable arity metadata is a
+                // hard error.
+                //
+                // For best-effort decode APIs (`decode_formula_rgce*`), fall back to a parseable
+                // call expression and keep decoding.
+                let argc: usize;
+                let name_owned;
+                let name: &str = match formula_biff::function_spec_from_id(iftab) {
+                    Some(spec) if spec.min_args == spec.max_args => {
+                        argc = spec.min_args as usize;
+                        spec.name
+                    }
+                    Some(spec) => {
+                        if warnings.is_none() {
+                            return Err(DecodeError::UnknownPtg {
+                                offset: ptg_offset,
+                                ptg,
+                            });
+                        }
 
-                let argc = spec.min_args as usize;
+                        if let Some(w) = warnings.as_deref_mut() {
+                            w.push(DecodeWarning::DecodeFailed {
+                                kind: DecodeFailureKind::UnknownPtg,
+                                offset: ptg_offset,
+                                ptg,
+                            });
+                        }
+
+                        // Best-effort: if we have metadata but it's variable-arity, assume the
+                        // minimum argument count (common when older Excel versions encoded
+                        // fixed-arity calls that later gained optional args).
+                        let min = spec.min_args as usize;
+                        argc = if stack.len() < min { stack.len().min(1) } else { min };
+                        spec.name
+                    }
+                    None => {
+                        if warnings.is_none() {
+                            return Err(DecodeError::UnknownPtg {
+                                offset: ptg_offset,
+                                ptg,
+                            });
+                        }
+
+                        if let Some(w) = warnings.as_deref_mut() {
+                            w.push(DecodeWarning::DecodeFailed {
+                                kind: DecodeFailureKind::UnknownPtg,
+                                offset: ptg_offset,
+                                ptg,
+                            });
+                        }
+
+                        // Best-effort: no argc metadata; assume unary if possible.
+                        argc = stack.len().min(1);
+                        match function_name(iftab) {
+                            Some(name) => name,
+                            None => {
+                                name_owned = format!("_UNKNOWN_FUNC_0X{iftab:04X}");
+                                &name_owned
+                            }
+                        }
+                    }
+                };
+
                 if stack.len() < argc {
                     return Err(DecodeError::StackUnderflow {
                         offset: ptg_offset,
@@ -1600,7 +1656,7 @@ fn decode_rgce_impl(
                     args.push(stack.pop().expect("len checked"));
                 }
                 args.reverse();
-                stack.push(format_function_call(spec.name, args));
+                stack.push(format_function_call(name, args));
             }
             // PtgFuncVar: [argc: u8][iftab: u16]
             0x22 | 0x42 | 0x62 => {
@@ -1642,10 +1698,29 @@ fn decode_rgce_impl(
                     args.reverse();
                     stack.push(format_function_call(&func_name, args));
                 } else {
-                    let name = function_name(iftab).ok_or(DecodeError::UnknownPtg {
-                        offset: ptg_offset,
-                        ptg,
-                    })?;
+                    let name_owned;
+                    let name = match function_name(iftab) {
+                        Some(name) => name,
+                        None => {
+                            if warnings.is_none() {
+                                return Err(DecodeError::UnknownPtg {
+                                    offset: ptg_offset,
+                                    ptg,
+                                });
+                            }
+
+                            if let Some(w) = warnings.as_deref_mut() {
+                                w.push(DecodeWarning::DecodeFailed {
+                                    kind: DecodeFailureKind::UnknownPtg,
+                                    offset: ptg_offset,
+                                    ptg,
+                                });
+                            }
+
+                            name_owned = format!("_UNKNOWN_FUNC_0X{iftab:04X}");
+                            &name_owned
+                        }
+                    };
 
                     let mut args = Vec::with_capacity(argc);
                     for _ in 0..argc {

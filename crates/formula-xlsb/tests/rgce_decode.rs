@@ -1,7 +1,7 @@
 use formula_engine::parse_formula;
 use formula_xlsb::rgce::{
     decode_formula_rgce, decode_formula_rgce_with_rgcb, decode_rgce, decode_rgce_with_base,
-    decode_rgce_with_context, CellCoord, DecodeFailureKind, DecodeWarning,
+    decode_rgce_with_context, CellCoord, DecodeError, DecodeFailureKind, DecodeWarning,
 };
 use formula_xlsb::workbook_context::WorkbookContext;
 use pretty_assertions::assert_eq;
@@ -168,6 +168,73 @@ fn decodes_ptgerr_unknown_code_without_aborting() {
             offset: 1
         }]
     );
+}
+
+#[test]
+fn renders_unknown_ptgfuncvar_ids_as_parseable_function_calls_in_best_effort_decoder() {
+    // Unknown `PtgFuncVar` iftab => emit a stable placeholder name rather than failing the entire
+    // formula decode.
+    let rgce = [0x22, 0x00, 0xFF, 0xFF]; // PtgFuncVar(argc=0, iftab=0xFFFF)
+    let decoded = decode_formula_rgce(&rgce);
+    assert_eq!(decoded.text.as_deref(), Some("_UNKNOWN_FUNC_0XFFFF()"));
+    assert_eq!(
+        decoded.warnings,
+        vec![DecodeWarning::DecodeFailed {
+            kind: DecodeFailureKind::UnknownPtg,
+            offset: 0,
+            ptg: 0x22
+        }]
+    );
+    assert_parses_and_roundtrips(decoded.text.as_ref().expect("text"));
+
+    // Strict decode APIs should still surface the unknown function id as an error.
+    let err = decode_rgce(&rgce).expect_err("expected error");
+    assert!(matches!(err, DecodeError::UnknownPtg { offset: 0, ptg: 0x22 }));
+}
+
+#[test]
+fn renders_unknown_ptgfunc_ids_as_parseable_function_calls_best_effort_unary() {
+    // Best-effort: unknown `PtgFunc` does not store argc, so the decoder assumes unary if
+    // possible.
+    //
+    // _UNKNOWN_FUNC_0XFFFF(1):
+    //   PtgInt(1)
+    //   PtgFunc(iftab=0xFFFF)
+    let rgce = [0x1E, 0x01, 0x00, 0x21, 0xFF, 0xFF];
+    let decoded = decode_formula_rgce(&rgce);
+    assert_eq!(decoded.text.as_deref(), Some("_UNKNOWN_FUNC_0XFFFF(1)"));
+    assert_eq!(
+        decoded.warnings,
+        vec![DecodeWarning::DecodeFailed {
+            kind: DecodeFailureKind::UnknownPtg,
+            offset: 3,
+            ptg: 0x21
+        }]
+    );
+    assert_parses_and_roundtrips(decoded.text.as_ref().expect("text"));
+
+    let err = decode_rgce(&rgce).expect_err("expected error");
+    assert!(matches!(err, DecodeError::UnknownPtg { offset: 3, ptg: 0x21 }));
+}
+
+#[test]
+fn renders_unknown_ptgfunc_ids_with_empty_stack_as_parseable_function_calls() {
+    // Unknown `PtgFunc` with no arguments on the stack => `_UNKNOWN_FUNC_0XFFFF()`.
+    let rgce = [0x21, 0xFF, 0xFF];
+    let decoded = decode_formula_rgce(&rgce);
+    assert_eq!(decoded.text.as_deref(), Some("_UNKNOWN_FUNC_0XFFFF()"));
+    assert_eq!(
+        decoded.warnings,
+        vec![DecodeWarning::DecodeFailed {
+            kind: DecodeFailureKind::UnknownPtg,
+            offset: 0,
+            ptg: 0x21
+        }]
+    );
+    assert_parses_and_roundtrips(decoded.text.as_ref().expect("text"));
+
+    let err = decode_rgce(&rgce).expect_err("expected error");
+    assert!(matches!(err, DecodeError::UnknownPtg { offset: 0, ptg: 0x21 }));
 }
 
 #[test]
