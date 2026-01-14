@@ -27,10 +27,16 @@
 //! After decryption, the `EncryptedPackage` stream yields:
 //!
 //! ```text
-//! 8B   original_package_size (u64 little-endian)
+//! 8B   original_package_size (8-byte plaintext size prefix; see compatibility note below)
 //! ...  ZIP bytes (length = original_package_size)
 //! ...  padding (to the cipher block size)
 //! ```
+//!
+//! Compatibility note: while MS-OFFCRYPTO describes the size prefix as a `u64le`, some
+//! producers/libraries interpret it as `u32 totalSize` + `u32 reserved` (often 0). New code should
+//! treat it as an 8-byte little-endian prefix and parse defensively (e.g. `lo=u32le`,
+//! `hi=u32le`, then `size = lo as u64 | ((hi as u64) << 32)`), rather than assuming the upper
+//! DWORD is always meaningful.
 //!
 //! The ciphertext is processed in **4096-byte segments** (plaintext segment size). Each segment is
 //! encrypted independently using the package key and a per-segment IV.

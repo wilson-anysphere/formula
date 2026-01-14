@@ -880,15 +880,39 @@ fn parse_encrypted_package_stream(encrypted_package: &[u8]) -> Result<(usize, &[
         });
     }
 
-    let len_bytes: [u8; 8] = encrypted_package[..8]
-        .try_into()
-        .expect("slice length already checked");
-    let declared_len_u64 = u64::from_le_bytes(len_bytes);
+    // `original_package_size` is an 8-byte plaintext prefix. While MS-OFFCRYPTO describes it as a
+    // `u64le`, some producers/libraries treat it as `u32 totalSize` + `u32 reserved` (often 0).
+    //
+    // To improve compatibility, parse as two DWORDs and apply a small heuristic:
+    // - if the combined 64-bit size is larger than the available ciphertext, but the low DWORD is
+    //   plausible, treat the upper DWORD as "reserved" and fall back to the low DWORD.
+    let len_lo = u32::from_le_bytes(
+        encrypted_package[..4]
+            .try_into()
+            .expect("slice length already checked"),
+    ) as u64;
+    let len_hi = u32::from_le_bytes(
+        encrypted_package[4..8]
+            .try_into()
+            .expect("slice length already checked"),
+    ) as u64;
+    let declared_len_u64 = len_lo | (len_hi << 32);
+
+    let ciphertext_len = encrypted_package.len() - 8;
+    let effective_len_u64 = if len_hi != 0
+        && declared_len_u64 > ciphertext_len as u64
+        && len_lo <= ciphertext_len as u64
+    {
+        len_lo
+    } else {
+        declared_len_u64
+    };
+
     let declared_len =
-        usize::try_from(declared_len_u64).map_err(|_| OffCryptoError::InvalidAttribute {
+        usize::try_from(effective_len_u64).map_err(|_| OffCryptoError::InvalidAttribute {
             element: "EncryptedPackage".to_string(),
             attr: "original_package_size".to_string(),
-            reason: format!("declared size {declared_len_u64} does not fit in usize"),
+            reason: format!("declared size {effective_len_u64} does not fit in usize"),
         })?;
 
     Ok((declared_len, &encrypted_package[8..]))
@@ -1371,6 +1395,21 @@ mod tests {
         }
         bytes.extend(std::iter::repeat(0u8).take(AES_BLOCK_SIZE - rem));
         bytes
+    }
+
+    #[test]
+    fn parse_encrypted_package_stream_falls_back_to_low_dword_when_high_dword_is_reserved() {
+        // Some producers store the 8-byte size prefix as `u32 totalSize` + `u32 reserved`, and the
+        // reserved field may be non-zero. If the combined `u64` size is not plausible for the
+        // available ciphertext, we should fall back to the low DWORD.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&16u32.to_le_bytes()); // lo
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // hi (reserved/non-zero)
+        bytes.extend_from_slice(&[0u8; 16]); // ciphertext
+
+        let (declared_len, ciphertext) = parse_encrypted_package_stream(&bytes).expect("parse");
+        assert_eq!(declared_len, 16);
+        assert_eq!(ciphertext.len(), 16);
     }
 
     fn encrypt_aes128_cbc_no_padding(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Vec<u8> {
