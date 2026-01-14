@@ -53,7 +53,9 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
       integrity verification is optional via `DecryptOptions.verify_integrity`)
     - `decrypt_ooxml_from_ole_bytes` (given raw OLE/CFB bytes; does not currently verify
       `dataIntegrity`)
-  - Agile password verifier + secret key (`crates/formula-offcrypto/src/agile.rs`)
+  - Agile password verifier + secret key:
+    - public helpers (`agile_verify_password`, `agile_secret_key`) in `crates/formula-offcrypto/src/lib.rs`
+    - verifier/key primitives in `crates/formula-offcrypto/src/agile.rs`
   - Agile `EncryptedPackage` segment decryption + IV derivation
     (`crates/formula-offcrypto/src/encrypted_package.rs`, `agile_decrypt_package`)
 
