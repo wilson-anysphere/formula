@@ -334,6 +334,16 @@ startup + idle-memory workflow (Linux/Windows/macOS) and uploads per-OS JSON art
 
 - `.github/workflows/desktop-perf-platform-matrix.yml`
 
+For **on-demand** cross-platform desktop perf checks on a PR, apply the `desktop-perf-matrix` (or
+`run-desktop-perf`) label. This triggers:
+
+- `.github/workflows/desktop-perf-platform-matrix-pr.yml`
+
+This workflow runs the same startup (cold + warm) + idle-memory runners against the PR **head SHA**,
+uploads per-OS artifacts, and posts/updates a compact PR comment summary. Maintainers can opt into
+gating by setting the GitHub Actions variable `FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX=1` (and the
+existing target variables described above).
+
 ```yaml
 # .github/workflows/perf.yml
 name: Performance
