@@ -1423,10 +1423,7 @@ impl DaxEngine {
                     let available = row_ctx
                         .stack
                         .iter()
-                        .filter_map(|frame| match frame {
-                            RowContextFrame::Physical { table: t, .. } if t == table => Some(()),
-                            _ => None,
-                        })
+                        .filter(|frame| matches!(frame, RowContextFrame::Physical { table: t, .. } if t == table))
                         .count();
                     return Err(DaxError::Eval(format!(
                         "EARLIER refers to an outer row context that does not exist for {table}[{column}] (requested level {level_from_inner}, available {available})"
@@ -2135,6 +2132,16 @@ impl DaxEngine {
             match frame {
                 RowContextFrame::Virtual { bindings } => {
                     for ((table, column), value) in bindings {
+                        // Virtual rows can contain columns that don't correspond to a physical model
+                        // column (e.g. table constructors or computed columns from future
+                        // `SELECTCOLUMNS`/`ADDCOLUMNS`). DAX context transition only adds filters
+                        // for *real* model columns, so ignore bindings that don't resolve.
+                        let Some(table_ref) = model.table(table) else {
+                            continue;
+                        };
+                        if table_ref.column_idx(column).is_none() {
+                            continue;
+                        }
                         let key = (table.clone(), column.clone());
                         match new_filter.column_filters.get_mut(&key) {
                             Some(existing) => existing.retain(|v| v == value),
@@ -5020,6 +5027,14 @@ fn propagate_filter(
             if let Some(from_index) = relationship.from_index.as_ref() {
                 // Fast path: in-memory fact tables use a precomputed FK -> row list index.
                 for key in &allowed_keys {
+                    // Tabular's relationship-generated blank member is distinct from a *physical*
+                    // BLANK key on the dimension side. Fact-side BLANK foreign keys should never
+                    // match a physical BLANK dimension row; they belong to the virtual blank
+                    // member and are only included when `blank_row_allowed` is true (handled
+                    // below).
+                    if key.is_blank() {
+                        continue;
+                    }
                     if let Some(rows) = from_index.get(key) {
                         for &row in rows {
                             if row < from_set.len() && from_set.get(row) {
@@ -5048,6 +5063,10 @@ fn propagate_filter(
                     .table(from_table_name)
                     .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
 
+                let allowed_keys: Vec<Value> = allowed_keys
+                    .into_iter()
+                    .filter(|key| !key.is_blank())
+                    .collect();
                 if !allowed_keys.is_empty() {
                     if let Some(rows) = from_table.filter_in(relationship.from_idx, &allowed_keys) {
                         for row in rows {

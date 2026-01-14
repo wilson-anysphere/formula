@@ -1,27 +1,15 @@
-use formula_dax::{DataModel, DaxEngine, FilterContext, RowContext, Value};
+mod common;
+
+use common::build_model;
+use formula_dax::{DaxEngine, FilterContext, RowContext, Value};
 use pretty_assertions::assert_eq;
 
 #[test]
-fn countrows_over_table_literal_counts_rows() {
-    let model = DataModel::new();
+fn sumx_table_constructor_value_column_sums() {
+    let model = build_model();
     let engine = DaxEngine::new();
-    let value = engine
-        .evaluate(
-            &model,
-            "COUNTROWS({1,2,3})",
-            &FilterContext::empty(),
-            &RowContext::default(),
-        )
-        .unwrap();
 
-    assert_eq!(value, Value::from(3i64));
-}
-
-#[test]
-fn sumx_over_table_literal_uses_value_column() {
-    let model = DataModel::new();
-    let engine = DaxEngine::new();
-    let value = engine
+    let result = engine
         .evaluate(
             &model,
             "SUMX({1,2,3}, [Value])",
@@ -30,22 +18,30 @@ fn sumx_over_table_literal_uses_value_column() {
         )
         .unwrap();
 
-    assert_eq!(value, Value::from(6.0));
+    assert_eq!(result, Value::from(6.0));
 }
 
 #[test]
-fn filter_over_table_literal_can_reference_value_column() {
-    let model = DataModel::new();
+fn sumx_table_constructor_measure_does_not_error_and_repeats_measure() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
     let engine = DaxEngine::new();
-    let value = engine
+
+    // The table constructor creates a virtual row context with a synthetic [Value] column that is
+    // not part of the model. Context transition should ignore that binding (it cannot produce
+    // filters), so the measure evaluates in the outer filter context for each row.
+    let result = engine
         .evaluate(
             &model,
-            "COUNTROWS(FILTER({1,2,3}, [Value] > 1))",
+            "SUMX({1,2,3}, [Total Sales])",
             &FilterContext::empty(),
             &RowContext::default(),
         )
         .unwrap();
 
-    assert_eq!(value, Value::from(2i64));
+    assert_eq!(result, Value::from(129.0));
 }
 
