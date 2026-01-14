@@ -69,8 +69,13 @@ async function withMockGitHub(config, fn) {
       );
       if (runsMatch) {
         const id = runsMatch[1];
+        const page = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
+        const runs =
+          "runsByWorkflowIdByPage" in config && config.runsByWorkflowIdByPage
+            ? config.runsByWorkflowIdByPage[id]?.[String(page)] ?? []
+            : config.runsByWorkflowId[id] ?? [];
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ workflow_runs: config.runsByWorkflowId[id] ?? [] }));
+        res.end(JSON.stringify({ workflow_runs: runs }));
         return;
       }
 
@@ -201,6 +206,49 @@ test("accepts GH_TOKEN as an alternative to GITHUB_TOKEN", async () => {
 
       assert.equal(result.code, 0, `expected exit 0\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
       assert.match(result.stdout, /CI status check passed/i);
+    },
+  );
+});
+
+test("finds a successful run even when it appears on a later runs API page", async () => {
+  const sha = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+
+  // Simulate a repo with many reruns for the same commit (requires pagination).
+  const page1 = Array.from({ length: 100 }, (_, i) => ({
+    id: i + 1,
+    head_sha: sha,
+    status: "completed",
+    conclusion: "failure",
+    html_url: `http://example.local/runs/${i + 1}`,
+  }));
+  const page2 = [
+    {
+      id: 101,
+      head_sha: sha,
+      status: "completed",
+      conclusion: "success",
+      html_url: "http://example.local/runs/101",
+    },
+  ];
+
+  await withMockGitHub(
+    {
+      workflows: [{ id: 123, name: "CI", path: ".github/workflows/ci.yml" }],
+      runsByWorkflowId: {},
+      runsByWorkflowIdByPage: {
+        "123": { "1": page1, "2": page2 },
+      },
+    },
+    async (baseUrl) => {
+      const result = await runScript(["--repo", "acme/widgets", "--sha", sha, "--workflow", "CI"], {
+        GITHUB_TOKEN: "test-token",
+        GITHUB_API_URL: baseUrl,
+        GITHUB_SERVER_URL: "http://example.local",
+      });
+
+      assert.equal(result.code, 0, `expected exit 0\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+      assert.match(result.stdout, /CI status check passed/i);
+      assert.match(result.stdout, /runs\/101/);
     },
   );
 });
