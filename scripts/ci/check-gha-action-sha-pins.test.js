@@ -60,6 +60,18 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test("allows branch-style comment tags for actions that don't publish semver tags (dtolnay/rust-toolchain)", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
+      - run: echo ok
+`);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("fails when actions use a floating tag (e.g. @v4)", { skip: !hasBash }, () => {
   const proc = runYaml(`
 jobs:
