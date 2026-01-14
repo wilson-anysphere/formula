@@ -10,12 +10,36 @@ import * as Y from "yjs";
 import { FileCollabPersistence } from "@formula/collab-persistence/file";
 import { createCollabSession } from "../src/index.ts";
 
+/**
+ * Best-effort temp directory cleanup.
+ *
+ * `FileCollabPersistence` can still have in-flight async writes when the test completes, which
+ * occasionally causes `rm({ recursive: true })` to throw `ENOTEMPTY`. Retry briefly to avoid
+ * flaky failures.
+ *
+ * @param {string} target
+ */
+async function rmWithRetries(target) {
+  const retryable = new Set(["ENOTEMPTY", "EBUSY", "EPERM"]);
+  const maxAttempts = 8;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = /** @type {any} */ (err)?.code;
+      if (!retryable.has(code) || attempt === maxAttempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 25 * (attempt + 1)));
+    }
+  }
+}
+
 test("CollabSession schema init waits for local persistence load (avoids extra default sheet)", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-schema-"));
   const docId = `doc-${randomUUID()}`;
 
   t.after(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rmWithRetries(dir);
   });
 
   // Seed local persistence storage with a workbook that already has a sheet id

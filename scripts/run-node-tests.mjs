@@ -519,18 +519,27 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
  * This is used only when TypeScript execution is unavailable, so we can skip node:test
  * suites that import workspace packages authored as `.ts`/`.tsx`.
  *
- * @returns {Promise<Map<string, { exports: any, main: string | null }>>}
+ * @returns {Promise<Map<string, { rootDir: string, exports: any, main: string | null }>>}
  */
-/** @type {Promise<Map<string, { exports: any, main: string | null }>> | null} */
+/** @type {Promise<Map<string, { rootDir: string, exports: any, main: string | null }>> | null} */
 var workspacePackageEntrypointsPromise;
 async function loadWorkspacePackageEntrypoints() {
   if (workspacePackageEntrypointsPromise) return workspacePackageEntrypointsPromise;
   workspacePackageEntrypointsPromise = (async () => {
     /** @type {string[]} */
     const packageJsonFiles = [];
-    await collectPackageJsonFiles(path.join(repoRoot, "packages"), packageJsonFiles);
+    for (const dir of ["packages", "apps", "services", "shared"]) {
+      const full = path.join(repoRoot, dir);
+      try {
+        const stats = await stat(full);
+        if (!stats.isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      await collectPackageJsonFiles(full, packageJsonFiles);
+    }
 
-    /** @type {Map<string, { exports: any, main: string | null }>} */
+    /** @type {Map<string, { rootDir: string, exports: any, main: string | null }>} */
     const out = new Map();
     for (const file of packageJsonFiles) {
       const raw = await readFile(file, "utf8").catch(() => null);
@@ -545,6 +554,7 @@ async function loadWorkspacePackageEntrypoints() {
       if (typeof parsed.name !== "string") continue;
       if (out.has(parsed.name)) continue;
       out.set(parsed.name, {
+        rootDir: path.dirname(file),
         exports: parsed.exports ?? null,
         main: typeof parsed.main === "string" ? parsed.main : null,
       });
@@ -938,6 +948,7 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
   /** @type {Set<string>} */
   const visiting = new Set();
   const builtins = new Set(builtinModules);
+  const workspacePackages = await loadWorkspacePackageEntrypoints();
   /**
    * Map an arbitrary directory to the nearest enclosing package.json (if any).
    * The cache stores the *resolved* nearest package for that directory (not just
@@ -959,6 +970,67 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
   const candidateExtensions = opts.canExecuteTsx
     ? [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"]
     : [".js", ".ts", ".mjs", ".cjs", ".jsx", ".json"];
+
+  function parseWorkspaceSpecifier(specifier) {
+    if (!specifier.startsWith("@formula/")) return null;
+    const parts = specifier.split("/");
+    if (parts.length < 2) return null;
+    const packageName = `${parts[0]}/${parts[1]}`;
+    const subpath = parts.slice(2).join("/");
+    const exportKey = subpath ? `./${subpath}` : ".";
+    return { packageName, exportKey };
+  }
+
+  /**
+   * @param {any} exportsMap
+   * @param {string} exportKey
+   * @param {string | null} main
+   */
+  function resolveExportPath(exportsMap, exportKey, main) {
+    /**
+     * @param {any} entry
+     * @returns {string | null}
+     */
+    function pickExportPath(entry) {
+      if (typeof entry === "string") return entry;
+      if (Array.isArray(entry)) {
+        for (const item of entry) {
+          const picked = pickExportPath(item);
+          if (picked) return picked;
+        }
+        return null;
+      }
+      if (entry && typeof entry === "object") {
+        if (typeof entry.node === "string") return entry.node;
+        if (typeof entry.import === "string") return entry.import;
+        if (typeof entry.default === "string") return entry.default;
+        if (typeof entry.require === "string") return entry.require;
+        for (const value of Object.values(entry)) {
+          const picked = pickExportPath(value);
+          if (picked) return picked;
+        }
+      }
+      return null;
+    }
+
+    let target = null;
+    if (exportsMap) {
+      if (typeof exportsMap === "string") {
+        if (exportKey === ".") target = exportsMap;
+      } else if (exportsMap && typeof exportsMap === "object") {
+        const keys = Object.keys(exportsMap);
+        const looksLikeSubpathMap = keys.some((k) => k === "." || k.startsWith("./"));
+        if (looksLikeSubpathMap) {
+          target = pickExportPath(exportsMap?.[exportKey]);
+        } else if (exportKey === ".") {
+          target = pickExportPath(exportsMap);
+        }
+      }
+    }
+
+    if (!target && exportKey === "." && typeof main === "string") target = main;
+    return target;
+  }
 
   function isBuiltin(specifier) {
     if (specifier.startsWith("node:")) return true;
@@ -1083,7 +1155,7 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
    * @param {string} importingFile
    * @returns {string | null}
    */
-  function resolveWorkspaceSpecifier(specifier, importingFile) {
+  async function resolveWorkspaceSpecifier(specifier, importingFile) {
     // `import.meta.resolve()` currently resolves relative to the module it's invoked from
     // (this runner), so it's not suitable for checking whether a workspace package is
     // installed relative to an arbitrary test file directory. Use `require.resolve()`
@@ -1091,6 +1163,60 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
     try {
       return require.resolve(specifier, { paths: [path.dirname(importingFile), repoRoot] });
     } catch {
+      // Fall back to a best-effort local workspace resolution. This keeps node:test resilient
+      // in environments with stale/partial `node_modules` that are missing some workspace links.
+      const parsed = parseWorkspaceSpecifier(specifier.split("?")[0].split("#")[0]);
+      if (!parsed) return null;
+      const info = workspacePackages.get(parsed.packageName);
+      if (!info) return null;
+
+      const target = resolveExportPath(info.exports, parsed.exportKey, info.main);
+      if (!target) return null;
+
+      const cleanedTarget =
+        target.startsWith("./") || target.startsWith("../") || target.startsWith("/")
+          ? target
+          : `./${target}`;
+      const basePath = path.resolve(info.rootDir, cleanedTarget.split("?")[0].split("#")[0]);
+
+      if (path.extname(basePath)) {
+        try {
+          const stats = await stat(basePath);
+          if (stats.isFile()) return basePath;
+        } catch {
+          return null;
+        }
+        return null;
+      }
+
+      for (const ext of candidateExtensions) {
+        const candidate = `${basePath}${ext}`;
+        try {
+          const stats = await stat(candidate);
+          if (stats.isFile()) return candidate;
+        } catch {
+          // continue
+        }
+      }
+
+      // Directory export: try index files.
+      try {
+        const stats = await stat(basePath);
+        if (stats.isDirectory()) {
+          for (const ext of candidateExtensions) {
+            const candidate = path.join(basePath, `index${ext}`);
+            try {
+              const idxStats = await stat(candidate);
+              if (idxStats.isFile()) return candidate;
+            } catch {
+              // continue
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+
       return null;
     }
   }
@@ -1278,7 +1404,7 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
         continue;
       }
 
-      const resolved = resolveWorkspaceSpecifier(specifier, file);
+      const resolved = await resolveWorkspaceSpecifier(specifier, file);
       if (!resolved) {
         missing = true;
         break;

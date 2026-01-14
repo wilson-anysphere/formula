@@ -1,9 +1,13 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import ts from "typescript";
 
 const shouldEmitSourceMaps =
   process.execArgv.includes("--enable-source-maps") || (process.env.NODE_OPTIONS?.includes("--enable-source-maps") ?? false);
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * In-flight transpile de-dupe.
@@ -62,16 +66,187 @@ function isResolutionMiss(error) {
   return code === "ERR_MODULE_NOT_FOUND" || code === "ERR_UNSUPPORTED_DIR_IMPORT";
 }
 
+/**
+ * Lazily-loaded map of workspace package name -> basic package.json info.
+ *
+ * We use this as a fallback for monorepo environments where `node_modules/` exists but is
+ * missing some workspace links (stale or partial installs). When a `@formula/*` package
+ * isn't resolvable via Node's default algorithm, we point it directly at its on-disk
+ * entrypoint (often a `.ts` source file).
+ *
+ * @type {Promise<Map<string, { rootDir: string, exports: any, main: string | null }>> | null}
+ */
+let workspacePackagesPromise = null;
+
+async function loadWorkspacePackages() {
+  if (workspacePackagesPromise) return workspacePackagesPromise;
+  workspacePackagesPromise = (async () => {
+    /** @type {string[]} */
+    const packageJsonFiles = [];
+    for (const dir of ["packages", "apps", "services", "shared"]) {
+      const full = path.join(repoRoot, dir);
+      try {
+        const st = await stat(full);
+        if (!st.isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      await collectPackageJsonFiles(full, packageJsonFiles);
+    }
+
+    /** @type {Map<string, { rootDir: string, exports: any, main: string | null }>} */
+    const out = new Map();
+    for (const file of packageJsonFiles) {
+      const raw = await readFile(file, "utf8").catch(() => null);
+      if (!raw) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (!parsed || typeof parsed !== "object") continue;
+      if (typeof parsed.name !== "string") continue;
+      if (out.has(parsed.name)) continue;
+      out.set(parsed.name, {
+        rootDir: path.dirname(file),
+        exports: parsed.exports ?? null,
+        main: typeof parsed.main === "string" ? parsed.main : null,
+      });
+    }
+
+    return out;
+  })();
+
+  return workspacePackagesPromise;
+}
+
+async function collectPackageJsonFiles(dir, out) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    // Skip node_modules and other generated output.
+    if (
+      entry.name === ".git" ||
+      entry.name === "node_modules" ||
+      entry.name === "dist" ||
+      entry.name === "coverage" ||
+      entry.name === "target" ||
+      entry.name === "build" ||
+      entry.name === ".turbo" ||
+      entry.name === ".pnpm-store" ||
+      entry.name === ".cache" ||
+      entry.name === ".vite" ||
+      entry.name === "playwright-report" ||
+      entry.name === "test-results" ||
+      entry.name === "security-report" ||
+      entry.name.startsWith(".tmp")
+    ) {
+      continue;
+    }
+
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectPackageJsonFiles(fullPath, out);
+      continue;
+    }
+
+    if (!entry.isFile()) continue;
+    if (entry.name !== "package.json") continue;
+    out.push(fullPath);
+  }
+}
+
+function parseWorkspaceSpecifier(specifier) {
+  if (!specifier.startsWith("@formula/")) return null;
+  const parts = specifier.split("/");
+  if (parts.length < 2) return null;
+  const packageName = `${parts[0]}/${parts[1]}`;
+  const subpath = parts.slice(2).join("/");
+  const exportKey = subpath ? `./${subpath}` : ".";
+  return { packageName, exportKey };
+}
+
+function resolveWorkspaceExport(exportsMap, exportKey, main) {
+  /**
+   * @param {any} entry
+   * @returns {string | null}
+   */
+  function pickExportPath(entry) {
+    if (typeof entry === "string") return entry;
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        const picked = pickExportPath(item);
+        if (picked) return picked;
+      }
+      return null;
+    }
+    if (entry && typeof entry === "object") {
+      // Prefer Node's default ESM condition order.
+      if (typeof entry.node === "string") return entry.node;
+      if (typeof entry.import === "string") return entry.import;
+      if (typeof entry.default === "string") return entry.default;
+      if (typeof entry.require === "string") return entry.require;
+
+      // Fall back to searching nested condition objects.
+      for (const value of Object.values(entry)) {
+        const picked = pickExportPath(value);
+        if (picked) return picked;
+      }
+    }
+    return null;
+  }
+
+  let target = null;
+  if (exportsMap) {
+    if (typeof exportsMap === "string") {
+      if (exportKey === ".") target = exportsMap;
+    } else if (exportsMap && typeof exportsMap === "object") {
+      const keys = Object.keys(exportsMap);
+      const looksLikeSubpathMap = keys.some((k) => k === "." || k.startsWith("./"));
+      if (looksLikeSubpathMap) {
+        target = pickExportPath(exportsMap?.[exportKey]);
+      } else if (exportKey === ".") {
+        target = pickExportPath(exportsMap);
+      }
+    }
+  }
+
+  if (!target && exportKey === "." && typeof main === "string") target = main;
+  return target;
+}
+
 export async function resolve(specifier, context, defaultResolve) {
   try {
     return await defaultResolve(specifier, context, defaultResolve);
   } catch (err) {
+    const { base, suffix } = splitSpecifier(specifier);
+
+    // Workspace package fallback for stale/minimal `node_modules` installs:
+    // `@formula/foo` -> `<repoRoot>/packages/...` entrypoint.
+    if (base.startsWith("@formula/") && isResolutionMiss(err)) {
+      const parsed = parseWorkspaceSpecifier(base);
+      if (parsed) {
+        const pkgs = await loadWorkspacePackages();
+        const info = pkgs.get(parsed.packageName);
+        if (info) {
+          const target = resolveWorkspaceExport(info.exports, parsed.exportKey, info.main);
+          if (typeof target === "string" && target.trim() !== "") {
+            const cleaned =
+              target.startsWith("./") || target.startsWith("../") || target.startsWith("/")
+                ? target
+                : `./${target}`;
+            const absPath = path.resolve(info.rootDir, cleaned);
+            const url = pathToFileURL(absPath).href + suffix;
+            return { url };
+          }
+        }
+      }
+    }
+
     if (!isPathLike(specifier)) throw err;
     // Only fall back for missing modules; other resolution errors (like invalid exports)
     // should be surfaced to the caller.
     if (!isResolutionMiss(err)) throw err;
-
-    const { base, suffix } = splitSpecifier(specifier);
 
     // `./foo.js` -> `./foo.ts` fallback (TypeScript ESM convention).
     if (base.endsWith(".js")) {

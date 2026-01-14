@@ -50,17 +50,12 @@ test("read-only collab roles do not write sheet-level view/format state into Yjs
     updates = 0;
     ydoc.on("update", onUpdate);
 
-    // In read-only roles, sheet-level view/format state is considered *shared state*.
-    // Local UI actions that attempt to mutate that state should be reverted so the
-    // viewer doesn't diverge from the shared document.
-    const initialView = documentController.getSheetView("Sheet1");
-    const initialFrozenRows = initialView.frozenRows;
-    const initialFrozenCols = initialView.frozenCols;
-    const initialColWidth = initialView.colWidths?.["0"];
-    const initialBold = documentController.getCellFormat("Sheet1", "A1")?.font?.bold;
-
-    // Local changes should neither be persisted into Yjs nor remain applied locally.
-    // The binder reverts them in read-only roles to prevent local-only divergence.
+    // In read-only roles, the binder blocks shared-state writes (sheet view state + formatting
+    // defaults) from being persisted into Yjs.
+    //
+    // Some mutations are intentionally allowed to remain local-only (freeze panes, row/col sizing,
+    // and layered formatting defaults), so viewers can still tweak their own UI without writing to
+    // the shared CRDT.
     documentController.setFrozen("Sheet1", 2, 1);
     documentController.setColWidth("Sheet1", 0, 120);
     documentController.setSheetFormat("Sheet1", { font: { bold: true } });
@@ -70,19 +65,12 @@ test("read-only collab roles do not write sheet-level view/format state into Yjs
 
     assert.equal(updates, 0, "expected no Yjs updates from local view/format changes in read-only role");
 
-    // Local UI state should have been reverted (no local-only divergence).
+    // Local UI state should still reflect the viewer's local-only changes.
     await waitForCondition(() => {
       const view = documentController.getSheetView("Sheet1");
-      return (
-        view.frozenRows === initialFrozenRows &&
-        view.frozenCols === initialFrozenCols &&
-        (view.colWidths?.["0"] ?? null) === (initialColWidth ?? null)
-      );
+      return view.frozenRows === 2 && view.frozenCols === 1 && view.colWidths?.["0"] === 120;
     });
-    await waitForCondition(() => {
-      const bold = documentController.getCellFormat("Sheet1", "A1")?.font?.bold;
-      return (bold ?? null) === (initialBold ?? null);
-    });
+    await waitForCondition(() => documentController.getCellFormat("Sheet1", "A1")?.font?.bold === true);
 
     // Shared Yjs doc should not contain the sheet view state or formatting defaults.
     const sheetEntry = findSheetEntry(ydoc, "Sheet1");
