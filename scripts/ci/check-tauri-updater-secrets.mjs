@@ -397,7 +397,9 @@ function main() {
 
   if (missing.length > 0) {
     errBlock(`Missing Tauri updater signing secrets`, [
-      `This release workflow is building a tagged desktop release and needs to sign updater artifacts.`,
+      `plugins.updater.active=true in ${relativeConfigPath}, so release artifacts must be signed.`,
+      `Without updater signing, the workflow will upload unsigned updater metadata (missing latest.json.sig), and auto-update will not work.`,
+      `If you intentionally do not want auto-update, set ${relativeConfigPath} → plugins.updater.active=false.`,
       `Expected secrets: TAURI_PRIVATE_KEY (unencrypted minisign secret key; base64).`,
       `Optional: TAURI_KEY_PASSWORD (only for encrypted PKCS#8 keys; encrypted minisign keys are not supported).`,
       `Missing/empty GitHub Actions repository secrets (Settings → Secrets and variables → Actions):`,
