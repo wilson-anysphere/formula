@@ -81,7 +81,17 @@ describe("bindSheetViewToCollabSession (mergedRanges)", () => {
     sheets.push([sheetMap]);
 
     const yRanges = new Y.Array<any>();
-    yRanges.push([{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }]);
+    // Include a mix of legacy/snake-case keys and Y.Map entries (some clients may store
+    // merged ranges as Y.Array<Y.Map> rather than plain JS objects).
+    const mapEntry = new Y.Map<any>();
+    mapEntry.set("startRow", 2);
+    mapEntry.set("endRow", 3);
+    mapEntry.set("startCol", 1);
+    mapEntry.set("endCol", 2);
+    yRanges.push([
+      { start_row: 0, end_row: 1, start_col: 0, end_col: 1 },
+      mapEntry,
+    ]);
     doc.transact(() => {
       const view = new Y.Map<any>();
       view.set("mergedRanges", yRanges);
@@ -96,7 +106,10 @@ describe("bindSheetViewToCollabSession (mergedRanges)", () => {
       documentController: document,
     });
 
-    expect(document.getMergedRanges(sheetId)).toEqual([{ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }]);
+    expect(document.getMergedRanges(sheetId)).toEqual([
+      { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
+      { startRow: 2, endRow: 3, startCol: 1, endCol: 2 },
+    ]);
 
     binder.destroy();
   });

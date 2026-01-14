@@ -317,12 +317,31 @@ function readMergedRanges(raw: unknown): Array<{ startRow: number; endRow: numbe
   const overlaps = (a: any, b: any) =>
     a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol;
 
+  const readEntryField = (entry: any, keys: string[]): any => {
+    if (!entry || typeof entry !== "object") return undefined;
+    const get = typeof entry.get === "function" ? entry.get.bind(entry) : null;
+    if (get) {
+      for (const key of keys) {
+        try {
+          const value = get(key);
+          if (value !== undefined) return value;
+        } catch {
+          // ignore
+        }
+      }
+    }
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(entry, key)) return entry[key];
+    }
+    return undefined;
+  };
+
   const out: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> = [];
   for (const entry of raw) {
-    const sr = Number((entry as any)?.startRow);
-    const er = Number((entry as any)?.endRow);
-    const sc = Number((entry as any)?.startCol);
-    const ec = Number((entry as any)?.endCol);
+    const sr = Number(yjsValueToJson(readEntryField(entry, ["startRow", "start_row", "sr"])));
+    const er = Number(yjsValueToJson(readEntryField(entry, ["endRow", "end_row", "er"])));
+    const sc = Number(yjsValueToJson(readEntryField(entry, ["startCol", "start_col", "sc"])));
+    const ec = Number(yjsValueToJson(readEntryField(entry, ["endCol", "end_col", "ec"])));
     if (!Number.isInteger(sr) || sr < 0) continue;
     if (!Number.isInteger(er) || er < 0) continue;
     if (!Number.isInteger(sc) || sc < 0) continue;
