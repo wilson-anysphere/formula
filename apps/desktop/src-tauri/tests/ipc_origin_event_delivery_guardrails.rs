@@ -59,6 +59,10 @@ fn sensitive_ipc_events_require_trusted_origin() {
         "window.emit(OPEN_FILE_EVENT",
         "emit_open_file_event must verify the main window origin is trusted before emitting",
     );
+    assert!(
+        !emit_open_file_event.contains("app.emit(OPEN_FILE_EVENT"),
+        "emit_open_file_event must not broadcast OPEN_FILE_EVENT via AppHandle::emit"
+    );
 
     let emit_oauth_redirect_event = extract_brace_block(main_rs, "fn emit_oauth_redirect_event");
     assert_any_contains_in_order(
@@ -66,6 +70,10 @@ fn sensitive_ipc_events_require_trusted_origin() {
         &["ensure_stable_origin", "is_trusted_app_origin"],
         "window.emit(OAUTH_REDIRECT_EVENT",
         "emit_oauth_redirect_event must verify the main window origin is trusted before emitting",
+    );
+    assert!(
+        !emit_oauth_redirect_event.contains("app.emit(OAUTH_REDIRECT_EVENT"),
+        "emit_oauth_redirect_event must not broadcast OAUTH_REDIRECT_EVENT via AppHandle::emit"
     );
 
     let open_file_ready_listener = extract_brace_block(main_rs, "listen(OPEN_FILE_READY_EVENT");
