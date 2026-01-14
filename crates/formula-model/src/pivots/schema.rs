@@ -4,12 +4,6 @@ use std::collections::HashSet;
 use std::fmt;
 
 use super::{PivotField, PivotKeyPart, PivotSource, ValueField};
-
-// Used by serde `default = "default_true"` attributes (not detected by the `dead_code` lint).
-#[allow(dead_code)]
-fn default_true() -> bool {
-    true
-}
 /// Canonical reference to a field used by a pivot configuration.
 ///
 /// Pivot tables can be sourced from either:
