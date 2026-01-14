@@ -2498,17 +2498,39 @@ mod encode_ast {
                 if let Some(sheet_name) = sheet_qualifier {
                     // `Sheet1![@Col]`-style references: use the explicit sheet qualifier along with
                     // the origin cell to infer the containing table.
-                    if let Some(table_id) = ctx.single_table_id() {
+                    if let Some(table_id) = ctx.table_id_for_cell(sheet_name, base.row, base.col) {
+                        table_id
+                    } else if let Some(table_id) = ctx.single_table_id() {
+                        // If we know the sheet containing the (only) table and it does not match
+                        // the sheet qualifier, treat the reference as invalid. BIFF12 `PtgList`
+                        // tokens do not encode sheet qualifiers, so this avoids silently dropping
+                        // a mismatched qualifier and changing semantics.
+                        if let Some(false) = ctx.table_is_on_sheet(table_id, sheet_name) {
+                            let table_name = ctx.table_name(table_id).unwrap_or("Table");
+                            return Err(EncodeError::Parse(format!(
+                                "structured reference table '{table_name}' is not on sheet '{sheet_name}'",
+                            )));
+                        }
+
+                        // If the workbook context has a registered table range on this sheet, then
+                        // failing to find the table by cell implies the base cell is outside the
+                        // table. `[@Col]`-style structured references require the origin cell to
+                        // be inside the table range, so error rather than guessing.
+                        if let Some(true) = ctx.table_is_on_sheet(table_id, sheet_name) {
+                            return Err(EncodeError::Parse(format!(
+                                "cannot infer table for structured reference without an explicit table name at '{sheet_name}'!R{}C{} (cell must be inside exactly one table)",
+                                base.row.saturating_add(1),
+                                base.col.saturating_add(1)
+                            )));
+                        }
+
                         table_id
                     } else {
-                        ctx.table_id_for_cell(sheet_name, base.row, base.col)
-                            .ok_or_else(|| {
-                                EncodeError::Parse(format!(
-                                    "cannot infer table for structured reference without an explicit table name at '{sheet_name}'!R{}C{} (cell must be inside exactly one table)",
-                                    base.row.saturating_add(1),
-                                    base.col.saturating_add(1)
-                                ))
-                            })?
+                        return Err(EncodeError::Parse(format!(
+                            "cannot infer table for structured reference without an explicit table name at '{sheet_name}'!R{}C{} (cell must be inside exactly one table)",
+                            base.row.saturating_add(1),
+                            base.col.saturating_add(1)
+                        )));
                     }
                 } else {
                     // Always prefer the "single table in workbook" heuristic when possible. This

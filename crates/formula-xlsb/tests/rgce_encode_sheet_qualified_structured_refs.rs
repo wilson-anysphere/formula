@@ -118,3 +118,19 @@ fn ast_encoder_rejects_sheet_qualified_structured_ref_when_sheet_does_not_match_
         "expected mismatch error, got: {err}"
     );
 }
+
+#[test]
+fn ast_encoder_rejects_sheet_qualified_tableless_structured_ref_when_sheet_does_not_match_table() {
+    let ctx = ctx_table1_on_sheet1();
+
+    // Base cell inside the table on Sheet1, but the sheet qualifier points at Sheet2.
+    // Since BIFF12 `PtgList` does not encode the qualifier, we should not silently accept the
+    // mismatch when the workbook context knows which sheet the table lives on.
+    let err = encode_rgce_with_context_ast("=Sheet2![@Qty]", &ctx, CellCoord::new(1, 0))
+        .expect_err("expected sheet mismatch error");
+
+    assert!(
+        err.to_string().to_ascii_lowercase().contains("not on sheet"),
+        "expected mismatch error, got: {err}"
+    );
+}
