@@ -180,6 +180,34 @@ describe("openFormatCellsDialog formatting performance guards", () => {
     expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBe("#,##0.00");
   });
 
+  it("initializes Number->Custom UI from the active cell's custom number format", () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { numberFormat: "#,##0.00" });
+
+    openFormatCellsDialog({
+      isEditing: () => false,
+      getDocument: () => doc,
+      getSheetId: () => "Sheet1",
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getSelectionRanges: () => [],
+      focusGrid: () => {},
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.format-cells-dialog");
+    expect(dialog).not.toBeNull();
+
+    const number = dialog!.querySelector<HTMLSelectElement>('[data-testid="format-cells-number"]');
+    expect(number?.value).toBe("__custom__");
+
+    const customInput = dialog!.querySelector<HTMLInputElement>('[data-testid="format-cells-number-custom"]');
+    expect(customInput?.value).toBe("#,##0.00");
+
+    const customRow = customInput?.closest<HTMLElement>(".format-cells-dialog__row");
+    expect(customRow?.style.display).not.toBe("none");
+    // The dialog should focus the code input when opening with an existing custom format.
+    expect(document.activeElement).toBe(customInput);
+  });
+
   it("preserves whitespace in custom number format codes", () => {
     const doc = new DocumentController();
 
