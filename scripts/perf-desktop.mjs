@@ -629,7 +629,7 @@ function main() {
   console.log(`[perf-desktop] Using isolated desktop HOME root=${path.relative(repoRoot, perfHome)}`);
   // eslint-disable-next-line no-console
   console.log(
-    "[perf-desktop] Tip: set FORMULA_PERF_PRESERVE_HOME=1 to reuse caches between runs.\n" +
+    "[perf-desktop] Tip: set FORMULA_PERF_PRESERVE_HOME=1 to avoid clearing the perf HOME between runs.\n" +
       "             set FORMULA_PERF_HOME=/path/to/dir to override.\n",
   );
 
