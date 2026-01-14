@@ -314,6 +314,7 @@ export class DrawingOverlay {
   private shapeTextCachePruneSource: DrawingObject[] | null = null;
   private shapeTextCachePruneLength = 0;
   private readonly spatialIndex = new DrawingSpatialIndex();
+  private readonly prefetchedImageBitmaps = new Map<string, Promise<ImageBitmap>>();
   private selectedId: number | null = null;
   private renderSeq = 0;
   private renderAbort: AbortController | null = null;
@@ -508,7 +509,19 @@ export class DrawingOverlay {
 
     const paneLayout = resolvePaneLayout(viewport, this.geom);
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
-    const prefetchedImageBitmaps = new Map<string, Promise<ImageBitmap>>();
+    const prefetchedImageBitmaps = this.prefetchedImageBitmaps;
+    prefetchedImageBitmaps.clear();
+    const withClipRect = (clipRect: Rect, fn: () => void) => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+      ctx.clip();
+      try {
+        fn();
+      } finally {
+        ctx.restore();
+      }
+    };
 
     // Spatial index: compute a small candidate list for the current viewport rather
     // than scanning every drawing on each render.
@@ -522,8 +535,20 @@ export class DrawingOverlay {
       const candidates = this.spatialIndex.query(rect, candidatesScratch);
       if (candidates.length === 0) return;
       for (const obj of candidates) {
-        const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
-        if (pane.quadrant !== quadrant) continue;
+        const anchor = obj.anchor;
+        const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
+        const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
+        const objQuadrant: PaneQuadrant =
+          anchor.type === "absolute"
+            ? "bottomRight"
+            : inFrozenRows && inFrozenCols
+              ? "topLeft"
+              : inFrozenRows
+                ? "topRight"
+                : inFrozenCols
+                  ? "bottomLeft"
+                  : "bottomRight";
+        if (objQuadrant !== quadrant) continue;
         ordered.push(obj);
       }
     };
@@ -558,6 +583,8 @@ export class DrawingOverlay {
     let selectedClipRect: Rect | null = null;
     let selectedAabb: Rect | null = null;
     let selectedTransform: DrawingTransform | undefined = undefined;
+    const screenRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+    const aabbScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
 
     if (drawObjects) {
       // First pass: kick off image decodes for all visible images without awaiting so
@@ -567,17 +594,27 @@ export class DrawingOverlay {
         if (seq !== this.renderSeq || signal?.aborted) return;
 
         const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
-        const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
-        const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
-        const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
-        const screenRect = {
-          x: rect.x - scrollX + paneLayout.headerOffsetX,
-          y: rect.y - scrollY + paneLayout.headerOffsetY,
-          width: rect.width,
-          height: rect.height,
-        };
-        const clipRect = paneLayout.quadrants[pane.quadrant];
-        const aabb = getAabbForObject(screenRect, obj.transform);
+        const anchor = obj.anchor;
+        const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
+        const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
+        const scrollX = inFrozenCols ? 0 : viewport.scrollX;
+        const scrollY = inFrozenRows ? 0 : viewport.scrollY;
+        screenRectScratch.x = rect.x - scrollX + paneLayout.headerOffsetX;
+        screenRectScratch.y = rect.y - scrollY + paneLayout.headerOffsetY;
+        screenRectScratch.width = rect.width;
+        screenRectScratch.height = rect.height;
+        const quadrant: PaneQuadrant =
+          anchor.type === "absolute"
+            ? "bottomRight"
+            : inFrozenRows && inFrozenCols
+              ? "topLeft"
+              : inFrozenRows
+                ? "topRight"
+                : inFrozenCols
+                  ? "bottomLeft"
+                  : "bottomRight";
+        const clipRect = paneLayout.quadrants[quadrant];
+        const aabb = getAabbForObject(screenRectScratch, obj.transform, aabbScratch);
 
         if (clipRect.width <= 0 || clipRect.height <= 0) continue;
         if (!intersects(aabb, clipRect)) continue;
@@ -605,22 +642,51 @@ export class DrawingOverlay {
         if (seq !== this.renderSeq || signal?.aborted) return;
         if (obj.kind.type === "shape") shapeCount += 1;
         const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
-        const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
-        const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
-        const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
-        const screenRect = {
-          x: rect.x - scrollX + paneLayout.headerOffsetX,
-          y: rect.y - scrollY + paneLayout.headerOffsetY,
-          width: rect.width,
-          height: rect.height,
-        };
-        const clipRect = paneLayout.quadrants[pane.quadrant];
-        const aabb = getAabbForObject(screenRect, obj.transform);
+        const anchor = obj.anchor;
+        const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
+        const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
+        const scrollX = inFrozenCols ? 0 : viewport.scrollX;
+        const scrollY = inFrozenRows ? 0 : viewport.scrollY;
+        screenRectScratch.x = rect.x - scrollX + paneLayout.headerOffsetX;
+        screenRectScratch.y = rect.y - scrollY + paneLayout.headerOffsetY;
+        screenRectScratch.width = rect.width;
+        screenRectScratch.height = rect.height;
+        const quadrant: PaneQuadrant =
+          anchor.type === "absolute"
+            ? "bottomRight"
+            : inFrozenRows && inFrozenCols
+              ? "topLeft"
+              : inFrozenRows
+                ? "topRight"
+                : inFrozenCols
+                  ? "bottomLeft"
+                  : "bottomRight";
+        const clipRect = paneLayout.quadrants[quadrant];
+        const aabb = getAabbForObject(screenRectScratch, obj.transform, aabbScratch);
 
         if (selectedId != null && obj.id === selectedId) {
-          selectedScreenRect = screenRect;
+          if (!selectedScreenRect) {
+            selectedScreenRect = {
+              x: screenRectScratch.x,
+              y: screenRectScratch.y,
+              width: screenRectScratch.width,
+              height: screenRectScratch.height,
+            };
+          } else {
+            selectedScreenRect.x = screenRectScratch.x;
+            selectedScreenRect.y = screenRectScratch.y;
+            selectedScreenRect.width = screenRectScratch.width;
+            selectedScreenRect.height = screenRectScratch.height;
+          }
           selectedClipRect = clipRect;
-          selectedAabb = aabb;
+          if (!selectedAabb) {
+            selectedAabb = { x: aabb.x, y: aabb.y, width: aabb.width, height: aabb.height };
+          } else {
+            selectedAabb.x = aabb.x;
+            selectedAabb.y = aabb.y;
+            selectedAabb.width = aabb.width;
+            selectedAabb.height = aabb.height;
+          }
           selectedTransform = obj.transform;
         }
 
@@ -630,18 +696,6 @@ export class DrawingOverlay {
         // Paranoia: clip rects are expected to be within the viewport, but keep the
         // early-out for callers providing custom layouts.
         if (!intersects(clipRect, viewportRect)) continue;
-
-        const withClip = (fn: () => void) => {
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
-          ctx.clip();
-          try {
-            fn();
-          } finally {
-            ctx.restore();
-          }
-        };
 
         if (!intersects(aabb, viewportRect)) {
           continue;
@@ -661,21 +715,21 @@ export class DrawingOverlay {
             // Image metadata can arrive before the bytes are hydrated into the ImageStore
             // (e.g. collaboration metadata received before IndexedDB hydration). Render a
             // placeholder box so the image remains visible/selectable until bytes load.
-            withClip(() => {
+            withClipRect(clipRect, () => {
               ctx.save();
               ctx.strokeStyle = colors.placeholderOtherStroke;
               ctx.lineWidth = 1;
               ctx.setLineDash([4, 2]);
               if (hasNonIdentityTransform(obj.transform)) {
-                drawTransformedRect(ctx, screenRect, obj.transform!);
+                drawTransformedRect(ctx, screenRectScratch, obj.transform!);
               } else {
-                ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+                ctx.strokeRect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
               }
               ctx.setLineDash([]);
               ctx.fillStyle = colors.placeholderLabel;
               ctx.globalAlpha = 0.6;
               ctx.font = "12px sans-serif";
-              ctx.fillText("missing image", screenRect.x + 4, screenRect.y + 14);
+              ctx.fillText("missing image", screenRectScratch.x + 4, screenRectScratch.y + 14);
               ctx.restore();
             });
             continue;
@@ -688,9 +742,9 @@ export class DrawingOverlay {
             const bitmap = await bitmapPromise;
             if (signal?.aborted) return;
             if (seq !== this.renderSeq) return;
-            withClip(() => {
+            withClipRect(clipRect, () => {
               if (hasNonIdentityTransform(obj.transform)) {
-                withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+                withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
                   ctx.save();
                   try {
                     // Clip to the (possibly rotated/flipped) image bounds so we don't
@@ -704,7 +758,7 @@ export class DrawingOverlay {
                   }
                 });
               } else {
-                ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+                ctx.drawImage(bitmap, screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
               }
             });
             continue;
@@ -719,11 +773,11 @@ export class DrawingOverlay {
           const chartId = obj.kind.chartId;
           if (this.chartRenderer && typeof chartId === "string" && chartId.length > 0) {
             let rendered = false;
-            withClip(() => {
+            withClipRect(clipRect, () => {
               ctx.save();
               try {
                 if (hasNonIdentityTransform(obj.transform)) {
-                  withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+                  withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
                     ctx.save();
                     try {
                       ctx.beginPath();
@@ -737,9 +791,9 @@ export class DrawingOverlay {
                   });
                 } else {
                   ctx.beginPath();
-                  ctx.rect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+                  ctx.rect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
                   ctx.clip();
-                  this.chartRenderer!.renderToCanvas(ctx, chartId, screenRect);
+                  this.chartRenderer!.renderToCanvas(ctx, chartId, screenRectScratch);
                   rendered = true;
                 }
               } catch {
@@ -776,15 +830,15 @@ export class DrawingOverlay {
             spec = null;
           }
 
-          if (spec) {
-            const specToDraw = canRenderText ? { ...spec, label: undefined } : spec;
-            withClip(() => {
-              try {
-                withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
-                  drawShape(ctx, localRect, specToDraw, colors, cssVarStyle, zoom);
-                  if (canRenderText) {
-                    renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
-                  }
+            if (spec) {
+              const specToDraw = canRenderText ? { ...spec, label: undefined } : spec;
+              withClipRect(clipRect, () => {
+                try {
+                  withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
+                    drawShape(ctx, localRect, specToDraw, colors, cssVarStyle, zoom);
+                    if (canRenderText) {
+                      renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
+                    }
                 });
                 rendered = true;
               } catch {
@@ -796,11 +850,11 @@ export class DrawingOverlay {
 
           // If we couldn't render the shape geometry but we did successfully parse text,
           // still render the text within the anchored bounds (and skip placeholders).
-          if (canRenderText) {
-            withClip(() => {
-              withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
-                ctx.save();
-                try {
+            if (canRenderText) {
+              withClipRect(clipRect, () => {
+                withObjectTransform(ctx, screenRectScratch, obj.transform, (localRect) => {
+                  ctx.save();
+                  try {
                   ctx.beginPath();
                   ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
                   ctx.clip();
@@ -815,15 +869,15 @@ export class DrawingOverlay {
 
           // Shape parsed but has no text: keep an empty bounds placeholder (no label).
           if (textParsed) {
-            withClip(() => {
+            withClipRect(clipRect, () => {
               ctx.save();
               ctx.strokeStyle = colors.placeholderOtherStroke;
               ctx.lineWidth = 1;
               ctx.setLineDash([4, 2]);
               if (hasNonIdentityTransform(obj.transform)) {
-                drawTransformedRect(ctx, screenRect, obj.transform!);
+                drawTransformedRect(ctx, screenRectScratch, obj.transform!);
               } else {
-                ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+                ctx.strokeRect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
               }
               ctx.restore();
             });
@@ -832,7 +886,7 @@ export class DrawingOverlay {
         }
 
         // Placeholder rendering for shapes/charts/unknown.
-        withClip(() => {
+        withClipRect(clipRect, () => {
           ctx.save();
           const rawXml =
             // Some integration layers still pass through snake_case from the Rust model.
@@ -849,9 +903,9 @@ export class DrawingOverlay {
           ctx.lineWidth = 1;
           ctx.setLineDash([4, 2]);
           if (hasNonIdentityTransform(obj.transform)) {
-            drawTransformedRect(ctx, screenRect, obj.transform!);
+            drawTransformedRect(ctx, screenRectScratch, obj.transform!);
           } else {
-            ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+            ctx.strokeRect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
           }
           ctx.setLineDash([]);
           ctx.fillStyle = colors.placeholderLabel;
@@ -865,7 +919,7 @@ export class DrawingOverlay {
                 obj.kind.type !== "chart"
                 ? graphicFramePlaceholderLabel(rawXml) ?? obj.kind.type
                 : obj.kind.type;
-          ctx.fillText(placeholderLabel, screenRect.x + 4, screenRect.y + 14);
+          ctx.fillText(placeholderLabel, screenRectScratch.x + 4, screenRectScratch.y + 14);
           ctx.restore();
         });
       }
@@ -888,16 +942,28 @@ export class DrawingOverlay {
         const selected = ordered.find((o) => o.id === selectedId);
         if (selected) {
           const rect = this.spatialIndex.getRect(selected.id) ?? anchorToRectPx(selected.anchor, this.geom, zoom);
-          const pane = resolveAnchorPane(selected.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
-          const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
-          const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
+          const anchor = selected.anchor;
+          const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
+          const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
+          const scrollX = inFrozenCols ? 0 : viewport.scrollX;
+          const scrollY = inFrozenRows ? 0 : viewport.scrollY;
           const screen = {
             x: rect.x - scrollX + paneLayout.headerOffsetX,
             y: rect.y - scrollY + paneLayout.headerOffsetY,
             width: rect.width,
             height: rect.height,
           };
-          const clipRect = paneLayout.quadrants[pane.quadrant];
+          const quadrant: PaneQuadrant =
+            anchor.type === "absolute"
+              ? "bottomRight"
+              : inFrozenRows && inFrozenCols
+                ? "topLeft"
+                : inFrozenRows
+                  ? "topRight"
+                  : inFrozenCols
+                    ? "bottomLeft"
+                    : "bottomRight";
+          const clipRect = paneLayout.quadrants[quadrant];
           const selectionAabb = getAabbForObject(screen, selected.transform);
           if (clipRect.width > 0 && clipRect.height > 0 && intersects(selectionAabb, clipRect)) {
             ctx.save();
@@ -985,6 +1051,7 @@ export class DrawingOverlay {
       this.preloadAbort?.abort();
       this.preloadAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
     }
+    this.prefetchedImageBitmaps.clear();
     this.bitmapCache.invalidate(String(imageId ?? ""));
   }
 
@@ -1001,6 +1068,7 @@ export class DrawingOverlay {
     this.renderAbort = null;
     this.preloadAbort?.abort();
     this.preloadAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
+    this.prefetchedImageBitmaps.clear();
     this.bitmapCache.clear();
   }
 
@@ -1016,6 +1084,7 @@ export class DrawingOverlay {
     this.themeObserver?.disconnect();
     this.themeObserver = null;
     this.bitmapCache.clear();
+    this.prefetchedImageBitmaps.clear();
     this.shapeTextCache.clear();
     this.shapeTextCachePruneSource = null;
     this.shapeTextCachePruneLength = 0;
@@ -1075,7 +1144,7 @@ function getTransformTrig(transform: DrawingTransform): CachedTrig {
   return next;
 }
 
-function rectToAabb(rect: Rect, transform: DrawingTransform): Rect {
+function rectToAabb(rect: Rect, transform: DrawingTransform, out?: Rect): Rect {
   const cx = rect.x + rect.width / 2;
   const cy = rect.y + rect.height / 2;
   const hw = rect.width / 2;
@@ -1111,12 +1180,17 @@ function rectToAabb(rect: Rect, transform: DrawingTransform): Rect {
   visitCorner(hw, hh);
   visitCorner(-hw, hh);
 
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  const target = out ?? { x: 0, y: 0, width: 0, height: 0 };
+  target.x = minX;
+  target.y = minY;
+  target.width = maxX - minX;
+  target.height = maxY - minY;
+  return target;
 }
 
-function getAabbForObject(rect: Rect, transform: DrawingTransform | undefined): Rect {
+function getAabbForObject(rect: Rect, transform: DrawingTransform | undefined, out?: Rect): Rect {
   if (!hasNonIdentityTransform(transform)) return rect;
-  return rectToAabb(rect, transform!);
+  return rectToAabb(rect, transform!, out);
 }
 
 function withObjectTransform(
@@ -1346,25 +1420,6 @@ function dashPatternForPreset(preset: string | undefined, strokeWidthPx: number)
 }
 
 type PaneQuadrant = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
-
-function resolveAnchorPane(
-  anchor: Anchor,
-  frozenRows: number,
-  frozenCols: number,
-): { quadrant: PaneQuadrant; inFrozenRows: boolean; inFrozenCols: boolean } {
-  if (anchor.type === "absolute") {
-    return { quadrant: "bottomRight", inFrozenRows: false, inFrozenCols: false };
-  }
-  const fromRow = anchor.from.cell.row;
-  const fromCol = anchor.from.cell.col;
-  const inFrozenRows = fromRow < frozenRows;
-  const inFrozenCols = fromCol < frozenCols;
-
-  if (inFrozenRows && inFrozenCols) return { quadrant: "topLeft", inFrozenRows, inFrozenCols };
-  if (inFrozenRows && !inFrozenCols) return { quadrant: "topRight", inFrozenRows, inFrozenCols };
-  if (!inFrozenRows && inFrozenCols) return { quadrant: "bottomLeft", inFrozenRows, inFrozenCols };
-  return { quadrant: "bottomRight", inFrozenRows, inFrozenCols };
-}
 
 function resolvePaneLayout(
   viewport: Viewport,
