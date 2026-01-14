@@ -10839,6 +10839,65 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   app.refresh();
 }
 
+const OPEN_WORKBOOK_PASSWORD_REQUIRED_PREFIX = "PASSWORD_REQUIRED:";
+const OPEN_WORKBOOK_INVALID_PASSWORD_PREFIX = "INVALID_PASSWORD:";
+
+function extractInvokeErrorMessage(err: unknown): string {
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const msg = (err as any).message;
+    if (typeof msg === "string") return msg;
+  }
+  return String(err);
+}
+
+function isAbortError(err: unknown): boolean {
+  return Boolean(err && typeof err === "object" && (err as any).name === "AbortError");
+}
+
+async function openWorkbookWithPasswordPrompt(
+  path: string,
+): Promise<WorkbookInfo> {
+  if (!tauriBackend) throw new Error("Desktop backend is not available");
+
+  const abort = () => {
+    const err = new Error("Open workbook cancelled");
+    err.name = "AbortError";
+    throw err;
+  };
+
+  const promptPassword = async (prompt: string): Promise<string> => {
+    const password = await showInputBox({
+      prompt,
+      placeHolder: "Password",
+      type: "password",
+      okLabel: "Open",
+      cancelLabel: "Cancel",
+    });
+    if (password == null) abort();
+    return password;
+  };
+
+  let password: string | null = null;
+  for (;;) {
+    try {
+      if (password == null) return await tauriBackend.openWorkbook(path);
+      return await tauriBackend.openWorkbook(path, { password });
+    } catch (err) {
+      const msg = extractInvokeErrorMessage(err);
+      if (msg.startsWith(OPEN_WORKBOOK_PASSWORD_REQUIRED_PREFIX)) {
+        password = await promptPassword("This workbook is password-protected. Enter password to open.");
+        continue;
+      }
+      if (msg.startsWith(OPEN_WORKBOOK_INVALID_PASSWORD_PREFIX)) {
+        password = await promptPassword("Invalid password. Try again.");
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 async function openWorkbookFromPath(
   path: string,
   options: { notifyExtensions?: boolean; throwOnCancel?: boolean } = {},
@@ -10885,7 +10944,7 @@ async function openWorkbookFromPath(
     workbookSync?.stop();
     workbookSync = null;
 
-    activeWorkbook = await tauriBackend.openWorkbook(path);
+    activeWorkbook = await openWorkbookWithPasswordPrompt(path);
     await loadWorkbookIntoDocument(activeWorkbook);
     if (options.notifyExtensions !== false) {
       try {
@@ -10938,6 +10997,7 @@ async function openWorkbookFromPath(
       }
     }
     void startPowerQueryService();
+    if (isAbortError(err) && !options.throwOnCancel) return;
     throw err;
   }
 }

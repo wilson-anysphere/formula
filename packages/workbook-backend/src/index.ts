@@ -115,7 +115,12 @@ export {
 export interface WorkbookBackend {
   newWorkbook(): Promise<WorkbookInfo>;
 
-  openWorkbook?(path: string): Promise<WorkbookInfo>;
+  /**
+   * Open a workbook by filesystem path (desktop-only; optional for web backends).
+   *
+   * `options.password` is used for password-protected/encrypted workbooks ("Password to open").
+   */
+  openWorkbook?(path: string, options?: { password?: string }): Promise<WorkbookInfo>;
   openWorkbookFromBytes?(bytes: Uint8Array): Promise<WorkbookInfo>;
 
   /**

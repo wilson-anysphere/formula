@@ -50,8 +50,10 @@ export class TauriWorkbookBackend implements WorkbookBackend {
     return info as WorkbookInfo;
   }
 
-  async openWorkbook(path: string): Promise<WorkbookInfo> {
-    const info = await this.invoke("open_workbook", { path });
+  async openWorkbook(path: string, options?: { password?: string }): Promise<WorkbookInfo> {
+    const args: Record<string, unknown> = { path };
+    if (options?.password != null) args.password = options.password;
+    const info = await this.invoke("open_workbook", args);
     return info as WorkbookInfo;
   }
 

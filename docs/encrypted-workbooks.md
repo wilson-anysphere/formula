@@ -102,7 +102,7 @@ Notes:
 Example `Cargo.toml` (when using `default-features = false`):
 
 ```toml
-# Enable encrypted workbook support (OOXML + legacy `.xls`) explicitly.
+# Enable encrypted OOXML workbook support (`EncryptionInfo` + `EncryptedPackage`) explicitly.
 formula-io = { version = "*", default-features = false, features = ["encrypted-workbooks"] }
 ```
 
@@ -155,8 +155,8 @@ Implementation note (desktop IPC):
 Current desktop limitations:
 
 - Password-aware open is supported for **encrypted OOXML workbooks that decrypt to XLSX/XLSM**
-  packages (via the `open_workbook` command’s `password` parameter). The frontend is expected to
-  prompt/retry when it receives a `PASSWORD_REQUIRED:` error.
+  packages (via the `open_workbook` command’s `password` parameter). The desktop frontend prompts
+  for a password and retries open when it receives `PASSWORD_REQUIRED:` / `INVALID_PASSWORD:` errors.
 - Legacy `.xls` BIFF `FILEPASS` password prompting is not yet wired through the desktop open path.
 - Encrypted `.xlsb` containers are detected, but the decrypted payload is not currently routed
   through the `.xlsb` reader.
