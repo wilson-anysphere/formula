@@ -275,32 +275,6 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     }
 }
 
-fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    // DAX table identifiers may be written without quotes when they are simple identifiers.
-    // Excel commonly uses quoted identifiers for tables containing spaces or punctuation.
-    //
-    // This check is intentionally conservative: if the name contains anything other than
-    // ASCII letters/digits/underscore, or starts with a non-letter/underscore, we require quotes.
-    let mut chars = raw.chars();
-    let Some(first) = chars.next() else {
-        return true;
-    };
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return true;
-    }
-    for ch in chars {
-        if !(ch.is_ascii_alphanumeric() || ch == '_') {
-            return true;
-        }
-    }
-    false
-}
-
-fn quote_dax_identifier(raw: &str) -> String {
-    // In DAX, single quotes are escaped by doubling (`''`) inside a quoted identifier.
-    format!("'{}'", raw.replace('\'', "''"))
-}
-
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
