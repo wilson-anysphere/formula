@@ -756,6 +756,39 @@ impl DaxEngine {
                     }
                 }
             }
+            Expr::BinaryOp {
+                op: BinaryOp::And,
+                left,
+                right,
+            } => {
+                // DAX logical operators `&&` / `||` short-circuit.
+                //
+                // This matters for correctness (avoiding errors in the RHS when the LHS determines
+                // the result) and matches common DAX usage patterns.
+                let left = self.eval_scalar(model, left, filter, row_ctx, env)?;
+                let left = left.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
+                if !left {
+                    return Ok(Value::Boolean(false));
+                }
+                let right = self.eval_scalar(model, right, filter, row_ctx, env)?;
+                let right = right.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
+                Ok(Value::Boolean(right))
+            }
+            Expr::BinaryOp {
+                op: BinaryOp::Or,
+                left,
+                right,
+            } => {
+                // See `BinaryOp::And` above.
+                let left = self.eval_scalar(model, left, filter, row_ctx, env)?;
+                let left = left.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
+                if left {
+                    return Ok(Value::Boolean(true));
+                }
+                let right = self.eval_scalar(model, right, filter, row_ctx, env)?;
+                let right = right.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
+                Ok(Value::Boolean(right))
+            }
             Expr::BinaryOp { op, left, right } => {
                 let left = self.eval_scalar(model, left, filter, row_ctx, env)?;
                 let right = self.eval_scalar(model, right, filter, row_ctx, env)?;
