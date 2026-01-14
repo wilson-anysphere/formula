@@ -11,6 +11,11 @@ This document explains what those files look like on disk and how to debug user 
 Note: the more complete, up-to-date overview lives in
 [`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md) (covers both OOXML + legacy `.xls`).
 
+Important: do not confuse **file encryption** (“Password to open” / “Encrypt with Password”) with
+**workbook/worksheet protection** (“Password to edit”). Protection settings live inside the normal
+OOXML package (e.g. `xl/workbook.xml` `<workbookProtection>` and `xl/worksheets/sheetN.xml`
+`<sheetProtection>`) and the file still starts with `PK`.
+
 For maintainer-level implementation notes (supported parameter subsets, KDF nuances, writer
 defaults), see [`docs/office-encryption.md`](./office-encryption.md).
 
