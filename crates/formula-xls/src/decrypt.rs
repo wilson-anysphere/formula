@@ -143,7 +143,6 @@ pub(crate) fn decrypt_biff_workbook_stream(
             ENCRYPTION_SUBTYPE_CRYPTOAPI | ENCRYPTION_INFO_CRYPTOAPI_LEGACY
         ) {
             decrypt_biff8_workbook_stream_rc4_cryptoapi(workbook_stream, password)?;
-            crate::biff::records::mask_workbook_globals_filepass_record_id_in_place(workbook_stream);
             return Ok(());
         }
         if second_field != ENCRYPTION_SUBTYPE_STANDARD {

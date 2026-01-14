@@ -462,14 +462,6 @@ fn import_xls_with_biff_reader(
             catch_calamine_panic_with_context("decrypting `.xls` workbook stream", || {
                 decrypt::decrypt_biff_workbook_stream(workbook_stream, password)
             })??;
-
-            // Decryption produces a plaintext workbook stream, but the `FILEPASS` record header
-            // remains. Mask it so downstream BIFF parsers (and `calamine`) don't treat the stream
-            // as encrypted and stop scanning at `FILEPASS`.
-            //
-            // Note: `decrypt_biff_workbook_stream` already masks `FILEPASS`, but keep this call
-            // here as a safety net so future decryptors don't regress this requirement.
-            biff::records::mask_workbook_globals_filepass_record_id_in_place(workbook_stream);
         }
     }
 
