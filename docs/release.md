@@ -1623,7 +1623,7 @@ integration metadata made it into the final bundles (not just `tauri.conf.json`)
 - macOS: `CFBundleDocumentTypes` includes `.xlsx`/`.csv`/`.parquet` (etc) and
   `CFBundleURLTypes` includes the `formula` scheme.
 - Windows: the built installers register:
-  - spreadsheet file associations (at least `.xlsx`)
+  - file associations from `apps/desktop/src-tauri/tauri.conf.json` (`bundle.fileAssociations`)
   - the `formula://` URL protocol handler
   - Note: MSI validation is static/authoritative (Windows Installer tables via COM). NSIS `.exe`
     validation is **heuristic** (marker scan) and is intended to catch obvious regressions.
