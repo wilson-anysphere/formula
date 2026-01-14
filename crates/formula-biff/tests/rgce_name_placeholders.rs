@@ -1,4 +1,5 @@
 use formula_biff::decode_rgce;
+use formula_engine::{Expr, UnaryOp};
 use pretty_assertions::assert_eq;
 
 fn ptg_name(name_id: u32, ptg: u8) -> Vec<u8> {
@@ -27,9 +28,13 @@ fn ptg_funcvar_udf(argc: u8) -> [u8; 4] {
     [0x22, argc, 0xFF, 0x00]
 }
 
-fn assert_parseable(formula: &str) {
+fn parse(formula: &str) -> formula_engine::Ast {
     formula_engine::parse_formula(formula, formula_engine::ParseOptions::default())
-        .expect("parse formula");
+        .expect("parse formula")
+}
+
+fn assert_parseable(formula: &str) {
+    parse(formula);
 }
 
 #[test]
@@ -38,6 +43,11 @@ fn decodes_ptg_name_to_safe_placeholder() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "Name_123");
     assert_parseable(&text);
+    let ast = parse(&text);
+    assert!(
+        matches!(&ast.expr, Expr::NameRef(n) if n.name == "Name_123"),
+        "expected NameRef(Name_123), got {ast:?}"
+    );
 }
 
 #[test]
@@ -46,6 +56,11 @@ fn decodes_ptg_namex_to_safe_placeholder() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "ExternName_IXTI0_N1");
     assert_parseable(&text);
+    let ast = parse(&text);
+    assert!(
+        matches!(&ast.expr, Expr::NameRef(n) if n.name == "ExternName_IXTI0_N1"),
+        "expected NameRef(ExternName_IXTI0_N1), got {ast:?}"
+    );
 }
 
 #[test]
@@ -54,6 +69,16 @@ fn decodes_value_class_ptg_name_with_implicit_intersection_prefix() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "@Name_123");
     assert_parseable(&text);
+    let ast = parse(&text);
+    assert!(
+        matches!(
+            &ast.expr,
+            Expr::Unary(u)
+                if u.op == UnaryOp::ImplicitIntersection
+                    && matches!(&*u.expr, Expr::NameRef(n) if n.name == "Name_123")
+        ),
+        "expected @NameRef(Name_123), got {ast:?}"
+    );
 }
 
 #[test]
@@ -62,6 +87,16 @@ fn decodes_value_class_ptg_namex_with_implicit_intersection_prefix() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "@ExternName_IXTI0_N1");
     assert_parseable(&text);
+    let ast = parse(&text);
+    assert!(
+        matches!(
+            &ast.expr,
+            Expr::Unary(u)
+                if u.op == UnaryOp::ImplicitIntersection
+                    && matches!(&*u.expr, Expr::NameRef(n) if n.name == "ExternName_IXTI0_N1")
+        ),
+        "expected @NameRef(ExternName_IXTI0_N1), got {ast:?}"
+    );
 }
 
 #[test]
@@ -93,6 +128,11 @@ fn decodes_ptg_name_as_udf_function_name_via_sentinel_funcvar() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "Name_123(1,2)");
     assert_parseable(&text);
+    let ast = parse(&text);
+    assert!(
+        matches!(&ast.expr, Expr::FunctionCall(call) if call.name.original == "Name_123"),
+        "expected FunctionCall(Name_123), got {ast:?}"
+    );
 }
 
 #[test]
@@ -109,4 +149,14 @@ fn decodes_value_class_ptg_name_as_udf_function_name_via_sentinel_funcvar() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "@Name_123(1,2)");
     assert_parseable(&text);
+    let ast = parse(&text);
+    assert!(
+        matches!(
+            &ast.expr,
+            Expr::Unary(u)
+                if u.op == UnaryOp::ImplicitIntersection
+                    && matches!(&*u.expr, Expr::FunctionCall(call) if call.name.original == "Name_123")
+        ),
+        "expected @FunctionCall(Name_123), got {ast:?}"
+    );
 }
