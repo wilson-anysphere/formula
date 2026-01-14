@@ -2072,10 +2072,10 @@ export class CollabSession {
    */
   async setCellValue(cellKey: string, value: unknown, options?: { ignorePermissions?: boolean }): Promise<void> {
     const ignorePermissions = options?.ignorePermissions === true;
+    if (typeof cellKey !== "string" || cellKey.length === 0) {
+      throw new Error(`Invalid cellKey: ${String(cellKey)}`);
+    }
     const userId = this.permissions?.userId ?? null;
-
-    const cellData = this.cells.get(cellKey);
-    const existingCell = getYMapCell(cellData);
     const parsedMaybe = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
 
     // Fail closed: when permissions are configured, we must not allow callers to
@@ -2088,6 +2088,8 @@ export class CollabSession {
       throw new Error(`Permission denied: cannot edit cell ${makeCellKey(parsedMaybe)}`);
     }
 
+    const cellData = this.cells.get(cellKey);
+    const existingCell = getYMapCell(cellData);
     const existingEnc = existingCell?.get("enc") ?? (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
 
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
@@ -2277,8 +2279,9 @@ export class CollabSession {
     options?: { ignorePermissions?: boolean }
   ): Promise<void> {
     const ignorePermissions = options?.ignorePermissions === true;
-    const cellData = this.cells.get(cellKey);
-    const existingCell = getYMapCell(cellData);
+    if (typeof cellKey !== "string" || cellKey.length === 0) {
+      throw new Error(`Invalid cellKey: ${String(cellKey)}`);
+    }
     const parsedMaybe = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
 
     // Fail closed: when permissions are configured, we must not allow callers to
@@ -2291,6 +2294,8 @@ export class CollabSession {
       throw new Error(`Permission denied: cannot edit cell ${makeCellKey(parsedMaybe)}`);
     }
 
+    const cellData = this.cells.get(cellKey);
+    const existingCell = getYMapCell(cellData);
     const existingEnc = existingCell?.get("enc") ?? (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
 
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
