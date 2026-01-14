@@ -27,11 +27,19 @@ fn read_xl_wide_string(payload: &[u8], offset: &mut usize) -> Option<String> {
     String::from_utf16(&units).ok()
 }
 
-fn first_ptg_namex_token(rgce: &[u8]) -> Option<[u8; 5]> {
+fn first_ptg_namex_ref(rgce: &[u8]) -> Option<(u16, u16)> {
     // PtgNameX token layout: [ptgNameX{R,V,A}][ixti:u16][name_index:u16]
-    rgce.windows(5)
-        .find(|w| matches!(w[0], 0x39 | 0x59 | 0x79))
-        .map(|w| [w[0], w[1], w[2], w[3], w[4]])
+    //
+    // We intentionally ignore the token *class* (R/V/A) and focus on the `(ixti, name_index)`
+    // payload, since this regression test is about stable NameX indices, not expression typing.
+    rgce.windows(5).find_map(|w| {
+        if !matches!(w[0], 0x39 | 0x59 | 0x79) {
+            return None;
+        }
+        let ixti = u16::from_le_bytes([w[1], w[2]]);
+        let name_index = u16::from_le_bytes([w[3], w[4]]);
+        Some((ixti, name_index))
+    })
 }
 
 #[test]
@@ -598,7 +606,7 @@ fn save_with_cell_formula_text_edits_reuses_existing_addin_supbook() {
         CellCoord::new(0, 0),
     )
     .expect("encode MyAddinFunc before patch");
-    let namex_token_before = first_ptg_namex_token(&encoded_before.rgce)
+    let namex_ref_before = first_ptg_namex_ref(&encoded_before.rgce)
         .expect("expected MyAddinFunc to encode using a PtgNameX token");
 
     // Insert a new `_xlfn.*` future function; udf.xlsb already has an AddIn SupBook + NameX table,
@@ -629,10 +637,10 @@ fn save_with_cell_formula_text_edits_reuses_existing_addin_supbook() {
         CellCoord::new(0, 0),
     )
     .expect("encode MyAddinFunc after patch");
-    let namex_token_after = first_ptg_namex_token(&encoded_after.rgce)
+    let namex_ref_after = first_ptg_namex_ref(&encoded_after.rgce)
         .expect("expected MyAddinFunc to encode using a PtgNameX token");
     assert_eq!(
-        namex_token_after, namex_token_before,
+        namex_ref_after, namex_ref_before,
         "expected MyAddinFunc NameX reference to remain stable after patch"
     );
 
