@@ -499,11 +499,12 @@ export class DrawingOverlay {
     // than scanning every drawing on each render.
     this.spatialIndex.rebuild(objects, this.geom, zoom);
     const ordered: DrawingObject[] = [];
+    const candidatesScratch: DrawingObject[] = [];
     const frozenContentWidth = paneLayout.quadrants.topLeft.width;
     const frozenContentHeight = paneLayout.quadrants.topLeft.height;
     const addCandidates = (quadrant: PaneQuadrant, rect: { x: number; y: number; width: number; height: number }) => {
       if (!(rect.width > 0 && rect.height > 0)) return;
-      const candidates = this.spatialIndex.query(rect);
+      const candidates = this.spatialIndex.query(rect, candidatesScratch);
       if (candidates.length === 0) return;
       for (const obj of candidates) {
         const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);

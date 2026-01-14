@@ -170,6 +170,7 @@ export class DrawingSpatialIndex {
   private readonly pointersScratch: number[] = [];
   private readonly seenGenerationById = new Map<number, number>();
   private seenGeneration = 1;
+  private readonly hitTestCandidatesScratch: DrawingObject[] = [];
 
   constructor(opts?: { tileSizePx?: number; maxBucketsPerObject?: number }) {
     const tileSizePx = opts?.tileSizePx ?? DEFAULT_DRAWING_SPATIAL_INDEX_TILE_SIZE_PX;
@@ -524,7 +525,9 @@ export class DrawingSpatialIndex {
    *
    * Returned in z-order (ascending).
    */
-  query(viewportRectSheetSpace: Rect): DrawingObject[] {
+  query(viewportRectSheetSpace: Rect, out?: DrawingObject[]): DrawingObject[] {
+    const result = out ?? [];
+    result.length = 0;
     const tileSize = this.tileSize;
     const minTileX = Math.floor(viewportRectSheetSpace.x / tileSize);
     const maxTileX = Math.floor((viewportRectSheetSpace.x + viewportRectSheetSpace.width) / tileSize);
@@ -545,7 +548,7 @@ export class DrawingSpatialIndex {
 
     if (this.globalBucket.length > 0) bucketArrays.push(this.globalBucket);
 
-    if (bucketArrays.length === 0) return [];
+    if (bucketArrays.length === 0) return result;
 
     // Ensure `pointersScratch` has enough entries and is zeroed.
     const pointers = this.pointersScratch;
@@ -566,8 +569,6 @@ export class DrawingSpatialIndex {
     const orderById = this.orderById;
     const aabbById = this.aabbById;
     const objectById = this.objectById;
-
-    const out: DrawingObject[] = [];
 
     // K-way merge of per-bucket z-ordered id lists.
     while (true) {
@@ -599,10 +600,10 @@ export class DrawingSpatialIndex {
       if (!aabb) continue;
       if (!intersects(aabb, viewportRectSheetSpace)) continue;
       const obj = objectById.get(bestId);
-      if (obj) out.push(obj);
+      if (obj) result.push(obj);
     }
 
-    return out;
+    return result;
   }
 
   /**
@@ -615,7 +616,7 @@ export class DrawingSpatialIndex {
     const sheetY = viewport.scrollY + pointScreen.y;
     // Use a point query on AABBs to collect a small candidate set, then test
     // the actual (potentially rotated/flipped) rectangle.
-    const candidates = this.query({ x: sheetX, y: sheetY, width: 0, height: 0 });
+    const candidates = this.query({ x: sheetX, y: sheetY, width: 0, height: 0 }, this.hitTestCandidatesScratch);
     for (let i = candidates.length - 1; i >= 0; i -= 1) {
       const obj = candidates[i]!;
       const rect = this.rectById.get(obj.id);
