@@ -415,3 +415,92 @@ fn streaming_patcher_preserves_flagged_inline_string_layout_on_value_update() {
     assert_ne!(payload.len(), expected_simple_len);
     assert_eq!(payload[12], 0);
 }
+
+#[test]
+fn streaming_patcher_preserves_inline_string_extras_on_style_update_when_text_unchanged() {
+    const CELL_ST: u32 = 0x0006;
+
+    // Make the rich/phonetic bytes distinctive to avoid accidental matches.
+    let rich_runs: Vec<u8> = vec![
+        0xDE, 0xAD, 0xBE, 0xEF, 0x10, 0x11, 0x12, 0x13, 0xFE, 0xED, 0xFA, 0xCE, 0x20, 0x21,
+        0x22, 0x23,
+    ];
+    let phonetic_bytes: Vec<u8> = vec![0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6, 0x07];
+
+    let original_text = "RichPho".to_string();
+    let wide = encode_xl_wide_string(
+        &original_text,
+        0x0003,
+        1,
+        Some(&rich_runs),
+        Some(&phonetic_bytes),
+    );
+    let mut cell_st_payload = Vec::new();
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // col
+    cell_st_payload.extend_from_slice(&0u32.to_le_bytes()); // style
+    cell_st_payload.extend_from_slice(&wide);
+    let sheet_bin = build_sheet_bin_with_cell_st(&cell_st_payload);
+
+    let edit = CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text(original_text.clone()),
+        new_style: Some(7),
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    };
+
+    let mut out = Vec::new();
+    let changed =
+        patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut out, &[edit]).expect("patch");
+    assert!(changed, "expected streaming patcher to report changes");
+
+    // The original rich/phonetic bytes should be preserved when the string did not change.
+    assert!(
+        out.windows(rich_runs.len()).any(|w| w == rich_runs.as_slice()),
+        "expected rich run bytes to be preserved on style-only update"
+    );
+    assert!(
+        out.windows(phonetic_bytes.len())
+            .any(|w| w == phonetic_bytes.as_slice()),
+        "expected phonetic bytes to be preserved on style-only update"
+    );
+
+    let parsed = formula_xlsb::parse_sheet_bin(&mut Cursor::new(&out), &[]).expect("parse sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("find cell");
+    assert_eq!(cell.value, CellValue::Text(original_text));
+    assert_eq!(cell.style, 7);
+
+    // Validate the rich/phonetic headers are still present and match the original bytes.
+    let payload = find_record_payload(&out, CELL_ST);
+    assert_eq!(payload[12], 0x03, "expected flags byte to be preserved");
+    let cch = u32::from_le_bytes(payload[8..12].try_into().expect("cch bytes")) as usize;
+    let utf16_end = 13 + cch * 2;
+    let c_run = u32::from_le_bytes(
+        payload[utf16_end..utf16_end + 4]
+            .try_into()
+            .expect("cRun bytes"),
+    ) as usize;
+    assert_eq!(c_run * 8, rich_runs.len());
+    let rich_start = utf16_end + 4;
+    let rich_end = rich_start + rich_runs.len();
+    assert_eq!(&payload[rich_start..rich_end], rich_runs.as_slice());
+
+    let cb_offset = rich_end;
+    let cb = u32::from_le_bytes(
+        payload[cb_offset..cb_offset + 4]
+            .try_into()
+            .expect("cb bytes"),
+    ) as usize;
+    assert_eq!(cb, phonetic_bytes.len());
+    let pho_start = cb_offset + 4;
+    let pho_end = pho_start + phonetic_bytes.len();
+    assert_eq!(&payload[pho_start..pho_end], phonetic_bytes.as_slice());
+}
