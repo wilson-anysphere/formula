@@ -15791,6 +15791,18 @@ fn walk_external_dependencies(
                         return;
                     }
                     external_workbooks.insert(workbook.to_string());
+
+                    // Attempt to refine workbook-level invalidation down to a sheet key when table
+                    // metadata is available (e.g. `[Book.xlsx]Table1[Col]`).
+                    if let Some(provider) = external_value_provider {
+                        if let Some(table_name) = r.sref.table_name.as_deref() {
+                            if let Some((table_sheet, _table)) =
+                                provider.workbook_table(workbook, table_name)
+                            {
+                                external_sheets.insert(format!("[{workbook}]{table_sheet}"));
+                            }
+                        }
+                    }
                 }
             }
         }

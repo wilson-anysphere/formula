@@ -727,6 +727,55 @@ fn external_workbook_invalidation_handles_workbook_ids_with_literal_brackets() {
 }
 
 #[test]
+fn external_structured_refs_respect_non_volatile_external_invalidation() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_table("Book.xlsx", "Sheet1", table_fixture_multi_col());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 1 }, 10.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 1 }, 20.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 3, col: 1 }, 30.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_external_refs_volatile(false);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1!Table1[Col2])")
+        .unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(60.0));
+
+    // Mutate the provider without invalidation: the result should not change because external refs
+    // are treated as non-volatile.
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 1 }, 25.0);
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(60.0));
+
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(65.0));
+}
+
+#[test]
+fn precedents_include_external_table_structured_ref_ranges() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_table("Book.xlsx", "Sheet1", table_fixture_multi_col());
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1!Table1[Col2])")
+        .unwrap();
+
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::ExternalRange {
+            sheet: "[Book.xlsx]Sheet1".to_string(),
+            start: CellAddr { row: 1, col: 1 },
+            end: CellAddr { row: 3, col: 1 },
+        }]
+    );
+}
+
+#[test]
 fn external_sheet_invalidation_only_dirties_dependents_of_that_sheet() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);

@@ -18,6 +18,6 @@ duplicated follow-up work across the task queue.
 - DONE — Task 384: Bytecode direct external refs
 - DONE — Task 385: Docs
 - DONE — INDIRECT supports external single-sheet refs in both bytecode + AST; rejects external 3D spans
-- DONE — Task 381: Dynamic external deps (dependency tracing/indexing for dynamic ref producers) (`efb7d5af9`)
+- DONE — Task 381: Dynamic external deps (dependency tracing/indexing for dynamic ref producers; structured refs participate in invalidation/precedents; `external_refs_volatile` applies) (`efb7d5af9`)
 
 ## Remaining (open)
