@@ -8170,6 +8170,7 @@ export class SpreadsheetApp {
       this.lastSyncedHiddenColsKeyBySheetId.clear();
       this.lastSyncedHiddenColsBySheetId.clear();
       this.syncWasmSheetOrigin();
+      this.seedHiddenColsSyncCacheFromDocument();
       this.syncHiddenColsToWasmEngine();
     }
   }
@@ -8317,6 +8318,7 @@ export class SpreadsheetApp {
               this.lastSyncedHiddenColsKeyBySheetId.clear();
               this.lastSyncedHiddenColsBySheetId.clear();
               this.syncWasmSheetOrigin();
+              this.seedHiddenColsSyncCacheFromDocument();
               this.syncHiddenColsToWasmEngine();
               return;
             }
@@ -8408,6 +8410,7 @@ export class SpreadsheetApp {
             this.lastSyncedHiddenColsKeyBySheetId.clear();
             this.lastSyncedHiddenColsBySheetId.clear();
             this.syncWasmSheetOrigin();
+            this.seedHiddenColsSyncCacheFromDocument();
             this.syncHiddenColsToWasmEngine();
         } catch {
           // Ignore initialization failures (e.g. missing WASM bundle).
@@ -12546,6 +12549,48 @@ export class SpreadsheetApp {
     const key = hiddenCols.join(",");
     this.lastSyncedHiddenColsKeyBySheetId.set(sheetId, key);
     this.lastSyncedHiddenColsBySheetId.set(sheetId, hiddenCols.slice());
+  }
+
+  private seedHiddenColsSyncCacheFromDocument(): void {
+    if (!this.wasmEngine) return;
+
+    // Ensure the cache is bound to the current engine instance.
+    if (this.lastSyncedHiddenColsEngine !== this.wasmEngine) {
+      this.lastSyncedHiddenColsEngine = this.wasmEngine;
+    }
+
+    const ENGINE_MAX_COLS = 16_384;
+    const normalize = (raw: unknown): number[] => {
+      if (!Array.isArray(raw) || raw.length === 0) return [];
+      const out: number[] = [];
+      for (const entry of raw) {
+        const col = Number(entry);
+        if (!Number.isInteger(col) || col < 0 || col >= ENGINE_MAX_COLS) continue;
+        out.push(col);
+      }
+      out.sort((a, b) => a - b);
+      // Deduplicate after sorting.
+      let write = 0;
+      let last: number | null = null;
+      for (const v of out) {
+        if (last === v) continue;
+        out[write++] = v;
+        last = v;
+      }
+      out.length = write;
+      return out;
+    };
+
+    const sheetIds = this.document.getSheetIds();
+    const hiddenColsBySheetId = (this.document as any)?.__sheetHiddenCols as Record<string, unknown> | null;
+
+    this.lastSyncedHiddenColsKeyBySheetId.clear();
+    this.lastSyncedHiddenColsBySheetId.clear();
+    for (const sheetId of sheetIds) {
+      const cols = normalize(hiddenColsBySheetId ? (hiddenColsBySheetId as any)[sheetId] : null);
+      this.lastSyncedHiddenColsKeyBySheetId.set(sheetId, cols.join(","));
+      this.lastSyncedHiddenColsBySheetId.set(sheetId, cols);
+    }
   }
 
   async insertCells(range: Range, direction: "right" | "down"): Promise<void> {
@@ -20477,7 +20522,6 @@ export class SpreadsheetApp {
   }
 
   private syncHiddenColsToWasmEngine(): void {
-    if (this.gridMode !== "legacy") return;
     if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
     // If the engine instance was replaced (e.g. re-init), resync even if the outline state
@@ -20488,13 +20532,20 @@ export class SpreadsheetApp {
       this.lastSyncedHiddenColsBySheetId.clear();
     }
 
+    const shouldTreatHidden =
+      this.gridMode === "legacy"
+        ? (hidden: { user: boolean; outline: boolean; filter: boolean }) => isHidden(hidden)
+        : (hidden: { user: boolean }) => Boolean(hidden?.user);
+
+    const ENGINE_MAX_COLS = 16_384;
+
     const outline = this.getOutlineForSheet(this.sheetId);
     const hiddenCols: number[] = [];
     for (const [summaryIndex, entry] of outline.cols.entries) {
-      if (!isHidden(entry.hidden)) continue;
+      if (!shouldTreatHidden(entry.hidden as any)) continue;
       // Outline indices are 1-based; engine uses 0-based column indices.
       const col = summaryIndex - 1;
-      if (col < 0 || col >= this.limits.maxCols) continue;
+      if (col < 0 || col >= ENGINE_MAX_COLS) continue;
       hiddenCols.push(col);
     }
     hiddenCols.sort((a, b) => a - b);
