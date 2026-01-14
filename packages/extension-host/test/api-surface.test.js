@@ -1758,12 +1758,12 @@ test("api surface: ui.registerContextMenu adds and removes runtime menu items", 
       exports.activate = async (context) => {
         context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
           registerCmd
-        )}, async () => {
-          disposable = await formula.ui.registerContextMenu("cell/context", [
-            { command: ${JSON.stringify(registerCmd)}, when: "cellHasValue", group: "extensions" }
-          ]);
-          return true;
-        }));
+         )}, async () => {
+           disposable = await formula.ui.registerContextMenu("cell/context", [
+            { command: ${JSON.stringify(` ${registerCmd} `)}, when: "cellHasValue", group: "extensions" }
+           ]);
+           return true;
+         }));
 
         context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
           unregisterCmd

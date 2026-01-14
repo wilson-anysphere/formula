@@ -1613,7 +1613,8 @@ class ExtensionHost {
       }
 
       case "ui.registerContextMenu": {
-        const menuId = String(args[0]);
+        const menuIdRaw = String(args[0]);
+        const menuId = menuIdRaw.trim();
         const items = Array.isArray(args[1]) ? args[1] : [];
         if (menuId.trim().length === 0) throw new Error("Menu id must be a non-empty string");
 
@@ -1622,8 +1623,9 @@ class ExtensionHost {
           if (!item || typeof item !== "object") {
             throw new Error(`Menu item at index ${idx} must be an object`);
           }
-          const command = String(item.command ?? "");
-          if (command.trim().length === 0) {
+          const commandRaw = String(item.command ?? "");
+          const command = commandRaw.trim();
+          if (command.length === 0) {
             throw new Error(`Menu item at index ${idx} must include a non-empty command`);
           }
           const when = item.when === undefined ? null : item.when === null ? null : String(item.when);
