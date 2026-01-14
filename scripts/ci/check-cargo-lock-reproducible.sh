@@ -4,6 +4,11 @@ set -euo pipefail
 # Ensure tagged desktop releases are built with exactly the dependency set committed to the repo.
 #
 # This script is intended to run in CI (preflight) and fail fast if Cargo would update Cargo.lock.
+#
+# Note: We run `cargo metadata --locked` in two modes:
+# - once for the full workspace (default feature set) to validate the repo lockfile baseline
+# - once with the desktop shell feature set enabled (apps/desktop/src-tauri, `--features desktop`)
+#   to ensure optional desktop-only dependencies are also captured in Cargo.lock.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
@@ -63,32 +68,16 @@ run_metadata() {
   return 1
 }
 
-desktop_targets=(
-  x86_64-unknown-linux-gnu
-  aarch64-unknown-linux-gnu
-  x86_64-pc-windows-msvc
-  aarch64-pc-windows-msvc
-  x86_64-apple-darwin
-  aarch64-apple-darwin
-)
+echo "Checking Cargo.lock for workspace dependency graph"
+run_metadata "workspace" \
+  --locked \
+  --format-version=1
 
-for target in "${desktop_targets[@]}"; do
-  echo "Checking Cargo.lock for target: ${target}"
-  run_metadata "desktop release target ${target}" \
-    --locked \
-    --format-version=1 \
-    --manifest-path "${desktop_manifest}" \
-    --features desktop \
-    --filter-platform "${target}"
-done
-
-# The desktop app also bundles a WASM engine (`crates/formula-wasm`), built via wasm-pack. Validate
-# the workspace lockfile for wasm32 as well so we fail early if `Cargo.lock` is out of date for the
-# engine dependency graph.
-echo "Checking Cargo.lock for target: wasm32-unknown-unknown"
-run_metadata "wasm32-unknown-unknown" \
+echo "Checking Cargo.lock for desktop release dependency graph (features=desktop)"
+run_metadata "desktop (features=desktop)" \
   --locked \
   --format-version=1 \
-  --filter-platform wasm32-unknown-unknown
+  --manifest-path "${desktop_manifest}" \
+  --features desktop
 
 echo "Cargo.lock is consistent with the committed dependency graph."

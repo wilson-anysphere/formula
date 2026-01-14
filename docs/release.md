@@ -196,16 +196,19 @@ node scripts/check-tauri-permissions.mjs
 # integration is configured for desktop bundles).
 node scripts/check-desktop-url-scheme.mjs
 
-# Ensures the committed Cargo.lock matches the desktop build dependency graph.
+# Ensures the committed Cargo.lock matches the dependency graph used by the release build.
 # (Fails if cargo would update Cargo.lock during the build.)
-cargo metadata --locked --format-version=1 --manifest-path apps/desktop/src-tauri/Cargo.toml --features desktop >/dev/null
-
-# (Optional) The desktop build also includes a WASM engine built for wasm32; this checks that
-# Cargo.lock is consistent for that target too.
-cargo metadata --locked --format-version=1 --filter-platform wasm32-unknown-unknown >/dev/null
-
-# (Equivalent) Run the same Cargo.lock reproducibility check CI uses for all desktop release targets.
+#
+# Equivalent (recommended): run the same check CI uses.
 bash scripts/ci/check-cargo-lock-reproducible.sh
+
+# Under the hood, the script runs:
+#
+# - Workspace dependency graph (includes target-specific deps like wasm32):
+#   cargo metadata --locked --format-version=1 >/dev/null
+#
+# - Desktop shell dependency graph (enables the `desktop` feature set):
+#   cargo metadata --locked --format-version=1 --manifest-path apps/desktop/src-tauri/Cargo.toml --features desktop >/dev/null
 
 # Ensures Windows installers will install WebView2 if it is missing.
 node scripts/ci/check-webview2-install-mode.mjs
