@@ -358,6 +358,11 @@ function pickPowerShellCommand() {
   return "pwsh";
 }
 
+function hasDocker() {
+  const probe = spawnSync("docker", ["info"], { stdio: "ignore" });
+  return probe.status === 0;
+}
+
 /**
  * @param {string} validatorPath
  * @param {string} key
@@ -781,7 +786,7 @@ async function main() {
             if (!commandExists("rpm")) {
               skipReason =
                 "Skipping validate-linux-rpm.sh because required command `rpm` is not available on PATH. Install rpm (and optionally docker) to validate local RPM bundles.";
-            } else if (!commandExists("docker")) {
+            } else if (!hasDocker()) {
               extraArgs.push("--no-container");
             }
           }
