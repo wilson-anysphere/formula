@@ -345,6 +345,16 @@ describe("engine.worker INFO() metadata integration", () => {
       expect(await read(15, "Sheet1")).toBe("$C$5");
       expect(await read(16, "Sheet2")).toBe("workbook-origin");
 
+      // `setInfoOriginForSheet` is a legacy alias for `setSheetOrigin`, so it must receive an A1 address.
+      const bad = await sendRequest(port, {
+        type: "request",
+        id: 16_000,
+        method: "setInfoOriginForSheet",
+        params: { sheet: "Sheet2", origin: "workbook-origin" },
+      });
+      expect(bad.ok).toBe(false);
+      expect(String((bad as any).error)).toMatch(/origin|a1|address|invalid/i);
+
       // Clearing the per-sheet override should fall back to the workbook-level legacy string.
       await sendRequest(port, {
         type: "request",
