@@ -151,6 +151,30 @@ describe("DrawingInteractionController image resize aspect ratio", () => {
     });
   });
 
+  it("does not lock aspect ratio when resizing from an edge handle (even for images)", () => {
+    const el = new StubEventTarget({ left: 0, top: 0 });
+    let objects: DrawingObject[] = [createImageObject()];
+
+    new DrawingInteractionController(el as unknown as HTMLElement, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+    });
+
+    // Start resizing from the east (right) edge handle.
+    el.dispatchPointerEvent("pointerdown", createPointerEvent({ clientX: 200, clientY: 50, pointerId: 1 }));
+
+    // Drag right while holding Shift; height should remain unchanged for edge handles.
+    el.dispatchPointerEvent("pointermove", createPointerEvent({ clientX: 250, clientY: 50, pointerId: 1, shiftKey: true }));
+
+    expect(objects[0]?.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(250), cy: pxToEmu(100) },
+    });
+  });
+
   it("does not lock aspect ratio for non-image objects", () => {
     const el = new StubEventTarget({ left: 0, top: 0 });
     let objects: DrawingObject[] = [createShapeObject()];
