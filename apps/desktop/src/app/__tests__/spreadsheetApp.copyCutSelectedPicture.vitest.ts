@@ -9,6 +9,26 @@ import type { DrawingObject } from "../../drawings/types";
 
 let priorGridMode: string | undefined;
 
+function createPngHeaderBytes(width = 1, height = 1): Uint8Array {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  // 13-byte IHDR chunk length.
+  bytes[8] = 0x00;
+  bytes[9] = 0x00;
+  bytes[10] = 0x00;
+  bytes[11] = 0x0d;
+  // IHDR chunk type.
+  bytes[12] = 0x49;
+  bytes[13] = 0x48;
+  bytes[14] = 0x44;
+  bytes[15] = 0x52;
+
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width, false);
+  view.setUint32(20, height, false);
+  return bytes;
+}
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -248,6 +268,48 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     await app.whenIdle();
     expect(write).not.toHaveBeenCalled();
     expect(app.getDocument().getSheetDrawings(sheetId)).toHaveLength(1);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("copies PNG bytes even when mimeType metadata is incorrect (does not invoke createImageBitmap)", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    root.focus();
+
+    const write = vi.fn(async () => {});
+    (app as any).clipboardProviderPromise = Promise.resolve({ write, read: vi.fn(async () => ({})) });
+
+    const createImageBitmapMock = vi.fn(() => Promise.reject(new Error("should not be called")));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const sheetId = app.getCurrentSheetId();
+    const imageId = "img-wrong-mime";
+    const pngBytes = createPngHeaderBytes(1, 1);
+
+    // Intentionally wrong mimeType; bytes are actually a PNG.
+    (app as any).drawingImages.set({ id: imageId, bytes: pngBytes, mimeType: "image/jpeg" });
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+      zOrder: 0,
+    };
+    app.getDocument().setSheetDrawings(sheetId, [drawing]);
+    app.selectDrawing(drawing.id);
+
+    app.copy();
+    await app.whenIdle();
+    expect(write).toHaveBeenCalledWith({ text: "", imagePng: pngBytes });
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
 
     app.destroy();
     root.remove();
