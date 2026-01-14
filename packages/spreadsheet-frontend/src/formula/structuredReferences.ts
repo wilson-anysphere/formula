@@ -87,6 +87,8 @@ export function parseStructuredReferenceText(text: string): ParsedStructuredRefe
     // `TableName[@Column]` / `TableName[@]` (or implicit `[@...]`) is shorthand for `#This Row`.
     if (item.startsWith("@")) {
       const columnName = item.slice(1).trim();
+      // Whole-row shorthand: `Table[@]` / `[@]` refers to the current row's values.
+      if (!columnName) return { tableName, selector: "#This Row", columnName: "" };
       // Shorthand `@Column` does not permit whitespace or nested bracket syntax; column names
       // that require quoting (spaces, etc) use the `@[[Column Name]]` form handled above.
       // Keep this strict to avoid accidentally treating `[@[Col]] , ...` tails as a single token
