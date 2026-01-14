@@ -212,7 +212,7 @@ impl fmt::Display for PivotFieldRef {
         match self {
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
             PivotFieldRef::DataModelColumn { table, column } => {
-                let table = format_dax_table_identifier(table);
+                let table = format_dax_table_identifier(table.as_str());
                 let column = escape_dax_bracket_identifier(column);
                 write!(f, "{table}[{column}]")
             }
