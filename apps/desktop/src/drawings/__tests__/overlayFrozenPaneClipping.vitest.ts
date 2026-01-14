@@ -115,5 +115,32 @@ describe("DrawingOverlay frozen pane clipping", () => {
       [200 - viewport.scrollX + headerOffsetX, 40 - viewport.scrollY + headerOffsetY, 10, 10], // BR (scrollX+scrollY)
     ]);
   });
-});
 
+  it("ignores stale frozen pixel extents when frozen row/col counts are 0", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+    const overlay = new DrawingOverlay(canvas, images, geom);
+
+    const objects: DrawingObject[] = [
+      shapeObject({ id: 1, row: 0, col: 0, zOrder: 0 }),
+    ];
+
+    const viewport: Viewport = {
+      scrollX: 0,
+      scrollY: 0,
+      width: 300,
+      height: 200,
+      dpr: 1,
+      frozenRows: 0,
+      frozenCols: 0,
+      // Stale pixel extents (should be ignored since frozenRows/Cols are 0).
+      frozenWidthPx: 100,
+      frozenHeightPx: 50,
+    };
+
+    await overlay.render(objects, viewport);
+
+    const strokeCalls = calls.filter((c) => c.method === "strokeRect").map((c) => c.args as number[]);
+    expect(strokeCalls).toEqual([[0, 0, 10, 10]]);
+  });
+});

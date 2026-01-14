@@ -1138,13 +1138,24 @@ function resolvePaneLayout(
     }
   })();
 
+  // Only treat `frozenWidthPx/HeightPx` as meaningful when the corresponding frozen row/col
+  // count is non-zero. This mirrors hit testing semantics and guards against stale pixel
+  // extents if a caller updates frozen row/col counts but forgets to reset the boundary.
   const frozenBoundaryX = clamp(
-    Number.isFinite(viewport.frozenWidthPx) ? viewport.frozenWidthPx! : headerOffsetX + derivedFrozenContentWidth,
+    frozenCols > 0
+      ? Number.isFinite(viewport.frozenWidthPx)
+        ? viewport.frozenWidthPx!
+        : headerOffsetX + derivedFrozenContentWidth
+      : headerOffsetX,
     headerOffsetX,
     viewport.width,
   );
   const frozenBoundaryY = clamp(
-    Number.isFinite(viewport.frozenHeightPx) ? viewport.frozenHeightPx! : headerOffsetY + derivedFrozenContentHeight,
+    frozenRows > 0
+      ? Number.isFinite(viewport.frozenHeightPx)
+        ? viewport.frozenHeightPx!
+        : headerOffsetY + derivedFrozenContentHeight
+      : headerOffsetY,
     headerOffsetY,
     viewport.height,
   );
