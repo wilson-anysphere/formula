@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
+import { extractYamlRunSteps, stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(repoRoot, ".github", "workflows", "windows-arm64-smoke.yml");
@@ -15,18 +15,31 @@ async function readWorkflow() {
 
 test("windows-arm64-smoke workflow validates built bundles via validate-windows-bundles.ps1", async () => {
   const text = await readWorkflow();
-  assert.match(text, /validate-windows-bundles\.ps1/);
-  assert.match(text, /-RequireExe\b/);
-  assert.match(text, /-RequireMsi\b/);
-  assert.match(
-    text,
-    /pwsh\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File\s+(?:\.\/)?scripts\/validate-windows-bundles\.ps1/,
+  const runSteps = extractYamlRunSteps(text);
+
+  const validatorSteps = runSteps.filter((step) => /validate-windows-bundles\.ps1/.test(step.script));
+  assert.ok(
+    validatorSteps.length > 0,
+    `Expected ${path.relative(repoRoot, workflowPath)} to invoke scripts/validate-windows-bundles.ps1 in a run step.`,
+  );
+
+  const validatorInvocation = /pwsh\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File\s+(?:\.\/)?scripts\/validate-windows-bundles\.ps1/;
+  const ok = validatorSteps.some(
+    ({ script }) => /-RequireExe\b/.test(script) && /-RequireMsi\b/.test(script) && validatorInvocation.test(script),
+  );
+  assert.ok(
+    ok,
+    `Expected ${path.relative(repoRoot, workflowPath)} to run validate-windows-bundles.ps1 with -RequireExe + -RequireMsi.\nFound scripts:\n${validatorSteps.map((s) => `- line ${s.line}: ${s.script}`).join("\n")}`,
   );
 });
 
 test("windows-arm64-smoke workflow validates desktop compliance artifact bundling config (LICENSE/NOTICE)", async () => {
   const text = await readWorkflow();
-  assert.match(text, /node\s+scripts\/ci\/check-desktop-compliance-artifacts\.mjs\b/);
+  const runSteps = extractYamlRunSteps(text);
+  assert.ok(
+    runSteps.some((step) => step.script.includes("node scripts/ci/check-desktop-compliance-artifacts.mjs")),
+    `Expected ${path.relative(repoRoot, workflowPath)} to run scripts/ci/check-desktop-compliance-artifacts.mjs in a run step.`,
+  );
 });
 
 test("windows-arm64-smoke workflow verifies the produced desktop binary is stripped", async () => {

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
+import { extractYamlRunSteps, stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
@@ -42,9 +42,9 @@ test("release workflow validates built Windows bundles (MSI + NSIS) after build"
 
 test("release workflow validates desktop compliance artifact bundling config (LICENSE/NOTICE)", async () => {
   const text = await readReleaseWorkflow();
-  assert.match(
-    text,
-    /node\s+scripts\/ci\/check-desktop-compliance-artifacts\.mjs\b/,
-    `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to run scripts/ci/check-desktop-compliance-artifacts.mjs in preflight.`,
+  const runSteps = extractYamlRunSteps(text);
+  assert.ok(
+    runSteps.some((step) => step.script.includes("node scripts/ci/check-desktop-compliance-artifacts.mjs")),
+    `Expected ${path.relative(repoRoot, releaseWorkflowPath)} to run scripts/ci/check-desktop-compliance-artifacts.mjs in a run step.`,
   );
 });

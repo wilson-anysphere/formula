@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
+import { extractYamlRunSteps, stripHashComments, stripYamlBlockScalarBodies } from "../../apps/desktop/test/sourceTextUtils.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(repoRoot, ".github", "workflows", "desktop-bundle-size.yml");
@@ -98,9 +98,9 @@ test("desktop-bundle-size workflow verifies the produced desktop binary is strip
 
 test("desktop-bundle-size workflow validates desktop compliance artifact bundling config (LICENSE/NOTICE)", async () => {
   const text = await readWorkflow();
-  assert.match(
-    text,
-    /node\s+scripts\/ci\/check-desktop-compliance-artifacts\.mjs\b/,
-    `Expected ${path.relative(repoRoot, workflowPath)} to run scripts/ci/check-desktop-compliance-artifacts.mjs before building bundles.`,
+  const runSteps = extractYamlRunSteps(text);
+  assert.ok(
+    runSteps.some((step) => step.script.includes("node scripts/ci/check-desktop-compliance-artifacts.mjs")),
+    `Expected ${path.relative(repoRoot, workflowPath)} to run scripts/ci/check-desktop-compliance-artifacts.mjs in a run step.`,
   );
 });

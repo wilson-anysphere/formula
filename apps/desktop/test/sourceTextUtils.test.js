@@ -7,6 +7,7 @@ import {
   stripHtmlComments,
   stripHashComments,
   stripYamlBlockScalarBodies,
+  extractYamlRunSteps,
   stripPowerShellComments,
   stripPythonComments,
   stripRustComments,
@@ -174,6 +175,41 @@ test("stripYamlBlockScalarBodies does not end a block scalar early on blank line
   assert.doesNotMatch(out, /\becho a\b/);
   assert.doesNotMatch(out, /\becho b\b/);
   assert.match(out, /\bname: After\b/);
+});
+
+test("extractYamlRunSteps extracts inline + block scalar run scripts and ignores non-run scalars", () => {
+  const input = [
+    "jobs:",
+    "  build:",
+    "    env:",
+    "      NOTES: |",
+    "        run: echo should not match",
+    "    steps:",
+    "      - run: echo hello",
+    "      - name: block run",
+    "        run: |2-",
+    "          # comment-only script line should not count",
+    "          echo ok",
+    "          run: echo yaml-ish text",
+  ].join("\n");
+
+  const runs = extractYamlRunSteps(input);
+  assert.equal(runs.length, 2);
+  assert.equal(runs[0]?.script.trim(), "echo hello");
+  assert.ok(runs[1]?.script.includes("echo ok"));
+  assert.ok(runs[1]?.script.includes("run: echo yaml-ish text"));
+  assert.ok(!runs[1]?.script.includes("comment-only script line should not count"));
+});
+
+test("extractYamlRunSteps ignores commented-out run steps", () => {
+  const input = [
+    "steps:",
+    "  # - run: echo no",
+    "  - run: echo yes",
+  ].join("\n");
+
+  const runs = extractYamlRunSteps(input);
+  assert.deepEqual(runs.map((r) => r.script.trim()), ["echo yes"]);
 });
 
 test("stripPowerShellComments strips # and <# #> comments but preserves strings + here-strings", () => {

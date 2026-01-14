@@ -460,6 +460,85 @@ export function stripYamlBlockScalarBodies(source) {
   return lines.join("\n");
 }
 
+export function extractYamlRunSteps(source) {
+  // Extracts the scripts/commands associated with workflow `run:` steps (both inline and block
+  // scalar forms).
+  //
+  // This is useful for "source scanning" tests that want to assert a workflow *executes* some
+  // command, without being fooled by YAML-like strings embedded inside unrelated block scalars
+  // (e.g. env vars, release notes, action inputs).
+  //
+  // Notes:
+  // - This intentionally does NOT attempt to fully parse YAML.
+  // - Commented-out YAML (e.g. `# - run: ...`) is ignored via `stripHashComments()`.
+  // - Non-`run:` YAML block scalars are skipped entirely.
+  const text = stripHashComments(String(source ?? ""));
+  const lines = text.split(/\r?\n/);
+
+  /** @type {Array<{ line: number, script: string }>} */
+  const runSteps = [];
+
+  let inBlock = false;
+  let blockIndent = 0;
+  let blockIsRun = false;
+  let runHeaderLine = 0;
+  /** @type {string[]} */
+  let runBlockBody = [];
+
+  const blockRe = /:[\t ]*[>|][0-9+-]*[\t ]*$/;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+    const indent = line.match(/^[ \t]*/)?.[0]?.length ?? 0;
+
+    if (inBlock) {
+      // Blank/whitespace-only lines are always part of the scalar.
+      if (trimmed === "") {
+        if (blockIsRun) runBlockBody.push("");
+        continue;
+      }
+      if (indent > blockIndent) {
+        if (blockIsRun) runBlockBody.push(line);
+        continue;
+      }
+
+      // Block scalar ended; flush any collected run script.
+      if (blockIsRun) {
+        runSteps.push({ line: runHeaderLine, script: runBlockBody.join("\n") });
+        runBlockBody = [];
+      }
+      inBlock = false;
+      blockIsRun = false;
+    }
+
+    const isBlockScalarHeader = blockRe.test(line.trimEnd());
+    if (isBlockScalarHeader) {
+      inBlock = true;
+      blockIndent = indent;
+      blockIsRun = /^\s*-?\s*run:\s*[>|]/.test(line);
+      runHeaderLine = i + 1;
+      runBlockBody = [];
+      continue;
+    }
+
+    const m = line.match(/^\s*-?\s*run:\s*(.+)$/);
+    if (!m) continue;
+    const rest = (m[1] ?? "").trimEnd();
+
+    // Ignore `run:` keys with no command (rare/invalid in workflows).
+    if (rest === "") continue;
+
+    runSteps.push({ line: i + 1, script: rest });
+  }
+
+  if (inBlock && blockIsRun) {
+    runSteps.push({ line: runHeaderLine, script: runBlockBody.join("\n") });
+  }
+
+  return runSteps;
+}
+
 export function stripPowerShellComments(source) {
   // Strip PowerShell line comments (`# ...`) and block comments (`<# ... #>`) while preserving:
   // - string literals (single/double quoted)
