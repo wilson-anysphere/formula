@@ -124,6 +124,15 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       value: () => createMockCanvasContext(),
     });
 
+    // jsdom does not always provide PointerEvent; SpreadsheetApp listens for pointer events
+    // in shared-grid mode. For tests, a MouseEvent-compatible shim is sufficient.
+    if (typeof (globalThis as any).PointerEvent === "undefined") {
+      (globalThis as any).PointerEvent = (window as any).MouseEvent;
+    }
+    if (typeof (window as any).PointerEvent === "undefined") {
+      (window as any).PointerEvent = (window as any).MouseEvent;
+    }
+
     (globalThis as any).ResizeObserver = class {
       observe() {}
       disconnect() {}
