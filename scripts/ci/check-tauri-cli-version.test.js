@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractPinnedCliVersionsFromWorkflow, findTauriActionScriptIssues } from "./check-tauri-cli-version.mjs";
+import { extractPinnedCliVersionsFromWorkflow, findTauriActionScriptIssues, parsePinnedCliVersion } from "./check-tauri-cli-version.mjs";
 
 test("detects tauri-action steps missing tauriScript (dash uses form)", () => {
   const yaml = [
@@ -107,4 +107,9 @@ test("ignores TAURI_CLI_VERSION strings inside YAML block scalars", () => {
   ].join("\n");
 
   assert.deepEqual(extractPinnedCliVersionsFromWorkflow(yaml), []);
+});
+
+test("parsePinnedCliVersion accepts a leading v/V prefix", () => {
+  assert.doesNotThrow(() => parsePinnedCliVersion("v2.9.5"));
+  assert.doesNotThrow(() => parsePinnedCliVersion("V2.9.5"));
 });

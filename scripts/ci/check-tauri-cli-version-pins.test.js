@@ -75,6 +75,33 @@ jobs:
   assert.match(proc.stdout, /Tauri CLI version pins match/i);
 });
 
+test("passes when workflows use a v/V prefix for the Tauri CLI version", { skip: !canRun }, () => {
+  const proc = run({
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  TAURI_CLI_VERSION: V2.9.5
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+    ".github/workflows/release.yml": `
+name: Release
+env:
+  TAURI_CLI_VERSION: v2.9.5
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Tauri CLI version pins match/i);
+});
+
 test("ignores TAURI_CLI_VERSION strings inside YAML block scalars", { skip: !canRun }, () => {
   const proc = run({
     ".github/workflows/ci.yml": `

@@ -75,6 +75,33 @@ jobs:
   assert.match(proc.stdout, /wasm-pack version pins match/i);
 });
 
+test("passes when workflows use a v/V prefix for the wasm-pack version", { skip: !canRun }, () => {
+  const proc = run({
+    ".github/workflows/ci.yml": `
+name: CI
+env:
+  WASM_PACK_VERSION: V0.13.1
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+    ".github/workflows/other.yml": `
+name: Other
+env:
+  WASM_PACK_VERSION: v0.13.1
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok
+`,
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /wasm-pack version pins match/i);
+});
+
 test("ignores WASM_PACK_VERSION strings inside YAML block scalars", { skip: !canRun }, () => {
   const proc = run({
     ".github/workflows/ci.yml": `

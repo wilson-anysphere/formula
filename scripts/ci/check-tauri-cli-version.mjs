@@ -32,13 +32,13 @@ function parseMajorMinor(version) {
   return `${match[1]}.${match[2]}`;
 }
 
-function parsePinnedCliVersion(version) {
+export function parsePinnedCliVersion(version) {
   const normalized = String(version ?? "").trim();
   // For determinism, TAURI_CLI_VERSION must be a fully pinned patch version.
   //
   // `cargo install tauri-cli --version 2.9` would float to the latest 2.9.x and
   // would therefore not be reproducible when new patch releases land.
-  const cleaned = normalized.replace(/^v/, "");
+  const cleaned = normalized.replace(/^[vV]/, "");
   const match = cleaned.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
   if (!match) {
     throw new Error(
@@ -316,7 +316,7 @@ async function main() {
       console.error(`Failed to locate tauri version in ${cargoLockRelativePath}.`);
       process.exit(1);
     }
-    const normalizedPinned = String(pinnedCliVersion).trim().replace(/^v/, "");
+    const normalizedPinned = String(pinnedCliVersion).trim().replace(/^[vV]/, "");
     if (normalizedPinned !== tauriLockVersion) {
       console.error("Pinned TAURI_CLI_VERSION does not match the resolved tauri crate version in Cargo.lock.");
       console.error(`- ${cargoLockRelativePath}: tauri version "${tauriLockVersion}"`);

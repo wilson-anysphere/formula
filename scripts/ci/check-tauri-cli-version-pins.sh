@@ -74,7 +74,7 @@ extract_version() {
     value="${value#\'}"
     value="${value%\'}"
   fi
-  value="${value#v}"
+  value="${value#[vV]}"
   printf '%s' "$value"
 }
 
