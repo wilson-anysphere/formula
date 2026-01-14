@@ -5133,14 +5133,9 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 let end_id = grid.resolve_sheet_name(end)?;
                 (start_id == end_id).then_some(start_id)
             }
-            crate::eval::SheetReference::External(key) => {
-                // Match `functions::builtins_reference::INDIRECT`:
-                // - allow only single-sheet external workbook keys like `"[Book.xlsx]Sheet1"`
-                // - reject external 3D spans like `"[Book.xlsx]Sheet1:Sheet3!A1"`.
-                crate::eval::is_valid_external_sheet_key(key)
-                    .then(|| grid.resolve_sheet_name(key))
-                    .flatten()
-            }
+            // Excel's INDIRECT does not support external workbook references.
+            // Keep bytecode behavior consistent with the AST evaluator by rejecting them here.
+            crate::eval::SheetReference::External(_) => None,
         }
     }
 

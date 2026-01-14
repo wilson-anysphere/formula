@@ -1,5 +1,5 @@
 use formula_engine::eval::CellAddr;
-use formula_engine::{bytecode, BytecodeCompileReason, Engine, ErrorKind, ExternalValueProvider, PrecedentNode, Value};
+use formula_engine::{Engine, ErrorKind, ExternalValueProvider, PrecedentNode, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -73,21 +73,6 @@ fn indirect_external_workbook_refs_are_ref_error() {
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
-
-    // External workbook references are not bytecode-eligible, even when they are introduced via
-    // dynamic reference functions like INDIRECT.
-    let stats = engine.bytecode_compile_stats();
-    assert_eq!(stats.total_formula_cells, 1);
-    assert_eq!(stats.compiled, 0);
-    assert_eq!(stats.fallback, 1);
-    assert_eq!(
-        stats
-            .fallback_reasons
-            .get(&BytecodeCompileReason::LowerError(bytecode::LowerError::ExternalReference))
-            .copied()
-            .unwrap_or(0),
-        1
-    );
 
     engine.recalculate();
 

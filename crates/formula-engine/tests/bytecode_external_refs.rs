@@ -62,7 +62,7 @@ fn bytecode_missing_external_cell_ref_is_ref_error() {
 }
 
 #[test]
-fn bytecode_indirect_external_cell_ref_evaluates_via_provider() {
+fn bytecode_indirect_external_cell_ref_is_ref_error() {
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(Arc::new(Provider)));
     engine.set_bytecode_enabled(true);
@@ -80,5 +80,8 @@ fn bytecode_indirect_external_cell_ref_evaluates_via_provider() {
     );
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(42.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
 }
