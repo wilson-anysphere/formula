@@ -335,7 +335,9 @@ def main() -> int:
         action="store_true",
         help=(
             "Include volatile function cases (e.g. CELL/INFO) for local debugging only. "
-            "This output is non-deterministic and must not be committed/pinned."
+            "The generated cases.json is deterministic, but Excel results for these cases depend on "
+            "workbook/environment state, so they cannot be pinned/stably compared. Do not commit or "
+            "pin this output."
         ),
     )
     args = parser.parse_args()

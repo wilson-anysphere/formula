@@ -136,7 +136,8 @@ python tools/excel-oracle/generate_cases.py --include-volatile --out /tmp/cases.
 ```
 
 This opt-in mode includes volatile functions like `CELL`/`INFO` (which cannot be pinned/stably
-compared) and must not be committed or used for pinned datasets.
+compared). The generated cases file is still deterministic, but the results are not stable/pinnable,
+so it must not be committed or used for pinned datasets.
 
 The generator also validates the corpus against `shared/functionCatalog.json` to ensure:
 
