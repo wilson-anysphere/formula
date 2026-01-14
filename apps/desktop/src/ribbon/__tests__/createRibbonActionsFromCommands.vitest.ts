@@ -103,6 +103,25 @@ describe("createRibbonActionsFromCommands", () => {
     expect(onUnknownCommand).toHaveBeenCalledWith("ribbon.toggle.unknown");
   });
 
+  it("invokes onUnknownCommand for unknown toggles even when the host does not call onCommand", async () => {
+    const registry = new CommandRegistry();
+    const onUnknownCommand = vi.fn();
+
+    const actions = createRibbonActionsFromCommands({
+      commandRegistry: registry,
+      onUnknownCommand,
+      // Returning false opts into the default unknown-command fallback behavior.
+      onUnknownToggle: () => false,
+    });
+
+    // Modern Ribbon implementations invoke `onToggle` only.
+    actions.onToggle?.("ribbon.toggle.unknown", true);
+    await flushMicrotasks();
+
+    expect(onUnknownCommand).toHaveBeenCalledTimes(1);
+    expect(onUnknownCommand).toHaveBeenCalledWith("ribbon.toggle.unknown");
+  });
+
   it("suppresses the follow-up onCommand for unknown toggles when onUnknownToggle returns true", async () => {
     const registry = new CommandRegistry();
     const onUnknownCommand = vi.fn();
@@ -179,6 +198,20 @@ describe("createRibbonActionsFromCommands", () => {
 
     const toast = toastRoot.querySelector<HTMLElement>("[data-testid=\"toast\"]");
     expect(toast?.textContent).toBe("Ribbon: ribbon.unknown");
+  });
+
+  it("shows a toast for unknown toggles by default even when the host does not call onCommand", async () => {
+    const registry = new CommandRegistry();
+    const toastRoot = document.createElement("div");
+    toastRoot.id = "toast-root";
+    document.body.appendChild(toastRoot);
+
+    const actions = createRibbonActionsFromCommands({ commandRegistry: registry });
+    actions.onToggle?.("ribbon.toggle.unknown", true);
+    await flushMicrotasks();
+
+    const toast = toastRoot.querySelector<HTMLElement>("[data-testid=\"toast\"]");
+    expect(toast?.textContent).toBe("Ribbon: ribbon.toggle.unknown");
   });
 });
 
