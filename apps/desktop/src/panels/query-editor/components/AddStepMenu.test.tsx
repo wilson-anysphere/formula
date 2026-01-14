@@ -140,6 +140,35 @@ describe("AddStepMenu", () => {
     expect(onAddStep).toHaveBeenCalledWith({ type: "addColumn", name: "Custom 1", formula: "[Region]" });
   });
 
+  it("generates a unique Rename Column newName when a conflicting name already exists", async () => {
+    const preview = new DataTable(
+      [
+        { name: "Region", type: "string" },
+        { name: "Region (Renamed)", type: "string" },
+      ],
+      [],
+    );
+    const onAddStep = vi.fn();
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={onAddStep} aiContext={{ query: baseQuery(), preview }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "Rename Columns").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onAddStep).toHaveBeenCalledWith({
+      type: "renameColumn",
+      oldName: "Region",
+      newName: "Region (Renamed) 1",
+    });
+  });
+
   it("disables schema-dependent operations when preview schema is missing", async () => {
     const onAddStep = vi.fn();
     await act(async () => {

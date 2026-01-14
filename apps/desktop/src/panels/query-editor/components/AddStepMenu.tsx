@@ -133,7 +133,8 @@ export function AddStepMenu(props: {
             create: () => {
               const oldName = firstColumnName;
               const baseNewName = `${oldName || "Column"} (Renamed)`;
-              const used = new Set(columnNames.filter((name) => name !== oldName));
+              const used = new Set(usedColumnNames);
+              used.delete(oldName);
               const newName = uniqueName(baseNewName, used);
               return { type: "renameColumn", oldName, newName };
             },
