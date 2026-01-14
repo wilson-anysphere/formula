@@ -362,7 +362,12 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                 Cow::Borrowed(&def.rgce)
             };
 
-            let decoded = rgce::decode_biff8_rgce_with_base(&rgce_to_decode, ctx, Some(target_cell));
+            let decoded = rgce::decode_biff8_rgce_with_base_and_rgcb(
+                &rgce_to_decode,
+                &def.rgcb,
+                ctx,
+                Some(target_cell),
+            );
             for w in decoded.warnings {
                 push_warning_bounded(
                     &mut warnings,
@@ -1575,6 +1580,14 @@ fn biff8_short_unicode_string_len(input: &[u8]) -> Option<usize> {
 mod tests {
     use super::*;
 
+    fn record(id: u16, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 + payload.len());
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
     #[test]
     fn materializes_ref_col_oob_to_referr_variants() {
         // When a `PtgRef*` token shifts out of bounds during shared-formula materialization, the
@@ -1746,6 +1759,75 @@ mod tests {
         assert!(
             warnings.iter().any(|w| w.contains("ambiguous")),
             "expected ambiguity warning, got {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn recovers_shrfmla_ptgarray_constants_using_rgcb() {
+        // Ensure `recover_ptgexp_formulas_from_shrfmla_and_array` decodes `PtgArray` tokens stored
+        // in SHRFMLA using the trailing `rgcb` data blocks (otherwise the array constant would be
+        // rendered as `#UNKNOWN!`).
+
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<crate::biff::externsheet::ExternSheetEntry> = Vec::new();
+        let supbooks: Vec<crate::biff::supbook::SupBookInfo> = Vec::new();
+        let defined_names: Vec<rgce::DefinedNameMeta> = Vec::new();
+        let ctx = rgce::RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // Follower cell B1 contains PtgExp -> A1.
+        let mut formula = Vec::<u8>::new();
+        formula.extend_from_slice(&0u16.to_le_bytes()); // row
+        formula.extend_from_slice(&1u16.to_le_bytes()); // col
+        formula.extend_from_slice(&0u16.to_le_bytes()); // xf
+        formula.extend_from_slice(&[0u8; 8]); // cached result
+        formula.extend_from_slice(&0x0008u16.to_le_bytes()); // grbit (fShrFmla)
+        formula.extend_from_slice(&[0u8; 4]); // calc chain
+        formula.extend_from_slice(&5u16.to_le_bytes()); // cce
+        formula.push(0x01); // PtgExp
+        formula.extend_from_slice(&0u16.to_le_bytes()); // base row (A1)
+        formula.extend_from_slice(&0u16.to_le_bytes()); // base col (A1)
+
+        // SHRFMLA record: range A1:B1 with rgce = PtgArray and trailing rgcb = {1,2}.
+        let mut rgcb = Vec::<u8>::new();
+        rgcb.extend_from_slice(&1u16.to_le_bytes()); // cols_minus1 = 1 => 2 cols
+        rgcb.extend_from_slice(&0u16.to_le_bytes()); // rows_minus1 = 0 => 1 row
+        for n in [1.0f64, 2.0] {
+            rgcb.push(0x01); // number
+            rgcb.extend_from_slice(&n.to_le_bytes());
+        }
+
+        let mut shrfmla = Vec::<u8>::new();
+        // RefU range header: [rwFirst:u16][rwLast:u16][colFirst:u8][colLast:u8]
+        shrfmla.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        shrfmla.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+        shrfmla.push(0u8); // colFirst
+        shrfmla.push(1u8); // colLast
+        shrfmla.extend_from_slice(&0u16.to_le_bytes()); // cUse
+        shrfmla.extend_from_slice(&8u16.to_le_bytes()); // cce (PtgArray + 7 bytes)
+        shrfmla.push(0x20); // PtgArray
+        shrfmla.extend_from_slice(&[0u8; 7]); // opaque PtgArray header
+        shrfmla.extend_from_slice(&rgcb); // rgcb trailing bytes
+
+        let mut stream = Vec::<u8>::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[]));
+        stream.extend_from_slice(&record(worksheet_formulas::RECORD_FORMULA, &formula));
+        stream.extend_from_slice(&record(worksheet_formulas::RECORD_SHRFMLA, &shrfmla));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let recovered =
+            recover_ptgexp_formulas_from_shrfmla_and_array(&stream, 0, &ctx).expect("recover");
+        assert_eq!(
+            recovered
+                .formulas
+                .get(&CellRef::new(0, 1))
+                .map(|s| s.as_str()),
+            Some("{1,2}")
         );
     }
 }
