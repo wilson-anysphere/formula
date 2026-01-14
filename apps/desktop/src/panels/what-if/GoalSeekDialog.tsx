@@ -27,6 +27,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
   const errorId = useMemo(() => `goal-seek-error-${domInstanceId}`, [domInstanceId]);
   const targetCellRef = useRef<HTMLInputElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   const trapTab = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Tab") return;
@@ -64,8 +65,17 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
 
   useEffect(() => {
     if (!open) return;
+    // Restore focus to the previously-focused element when the dialog closes.
+    // (Dialogs are mounted as portals/overlays, so focus would otherwise jump to <body>.)
+    restoreFocusRef.current = (document.activeElement as HTMLElement | null) ?? null;
     // Focus the first input so keyboard users can immediately type.
     targetCellRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (open) return;
+    restoreFocusRef.current?.focus?.();
+    restoreFocusRef.current = null;
   }, [open]);
 
   async function run() {
