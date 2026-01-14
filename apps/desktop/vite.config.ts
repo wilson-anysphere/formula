@@ -257,6 +257,9 @@ export default defineConfig({
       // Clipboard + extension helpers have a few small `.test.ts` suites as well.
       "src/clipboard/**/__tests__/**/*.test.ts",
       "src/extensions/**/*.test.ts",
+      // Some panel unit tests use the `.test.ts(x)` suffix.
+      "src/panels/**/*.test.ts",
+      "src/panels/**/*.test.tsx",
       // Misc small leaf packages with `.test.ts` suites.
       "src/tauri/__tests__/**/*.test.ts",
       "src/macros/**/*.test.ts",

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { IDBKeyRange, indexedDB } from "fake-indexeddb";
@@ -22,6 +23,22 @@ const originalGlobals = {
   IDBKeyRange: (globalThis as any).IDBKeyRange,
   __TAURI__: (globalThis as any).__TAURI__
 };
+
+function resolveRepoDir(relativeFromRepoRoot: string): string {
+  // This test runs under both:
+  // - repo-root Vitest (cwd = repo root)
+  // - desktop-scoped Vitest (cwd = apps/desktop)
+  // Resolve the sample extension directory by walking upward until it exists.
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i += 1) {
+    const candidate = path.resolve(dir, relativeFromRepoRoot);
+    if (existsSync(path.join(candidate, "package.json"))) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`Could not find directory: ${relativeFromRepoRoot}`);
+}
 
 async function deleteExtensionDb() {
   await new Promise<void>((resolve) => {
@@ -136,7 +153,7 @@ function createMockMarketplace({ extensionId, latestVersion, publicKeyPem, pkgBy
 
 test("falls back to Tauri Ed25519 verification when WebCrypto Ed25519 is unsupported", async () => {
   const keys = generateEd25519KeyPair();
-  const extensionDir = path.resolve("extensions/sample-hello");
+  const extensionDir = resolveRepoDir("extensions/sample-hello");
   const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
 
   const marketplaceClient = createMockMarketplace({
