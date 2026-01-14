@@ -272,6 +272,7 @@ describe("Ribbon UI state overrides", () => {
       "home.editing.sortFilter.reapply",
       "home.editing.clear",
       "format.clearAll",
+      "format.clearContents",
       "format.clearFormats",
       "edit.clearContents",
       "home.editing.clear.clearComments",
