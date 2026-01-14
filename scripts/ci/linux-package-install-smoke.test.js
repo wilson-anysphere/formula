@@ -25,6 +25,7 @@ test("linux-package-install-smoke: --help prints expected usage + env vars", () 
   assert.match(proc.stdout, /DOCKER_PLATFORM/);
   assert.match(proc.stdout, /FORMULA_DEB_SMOKE_IMAGE/);
   assert.match(proc.stdout, /FORMULA_RPM_SMOKE_IMAGE/);
+  assert.match(proc.stdout, /FORMULA_TAURI_CONF_PATH/);
 });
 
 test("linux-package-install-smoke: invalid arg exits with usage (status 2)", () => {
