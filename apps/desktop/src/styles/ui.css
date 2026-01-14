@@ -869,14 +869,14 @@ a:visited {
 
 .grid__row-header {
   background: var(--formula-grid-header-bg, var(--grid-header-bg));
-  color: var(--text-secondary);
+  color: var(--formula-grid-header-text, var(--grid-header-text));
   font-weight: 600;
   user-select: none;
 }
 
 .grid__cell--selected {
-  background: var(--selection-bg);
-  color: var(--selection-text);
+  background: var(--formula-grid-selection-fill, var(--selection-bg));
+  color: var(--formula-grid-cell-text, var(--selection-text));
   outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
   outline-offset: -2px;
 }
@@ -906,12 +906,13 @@ a:visited {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
+  color: inherit;
   cursor: pointer;
   flex: 0 0 auto;
   user-select: none;
   line-height: 1;
   font-size: 10px;
+  opacity: 0.7;
   transition:
     background-color var(--motion-duration) var(--motion-ease),
     border-color var(--motion-duration) var(--motion-ease),
@@ -919,19 +920,20 @@ a:visited {
 }
 
 .formula-table-filter-button:hover {
-  background: var(--bg-hover);
-  border-color: var(--border);
-  color: var(--text-primary);
+  background: var(--formula-grid-scrollbar-track, var(--bg-hover));
+  border-color: var(--formula-grid-line, var(--border));
+  opacity: 1;
 }
 
 .formula-table-filter-button:active {
-  background: var(--bg-active);
+  background: var(--formula-grid-scrollbar-track, var(--bg-active));
 }
 
 .formula-table-filter-button:focus-visible {
   outline: none;
-  border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  border-color: var(--formula-grid-selection-border, var(--selection-border));
+  box-shadow: 0 0 0 2px var(--formula-grid-selection-fill, var(--selection-bg));
+  opacity: 1;
 }
 
 .formula-table-filter-button:disabled {
