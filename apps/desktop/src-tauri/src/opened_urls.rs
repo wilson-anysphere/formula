@@ -27,6 +27,8 @@ pub struct OpenedUrlClassification {
 /// forwarded to the frontend (for OAuth), while still preserving Finder-style file open behavior
 /// for `file://...` URLs.
 pub fn classify_opened_urls(urls: &[Url]) -> OpenedUrlClassification {
+    let schemes = crate::deep_link_schemes::configured_schemes();
+
     // Treat OS-delivered URL-open events as untrusted input. Bound allocations so a malicious
     // sender cannot OOM the host by delivering a huge list of opened URLs while the app is
     // already running.
@@ -45,7 +47,8 @@ pub fn classify_opened_urls(urls: &[Url]) -> OpenedUrlClassification {
     for url in urls.iter().rev() {
         let raw = url.as_str();
         let len = raw.len();
-        if url.scheme() == "formula" {
+        let is_deep_link = schemes.iter().any(|scheme| scheme.as_str() == url.scheme());
+        if is_deep_link {
             if oauth_rev.len() >= MAX_OAUTH_REDIRECT_PENDING_URLS {
                 continue;
             }

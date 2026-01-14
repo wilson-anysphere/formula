@@ -117,7 +117,7 @@ pub fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
 }
 
 fn normalize_open_file_candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBuf> {
-    let arg = arg.trim();
+    let arg = arg.trim().trim_matches('"');
     if arg.is_empty() {
         return None;
     }
@@ -129,11 +129,8 @@ fn normalize_open_file_candidate(arg: &str, cwd: Option<&Path>) -> Option<PathBu
     }
 
     // Deep links (e.g. OAuth redirects) are delivered via argv on some platforms. Ignore them
-    // here so we don't attempt to treat `formula://...` as a filesystem path.
-    if arg
-        .get(..8)
-        .map_or(false, |prefix| prefix.eq_ignore_ascii_case("formula:"))
-    {
+    // here so we don't attempt to treat `scheme://...` as a filesystem path.
+    if crate::deep_link_schemes::is_deep_link_url(arg) {
         return None;
     }
 
@@ -223,6 +220,7 @@ mod tests {
             "formula-desktop".to_string(),
             "formula://oauth/callback?code=abc".to_string(),
             "FORMULA://oauth/callback?code=def".to_string(),
+            "\"formula://oauth/callback?code=ghi\"".to_string(),
         ];
         let paths = extract_open_file_paths_from_argv(&argv, None);
         assert!(paths.is_empty());
@@ -305,6 +303,21 @@ mod tests {
         let url = Url::from_file_path(&file_path).unwrap();
 
         let argv = vec!["formula-desktop".to_string(), url.to_string()];
+        let paths = extract_open_file_paths_from_argv(&argv, Some(dir.path()));
+
+        assert_eq!(paths, vec![file_path]);
+    }
+
+    #[test]
+    fn handles_quoted_file_urls() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("book.xlsm");
+        let url = Url::from_file_path(&file_path).unwrap();
+
+        let argv = vec![
+            "formula-desktop".to_string(),
+            format!("\"{}\"", url.to_string()),
+        ];
         let paths = extract_open_file_paths_from_argv(&argv, Some(dir.path()));
 
         assert_eq!(paths, vec![file_path]);

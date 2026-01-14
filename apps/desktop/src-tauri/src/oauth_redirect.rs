@@ -31,12 +31,9 @@ pub fn extract_oauth_redirect_urls_from_argv(argv: &[String]) -> Vec<String> {
             continue;
         }
 
-        // Deep links are delivered via argv as raw URL strings. Filter down to the app scheme so
-        // we don't attempt to parse every argv entry as a URL.
-        if !trimmed
-            .get(..8)
-            .map_or(false, |prefix| prefix.eq_ignore_ascii_case("formula:"))
-        {
+        // Deep links are delivered via argv as raw URL strings. Filter down to configured app
+        // schemes so we don't attempt to parse every argv entry as a URL.
+        if !crate::deep_link_schemes::is_deep_link_url(trimmed) {
             continue;
         }
 
@@ -65,7 +62,8 @@ pub fn extract_oauth_redirect_urls_from_argv(argv: &[String]) -> Vec<String> {
 /// URLs that are safe to forward to the frontend OAuth broker.
 ///
 /// Accepted:
-/// - Custom scheme deep links: `formula://...`
+/// - Custom scheme deep links registered by the desktop app (from
+///   `tauri.conf.json` → `plugins.deep-link.desktop.schemes`, e.g. `formula://...`)
 /// - RFC 8252 loopback redirects:
 ///   - `http://127.0.0.1:<port>/...`
 ///   - `http://localhost:<port>/...`
@@ -74,6 +72,29 @@ pub fn extract_oauth_redirect_urls_from_argv(argv: &[String]) -> Vec<String> {
 /// SECURITY: loopback URLs are accepted only when the scheme is `http`, an explicit non-zero port
 /// is present, and the host is a loopback host.
 pub fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {
+    normalize_oauth_redirect_request_urls_with_schemes(urls, crate::deep_link_schemes::configured_schemes())
+}
+
+fn starts_with_any_scheme(trimmed: &str, schemes: &[String]) -> bool {
+    for scheme in schemes {
+        if scheme.is_empty() {
+            continue;
+        }
+        let expected = format!("{scheme}:");
+        let Some(prefix) = trimmed.get(..expected.len()) else {
+            continue;
+        };
+        if prefix.eq_ignore_ascii_case(&expected) {
+            return true;
+        }
+    }
+    false
+}
+
+pub fn normalize_oauth_redirect_request_urls_with_schemes(
+    urls: Vec<String>,
+    schemes: &[String],
+) -> Vec<String> {
     // Keep this bounded; argv / OS-delivered deep links should be treated as untrusted.
     let mut seen =
         HashSet::<String>::with_capacity(MAX_OAUTH_REDIRECT_PENDING_URLS.min(urls.len()));
@@ -97,17 +118,15 @@ pub fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {
             continue;
         }
 
-        let is_formula = trimmed
-            .get(..8)
-            .map_or(false, |prefix| prefix.eq_ignore_ascii_case("formula:"));
+        let is_custom_scheme = starts_with_any_scheme(trimmed, schemes);
 
-        let is_loopback = if !is_formula {
+        let is_loopback = if !is_custom_scheme {
             crate::oauth_loopback::parse_loopback_redirect_uri(trimmed).is_ok()
         } else {
             false
         };
 
-        if !is_formula && !is_loopback {
+        if !is_custom_scheme && !is_loopback {
             continue;
         }
 
@@ -147,6 +166,26 @@ mod tests {
             vec![
                 "formula://oauth/callback?code=123".to_string(),
                 "FORMULA://oauth/callback?code=456".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn accepts_additional_custom_scheme_urls_when_configured() {
+        let schemes = vec!["formula".to_string(), "formula-extra".to_string()];
+        let out = normalize_oauth_redirect_request_urls_with_schemes(
+            vec![
+                "formula-extra://oauth/callback?code=123".to_string(),
+                "FORMULA-EXTRA://oauth/callback?code=456".to_string(),
+            ],
+            &schemes,
+        );
+
+        assert_eq!(
+            out,
+            vec![
+                "formula-extra://oauth/callback?code=123".to_string(),
+                "FORMULA-EXTRA://oauth/callback?code=456".to_string(),
             ]
         );
     }

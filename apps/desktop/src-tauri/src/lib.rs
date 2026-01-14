@@ -2,6 +2,7 @@ pub(crate) mod atomic_write;
 pub mod asset_protocol_core;
 pub mod asset_protocol_policy;
 pub mod commands;
+pub mod deep_link_schemes;
 pub mod ed25519_verifier;
 pub mod external_url;
 #[cfg(any(feature = "desktop", test))]
