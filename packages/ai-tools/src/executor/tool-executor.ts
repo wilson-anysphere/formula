@@ -7,6 +7,8 @@ import { TOOL_REGISTRY, validateToolCall } from "../tool-schema.ts";
 
 import { redactUrlSecrets } from "../utils/urlRedaction.ts";
 
+import { classifyText } from "../../../ai-context/src/dlp.js";
+
 import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../security/dlp/src/policyEngine.js";
 import { CLASSIFICATION_LEVEL, classificationRank, maxClassification } from "../../../security/dlp/src/classification.js";
@@ -31,6 +33,35 @@ const UNSERIALIZABLE_CELL_VALUE_PLACEHOLDER = "[Unserializable cell value]";
 const DEFAULT_RICH_VALUE_SAMPLE_ITEMS = 32;
 const DEFAULT_RICH_VALUE_MAX_COLLECTION_ITEMS = 256;
 const DEFAULT_RICH_VALUE_MAX_OBJECT_KEYS = 256;
+
+const HEURISTIC_TRUNCATION_MARKER = "\n[TRUNCATED]…\n";
+
+function truncateTextForHeuristicScan(text: string, maxChars: number): string {
+  const s = String(text ?? "");
+  if (!Number.isFinite(maxChars) || maxChars <= 0) return "";
+  if (s.length <= maxChars) return s;
+
+  // Keep a small suffix so we can still detect trailing markers (e.g. PEM blocks).
+  if (maxChars <= HEURISTIC_TRUNCATION_MARKER.length) return HEURISTIC_TRUNCATION_MARKER.slice(0, Math.max(0, maxChars));
+
+  const budget = maxChars - HEURISTIC_TRUNCATION_MARKER.length;
+  const suffixLen = Math.min(200, Math.max(0, Math.floor(budget / 3)));
+  const prefixLen = Math.max(0, budget - suffixLen);
+  return `${s.slice(0, prefixLen)}${HEURISTIC_TRUNCATION_MARKER}${suffixLen > 0 ? s.slice(-suffixLen) : ""}`;
+}
+
+function heuristicToPolicyClassification(heuristic: ReturnType<typeof classifyText>): any {
+  if (heuristic?.level === "sensitive") {
+    const labels = (heuristic.findings || []).map((f) => `heuristic:${String(f)}`);
+    return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
+  }
+  return { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+}
+
+function looksLikePrivateKeyHeader(text: string): boolean {
+  const upper = String(text ?? "").toUpperCase();
+  return upper.includes("-----BEGIN") && (upper.includes("PRIVATE KEY-----") || upper.includes("PGP PRIVATE KEY BLOCK-----"));
+}
 
 function truncateCellString(value: string, maxChars: number): string {
   const limit = Number.isFinite(maxChars) ? Math.max(0, Math.floor(maxChars)) : DEFAULT_READ_RANGE_MAX_CELL_CHARS;
@@ -682,13 +713,16 @@ export class ToolExecutor {
     const rowCount = range.endRow - range.startRow + 1;
     const colCount = range.endCol - range.startCol + 1;
     const includeFormulas = Boolean(params.include_formulas);
-    if (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW) {
-      const includeFormulaValues = Boolean(this.options.include_formula_values);
-      const values: CellScalar[][] = Array.from({ length: rowCount }, () => new Array(colCount));
-      const formulas: Array<Array<string | null>> | undefined = includeFormulas
-        ? Array.from({ length: rowCount }, () => new Array(colCount))
-        : undefined;
+    const includeFormulaValues = Boolean(this.options.include_formula_values);
 
+    // Always materialize the read_range output; downstream enforcement may mutate in-place.
+    const values: CellScalar[][] = Array.from({ length: rowCount }, () => new Array(colCount));
+    const formulas: Array<Array<string | null>> | undefined = includeFormulas
+      ? Array.from({ length: rowCount }, () => new Array(colCount))
+      : undefined;
+
+    // Fast path: if DLP is not configured, return values as-is.
+    if (!dlp) {
       for (let r = 0; r < rowCount; r += 1) {
         const row = Array.isArray(cells[r]) ? (cells[r] ?? []) : [];
         const valuesRow = values[r]!;
@@ -702,9 +736,96 @@ export class ToolExecutor {
           if (formulasRow) formulasRow[c] = normalizeFormulaOutput(formula);
         }
       }
-      if (dlp) {
-        this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount: 0 });
+      const rangeForUser = { ...range, sheet: this.displaySheetName(range.sheet) };
+      enforceReadRangeCharLimit({ range: rangeForUser, values, formulas, maxChars: this.options.max_read_range_chars });
+      return { range: this.formatRangeForUser(range), values, ...(formulas ? { formulas } : {}) };
+    }
+
+    // Defense-in-depth: even without structured classification records, heuristically detect
+    // sensitive patterns (email, API keys, etc.) in returned values/formulas so we can enforce
+    // the configured DLP policy before returning tool results to the model.
+    let heuristicSelectionClassification: any = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+    const heuristicRestrictedByOffset = new Uint8Array(rowCount * colCount);
+
+    const scanClassificationForText = (text: string): any => {
+      const scanText = truncateTextForHeuristicScan(text, DEFAULT_READ_RANGE_MAX_CELL_CHARS);
+      if (!scanText) return { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+
+      const heuristic = classifyText(scanText);
+      let classification = heuristicToPolicyClassification(heuristic);
+
+      if (looksLikePrivateKeyHeader(scanText)) {
+        classification = maxClassification(classification, {
+          level: CLASSIFICATION_LEVEL.RESTRICTED,
+          labels: ["heuristic:private_key"]
+        });
       }
+
+      return classification;
+    };
+
+    const scanClassificationForValue = (raw: unknown): any => {
+      if (raw === null || raw === undefined) return { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+      if (typeof raw === "string") return scanClassificationForText(raw);
+      if (typeof raw === "number") return Number.isFinite(raw) ? scanClassificationForText(String(raw)) : { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+      if (typeof raw === "boolean") return scanClassificationForText(raw ? "TRUE" : "FALSE");
+      return scanClassificationForText(stringifyCellValue(raw));
+    };
+
+    for (let r = 0; r < rowCount; r += 1) {
+      const row = Array.isArray(cells[r]) ? (cells[r] ?? []) : [];
+      const valuesRow = values[r]!;
+      const formulasRow = formulas ? formulas[r]! : undefined;
+      for (let c = 0; c < colCount; c += 1) {
+        const cell = row[c];
+        const formula = (cell as any)?.formula;
+        const hasFormula = Boolean(formula);
+        const rawValue = (cell as any)?.value;
+
+        valuesRow[c] = normalizeCellOutput(hasFormula ? (includeFormulaValues ? rawValue : null) : rawValue);
+        if (formulasRow) formulasRow[c] = normalizeFormulaOutput(formula);
+
+        // Only scan content that is eligible to be returned for the current tool call.
+        const offset = r * colCount + c;
+        let cellClassification: any = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+
+        const valueWillBeReturned = !hasFormula || includeFormulaValues;
+        if (valueWillBeReturned) {
+          cellClassification = maxClassification(cellClassification, scanClassificationForValue(rawValue));
+        }
+        if (formulasRow) {
+          const formulaOut = formulasRow[c];
+          if (formulaOut) {
+            cellClassification = maxClassification(cellClassification, scanClassificationForText(formulaOut));
+          }
+        }
+
+        if (cellClassification.level === CLASSIFICATION_LEVEL.RESTRICTED) {
+          heuristicRestrictedByOffset[offset] = 1;
+          heuristicSelectionClassification = maxClassification(heuristicSelectionClassification, cellClassification);
+        }
+      }
+    }
+
+    const combinedSelectionClassification = maxClassification(dlp.selectionClassification, heuristicSelectionClassification);
+    dlp.selectionClassification = combinedSelectionClassification;
+    dlp.decision = evaluatePolicy({
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      classification: combinedSelectionClassification,
+      policy: dlp.policy,
+      options: { includeRestrictedContent: dlp.includeRestrictedContent }
+    });
+
+    if (dlp.decision.decision === DLP_DECISION.BLOCK) {
+      this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount: 0 });
+      throw toolError(
+        "permission_denied",
+        `DLP policy blocks reading ${this.formatRangeForUser(range)} via read_range (ai.cloudProcessing).`
+      );
+    }
+
+    if (dlp.decision.decision === DLP_DECISION.ALLOW) {
+      this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount: 0 });
       const rangeForUser = { ...range, sheet: this.displaySheetName(range.sheet) };
       enforceReadRangeCharLimit({ range: rangeForUser, values, formulas, maxChars: this.options.max_read_range_chars });
       return { range: this.formatRangeForUser(range), values, ...(formulas ? { formulas } : {}) };
@@ -712,28 +833,32 @@ export class ToolExecutor {
 
     let redactedCellCount = 0;
 
-    const values: CellScalar[][] = Array.from({ length: rowCount }, () => new Array(colCount));
-    const formulas: Array<Array<string | null>> | undefined = includeFormulas
-      ? Array.from({ length: rowCount }, () => new Array(colCount))
-      : undefined;
-
     for (let r = 0, rowIndex = range.startRow; r < rowCount; r += 1, rowIndex += 1) {
       const row = Array.isArray(cells[r]) ? (cells[r] ?? []) : [];
       const valuesRow = values[r]!;
       const formulasRow = formulas ? formulas[r]! : undefined;
       for (let c = 0, colIndex = range.startCol; c < colCount; c += 1, colIndex += 1) {
-        if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+        const offset = r * colCount + c;
+        const cell = row[c];
+        const formula = (cell as any)?.formula;
+        const hasFormula = Boolean(formula);
+
+        const shouldRedactHeuristically = heuristicRestrictedByOffset[offset] === 1 && !dlp.restrictedAllowed;
+        const allowed = this.isDlpCellAllowed(dlp, rowIndex, colIndex);
+
+        if (!allowed || shouldRedactHeuristically) {
           redactedCellCount += 1;
           valuesRow[c] = DLP_REDACTION_PLACEHOLDER;
           if (formulasRow) formulasRow[c] = DLP_REDACTION_PLACEHOLDER;
           continue;
         }
-        const cell = row[c];
-        const formula = (cell as any)?.formula;
-        const hasFormula = Boolean(formula);
-        const rawValue = (cell as any)?.value;
-        valuesRow[c] = normalizeCellOutput(hasFormula ? null : rawValue);
-        if (formulasRow) formulasRow[c] = normalizeFormulaOutput(formula);
+
+        // DLP-safe default: under REDACT, never surface formula values (even when
+        // include_formula_values is enabled) to avoid leaking computed values derived
+        // from restricted dependencies.
+        if (hasFormula) {
+          valuesRow[c] = null;
+        }
       }
     }
 

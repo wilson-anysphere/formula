@@ -79,6 +79,56 @@ describe("tool output DLP enforcement", () => {
     expect(serialized).not.toContain("TopSecret");
   });
 
+  it("redacts heuristically sensitive values in read_range even without classification records", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "user@example.com" });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: "Public" });
+
+    const executor = new SpreadsheetLLMToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: makePolicy({ redactDisallowed: true }),
+        classification_records: [],
+      },
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      arguments: { range: "Sheet1!A1:B1" },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([["[REDACTED]", "Public"]]);
+    expect(JSON.stringify(result)).not.toContain("user@example.com");
+  });
+
+  it("redacts heuristically sensitive formulas in read_range even without classification records", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: null, formula: '="user@example.com"' });
+
+    const executor = new SpreadsheetLLMToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: makePolicy({ redactDisallowed: true }),
+        classification_records: [],
+      },
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      arguments: { range: "Sheet1!A1:A1", include_formulas: true },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([["[REDACTED]"]]);
+    expect(result.data?.formulas).toEqual([["[REDACTED]"]]);
+    expect(JSON.stringify(result)).not.toContain("user@example.com");
+  });
+
   it("blocks tool results when policy disallows cloud processing (BLOCK)", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Public" });
