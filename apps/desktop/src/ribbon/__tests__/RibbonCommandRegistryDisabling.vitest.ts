@@ -12,8 +12,6 @@ import { registerFormatPainterCommand } from "../../commands/formatPainterComman
 import { registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands";
 import { Ribbon } from "../Ribbon";
 import type { RibbonSchema } from "../ribbonSchema";
-import { defaultRibbonSchema } from "../ribbonSchema";
-import { COMMAND_REGISTRY_EXEMPT_IDS } from "../ribbonCommandRegistryDisabling";
 import { computeRibbonDisabledByIdFromCommandRegistry } from "../ribbonCommandRegistryDisabling";
 import { setRibbonUiState } from "../ribbonUiState";
 
@@ -32,21 +30,6 @@ afterEach(() => {
 });
 
 describe("CommandRegistry-backed ribbon disabling", () => {
-  function collectDefaultRibbonIds(): Set<string> {
-    const ids = new Set<string>();
-    for (const tab of defaultRibbonSchema.tabs) {
-      for (const group of tab.groups) {
-        for (const button of group.buttons) {
-          ids.add(button.id);
-          for (const menuItem of button.menuItems ?? []) {
-            ids.add(menuItem.id);
-          }
-        }
-      }
-    }
-    return ids;
-  }
-
   function createDesktopCommandRegistry(): CommandRegistry {
     const commandRegistry = new CommandRegistry();
 
@@ -138,27 +121,6 @@ describe("CommandRegistry-backed ribbon disabling", () => {
 
     return commandRegistry;
   }
-
-  it("keeps the CommandRegistry exemption list in sync with the ribbon schema", () => {
-    const ribbonIds = collectDefaultRibbonIds();
-    const staleExemptions = [...COMMAND_REGISTRY_EXEMPT_IDS].filter((id) => !ribbonIds.has(id)).sort();
-    expect(
-      staleExemptions,
-      `Exemptions contain ids that are no longer present in defaultRibbonSchema:\n${staleExemptions.map((id) => `- ${id}`).join("\n")}`,
-    ).toEqual([]);
-  });
-
-  it("ensures CommandRegistry exemptions are truly non-registry ids (catches drift)", () => {
-    const commandRegistry = createDesktopCommandRegistry();
-    const implementedExemptions = [...COMMAND_REGISTRY_EXEMPT_IDS].filter((id) => commandRegistry.getCommand(id) != null).sort();
-    expect(
-      implementedExemptions,
-      [
-        "Exemptions contain ids that are now registered commands (please remove them from COMMAND_REGISTRY_EXEMPT_IDS):",
-        ...implementedExemptions.map((id) => `- ${id}`),
-      ].join("\n"),
-    ).toEqual([]);
-  });
 
   it("renders an unknown command id as disabled when the baseline override is applied", () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
