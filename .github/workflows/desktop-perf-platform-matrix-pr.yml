@@ -209,7 +209,8 @@ jobs:
           # This workflow does not run Playwright tests, so skip the ~GB browser downloads
           # performed by `@playwright/test`'s postinstall script.
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-        run: pnpm install --frozen-lockfile
+        # Prefer cached pnpm store entries to reduce network flakiness on reruns.
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
