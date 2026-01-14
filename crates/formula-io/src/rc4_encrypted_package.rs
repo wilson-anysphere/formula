@@ -28,7 +28,14 @@ pub(crate) const ENCRYPTED_PACKAGE_SIZE_HEADER_LEN: usize = 8;
 ///
 /// This is a safety belt against malformed headers that could otherwise cause OOM when callers
 /// allocate based on the declared package size.
-pub(crate) const DEFAULT_MAX_DECRYPTED_PACKAGE_SIZE: u64 = 2 * 1024 * 1024 * 1024; // 2GiB
+const fn min_u64(a: u64, b: u64) -> u64 {
+    if a < b { a } else { b }
+}
+
+pub(crate) const DEFAULT_MAX_DECRYPTED_PACKAGE_SIZE: u64 = min_u64(
+    2 * 1024 * 1024 * 1024, // 2GiB
+    isize::MAX as u64,      // avoid `Vec`/allocation invariants on 32-bit targets
+);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Rc4EncryptedPackageParseOptions {
@@ -160,6 +167,17 @@ pub(crate) fn parse_rc4_encrypted_package_stream<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_max_decrypted_package_size_respects_isize_max() {
+        let two_gib = 2u64 * 1024 * 1024 * 1024;
+        let expected = if (isize::MAX as u64) < two_gib {
+            isize::MAX as u64
+        } else {
+            two_gib
+        };
+        assert_eq!(DEFAULT_MAX_DECRYPTED_PACKAGE_SIZE, expected);
+    }
 
     #[test]
     fn rc4_encrypted_package_size_header_hi_zero() {
