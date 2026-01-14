@@ -60,11 +60,13 @@ detect_docker_platform() {
   esac
 }
 
-# Force docker to use the host architecture image variant so we don't accidentally
-# run an ARM container on an x86_64 runner (or vice versa). This avoids confusing
-# failures like `exec format error` or `ldd: not a dynamic executable` when the
-# installed binary can't run on the container architecture.
-DOCKER_PLATFORM="$(detect_docker_platform)"
+# Force docker to use the host architecture image variant by default so we don't accidentally run
+# an ARM container on an x86_64 runner (or vice versa). This avoids confusing failures like
+# `exec format error` or `ldd: not a dynamic executable` when the installed binary can't run on the
+# container architecture.
+#
+# Override for debugging by exporting DOCKER_PLATFORM explicitly.
+DOCKER_PLATFORM="${DOCKER_PLATFORM:-$(detect_docker_platform)}"
 
 find_pkg_dirs() {
   local pkg_type="$1" # deb|rpm
