@@ -125,9 +125,9 @@ function pruneNullsDeep(value: unknown): unknown {
   return out;
 }
 
-function pruneUndefinedShallow<T extends Record<string, unknown>>(value: T): T {
+function pruneUndefinedShallow<T extends object>(value: T): T {
   const out: Record<string, unknown> = {};
-  for (const [key, raw] of Object.entries(value)) {
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     if (raw === undefined) continue;
     out[key] = raw;
   }
@@ -368,7 +368,7 @@ export class EngineWorker {
 
   async setEngineInfo(info: EngineInfoDto, options?: RpcOptions): Promise<void> {
     await this.flush();
-    const normalized = pruneUndefinedShallow(info as unknown as Record<string, unknown>) as EngineInfoDto;
+    const normalized = pruneUndefinedShallow(info);
     const memavail = (normalized as any).memavail as unknown;
     if (memavail !== undefined && memavail !== null) {
       if (typeof memavail !== "number" || !Number.isFinite(memavail)) {
@@ -591,7 +591,7 @@ export class EngineWorker {
     await this.flush();
     // `serde_wasm_bindgen` does not accept `undefined` values inside structs; prune optional keys
     // so callers can pass `{ foo?: undefined }` without breaking deserialization.
-    const normalized = pruneUndefinedShallow(request as unknown as Record<string, unknown>) as GoalSeekRequest;
+    const normalized = pruneUndefinedShallow(request);
     return (await this.invoke("goalSeek", normalized, options)) as GoalSeekResponse;
   }
 
