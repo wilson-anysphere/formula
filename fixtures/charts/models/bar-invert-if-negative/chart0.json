@@ -1,0 +1,136 @@
+{
+  "chartIndex": 0,
+  "sheetName": "Sheet1",
+  "anchor": {
+    "TwoCell": {
+      "from": {
+        "cell": {
+          "row": 1,
+          "col": 3
+        },
+        "offset": {
+          "x_emu": 0,
+          "y_emu": 0
+        }
+      },
+      "to": {
+        "cell": {
+          "row": 15,
+          "col": 10
+        },
+        "offset": {
+          "x_emu": 304800,
+          "y_emu": 76200
+        }
+      }
+    }
+  },
+  "drawingRelId": "rId1",
+  "drawingObjectId": 2,
+  "drawingObjectName": "Chart 1",
+  "parts": {
+    "drawingPart": "xl/drawings/drawing1.xml",
+    "chartPart": "xl/charts/chart1.xml",
+    "chartExPart": null,
+    "stylePart": null,
+    "colorsPart": null
+  },
+  "modelChartSpace": {
+    "chartKind": {
+      "kind": "bar"
+    },
+    "title": {
+      "richText": {
+        "text": "Example Chart",
+        "runs": []
+      },
+      "formula": null
+    },
+    "legend": {
+      "position": "right",
+      "overlay": false
+    },
+    "plotArea": {
+      "kind": "bar",
+      "varyColors": null,
+      "barDirection": "col",
+      "grouping": "clustered",
+      "gapWidth": null,
+      "overlap": null,
+      "axIds": [
+        50010001,
+        50010002
+      ]
+    },
+    "axes": [
+      {
+        "id": 50010001,
+        "kind": "category",
+        "position": "bottom",
+        "scaling": {
+          "min": null,
+          "max": null,
+          "logBase": null,
+          "reverse": false
+        },
+        "numFmt": null,
+        "tickLabelPosition": "nextTo",
+        "majorGridlines": false,
+        "crossAxisId": 50010002,
+        "crosses": "autoZero"
+      },
+      {
+        "id": 50010002,
+        "kind": "value",
+        "position": "left",
+        "scaling": {
+          "min": null,
+          "max": null,
+          "logBase": null,
+          "reverse": false
+        },
+        "numFmt": {
+          "formatCode": "General",
+          "sourceLinked": true
+        },
+        "tickLabelPosition": "nextTo",
+        "majorGridlines": true,
+        "crossAxisId": 50010001,
+        "crosses": "autoZero"
+      }
+    ],
+    "series": [
+      {
+        "idx": 0,
+        "order": 0,
+        "name": null,
+        "categories": {
+          "formula": "Sheet1!$A$2:$A$5",
+          "cache": [
+            "A",
+            "B",
+            "C",
+            "D"
+          ]
+        },
+        "values": {
+          "formula": "Sheet1!$B$2:$B$5",
+          "cache": [
+            2.0,
+            4.0,
+            3.0,
+            5.0
+          ],
+          "formatCode": "General"
+        },
+        "xValues": null,
+        "yValues": null,
+        "smooth": null,
+        "invertIfNegative": true
+      }
+    ],
+    "plotVisOnly": true,
+    "diagnostics": []
+  },
+  "modelChartEx": null
+}

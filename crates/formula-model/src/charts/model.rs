@@ -274,6 +274,9 @@ pub enum ComboChartEntry {
 #[serde(rename_all = "camelCase")]
 pub struct AreaChartModel {
     pub grouping: Option<String>,
+    pub gap_width: Option<u32>,
+    pub overlap: Option<i32>,
+    pub vary_colors: Option<bool>,
     pub ax_ids: Vec<u32>,
 }
 
@@ -310,6 +313,7 @@ pub struct DoughnutChartModel {
 pub struct LineChartModel {
     pub vary_colors: Option<bool>,
     pub grouping: Option<String>,
+    pub smooth: Option<bool>,
     pub ax_ids: Vec<u32>,
 }
 

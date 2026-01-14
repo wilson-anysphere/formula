@@ -387,15 +387,17 @@ fn parse_plot_area_model(
     match chart_kind {
         ChartKind::Area => PlotAreaModel::Area(AreaChartModel {
             grouping: child_attr(chart_node, "grouping", "val").map(str::to_string),
+            gap_width: child_u32(chart_node, "gapWidth", diagnostics, "barChart.gapWidth"),
+            overlap: child_i32(chart_node, "overlap", diagnostics, "barChart.overlap"),
+            vary_colors: child_bool(chart_node, "varyColors", diagnostics, "barChart.varyColors"),
             ax_ids: parse_ax_ids(chart_node),
         }),
         ChartKind::Bar => PlotAreaModel::Bar(BarChartModel {
-            vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
+            vary_colors: child_bool(chart_node, "varyColors", diagnostics, "barChart.varyColors"),
             bar_direction: child_attr(chart_node, "barDir", "val").map(str::to_string),
             grouping: child_attr(chart_node, "grouping", "val").map(str::to_string),
-            gap_width: child_attr(chart_node, "gapWidth", "val")
-                .and_then(|v| v.parse::<u16>().ok()),
-            overlap: child_attr(chart_node, "overlap", "val").and_then(|v| v.parse::<i16>().ok()),
+            gap_width: child_u16(chart_node, "gapWidth", diagnostics, "barChart.gapWidth"),
+            overlap: child_i16(chart_node, "overlap", diagnostics, "barChart.overlap"),
             ax_ids: parse_ax_ids(chart_node),
         }),
         ChartKind::Bubble => PlotAreaModel::Bubble(BubbleChartModel {
@@ -415,6 +417,7 @@ fn parse_plot_area_model(
         ChartKind::Line => PlotAreaModel::Line(LineChartModel {
             vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
             grouping: child_attr(chart_node, "grouping", "val").map(str::to_string),
+            smooth: child_bool(chart_node, "smooth", diagnostics, "lineChart.smooth"),
             ax_ids: parse_ax_ids(chart_node),
         }),
         ChartKind::Pie => PlotAreaModel::Pie(PieChartModel {
@@ -509,9 +512,25 @@ fn parse_series(
         .filter_map(parse_series_point_style)
         .collect();
 
-    let smooth = child_attr(series_node, "smooth", "val").map(parse_ooxml_bool);
-    let invert_if_negative =
-        child_attr(series_node, "invertIfNegative", "val").map(parse_ooxml_bool);
+    let chart_smooth_default = series_node
+        .parent()
+        .filter(|n| n.is_element())
+        .and_then(|chart_node| {
+            if matches!(map_chart_kind(chart_node.tag_name().name()), ChartKind::Line) {
+                child_bool(chart_node, "smooth", diagnostics, "lineChart.smooth")
+            } else {
+                None
+            }
+        });
+
+    let smooth =
+        child_bool(series_node, "smooth", diagnostics, "series.smooth").or(chart_smooth_default);
+    let invert_if_negative = child_bool(
+        series_node,
+        "invertIfNegative",
+        diagnostics,
+        "series.invertIfNegative",
+    );
     let ext_lst_xml = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "extLst")
@@ -1577,6 +1596,58 @@ fn attach_part(diagnostics: &mut [ChartDiagnostic], part_name: &str) {
     }
 }
 
+fn parse_ooxml_bool_warn(
+    value: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<bool> {
+    match value {
+        "1" | "true" | "True" => Some(true),
+        "0" | "false" | "False" => Some(false),
+        other => {
+            warn(
+                diagnostics,
+                format!("{context}: unsupported boolean value {other:?}"),
+            );
+            None
+        }
+    }
+}
+
+fn parse_attr_u32(
+    value: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<u32> {
+    match value.parse::<u32>() {
+        Ok(v) => Some(v),
+        Err(_) => {
+            warn(
+                diagnostics,
+                format!("{context}: invalid unsigned integer value {value:?}"),
+            );
+            None
+        }
+    }
+}
+
+fn parse_attr_i32(
+    value: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<i32> {
+    match value.parse::<i32>() {
+        Ok(v) => Some(v),
+        Err(_) => {
+            warn(
+                diagnostics,
+                format!("{context}: invalid integer value {value:?}"),
+            );
+            None
+        }
+    }
+}
+
 fn child_attr<'a>(node: Node<'a, 'a>, child: &str, attr: &str) -> Option<&'a str> {
     node.children()
         .find(|n| n.is_element() && n.tag_name().name() == child)
@@ -1589,6 +1660,114 @@ fn child_bool_attr(node: Node<'_, '_>, child: &str) -> Option<bool> {
         .find(|n| n.is_element() && n.tag_name().name() == child)?;
 
     Some(child_node.attribute("val").map_or(true, parse_ooxml_bool))
+}
+
+fn child_bool(
+    node: Node<'_, '_>,
+    child: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<bool> {
+    let Some(child_node) = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == child)
+    else {
+        return None;
+    };
+
+    match child_node.attribute("val") {
+        Some(v) => parse_ooxml_bool_warn(v, diagnostics, context),
+        // Per OOXML's `CT_Boolean`, a missing `val` attribute implies `true`.
+        None => Some(true),
+    }
+}
+
+fn child_u32(
+    node: Node<'_, '_>,
+    child: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<u32> {
+    let Some(child_node) = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == child)
+    else {
+        return None;
+    };
+
+    match child_node.attribute("val") {
+        Some(v) => parse_attr_u32(v, diagnostics, context),
+        None => {
+            warn(
+                diagnostics,
+                format!("{context}: missing required attribute @val"),
+            );
+            None
+        }
+    }
+}
+
+fn child_u16(
+    node: Node<'_, '_>,
+    child: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<u16> {
+    let v = child_u32(node, child, diagnostics, context)?;
+    match u16::try_from(v) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            warn(
+                diagnostics,
+                format!("{context}: value {v} is out of range for u16"),
+            );
+            None
+        }
+    }
+}
+
+fn child_i32(
+    node: Node<'_, '_>,
+    child: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<i32> {
+    let Some(child_node) = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == child)
+    else {
+        return None;
+    };
+
+    match child_node.attribute("val") {
+        Some(v) => parse_attr_i32(v, diagnostics, context),
+        None => {
+            warn(
+                diagnostics,
+                format!("{context}: missing required attribute @val"),
+            );
+            None
+        }
+    }
+}
+
+fn child_i16(
+    node: Node<'_, '_>,
+    child: &str,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<i16> {
+    let v = child_i32(node, child, diagnostics, context)?;
+    match i16::try_from(v) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            warn(
+                diagnostics,
+                format!("{context}: value {v} is out of range for i16"),
+            );
+            None
+        }
+    }
 }
 
 fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
