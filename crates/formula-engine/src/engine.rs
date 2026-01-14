@@ -2965,8 +2965,16 @@ impl Engine {
     /// for the sheet key `"[Book.xlsx]Sheet1"`.
     pub fn mark_external_workbook_dirty(&mut self, workbook: &str) {
         let mut workbook = workbook.trim();
-        if let Some(stripped) = workbook.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            workbook = stripped;
+
+        // Normalize a few common caller-provided forms:
+        // - the workbook component itself: `Book.xlsx`
+        // - a bracket-wrapped workbook id: `[Book.xlsx]` (strip wrapper brackets)
+        //
+        // Workbook names can contain literal `[` characters and escape literal `]` characters as
+        // `]]`. Avoid naïvely stripping leading/trailing brackets when the brackets are part of the
+        // workbook id itself (e.g. a filename like `[Book]` yields a workbook id of `"[Book]]"`).
+        if let Some(inner) = Self::strip_wrapping_workbook_brackets(workbook) {
+            workbook = inner;
         }
 
         let mut cells: HashSet<CellKey> = HashSet::new();
@@ -2989,6 +2997,44 @@ impl Engine {
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
+    }
+
+    /// Strip leading/trailing `[...]` from a workbook id string when the brackets represent an
+    /// Excel-style workbook prefix.
+    ///
+    /// This uses Excel escaping rules where literal `]` characters are escaped by doubling them
+    /// (`]]`). Workbook ids may contain literal `[` characters, which do **not** introduce nesting.
+    ///
+    /// Returns `None` when `workbook` does not appear to be wrapped.
+    fn strip_wrapping_workbook_brackets(workbook: &str) -> Option<&str> {
+        let bytes = workbook.as_bytes();
+        if bytes.first() != Some(&b'[') {
+            return None;
+        }
+
+        // Find the closing `]` for the opening bracket using Excel workbook escaping rules.
+        let mut i = 1usize;
+        while i < bytes.len() {
+            if bytes[i] == b']' {
+                if bytes.get(i + 1) == Some(&b']') {
+                    i += 2;
+                    continue;
+                }
+
+                // Only treat this as a wrapper when it spans the entire string.
+                if i + 1 == bytes.len() {
+                    return Some(&workbook[1..i]);
+                }
+                return None;
+            }
+
+            // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
+            // inside multi-byte sequences as actual bracket characters.
+            let ch = workbook[i..].chars().next()?;
+            i += ch.len_utf8();
+        }
+
+        None
     }
 
     pub fn bytecode_program_count(&self) -> usize {

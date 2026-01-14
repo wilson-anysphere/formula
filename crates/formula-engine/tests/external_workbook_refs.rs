@@ -640,6 +640,43 @@ fn external_sheet_invalidation_dirties_dynamic_external_indirect_dependents() {
 }
 
 #[test]
+fn external_workbook_invalidation_handles_workbook_ids_with_literal_brackets() {
+    // Workbook names can contain literal `[` characters. Literal `]` characters are escaped as
+    // `]]` in workbook ids. For a workbook name like `[Book]`, the canonical workbook id is:
+    //   `[Book]]` (leading `[` is literal, trailing `]` is escaped).
+    //
+    // This workbook id appears in canonical external sheet keys as:
+    //   `[[Book]]]Sheet1` (outer `[...]` plus the workbook id, then the sheet name).
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[[Book]]]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        1.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider.clone()));
+    engine.set_external_refs_volatile(false);
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[[Book]]]Sheet1!A1")
+        .unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+
+    provider.set(
+        "[[Book]]]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        2.0,
+    );
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+
+    engine.mark_external_workbook_dirty("[Book]]");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+}
+
+#[test]
 fn external_sheet_invalidation_only_dirties_dependents_of_that_sheet() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);

@@ -924,7 +924,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         None => {
                             // Workbook-only external reference (`[Book.xlsx]...`); parse the
                             // bracketed workbook prefix.
-                            let Some(end) = key.find(']') else {
+                            // Workbook ids can contain escaped `]` characters (`]]`), so locate
+                            // the *last* closing bracket.
+                            let Some(end) = key.rfind(']') else {
                                 return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                             };
                             let workbook = &key[1..end];

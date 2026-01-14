@@ -753,26 +753,99 @@ fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
 fn parse_path_qualified_external_sheet_key(name: &str) -> Option<(String, String)> {
     // We only treat this as the path-qualified form when `[` is not the leading character. If the
     // name starts with `[`, it's already in the canonical external key form (or is malformed).
-    let open = name.rfind('[')?;
-    if open == 0 {
+    if name.starts_with('[') {
         return None;
     }
 
-    let rest = &name[open + 1..];
-    let close_rel = rest.find(']')?;
-    let close = open + 1 + close_rel;
+    // Excel external workbook prefixes:
+    // - are not nested (workbook names may contain `[` characters)
+    // - escape literal `]` characters by doubling them (`]]`)
+    //
+    // Path-qualified references can also contain bracketed path components, e.g.
+    // `C:\[foo]\[Book.xlsx]Sheet1`. Scan for the best `[workbook]sheet` segment by finding the
+    // bracketed component whose closing `]` is furthest to the right, skipping over workbook
+    // prefixes so we do not misclassify `[` characters inside workbook names.
+    let bytes = name.as_bytes();
+    let mut i = 0usize;
+    let mut best: Option<(usize, usize)> = None; // (open, end) where end is exclusive of the closing `]`
+
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            if let Some(end) = find_workbook_prefix_end(name, i) {
+                // Only treat this as a workbook prefix if there is a remainder (sheet name) after
+                // the closing `]`.
+                if end < name.len() {
+                    best = match best {
+                        None => Some((i, end)),
+                        Some((best_start, best_end)) => {
+                            if end > best_end {
+                                Some((i, end))
+                            } else if end == best_end && i < best_start {
+                                Some((i, end))
+                            } else {
+                                Some((best_start, best_end))
+                            }
+                        }
+                    };
+                }
+
+                // Skip the entire bracketed segment to avoid misclassifying `[` characters inside
+                // the workbook name as the start of a new prefix.
+                i = end;
+                continue;
+            }
+        }
+
+        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
+        // inside multi-byte sequences as actual bracket characters.
+        let ch = name[i..].chars().next().expect("i always at char boundary");
+        i += ch.len_utf8();
+    }
+
+    let Some((open, end)) = best else {
+        return None;
+    };
+
+    // `end` is exclusive, so `end - 1` is the closing `]`.
+    let book = &name[open + 1..end - 1];
+    let sheet = &name[end..];
+    if book.is_empty() || sheet.is_empty() {
+        return None;
+    }
 
     let prefix = &name[..open];
-    let workbook = &name[open + 1..close];
-    let sheet = &name[close + 1..];
-    if workbook.is_empty() || sheet.is_empty() {
+    let mut workbook = String::with_capacity(prefix.len().saturating_add(book.len()));
+    workbook.push_str(prefix);
+    workbook.push_str(book);
+    Some((workbook, sheet.to_string()))
+}
+
+fn find_workbook_prefix_end(src: &str, start: usize) -> Option<usize> {
+    // External workbook prefixes escape literal `]` characters by doubling them: `]]` -> `]`.
+    //
+    // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
+    let bytes = src.as_bytes();
+    if bytes.get(start) != Some(&b'[') {
         return None;
     }
 
-    let mut out = String::with_capacity(prefix.len().saturating_add(workbook.len()));
-    out.push_str(prefix);
-    out.push_str(workbook);
-    Some((out, sheet.to_string()))
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b']' {
+            if bytes.get(i + 1) == Some(&b']') {
+                i += 2;
+                continue;
+            }
+            return Some(i + 1);
+        }
+
+        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
+        // inside multi-byte sequences as actual bracket characters.
+        let ch = src[i..].chars().next()?;
+        i += ch.len_utf8();
+    }
+
+    None
 }
 
 fn parse_bracket_quoted_field_name(raw: &str) -> Result<String, ()> {
@@ -4472,6 +4545,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_path_qualified_external_sheet_key_supports_workbook_names_containing_lbracket() {
+        let (workbook, sheet) =
+            parse_path_qualified_external_sheet_key(r"C:\path\[A1[Name.xlsx]Sheet1")
+                .expect("expected path-qualified external ref");
+        assert_eq!(workbook, r"C:\path\A1[Name.xlsx");
+        assert_eq!(sheet, "Sheet1");
+    }
+
+    #[test]
+    fn parse_path_qualified_external_sheet_key_supports_workbook_names_with_escaped_rbracket() {
+        let (workbook, sheet) =
+            parse_path_qualified_external_sheet_key(r"C:\path\[Book[Name]].xlsx]Sheet1")
+                .expect("expected path-qualified external ref");
+        assert_eq!(workbook, r"C:\path\Book[Name]].xlsx");
+        assert_eq!(sheet, "Sheet1");
+    }
+
+    #[test]
     fn split_sheet_span_name_ignores_drive_colons_in_external_sheet_keys() {
         assert_eq!(split_sheet_span_name(r"[C:\path\Book.xlsx]Sheet1"), None);
         assert_eq!(
@@ -4525,6 +4616,47 @@ mod tests {
                 assert_eq!(
                     cell.sheet,
                     SheetReference::External(r"[C:\[foo]\Book.xlsx]Sheet1".to_string())
+                );
+                assert_eq!(
+                    cell.addr,
+                    crate::eval::Ref::from_abs_cell_addr(parse_a1("A1").unwrap()).unwrap()
+                );
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_path_qualified_external_refs_with_lbracket_in_workbook_name() {
+        let expr = parse_spanned_formula(r#"='C:\path\[A1[Name.xlsx]Sheet1'!A1"#)
+            .expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::CellRef(cell) => {
+                assert_eq!(
+                    cell.sheet,
+                    SheetReference::External(r"[C:\path\A1[Name.xlsx]Sheet1".to_string())
+                );
+                assert_eq!(
+                    cell.addr,
+                    crate::eval::Ref::from_abs_cell_addr(parse_a1("A1").unwrap()).unwrap()
+                );
+            }
+            other => panic!("expected CellRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_spanned_formula_supports_path_qualified_external_refs_with_escaped_rbracket_in_workbook_name(
+    ) {
+        let expr = parse_spanned_formula(r#"='C:\path\[Book[Name]].xlsx]Sheet1'!A1"#)
+            .expect("parse should succeed");
+
+        match expr.kind {
+            SpannedExprKind::CellRef(cell) => {
+                assert_eq!(
+                    cell.sheet,
+                    SheetReference::External(r"[C:\path\Book[Name]].xlsx]Sheet1".to_string())
                 );
                 assert_eq!(
                     cell.addr,
