@@ -602,13 +602,14 @@ try {
  
     $schemes = @()
  
-    function Add-SchemesFromProtocol {
-      param([Parameter(Mandatory = $true)] $Protocol)
+    # plugins.deep-link.desktop can be either:
+    # - a single protocol object with a `schemes` field
+    # - an array of protocol objects
+    foreach ($proto in @($desktop)) {
+      if ($null -eq $proto) { continue }
  
-      if ($null -eq $Protocol) { return }
- 
-      $schemesProp = $Protocol.PSObject.Properties["schemes"]
-      if ($null -eq $schemesProp -or $null -eq $schemesProp.Value) { return }
+      $schemesProp = $proto.PSObject.Properties["schemes"]
+      if ($null -eq $schemesProp -or $null -eq $schemesProp.Value) { continue }
  
       foreach ($s in @($schemesProp.Value)) {
         if ($null -eq $s) { continue }
@@ -621,17 +622,6 @@ try {
           $schemes += $v
         }
       }
-    }
- 
-    # plugins.deep-link.desktop can be either:
-    # - a single protocol object with a `schemes` field
-    # - an array of protocol objects
-    if ($desktop -is [System.Array]) {
-      foreach ($proto in @($desktop)) {
-        Add-SchemesFromProtocol -Protocol $proto
-      }
-    } else {
-      Add-SchemesFromProtocol -Protocol $desktop
     }
     if ($schemes.Count -eq 0) {
       return $default
