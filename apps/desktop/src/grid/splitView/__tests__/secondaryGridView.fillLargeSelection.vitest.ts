@@ -60,7 +60,7 @@ describe("SecondaryGridView fill large selections", () => {
     };
   });
 
-  const images: ImageStore = { get: () => undefined, set: () => {} };
+  const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
   it("does not apply extremely large fill commits", async () => {
     const container = document.createElement("div");

@@ -58,6 +58,8 @@ function createShapeObject(raw_xml: string, opts?: { widthPx?: number; heightPx?
 const images: ImageStore = {
   get: () => undefined,
   set: () => {},
+  delete: () => {},
+  clear: () => {},
 };
 
 const geom: GridGeometry = {

@@ -97,6 +97,8 @@ function createNoopSurfaceContext(): CanvasRenderingContext2D {
 const images: ImageStore = {
   get: () => undefined,
   set: () => {},
+  delete: () => {},
+  clear: () => {},
 };
 
 const geom: GridGeometry = {

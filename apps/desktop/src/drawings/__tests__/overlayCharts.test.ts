@@ -52,6 +52,8 @@ function createChartObject(chartId: string): DrawingObject {
 const images: ImageStore = {
   get: () => undefined,
   set: () => {},
+  delete: () => {},
+  clear: () => {},
 };
 
 const geom: GridGeometry = {

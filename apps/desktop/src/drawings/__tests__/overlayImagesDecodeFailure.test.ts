@@ -49,6 +49,12 @@ function createImageStore(entries: ImageEntry[]): ImageStore {
   return {
     get: (id) => map.get(id),
     set: (entry) => map.set(entry.id, entry),
+    delete: (id) => {
+      map.delete(id);
+    },
+    clear: () => {
+      map.clear();
+    },
   };
 }
 

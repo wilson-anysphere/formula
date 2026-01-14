@@ -309,7 +309,7 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
 
       // Verify hit testing aligns with where the object is rendered in drawingCanvas space.
       const geom = (app as any).drawingOverlay.geom;
-      const images: ImageStore = { get: () => undefined, set: () => {} };
+      const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
       const object: DrawingObject = {
         id: 1,

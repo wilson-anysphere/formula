@@ -402,6 +402,14 @@ class MapImageStore implements ImageStore {
   set(entry: ImageEntry): void {
     this.images.set(entry.id, entry);
   }
+
+  delete(id: string): void {
+    this.images.delete(id);
+  }
+
+  clear(): void {
+    this.images.clear();
+  }
 }
 
 function decodeBase64ToBytes(base64: string): Uint8Array | null {

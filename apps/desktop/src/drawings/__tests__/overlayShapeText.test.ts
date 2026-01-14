@@ -51,6 +51,8 @@ function createShapeObject(rawXml: string): DrawingObject {
 const images: ImageStore = {
   get: () => undefined,
   set: () => {},
+  delete: () => {},
+  clear: () => {},
 };
 
 const geom: GridGeometry = {
@@ -86,4 +88,3 @@ describe("DrawingOverlay shapes", () => {
     expect(fillTextValues).not.toContain("shape");
   });
 });
-

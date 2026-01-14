@@ -48,7 +48,19 @@ function createImageObject(opts: { id: number; imageId: string; zOrder: number; 
 function createImageStore(entries: Record<string, ImageEntry>): ImageStore {
   return {
     get: (id) => entries[id],
-    set: () => {},
+    set: (entry) => {
+      entries[entry.id] = entry;
+    },
+    delete: (id) => {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete entries[id];
+    },
+    clear: () => {
+      for (const key of Object.keys(entries)) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete entries[key];
+      }
+    },
   };
 }
 

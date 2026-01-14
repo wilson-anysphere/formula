@@ -71,7 +71,7 @@ describe("SecondaryGridView in-cell images", () => {
     vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width: 1, height: 1 } as any)));
   });
 
-  const images: ImageStore = { get: () => undefined, set: () => {} };
+  const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
   it("forwards the image resolver to the underlying CanvasGridRenderer", async () => {
     const container = document.createElement("div");

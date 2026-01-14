@@ -36,6 +36,8 @@ function createStubCanvas(ctx: CanvasRenderingContext2D): HTMLCanvasElement {
 const images: ImageStore = {
   get: () => undefined,
   set: () => {},
+  delete: () => {},
+  clear: () => {},
 };
 
 const geom: GridGeometry = {

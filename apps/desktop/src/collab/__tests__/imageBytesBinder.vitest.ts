@@ -14,6 +14,12 @@ function createMemoryImageStore(): ImageStore & { map: Map<string, ImageEntry> }
     set(entry: ImageEntry) {
       map.set(entry.id, entry);
     },
+    delete(id: string) {
+      map.delete(id);
+    },
+    clear() {
+      map.clear();
+    },
   };
 }
 

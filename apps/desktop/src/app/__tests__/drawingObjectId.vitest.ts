@@ -25,6 +25,8 @@ describe("DrawingObject ids", () => {
     const images: ImageStore = {
       get: (id) => store.get(id),
       set: (entry) => store.set(entry.id, entry),
+      delete: (id) => store.delete(id),
+      clear: () => store.clear(),
     };
 
     const anchor: Anchor = {
@@ -50,4 +52,3 @@ describe("DrawingObject ids", () => {
     expect(result.objects[0]!.id).not.toBe(unsafeCounterId);
   });
 });
-

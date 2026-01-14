@@ -49,6 +49,8 @@ function createOneCellShapeObject(opts: { id: number; row: number; col: number; 
 const images: ImageStore = {
   get: () => undefined,
   set: () => {},
+  delete: () => {},
+  clear: () => {},
 };
 
 const CELL = 10;

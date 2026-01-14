@@ -581,7 +581,7 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
 
       // Verify hit testing aligns with the rectangle rendered in drawingCanvas space.
       const geom = (app as any).drawingOverlay.geom;
-      const images: ImageStore = { get: () => undefined, set: () => {} };
+      const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
       const object: DrawingObject = {
         id: 1,

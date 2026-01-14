@@ -65,6 +65,8 @@ describe("DrawingOverlay missing images", () => {
     const images: ImageStore = {
       get: () => undefined,
       set: () => {},
+      delete: () => {},
+      clear: () => {},
     };
 
     const overlay = new DrawingOverlay(canvas, images, geom);

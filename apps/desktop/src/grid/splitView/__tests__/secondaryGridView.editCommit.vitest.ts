@@ -60,7 +60,7 @@ describe("SecondaryGridView edit commits", () => {
     };
   });
 
-  const images: ImageStore = { get: () => undefined, set: () => {} };
+  const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
   it("advances selection after an Enter commit", () => {
     const container = document.createElement("div");

@@ -10,3 +10,5 @@ export * from "./modelAdapters";
 export * from "./duplicate";
 export * from "./transform";
 export * from "./commands";
+export * from "./workbookImageManager";
+export * from "./persistence/indexedDbImageStore";

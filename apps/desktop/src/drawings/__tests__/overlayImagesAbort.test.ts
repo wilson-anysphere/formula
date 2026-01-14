@@ -55,6 +55,8 @@ describe("DrawingOverlay images", () => {
     const images: ImageStore = {
       get: (id) => (id === entry.id ? entry : undefined),
       set: () => {},
+      delete: () => {},
+      clear: () => {},
     };
 
     let resolveDecode!: (bitmap: ImageBitmap) => void;
@@ -90,4 +92,3 @@ describe("DrawingOverlay images", () => {
     expect(calls.filter((c) => c.method === "drawImage")).toHaveLength(1);
   });
 });
-

@@ -163,6 +163,7 @@ import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.j
 import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import { ImageBitmapCache } from "../drawings/imageBitmapCache";
 import { applyTransformVector, inverseTransformVector } from "../drawings/transform";
+import { WorkbookImageManager } from "../drawings/workbookImageManager";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, createCommentManagerForDoc, getCommentsRoot } from "@formula/collab-comments";
@@ -498,6 +499,49 @@ export class DocumentImageStore implements ImageStore {
     // Keep a session-local cache so synchronous `get()` calls can resolve quickly without
     // reading from IndexedDB.
     this.fallback.set(entry.id, entry);
+  }
+
+  delete(id: string): void {
+    const imageId = String(id ?? "");
+    if (!imageId) return;
+
+    const doc = this.document as any;
+
+    // Prefer direct mutation of the internal map so GC does not create an undo step.
+    const images = doc?.images;
+    if (images instanceof Map) {
+      images.delete(imageId);
+      this.fallback.delete(imageId);
+      return;
+    }
+    if (images && typeof images === "object") {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (images as any)[imageId];
+      } catch {
+        // ignore
+      }
+    }
+
+    this.fallback.delete(imageId);
+  }
+
+  clear(): void {
+    const doc = this.document as any;
+    const images = doc?.images;
+    if (images instanceof Map) {
+      images.clear();
+    } else if (images && typeof images === "object") {
+      try {
+        for (const key of Object.keys(images)) {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete (images as any)[key];
+        }
+      } catch {
+        // ignore
+      }
+    }
+    this.fallback.clear();
   }
 
   async getAsync(id: string): Promise<ImageEntry | undefined> {
@@ -1059,6 +1103,9 @@ export class SpreadsheetApp {
   private activeSheetBackgroundLoadToken = 0;
   private activeSheetBackgroundAbort: AbortController | null = null;
 
+  // Workbook-level drawing image reference counting + garbage collection.
+  private readonly workbookImageManager: WorkbookImageManager;
+
   private wasmEngine: EngineClient | null = null;
   private wasmSyncSuspended = false;
   private wasmUnsubscribe: (() => void) | null = null;
@@ -1335,7 +1382,7 @@ export class SpreadsheetApp {
   >();
   private readonly chartCanvasStoreAdapter: ChartCanvasStoreAdapter;
   private chartRecordLookupCache: { list: readonly ChartRecord[]; map: Map<string, ChartRecord> } | null = null;
-  private readonly chartOverlayImages: ImageStore = { get: () => undefined, set: () => {} };
+  private readonly chartOverlayImages: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
   private chartOverlayGeom: DrawingGridGeometry | null = null;
   private chartSelectionOverlay: DrawingOverlay | null = null;
   private chartSelectionViewportMemo: { width: number; height: number; dpr: number } | null = null;
@@ -2383,6 +2430,32 @@ export class SpreadsheetApp {
     );
     this.drawingOverlay.setSelectedId(null);
 
+    this.workbookImageManager = new WorkbookImageManager({
+      images: this.drawingImages,
+      bitmapCache: {
+        invalidate: (imageId) => {
+          // The drawing overlay owns decoded picture bitmaps; invalidate so we can release them when
+          // picture bytes are garbage-collected.
+          this.drawingOverlay.invalidateImage(imageId);
+          // Sheet background images share the same underlying image store; invalidate any cached
+          // decoded bitmap so it doesn't keep memory alive after bytes are evicted.
+          this.workbookImageBitmaps.invalidate(imageId);
+        },
+      },
+      persistence: {
+        delete: async (imageId) => {
+          // Best-effort: delete from any local/offline persistence layers.
+          try {
+            await persistedDrawingImages.deleteAsync(imageId);
+          } catch {
+            // ignore
+          }
+          this.deleteDrawingImageFromCollabMetadata(imageId);
+        },
+      },
+    });
+    this.syncWorkbookImageRefCountsFromDocument();
+
     const enableDrawingInteractions = opts.enableDrawingInteractions ?? this.drawingsDemoEnabled;
     if (enableDrawingInteractions) {
       const callbacks: DrawingInteractionCallbacks = {
@@ -2820,6 +2893,7 @@ export class SpreadsheetApp {
         // (including undo/redo and collaboration updates).
         this.syncActiveSheetBackgroundImage();
       }
+
     });
 
     // SpreadsheetApp's legacy (non-shared) renderer only repaints when explicitly asked.
@@ -2947,6 +3021,7 @@ export class SpreadsheetApp {
           }
         }
         this.handleWorkbookImageDeltasForBackground(payload);
+        this.syncWorkbookImageRefCountsFromDocument(payload);
         invalidateAndRenderDrawings("document:change");
       }),
     );
@@ -3711,6 +3786,10 @@ export class SpreadsheetApp {
     this.chartSelectionViewportMemo = null;
     this.conflictUiContainer = null;
 
+    // Drawings/images GC + persistence.
+    this.workbookImageManager.dispose();
+    this.drawingImages.clear();
+
     // Drop references to drawings state so a disposed app instance does not retain
     // large drawing metadata/images if it is kept alive (e.g. tests/hot reload).
     //
@@ -4396,6 +4475,16 @@ export class SpreadsheetApp {
     }
   }
 
+  /**
+   * Force a pass of picture/image garbage collection.
+   *
+   * This is primarily exposed for tests and diagnostic tooling. Normal operation uses
+   * deferred GC so picture deletions remain undoable.
+   */
+  async runImageGcNow(opts: { force?: boolean } = {}): Promise<void> {
+    await this.workbookImageManager.runGcNow(opts);
+  }
+
   getRecalcCount(): number {
     return this.engine.recalcCount;
   }
@@ -4588,6 +4677,7 @@ export class SpreadsheetApp {
         // ignore
       }
     }
+    this.workbookImageManager.setExternalImageIds(this.listWorkbookExternalImageIds());
     if (key === this.sheetId) {
       this.syncActiveSheetBackgroundImage();
     }
@@ -11986,6 +12076,101 @@ export class SpreadsheetApp {
     if (payload?.drawingsChanged === true || payload?.imagesChanged === true) return true;
 
     return false;
+  }
+
+  private listWorkbookExternalImageIds(): string[] {
+    const ids: string[] = [];
+    for (const sheetId of this.document.getSheetIds()) {
+      const id = this.getSheetBackgroundImageId(sheetId);
+      const normalized = typeof id === "string" ? id.trim() : "";
+      if (normalized) ids.push(normalized);
+    }
+    return ids;
+  }
+
+  /**
+   * Keep workbook-level image refcounts derived from drawing metadata in sync with DocumentController state.
+   *
+   * This drives deferred garbage-collection of picture bytes when drawings are deleted.
+   */
+  private syncWorkbookImageRefCountsFromDocument(payload?: any): void {
+    if (this.disposed) return;
+
+    const source = typeof payload?.source === "string" ? payload.source : "";
+    const drawingDeltas: any[] = Array.isArray(payload?.drawingDeltas) ? payload.drawingDeltas : [];
+    const sheetMetaDeltas: any[] = Array.isArray(payload?.sheetMetaDeltas) ? payload.sheetMetaDeltas : [];
+    const drawingsChanged = payload?.drawingsChanged === true;
+
+    // Unknown/global updates: recompute from scratch.
+    if (!payload || source === "applyState" || drawingsChanged) {
+      const drawingsBySheetId = new Map<string, DrawingObject[]>();
+      for (const sheetId of this.document.getSheetIds()) {
+        drawingsBySheetId.set(sheetId, this.listDrawingObjectsForSheet(sheetId));
+      }
+      this.workbookImageManager.replaceAllSheetDrawings(drawingsBySheetId, {
+        externalImageIds: this.listWorkbookExternalImageIds(),
+      });
+      return;
+    }
+
+    const deletedSheetIds = sheetMetaDeltas
+      .filter((d) => d && typeof d.sheetId === "string" && (d.after == null || d.after === undefined))
+      .map((d) => String(d.sheetId ?? "").trim())
+      .filter(Boolean);
+
+    if (deletedSheetIds.length > 0) {
+      for (const sheetId of deletedSheetIds) {
+        this.workbookImageManager.deleteSheet(sheetId);
+      }
+      this.workbookImageManager.setExternalImageIds(this.listWorkbookExternalImageIds());
+    }
+
+    // If drawings changed and we have explicit deltas, only refresh the touched sheets.
+    const touched = new Set<string>();
+    for (const delta of drawingDeltas) {
+      const sheetId = typeof delta?.sheetId === "string" ? String(delta.sheetId).trim() : "";
+      if (sheetId) touched.add(sheetId);
+    }
+
+    if (touched.size === 0) return;
+
+    for (const sheetId of touched) {
+      this.workbookImageManager.setSheetDrawings(sheetId, this.listDrawingObjectsForSheet(sheetId));
+    }
+  }
+
+  private deleteDrawingImageFromCollabMetadata(imageId: string): void {
+    const id = String(imageId ?? "").trim();
+    if (!id) return;
+
+    const session: any = this.collabSession as any;
+    const doc = session?.doc as Y.Doc | undefined;
+    const metadata = session?.metadata as Y.Map<any> | undefined;
+    if (!doc || !metadata) return;
+
+    // Use the binder origin so the image-bytes binder ignores our GC writes.
+    const origin = this.collabBinderOrigin ?? { type: "desktop:image-gc" };
+
+    try {
+      doc.transact(() => {
+        const container = metadata.get("drawingImages");
+        if (container instanceof Y.Map) {
+          container.delete(id);
+          return;
+        }
+
+        if (container && typeof container === "object" && !Array.isArray(container)) {
+          const record = container as Record<string, unknown>;
+          if (!Object.prototype.hasOwnProperty.call(record, id)) return;
+          const next: Record<string, unknown> = { ...record };
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete next[id];
+          metadata.set("drawingImages", next);
+        }
+      }, origin);
+    } catch {
+      // ignore GC failures
+    }
   }
 
   private listDrawingObjectsForSheet(sheetId: string = this.sheetId): DrawingObject[] {

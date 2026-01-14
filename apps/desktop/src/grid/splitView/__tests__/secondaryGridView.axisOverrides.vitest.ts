@@ -59,7 +59,7 @@ describe("SecondaryGridView sheet view axis overrides", () => {
     };
   });
 
-  const images: ImageStore = { get: () => undefined, set: () => {} };
+  const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
   it("uses CanvasGridRenderer.applyAxisSizeOverrides (no per-index setters)", () => {
     const container = document.createElement("div");

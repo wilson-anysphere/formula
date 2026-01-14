@@ -110,7 +110,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
 
-    const images: ImageStore = { get: () => undefined, set: () => {} };
+    const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
     // Anchor at B1 so its x-position depends on the width of column A.
     const objects: DrawingObject[] = [
@@ -201,7 +201,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
 
-    const images: ImageStore = { get: () => undefined, set: () => {} };
+    const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
     // Anchor at A2 so its y-position depends on the height of row 1 (doc row 0).
     const objects: DrawingObject[] = [

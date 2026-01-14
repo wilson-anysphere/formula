@@ -79,6 +79,12 @@ describe("DrawingOverlay render ordering", () => {
       set: (entry) => {
         imagesById.set(entry.id, entry);
       },
+      delete: (id) => {
+        imagesById.delete(id);
+      },
+      clear: () => {
+        imagesById.clear();
+      },
     };
 
     const bitmapA = { tag: "A" } as unknown as ImageBitmap;

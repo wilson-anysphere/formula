@@ -71,12 +71,34 @@ export interface ImageEntry {
 export interface ImageStore {
   get(id: string): ImageEntry | undefined;
   set(entry: ImageEntry): void;
+  delete(id: string): void;
+  clear(): void;
   /**
    * Optional async helpers for stores that can load/persist out-of-process
    * (e.g. IndexedDB). Callers should treat these as best-effort.
    */
   getAsync?(id: string): Promise<ImageEntry | undefined>;
   setAsync?(entry: ImageEntry): Promise<void>;
+}
+
+export class InMemoryImageStore implements ImageStore {
+  private readonly entries = new Map<string, ImageEntry>();
+
+  get(id: string): ImageEntry | undefined {
+    return this.entries.get(id);
+  }
+
+  set(entry: ImageEntry): void {
+    this.entries.set(entry.id, entry);
+  }
+
+  delete(id: string): void {
+    this.entries.delete(id);
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
 }
 
 export interface Rect {

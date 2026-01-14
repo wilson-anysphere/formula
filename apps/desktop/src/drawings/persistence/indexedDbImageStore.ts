@@ -80,6 +80,20 @@ export class IndexedDbImageStore implements ImageStore {
     void this.setAsync(entry).catch(() => {});
   }
 
+  delete(id: string): void {
+    const imageId = String(id ?? "");
+    if (!imageId) return;
+    this.cache.delete(imageId);
+    // Best-effort: do not surface IndexedDB failures to callers.
+    void this.deleteAsync(imageId).catch(() => {});
+  }
+
+  clear(): void {
+    this.cache.clear();
+    // Best-effort: do not surface IndexedDB failures to callers.
+    void this.clearAsync().catch(() => {});
+  }
+
   /**
    * Clear the in-memory cache without touching IndexedDB.
    *
@@ -140,6 +154,16 @@ export class IndexedDbImageStore implements ImageStore {
     this.cache.delete(imageId);
   }
 
+  async clearAsync(): Promise<void> {
+    const db = await this.openDb();
+    const tx = db.transaction(this.storeName, "readwrite");
+    const done = transactionDone(tx);
+    const store = tx.objectStore(this.storeName);
+    store.clear();
+    await done;
+    this.cache.clear();
+  }
+
   /**
    * Best-effort garbage collection: remove any records not present in `keep`.
    */
@@ -189,3 +213,4 @@ export class IndexedDbImageStore implements ImageStore {
     return this.dbPromise;
   }
 }
+

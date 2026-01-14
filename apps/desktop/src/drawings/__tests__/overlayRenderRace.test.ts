@@ -63,6 +63,8 @@ const imageEntry: ImageEntry = {
 const images: ImageStore = {
   get: (id) => (id === imageEntry.id ? imageEntry : undefined),
   set: () => {},
+  delete: () => {},
+  clear: () => {},
 };
 
 function createImageObject({ x, y, id = 1, zOrder = 0 }: { x: number; y: number; id?: number; zOrder?: number }): DrawingObject {
@@ -159,4 +161,3 @@ describe("DrawingOverlay async render races", () => {
     expect(placeholderCalls[0]?.args).toEqual([40, 41, 10, 10]);
   });
 });
-

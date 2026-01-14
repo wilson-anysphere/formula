@@ -115,7 +115,7 @@ describe("SecondaryGridView drawings overlay", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
 
-    const images: ImageStore = { get: () => undefined, set: () => {} };
+    const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
     const objects: DrawingObject[] = [
       {
@@ -168,7 +168,7 @@ describe("SecondaryGridView drawings overlay", () => {
     // Freeze 1 row + 2 cols (sheet-level counts; excludes the shared-grid headers).
     doc.setFrozen(sheetId, 1, 2, { label: "Freeze" });
 
-    const images: ImageStore = { get: () => undefined, set: () => {} };
+    const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
     const gridView = new SecondaryGridView({
       container,
       document: doc,
@@ -223,7 +223,7 @@ describe("SecondaryGridView drawings overlay", () => {
     const clearSpy = vi.spyOn(ImageBitmapCache.prototype, "clear");
 
     const doc = new DocumentController();
-    const images: ImageStore = { get: () => undefined, set: () => {} };
+    const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
     const view = new SecondaryGridView({
       container,
