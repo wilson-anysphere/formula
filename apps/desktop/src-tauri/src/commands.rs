@@ -3352,6 +3352,50 @@ pub fn export_sheet_range_pdf(
 
 pub use crate::macros::{MacroInfo, MacroPermission, MacroPermissionRequest};
 
+/// IPC-deserialized vector of macro permissions with a conservative maximum length.
+///
+/// This prevents a compromised webview from sending huge permission arrays and forcing unbounded
+/// allocations during JSON deserialization.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LimitedMacroPermissions(pub Vec<MacroPermission>);
+
+impl<'de> Deserialize<'de> for LimitedMacroPermissions {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor;
+
+        impl<'de> de::Visitor<'de> for VecVisitor {
+            type Value = LimitedMacroPermissions;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of macro permissions")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::MAX_MACRO_PERMISSION_ENTRIES;
+
+                let mut out = Vec::new();
+                while let Some(permission) = seq.next_element::<MacroPermission>()? {
+                    if out.len() >= MAX_MACRO_PERMISSION_ENTRIES {
+                        return Err(de::Error::custom(format!(
+                            "macro permissions list is too large (max {MAX_MACRO_PERMISSION_ENTRIES} entries)"
+                        )));
+                    }
+                    out.push(permission);
+                }
+                Ok(LimitedMacroPermissions(out))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MacroSignatureStatus {
@@ -3444,13 +3488,116 @@ pub enum PythonNetworkPermission {
     Full,
 }
 
+/// IPC-deserialized string with a maximum byte length for Python network allowlist entries.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct LimitedPythonNetworkAllowlistEntry(pub String);
+
+impl<'de> Deserialize<'de> for LimitedPythonNetworkAllowlistEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct StringVisitor;
+
+        impl<'de> de::Visitor<'de> for StringVisitor {
+            type Value = LimitedPythonNetworkAllowlistEntry;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string")
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                use crate::resource_limits::MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES;
+                if v.len() > MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES {
+                    return Err(E::custom(format!(
+                        "python network allowlist entry is too large (max {MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedPythonNetworkAllowlistEntry(v.to_string()))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                use crate::resource_limits::MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES;
+                if v.len() > MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES {
+                    return Err(E::custom(format!(
+                        "python network allowlist entry is too large (max {MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedPythonNetworkAllowlistEntry(v.to_string()))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                use crate::resource_limits::MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES;
+                if v.len() > MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES {
+                    return Err(E::custom(format!(
+                        "python network allowlist entry is too large (max {MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedPythonNetworkAllowlistEntry(v))
+            }
+        }
+
+        deserializer.deserialize_str(StringVisitor)
+    }
+}
+
+/// IPC-deserialized vector of Python network allowlist entries with a maximum length.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct LimitedPythonNetworkAllowlist(pub Vec<LimitedPythonNetworkAllowlistEntry>);
+
+impl<'de> Deserialize<'de> for LimitedPythonNetworkAllowlist {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor;
+
+        impl<'de> de::Visitor<'de> for VecVisitor {
+            type Value = LimitedPythonNetworkAllowlist;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array of strings")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                use crate::resource_limits::MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES;
+
+                let mut out = Vec::new();
+                while let Some(entry) = seq.next_element::<LimitedPythonNetworkAllowlistEntry>()? {
+                    if out.len() >= MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES {
+                        return Err(de::Error::custom(format!(
+                            "python network allowlist is too large (max {MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES} entries)"
+                        )));
+                    }
+                    out.push(entry);
+                }
+                Ok(LimitedPythonNetworkAllowlist(out))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PythonPermissions {
     pub filesystem: PythonFilesystemPermission,
     pub network: PythonNetworkPermission,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub network_allowlist: Option<Vec<String>>,
+    pub network_allowlist: Option<LimitedPythonNetworkAllowlist>,
 }
 
 impl Default for PythonPermissions {
@@ -3952,7 +4099,7 @@ pub async fn run_macro(
     window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     macro_id: String,
-    permissions: Option<Vec<MacroPermission>>,
+    permissions: Option<LimitedMacroPermissions>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
@@ -3978,7 +4125,7 @@ pub async fn run_macro(
         }
 
         let options = crate::macros::MacroExecutionOptions {
-            permissions: permissions.unwrap_or_default(),
+            permissions: permissions.map(|p| p.0).unwrap_or_default(),
             timeout_ms,
         };
         let outcome = state
@@ -5284,7 +5431,7 @@ fn macro_result_from_outcome(outcome: crate::macros::MacroExecutionOutcome) -> M
 pub async fn fire_workbook_open(
     window: tauri::WebviewWindow,
     workbook_id: Option<String>,
-    permissions: Option<Vec<MacroPermission>>,
+    permissions: Option<LimitedMacroPermissions>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
@@ -5309,7 +5456,7 @@ pub async fn fire_workbook_open(
             return Ok(macro_blocked_result(blocked));
         }
         let options = crate::macros::MacroExecutionOptions {
-            permissions: permissions.unwrap_or_default(),
+            permissions: permissions.map(|p| p.0).unwrap_or_default(),
             timeout_ms,
         };
         let outcome = state
@@ -5326,7 +5473,7 @@ pub async fn fire_workbook_open(
 pub async fn fire_workbook_before_close(
     window: tauri::WebviewWindow,
     workbook_id: Option<String>,
-    permissions: Option<Vec<MacroPermission>>,
+    permissions: Option<LimitedMacroPermissions>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
@@ -5351,7 +5498,7 @@ pub async fn fire_workbook_before_close(
             return Ok(macro_blocked_result(blocked));
         }
         let options = crate::macros::MacroExecutionOptions {
-            permissions: permissions.unwrap_or_default(),
+            permissions: permissions.map(|p| p.0).unwrap_or_default(),
             timeout_ms,
         };
         let outcome = state
@@ -5373,7 +5520,7 @@ pub async fn fire_worksheet_change(
     start_col: usize,
     end_row: usize,
     end_col: usize,
-    permissions: Option<Vec<MacroPermission>>,
+    permissions: Option<LimitedMacroPermissions>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
@@ -5398,7 +5545,7 @@ pub async fn fire_worksheet_change(
             return Ok(macro_blocked_result(blocked));
         }
         let options = crate::macros::MacroExecutionOptions {
-            permissions: permissions.unwrap_or_default(),
+            permissions: permissions.map(|p| p.0).unwrap_or_default(),
             timeout_ms,
         };
         let outcome = state
@@ -5420,7 +5567,7 @@ pub async fn fire_selection_change(
     start_col: usize,
     end_row: usize,
     end_col: usize,
-    permissions: Option<Vec<MacroPermission>>,
+    permissions: Option<LimitedMacroPermissions>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
@@ -5445,7 +5592,7 @@ pub async fn fire_selection_change(
             return Ok(macro_blocked_result(blocked));
         }
         let options = crate::macros::MacroExecutionOptions {
-            permissions: permissions.unwrap_or_default(),
+            permissions: permissions.map(|p| p.0).unwrap_or_default(),
             timeout_ms,
         };
         let outcome = state
@@ -6280,6 +6427,26 @@ mod tests {
     }
 
     #[test]
+    fn limited_macro_permissions_rejects_too_many_entries() {
+        let max = crate::resource_limits::MAX_MACRO_PERMISSION_ENTRIES;
+        let mut json = String::from("[");
+        for idx in 0..=max {
+            if idx > 0 {
+                json.push(',');
+            }
+            json.push_str("\"filesystem_read\"");
+        }
+        json.push(']');
+
+        let err = serde_json::from_str::<LimitedMacroPermissions>(&json)
+            .expect_err("expected oversized permissions array to be rejected");
+        assert!(
+            err.to_string().contains(&max.to_string()),
+            "expected error to mention limit: {err}"
+        );
+    }
+
+    #[test]
     fn limited_vec_rejects_too_many_sheet_ids() {
         type ShortSheetId = LimitedString<4>;
         type SheetIds = LimitedVec<ShortSheetId, 4>;
@@ -6290,6 +6457,28 @@ mod tests {
         assert!(
             err.to_string().contains("max") && err.to_string().contains("4"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_permissions_rejects_too_many_allowlist_entries() {
+        let max = crate::resource_limits::MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES;
+        let mut json = String::from(
+            "{\"filesystem\":\"none\",\"network\":\"allowlist\",\"networkAllowlist\":[",
+        );
+        for idx in 0..=max {
+            if idx > 0 {
+                json.push(',');
+            }
+            json.push_str("\"example.com\"");
+        }
+        json.push_str("]}");
+
+        let err = serde_json::from_str::<PythonPermissions>(&json)
+            .expect_err("expected oversized allowlist to be rejected");
+        assert!(
+            err.to_string().contains(&max.to_string()),
+            "expected error to mention limit: {err}"
         );
     }
 
@@ -6330,6 +6519,22 @@ mod tests {
         assert!(
             err.contains("Sheet formatting metadata") && err.contains(&max.to_string()),
             "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn python_permissions_rejects_allowlist_entries_that_exceed_max_bytes() {
+        let max = crate::resource_limits::MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES;
+        let oversized_entry = "x".repeat(max + 1);
+        let json = format!(
+            "{{\"filesystem\":\"none\",\"network\":\"allowlist\",\"networkAllowlist\":[\"{oversized_entry}\"]}}"
+        );
+
+        let err = serde_json::from_str::<PythonPermissions>(&json)
+            .expect_err("expected oversized allowlist entry to be rejected");
+        assert!(
+            err.to_string().contains(&max.to_string()),
+            "expected error to mention limit: {err}"
         );
     }
 

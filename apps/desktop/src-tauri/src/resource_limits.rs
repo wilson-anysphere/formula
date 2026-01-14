@@ -86,6 +86,13 @@ pub fn max_origin_xlsx_bytes() -> usize {
     }
 }
 
+/// Maximum number of macro permissions accepted over IPC.
+///
+/// This is intentionally small because macros currently support a small fixed set of permissions.
+/// Bounding the array length prevents a compromised WebView from sending huge arrays and forcing
+/// unbounded allocations during JSON deserialization.
+pub const MAX_MACRO_PERMISSION_ENTRIES: usize = 8;
+
 /// Maximum number of log lines captured from a single VBA macro execution.
 ///
 /// VBA code can emit host output via `Debug.Print`/`MsgBox`. The desktop backend forwards this
@@ -111,6 +118,19 @@ pub const MAX_MACRO_UPDATES: usize = 10_000;
 // -----------------------------------------------------------------------------
 // Native Python runner limits
 // -----------------------------------------------------------------------------
+
+/// Maximum number of entries allowed in the Python `network_allowlist` IPC field.
+///
+/// This allowlist is semantically small (hostnames / CIDR blocks) but untrusted. Bounding the
+/// length prevents a compromised WebView from allocating arbitrarily large vectors while parsing
+/// JSON IPC requests.
+pub const MAX_PYTHON_NETWORK_ALLOWLIST_ENTRIES: usize = 256;
+
+/// Maximum size in bytes of a single Python `network_allowlist` entry accepted over IPC.
+///
+/// Entries are expected to be small (domain names / IP ranges). Bounding the per-entry size avoids
+/// large string allocations during IPC deserialization.
+pub const MAX_PYTHON_NETWORK_ALLOWLIST_ENTRY_BYTES: usize = 512;
 
 /// Maximum number of bytes captured from the native Python runner's stderr stream.
 ///
