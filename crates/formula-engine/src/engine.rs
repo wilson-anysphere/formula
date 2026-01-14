@@ -2008,6 +2008,7 @@ impl Engine {
             sheet_state.col_properties.clear();
             sheet_state.format_runs_by_col.clear();
         }
+
         // Rewrite formulas stored in remaining sheets.
         let remaining_sheet_ids = self.workbook.sheet_ids_in_order().to_vec();
         for sheet_id in &remaining_sheet_ids {

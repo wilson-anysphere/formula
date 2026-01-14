@@ -1,4 +1,5 @@
 use formula_xlsx::XlsxPackage;
+use formula_xlsx::drawingml::charts::ChartDiagnosticLevel;
 use rust_xlsxwriter::{Chart, ChartType, Workbook};
 
 const FIXTURE: &[u8] = include_bytes!("../../../fixtures/xlsx/charts/chart-user-shapes.xlsx");
@@ -115,6 +116,98 @@ fn detects_chart_user_shapes_part_from_chart_relationships_and_roundtrips() {
         package.part(user_shapes.rels_path.as_deref().unwrap()),
         pkg2.part(user_shapes.rels_path.as_deref().unwrap()),
         "chart userShapes rels should round-trip losslessly"
+    );
+}
+
+#[test]
+fn ignores_external_chart_user_shapes_relationships() {
+    let bytes = build_workbook_with_chart();
+    let mut package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_part = package
+        .part_names()
+        .find(|p| p.starts_with("xl/charts/chart") && p.ends_with(".xml"))
+        .expect("chart part present")
+        .to_string();
+    let chart_rels_part = rels_for_part(&chart_part);
+
+    let mut updated_rels = package
+        .part(&chart_rels_part)
+        .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap())
+        .unwrap_or_else(|| {
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#.to_string()
+        });
+    let insert_idx = updated_rels
+        .rfind("</Relationships>")
+        .expect("closing Relationships tag");
+    updated_rels.insert_str(
+        insert_idx,
+        r#"  <Relationship Id="rId999" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartUserShapes" Target="https://example.com" TargetMode="External"/>"#,
+    );
+    package.set_part(chart_rels_part.clone(), updated_rels.into_bytes());
+
+    let bytes = package.write_to_bytes().unwrap();
+    let package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_objects = package.extract_chart_objects().unwrap();
+    assert_eq!(chart_objects.len(), 1);
+    let chart_object = &chart_objects[0];
+    assert!(
+        chart_object.parts.user_shapes.is_none(),
+        "external chartUserShapes relationship should be ignored"
+    );
+    assert!(
+        chart_object
+            .diagnostics
+            .iter()
+            .all(|d| !d.message.to_ascii_lowercase().contains("usershapes")),
+        "expected no userShapes-related diagnostics for external relationship"
+    );
+}
+
+#[test]
+fn warns_when_chart_user_shapes_relationship_targets_missing_part() {
+    let bytes = build_workbook_with_chart();
+    let mut package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_part = package
+        .part_names()
+        .find(|p| p.starts_with("xl/charts/chart") && p.ends_with(".xml"))
+        .expect("chart part present")
+        .to_string();
+    let chart_rels_part = rels_for_part(&chart_part);
+
+    let mut updated_rels = package
+        .part(&chart_rels_part)
+        .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap())
+        .unwrap_or_else(|| {
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#.to_string()
+        });
+    let insert_idx = updated_rels
+        .rfind("</Relationships>")
+        .expect("closing Relationships tag");
+    updated_rels.insert_str(
+        insert_idx,
+        r#"  <Relationship Id="rId999" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartUserShapes" Target="../drawings/drawing99.xml"/>"#,
+    );
+    package.set_part(chart_rels_part.clone(), updated_rels.into_bytes());
+
+    let bytes = package.write_to_bytes().unwrap();
+    let package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_objects = package.extract_chart_objects().unwrap();
+    assert_eq!(chart_objects.len(), 1);
+    let chart_object = &chart_objects[0];
+    assert!(
+        chart_object.parts.user_shapes.is_none(),
+        "missing chartUserShapes part should not crash extraction"
+    );
+    assert!(
+        chart_object.diagnostics.iter().any(|d| {
+            d.level == ChartDiagnosticLevel::Warning
+                && d.message.contains("missing chart userShapes part")
+        }),
+        "expected warning about missing chart userShapes part"
     );
 }
 
