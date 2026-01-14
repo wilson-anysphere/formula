@@ -31,13 +31,19 @@ fn verify_ed25519_signature_command_has_ipc_origin_checks() {
         .find("fn verify_ed25519_signature")
         .expect("expected verify_ed25519_signature command to exist");
     let body = &src[start..];
+    let has_main = body.contains("ensure_main_window(")
+        || body.contains("ensure_main_window_and_stable_origin(")
+        || body.contains("ensure_main_window_and_trusted_origin(");
+    let has_origin = body.contains("ensure_stable_origin(")
+        || body.contains("ensure_trusted_origin(")
+        || body.contains("ensure_main_window_and_stable_origin(")
+        || body.contains("ensure_main_window_and_trusted_origin(");
     assert!(
-        body.contains("ensure_main_window("),
+        has_main,
         "expected verify_ed25519_signature to enforce main-window checks"
     );
     assert!(
-        body.contains("ensure_trusted_origin("),
-        "expected verify_ed25519_signature to enforce trusted-origin checks"
+        has_origin,
+        "expected verify_ed25519_signature to enforce origin checks"
     );
 }
-

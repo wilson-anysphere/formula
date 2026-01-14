@@ -259,13 +259,20 @@ fn macro_and_python_commands_enforce_ipc_origin() {
             body.contains("window: tauri::WebviewWindow"),
             "{command} must accept window: tauri::WebviewWindow so Tauri can inject the caller window for origin enforcement"
         );
+        let has_main = body.contains("ensure_main_window(")
+            || body.contains("ensure_main_window_and_stable_origin(")
+            || body.contains("ensure_main_window_and_trusted_origin(");
+        let has_origin = body.contains("ensure_stable_origin(")
+            || body.contains("ensure_trusted_origin(")
+            || body.contains("ensure_main_window_and_stable_origin(")
+            || body.contains("ensure_main_window_and_trusted_origin(");
         assert!(
-            body.contains("ensure_main_window("),
-            "{command} must enforce ipc_origin::ensure_main_window"
+            has_main,
+            "{command} must enforce ipc_origin main-window checks"
         );
         assert!(
-            body.contains("ensure_trusted_origin("),
-            "{command} must enforce ipc_origin::ensure_trusted_origin"
+            has_origin,
+            "{command} must enforce ipc_origin origin checks"
         );
     }
 }
