@@ -183,6 +183,55 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
     root.remove();
   });
 
+  it("commits an in-cell edit and selects the drawing when pointerdown hits a drawing (drawing interactions enabled)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+
+    const objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape", label: "rect" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(50), cy: pxToEmu(50) },
+        },
+        zOrder: 0,
+      },
+    ];
+    app.setDrawingObjects(objects);
+
+    // Begin editing the active cell (A1).
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "F2" }));
+    const editor = root.querySelector<HTMLTextAreaElement>("textarea.cell-editor");
+    expect(editor).not.toBeNull();
+    editor!.value = "Hello";
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    const cellRect = app.getCellRectA1("A1");
+    expect(cellRect).not.toBeNull();
+
+    // Hit inside the drawing bounds (anchored at A1 with 0 offset).
+    const hitX = cellRect!.x + 10;
+    const hitY = cellRect!.y + 10;
+    dispatchPointerEvent(selectionCanvas, "pointerdown", { x: hitX, y: hitY }, { pointerId: 1, pointerType: "mouse", button: 0 });
+    dispatchPointerEvent(selectionCanvas, "pointerup", { x: hitX, y: hitY }, { pointerId: 1, pointerType: "mouse", button: 0 });
+
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+    expect(doc.getCell(sheetId, "A1").value).toBe("Hello");
+    expect(app.getSelectedDrawingId()).toBe(1);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("commits an in-cell edit and selects the drawing when pointerdown hits a drawing (shared grid)", () => {
     process.env.DESKTOP_GRID_MODE = "shared";
 
@@ -217,6 +266,58 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
     editor!.value = "Hello";
 
     const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    const cellRect = app.getCellRectA1("A1");
+    expect(cellRect).not.toBeNull();
+
+    const hitX = cellRect!.x + 10;
+    const hitY = cellRect!.y + 10;
+    dispatchPointerEvent(selectionCanvas, "pointerdown", { x: hitX, y: hitY }, { pointerId: 1, pointerType: "mouse", button: 0 });
+    dispatchPointerEvent(selectionCanvas, "pointerup", { x: hitX, y: hitY }, { pointerId: 1, pointerType: "mouse", button: 0 });
+
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+    expect(doc.getCell(sheetId, "A1").value).toBe("Hello");
+    expect(app.getSelectedDrawingId()).toBe(1);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("commits an in-cell edit and selects the drawing when pointerdown hits a drawing (shared grid + drawing interactions enabled)", () => {
+    process.env.DESKTOP_GRID_MODE = "shared";
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    expect(app.getGridMode()).toBe("shared");
+
+    const objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape", label: "rect" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(50), cy: pxToEmu(50) },
+        },
+        zOrder: 0,
+      },
+    ];
+    app.setDrawingObjects(objects);
+
+    // Begin editing the active cell (A1).
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "F2" }));
+    const editor = root.querySelector<HTMLTextAreaElement>("textarea.cell-editor");
+    expect(editor).not.toBeNull();
+    editor!.value = "Hello";
+
+    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+    selectionCanvas.getBoundingClientRect = root.getBoundingClientRect as any;
     const cellRect = app.getCellRectA1("A1");
     expect(cellRect).not.toBeNull();
 
