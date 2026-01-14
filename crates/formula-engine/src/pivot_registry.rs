@@ -459,6 +459,13 @@ mod tests {
             normalize_pivot_cache_field_name("Orders[Amount]]USD]").as_ref(),
             "Orders[Amount]]USD]"
         );
+
+        // Quoted table names that themselves contain `[` should normalize without splitting on the
+        // inner bracket.
+        assert_eq!(
+            normalize_pivot_cache_field_name("'My[Table]'[Col]").as_ref(),
+            "'My[Table]'[Col]"
+        );
     }
 }
 fn rewrite_pivot_destination_for_structural_edit(
