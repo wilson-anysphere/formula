@@ -11,6 +11,7 @@ use formula_model::drawings::Anchor as FormulaDrawingAnchor;
 #[cfg(feature = "desktop")]
 use std::collections::BTreeMap;
 use std::fmt;
+use std::marker::PhantomData;
 
 use crate::macro_trust::MacroTrustDecision;
 #[cfg(feature = "desktop")]
@@ -498,6 +499,137 @@ impl<'de> Deserialize<'de> for LimitedF64Vec {
     }
 }
 
+/// IPC-deserialized string with a maximum byte length.
+///
+/// Used for command arguments that accept strings from an untrusted webview to avoid allocating
+/// arbitrarily large `String`s during deserialization.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LimitedString<const MAX_BYTES: usize>(pub String);
+
+impl<const MAX_BYTES: usize> LimitedString<MAX_BYTES> {
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl<'de, const MAX_BYTES: usize> Deserialize<'de> for LimitedString<MAX_BYTES> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct LimitedStringVisitor<const MAX_BYTES: usize>;
+
+        impl<'de, const MAX_BYTES: usize> de::Visitor<'de> for LimitedStringVisitor<MAX_BYTES> {
+            type Value = LimitedString<MAX_BYTES>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string")
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if v.len() > MAX_BYTES {
+                    return Err(de::Error::custom(format!(
+                        "string is too large (max {MAX_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedString(v.to_string()))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if v.len() > MAX_BYTES {
+                    return Err(de::Error::custom(format!(
+                        "string is too large (max {MAX_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedString(v.to_string()))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if v.len() > MAX_BYTES {
+                    return Err(de::Error::custom(format!(
+                        "string is too large (max {MAX_BYTES} bytes)"
+                    )));
+                }
+                Ok(LimitedString(v))
+            }
+        }
+
+        deserializer.deserialize_str(LimitedStringVisitor::<MAX_BYTES>)
+    }
+}
+
+/// IPC-deserialized vector with a maximum length.
+///
+/// Used for command arguments that accept arrays from an untrusted webview to avoid allocating
+/// arbitrarily large `Vec`s during deserialization.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LimitedVec<T, const MAX_LEN: usize>(pub Vec<T>);
+
+impl<T, const MAX_LEN: usize> LimitedVec<T, MAX_LEN> {
+    pub fn into_inner(self) -> Vec<T> {
+        self.0
+    }
+}
+
+impl<'de, T, const MAX_LEN: usize> Deserialize<'de> for LimitedVec<T, MAX_LEN>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct LimitedVecVisitor<T, const MAX_LEN: usize>(PhantomData<T>);
+
+        impl<'de, T, const MAX_LEN: usize> de::Visitor<'de> for LimitedVecVisitor<T, MAX_LEN>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = LimitedVec<T, MAX_LEN>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an array")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                let mut out = match seq.size_hint() {
+                    Some(hint) => Vec::with_capacity(hint.min(MAX_LEN)),
+                    None => Vec::new(),
+                };
+
+                for _ in 0..MAX_LEN {
+                    match seq.next_element::<T>()? {
+                        Some(v) => out.push(v),
+                        None => return Ok(LimitedVec(out)),
+                    }
+                }
+
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom(format!(
+                        "array is too large (max {MAX_LEN} items)"
+                    )));
+                }
+
+                Ok(LimitedVec(out))
+            }
+        }
+
+        deserializer.deserialize_seq(LimitedVecVisitor::<T, MAX_LEN>(PhantomData))
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PivotCellRange {
     pub start_row: usize,
@@ -772,9 +904,17 @@ pub async fn add_sheet_with_id(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn reorder_sheets(
-    sheet_ids: Vec<String>,
+    sheet_ids: LimitedVec<
+        LimitedString<{ crate::ipc_limits::MAX_SHEET_ID_BYTES }>,
+        { crate::ipc_limits::MAX_REORDER_SHEET_IDS },
+    >,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    let sheet_ids = sheet_ids
+        .into_inner()
+        .into_iter()
+        .map(|id| id.into_inner())
+        .collect();
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -2794,11 +2934,12 @@ pub fn set_sheet_page_setup(
 #[tauri::command]
 pub fn set_sheet_print_area(
     sheet_id: String,
-    print_area: Option<Vec<PrintCellRange>>,
+    print_area: Option<LimitedVec<PrintCellRange, { crate::ipc_limits::MAX_PRINT_AREA_RANGES }>>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
     let print_area = print_area.map(|ranges| {
         ranges
+            .into_inner()
             .into_iter()
             .map(|r| formula_xlsx::print::CellRange {
                 start_row: r.start_row,
@@ -5792,6 +5933,52 @@ mod tests {
             serde_json::from_str::<LimitedF64Vec>(&json).expect_err("expected size limit to fail");
         assert!(
             err.to_string().contains("max") && err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_string_rejects_oversized_payloads() {
+        type ShortString = LimitedString<4>;
+
+        let err = serde_json::from_str::<ShortString>("\"abcde\"")
+            .expect_err("expected oversized string to fail");
+        assert!(
+            err.to_string().contains("max") && err.to_string().contains("4"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_vec_rejects_too_many_sheet_ids() {
+        type ShortSheetId = LimitedString<4>;
+        type SheetIds = LimitedVec<ShortSheetId, 4>;
+
+        let value = serde_json::json!(["a", "b", "c", "d", "e"]);
+        let err =
+            serde_json::from_value::<SheetIds>(value).expect_err("expected oversized array to fail");
+        assert!(
+            err.to_string().contains("max") && err.to_string().contains("4"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn limited_vec_rejects_too_many_print_area_ranges() {
+        type PrintRanges = LimitedVec<PrintCellRange, 4>;
+
+        let value = serde_json::json!([
+            { "start_row": 1, "end_row": 1, "start_col": 1, "end_col": 1 },
+            { "start_row": 2, "end_row": 2, "start_col": 1, "end_col": 1 },
+            { "start_row": 3, "end_row": 3, "start_col": 1, "end_col": 1 },
+            { "start_row": 4, "end_row": 4, "start_col": 1, "end_col": 1 },
+            { "start_row": 5, "end_row": 5, "start_col": 1, "end_col": 1 }
+        ]);
+
+        let err = serde_json::from_value::<PrintRanges>(value)
+            .expect_err("expected oversized print area ranges to fail");
+        assert!(
+            err.to_string().contains("max") && err.to_string().contains("4"),
             "unexpected error: {err}"
         );
     }

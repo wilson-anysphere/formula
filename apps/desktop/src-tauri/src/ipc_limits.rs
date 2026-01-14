@@ -7,6 +7,23 @@
 /// Maximum size (in bytes) of a script `code` payload accepted over IPC.
 pub const MAX_SCRIPT_CODE_BYTES: usize = 1_000_000; // ~1MB
 
+/// Maximum number of sheet IDs accepted by the `reorder_sheets` IPC command.
+///
+/// The frontend sends the full sheet ID ordering, so this must be high enough for very large
+/// workbooks while still preventing unbounded allocations during deserialization.
+pub const MAX_REORDER_SHEET_IDS: usize = 10_000;
+
+/// Maximum size (in bytes) of a single sheet ID accepted over IPC.
+///
+/// Sheet IDs are typically UUID strings (36 bytes), so this is intentionally conservative.
+pub const MAX_SHEET_ID_BYTES: usize = 128;
+
+/// Maximum number of print-area ranges accepted by the `set_sheet_print_area` IPC command.
+///
+/// Print areas are typically a small number of disjoint ranges; this cap prevents allocating large
+/// vectors when deserializing untrusted IPC inputs.
+pub const MAX_PRINT_AREA_RANGES: usize = 1_000;
+
 pub fn enforce_script_code_size(code: &str) -> Result<(), String> {
     if code.len() > MAX_SCRIPT_CODE_BYTES {
         return Err(format!(
@@ -34,4 +51,3 @@ mod tests {
         );
     }
 }
-
