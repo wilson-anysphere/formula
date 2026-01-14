@@ -185,7 +185,9 @@ Current desktop limitations:
   forces “Save As”. Save as `.xlsx` instead.
 - Saving **encrypted** `.xlsx`/`.xlsm` is supported when the save command is invoked with a
   `password` (the output is wrapped back into an OLE/CFB `EncryptedPackage` container).
-- Saving encrypted `.xlsb` is not supported yet (save as `.xlsx` instead).
+- Saving encrypted `.xlsb` is not supported yet (open is supported, but you must save as `.xlsx`).
+- Saving legacy `.xls` (encrypted or unencrypted) writes `.xlsx` (Formula does not write BIFF and
+  does not preserve `.xls` `FILEPASS` encryption).
 
 ---
 
