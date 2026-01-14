@@ -954,8 +954,8 @@ fn external_sheet_invalidation_dirties_dynamic_external_indirect_range_dependent
 }
 
 #[test]
-fn external_sheet_invalidation_dirties_dynamic_external_indirect_range_dependents_from_ref_text_cell()
-{
+fn external_sheet_invalidation_dirties_dynamic_external_indirect_range_dependents_from_ref_text_cell(
+) {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 2.0);
@@ -1063,10 +1063,7 @@ fn external_sheet_invalidation_updates_when_indirect_range_ref_text_cell_changes
         .set_cell_value("Sheet1", "B1", "[Book.xlsx]Sheet2!A1:A2")
         .unwrap();
     engine.recalculate();
-    assert_eq!(
-        engine.get_cell_value("Sheet1", "A1"),
-        Value::Number(30.0)
-    );
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(30.0));
 
     engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
     assert!(!engine.is_dirty("Sheet1", "A1"));
@@ -1108,10 +1105,7 @@ fn external_workbook_invalidation_updates_when_indirect_ref_text_cell_changes_wo
         .set_cell_value("Sheet1", "B1", "[Book2.xlsx]Sheet1!A1")
         .unwrap();
     engine.recalculate();
-    assert_eq!(
-        engine.get_cell_value("Sheet1", "A1"),
-        Value::Number(10.0)
-    );
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(10.0));
 
     engine.mark_external_workbook_dirty("Book1.xlsx");
     assert!(!engine.is_dirty("Sheet1", "A1"));
