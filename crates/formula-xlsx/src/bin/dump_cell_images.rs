@@ -4,6 +4,8 @@ use std::collections::BTreeSet;
 use std::error::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use formula_xlsx::{openxml, XlsxPackage};
@@ -49,6 +51,21 @@ fn main() {}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn Error>> {
+    let result = main_inner();
+    if let Err(err) = result {
+        if let Some(io_err) = err.downcast_ref::<io::Error>() {
+            if io_err.kind() == io::ErrorKind::BrokenPipe {
+                // Allow piping output to tools like `head` without panicking.
+                return Ok(());
+            }
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn main_inner() -> Result<(), Box<dyn Error>> {
     let mut input_path: Option<PathBuf> = None;
     let mut password: Option<String> = None;
     let mut print_xml = false;
@@ -124,16 +141,19 @@ fn dump_one(
 
     let dump = inspect_package(&pkg, workbook);
 
+    let mut out = io::BufWriter::new(io::stdout());
+
     if json {
-        println!("{}", serde_json::to_string(&dump)?);
+        writeln!(out, "{}", serde_json::to_string(&dump)?)?;
         // Keep JSON output machine-readable. If the caller also asked for XML, put it on stderr.
         if print_xml {
             print_xml_to_stderr(&pkg, &dump);
         }
     } else {
-        print_human(&pkg, &dump, print_xml);
+        print_human(&pkg, &dump, print_xml, &mut out)?;
     }
 
+    out.flush()?;
     Ok(())
 }
 
@@ -181,34 +201,44 @@ fn inspect_package(pkg: &XlsxPackage, workbook: String) -> WorkbookCellImagesDum
     }
 }
 
-fn print_human(pkg: &XlsxPackage, dump: &WorkbookCellImagesDump, print_xml: bool) {
-    println!("workbook: {}", dump.workbook);
+fn print_human(
+    pkg: &XlsxPackage,
+    dump: &WorkbookCellImagesDump,
+    print_xml: bool,
+    out: &mut dyn Write,
+) -> io::Result<()> {
+    writeln!(out, "workbook: {}", dump.workbook)?;
 
     let Some(cell_images_part) = dump.cell_images_part.as_deref() else {
-        println!("  no cell images part\n");
-        return;
+        writeln!(out, "  no cell images part")?;
+        writeln!(out)?;
+        return Ok(());
     };
 
-    println!("  cell images part: {cell_images_part}");
-    println!(
+    writeln!(out, "  cell images part: {cell_images_part}")?;
+    writeln!(
+        out,
         "  cell images rels: {}",
         dump.cell_images_rels_part
             .as_deref()
             .unwrap_or("unknown")
-    );
-    println!(
+    )?;
+    writeln!(
+        out,
         "  content type override: {}",
         dump.content_type_override
             .as_deref()
             .unwrap_or("unknown")
-    );
-    println!(
+    )?;
+    writeln!(
+        out,
         "  workbook relationship type: {}",
         dump.workbook_relationship_type_uri
             .as_deref()
             .unwrap_or("unknown")
-    );
-    println!(
+    )?;
+    writeln!(
+        out,
         "  root element: {} namespace={}",
         dump.root_element_local_name
             .as_deref()
@@ -216,36 +246,46 @@ fn print_human(pkg: &XlsxPackage, dump: &WorkbookCellImagesDump, print_xml: bool
         dump.root_element_namespace_uri
             .as_deref()
             .unwrap_or("unknown")
-    );
-    println!(
+    )?;
+    writeln!(
+        out,
         "  a:blip embeds: {}",
         dump.blip_embed_count
             .map(|n| n.to_string())
             .as_deref()
             .unwrap_or("unknown")
-    );
-    println!(
+    )?;
+    writeln!(
+        out,
         "  rels relationship types: {}",
         dump.cell_images_rels_relationship_type_uris
             .as_deref()
             .map(|v| v.join(", "))
             .unwrap_or_else(|| "unknown".to_string())
-    );
+    )?;
 
     if print_xml {
         if let Some(bytes) = pkg.part(cell_images_part) {
             match std::str::from_utf8(bytes) {
                 Ok(xml) => {
-                    println!("\ncellimages.xml:\n{xml}\n");
+                    writeln!(out)?;
+                    writeln!(out, "cellimages.xml:\n{xml}")?;
+                    writeln!(out)?;
                 }
                 Err(err) => {
-                    println!("  warning: cellimages.xml is not UTF-8; cannot print ({err})\n");
+                    writeln!(
+                        out,
+                        "  warning: cellimages.xml is not UTF-8; cannot print ({err})"
+                    )?;
+                    writeln!(out)?;
                 }
             }
         }
     } else {
-        println!();
+        writeln!(out)?;
     }
+
+    Ok(())
 }
 
 fn print_xml_to_stderr(pkg: &XlsxPackage, dump: &WorkbookCellImagesDump) {

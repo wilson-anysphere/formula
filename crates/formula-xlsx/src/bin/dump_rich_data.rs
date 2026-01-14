@@ -769,11 +769,14 @@ struct MappingRow {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn dump_vm_mappings(pkg: &XlsxPackage) -> bool {
+    use std::io::Write;
+
     let sheets = list_sheets_best_effort(pkg);
     let vm_cells = collect_vm_cells(pkg, &sheets);
 
     if vm_cells.is_empty() {
-        println!("no richData found");
+        // Ignore broken pipes so `... | head` doesn't panic.
+        let _ = writeln!(std::io::stdout(), "no richData found");
         return false;
     }
 
@@ -838,9 +841,16 @@ fn dump_vm_mappings(pkg: &XlsxPackage) -> bool {
         let media_part = row.media_part.unwrap_or_else(|| "-".to_string());
 
         // Keep the `... -> <target>` segment stable for substring checks in tests/log-scraping.
-        println!(
+        // Ignore broken pipes so `... | head` doesn't panic.
+        let _ = writeln!(
+            std::io::stdout(),
             "{}!{} vm={} -> rv={} -> {} rel={}",
-            row.sheet_name, row.cell_ref, row.vm, rich_value_index, media_part, rel_index
+            row.sheet_name,
+            row.cell_ref,
+            row.vm,
+            rich_value_index,
+            media_part,
+            rel_index
         );
     }
 

@@ -1,7 +1,11 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::error::Error;
 #[cfg(not(target_arch = "wasm32"))]
+use std::io;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Cursor;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Write;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
@@ -41,6 +45,21 @@ fn main() {}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn Error>> {
+    let result = main_inner();
+    if let Err(err) = result {
+        if let Some(io_err) = err.downcast_ref::<io::Error>() {
+            if io_err.kind() == io::ErrorKind::BrokenPipe {
+                // Allow piping output to tools like `head` without panicking.
+                return Ok(());
+            }
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn main_inner() -> Result<(), Box<dyn Error>> {
     let mut xlsx_path: Option<PathBuf> = None;
     let mut password: Option<String> = None;
 
@@ -82,32 +101,36 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let pkg = workbook_open::open_xlsx_package(&path, password.as_deref())?;
 
-    println!("workbook: {}", path.display());
-    println!();
+    let mut out = io::BufWriter::new(io::stdout());
 
-    dump_metadata_xml(&pkg);
-    dump_metadata_relationships(&pkg);
-    dump_richdata_parts(&pkg);
-    dump_worksheet_vm_cm_summary(&pkg);
+    writeln!(out, "workbook: {}", path.display())?;
+    writeln!(out)?;
+
+    dump_metadata_xml(&pkg, &mut out)?;
+    dump_metadata_relationships(&pkg, &mut out)?;
+    dump_richdata_parts(&pkg, &mut out)?;
+    dump_worksheet_vm_cm_summary(&pkg, &mut out)?;
+
+    out.flush()?;
 
     Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn dump_metadata_xml(pkg: &XlsxPackage) {
-    println!("[xl/metadata.xml]");
+fn dump_metadata_xml(pkg: &XlsxPackage, out: &mut dyn Write) -> io::Result<()> {
+    writeln!(out, "[xl/metadata.xml]")?;
 
     let Some(bytes) = pkg.part("xl/metadata.xml") else {
-        println!("  (missing)");
-        println!();
-        return;
+        writeln!(out, "  (missing)")?;
+        writeln!(out)?;
+        return Ok(());
     };
 
-    println!("  size: {} bytes", bytes.len());
+    writeln!(out, "  size: {} bytes", bytes.len())?;
 
     match parse_metadata_xml(bytes) {
         Ok(doc) => {
-            println!("  metadataTypes: {}", doc.metadata_types.len());
+            writeln!(out, "  metadataTypes: {}", doc.metadata_types.len())?;
             for (idx, ty) in doc.metadata_types.iter().enumerate() {
                 let attrs: Vec<String> = ty
                     .attributes
@@ -116,72 +139,77 @@ fn dump_metadata_xml(pkg: &XlsxPackage) {
                     .map(|(k, v)| format!("{k}={v}"))
                     .collect();
                 if attrs.is_empty() {
-                    println!("    [{idx}] {}", ty.name);
+                    writeln!(out, "    [{idx}] {}", ty.name)?;
                 } else {
-                    println!("    [{idx}] {} ({})", ty.name, attrs.join(", "));
+                    writeln!(out, "    [{idx}] {} ({})", ty.name, attrs.join(", "))?;
                 }
             }
 
             let cell_metadata_blocks = doc.cell_metadata.len();
             let cell_metadata_rc_total: usize =
                 doc.cell_metadata.iter().map(|b| b.block.records.len()).sum();
-            println!(
+            writeln!(
+                out,
                 "  cellMetadata: blocks={} rc_records={}",
                 cell_metadata_blocks, cell_metadata_rc_total
-            );
+            )?;
 
             let value_metadata_blocks = doc.value_metadata.len();
             let value_metadata_rc_total: usize =
                 doc.value_metadata.iter().map(|b| b.block.records.len()).sum();
-            println!(
+            writeln!(
+                out,
                 "  valueMetadata: blocks={} rc_records={}",
                 value_metadata_blocks, value_metadata_rc_total
-            );
+            )?;
 
-            println!(
+            writeln!(
+                out,
                 "  futureMetadata blocks: {}",
                 doc.future_metadata_blocks.len()
-            );
+            )?;
             for (idx, block) in doc.future_metadata_blocks.iter().enumerate() {
-                println!(
+                writeln!(
+                    out,
                     "    [{idx}] count={} inner_xml_chars={}",
                     block.count,
                     block.block.inner_xml.len()
-                );
+                )?;
             }
         }
         Err(err) => {
-            println!("  warning: failed to parse metadata.xml: {err}");
+            writeln!(out, "  warning: failed to parse metadata.xml: {err}")?;
         }
     }
 
-    println!();
+    writeln!(out)?;
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn dump_metadata_relationships(pkg: &XlsxPackage) {
-    println!("[xl/_rels/metadata.xml.rels]");
+fn dump_metadata_relationships(pkg: &XlsxPackage, out: &mut dyn Write) -> io::Result<()> {
+    writeln!(out, "[xl/_rels/metadata.xml.rels]")?;
 
     let Some(bytes) = pkg.part("xl/_rels/metadata.xml.rels") else {
-        println!("  (missing)");
-        println!();
-        return;
+        writeln!(out, "  (missing)")?;
+        writeln!(out)?;
+        return Ok(());
     };
 
-    println!("  size: {} bytes", bytes.len());
+    writeln!(out, "  size: {} bytes", bytes.len())?;
 
     let mut relationships = match openxml::parse_relationships(bytes) {
         Ok(rels) => rels,
         Err(err) => {
-            println!("  warning: failed to parse relationships: {err}");
-            println!();
-            return;
+            writeln!(out, "  warning: failed to parse relationships: {err}")?;
+            writeln!(out)?;
+            return Ok(());
         }
     };
 
     relationships.sort_by(|a, b| relationship_id_sort_cmp(&a.id, &b.id));
 
-    println!("  relationships: {}", relationships.len());
+    writeln!(out, "  relationships: {}", relationships.len())?;
     for rel in relationships {
         let mode = rel
             .target_mode
@@ -194,18 +222,20 @@ fn dump_metadata_relationships(pkg: &XlsxPackage) {
         } else {
             openxml::resolve_target("xl/metadata.xml", &rel.target)
         };
-        println!(
+        writeln!(
+            out,
             "    - id={} type={} target={} mode={} resolved={}",
             rel.id, rel.type_uri, rel.target, mode, resolved
-        );
+        )?;
     }
 
-    println!();
+    writeln!(out)?;
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn dump_richdata_parts(pkg: &XlsxPackage) {
-    println!("[xl/richData/*]");
+fn dump_richdata_parts(pkg: &XlsxPackage, out: &mut dyn Write) -> io::Result<()> {
+    writeln!(out, "[xl/richData/*]")?;
 
     let mut parts: Vec<&str> = pkg
         .part_names()
@@ -213,12 +243,13 @@ fn dump_richdata_parts(pkg: &XlsxPackage) {
         .collect();
     parts.sort();
 
-    println!("  parts: {}", parts.len());
+    writeln!(out, "  parts: {}", parts.len())?;
     for name in parts {
-        println!("    - {name}");
+        writeln!(out, "    - {name}")?;
     }
 
-    println!();
+    writeln!(out)?;
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -232,8 +263,8 @@ struct WorksheetCellMetadataSummary {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn dump_worksheet_vm_cm_summary(pkg: &XlsxPackage) {
-    println!("[xl/worksheets/sheet*.xml vm/cm]");
+fn dump_worksheet_vm_cm_summary(pkg: &XlsxPackage, out: &mut dyn Write) -> io::Result<()> {
+    writeln!(out, "[xl/worksheets/sheet*.xml vm/cm]")?;
 
     let mut sheets: Vec<&str> = pkg
         .part_names()
@@ -242,35 +273,41 @@ fn dump_worksheet_vm_cm_summary(pkg: &XlsxPackage) {
     sheets.sort_by(|a, b| worksheet_part_sort_cmp(a, b));
 
     if sheets.is_empty() {
-        println!("  (no worksheet parts matched xl/worksheets/sheet*.xml)");
-        println!();
-        return;
+        writeln!(
+            out,
+            "  (no worksheet parts matched xl/worksheets/sheet*.xml)"
+        )?;
+        writeln!(out)?;
+        return Ok(());
     }
 
     for sheet_part in sheets {
-        println!("  {sheet_part}");
+        writeln!(out, "  {sheet_part}")?;
         let Some(bytes) = pkg.part(sheet_part) else {
-            println!("    warning: missing part bytes");
+            writeln!(out, "    warning: missing part bytes")?;
             continue;
         };
 
         let summary = scan_worksheet_cells_for_vm_cm(bytes, MAX_CELL_REFS);
-        println!(
+        writeln!(
+            out,
             "    cells with cm: {}{}",
             summary.cm_cells,
             format_first_refs(summary.cm_cells, &summary.cm_refs)
-        );
-        println!(
+        )?;
+        writeln!(
+            out,
             "    cells with vm: {}{}",
             summary.vm_cells,
             format_first_refs(summary.vm_cells, &summary.vm_refs)
-        );
+        )?;
         if let Some(warn) = summary.warning {
-            println!("    warning: {warn}");
+            writeln!(out, "    warning: {warn}")?;
         }
     }
 
-    println!();
+    writeln!(out)?;
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
