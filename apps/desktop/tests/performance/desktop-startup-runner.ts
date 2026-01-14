@@ -70,6 +70,8 @@ function usage(): string {
     "  - Uses isolated profile directories under target/perf-home by default (override via FORMULA_PERF_HOME).",
     "    Each invocation picks a unique profile root to avoid cache pollution across runs.",
     "  - Sets FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1 for stability.",
+    "  - In --shell/--startup-bench mode, first_render_ms is a best-effort first-frame proxy and may be skipped",
+    `    when fewer than ${Math.round(DESKTOP_STARTUP_OPTIONAL_METRIC_MIN_VALID_FRACTION * 100)}% of runs report it.`,
     "",
   ].join("\n");
 }
