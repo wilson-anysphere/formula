@@ -411,31 +411,29 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             Value::Number(info.parentheses as f64)
         }
         CellInfoType::Width => {
-            // `CELL("width")` consults column metadata but should avoid recording an implicit
-            // self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
-            let cell_ref = record_explicit_cell(ctx);
+            // `CELL("width")` consults column metadata.
+            //
+            // Do *not* record a cell-value dependency on the referenced cell. The output depends on
+            // column properties, not the referenced cell's value, and recording it can introduce
+            // spurious circular references (e.g. `=CELL("width", A1)` in A1).
 
-            // Excel returns a number whose integer part is the column width (in characters) and
-            // whose first decimal digit is `0` when the column uses the sheet default width or `1`
-            // when it uses an explicit per-column width.
+            // We return the stored column width in Excel "character" units (OOXML `col/@width`).
             const EXCEL_STANDARD_COL_WIDTH: f64 = 8.43;
 
-            let props = ctx.col_properties(&cell_ref.sheet_id, addr.col);
+            let props = ctx.col_properties(&reference.sheet_id, addr.col);
             if props.as_ref().is_some_and(|p| p.hidden) {
                 return Value::Number(0.0);
             }
 
-            let (width, is_custom) = match props.and_then(|p| p.width) {
-                Some(w) => (w as f64, true),
-                None => match ctx.sheet_default_col_width(&cell_ref.sheet_id) {
-                    Some(w) => (w as f64, false),
-                    None => (EXCEL_STANDARD_COL_WIDTH, false),
+            let width = match props.and_then(|p| p.width) {
+                Some(w) => w as f64,
+                None => match ctx.sheet_default_col_width(&reference.sheet_id) {
+                    Some(w) => w as f64,
+                    None => EXCEL_STANDARD_COL_WIDTH,
                 },
             };
 
-            let chars = width.floor();
-            let flag = if is_custom { 0.1 } else { 0.0 };
-            Value::Number(chars + flag)
+            Value::Number(width)
         }
         CellInfoType::Protect => {
             // `CELL("protect")` consults cell protection metadata but should avoid recording an
