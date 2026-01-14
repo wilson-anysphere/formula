@@ -6479,9 +6479,16 @@ export class SpreadsheetApp {
       this.rebuildAxisVisibilityCache();
     }
     this.renderGrid();
-    this.renderDrawings();
-    this.renderCharts(true);
-    this.renderReferencePreview();
+    // In canvas-charts mode, `renderCharts(true)` invalidates + renders charts by calling
+    // `renderDrawings()` internally. Avoid a redundant drawings render (and a one-frame
+    // flash of stale chart surfaces) by only rendering drawings directly when charts are
+    // painted on their dedicated canvas.
+    if (this.useCanvasCharts) {
+      this.renderCharts(true);
+    } else {
+      this.renderDrawings();
+      this.renderCharts(true);
+    }
     if (this.sharedGrid) {
       // Switching sheets updates the provider data source but does not emit document
       // changes. Force a full redraw so the CanvasGridRenderer pulls from the new
