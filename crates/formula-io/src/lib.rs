@@ -356,6 +356,10 @@ impl Default for SaveEncryptionScheme {
 #[derive(Clone, Default)]
 pub struct SaveOptions {
     /// Password used to encrypt the output workbook (Office-encrypted OLE wrapper).
+    ///
+    /// Note: password-based encryption requires the `formula-io/encrypted-workbooks` cargo feature.
+    /// When that feature is disabled and `password` is set, [`save_workbook_with_options`] returns
+    /// [`Error::UnsupportedEncryption`].
     pub password: Option<String>,
     /// Encryption scheme used when `password` is set.
     pub encryption_scheme: SaveEncryptionScheme,
@@ -4386,6 +4390,9 @@ fn encrypt_options_from_save_options(options: &SaveOptions) -> formula_office_cr
 }
 
 /// Save a workbook to disk with additional options (e.g. password-based encryption).
+///
+/// Note: when `options.password` is set, this requires the `formula-io/encrypted-workbooks` cargo
+/// feature. Without it, this function returns [`Error::UnsupportedEncryption`].
 pub fn save_workbook_with_options(
     workbook: &Workbook,
     path: impl AsRef<Path>,
