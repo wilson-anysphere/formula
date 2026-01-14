@@ -188,6 +188,8 @@ export class InlineEditOverlay {
     this.errorLabel.textContent = "";
     this.errorLabel.hidden = true;
     this.statusLabel.textContent = "";
+    this.previewSummary.textContent = "";
+    this.previewList.replaceChildren();
     this.previewContainer.hidden = true;
     this.runButton.disabled = false;
     this.cancelButton.disabled = false;
@@ -209,6 +211,14 @@ export class InlineEditOverlay {
     this.mode = "prompt";
     this.element.hidden = true;
     this.promptInput.value = "";
+    this.selectionLabel.textContent = "";
+    this.statusLabel.textContent = "";
+    this.errorLabel.textContent = "";
+    this.errorLabel.hidden = true;
+    // Preview lists can contain many cells; clear to avoid retaining large DOM trees
+    // when the controller instance is kept referenced after close/teardown.
+    this.previewSummary.textContent = "";
+    this.previewList.replaceChildren();
     this.previewContainer.hidden = true;
   }
 
@@ -233,6 +243,9 @@ export class InlineEditOverlay {
     this.promptInput.disabled = false;
     this.runButton.disabled = false;
     this.cancelButton.disabled = false;
+    // Clear any prior preview DOM so large lists aren't retained in hidden state.
+    this.previewSummary.textContent = "";
+    this.previewList.replaceChildren();
     this.previewContainer.hidden = true;
     this.promptInput.focus();
   }

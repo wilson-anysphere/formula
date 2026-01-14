@@ -120,6 +120,7 @@ describe("InlineEditController approval gating + batching", () => {
     overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-preview-cancel"]')!.click();
 
     await waitFor(() => (overlay.hidden ? overlay : null), 5000);
+    expect(overlay.querySelectorAll('[data-testid="inline-edit-preview-changes"] li')).toHaveLength(0);
 
     // Denial path must not apply changes.
     expect(doc.getCell("Sheet1", "A1").value).toBe("before");
@@ -201,6 +202,7 @@ describe("InlineEditController approval gating + batching", () => {
 
     await waitFor(() => (doc.getCell("Sheet1", "A1").value === "after" ? doc : null), 5000);
     await waitFor(() => (overlay.hidden ? overlay : null), 5000);
+    expect(overlay.querySelectorAll('[data-testid="inline-edit-preview-changes"] li')).toHaveLength(0);
 
     expect(doc.getCell("Sheet1", "A1").value).toBe("after");
     expect((doc as any).batchDepth ?? 0).toBe(0);
@@ -211,4 +213,3 @@ describe("InlineEditController approval gating + batching", () => {
     expect(llmClient.chat).toHaveBeenCalledTimes(2);
   });
 });
-
