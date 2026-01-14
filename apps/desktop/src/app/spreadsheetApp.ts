@@ -12922,17 +12922,77 @@ export class SpreadsheetApp {
       this.workbookImageManager.setExternalImageIds(this.listWorkbookExternalImageIds());
     }
 
-    // If drawings changed and we have explicit deltas, only refresh the touched sheets.
-    const touched = new Set<string>();
+    const imageIdCountsForRawDrawings = (raw: unknown, sheetId: string): Map<string, number> => {
+      const counts = new Map<string, number>();
+      if (!Array.isArray(raw) || raw.length === 0) return counts;
+      // Prefer a lightweight scan of the raw drawings list so we don't depend on (possibly stale)
+      // UI-level drawing caches during DocumentController change events.
+      for (const entry of raw) {
+        if (!entry || typeof entry !== "object") continue;
+        const kind: any = (entry as any).kind;
+        if (!kind || typeof kind !== "object") continue;
+
+        const type =
+          typeof kind.type === "string"
+            ? kind.type
+            : // Some legacy encodings use externally-tagged enums: `{ Image: { image_id: ... } }`.
+              Object.keys(kind).length === 1
+              ? Object.keys(kind)[0]
+              : null;
+
+        const normalizedType = typeof type === "string" ? type.toLowerCase() : "";
+        if (normalizedType !== "image") continue;
+
+        const rawImageId =
+          kind.imageId ??
+          kind.image_id ??
+          kind.Image?.image_id ??
+          kind.Image?.imageId ??
+          // Best-effort: if the kind enum variant is externally tagged, treat its value as the payload.
+          (normalizedType === "image" && typeof kind.Image === "object" ? kind.Image?.image_id : null);
+
+        const imageId =
+          typeof rawImageId === "string"
+            ? rawImageId.trim()
+            : typeof rawImageId === "number" || typeof rawImageId === "bigint"
+              ? String(rawImageId)
+              : "";
+        if (!imageId) continue;
+        counts.set(imageId, (counts.get(imageId) ?? 0) + 1);
+      }
+      return counts;
+    };
+
+    const countsEqual = (a: Map<string, number>, b: Map<string, number>): boolean => {
+      if (a.size !== b.size) return false;
+      for (const [key, value] of a.entries()) {
+        if (b.get(key) !== value) return false;
+      }
+      return true;
+    };
+
+    const updatedSheets = new Map<string, unknown>();
+    const recordIfImageRefsChanged = (sheetIdRaw: unknown, beforeDrawings: unknown, afterDrawings: unknown) => {
+      const sheetId = typeof sheetIdRaw === "string" ? String(sheetIdRaw).trim() : "";
+      if (!sheetId) return;
+      const beforeCounts = imageIdCountsForRawDrawings(beforeDrawings, sheetId);
+      const afterCounts = imageIdCountsForRawDrawings(afterDrawings, sheetId);
+      if (countsEqual(beforeCounts, afterCounts)) return;
+      updatedSheets.set(sheetId, Array.isArray(afterDrawings) ? afterDrawings : []);
+    };
+
     for (const delta of drawingDeltas) {
-      const sheetId = typeof delta?.sheetId === "string" ? String(delta.sheetId).trim() : "";
-      if (sheetId) touched.add(sheetId);
+      recordIfImageRefsChanged(delta?.sheetId, delta?.before, delta?.after);
+    }
+    for (const delta of sheetViewDeltas) {
+      recordIfImageRefsChanged(delta?.sheetId, delta?.before?.drawings, delta?.after?.drawings);
     }
 
-    if (touched.size === 0) return;
+    if (updatedSheets.size === 0) return;
 
-    for (const sheetId of touched) {
-      this.workbookImageManager.setSheetDrawings(sheetId, this.listDrawingObjectsForSheet(sheetId));
+    for (const [sheetId, afterDrawings] of updatedSheets.entries()) {
+      const objects = convertDocumentSheetDrawingsToUiDrawingObjects(afterDrawings, { sheetId });
+      this.workbookImageManager.setSheetDrawings(sheetId, objects);
     }
   }
 
