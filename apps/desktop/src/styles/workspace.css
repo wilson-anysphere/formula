@@ -64,11 +64,11 @@
 
 #grid-split[data-split-direction="horizontal"] {
   grid-template-columns: 1fr;
-  grid-template-rows: var(--split-primary-size, 1fr) 4px var(--split-secondary-size, 1fr);
+  grid-template-rows: var(--split-primary-size, 1fr) var(--space-2) var(--split-secondary-size, 1fr);
 }
 
 #grid-split[data-split-direction="vertical"] {
-  grid-template-columns: var(--split-primary-size, 1fr) 4px var(--split-secondary-size, 1fr);
+  grid-template-columns: var(--split-primary-size, 1fr) var(--space-2) var(--split-secondary-size, 1fr);
   grid-template-rows: 1fr;
 }
 
@@ -128,8 +128,8 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: var(--space-2);
+  padding: calc(var(--space-3) / 2) var(--space-4);
   border-bottom: 1px solid var(--panel-border);
 }
 
@@ -150,7 +150,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -163,7 +163,7 @@
   flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-4);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -206,7 +206,7 @@
 
 .dock-panel__controls {
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
   margin-left: auto;
   flex-shrink: 0;
 }
@@ -252,7 +252,7 @@
 }
 
 .dock-panel__body {
-  padding: 8px;
+  padding: var(--space-4);
   color: var(--text-secondary);
   flex: 1;
   min-height: 0;
