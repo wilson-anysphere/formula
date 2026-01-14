@@ -55,8 +55,12 @@ fn map_offcrypto_error(err: crate::offcrypto::OffCryptoError) -> EncryptedOoxmlE
         OffCryptoError::UnsupportedEncryptionVersion { .. }
         | OffCryptoError::UnsupportedCipherAlgorithm { .. }
         | OffCryptoError::UnsupportedChainingMode { .. }
+        | OffCryptoError::UnsupportedCipherChaining { .. }
         | OffCryptoError::UnsupportedHashAlgorithm { .. } => {
             EncryptedOoxmlError::UnsupportedEncryption(err.to_string())
+        }
+        OffCryptoError::UnsupportedKeyEncryptor { message, .. } => {
+            EncryptedOoxmlError::UnsupportedEncryption(message)
         }
         other => EncryptedOoxmlError::InvalidEncryptedWorkbook(other.to_string()),
     }
