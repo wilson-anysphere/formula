@@ -28,6 +28,73 @@ pub(crate) enum DefinedNameEdit {
     Remove,
 }
 
+/// Workbook-level print settings that are stored as defined names in `xl/workbook.xml`.
+///
+/// This mirrors the XLSX representation:
+/// - `print_area` corresponds to `_xlnm.Print_Area`
+/// - `print_titles` corresponds to `_xlnm.Print_Titles`
+///
+/// These are 1-based ranges (A1 references) as they appear in the XLSX file.
+#[derive(Debug, Clone)]
+pub(crate) struct SheetDefinedPrintNames {
+    pub(crate) sheet_name: String,
+    pub(crate) r_id: String,
+    pub(crate) print_area: Option<Vec<crate::print::CellRange>>,
+    pub(crate) print_titles: Option<crate::print::PrintTitles>,
+}
+
+/// Parse worksheet names and the `_xlnm.Print_Area` / `_xlnm.Print_Titles` defined names from the
+/// workbook XML part (`xl/workbook.xml`).
+///
+/// This is a part-based helper intended for higher-level readers that already have `workbook.xml`
+/// bytes, avoiding the need to re-open or re-read the ZIP package.
+pub(crate) fn parse_workbook_defined_print_names(
+    workbook_xml: &[u8],
+) -> Result<Vec<SheetDefinedPrintNames>, PrintError> {
+    let workbook = parse_workbook_xml(workbook_xml)?;
+
+    let mut out = Vec::with_capacity(workbook.sheets.len());
+    for (sheet_index, sheet) in workbook.sheets.into_iter().enumerate() {
+        let sheet_name = sheet.name;
+        let print_area = workbook
+            .defined_names
+            .iter()
+            .find(|dn| dn.name == "_xlnm.Print_Area" && dn.local_sheet_id == Some(sheet_index))
+            .map(|dn| parse_print_area_defined_name(&sheet_name, &dn.value))
+            .transpose()?;
+
+        let print_titles = workbook
+            .defined_names
+            .iter()
+            .find(|dn| dn.name == "_xlnm.Print_Titles" && dn.local_sheet_id == Some(sheet_index))
+            .map(|dn| parse_print_titles_defined_name(&sheet_name, &dn.value))
+            .transpose()?;
+
+        out.push(SheetDefinedPrintNames {
+            sheet_name,
+            r_id: sheet.r_id,
+            print_area,
+            print_titles,
+        });
+    }
+
+    Ok(out)
+}
+
+/// Parse the worksheet `pageSetup`/`pageMargins`/`pageSetUpPr` settings from an already-extracted
+/// worksheet XML part (`xl/worksheets/sheetN.xml`).
+pub(crate) fn parse_worksheet_page_setup(sheet_xml: &[u8]) -> Result<PageSetup, PrintError> {
+    Ok(parse_worksheet_print_settings(sheet_xml)?.0)
+}
+
+/// Parse worksheet `rowBreaks` / `colBreaks` manual page breaks from an already-extracted
+/// worksheet XML part (`xl/worksheets/sheetN.xml`).
+pub(crate) fn parse_worksheet_manual_page_breaks(
+    sheet_xml: &[u8],
+) -> Result<ManualPageBreaks, PrintError> {
+    Ok(parse_worksheet_print_settings(sheet_xml)?.1)
+}
+
 pub fn read_workbook_print_settings(
     xlsx_bytes: &[u8],
 ) -> Result<WorkbookPrintSettings, PrintError> {
@@ -61,11 +128,11 @@ fn read_workbook_print_settings_from_reader_with_limit<R: Read + Seek>(
     let workbook_xml = read_zip_bytes(&mut zip, "xl/workbook.xml", max_part_bytes)?;
     let rels_xml = read_zip_bytes(&mut zip, "xl/_rels/workbook.xml.rels", max_part_bytes)?;
 
-    let workbook = parse_workbook_xml(&workbook_xml)?;
+    let workbook_print_names = parse_workbook_defined_print_names(&workbook_xml)?;
     let rels = parse_workbook_rels(&rels_xml)?;
 
-    let mut sheets = Vec::with_capacity(workbook.sheets.len());
-    for (sheet_index, sheet) in workbook.sheets.iter().enumerate() {
+    let mut sheets = Vec::with_capacity(workbook_print_names.len());
+    for sheet in workbook_print_names {
         let sheet_target = rels
             .get(&sheet.r_id)
             .ok_or(PrintError::MissingPart("worksheet relationship"))?;
@@ -75,26 +142,13 @@ fn read_workbook_print_settings_from_reader_with_limit<R: Read + Seek>(
         let sheet_path = crate::openxml::resolve_target("xl/workbook.xml", sheet_target);
         let sheet_xml = read_zip_bytes(&mut zip, &sheet_path, max_part_bytes)?;
 
-        let (page_setup, manual_page_breaks) = parse_worksheet_print_settings(&sheet_xml)?;
-
-        let print_area = workbook
-            .defined_names
-            .iter()
-            .find(|dn| dn.name == "_xlnm.Print_Area" && dn.local_sheet_id == Some(sheet_index))
-            .map(|dn| parse_print_area_defined_name(&sheet.name, &dn.value))
-            .transpose()?;
-
-        let print_titles = workbook
-            .defined_names
-            .iter()
-            .find(|dn| dn.name == "_xlnm.Print_Titles" && dn.local_sheet_id == Some(sheet_index))
-            .map(|dn| parse_print_titles_defined_name(&sheet.name, &dn.value))
-            .transpose()?;
+        let page_setup = parse_worksheet_page_setup(&sheet_xml)?;
+        let manual_page_breaks = parse_worksheet_manual_page_breaks(&sheet_xml)?;
 
         sheets.push(SheetPrintSettings {
-            sheet_name: sheet.name.clone(),
-            print_area,
-            print_titles,
+            sheet_name: sheet.sheet_name,
+            print_area: sheet.print_area,
+            print_titles: sheet.print_titles,
             page_setup,
             manual_page_breaks,
         });

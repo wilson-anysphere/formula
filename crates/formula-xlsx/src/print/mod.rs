@@ -1,4 +1,5 @@
 mod a1;
+mod convert;
 mod page_breaks;
 mod pdf;
 pub(crate) mod xlsx;
