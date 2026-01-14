@@ -15931,6 +15931,58 @@ fn walk_external_dependencies(
         }
     }
 
+    fn static_coerce_bool(expr: &CompiledExpr) -> Option<bool> {
+        fn static_coerce_number(expr: &CompiledExpr) -> Option<f64> {
+            match expr {
+                Expr::Number(n) => Some(*n),
+                Expr::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+                Expr::Blank => Some(0.0),
+                Expr::Text(s) => {
+                    let t = s.trim();
+                    if t.is_empty() {
+                        return Some(0.0);
+                    }
+                    match t.parse::<f64>() {
+                        Ok(n) if n.is_finite() => Some(n),
+                        _ => None,
+                    }
+                }
+                Expr::Unary { op, expr } => {
+                    let n = static_coerce_number(expr)?;
+                    match op {
+                        crate::eval::UnaryOp::Plus => Some(n),
+                        crate::eval::UnaryOp::Minus => Some(-n),
+                    }
+                }
+                Expr::Postfix { op, expr } => {
+                    let n = static_coerce_number(expr)?;
+                    match op {
+                        crate::eval::PostfixOp::Percent => Some(n / 100.0),
+                    }
+                }
+                _ => None,
+            }
+        }
+
+        match expr {
+            Expr::Bool(b) => Some(*b),
+            Expr::Text(s) => {
+                let t = s.trim();
+                if t.is_empty() {
+                    return Some(false);
+                }
+                if t.eq_ignore_ascii_case("TRUE") {
+                    return Some(true);
+                }
+                if t.eq_ignore_ascii_case("FALSE") {
+                    return Some(false);
+                }
+                static_coerce_number(expr).map(|n| n != 0.0)
+            }
+            _ => static_coerce_number(expr).map(|n| n != 0.0),
+        }
+    }
+
     match expr {
         Expr::CellRef(r) => {
             if let SheetReference::External(key) = &r.sheet {
@@ -16105,12 +16157,11 @@ fn walk_external_dependencies(
                         // evaluated.
                         if let Some(Expr::Text(text)) = args.first() {
                             // Only attempt static extraction when the optional A1 flag is either
-                            // omitted or a literal boolean; otherwise the reference style is runtime
-                            // dependent.
+                            // omitted or can be statically coerced to a scalar boolean; otherwise the
+                            // reference style is runtime dependent.
                             let a1 = match args.get(1) {
                                 None => Some(true),
-                                Some(Expr::Bool(v)) => Some(*v),
-                                Some(_) => None,
+                                Some(expr) => static_coerce_bool(expr),
                             };
                             if let Some(a1) = a1 {
                                 let ref_text = text.trim();
@@ -18568,6 +18619,138 @@ mod tests {
             sheet: sheet_id,
             addr,
         };
+
+        assert_eq!(
+            engine
+                .cell_external_sheet_refs
+                .get(&key)
+                .expect("cell should have external sheet refs"),
+            &HashSet::from_iter([String::from("[Book.xlsx]Sheet1")])
+        );
+        assert_eq!(
+            engine
+                .cell_external_workbook_refs
+                .get(&key)
+                .expect("cell should have external workbook refs"),
+            &HashSet::from_iter([String::from("Book.xlsx")])
+        );
+    }
+
+    #[test]
+    fn indirect_constant_external_refs_are_indexed_when_a1_flag_is_numeric() {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "A1",
+                // Numeric `0` coerces to FALSE (R1C1 mode).
+                r#"=INDIRECT("[Book.xlsx]Sheet1!R2C2",0)"#,
+            )
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").expect("addr");
+        let key = CellKey { sheet: sheet_id, addr };
+
+        assert_eq!(
+            engine
+                .cell_external_sheet_refs
+                .get(&key)
+                .expect("cell should have external sheet refs"),
+            &HashSet::from_iter([String::from("[Book.xlsx]Sheet1")])
+        );
+        assert_eq!(
+            engine
+                .cell_external_workbook_refs
+                .get(&key)
+                .expect("cell should have external workbook refs"),
+            &HashSet::from_iter([String::from("Book.xlsx")])
+        );
+    }
+
+    #[test]
+    fn indirect_constant_external_refs_are_indexed_when_a1_flag_is_text() {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "A1",
+                // Text `"FALSE"` coerces to FALSE (R1C1 mode).
+                r#"=INDIRECT("[Book.xlsx]Sheet1!R2C2","FALSE")"#,
+            )
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").expect("addr");
+        let key = CellKey { sheet: sheet_id, addr };
+
+        assert_eq!(
+            engine
+                .cell_external_sheet_refs
+                .get(&key)
+                .expect("cell should have external sheet refs"),
+            &HashSet::from_iter([String::from("[Book.xlsx]Sheet1")])
+        );
+        assert_eq!(
+            engine
+                .cell_external_workbook_refs
+                .get(&key)
+                .expect("cell should have external workbook refs"),
+            &HashSet::from_iter([String::from("Book.xlsx")])
+        );
+    }
+
+    #[test]
+    fn indirect_constant_external_refs_are_indexed_when_a1_flag_is_numeric_true() {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "A1",
+                // Numeric `1` coerces to TRUE (A1 mode).
+                r#"=INDIRECT("[Book.xlsx]Sheet1!B2",1)"#,
+            )
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").expect("addr");
+        let key = CellKey { sheet: sheet_id, addr };
+
+        assert_eq!(
+            engine
+                .cell_external_sheet_refs
+                .get(&key)
+                .expect("cell should have external sheet refs"),
+            &HashSet::from_iter([String::from("[Book.xlsx]Sheet1")])
+        );
+        assert_eq!(
+            engine
+                .cell_external_workbook_refs
+                .get(&key)
+                .expect("cell should have external workbook refs"),
+            &HashSet::from_iter([String::from("Book.xlsx")])
+        );
+    }
+
+    #[test]
+    fn indirect_constant_external_refs_are_indexed_when_a1_flag_is_text_true() {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "A1",
+                // Text `"TRUE"` coerces to TRUE (A1 mode).
+                r#"=INDIRECT("[Book.xlsx]Sheet1!B2","TRUE")"#,
+            )
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let addr = parse_a1("A1").expect("addr");
+        let key = CellKey { sheet: sheet_id, addr };
 
         assert_eq!(
             engine
