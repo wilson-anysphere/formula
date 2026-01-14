@@ -908,7 +908,8 @@ JS/WASM DTOs:
  * directly through wasm and deserialize it via serde).
  *
  * Note: `GoalSeekParams` itself has non-optional tuning fields; JS/WASM bindings typically expose
- * these as optionals and then map into `GoalSeekParams::new(...)` so defaults are applied.
+ * these as optionals and then map into `GoalSeekParams::new(...)` so defaults are applied (this is
+ * how the in-tree `formula-wasm` `workbook.goalSeek(...)` binding works).
  */
 export interface GoalSeekParams {
   targetCell: CellRef;
@@ -962,7 +963,8 @@ export interface CellChange {
 
 /**
  * Current `formula-wasm` API:
- *   `workbook.goalSeek(params)` (see [`crates/formula-wasm/src/lib.rs`](../crates/formula-wasm/src/lib.rs)).
+ *   `workbook.goalSeek(params)` → `{ result, changes }`
+ *   (see [`crates/formula-wasm/src/lib.rs`](../crates/formula-wasm/src/lib.rs)).
  */
 export interface GoalSeekRequest {
   // Defaults to "Sheet1" when omitted/empty.
@@ -970,11 +972,12 @@ export interface GoalSeekRequest {
 
   // A1 addresses WITHOUT a `Sheet!` prefix (sheet is provided separately).
   targetCell: string;
+  targetValue: number;
   changingCell: string;
 
-  targetValue: number;
-
-  // Optional tuning; when omitted (or set to `null`), defaults match `GoalSeekParams::new(...)`.
+  // Optional tuning; when omitted (or set to `null`), defaults match `GoalSeekParams::new(...)`:
+  //   maxIterations=100, tolerance=0.001, derivativeStep=null (auto), minDerivative=1e-10,
+  //   maxBracketExpansions=50.
   maxIterations?: number;
   tolerance?: number;
   derivativeStep?: number | null;
@@ -1039,9 +1042,26 @@ WASM binding side effects / integration notes:
     rather than at `result.solution` for `NoBracketFound` and some `NumericalFailure` paths. The
     `formula-wasm` binding re-applies `result.solution` to the workbook state and performs a final
     recalc so dependents are consistent.
-- The wasm `goalSeek` API runs recalculation internally and returns `{ result, changes }`, where
-  `changes` is a `recalculate()`-compatible cell change list so hosts can update UI/caches without a
-  separate `recalculate()` call.
+- The wasm `goalSeek` API runs recalculation internally and returns `{ result, changes }`, where:
+  - `result` is the `GoalSeekResult`.
+  - `changes` is a `recalculate()`-compatible `CellChange[]` so hosts can update UI/caches without a separate `recalculate()` call.
+
+Example (apply `changes` to a UI cell store):
+
+```ts
+const { result, changes } = workbook.goalSeek({
+  sheet: "Sheet1",
+  targetCell: "B1",
+  targetValue: 100,
+  changingCell: "A1",
+});
+
+for (const ch of changes) {
+  cellStore.set(`${ch.sheet}!${ch.address}`, ch.value);
+}
+
+console.log(result.status, result.solution);
+```
 
 Progress events:
 
@@ -1405,7 +1425,7 @@ Proposed WASM binding validation rules (if/when implemented):
 
 WASM binding return shape (suggested):
 
-- For parity with `goalSeek`, a future `runMonteCarloSimulation` binding can return only the `SimulationResult`.
+- A future `runMonteCarloSimulation` binding can return only the `SimulationResult`.
 - It should not attempt to return a full `recalculate()` cell-delta list for each iteration; hosts can fetch cells/ranges after the run if they need to refresh UI state.
 
 ---
@@ -1662,7 +1682,7 @@ WASM binding return shape (suggested):
 
 - Return only the `SolveOutcome` (mirrors the Rust return type).
 - If the host needs UI deltas, a binding can also return a `recalculate()`-compatible `CellChange[]`
-  alongside the outcome (as `goalSeek` does).
+  alongside the outcome (as `goalSeek` does); otherwise hosts can refresh via `getCell`/`getRange`.
 
 ---
 
