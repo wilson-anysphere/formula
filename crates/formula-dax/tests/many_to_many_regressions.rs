@@ -167,6 +167,12 @@ fn userelationship_override_works_with_m2m_for_columnar_dim() {
         formula_columnar::Value::Number(20.0),
         formula_columnar::Value::String("B".into()),
     ]);
+    // Physical BLANK key row: should not pick up unmatched facts under USERELATIONSHIP.
+    dim.append_row(&[
+        formula_columnar::Value::Null,
+        formula_columnar::Value::Null,
+        formula_columnar::Value::String("PhysicalBlank".into()),
+    ]);
     model
         .add_table(Table::from_columnar("Dim", dim.finalize()))
         .unwrap();
@@ -451,6 +457,15 @@ fn userelationship_override_sees_virtual_blank_member_for_columnar_dim() {
         model.evaluate_measure("Total via KeyB", &blank_attr).unwrap(),
         7.0.into()
     );
+
+    // Ensure the physical BLANK-key dimension row does *not* behave like the relationship-generated
+    // blank member.
+    let physical_blank =
+        FilterContext::empty().with_column_equals("Dim", "Attr", "PhysicalBlank".into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &physical_blank).unwrap(),
+        Value::Blank
+    );
 }
 
 #[test]
@@ -487,6 +502,11 @@ fn userelationship_override_sees_virtual_blank_member_for_columnar_dim_and_fact(
         formula_columnar::Value::Number(2.0),
         formula_columnar::Value::Number(20.0),
         formula_columnar::Value::String("B".into()),
+    ]);
+    dim.append_row(&[
+        formula_columnar::Value::Null,
+        formula_columnar::Value::Null,
+        formula_columnar::Value::String("PhysicalBlank".into()),
     ]);
     model
         .add_table(Table::from_columnar("Dim", dim.finalize()))
@@ -576,6 +596,14 @@ fn userelationship_override_sees_virtual_blank_member_for_columnar_dim_and_fact(
     assert_eq!(
         model.evaluate_measure("Total via KeyB", &blank_attr).unwrap(),
         7.0.into()
+    );
+
+    let physical_blank =
+        FilterContext::empty().with_column_equals("Dim", "Attr", "PhysicalBlank".into());
+    assert_eq!(model.evaluate_measure("Total", &physical_blank).unwrap(), Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &physical_blank).unwrap(),
+        Value::Blank
     );
 }
 
@@ -4303,6 +4331,10 @@ fn insert_row_resolves_blank_member_for_inactive_userelationship_with_columnar_f
     let mut dim = Table::new("Dim", vec!["KeyA", "KeyB", "Attr"]);
     dim.push_row(vec![1.into(), 10.into(), "A".into()]).unwrap();
     dim.push_row(vec![2.into(), 20.into(), "B".into()]).unwrap();
+    // Physical BLANK key row on the dimension side should not behave like the relationship-generated
+    // blank/unknown member under USERELATIONSHIP.
+    dim.push_row(vec![Value::Blank, Value::Blank, "PhysicalBlank".into()])
+        .unwrap();
     model.add_table(dim).unwrap();
 
     let fact_schema = vec![
@@ -4387,6 +4419,13 @@ fn insert_row_resolves_blank_member_for_inactive_userelationship_with_columnar_f
     assert_eq!(
         model.evaluate_measure("Total via KeyB", &blank_attr).unwrap(),
         7.0.into()
+    );
+
+    let physical_blank =
+        FilterContext::empty().with_column_equals("Dim", "Attr", "PhysicalBlank".into());
+    assert_eq!(
+        model.evaluate_measure("Total via KeyB", &physical_blank).unwrap(),
+        Value::Blank
     );
 
     // Insert a Dim row that resolves the previously-unmatched KeyB value.
