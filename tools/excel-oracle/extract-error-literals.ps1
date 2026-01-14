@@ -115,6 +115,11 @@ function Extract-CanonicalErrorLiterals {
   return ,$out.ToArray()
 }
 
+$outPathIsTsvFile = $false
+if ($OutPath) {
+  $outPathIsTsvFile = $OutPath.ToLowerInvariant().EndsWith(".tsv")
+}
+
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot ".." "..")
 $rustErrorKindPath = Join-Path $repoRoot "crates" "formula-engine" "src" "value" "mod.rs"
 $canonicalCodes = Extract-CanonicalErrorLiterals -RustPath $rustErrorKindPath
@@ -163,6 +168,9 @@ try {
   if (-not $OutPath) {
     $upstreamDir = Join-Path $repoRoot "crates" "formula-engine" "src" "locale" "data" "upstream" "errors"
     $OutPath = Join-Path $upstreamDir "$Locale.tsv"
+  } elseif (-not $outPathIsTsvFile) {
+    # Match `extract-function-translations.ps1` behavior: allow callers to pass a directory.
+    $OutPath = Join-Path $OutPath "$Locale.tsv"
   }
 
   $excelVersion = $null
