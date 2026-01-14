@@ -87,8 +87,8 @@ impl<R> DecryptedPackageReader<R> {
 impl<R> Drop for DecryptedPackageReader<R> {
     fn drop(&mut self) {
         // Best-effort: wipe cached plaintext and any key material held by `EncryptionMethod`.
-        self.cached_segment_plain.zeroize();
-        self.scratch.zeroize();
+        zeroize_vec_u8_full(&mut self.cached_segment_plain);
+        zeroize_vec_u8_full(&mut self.scratch);
     }
 }
 
@@ -215,7 +215,7 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
         // `self.scratch` now contains the previous segment's plaintext bytes. Wipe them before
         // resizing/reading the next ciphertext segment, so sensitive data doesn't linger in the
         // Vec's spare capacity (e.g. when the next segment is shorter).
-        self.scratch.zeroize();
+        zeroize_vec_u8_full(&mut self.scratch);
 
         self.scratch.resize(seg_cipher_len, 0);
         self.inner.seek(SeekFrom::Start(seg_cipher_start))?;
@@ -267,6 +267,13 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
 
 fn map_aes_cbc_err(err: formula_xlsx::offcrypto::AesCbcDecryptError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, err)
+}
+
+fn zeroize_vec_u8_full(buf: &mut Vec<u8>) {
+    buf.zeroize();
+    for slot in buf.spare_capacity_mut() {
+        slot.write(0);
+    }
 }
 
 fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> io::Result<()> {
