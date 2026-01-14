@@ -249,17 +249,27 @@ fn detect_chart_kind(
         return chart_type;
     }
 
+    let hints = collect_chart_ex_kind_hints(doc);
+    let hint_list = if hints.is_empty() {
+        "<none>".to_string()
+    } else {
+        hints.join(", ")
+    };
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: "ChartEx chart kind could not be inferred".to_string(),
+        message: format!("ChartEx chart kind could not be inferred; hints: {hint_list}"),
     });
 
     "unknown".to_string()
 }
 
 fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
+    // Best-effort: capture any attribute-based hints that might identify the ChartEx chart kind.
+    //
+    // This is diagnostic-only and should be stable/deterministic (for fixture tests), so we
+    // de-duplicate and sort the collected hints.
     let mut out = Vec::new();
-    let mut seen = HashSet::<String>::new();
+    let mut seen = HashSet::new();
 
     for node in doc.descendants().filter(|n| n.is_element()) {
         if let Some(layout_id) = attribute_case_insensitive(node, "layoutId")
@@ -291,6 +301,7 @@ fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
         }
     }
 
+    out.sort();
     out
 }
 fn find_chart_type_node<'a>(doc: &'a Document<'a>) -> Option<Node<'a, 'a>> {

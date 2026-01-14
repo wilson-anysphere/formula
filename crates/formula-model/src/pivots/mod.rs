@@ -107,6 +107,7 @@ pub enum SortOrder {
     Descending,
     Manual,
 }
+
 /// Value representation used for manual pivot-field ordering.
 ///
 /// This is intentionally lightweight and serde-friendly since it may cross IPC
