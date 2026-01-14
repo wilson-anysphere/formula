@@ -55,7 +55,11 @@ run_metadata() {
   fi
 
   if grep -Eqi "needs to be updated but --locked was passed|but --locked was passed to prevent this" "$err"; then
-    echo "::error::Cargo.lock is out of date (${context}). Run 'cargo generate-lockfile' (or build locally) and commit the updated Cargo.lock."
+    if [[ "$context" == "workspace" ]]; then
+      echo "::error::Cargo.lock is out of date (${context}). Run 'cargo generate-lockfile' (or 'cargo metadata --format-version=1 >/dev/null') and commit the updated Cargo.lock."
+    else
+      echo "::error::Cargo.lock is out of date (${context}). Run 'cargo metadata --format-version=1 --manifest-path ${desktop_manifest} --features desktop >/dev/null' and commit the updated Cargo.lock."
+    fi
   else
     echo "::error::cargo metadata failed (${context}). See logs above."
   fi
