@@ -109,6 +109,20 @@ test("passes with distinct URLs and correct per-platform updater artifact types"
   assert.equal(result.validatedTargets.length, 6);
 });
 
+test("passes when installer-specific platform keys are present (e.g. linux-x86_64-deb)", () => {
+  const { platforms, assetNames } = baseline();
+  platforms["linux-x86_64-deb"] = {
+    url: "https://github.com/example/repo/releases/download/v0.1.0/formula_0.1.0_amd64.deb",
+    signature: "sig",
+  };
+  assetNames.add("formula_0.1.0_amd64.deb");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.invalidTargets, []);
+  assert.deepEqual(result.missingAssets, []);
+});
+
 test("fails when a macOS updater entry points at a non-updater artifact (.dmg)", () => {
   const { platforms, assetNames } = baseline();
   platforms["darwin-x86_64"].url =
