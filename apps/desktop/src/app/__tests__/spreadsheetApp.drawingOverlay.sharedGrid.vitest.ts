@@ -675,6 +675,55 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     }
   });
 
+  it("does not emit an unhandled rejection when chart selection overlay render returns a rejected promise", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    vi.useRealTimers();
+    try {
+      const err = new Error("boom");
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", onUnhandled);
+
+      try {
+        const app = new SpreadsheetApp(root, status);
+
+        warnSpy.mockClear();
+        // Override just the chart selection overlay instance so drawing overlay renders don't
+        // consume the mock implementation.
+        const overlay = (app as any).chartSelectionOverlay as DrawingOverlay;
+        (overlay as any).render = vi.fn(() => Promise.reject(err));
+
+        (app as any).renderChartSelectionOverlay();
+
+        // Allow the rejection handler (and Node unhandledRejection bookkeeping) to run.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(unhandled).toHaveLength(0);
+        expect(warnSpy).toHaveBeenCalledWith("Chart selection overlay render failed", err);
+
+        app.destroy();
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+        root.remove();
+      }
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("computes consistent render vs interaction viewports for drawings (headers + frozen panes)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
