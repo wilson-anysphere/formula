@@ -23,6 +23,18 @@ fn formats_thousands_grouping_for_each_locale() {
         "1,234,567.5"
     );
     assert_eq!(
+        locale::format_number(value, locale::get_locale("zh-HK").unwrap()),
+        "1,234,567.5"
+    );
+    assert_eq!(
+        locale::format_number(value, locale::get_locale("zh-SG").unwrap()),
+        "1,234,567.5"
+    );
+    assert_eq!(
+        locale::format_number(value, locale::get_locale("zh-MO").unwrap()),
+        "1,234,567.5"
+    );
+    assert_eq!(
         locale::format_number(value, locale::get_locale("ko-KR").unwrap()),
         "1,234,567.5"
     );
