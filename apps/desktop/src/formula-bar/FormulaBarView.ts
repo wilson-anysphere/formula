@@ -2898,8 +2898,6 @@ export class FormulaBarView {
       this.#lastHighlightSpans = highlightedSpans;
       this.#lastColoredReferences = coloredReferences;
     } else {
-      let ghostInserted = false;
-      let previewInserted = false;
       const highlightParts: string[] = [];
       // Escaping every token individually incurs a lot of overhead on long formulas. If the
       // underlying draft contains no HTML-significant characters, we can safely emit token
@@ -2962,43 +2960,54 @@ export class FormulaBarView {
         }</span>`;
       };
 
-      for (const span of highlightedSpans) {
-        if (!ghostInserted && ghost && cursor <= span.start) {
-          highlightParts.push(`<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`);
-          if (previewText && !previewInserted) {
-            highlightParts.push(`<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`);
-            previewInserted = true;
+      if (!ghost) {
+        for (const span of highlightedSpans) {
+          highlightParts.push(renderSpan(span, span.text));
+        }
+      } else {
+        let ghostInserted = false;
+        let previewInserted = false;
+        const ghostHtml = `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+        const previewHtml = previewText ? `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>` : "";
+
+        for (const span of highlightedSpans) {
+          if (!ghostInserted && cursor <= span.start) {
+            highlightParts.push(ghostHtml);
+            if (previewHtml && !previewInserted) {
+              highlightParts.push(previewHtml);
+              previewInserted = true;
+            }
+            ghostInserted = true;
           }
-          ghostInserted = true;
+
+          if (!ghostInserted && cursor > span.start && cursor < span.end) {
+            const split = cursor - span.start;
+            const before = span.text.slice(0, split);
+            const after = span.text.slice(split);
+            if (before) {
+              highlightParts.push(renderSpan(span, before));
+            }
+            highlightParts.push(ghostHtml);
+            if (previewHtml && !previewInserted) {
+              highlightParts.push(previewHtml);
+              previewInserted = true;
+            }
+            ghostInserted = true;
+            if (after) {
+              highlightParts.push(renderSpan(span, after));
+            }
+            continue;
+          }
+
+          highlightParts.push(renderSpan(span, span.text));
         }
 
-        if (!ghostInserted && ghost && cursor > span.start && cursor < span.end) {
-          const split = cursor - span.start;
-          const before = span.text.slice(0, split);
-          const after = span.text.slice(split);
-          if (before) {
-            highlightParts.push(renderSpan(span, before));
-          }
-          highlightParts.push(`<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`);
-          if (previewText && !previewInserted) {
-            highlightParts.push(`<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`);
+        if (!ghostInserted) {
+          highlightParts.push(ghostHtml);
+          if (previewHtml && !previewInserted) {
+            highlightParts.push(previewHtml);
             previewInserted = true;
           }
-          ghostInserted = true;
-          if (after) {
-            highlightParts.push(renderSpan(span, after));
-          }
-          continue;
-        }
-
-        highlightParts.push(renderSpan(span, span.text));
-      }
-
-      if (!ghostInserted && ghost) {
-        highlightParts.push(`<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`);
-        if (previewText && !previewInserted) {
-          highlightParts.push(`<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`);
-          previewInserted = true;
         }
       }
 
