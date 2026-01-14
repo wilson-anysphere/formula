@@ -232,13 +232,17 @@ impl Default for Sheet {
 #[derive(Debug, Default, Clone)]
 struct Workbook {
     sheets: Vec<Sheet>,
-    sheet_names: Vec<String>,
+    /// Display name for each sheet id.
+    ///
+    /// Indices are stable for the lifetime of a sheet. Deleted sheets are represented by `None`
+    /// so ids are never reused.
+    sheet_names: Vec<Option<String>>,
+    sheet_name_to_id: HashMap<String, SheetId>,
     /// Current sheet tab order expressed as stable sheet ids.
     ///
     /// This is intentionally separate from `sheets`/`sheet_names` so sheet ids remain stable when
     /// users reorder worksheet tabs.
     sheet_order: Vec<SheetId>,
-    sheet_name_to_id: HashMap<String, SheetId>,
     names: HashMap<String, DefinedName>,
     styles: StyleTable,
     workbook_directory: Option<String>,
@@ -259,9 +263,9 @@ impl Workbook {
         }
         let id = self.sheets.len();
         self.sheets.push(Sheet::default());
-        self.sheet_names.push(name.to_string());
-        self.sheet_order.push(id);
+        self.sheet_names.push(Some(name.to_string()));
         self.sheet_name_to_id.insert(key, id);
+        self.sheet_order.push(id);
         id
     }
 
@@ -270,32 +274,87 @@ impl Workbook {
         self.sheet_name_to_id.get(&key).copied()
     }
 
+    fn sheet_exists(&self, sheet: SheetId) -> bool {
+        matches!(self.sheet_names.get(sheet), Some(Some(_)))
+    }
+
+    fn sheet_name(&self, sheet: SheetId) -> Option<&str> {
+        self.sheet_names.get(sheet)?.as_deref()
+    }
+
+    fn sheet_ids_in_order(&self) -> &[SheetId] {
+        &self.sheet_order
+    }
+
+    #[cfg(test)]
+    fn set_sheet_order(&mut self, new_order: Vec<SheetId>) {
+        // Keep invariants explicit: sheet order is a permutation of the currently-live sheets.
+        let existing: HashSet<SheetId> = self.sheet_order.iter().copied().collect();
+        let mut seen: HashSet<SheetId> = HashSet::with_capacity(new_order.len());
+        for &id in &new_order {
+            assert!(
+                self.sheet_exists(id),
+                "sheet order contains missing sheet id {}",
+                id
+            );
+            assert!(seen.insert(id), "sheet order contains duplicate sheet id {id}");
+        }
+        assert_eq!(
+            seen, existing,
+            "sheet order must contain exactly the workbook's live sheets"
+        );
+        self.sheet_order = new_order;
+    }
+
+    fn sheet_order_index(&self, sheet: SheetId) -> Option<usize> {
+        self.sheet_order.iter().position(|&id| id == sheet)
+    }
+
+    /// Returns the sheet ids referenced by an Excel-style 3D sheet span (`Sheet1:Sheet3`).
+    ///
+    /// This respects the current workbook tab order and supports reversed spans.
     fn sheet_span_ids(&self, start: SheetId, end: SheetId) -> Option<Vec<SheetId>> {
-        let start_idx = self.sheet_order.iter().position(|&id| id == start)?;
-        let end_idx = self.sheet_order.iter().position(|&id| id == end)?;
-        let (lo, hi) = if start_idx <= end_idx {
-            (start_idx, end_idx)
+        let start_idx = self.sheet_order_index(start)?;
+        let end_idx = self.sheet_order_index(end)?;
+        if start_idx <= end_idx {
+            Some(self.sheet_order[start_idx..end_idx.saturating_add(1)].to_vec())
         } else {
-            (end_idx, start_idx)
-        };
-        Some(self.sheet_order[lo..=hi].to_vec())
+            let mut out: Vec<SheetId> =
+                self.sheet_order[end_idx..start_idx.saturating_add(1)].to_vec();
+            out.reverse();
+            Some(out)
+        }
     }
 
     fn get_cell(&self, key: CellKey) -> Option<&Cell> {
+        if !self.sheet_exists(key.sheet) {
+            return None;
+        }
         self.sheets.get(key.sheet)?.cells.get(&key.addr)
     }
 
     fn get_or_create_cell_mut(&mut self, key: CellKey) -> &mut Cell {
+        assert!(
+            self.sheet_exists(key.sheet),
+            "attempted to access missing sheet id {}",
+            key.sheet
+        );
         self.sheets[key.sheet].cells.entry(key.addr).or_default()
     }
 
     fn set_tables(&mut self, sheet: SheetId, tables: Vec<Table>) {
+        if !self.sheet_exists(sheet) {
+            return;
+        }
         if let Some(s) = self.sheets.get_mut(sheet) {
             s.tables = tables;
         }
     }
 
     fn grow_sheet_dimensions(&mut self, sheet: SheetId, addr: CellAddr) -> bool {
+        if !self.sheet_exists(sheet) {
+            return false;
+        }
         let Some(s) = self.sheets.get_mut(sheet) else {
             return false;
         };
@@ -421,11 +480,7 @@ impl RecalcValueChangeCollector {
             if *before == after {
                 continue;
             }
-            let sheet = workbook
-                .sheet_names
-                .get(key.sheet)
-                .cloned()
-                .unwrap_or_default();
+            let sheet = workbook.sheet_name(key.sheet).unwrap_or_default().to_string();
             out.push(RecalcValueChange {
                 sheet,
                 addr: key.addr,
@@ -859,6 +914,9 @@ impl Engine {
         let mut entries: Vec<(SheetId, CellAddr, BytecodeCompileReason)> = Vec::new();
 
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            if !self.workbook.sheet_exists(sheet_id) {
+                continue;
+            }
             for (addr, cell) in &sheet.cells {
                 if cell.formula.is_none() {
                     continue;
@@ -878,12 +936,7 @@ impl Engine {
 
         let mut out = Vec::new();
         for (sheet_id, addr, reason) in entries.into_iter().take(limit) {
-            let sheet = self
-                .workbook
-                .sheet_names
-                .get(sheet_id)
-                .cloned()
-                .unwrap_or_default();
+            let sheet = self.workbook.sheet_name(sheet_id).unwrap_or_default().to_string();
             out.push(BytecodeCompileReportEntry {
                 sheet,
                 addr,
@@ -904,6 +957,9 @@ impl Engine {
         let mut updates: Vec<(CellKey, CompiledFormula, Option<BytecodeCompileReason>)> =
             Vec::new();
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            if !self.workbook.sheet_exists(sheet_id) {
+                continue;
+            }
             for (addr, cell) in &sheet.cells {
                 let Some(formula) = cell.formula.as_deref() else {
                     continue;
@@ -1021,6 +1077,9 @@ impl Engine {
 
     fn mark_all_compiled_cells_dirty(&mut self) {
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            if !self.workbook.sheet_exists(sheet_id) {
+                continue;
+            }
             for (addr, cell) in &sheet.cells {
                 if cell.compiled.is_some() {
                     let key = CellKey {
@@ -1167,7 +1226,14 @@ impl Engine {
             .workbook
             .sheets
             .iter()
-            .map(|s| s.tables.clone())
+            .enumerate()
+            .map(|(sheet_id, s)| {
+                if self.workbook.sheet_exists(sheet_id) {
+                    s.tables.clone()
+                } else {
+                    Vec::new()
+                }
+            })
             .collect();
 
         // Structured reference resolution can change which cells a formula depends on, so refresh
@@ -1178,6 +1244,9 @@ impl Engine {
         // variant (AST vs bytecode) for all formula cells.
         let mut formulas: Vec<(CellKey, String, CompiledExpr)> = Vec::new();
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            if !self.workbook.sheet_exists(sheet_id) {
+                continue;
+            }
             for (addr, cell) in &sheet.cells {
                 let Some(formula) = cell.formula.as_deref() else {
                     continue;
@@ -1282,12 +1351,22 @@ impl Engine {
             .workbook
             .sheets
             .iter()
-            .map(|s| s.tables.clone())
+            .enumerate()
+            .map(|(sheet_id, s)| {
+                if self.workbook.sheet_exists(sheet_id) {
+                    s.tables.clone()
+                } else {
+                    Vec::new()
+                }
+            })
             .collect();
 
         // Collect formula cells up-front to avoid borrow conflicts while recompiling.
         let mut formulas: Vec<(CellKey, String)> = Vec::new();
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            if !self.workbook.sheet_exists(sheet_id) {
+                continue;
+            }
             for (addr, cell) in &sheet.cells {
                 if let Some(formula) = cell.formula.as_deref() {
                     formulas.push((
@@ -1718,7 +1797,7 @@ impl Engine {
         if let Some(provider) = &self.external_value_provider {
             // Use the workbook's canonical display name to keep provider lookups stable even when
             // callers pass a different sheet-name casing.
-            if let Some(sheet_name) = self.workbook.sheet_names.get(sheet_id) {
+            if let Some(sheet_name) = self.workbook.sheet_name(sheet_id) {
                 if let Some(v) = provider.get(sheet_name, addr) {
                     return v;
                 }
@@ -3341,7 +3420,7 @@ impl Engine {
                         return Some(key);
                     }
                 } else if let Some(provider) = &self.external_value_provider {
-                    if let Some(sheet_name) = self.workbook.sheet_names.get(origin.sheet) {
+                    if let Some(sheet_name) = self.workbook.sheet_name(origin.sheet) {
                         if let Some(v) = provider.get(sheet_name, addr) {
                             if v != Value::Blank {
                                 return Some(key);
@@ -4389,7 +4468,7 @@ impl Engine {
             }
         }
 
-        let Some(sheet_name) = self.workbook.sheet_names.get(current_sheet) else {
+        let Some(sheet_name) = self.workbook.sheet_name(current_sheet) else {
             return expr.clone();
         };
         normalize_inner(expr, sheet_name, true)
@@ -4492,9 +4571,8 @@ impl Engine {
                 // used to resolve the defined name (which may differ from the formula's sheet when
                 // the name reference is explicitly sheet-qualified).
                 if both_unprefixed {
-                    let sheet_ref = crate::SheetRef::Sheet(
-                        self.workbook.sheet_names.get(current_sheet)?.clone(),
-                    );
+                    let sheet_ref =
+                        crate::SheetRef::Sheet(self.workbook.sheet_name(current_sheet)?.to_string());
                     match &mut left {
                         crate::Expr::CellRef(r) => r.sheet = Some(sheet_ref.clone()),
                         crate::Expr::ColRef(r) => r.sheet = Some(sheet_ref.clone()),
@@ -4608,7 +4686,7 @@ impl Engine {
         }
         let sheet = match r.sheet.as_ref() {
             None => Some(crate::SheetRef::Sheet(
-                self.workbook.sheet_names.get(current_sheet)?.clone(),
+                self.workbook.sheet_name(current_sheet)?.to_string(),
             )),
             Some(crate::SheetRef::Sheet(name)) => Some(crate::SheetRef::Sheet(name.clone())),
             Some(crate::SheetRef::SheetRange { start, end }) => Some(crate::SheetRef::SheetRange {
@@ -5344,9 +5422,8 @@ fn sheet_names_by_id(workbook: &Workbook) -> HashMap<SheetId, String> {
     workbook
         .sheet_names
         .iter()
-        .cloned()
         .enumerate()
-        .map(|(id, name)| (id, name))
+        .filter_map(|(id, name)| name.clone().map(|name| (id, name)))
         .collect()
 }
 
@@ -6856,7 +6933,8 @@ fn rewrite_structured_refs_for_bytecode(
 
 struct Snapshot {
     sheets: HashSet<SheetId>,
-    sheet_names_by_id: Vec<String>,
+    sheet_names_by_id: Vec<Option<String>>,
+    sheet_order: Vec<SheetId>,
     sheet_dimensions: Vec<(u32, u32)>,
     values: HashMap<CellKey, Value>,
     style_ids: HashMap<CellKey, u32>,
@@ -6889,18 +6967,29 @@ impl Snapshot {
         external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
         external_data_provider: Option<Arc<dyn ExternalDataProvider>>,
     ) -> Self {
-        let sheets: HashSet<SheetId> = (0..workbook.sheets.len()).collect();
+        let sheet_order = workbook.sheet_ids_in_order().to_vec();
+        let sheets: HashSet<SheetId> = sheet_order.iter().copied().collect();
         let sheet_names_by_id = workbook.sheet_names.clone();
         let sheet_dimensions = workbook
             .sheets
             .iter()
-            .map(|s| (s.row_count, s.col_count))
+            .enumerate()
+            .map(|(sheet_id, s)| {
+                if workbook.sheet_exists(sheet_id) {
+                    (s.row_count, s.col_count)
+                } else {
+                    (0, 0)
+                }
+            })
             .collect();
         let mut values = HashMap::new();
         let mut style_ids = HashMap::new();
         let mut formulas = HashMap::new();
         let mut ordered_cells = BTreeSet::new();
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
+            if !workbook.sheet_exists(sheet_id) {
+                continue;
+            }
             for (addr, cell) in &sheet.cells {
                 let key = CellKey {
                     sheet: sheet_id,
@@ -6941,16 +7030,41 @@ impl Snapshot {
             }
         }
         let spill_origin_by_cell = spills.origin_by_cell.clone();
-        let tables = workbook.sheets.iter().map(|s| s.tables.clone()).collect();
+        let tables = workbook
+            .sheets
+            .iter()
+            .enumerate()
+            .map(|(sheet_id, s)| {
+                if workbook.sheet_exists(sheet_id) {
+                    s.tables.clone()
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect();
         let row_properties = workbook
             .sheets
             .iter()
-            .map(|s| s.row_properties.clone())
+            .enumerate()
+            .map(|(sheet_id, s)| {
+                if workbook.sheet_exists(sheet_id) {
+                    s.row_properties.clone()
+                } else {
+                    BTreeMap::new()
+                }
+            })
             .collect();
         let col_properties = workbook
             .sheets
             .iter()
-            .map(|s| s.col_properties.clone())
+            .enumerate()
+            .map(|(sheet_id, s)| {
+                if workbook.sheet_exists(sheet_id) {
+                    s.col_properties.clone()
+                } else {
+                    BTreeMap::new()
+                }
+            })
             .collect();
 
         let mut workbook_names = HashMap::new();
@@ -6959,10 +7073,12 @@ impl Snapshot {
         }
 
         let mut sheet_names = Vec::with_capacity(workbook.sheets.len());
-        for sheet in &workbook.sheets {
+        for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
             let mut names = HashMap::new();
-            for (name, def) in &sheet.names {
-                names.insert(name.clone(), name_to_resolved(def));
+            if workbook.sheet_exists(sheet_id) {
+                for (name, def) in &sheet.names {
+                    names.insert(name.clone(), name_to_resolved(def));
+                }
             }
             sheet_names.push(names);
         }
@@ -6983,6 +7099,7 @@ impl Snapshot {
         Self {
             sheets,
             sheet_names_by_id,
+            sheet_order,
             sheet_dimensions,
             values,
             style_ids,
@@ -7020,11 +7137,11 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn sheet_count(&self) -> usize {
-        self.sheet_names_by_id.len()
+        self.sheet_order.len()
     }
 
     fn sheet_name(&self, sheet_id: usize) -> Option<&str> {
-        self.sheet_names_by_id.get(sheet_id).map(|s| s.as_str())
+        self.sheet_names_by_id.get(sheet_id)?.as_deref()
     }
 
     fn sheet_dimensions(&self, sheet_id: usize) -> (u32, u32) {
@@ -7093,7 +7210,8 @@ impl crate::eval::ValueResolver for Snapshot {
         }
 
         if let Some(provider) = &self.external_value_provider {
-            if let Some(sheet_name) = self.sheet_names_by_id.get(sheet_id) {
+            if let Some(sheet_name) = self.sheet_names_by_id.get(sheet_id).and_then(|s| s.as_deref())
+            {
                 if let Some(v) = provider.get(sheet_name, addr) {
                     return v;
                 }
@@ -7114,9 +7232,13 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn sheet_id(&self, name: &str) -> Option<usize> {
-        self.sheet_names_by_id.iter().position(|candidate| {
-            crate::value::cmp_case_insensitive(candidate, name) == Ordering::Equal
-        })
+        self.sheet_names_by_id
+            .iter()
+            .enumerate()
+            .find_map(|(id, candidate)| {
+                let candidate = candidate.as_deref()?;
+                (crate::value::cmp_case_insensitive(candidate, name) == Ordering::Equal).then_some(id)
+            })
     }
 
     fn iter_sheet_cells(&self, sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
@@ -8061,7 +8183,10 @@ impl BytecodeColumnCache {
                 let mut col_segments: Vec<BytecodeColumnSegment> =
                     Vec::with_capacity(segments.len());
 
-                let sheet_name = snapshot.sheet_names_by_id.get(sheet_id).map(String::as_str);
+                let sheet_name = snapshot
+                    .sheet_names_by_id
+                    .get(sheet_id)
+                    .and_then(|s| s.as_deref());
                 let provider = snapshot.external_value_provider.as_ref();
 
                 for (row_start, row_end) in segments {
@@ -8246,7 +8371,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             .map(engine_value_to_bytecode)
             .or_else(|| {
                 let provider = self.snapshot.external_value_provider.as_ref()?;
-                let sheet_name = self.snapshot.sheet_names_by_id.get(sheet)?;
+                let sheet_name = self.snapshot.sheet_names_by_id.get(sheet)?.as_deref()?;
                 provider
                     .get(sheet_name, addr)
                     .as_ref()
@@ -10784,17 +10909,11 @@ fn resolve_sheet_span(
     sheet: &SheetReference<usize>,
     current_sheet: SheetId,
     workbook: &Workbook,
-) -> Option<std::ops::RangeInclusive<SheetId>> {
+) -> Option<Vec<SheetId>> {
     match sheet {
-        SheetReference::Current => Some(current_sheet..=current_sheet),
-        SheetReference::Sheet(id) => Some(*id..=*id),
-        SheetReference::SheetRange(a, b) => {
-            let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
-            if end >= workbook.sheets.len() {
-                return None;
-            }
-            Some(start..=end)
-        }
+        SheetReference::Current => Some(vec![current_sheet]),
+        SheetReference::Sheet(id) => workbook.sheet_exists(*id).then(|| vec![*id]),
+        SheetReference::SheetRange(a, b) => workbook.sheet_span_ids(*a, *b),
         SheetReference::External(_) => None,
     }
 }
@@ -12401,6 +12520,40 @@ mod tests {
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 0);
+    }
+
+    #[test]
+    fn workbook_sheet_ids_are_stable_and_sheet_spans_follow_tab_order() {
+        let mut workbook = Workbook::default();
+        let sheet1 = workbook.ensure_sheet("Sheet1");
+        let sheet2 = workbook.ensure_sheet("Sheet2");
+        let sheet3 = workbook.ensure_sheet("Sheet3");
+
+        // Sheet names are case-insensitive.
+        assert_eq!(workbook.ensure_sheet("sheet1"), sheet1);
+        assert_eq!(workbook.sheet_id("SHEET2"), Some(sheet2));
+
+        // Default tab order matches creation order.
+        assert_eq!(workbook.sheet_ids_in_order(), &[sheet1, sheet2, sheet3]);
+        assert_eq!(workbook.sheet_order_index(sheet1), Some(0));
+        assert_eq!(workbook.sheet_name(sheet3), Some("Sheet3"));
+
+        // Reorder sheets without changing ids.
+        workbook.set_sheet_order(vec![sheet2, sheet3, sheet1]);
+        assert_eq!(workbook.sheet_ids_in_order(), &[sheet2, sheet3, sheet1]);
+        assert_eq!(workbook.sheet_id("Sheet1"), Some(sheet1));
+        assert_eq!(workbook.sheet_id("Sheet2"), Some(sheet2));
+        assert_eq!(workbook.sheet_id("Sheet3"), Some(sheet3));
+
+        // Excel-style 3D spans use tab order (and support reversed spans).
+        assert_eq!(
+            workbook.sheet_span_ids(sheet2, sheet1),
+            Some(vec![sheet2, sheet3, sheet1])
+        );
+        assert_eq!(
+            workbook.sheet_span_ids(sheet1, sheet2),
+            Some(vec![sheet1, sheet3, sheet2])
+        );
     }
 
     #[test]
