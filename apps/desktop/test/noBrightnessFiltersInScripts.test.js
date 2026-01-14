@@ -56,7 +56,7 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
     // React style objects (e.g. `{ filter: "brightness(0.9)" }`).
     { re: /\bfilter\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "filter (style object)" },
     // DOM style assignment (e.g. `el.style.filter = "brightness(0.9)"`)
-    { re: /\.style\.filter\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.filter" },
+    { re: /\.style\.filter\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.filter" },
     // setProperty("filter", "brightness(0.9)")
     {
       re: /\.style\.setProperty\(\s*(["'])filter\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,

@@ -66,7 +66,7 @@ test("desktop UI scripts should not hardcode px values for padding/margin/gap in
       },
       // DOM style assignment (e.g. `el.style.marginTop = "8px"`).
       {
-        re: /\.style\.(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\.style\.(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "style.prop",
       },
       // DOM style assignment (numeric) (e.g. `el.style.marginTop = 8`).
@@ -254,4 +254,3 @@ test("desktop UI scripts should not hardcode px values for padding/margin/gap in
       .join("\n")}`,
   );
 });
-

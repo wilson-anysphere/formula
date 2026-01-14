@@ -66,9 +66,9 @@ test("desktop UI scripts should not hardcode monospace font stacks in inline sty
     // React style objects (e.g. `{ font: "12px ui-monospace" }`).
     { re: /\bfont\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "font" },
     // DOM style assignment (e.g. `el.style.fontFamily = "ui-monospace"`).
-    { re: /\.style\.fontFamily\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.fontFamily" },
+    { re: /\.style\.fontFamily\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.fontFamily" },
     // DOM style assignment (e.g. `el.style.font = "12px ui-monospace"`).
-    { re: /\.style\.font\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.font" },
+    { re: /\.style\.font\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.font" },
     // setProperty("font-family", "ui-monospace")
     {
       re: /\.style\.setProperty\(\s*(["'])font-family\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
