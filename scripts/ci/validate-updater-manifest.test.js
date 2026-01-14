@@ -153,13 +153,26 @@ test("fails when a macOS updater entry points at a non-updater artifact (.dmg)",
   );
 });
 
-test("fails when a macOS updater entry points at a tarball that is not .app.tar.gz", () => {
+test("passes when a macOS updater entry points at a generic tarball (.tar.gz)", () => {
   const { platforms, assetNames } = baseline();
   const url = "https://github.com/example/repo/releases/download/v0.1.0/Formula_universal.tar.gz";
   platforms["darwin-x86_64"].url = url;
   platforms["darwin-aarch64"].url = url;
   assetNames.delete("Formula.app.tar.gz");
   assetNames.add("Formula_universal.tar.gz");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.invalidTargets, []);
+});
+
+test("fails when a macOS updater entry points at a Linux AppImage tarball", () => {
+  const { platforms, assetNames } = baseline();
+  const url = "https://github.com/example/repo/releases/download/v0.1.0/Formula.AppImage.tar.gz";
+  platforms["darwin-x86_64"].url = url;
+  platforms["darwin-aarch64"].url = url;
+  assetNames.delete("Formula.app.tar.gz");
+  assetNames.add("Formula.AppImage.tar.gz");
 
   const result = validatePlatformEntries({ platforms, assetNames });
   assert.ok(

@@ -6,7 +6,7 @@
  * - Ensures the manifest contains updater entries for all expected targets.
  * - Ensures each updater entry references an asset that exists on the GitHub Release.
  * - Ensures each target references the correct *self-updatable* artifact type:
- *   - macOS: `.app.tar.gz` updater archive (not the `.dmg`)
+ *   - macOS: updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (not the `.dmg`)
  *   - Windows: `.msi` (Windows Installer; updater runs this)
  *   - Linux: `.AppImage`
  * - Ensures required `{os}-{arch}` targets do not unexpectedly collide on the same updater URL
@@ -139,16 +139,24 @@ const EXPECTED_PLATFORMS = [
     key: "darwin-x86_64",
     label: "macOS (x86_64)",
     expectedAsset: {
-      description: `macOS updater archive (*.app.tar.gz)`,
-      matches: (assetName) => assetName.toLowerCase().endsWith(".app.tar.gz"),
+      description: `macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz/*.tgz)`,
+      matches: (assetName) => {
+        const lower = assetName.toLowerCase();
+        if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
+        return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
+      },
     },
   },
   {
     key: "darwin-aarch64",
     label: "macOS (aarch64)",
     expectedAsset: {
-      description: `macOS updater archive (*.app.tar.gz)`,
-      matches: (assetName) => assetName.toLowerCase().endsWith(".app.tar.gz"),
+      description: `macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz/*.tgz)`,
+      matches: (assetName) => {
+        const lower = assetName.toLowerCase();
+        if (lower.endsWith(".appimage.tar.gz") || lower.endsWith(".appimage.tgz")) return false;
+        return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
+      },
     },
   },
   {
