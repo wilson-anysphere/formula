@@ -271,6 +271,47 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     }
 }
 
+fn dax_identifier_requires_quotes(raw: &str) -> bool {
+    // DAX table identifiers can be written without quotes when they are simple identifier tokens.
+    // Anything containing whitespace/punctuation must be wrapped in single quotes, and embedded
+    // single quotes must be escaped as `''`.
+    //
+    // This is only used to generate a human-friendly display form for `PivotFieldRef`. Keep it
+    // conservative: if we're unsure, quote it.
+    let mut chars = raw.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return true;
+    }
+
+    for c in chars {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            continue;
+        }
+        return true;
+    }
+
+    false
+}
+
+fn quote_dax_identifier(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len() + 2);
+    out.push('\'');
+    for c in raw.chars() {
+        if c == '\'' {
+            out.push('\'');
+            out.push('\'');
+        } else {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    out
+}
+
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
