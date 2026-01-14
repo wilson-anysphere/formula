@@ -515,6 +515,11 @@ export function createEngineClient(options?: {
         }
       );
     });
+    // `createEngineClient` is often used in React effects where `init()` may be
+    // fired-and-forgotten (or cancelled during StrictMode cleanup). Attach a no-op
+    // rejection handler so a failed/aborted connect attempt never surfaces as an
+    // unhandled rejection when callers don't await.
+    void enginePromise.catch(() => {});
 
     void rawConnectPromise
       .then((connected) => {
@@ -556,8 +561,13 @@ export function createEngineClient(options?: {
   };
 
   return {
-    init: async () => {
-      await connect();
+    init: () => {
+      const promise = connect().then(() => undefined) as Promise<void>;
+      // Callers sometimes fire-and-forget initialization (e.g. app startup effects). Attach a no-op
+      // rejection handler so connect failures/timeouts don't surface as unhandled rejections when
+      // the returned promise isn't awaited.
+      void promise.catch(() => {});
+      return promise;
     },
     newWorkbook: async () => await withEngine((connected) => connected.newWorkbook()),
     loadWorkbookFromJson: async (json) => await withEngine((connected) => connected.loadWorkbookFromJson(json)),

@@ -42,6 +42,42 @@ class TestWorker {
 }
 
 describe("createEngineClient() connect timeout", () => {
+  it("does not emit unhandled rejections when init() is fire-and-forgotten and the connect attempt times out", async () => {
+    vi.useFakeTimers();
+    const originalWorker = (globalThis as any).Worker;
+    (globalThis as any).Worker = TestWorker;
+
+    const unhandled: unknown[] = [];
+    const handler = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", handler);
+
+    try {
+      TestWorker.mode = "hang";
+      TestWorker.terminateThrows = false;
+      const engine = createEngineClient({
+        wasmModuleUrl: "mock://wasm",
+        wasmBinaryUrl: "mock://wasm_bg.wasm",
+        connectTimeoutMs: 50,
+      });
+
+      // Fire-and-forget: caller does not await init().
+      void engine.init();
+
+      await vi.advanceTimersByTimeAsync(50);
+      // Give Node a tick to process unhandled rejection bookkeeping.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", handler);
+      (globalThis as any).Worker = originalWorker;
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects init() when the worker never sends the ready handshake within connectTimeoutMs", async () => {
     vi.useFakeTimers();
     const originalWorker = (globalThis as any).Worker;
