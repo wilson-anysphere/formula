@@ -119,6 +119,30 @@ fn index_over_sheet_range_uses_tab_order_after_reorder() {
 }
 
 #[test]
+fn index_over_reversed_sheet_range_uses_tab_order() {
+    // Reversed 3D spans (e.g. `Sheet3:Sheet1`) should refer to the same set of sheets as the
+    // forward span, ordered by workbook tab order.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(INDEX(Sheet3:Sheet1!A1,1,1,1))")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(1.0));
+
+    // Reverse the sheet tab order: Sheet3, Sheet2, Sheet1, Summary.
+    assert!(engine.reorder_sheet("Sheet3", 0));
+    assert!(engine.reorder_sheet("Sheet2", 1));
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(3.0));
+}
+
+#[test]
 fn bytecode_sum_over_sheet_range_uses_tab_order_after_reorder_for_error_precedence() {
     // The bytecode backend expands 3D sheet spans at compile time. Ensure that expansion follows
     // workbook tab order (not the textual order of the boundary sheets).
