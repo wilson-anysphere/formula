@@ -48,6 +48,17 @@ export type WorkbookTransact = (fn: () => void) => void;
 
 const METADATA_KEY = "encryptedRanges";
 
+function assertEncryptedRangesSchemaSupported(value: unknown): void {
+  if (value == null) return;
+  if (getYArray(value)) return;
+  if (getYMap(value)) return;
+  if (Array.isArray(value)) return;
+  const kind = (value as any)?.constructor?.name ?? typeof value;
+  throw new Error(
+    `Unsupported metadata.${METADATA_KEY} schema: expected Y.Array, Y.Map, or Array but found ${kind}`
+  );
+}
+
 function coerceString(value: unknown): string | null {
   const text = getYText(value);
   if (text) return text.toString();
@@ -292,6 +303,8 @@ export class EncryptedRangeManager {
   }
 
   add(range: EncryptedRangeAddInput): string {
+    assertEncryptedRangesSchemaSupported(this.metadata.get(METADATA_KEY));
+
     // Normalize foreign nested Yjs types (ESM/CJS) before we start an undo-tracked
     // transaction so collaborative undo only captures the user's change.
     this.normalizeEncryptedRangesForUndoScope();
@@ -339,6 +352,7 @@ export class EncryptedRangeManager {
 
   remove(id: string): void {
     const normalizedId = normalizeId(id);
+    assertEncryptedRangesSchemaSupported(this.metadata.get(METADATA_KEY));
 
     // If the doc contains duplicate encryptedRanges entries (e.g. concurrent inserts),
     // normalize before applying the tracked mutation. Prefer keeping the entry
@@ -360,6 +374,7 @@ export class EncryptedRangeManager {
 
   update(id: string, patch: EncryptedRangeUpdatePatch): void {
     const normalizedId = normalizeId(id);
+    assertEncryptedRangesSchemaSupported(this.metadata.get(METADATA_KEY));
     const patchSheetId = patch.sheetId == null ? undefined : normalizeSheetId(patch.sheetId);
     const resolveSheetId = createSheetIdResolverFromWorkbook(this.doc);
     const patchSheetIdResolved =
@@ -676,12 +691,12 @@ export class EncryptedRangeManager {
       } else if (Array.isArray(existing)) {
         for (const item of existing) cloneEntry(item);
       } else {
-        // Defensive: avoid clobbering unknown/corrupt schemas (could contain
-        // data from a newer client we don't know how to parse).
-        const kind = (existing as any)?.constructor?.name ?? typeof existing;
-        throw new Error(
-          `Unsupported metadata.${METADATA_KEY} schema: expected Y.Array, Y.Map, or Array but found ${kind}`
-        );
+        // Defensive: avoid clobbering unknown/corrupt schemas (could contain data from a newer
+        // client we don't know how to parse).
+        assertEncryptedRangesSchemaSupported(existing);
+        // `assertEncryptedRangesSchemaSupported` always throws for unknown types; keep this return
+        // for type-checkers.
+        return next;
       }
     }
 

@@ -41,6 +41,8 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(() =>
       mgr.add({ sheetId: "s1", startRow: 0, startCol: 0, endRow: 0, endCol: 0, keyId: "k1" })
     ).toThrow(/Unsupported metadata\.encryptedRanges schema/);
+    expect(() => mgr.update("r1", { endCol: 1 })).toThrow(/Unsupported metadata\.encryptedRanges schema/);
+    expect(() => mgr.remove("r1")).toThrow(/Unsupported metadata\.encryptedRanges schema/);
 
     // Should not clobber the original value.
     expect(metadata.get("encryptedRanges")).toEqual(bogus);
