@@ -1,4 +1,5 @@
 import type { DrawingTransform, Rect } from "./types";
+import { applyTransformVector } from "./transform";
 
 /**
  * Resize handles are drawn in the drawing overlay's screen-space coordinate system
@@ -130,65 +131,78 @@ export function hitTestResizeHandle(
   );
 }
 
-export function cursorForResizeHandle(handle: ResizeHandle, transform?: DrawingTransform): string {
-  // Fast path for untransformed objects (the common case).
-  if (!hasNonIdentityTransform(transform)) {
-    switch (handle) {
-      case "nw":
-      case "se":
-        return "nwse-resize";
-      case "ne":
-      case "sw":
-        return "nesw-resize";
-      case "n":
-      case "s":
-        return "ns-resize";
-      case "e":
-      case "w":
-        return "ew-resize";
-    }
-  }
-
-  // For rotated/flipped objects, map the local handle axis into screen-space and
-  // choose the closest available CSS cursor.
-  //
-  // We only have four cursor options (horizontal/vertical + two diagonals), so
-  // this is an approximation — but it keeps 90° rotations and flips intuitive.
-  let axisX = 0;
-  let axisY = 0;
+export function cursorForResizeHandle(handle: ResizeHandle): string {
   switch (handle) {
-    case "n":
-    case "s":
-      axisX = 0;
-      axisY = 1;
-      break;
-    case "e":
-    case "w":
-      axisX = 1;
-      axisY = 0;
-      break;
     case "nw":
     case "se":
-      axisX = 1;
-      axisY = 1;
-      break;
+      return "nwse-resize";
     case "ne":
     case "sw":
-      axisX = 1;
-      axisY = -1;
+      return "nesw-resize";
+    case "n":
+    case "s":
+      return "ns-resize";
+    case "e":
+    case "w":
+      return "ew-resize";
+  }
+}
+
+const SNAP_CURSOR_BY_45_DEG: readonly [string, string, string, string] = [
+  "ew-resize",
+  "nwse-resize",
+  "ns-resize",
+  "nesw-resize",
+];
+
+export function cursorForResizeHandleWithTransform(handle: ResizeHandle, transform?: DrawingTransform): string {
+  // Match the legacy mapping for the common "no transform" case.
+  if (!hasNonIdentityTransform(transform)) return cursorForResizeHandle(handle);
+
+  let dx = 0;
+  let dy = 0;
+  switch (handle) {
+    case "nw":
+      dx = -1;
+      dy = -1;
+      break;
+    case "n":
+      dx = 0;
+      dy = -1;
+      break;
+    case "ne":
+      dx = 1;
+      dy = -1;
+      break;
+    case "e":
+      dx = 1;
+      dy = 0;
+      break;
+    case "se":
+      dx = 1;
+      dy = 1;
+      break;
+    case "s":
+      dx = 0;
+      dy = 1;
+      break;
+    case "sw":
+      dx = -1;
+      dy = 1;
+      break;
+    case "w":
+      dx = -1;
+      dy = 0;
       break;
   }
 
-  const trig = getTransformTrig(transform!);
-  const v = applyTransformVectorFast(axisX, axisY, transform!, trig);
-  const ax = Math.abs(v.x);
-  const ay = Math.abs(v.y);
-
-  if (handle === "n" || handle === "s" || handle === "e" || handle === "w") {
-    // Edge handles: choose horizontal vs vertical based on dominant axis.
-    return ax >= ay ? "ew-resize" : "ns-resize";
-  }
-
-  // Corner handles: choose the diagonal based on the transformed axis orientation.
-  return v.x * v.y >= 0 ? "nwse-resize" : "nesw-resize";
+  const v = applyTransformVector(dx, dy, transform!);
+  const angleDeg = (Math.atan2(v.y, v.x) * 180) / Math.PI;
+  // Reduce to [0, 180) since cursor direction is symmetric under 180° rotation.
+  const normalized = ((angleDeg % 180) + 180) % 180;
+  // Snap to nearest 45° (0, 45, 90, 135) modulo 180.
+  const rawIndex = Math.round(normalized / 45);
+  if (!Number.isFinite(rawIndex)) return cursorForResizeHandle(handle);
+  const snappedIndex = ((rawIndex % 4) + 4) % 4;
+  return SNAP_CURSOR_BY_45_DEG[snappedIndex];
 }

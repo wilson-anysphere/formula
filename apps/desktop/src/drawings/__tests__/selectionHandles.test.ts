@@ -4,6 +4,7 @@ import { pxToEmu } from "../overlay";
 import { DrawingInteractionController } from "../interaction";
 import {
   cursorForResizeHandle,
+  cursorForResizeHandleWithTransform,
   getResizeHandleCenters,
   hitTestResizeHandle,
   type ResizeHandle,
@@ -73,18 +74,44 @@ describe("drawings selection handles", () => {
     }
   });
 
-  it("cursorForResizeHandle accounts for object rotation", () => {
+  it("cursorForResizeHandleWithTransform matches cursorForResizeHandle at rotationDeg=0", () => {
+    const identity: DrawingTransform = { rotationDeg: 0, flipH: false, flipV: false };
+    const handles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+    for (const handle of handles) {
+      expect(cursorForResizeHandleWithTransform(handle, identity)).toBe(cursorForResizeHandle(handle));
+    }
+  });
+
+  it("cursorForResizeHandleWithTransform accounts for object rotation", () => {
     const t90: DrawingTransform = { rotationDeg: 90, flipH: false, flipV: false };
-    expect(cursorForResizeHandle("n", t90)).toBe("ew-resize");
-    expect(cursorForResizeHandle("s", t90)).toBe("ew-resize");
-    expect(cursorForResizeHandle("e", t90)).toBe("ns-resize");
-    expect(cursorForResizeHandle("w", t90)).toBe("ns-resize");
+    expect(cursorForResizeHandleWithTransform("n", t90)).toBe("ew-resize");
+    expect(cursorForResizeHandleWithTransform("s", t90)).toBe("ew-resize");
+    expect(cursorForResizeHandleWithTransform("e", t90)).toBe("ns-resize");
+    expect(cursorForResizeHandleWithTransform("w", t90)).toBe("ns-resize");
 
     // 90° rotation swaps the diagonals.
-    expect(cursorForResizeHandle("nw", t90)).toBe("nesw-resize");
-    expect(cursorForResizeHandle("se", t90)).toBe("nesw-resize");
-    expect(cursorForResizeHandle("ne", t90)).toBe("nwse-resize");
-    expect(cursorForResizeHandle("sw", t90)).toBe("nwse-resize");
+    expect(cursorForResizeHandleWithTransform("nw", t90)).toBe("nesw-resize");
+    expect(cursorForResizeHandleWithTransform("se", t90)).toBe("nesw-resize");
+    expect(cursorForResizeHandleWithTransform("ne", t90)).toBe("nwse-resize");
+    expect(cursorForResizeHandleWithTransform("sw", t90)).toBe("nwse-resize");
+  });
+
+  it("cursorForResizeHandleWithTransform is resilient to flips", () => {
+    const handles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+    const cursors = new Set(["ns-resize", "ew-resize", "nwse-resize", "nesw-resize"]);
+    const transforms: DrawingTransform[] = [
+      { rotationDeg: 0, flipH: true, flipV: false },
+      { rotationDeg: 0, flipH: false, flipV: true },
+      { rotationDeg: 0, flipH: true, flipV: true },
+      { rotationDeg: 45, flipH: true, flipV: false },
+      { rotationDeg: 45, flipH: false, flipV: true },
+      { rotationDeg: 45, flipH: true, flipV: true },
+    ];
+    for (const transform of transforms) {
+      for (const handle of handles) {
+        expect(cursors.has(cursorForResizeHandleWithTransform(handle, transform))).toBe(true);
+      }
+    }
   });
 
   it("DrawingInteractionController updates cursor on hover for selected object handles", () => {
@@ -192,7 +219,7 @@ describe("drawings selection handles", () => {
     const bounds = { x: 100, y: 200, width: 80, height: 40 };
     for (const c of getResizeHandleCenters(bounds, transform)) {
       pointerMove!(makePointerEvent(c.x, c.y));
-      expect(canvas.style.cursor).toBe(cursorForResizeHandle(c.handle, transform));
+      expect(canvas.style.cursor).toBe(cursorForResizeHandleWithTransform(c.handle, transform));
     }
   });
 

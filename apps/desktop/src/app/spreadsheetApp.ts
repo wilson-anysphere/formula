@@ -20,6 +20,7 @@ import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawings, type H
 import { DrawingInteractionController, resizeAnchor, shiftAnchor, type DrawingInteractionCallbacks } from "../drawings/interaction";
 import {
   cursorForResizeHandle,
+  cursorForResizeHandleWithTransform,
   getResizeHandleCenters,
   hitTestResizeHandle,
   RESIZE_HANDLE_SIZE_PX,
@@ -6655,7 +6656,7 @@ export class SpreadsheetApp {
     const hit = hitTestDrawings(index, viewport, x, y);
     if (!hit) return null;
     const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
-    if (handle) return cursorForResizeHandle(handle, hit.object.transform);
+    if (handle) return cursorForResizeHandleWithTransform(handle, hit.object.transform);
     return "move";
   }
 

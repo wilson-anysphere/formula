@@ -2,7 +2,7 @@ import type { AnchorPoint, DrawingObject, DrawingTransform, Rect } from "./types
 import type { GridGeometry, Viewport } from "./overlay";
 import { anchorToRectPx, emuToPx, pxToEmu } from "./overlay";
 import { buildHitTestIndex, hitTestDrawings, hitTestDrawingsObject, type HitTestIndex } from "./hitTest";
-import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "./selectionHandles";
+import { cursorForResizeHandleWithTransform, hitTestResizeHandle, type ResizeHandle } from "./selectionHandles";
 import {
   extractXfrmOff,
   patchAnchorExt,
@@ -159,7 +159,7 @@ export class DrawingInteractionController {
             startObjects: objects,
             transform: selectedObject.transform,
           };
-          this.element.style.cursor = cursorForResizeHandle(handle, selectedObject.transform);
+          this.element.style.cursor = cursorForResizeHandleWithTransform(handle, selectedObject.transform);
           return;
         }
       }
@@ -190,7 +190,7 @@ export class DrawingInteractionController {
         startObjects: objects,
         transform: hit.object.transform,
       };
-      this.element.style.cursor = cursorForResizeHandle(handle, hit.object.transform);
+      this.element.style.cursor = cursorForResizeHandleWithTransform(handle, hit.object.transform);
     } else {
       this.dragging = {
         id: hit.object.id,
@@ -220,7 +220,7 @@ export class DrawingInteractionController {
         };
       });
       this.callbacks.setObjects(next);
-      this.element.style.cursor = cursorForResizeHandle(this.resizing.handle, this.resizing.transform);
+      this.element.style.cursor = cursorForResizeHandleWithTransform(this.resizing.handle, this.resizing.transform);
       return;
     }
 
@@ -339,7 +339,7 @@ export class DrawingInteractionController {
           const bounds = objectToScreenRect(selected, viewport, this.geom, index.bounds[selectedIndex], this.scratchRect);
           const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
           if (handle) {
-            this.element.style.cursor = cursorForResizeHandle(handle, selected.transform);
+            this.element.style.cursor = cursorForResizeHandleWithTransform(handle, selected.transform);
             return;
           }
           if (pointInRect(x, y, bounds)) {
