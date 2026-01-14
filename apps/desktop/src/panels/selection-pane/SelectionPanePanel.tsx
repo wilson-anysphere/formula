@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DrawingObject, DrawingObjectId } from "../../drawings/types";
 
@@ -34,6 +34,7 @@ function DrawingKindIcon({ kind }: { kind: DrawingObject["kind"]["type"] }) {
 }
 
 export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [drawings, setDrawings] = useState<DrawingObject[]>(() => app.listDrawingsForSheet());
   const [selectedId, setSelectedId] = useState<DrawingObjectId | null>(() => app.getSelectedDrawingId());
 
@@ -81,8 +82,70 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
     });
   }, [drawings]);
 
+  const scrollItemIntoView = useCallback((id: DrawingObjectId) => {
+    if (typeof document === "undefined") return;
+    const root = rootRef.current;
+    if (!root) return;
+    try {
+      const el = root.querySelector<HTMLElement>(`[data-testid="selection-pane-item-${id}"]`);
+      el?.scrollIntoView?.({ block: "nearest" });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (items.length === 0) return;
+      // Only handle keys when the Selection Pane root itself is focused.
+      // (If a per-row action button is focused, allow normal Tab navigation and avoid
+      // hijacking keyboard interactions.)
+      if (e.target !== e.currentTarget) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const currentIndex = selectedId == null ? -1 : items.findIndex(({ obj }) => obj.id === selectedId);
+
+      const selectIndex = (nextIndex: number) => {
+        if (nextIndex < 0 || nextIndex >= items.length) return;
+        const nextId = items[nextIndex]!.obj.id;
+        if (nextId === selectedId) return;
+        e.preventDefault();
+        e.stopPropagation();
+        app.selectDrawingById(nextId);
+        scrollItemIntoView(nextId);
+      };
+
+      switch (e.key) {
+        case "ArrowDown":
+          selectIndex(currentIndex < 0 ? 0 : Math.min(currentIndex + 1, items.length - 1));
+          return;
+        case "ArrowUp":
+          selectIndex(currentIndex < 0 ? items.length - 1 : Math.max(currentIndex - 1, 0));
+          return;
+        case "Home":
+          selectIndex(0);
+          return;
+        case "End":
+          selectIndex(items.length - 1);
+          return;
+        case "Delete":
+        case "Backspace": {
+          if (selectedId == null) return;
+          if (typeof app.deleteDrawingById !== "function") return;
+          e.preventDefault();
+          e.stopPropagation();
+          app.deleteDrawingById(selectedId);
+          return;
+        }
+        default:
+          return;
+      }
+    },
+    [app, items, scrollItemIntoView, selectedId],
+  );
+
   return (
-    <div className="selection-pane" data-testid="selection-pane" tabIndex={0}>
+    <div className="selection-pane" data-testid="selection-pane" tabIndex={0} ref={rootRef} onKeyDown={handleKeyDown}>
       {items.length === 0 ? (
         <div className="selection-pane__empty" data-testid="selection-pane-empty">
           No objects on this sheet.

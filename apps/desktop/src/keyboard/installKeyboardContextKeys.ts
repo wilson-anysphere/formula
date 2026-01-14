@@ -13,6 +13,7 @@ import type { SpreadsheetApp } from "../app/spreadsheetApp";
  * - `focus.inSheetTabs`: `document.activeElement` is within the sheet tab strip (tablist)
  * - `focus.inSheetTabRename`: `document.activeElement` is within sheet tabs root *and* is a text input
  * - `focus.inGrid`: `document.activeElement` is within either the primary or secondary grid root
+ * - `focus.inSelectionPane`: `document.activeElement` is within the Selection Pane panel (drawing listbox)
  * - `spreadsheet.isEditing`: SpreadsheetApp is editing *or* split-view secondary editor is editing
  * - `spreadsheet.formulaBarEditing`: `app.isFormulaBarEditing()`
  * - `spreadsheet.formulaBarFormulaEditing`: `app.isFormulaBarFormulaEditing()`
@@ -25,6 +26,7 @@ export const KeyboardContextKeyIds = {
   focusInSheetTabs: "focus.inSheetTabs",
   focusInSheetTabRename: "focus.inSheetTabRename",
   focusInGrid: "focus.inGrid",
+  focusInSelectionPane: "focus.inSelectionPane",
   spreadsheetIsEditing: "spreadsheet.isEditing",
   spreadsheetFormulaBarEditing: "spreadsheet.formulaBarEditing",
   spreadsheetFormulaBarFormulaEditing: "spreadsheet.formulaBarFormulaEditing",
@@ -106,6 +108,14 @@ export function installKeyboardContextKeys(params: KeyboardContextKeysParams): K
     const inSheetTabsRoot = safeContains(sheetTabsRoot, active);
     const inSheetTabRename = inSheetTabsRoot && inTextInput;
     const inGrid = safeContains(gridRoot, active) || (gridSecondaryRoot ? safeContains(gridSecondaryRoot, active) : false);
+    const inSelectionPane = (() => {
+      if (!active) return false;
+      try {
+        return typeof active.closest === "function" && Boolean(active.closest(".selection-pane"));
+      } catch {
+        return false;
+      }
+    })();
 
     const secondaryEditing = isSplitViewSecondaryEditing?.() === true;
     const isEditing = Boolean(app.isEditing() || secondaryEditing);
@@ -116,6 +126,7 @@ export function installKeyboardContextKeys(params: KeyboardContextKeysParams): K
       [KeyboardContextKeyIds.focusInSheetTabs]: inSheetTabs,
       [KeyboardContextKeyIds.focusInSheetTabRename]: inSheetTabRename,
       [KeyboardContextKeyIds.focusInGrid]: inGrid,
+      [KeyboardContextKeyIds.focusInSelectionPane]: inSelectionPane,
       [KeyboardContextKeyIds.spreadsheetIsEditing]: isEditing,
       [KeyboardContextKeyIds.spreadsheetFormulaBarEditing]: Boolean(app.isFormulaBarEditing()),
       [KeyboardContextKeyIds.spreadsheetFormulaBarFormulaEditing]: Boolean(app.isFormulaBarFormulaEditing()),

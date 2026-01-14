@@ -306,7 +306,9 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     key: "delete",
     // macOS keyboards use Backspace for the "delete backwards" key.
     mac: "backspace",
-    when: WHEN_SPREADSHEET_READY,
+    // The Selection Pane should behave like Excel: Delete removes the selected drawing object,
+    // not the active cell contents.
+    when: `${WHEN_SPREADSHEET_READY} && focus.inSelectionPane != true`,
   },
   {
     command: "edit.fillDown",
