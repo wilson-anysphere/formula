@@ -53,7 +53,7 @@ pub fn parse_chart_ex(
     let root_ns = root.tag_name().namespace().unwrap_or("");
 
     let external_data_node = root
-        .children()
+        .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "externalData");
     let external_data_rel_id = external_data_node
         .and_then(|n| {

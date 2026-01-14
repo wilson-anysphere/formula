@@ -63,7 +63,9 @@ pub fn parse_chart_space(
 
     let external_data_node = chart_space
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "externalData");
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_external_data_node))
+        .find(|n| is_external_data_node(*n));
     let external_data_rel_id = external_data_node
         .and_then(|n| {
             n.attribute((REL_NS, "id"))
@@ -638,6 +640,10 @@ fn is_sppr_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
 
 fn is_layout_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
     node.is_element() && node.tag_name().name() == "layout"
+}
+
+fn is_external_data_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "externalData"
 }
 
 fn is_ser_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
