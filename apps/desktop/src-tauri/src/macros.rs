@@ -1,5 +1,8 @@
 use crate::file_io::Workbook;
-use crate::resource_limits::{MAX_MACRO_OUTPUT_BYTES, MAX_MACRO_OUTPUT_LINES, MAX_MACRO_UPDATES};
+use crate::resource_limits::{
+    MAX_CELL_FORMULA_BYTES, MAX_CELL_VALUE_STRING_BYTES, MAX_MACRO_OUTPUT_BYTES,
+    MAX_MACRO_OUTPUT_LINES, MAX_MACRO_UPDATES,
+};
 use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{AppState, CellScalar, CellUpdateData};
 use formula_vba_runtime::Spreadsheet;
@@ -577,8 +580,18 @@ impl<'a> AppStateSpreadsheet<'a> {
             }
             formula_vba_runtime::VbaValue::String(s) => {
                 if s.starts_with('=') {
+                    if s.len() > MAX_CELL_FORMULA_BYTES {
+                        return Err(formula_vba_runtime::VbaError::Runtime(format!(
+                            "cell formula is too large (max {MAX_CELL_FORMULA_BYTES} bytes)"
+                        )));
+                    }
                     Ok((None, Some(s.clone())))
                 } else {
+                    if s.len() > MAX_CELL_VALUE_STRING_BYTES {
+                        return Err(formula_vba_runtime::VbaError::Runtime(format!(
+                            "cell value string is too large (max {MAX_CELL_VALUE_STRING_BYTES} bytes)"
+                        )));
+                    }
                     Ok((Some(serde_json::Value::from(s.clone())), None))
                 }
             }
@@ -760,6 +773,12 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             return Err(formula_vba_runtime::VbaError::Runtime(
                 "Row/col are 1-based".to_string(),
             ));
+        }
+
+        if formula.len() > MAX_CELL_FORMULA_BYTES {
+            return Err(formula_vba_runtime::VbaError::Runtime(format!(
+                "cell formula is too large (max {MAX_CELL_FORMULA_BYTES} bytes)"
+            )));
         }
 
         let updates = self
@@ -1076,7 +1095,10 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resource_limits::{MAX_MACRO_OUTPUT_BYTES, MAX_MACRO_OUTPUT_LINES, MAX_MACRO_UPDATES};
+    use crate::resource_limits::{
+        MAX_CELL_FORMULA_BYTES, MAX_CELL_VALUE_STRING_BYTES, MAX_MACRO_OUTPUT_BYTES,
+        MAX_MACRO_OUTPUT_LINES, MAX_MACRO_UPDATES,
+    };
     use crate::state::Cell;
 
     fn empty_state_with_sheet() -> AppState {
@@ -1166,6 +1188,68 @@ End Sub
             out[0].capacity() <= max_line_bytes,
             "expected log output capacity <= {max_line_bytes}, got {}",
             out[0].capacity()
+        );
+    }
+
+    #[test]
+    fn macro_aborts_when_cell_value_string_is_too_large() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        let info = state.load_workbook(workbook);
+        let sheet_id = info.sheets[0].id.clone();
+
+        let payload = "x".repeat(MAX_CELL_VALUE_STRING_BYTES + 1);
+        let source = format!(
+            r#"
+Sub BigValue()
+    Range("A1").Value = "{payload}"
+End Sub
+"#
+        );
+
+        let program = formula_vba_runtime::parse_program(&source).expect("parse program");
+        let (outcome, _ctx) = execute_invocation(
+            &mut state,
+            program,
+            MacroRuntimeContext::default(),
+            None,
+            MacroInvocation::Procedure {
+                macro_id: "BigValue".to_string(),
+            },
+            MacroExecutionOptions::default(),
+        )
+        .expect("execute macro");
+
+        assert!(!outcome.ok, "expected macro to fail due to value size limit");
+        let err = outcome.error.expect("expected error message");
+        assert!(
+            err.contains(&MAX_CELL_VALUE_STRING_BYTES.to_string()),
+            "expected error to mention limit {MAX_CELL_VALUE_STRING_BYTES}, got: {err}"
+        );
+        assert_eq!(
+            state.get_cell(&sheet_id, 0, 0).unwrap().value,
+            CellScalar::Empty
+        );
+    }
+
+    #[test]
+    fn set_cell_formula_rejects_oversized_formulas() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut sheet =
+            AppStateSpreadsheet::new(&mut state, MacroRuntimeContext::default()).expect("new sheet");
+
+        let oversized = format!("={}", "1".repeat(MAX_CELL_FORMULA_BYTES));
+        let err = sheet
+            .set_cell_formula(0, 1, 1, oversized)
+            .expect_err("expected oversized formula to be rejected");
+        assert!(
+            err.to_string().contains(&MAX_CELL_FORMULA_BYTES.to_string()),
+            "expected error to mention limit {MAX_CELL_FORMULA_BYTES}, got: {err}"
         );
     }
 
