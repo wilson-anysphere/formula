@@ -293,6 +293,21 @@ jobs:
             throw "NSIS installation failed: makensis.exe not found on PATH."
           }
 
+      - name: Install 7-Zip (required for NSIS payload validation)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (-not (Get-Command 7z.exe -ErrorAction SilentlyContinue)) {
+            choco install 7zip --no-progress -y
+            if (Test-Path "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1") {
+              Import-Module "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1"
+              refreshenv
+            }
+          }
+          if (-not (Get-Command 7z.exe -ErrorAction SilentlyContinue)) {
+            throw "7-Zip installation failed: 7z.exe not found on PATH."
+          }
+
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
