@@ -7,6 +7,7 @@ import {
   defaultDesktopBinPath,
   parseStartupLine,
   parseProcChildrenPids,
+  formatPerfPath,
   percentile,
   repoRoot,
   resolvePerfHome,
@@ -52,12 +53,6 @@ function isSubpath(parentDir: string, maybeChild: string): boolean {
   // `path.relative()` can return an absolute path on Windows when drives differ.
   if (isAbsolute(rel)) return false;
   return true;
-}
-
-function formatLogPath(path: string): string {
-  const rel = relative(repoRoot, path);
-  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return path;
-  return rel;
 }
 
 function usage(): string {
@@ -604,17 +599,17 @@ async function main(): Promise<void> {
   const profileRoot = resolve(perfHome, `desktop-memory-${Date.now()}-${process.pid}`);
   // eslint-disable-next-line no-console
   console.log(
-    `[desktop-memory] measuring idle memory for the desktop app (${memoryKind} after TTI).\n` +
-      `- runs: ${runs} (override via --runs or FORMULA_DESKTOP_MEMORY_RUNS)\n` +
-      `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_MEMORY_TIMEOUT_MS)\n` +
-      `- settle: ${settleMs}ms (override via --settle-ms or FORMULA_DESKTOP_MEMORY_SETTLE_MS)\n` +
-      `- target: ${targetMb}MB (override via --target-mb or FORMULA_DESKTOP_IDLE_RSS_TARGET_MB)\n` +
-      `- perf-home: ${formatLogPath(perfHome)} (override with FORMULA_PERF_HOME)\n` +
-      `- profile: ${formatLogPath(profileRoot)}\n` +
-      (enforce
-        ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=0 to disable)\n"
-        : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1 or pass --enforce to fail on regression)\n"),
-  );
+      `[desktop-memory] measuring idle memory for the desktop app (${memoryKind} after TTI).\n` +
+        `- runs: ${runs} (override via --runs or FORMULA_DESKTOP_MEMORY_RUNS)\n` +
+        `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_MEMORY_TIMEOUT_MS)\n` +
+        `- settle: ${settleMs}ms (override via --settle-ms or FORMULA_DESKTOP_MEMORY_SETTLE_MS)\n` +
+        `- target: ${targetMb}MB (override via --target-mb or FORMULA_DESKTOP_IDLE_RSS_TARGET_MB)\n` +
+        `- perf-home: ${formatPerfPath(perfHome)} (override with FORMULA_PERF_HOME)\n` +
+        `- profile: ${formatPerfPath(profileRoot)}\n` +
+        (enforce
+          ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=0 to disable)\n"
+          : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1 or pass --enforce to fail on regression)\n"),
+    );
 
   const results: number[] = [];
   for (let i = 0; i < runs; i += 1) {

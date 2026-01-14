@@ -47,19 +47,19 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 import { type BenchmarkResult } from './benchmark.ts';
 import {
   defaultDesktopBinPath,
   findPidForExecutableLinux,
   getProcessRssMbLinux,
+  formatPerfPath,
   mean,
   median,
   percentile,
   buildDesktopStartupProfileRoot,
   runDesktopStartupIterations,
-  repoRoot,
   resolveDesktopStartupArgv,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupMode,
@@ -101,12 +101,6 @@ function buildResult(
     targetMs: target,
     passed: p95 <= target,
   };
-}
-
-function formatLogPath(path: string): string {
-  const rel = relative(repoRoot, path);
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return path;
-  return rel;
 }
 
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -263,7 +257,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
       },
       afterCaptureTimeoutMs: rssIdleDelayMs + 4000,
       onProgress: ({ phase, mode, iteration, total, profileDir }) => {
-        const profileLabel = formatLogPath(profileDir);
+        const profileLabel = formatPerfPath(profileDir);
         // eslint-disable-next-line no-console
         if (phase === 'warmup') {
           console.log(`[desktop-${benchKind}-startup] warmup run 1/1 (warm, profile=${profileLabel})...`);

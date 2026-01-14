@@ -112,6 +112,18 @@ export function resolveDesktopStartupBenchKind(options: {
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
+/**
+ * Format an absolute path as repo-relative when possible.
+ *
+ * Useful for perf logs that run in CI (where absolute paths can be noisy), while still showing an
+ * absolute path when the value points outside the repo.
+ */
+export function formatPerfPath(path: string): string {
+  const relPath = relative(repoRoot, path);
+  if (relPath === '' || relPath.startsWith('..') || isAbsolute(relPath)) return path;
+  return relPath;
+}
+
 export function resolvePerfHome(): string {
   const fromEnv = process.env.FORMULA_PERF_HOME;
   if (fromEnv && fromEnv.trim() !== '') {

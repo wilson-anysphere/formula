@@ -20,7 +20,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { isAbsolute, parse, relative, resolve } from 'node:path';
+import { parse, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { type BenchmarkResult } from './benchmark.ts';
@@ -28,6 +28,7 @@ import {
   defaultDesktopBinPath,
   collectProcessTreePidsLinux,
   findPidForExecutableLinux,
+  formatPerfPath,
   getProcessTreeRssBytesLinux,
   mean,
   median,
@@ -42,12 +43,6 @@ import {
 
 // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
 const perfHome = resolvePerfHome();
-
-function formatLogPath(path: string): string {
-  const rel = relative(repoRoot, path);
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return path;
-  return rel;
-}
 
 function resolveProfileDirs(profileDir: string): {
   home: string;
@@ -414,7 +409,7 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `[desktop-memory] idle RSS benchmark: runs=${runs} settleMs=${settleMs} timeoutMs=${timeoutMs} targetMb=${targetMb} profile=${formatLogPath(profileRoot)}`,
+    `[desktop-memory] idle RSS benchmark: runs=${runs} settleMs=${settleMs} timeoutMs=${timeoutMs} targetMb=${targetMb} profile=${formatPerfPath(profileRoot)}`,
   );
 
   const values: number[] = [];
