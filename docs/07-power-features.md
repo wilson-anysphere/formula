@@ -850,6 +850,10 @@ Engine adapter notes (in-tree today):
   - errors are degraded to their error code string (e.g. `"#DIV/0!"`)
   - rich values (entities/records, references, lambdas, etc.) are degraded to the engine display string
   - implication: if a target/output cell evaluates to an error or a non-scalar, What‑If tools will typically treat it as **non-numeric** and return `WhatIfError::NonNumericCell`.
+- Calculation mode:
+  - `formula_engine::Engine` supports “automatic” calculation mode where `set_cell_value` triggers an immediate recalc.
+  - Goal Seek / Scenario apply / Monte Carlo / Solver all call `recalculate()` explicitly as part of their algorithms.
+  - To avoid redundant recalculation (and large slowdowns), hosts should keep the engine in **manual** calculation mode while running these tools (this is also the engine’s default in-tree today).
 
 Proposed JS/WASM DTOs (directly compatible with the current serde shapes):
 
