@@ -44,5 +44,27 @@ describe("parseDrawingMLShapeText (DOMParser path)", () => {
       vi.unstubAllGlobals();
     }
   });
-});
 
+  it("preserves <a:tab/> placeholders as tab characters", () => {
+    const rawXml = `
+      <xdr:sp
+        xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+      >
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p>
+            <a:r><a:t>Hello</a:t></a:r>
+            <a:tab/>
+            <a:r><a:t>World</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("Hello\tWorld");
+  });
+});

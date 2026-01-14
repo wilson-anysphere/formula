@@ -1836,6 +1836,7 @@ function layoutShapeTextLines(
   let width = 0;
   let maxFontSizePx = 0;
   const scale = Number.isFinite(opts.zoom) && opts.zoom > 0 ? opts.zoom : 1;
+  const normalizeText = (text: string): string => (text.includes("\t") ? text.replaceAll("\t", "    ") : text);
 
   const flush = () => {
     if (segments.length === 0) {
@@ -1853,10 +1854,11 @@ function layoutShapeTextLines(
   };
 
   const appendText = (text: string, run: ShapeTextRun) => {
-    if (text === "") return;
+    const normalized = normalizeText(text);
+    if (normalized === "") return;
     const { font, fontSizePx } = shapeRunFont(run, scale);
     ctx.font = font;
-    const measured = ctx.measureText(text).width;
+    const measured = ctx.measureText(normalized).width;
     const color = run.color ?? opts.defaultColor;
     const underline = Boolean(run.underline);
 
@@ -1865,10 +1867,10 @@ function layoutShapeTextLines(
     const key = runKey(run);
     const prev = segments[segments.length - 1];
     if (prev && runKey(prev.run) === key && prev.color === color && prev.font === font) {
-      prev.text += text;
+      prev.text += normalized;
       prev.width += measured;
     } else {
-      segments.push({ text, run, font, fontSizePx, color, underline, width: measured });
+      segments.push({ text: normalized, run, font, fontSizePx, color, underline, width: measured });
     }
     width += measured;
   };
@@ -1882,17 +1884,21 @@ function layoutShapeTextLines(
     const tokens = chunk.split(/(\s+)/);
     for (const token of tokens) {
       if (token === "") continue;
-      if (segments.length === 0 && token.trim() === "") continue;
+      // Leading tabs are meaningful (Excel uses `<a:tab/>` for indentation). Keep them when
+      // present, but continue to drop leading spaces when wrapping so we don't create
+      // accidental extra whitespace.
+      if (segments.length === 0 && token.trim() === "" && !token.includes("\t")) continue;
 
       const { font } = shapeRunFont(run, scale);
       ctx.font = font;
-      const tokenWidth = ctx.measureText(token).width;
+      const normalizedToken = normalizeText(token);
+      const tokenWidth = ctx.measureText(normalizedToken).width;
       if (segments.length > 0 && width + tokenWidth > maxWidth) {
         flush();
         if (token.trim() === "") continue;
       }
 
-      appendText(token, run);
+      appendText(normalizedToken, run);
     }
   };
 

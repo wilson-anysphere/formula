@@ -38,6 +38,44 @@ describe("parseDrawingMLShapeText", () => {
     expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("Line 1\nLine 2");
   });
 
+  it("preserves <a:tab/> placeholders as tab characters", () => {
+    const rawXml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p>
+            <a:r><a:t>Hello</a:t></a:r>
+            <a:tab/>
+            <a:r><a:t>World</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("Hello\tWorld");
+  });
+
+  it("decodes numeric XML entities (including code points > 0xFFFF)", () => {
+    const rawXml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p>
+            <a:r><a:t>Hello &#x1F600;</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const parsed = parseDrawingMLShapeText(rawXml);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.textRuns.map((r) => r.text).join("")).toBe("Hello 😀");
+  });
+
   it("applies default run styles with per-run overrides", () => {
     const rawXml = `
       <xdr:sp>

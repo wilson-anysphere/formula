@@ -101,6 +101,30 @@ describe("DrawingOverlay shapes", () => {
     expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
   });
 
+  it("renders <a:tab/> placeholders as spaces on the canvas", () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const xml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr wrap="none"/>
+          <a:lstStyle/>
+          <a:p>
+            <a:r><a:t>Hello</a:t></a:r>
+            <a:tab/>
+            <a:r><a:t>World</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+      </xdr:sp>
+    `;
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+    overlay.render([createShapeObject(xml, { widthPx: 200, heightPx: 40 })], viewport);
+
+    expect(calls.some((call) => call.method === "fillText" && call.args[0] === "Hello    World")).toBe(true);
+  });
+
   it("renders line shapes using moveTo/lineTo", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);

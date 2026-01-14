@@ -252,6 +252,11 @@ function parseShapeTextDom(rawXml: string): ShapeTextLayout | null {
         continue;
       }
 
+      if (el.localName === "tab") {
+        textRuns.push({ text: "\t", ...paraDefaultStyle });
+        continue;
+      }
+
       if (el.localName !== "r" && el.localName !== "fld") continue;
       const rPr = findFirstByLocalName(el, "rPr");
       const style = mergeStyle(paraDefaultStyle, parseRunStyleFromDom(rPr));
@@ -275,8 +280,24 @@ function decodeXmlEntities(text: string): string {
     .replaceAll("&quot;", '"')
     .replaceAll("&apos;", "'")
     .replaceAll("&amp;", "&")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(Number.parseInt(code, 16)));
+    .replace(/&#(\d+);/g, (match, code) => {
+      const cp = Number.parseInt(code, 10);
+      if (!Number.isFinite(cp)) return match;
+      try {
+        return String.fromCodePoint(cp);
+      } catch {
+        return match;
+      }
+    })
+    .replace(/&#x([0-9a-fA-F]+);/g, (match, code) => {
+      const cp = Number.parseInt(code, 16);
+      if (!Number.isFinite(cp)) return match;
+      try {
+        return String.fromCodePoint(cp);
+      } catch {
+        return match;
+      }
+    });
 }
 
 function getAttrFromTag(tagXml: string, name: string): string | null {
@@ -365,13 +386,18 @@ function parseShapeTextFallback(rawXml: string): ShapeTextLayout | null {
 
     const paraDefaultStyle = mergeStyle(shapeDefaultStyle, parseRunStyleFromXmlSnippet(extractFirstElementXml(pPrXml ?? "", "defRPr")));
 
-    // Walk runs + breaks in order within the paragraph.
+    // Walk runs + breaks/tabs in order within the paragraph.
     const nodeRe =
-      /<(?:[A-Za-z_][\w.-]*:)?(r|fld)\b[^>]*>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?\1\s*>|<(?:[A-Za-z_][\w.-]*:)?br\b[^>]*\/>|<(?:[A-Za-z_][\w.-]*:)?br\b[^>]*>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?br\s*>/gi;
+      /<(?:[A-Za-z_][\w.-]*:)?(r|fld)\b[^>]*>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?\1\s*>|<(?:[A-Za-z_][\w.-]*:)?br\b[^>]*\/>|<(?:[A-Za-z_][\w.-]*:)?br\b[^>]*>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?br\s*>|<(?:[A-Za-z_][\w.-]*:)?tab\b[^>]*\/>|<(?:[A-Za-z_][\w.-]*:)?tab\b[^>]*>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?tab\s*>/gi;
     for (const match of pInner.matchAll(nodeRe)) {
       const chunk = match[0] ?? "";
-      if (/(?:^|<)[^>]*?\bbr\b/i.test(chunk)) {
+      if (/<(?:[A-Za-z_][\w.-]*:)?br\b/i.test(chunk)) {
         textRuns.push({ text: "\n", ...paraDefaultStyle });
+        continue;
+      }
+
+      if (/<(?:[A-Za-z_][\w.-]*:)?tab\b/i.test(chunk)) {
+        textRuns.push({ text: "\t", ...paraDefaultStyle });
         continue;
       }
 
