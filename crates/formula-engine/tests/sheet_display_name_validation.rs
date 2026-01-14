@@ -1,5 +1,5 @@
-use formula_engine::{Engine, Value};
 use formula_engine::pivot::{PivotConfig, PivotDestination, PivotSource, PivotTableDefinition};
+use formula_engine::{Engine, Value};
 use formula_model::{CellRef, EXCEL_MAX_SHEET_NAME_LEN};
 
 #[test]
@@ -62,4 +62,3 @@ fn set_sheet_display_name_rejects_invalid_excel_sheet_names() {
         }
     }
 }
-
