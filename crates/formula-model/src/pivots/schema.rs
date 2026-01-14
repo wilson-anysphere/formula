@@ -270,6 +270,7 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
         Cow::Borrowed(raw)
     }
 }
+
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
