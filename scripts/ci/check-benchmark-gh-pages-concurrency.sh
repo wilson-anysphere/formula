@@ -97,6 +97,24 @@ for wf in "${workflows[@]}"; do
         return 0;
       }
 
+      function inline_mapping_get_autopush(v,    inner, n, parts, i, part, av) {
+        v = trim(v);
+        if (substr(v, 1, 1) != "{" || substr(v, length(v), 1) != "}") {
+          return "";
+        }
+        inner = substr(v, 2, length(v) - 2);
+        n = split(inner, parts, ",");
+        for (i = 1; i <= n; i++) {
+          part = trim(parts[i]);
+          if (part ~ /^auto-push[[:space:]]*:/) {
+            av = part;
+            sub(/^auto-push[[:space:]]*:/, "", av);
+            return trim(av);
+          }
+        }
+        return "";
+      }
+
       function auto_push_enabled(v,    low, compact) {
         v = strip_quotes(v);
         low = tolower(v);
@@ -338,6 +356,18 @@ for wf in "${workflows[@]}"; do
           in_with = 1;
           with_indent = ind;
           next;
+        }
+
+        if (step_line ~ /^with:[[:space:]]*/) {
+          v = step_line;
+          sub(/^with:[[:space:]]*/, "", v);
+          v = trim(v);
+          if (v != "") {
+            ap = inline_mapping_get_autopush(v);
+            if (ap != "" && auto_push_enabled(ap)) {
+              step_auto_push = 1;
+            }
+          }
         }
 
         if (in_with) {

@@ -215,6 +215,30 @@ jobs:
   assert.notEqual(proc.status, 0);
 });
 
+test("detects auto-push inside with inline mapping", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: benchmark-action/github-action-benchmark@v1
+        with: { auto-push: true }
+`);
+  assert.notEqual(proc.status, 0);
+});
+
+test("passes when with inline mapping auto-push is disabled", { skip: !hasBash }, () => {
+  const proc = runYaml(`
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: benchmark-action/github-action-benchmark@v1
+        with: { auto-push: false }
+`);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
 test("ignores auto-push occurrences inside YAML block scalars", { skip: !hasBash }, () => {
   const proc = runYaml(`
 jobs:
