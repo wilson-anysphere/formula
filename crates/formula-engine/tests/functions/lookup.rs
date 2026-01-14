@@ -1639,3 +1639,76 @@ fn getpivotdata_falls_back_to_scan_when_pivot_not_registered() {
         Value::Number(250.0)
     );
 }
+
+#[test]
+fn getpivotdata_tracks_dynamic_dependency_on_pivot_destination_via_registry() {
+    use formula_engine::pivot::{
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
+        SubtotalPosition, ValueField,
+    };
+    use formula_model::{CellRef, Range};
+
+    fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
+        values.to_vec()
+    }
+
+    let destination = Range::new(CellRef::new(0, 0), CellRef::new(1, 1)); // A1:B2
+
+    let cfg = PivotConfig {
+        row_fields: vec![PivotField::new("Region")],
+        column_fields: vec![],
+        value_fields: vec![ValueField {
+            source_field: "Sales".to_string(),
+            name: "Sum of Sales".to_string(),
+            aggregation: AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        }],
+        filter_fields: vec![],
+        calculated_fields: vec![],
+        calculated_items: vec![],
+        layout: Layout::Tabular,
+        subtotals: SubtotalPosition::None,
+        grand_totals: GrandTotals {
+            rows: true,
+            columns: true,
+        },
+    };
+
+    let source_v1 = vec![
+        pv_row(&["Region".into(), "Sales".into()]),
+        pv_row(&["East".into(), 100.into()]),
+        pv_row(&["West".into(), 200.into()]),
+    ];
+    let pivot_v1 = PivotTable::new("PivotTable1", &source_v1, cfg.clone()).expect("create pivot");
+
+    let mut sheet = TestSheet::new();
+    sheet.register_pivot_table(destination, pivot_v1);
+    sheet.set("A1", "Region"); // stable anchor cell; do not mutate across refreshes.
+
+    // Evaluate once so the dependency graph captures GETPIVOTDATA's dynamic reference to the full
+    // pivot destination.
+    sheet.set_formula("C1", "=GETPIVOTDATA(\"Sum of Sales\", A1, \"Region\", \"East\")");
+    sheet.recalc();
+    assert_eq!(sheet.get("C1"), Value::Number(100.0));
+
+    // Simulate a pivot refresh:
+    // - Update the registered pivot metadata (new cache values).
+    // - Change a value cell within the pivot destination range (but *not* the pivot_table argument
+    //   cell) to trigger dependency propagation.
+    let source_v2 = vec![
+        pv_row(&["Region".into(), "Sales".into()]),
+        pv_row(&["East".into(), 150.into()]),
+        pv_row(&["West".into(), 200.into()]),
+    ];
+    let pivot_v2 = PivotTable::new("PivotTable1", &source_v2, cfg).expect("create pivot");
+    sheet.register_pivot_table(destination, pivot_v2);
+
+    // This edit should cause `C1` to be marked dirty only if GETPIVOTDATA recorded a dynamic
+    // dependency on the full pivot destination range.
+    sheet.set("B2", 150.0);
+    sheet.recalc();
+    assert_eq!(sheet.get("C1"), Value::Number(150.0));
+}

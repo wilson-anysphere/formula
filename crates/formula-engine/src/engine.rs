@@ -12687,7 +12687,15 @@ fn walk_expr_flags(
                 if spec.thread_safety == crate::functions::ThreadSafety::NotThreadSafe {
                     *thread_safe = false;
                 }
-                if matches!(spec.name, "OFFSET" | "INDIRECT") {
+                // Some functions produce runtime-determined precedents that must be traced during
+                // evaluation so the dependency graph stays accurate across recalcs.
+                //
+                // - OFFSET / INDIRECT: reference-returning functions.
+                // - GETPIVOTDATA: depends on the (runtime-registered) pivot output range; the
+                //   function records a dynamic reference to the full pivot destination so pivot
+                //   refreshes trigger dependent formulas even when the `pivot_table` argument is a
+                //   single (unchanged) cell.
+                if matches!(spec.name, "OFFSET" | "INDIRECT" | "GETPIVOTDATA") {
                     *dynamic_deps = true;
                 }
 

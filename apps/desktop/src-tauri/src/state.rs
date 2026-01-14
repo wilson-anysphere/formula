@@ -9,7 +9,7 @@ use crate::persistence::{
 };
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_engine::eval::{parse_a1, CellAddr};
-use formula_engine::pivot::{PivotCache, PivotConfig, PivotEngine, PivotValue};
+use formula_engine::pivot::{PivotCache, PivotConfig, PivotEngine, PivotTable as EnginePivotTable, PivotValue};
 use formula_engine::pivot::source::build_pivot_source_range_with_number_formats;
 use formula_engine::style_bridge::ui_style_to_model_style;
 use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult};
@@ -4786,18 +4786,26 @@ fn refresh_pivot_registration(
         }
     }
 
+    let next_model_range = rect_to_model_range(&next_range)?;
     let engine_values: Vec<Vec<EngineValue>> = grid
         .iter()
         .map(|row| row.iter().map(pivot_value_to_engine_value).collect())
         .collect();
     engine
-        .set_range_values(
-            &dest_sheet_name,
-            rect_to_model_range(&next_range)?,
-            &engine_values,
-            false,
-        )
+        .set_range_values(&dest_sheet_name, next_model_range, &engine_values, false)
         .map_err(|e| AppStateError::Engine(e.to_string()))?;
+
+    // Register the pivot metadata in the formula engine so `GETPIVOTDATA` can resolve pivots
+    // without scanning the rendered output grid.
+    let pivot_table = EnginePivotTable {
+        id: pivot.id.clone(),
+        name: pivot.name.clone(),
+        config: pivot.config.clone(),
+        cache,
+    };
+    engine
+        .register_pivot_table(&dest_sheet_name, next_model_range, pivot_table)
+        .map_err(|e| AppStateError::Pivot(e.to_string()))?;
 
     let mut updates = Vec::new();
 
