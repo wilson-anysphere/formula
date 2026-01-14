@@ -3,7 +3,7 @@ use std::io::{Cursor, Write};
 use formula_model::{CellRef, CellValue, Range};
 use formula_xlsx::{
     load_from_bytes, patch_xlsx_streaming, read_workbook_model_from_bytes, worksheet_parts_from_reader,
-    WorksheetCellPatch, XlsxPackage,
+    PackageCellPatch, WorksheetCellPatch, XlsxPackage,
 };
 use formula_xlsx::print::{read_workbook_print_settings, write_workbook_print_settings, CellRange};
 use formula_xlsx::pivots::preserve_pivot_parts_from_reader;
@@ -335,6 +335,34 @@ mod leading_slash_zip_entries_tests {
         let pkg = XlsxPackage::from_bytes(&out.into_inner()).expect("read patched package");
         let sheet_xml = std::str::from_utf8(
             pkg.part("xl/worksheets/sheet1.xml")
+                .expect("worksheet part present"),
+        )
+        .expect("worksheet xml utf-8");
+        assert!(
+            sheet_xml.contains("<v>42</v>") || sheet_xml.contains("<v>42.0</v>"),
+            "expected patched worksheet XML to contain cell value 42 (got {sheet_xml:?})"
+        );
+    }
+
+    #[test]
+    fn xlsx_package_apply_cell_patches_tolerates_noncanonical_zip_entries() {
+        let bytes = build_minimal_xlsx_with_noncanonical_entries();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+
+        let patch = PackageCellPatch::for_sheet_name(
+            "Sheet1",
+            CellRef::new(0, 0),
+            CellValue::Number(42.0),
+            None,
+        );
+        let out = pkg
+            .apply_cell_patches_to_bytes(&[patch])
+            .expect("apply patches");
+
+        let patched_pkg = XlsxPackage::from_bytes(&out).expect("read patched package");
+        let sheet_xml = std::str::from_utf8(
+            patched_pkg
+                .part("xl/worksheets/sheet1.xml")
                 .expect("worksheet part present"),
         )
         .expect("worksheet xml utf-8");

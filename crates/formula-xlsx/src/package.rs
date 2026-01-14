@@ -1199,7 +1199,14 @@ impl XlsxPackage {
         }
 
         for part in patches_by_part.keys() {
-            if !self.parts.contains_key(part) {
+            // Be tolerant to non-canonical producer output:
+            // - leading `/`
+            // - Windows-style `\` separators
+            // - ASCII case differences
+            // - percent-encoded names
+            //
+            // `XlsxPackage::part` already implements these lookup semantics.
+            if self.part(part).is_none() {
                 return Err(crate::streaming::StreamingPatchError::MissingWorksheetPart(
                     part.clone(),
                 )
