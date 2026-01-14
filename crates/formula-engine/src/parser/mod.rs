@@ -3003,10 +3003,11 @@ impl<'a> Parser<'a> {
                 }))
             }
             TokenKind::QuotedIdent(name) => {
-                let name = name.clone();
+                let raw = name.clone();
                 self.next();
+                let (workbook, name) = split_external_sheet_name(&raw);
                 Ok(Expr::NameRef(NameRef {
-                    workbook: None,
+                    workbook,
                     sheet: None,
                     name,
                 }))
@@ -4144,6 +4145,31 @@ mod tests {
                 );
             }
             other => panic!("expected compiled CellRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quoted_external_workbook_name_ref_splits_workbook_prefix() {
+        let ast = parse_formula("='[Book.xlsx]MyName'", ParseOptions::default()).unwrap();
+        match &ast.expr {
+            Expr::NameRef(r) => {
+                assert_eq!(r.workbook.as_deref(), Some("Book.xlsx"));
+                assert_eq!(r.sheet, None);
+                assert_eq!(r.name, "MyName");
+            }
+            other => panic!("expected NameRef, got {other:?}"),
+        }
+
+        // Add-ins emit non-function extern names (constants / macros) via NameX with a workbook-ish
+        // prefix like `'[AddIn]ConstName'`.
+        let ast = parse_formula("='[AddIn]MyAddinConst'", ParseOptions::default()).unwrap();
+        match &ast.expr {
+            Expr::NameRef(r) => {
+                assert_eq!(r.workbook.as_deref(), Some("AddIn"));
+                assert_eq!(r.sheet, None);
+                assert_eq!(r.name, "MyAddinConst");
+            }
+            other => panic!("expected NameRef, got {other:?}"),
         }
     }
 }
