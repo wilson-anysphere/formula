@@ -40,14 +40,18 @@ This doc is intentionally “close to the metal”. Helpful entrypoints in this 
   - `crates/formula-io/src/encrypted_package_reader.rs`
   - Verifies the password and unwraps the package key, then decrypts `EncryptedPackage` on demand as
     a `Read + Seek` stream.
- - **Agile (4.4) reference decryptor (includes `dataIntegrity` HMAC verification when present):**
-   `crates/formula-xlsx/src/offcrypto/*`
+- **Agile (4.4) reference decryptor (includes `dataIntegrity` HMAC verification when present):**
+  `crates/formula-xlsx/src/offcrypto/*`
 - **End-to-end decrypt helpers + Agile writer (OLE wrapper → decrypted ZIP bytes):**
   `crates/formula-office-crypto`
   - Note: `formula-office-crypto` also validates `dataIntegrity` (HMAC) and returns
     `OfficeCryptoError::IntegrityCheckFailed` on mismatch.
-- **MS-OFFCRYPTO parsing + low-level building blocks:** `crates/formula-offcrypto`
+- **MS-OFFCRYPTO parsing + decrypt helpers + low-level building blocks:** `crates/formula-offcrypto`
   - `parse_encryption_info`, `inspect_encryption_info` (`crates/formula-offcrypto/src/lib.rs`)
+  - End-to-end decrypt helpers:
+    - `decrypt_encrypted_package` (given `EncryptionInfo` + `EncryptedPackage` stream bytes)
+    - `decrypt_ooxml_from_ole_bytes` (given raw OLE/CFB bytes)
+    - Integrity verification is optional via `DecryptOptions.verify_integrity`
   - Agile password verifier + secret key (`crates/formula-offcrypto/src/agile.rs`)
   - Agile `EncryptedPackage` segment decryption + IV derivation
     (`crates/formula-offcrypto/src/encrypted_package.rs`, `agile_decrypt_package`)
