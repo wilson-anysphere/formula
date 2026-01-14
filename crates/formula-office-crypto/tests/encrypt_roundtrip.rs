@@ -194,6 +194,43 @@ fn standard_encrypt_decrypt_round_trip() {
 }
 
 #[test]
+fn standard_unicode_and_whitespace_password_round_trip() {
+    let zip = basic_xlsx_fixture_bytes();
+    // Trailing whitespace is significant, and the emoji exercises non-BMP UTF-16 surrogate pairs.
+    let password = "pässwörd🔒 ";
+
+    let ole = encrypt_package_to_ole(
+        zip,
+        password,
+        EncryptOptions {
+            scheme: EncryptionScheme::Standard,
+            key_bits: 128,
+            hash_algorithm: HashAlgorithm::Sha1,
+            spin_count: 50_000,
+        },
+    )
+    .expect("encrypt");
+    let decrypted = decrypt_encrypted_package_ole(&ole, password).expect("decrypt");
+    assert_eq!(decrypted.as_slice(), zip);
+
+    // Passwords must not be trimmed: the trimmed password should fail.
+    let trimmed = password.trim();
+    let err = decrypt_encrypted_package_ole(&ole, trimmed).expect_err("expected trimmed password to fail");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword for trimmed password, got {err:?}"
+    );
+
+    // Passwords must not be Unicode-normalized: NFC vs NFD should differ.
+    let nfd = "pa\u{0308}sswo\u{0308}rd🔒 ";
+    let err = decrypt_encrypted_package_ole(&ole, nfd).expect_err("expected NFD password to fail");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword for NFD password, got {err:?}"
+    );
+}
+
+#[test]
 fn tampered_ciphertext_fails_integrity_check() {
     let ole = agile_ole_fixture();
 
