@@ -67,12 +67,15 @@ test("desktop UI CSS keeps layout spacing on the --space-* scale (no raw px in p
       while ((unitMatch = pxUnit.exec(value))) {
         const numeric = unitMatch[1] ?? "";
         const n = Number(numeric);
-        if (!Number.isFinite(n)) continue;
-        if (n === 0) continue;
+       if (!Number.isFinite(n)) continue;
+       if (n === 0) continue;
 
-        const absIndex = valueStart + (unitMatch.index ?? 0);
-        const line = getLineNumber(stripped, absIndex);
-        violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: ${prop}: ${value.trim()}`);
+       const absIndex = valueStart + (unitMatch.index ?? 0);
+       const line = getLineNumber(stripped, absIndex);
+        // Include the specific offending literal so multi-value declarations like
+        // `padding: 8px 10px` report both 8px and 10px distinctly.
+        const rawUnit = unitMatch[0] ?? `${numeric}px`;
+        violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: ${prop}: ${value.trim()} (found ${rawUnit})`);
       }
 
       pxUnit.lastIndex = 0;
@@ -89,4 +92,3 @@ test("desktop UI CSS keeps layout spacing on the --space-* scale (no raw px in p
       .join("\n")}`,
   );
 });
-
