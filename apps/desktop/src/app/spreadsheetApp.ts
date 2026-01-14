@@ -4094,6 +4094,7 @@ export class SpreadsheetApp {
     // Do this after disposing drawing interaction controllers since they may cancel an
     // in-progress gesture by restoring the pre-gesture object list.
     this.selectedDrawingId = null;
+    this.selectedDrawingIndex = null;
     this.drawingObjectsCache = null;
     this.invalidateDrawingHitTestIndexCaches();
     this.drawingObjects = [];
@@ -6180,6 +6181,18 @@ export class SpreadsheetApp {
       this.invalidateDrawingHitTestIndexCaches();
       const prevSelected = this.selectedDrawingId;
       this.selectedDrawingId = lastInsertedId;
+      // Cache the selected index so the next drag gesture avoids scanning.
+      {
+        const objects = this.listDrawingObjectsForSheet();
+        let idx = -1;
+        for (let i = 0; i < objects.length; i += 1) {
+          if (objects[i]!.id === lastInsertedId) {
+            idx = i;
+            break;
+          }
+        }
+        this.selectedDrawingIndex = idx >= 0 ? idx : null;
+      }
       if (this.selectedChartId != null) {
         // Drawings and charts share a single selection model; inserting/selecting a picture should
         // clear any active chart selection so UI state (ribbon/context panels) stays consistent.
@@ -7265,6 +7278,7 @@ export class SpreadsheetApp {
     const clearedSelection = this.selectedDrawingId === drawingId;
     if (this.selectedDrawingId === drawingId) {
       this.selectedDrawingId = null;
+      this.selectedDrawingIndex = null;
       this.drawingOverlay.setSelectedId(null);
       this.drawingInteractionController?.setSelectedId(null);
     }
@@ -7328,6 +7342,20 @@ export class SpreadsheetApp {
   selectDrawingById(id: DrawingObjectId | null): void {
     const prev = this.selectedDrawingId;
     this.selectedDrawingId = id;
+    if (id == null) {
+      this.selectedDrawingIndex = null;
+    } else {
+      // Cache the selected index so pointer-move updates during drag/resize gestures can avoid scanning.
+      const objects = this.listDrawingObjectsForSheet();
+      let idx = -1;
+      for (let i = 0; i < objects.length; i += 1) {
+        if (objects[i]!.id === id) {
+          idx = i;
+          break;
+        }
+      }
+      this.selectedDrawingIndex = idx >= 0 ? idx : null;
+    }
     if (prev !== id) {
       this.dispatchDrawingSelectionChanged();
     }
@@ -8126,6 +8154,20 @@ export class SpreadsheetApp {
       this.setSelectedChartId(null);
     }
     this.selectedDrawingId = id;
+    if (id == null) {
+      this.selectedDrawingIndex = null;
+    } else {
+      // Cache the selected index so pointer-move updates during drag/resize gestures can avoid scanning.
+      const objects = this.listDrawingObjectsForSheet();
+      let idx = -1;
+      for (let i = 0; i < objects.length; i += 1) {
+        if (objects[i]!.id === id) {
+          idx = i;
+          break;
+        }
+      }
+      this.selectedDrawingIndex = idx >= 0 ? idx : null;
+    }
     // Keep all drawing interaction controllers in sync so keyboard-driven selection changes
     // (e.g. Escape to deselect) don't leave pointer interactions thinking an object is still
     // selected (which could enable invisible resize/rotate handles).
@@ -8496,6 +8538,7 @@ export class SpreadsheetApp {
     }
 
     this.selectedDrawingId = null;
+    this.selectedDrawingIndex = null;
     this.dispatchDrawingSelectionChanged();
     this.drawingOverlay.setSelectedId(null);
     this.drawingInteractionController?.setSelectedId(null);
@@ -9249,6 +9292,17 @@ export class SpreadsheetApp {
 
       const prevSelected = this.selectedDrawingId;
       this.selectedDrawingId = inserted.id;
+      // Cache the selected index so the next drag gesture avoids scanning.
+      {
+        let idx = -1;
+        for (let i = 0; i < combinedObjects.length; i += 1) {
+          if (combinedObjects[i]!.id === inserted.id) {
+            idx = i;
+            break;
+          }
+        }
+        this.selectedDrawingIndex = idx >= 0 ? idx : null;
+      }
       if (this.selectedChartId != null) {
         this.setSelectedChartId(null);
       }
@@ -9315,6 +9369,20 @@ export class SpreadsheetApp {
       onSelectionChange: (selectedId) => {
         const prev = this.selectedDrawingId;
         this.selectedDrawingId = selectedId;
+        if (selectedId == null) {
+          this.selectedDrawingIndex = null;
+        } else {
+          // Cache the selected index so pointer-move updates avoid scanning.
+          const objects = this.listDrawingObjectsForSheet();
+          let idx = -1;
+          for (let i = 0; i < objects.length; i += 1) {
+            if (objects[i]!.id === selectedId) {
+              idx = i;
+              break;
+            }
+          }
+          this.selectedDrawingIndex = idx >= 0 ? idx : null;
+        }
         this.drawingOverlay.setSelectedId(selectedId);
         if (prev !== selectedId) {
           this.dispatchDrawingSelectionChanged();
@@ -12551,6 +12619,7 @@ export class SpreadsheetApp {
     if (objects.length === 0) {
       if (prevSelected != null) {
         this.selectedDrawingId = null;
+        this.selectedDrawingIndex = null;
         this.dispatchDrawingSelectionChanged();
         this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
         this.emitDrawingSelectionChanged();
@@ -12615,6 +12684,7 @@ export class SpreadsheetApp {
       if (prevSelected != null) {
         if (x >= headerOffsetX && y >= headerOffsetY) {
           this.selectedDrawingId = null;
+          this.selectedDrawingIndex = null;
           this.dispatchDrawingSelectionChanged();
           this.renderDrawings(sharedViewport);
           this.emitDrawingSelectionChanged();
@@ -12645,6 +12715,16 @@ export class SpreadsheetApp {
     }
 
     this.selectedDrawingId = hit.id;
+    {
+      let idx = -1;
+      for (let i = 0; i < objects.length; i += 1) {
+        if (objects[i]!.id === hit.id) {
+          idx = i;
+          break;
+        }
+      }
+      this.selectedDrawingIndex = idx >= 0 ? idx : null;
+    }
     if (this.selectedDrawingId !== prevSelected) {
       this.dispatchDrawingSelectionChanged();
       this.renderDrawings(sharedViewport);
@@ -13738,6 +13818,7 @@ export class SpreadsheetApp {
     this.drawingObjects = baseObjects;
     if (this.selectedDrawingId != null && !baseObjects.some((o) => o.id === this.selectedDrawingId)) {
       this.selectedDrawingId = null;
+      this.selectedDrawingIndex = null;
     }
     const objects = this.listDrawingOverlayObjectsForSheet(this.sheetId, baseObjects);
 
@@ -15993,6 +16074,16 @@ export class SpreadsheetApp {
           this.editor.commit("command");
         }
         this.selectedDrawingId = hit.id;
+        {
+          let idx = -1;
+          for (let i = 0; i < drawings.length; i += 1) {
+            if (drawings[i]!.id === hit.id) {
+              idx = i;
+              break;
+            }
+          }
+          this.selectedDrawingIndex = idx >= 0 ? idx : null;
+        }
         if (this.selectedChartId != null) {
           // Clear chart selection after setting `selectedDrawingId` so we don't emit an intermediate
           // selection-change event (drawings and charts are mutually exclusive selections).
@@ -16059,6 +16150,7 @@ export class SpreadsheetApp {
     // Clicking outside any drawing clears drawing selection.
     if (primaryButton && this.selectedDrawingId != null) {
       this.selectedDrawingId = null;
+      this.selectedDrawingIndex = null;
       this.dispatchDrawingSelectionChanged();
     }
 
@@ -18626,6 +18718,7 @@ export class SpreadsheetApp {
     }
 
     this.selectedDrawingId = null;
+    this.selectedDrawingIndex = null;
     this.dispatchDrawingSelectionChanged();
     this.drawingOverlay.setSelectedId(null);
     this.drawingInteractionController?.setSelectedId(null);
@@ -18893,6 +18986,17 @@ export class SpreadsheetApp {
     this.invalidateDrawingHitTestIndexCaches();
     const prevDrawingSelected = this.selectedDrawingId;
     this.selectedDrawingId = drawingId;
+    {
+      const objects = this.listDrawingObjectsForSheet();
+      let idx = -1;
+      for (let i = 0; i < objects.length; i += 1) {
+        if (objects[i]!.id === drawingId) {
+          idx = i;
+          break;
+        }
+      }
+      this.selectedDrawingIndex = idx >= 0 ? idx : null;
+    }
     if (this.selectedChartId != null) {
       this.setSelectedChartId(null);
     }
