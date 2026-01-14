@@ -720,6 +720,14 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
   const roots = getWorkbookRoots(doc);
   const metadata = roots.metadata;
   const sheetsRoot = roots.sheets;
+  const isEncryptedRangesSchemaUnknown = (): boolean => {
+    const raw = metadata.get(METADATA_KEY);
+    if (raw == null) return false;
+    if (getYArray(raw)) return false;
+    if (getYMap(raw)) return false;
+    if (Array.isArray(raw)) return false;
+    return true;
+  };
 
   function normalizeCell(cell: { sheetId: string; row: number; col: number }): { sheetId: string; row: number; col: number } | null {
     const sheetId = String(cell?.sheetId ?? "").trim();
@@ -868,9 +876,16 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
 
   return {
     shouldEncryptCell(cell): boolean {
+      // Fail closed: if `metadata.encryptedRanges` exists but is in an unknown schema, treat
+      // all valid cells as encrypted so keyless clients refuse plaintext writes rather than
+      // potentially violating a newer encryption policy they cannot parse.
+      if (!normalizeCell(cell)) return false;
+      if (isEncryptedRangesSchemaUnknown()) return true;
       return findMatch(cell) != null;
     },
     keyIdForCell(cell): string | null {
+      if (!normalizeCell(cell)) return null;
+      if (isEncryptedRangesSchemaUnknown()) return null;
       return findMatch(cell)?.keyId ?? null;
     },
   };

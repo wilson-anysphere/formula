@@ -282,6 +282,7 @@ APIs (source: [`packages/collab/encrypted-ranges/src/index.ts`](../packages/coll
   - Reads `metadata.encryptedRanges` (including legacy schemas) to answer:
     - **should this cell be encrypted on write?** (`shouldEncryptCell`)
     - **which key id applies?** (`keyIdForCell`)
+  - Fail-closed: if `metadata.encryptedRanges` is present but in an unknown schema, `shouldEncryptCell` returns `true` for all valid cells (so keyless clients refuse plaintext writes), and `keyIdForCell` returns `null`.
   - Sheet matching is case-insensitive and tolerates callers passing either a stable sheet id or (when sheets metadata is available) a sheet display name.
   - Overlap rule: when multiple ranges match:
     - canonical array schema (`Y.Array`): the most recently added match wins (last entry wins)

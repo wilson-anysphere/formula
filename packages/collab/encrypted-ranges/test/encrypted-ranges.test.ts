@@ -48,6 +48,24 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(metadata.get("encryptedRanges")).toEqual(bogus);
   });
 
+  it("policy helper fails closed when metadata.encryptedRanges is present in an unknown schema", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    doc.transact(() => {
+      metadata.set("encryptedRanges", { foo: "bar" });
+    });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 0 })).toBe(true);
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe(null);
+
+    // Still validates cell addresses.
+    expect(policy.shouldEncryptCell({ sheetId: "", row: 0, col: 0 } as any)).toBe(false);
+    expect(policy.keyIdForCell({ sheetId: "", row: 0, col: 0 } as any)).toBe(null);
+  });
+
   it("manager add/list/remove is deterministic and dedupes identical ranges", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
