@@ -308,7 +308,13 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
 }
 
 export async function waitForDesktopReady(page: Page, options: DesktopReadyOptions = {}): Promise<void> {
-  const { waitForIdle = true, idleTimeoutMs, appReadyTimeoutMs } = options;
+  const {
+    waitForIdle = true,
+    idleTimeoutMs,
+    appReadyTimeoutMs,
+    waitForContextMenu = true,
+    contextMenuTimeoutMs,
+  } = options;
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
@@ -442,6 +448,15 @@ export async function waitForDesktopReady(page: Page, options: DesktopReadyOptio
         },
         { waitForIdle, idleTimeoutMs },
       );
+
+      if (waitForContextMenu) {
+        const menuWait = page.waitForFunction(
+          () => Boolean(document.querySelector('[data-testid="context-menu"]')),
+          undefined,
+          { timeout: typeof contextMenuTimeoutMs === "number" && contextMenuTimeoutMs > 0 ? contextMenuTimeoutMs : 30_000 },
+        );
+        await menuWait;
+      }
 
       // If the desktop shell threw during startup (uncaught exception), the app can partially
       // mount while leaving other regions uninitialized. Surface those failures early so flaky
