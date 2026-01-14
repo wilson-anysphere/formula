@@ -172,6 +172,19 @@ pub fn write_workbook_print_settings(
     write_workbook_print_settings_impl(xlsx_bytes, settings, MAX_PRINT_ZIP_PART_BYTES)
 }
 
+/// Variant of [`write_workbook_print_settings`] that allows callers to specify the maximum
+/// uncompressed size permitted for any ZIP part inflated while applying updates.
+///
+/// This is useful for best-effort save pipelines that want tighter per-part caps than the
+/// library default when patching untrusted origin packages.
+pub fn write_workbook_print_settings_with_limit(
+    xlsx_bytes: &[u8],
+    settings: &WorkbookPrintSettings,
+    max_part_bytes: u64,
+) -> Result<Vec<u8>, PrintError> {
+    write_workbook_print_settings_impl(xlsx_bytes, settings, max_part_bytes)
+}
+
 fn write_workbook_print_settings_impl(
     xlsx_bytes: &[u8],
     settings: &WorkbookPrintSettings,

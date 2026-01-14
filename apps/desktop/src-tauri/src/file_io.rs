@@ -3335,8 +3335,50 @@ pub fn build_xlsx_bytes_blocking(path: &Path, workbook: &Workbook) -> anyhow::Re
         }
 
         if print_settings_changed {
-            bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            // Only patch sheets whose print settings differ from the original package. This avoids
+            // inflating and rewriting large untouched worksheet XML parts (untrusted ZIP metadata
+            // can otherwise trigger memory-DoS during print settings patching).
+            let mut changed_sheets = Vec::new();
+            for sheet_settings in &workbook.print_settings.sheets {
+                let original = workbook.original_print_settings.sheets.iter().find(|s| {
+                    sheet_name_eq_case_insensitive(&s.sheet_name, &sheet_settings.sheet_name)
+                });
+                let is_changed = match original {
+                    Some(original) => {
+                        let mut normalized = original.clone();
+                        normalized.sheet_name = sheet_settings.sheet_name.clone();
+                        &normalized != sheet_settings
+                    }
+                    None => true,
+                };
+                if is_changed {
+                    changed_sheets.push(sheet_settings.clone());
+                }
+            }
+
+            // Apply print settings sheet-by-sheet so one oversized worksheet does not prevent other
+            // print setting edits from being persisted.
+            for sheet_settings in &changed_sheets {
+                let settings = WorkbookPrintSettings {
+                    sheets: vec![sheet_settings.clone()],
+                };
+                match formula_xlsx::print::write_workbook_print_settings_with_limit(
+                    &bytes,
+                    &settings,
+                    XLSX_WORKSHEET_XML_MAX_BYTES,
+                ) {
+                    Ok(updated) => bytes = updated,
+                    Err(formula_xlsx::print::PrintError::PartTooLarge { part, size, max }) => {
+                        eprintln!(
+                            "warning: skipped print settings patch for sheet `{}` because xlsx part `{part}` is too large ({size} bytes, max {max})",
+                            sheet_settings.sheet_name
+                        );
+                    }
+                    Err(err) => {
+                        return Err(anyhow::anyhow!(err.to_string()));
+                    }
+                }
+            }
         }
 
         if let Some(desired) = desired_workbook_content_type {
@@ -4756,6 +4798,60 @@ mod tests {
             .expect("read worksheet parts");
         let names: Vec<String> = parts.iter().map(|p| p.name.clone()).collect();
         assert_eq!(names, vec!["Sheet3", "Sheet1", "Sheet2"]);
+    }
+
+    #[test]
+    fn patch_save_print_settings_avoids_inflating_unchanged_oversized_sheets() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let origin_path = tmp.path().join("origin.xlsx");
+        let out_path = tmp.path().join("saved.xlsx");
+
+        // Build a small 2-sheet XLSX so `write_xlsx_blocking` takes the patch-based save path.
+        let mut model = formula_model::Workbook::new();
+        model.add_sheet("Sheet1").expect("add Sheet1");
+        model.add_sheet("Sheet2").expect("add Sheet2");
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write xlsx bytes");
+        let bytes = cursor.into_inner();
+
+        // Forge worksheet ZIP metadata so Sheet2 appears too large for the patch-based print settings
+        // path (which uses `XLSX_WORKSHEET_XML_MAX_BYTES`), while still being acceptable for the
+        // main XLSX reader (default 256MiB cap). Sheet2 remains unchanged, so save should not need
+        // to inflate it when only Sheet1 print settings are edited.
+        let oversized_len = XLSX_WORKSHEET_XML_MAX_BYTES as u32 + 1;
+        let patched =
+            patch_zip_entry_uncompressed_size(bytes, "xl/worksheets/sheet2.xml", oversized_len);
+        std::fs::write(&origin_path, &patched).expect("write origin xlsx");
+
+        let mut workbook = read_xlsx_blocking(&origin_path).expect("read origin xlsx");
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected origin bytes baseline"
+        );
+
+        // Flip Sheet1 orientation so we trigger print-settings patching.
+        let sheet_idx = workbook
+            .print_settings
+            .sheets
+            .iter()
+            .position(|s| sheet_name_eq_case_insensitive(&s.sheet_name, "Sheet1"))
+            .expect("Sheet1 print settings present");
+        let existing = workbook.print_settings.sheets[sheet_idx].page_setup.orientation;
+        let updated = match existing {
+            formula_xlsx::print::Orientation::Portrait => formula_xlsx::print::Orientation::Landscape,
+            formula_xlsx::print::Orientation::Landscape => formula_xlsx::print::Orientation::Portrait,
+        };
+        workbook.print_settings.sheets[sheet_idx].page_setup.orientation = updated;
+
+        let written_bytes = write_xlsx_blocking(&out_path, &workbook).expect("save workbook");
+        let reread =
+            read_workbook_print_settings(written_bytes.as_ref()).expect("read workbook print settings");
+        let sheet1 = reread
+            .sheets
+            .iter()
+            .find(|s| sheet_name_eq_case_insensitive(&s.sheet_name, "Sheet1"))
+            .expect("Sheet1 print settings roundtrip");
+        assert_eq!(sheet1.page_setup.orientation, updated);
     }
 
     #[test]

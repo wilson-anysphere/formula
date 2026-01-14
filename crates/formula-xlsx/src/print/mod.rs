@@ -14,6 +14,7 @@ pub use pdf::export_range_to_pdf_bytes;
 pub(crate) use xlsx::parse_worksheet_print_settings;
 pub use xlsx::{
     read_workbook_print_settings, read_workbook_print_settings_from_reader, write_workbook_print_settings,
+    write_workbook_print_settings_with_limit,
 };
 
 use std::collections::BTreeSet;

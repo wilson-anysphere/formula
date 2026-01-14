@@ -4141,8 +4141,10 @@ fn extract_imported_sheet_background_images_from_xlsx_bytes(
 
     let worksheets = match pkg.worksheet_parts() {
         Ok(parts) => parts,
-        Err(_) => match formula_xlsx::worksheet_parts_from_reader(std::io::Cursor::new(xlsx_bytes))
-        {
+        Err(_) => match formula_xlsx::worksheet_parts_from_reader_limited(
+            std::io::Cursor::new(xlsx_bytes),
+            crate::resource_limits::MAX_IPC_XLSX_PACKAGE_PART_BYTES as u64,
+        ) {
             Ok(parts) => parts,
             Err(_) => return Vec::new(),
         },
