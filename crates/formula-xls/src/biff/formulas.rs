@@ -549,24 +549,81 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         }
         match record.record_id {
             worksheet_formulas::RECORD_FORMULA => {
-                let parsed = match worksheet_formulas::parse_biff8_formula_record(&record) {
-                    Ok(parsed) => parsed,
-                    Err(err) => {
-                        push_warning_bounded(
-                            &mut warnings,
-                            format!(
-                                "failed to parse FORMULA record at offset {} in worksheet stream: {err}",
-                                record.offset
-                            ),
-                        );
-                        continue;
-                    }
-                };
-                let row = parsed.row as u32;
-                let col = parsed.col as u32;
-                let grbit = parsed.grbit;
-                let rgce = parsed.rgce;
-                let rgcb = parsed.rgcb;
+                // Prefer the fragment-aware BIFF8 formula parser so `PtgStr` continuation flags are
+                // skipped correctly. However, that parser assumes BIFF8’s canonical `PtgExp`
+                // payload width (4 bytes) and can fail for non-standard `PtgExp` encodings where
+                // the row is stored as a u32 (seen in the wild).
+                //
+                // Best-effort: if canonical parsing fails, fall back to slicing the raw `rgce`
+                // bytes from the record payload when the token stream begins with `PtgExp`/`PtgTbl`.
+                let (row, col, grbit, rgce, rgcb) =
+                    match worksheet_formulas::parse_biff8_formula_record(&record) {
+                        Ok(parsed) => (
+                            parsed.row as u32,
+                            parsed.col as u32,
+                            parsed.grbit,
+                            parsed.rgce,
+                            parsed.rgcb,
+                        ),
+                        Err(err) => {
+                            let data = record.data.as_ref();
+                            if data.len() < 22 {
+                                push_warning_bounded(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to parse FORMULA record at offset {} in worksheet stream: {err}",
+                                        record.offset
+                                    ),
+                                );
+                                continue;
+                            }
+
+                            let row = u16::from_le_bytes([data[0], data[1]]) as u32;
+                            let col = u16::from_le_bytes([data[2], data[3]]) as u32;
+                            let grbit = worksheet_formulas::FormulaGrbit(u16::from_le_bytes([
+                                data[14], data[15],
+                            ]));
+
+                            let cce = u16::from_le_bytes([data[20], data[21]]) as usize;
+                            let rgce_start = 22usize;
+                            let Some(rgce_end) = rgce_start.checked_add(cce) else {
+                                push_warning_bounded(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to parse FORMULA record at offset {} in worksheet stream: cce overflow",
+                                        record.offset
+                                    ),
+                                );
+                                continue;
+                            };
+                            if data.len() < rgce_end {
+                                push_warning_bounded(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to parse FORMULA record at offset {} in worksheet stream: truncated rgce (cce={cce})",
+                                        record.offset
+                                    ),
+                                );
+                                continue;
+                            }
+
+                            let rgce = data[rgce_start..rgce_end].to_vec();
+                            let rgcb = data[rgce_end..].to_vec();
+
+                            if !matches!(rgce.first().copied(), Some(0x01 | 0x02)) {
+                                push_warning_bounded(
+                                    &mut warnings,
+                                    format!(
+                                        "failed to parse FORMULA record at offset {} in worksheet stream: {err}",
+                                        record.offset
+                                    ),
+                                );
+                                continue;
+                            }
+
+                            (row, col, grbit, rgce, rgcb)
+                        }
+                    };
 
                 if let Some((base_row, base_col)) = parse_ptg_exp(&rgce) {
                     ptgexp_cells.push((row, col, base_row, base_col, grbit));
@@ -1084,30 +1141,36 @@ pub(crate) fn materialize_biff8_rgce_from_base(
 }
 
 fn parse_ptg_exp(rgce: &[u8]) -> Option<(u32, u32)> {
-    // BIFF8 PtgExp: [0x01][rw: u16][col: u16]
-    //
-    // Best-effort: some producers emit a non-standard 6-byte payload (BIFF12-style coordinate
-    // widths) even in BIFF8 `.xls` files:
-    //   [0x01][rw: u32][col: u16]
     if rgce.first().copied()? != 0x01 {
         return None;
     }
 
-    // Non-standard "wide" payload layout: [rw:u32][col:u16] (7 bytes total).
-    if rgce.len() == 7 {
-        let row = u32::from_le_bytes([rgce[1], rgce[2], rgce[3], rgce[4]]);
-        let col = u16::from_le_bytes([rgce[5], rgce[6]]) as u32;
-        if row <= BIFF8_MAX_ROW0 as u32 && col <= BIFF8_MAX_COL0 as u32 {
-            return Some((row, col));
-        }
+    // BIFF8 specifies `PtgExp` as a 4-byte payload:
+    //   [ptg:0x01][rw:u16][col:u16]
+    //
+    // Best-effort: some producers embed wider row/col fields (BIFF12/XLSB-like) even inside `.xls`
+    // files. Prefer the canonical decode for 5-byte token streams, and fall back to the worksheet
+    // formula parser’s payload-width heuristics for non-canonical lengths.
+    if rgce.len() == 5 {
+        let row = u16::from_le_bytes([rgce[1], rgce[2]]) as u32;
+        let col = u16::from_le_bytes([rgce[3], rgce[4]]) as u32;
+        return Some((row, col));
     }
 
-    if rgce.len() < 5 {
-        return None;
+    let payload = rgce.get(1..)?;
+    if let Some((row, col)) = worksheet_formulas::ptgexp_candidates(payload).first().copied() {
+        return Some((row, col));
     }
-    let row = u16::from_le_bytes([rgce[1], rgce[2]]) as u32;
-    let col = u16::from_le_bytes([rgce[3], rgce[4]]) as u32;
-    Some((row, col))
+
+    // Fallback: treat as BIFF8 u16/u16 when we have enough bytes, even if it doesn't fit BIFF8
+    // bounds. This keeps behavior closer to the previous implementation for malformed files.
+    if payload.len() >= 4 {
+        let row = u16::from_le_bytes([payload[0], payload[1]]) as u32;
+        let col = u16::from_le_bytes([payload[2], payload[3]]) as u32;
+        return Some((row, col));
+    }
+
+    None
 }
 
 fn parse_ptg_exp_master_cell_candidates(rgce: &[u8]) -> Option<(u32, u32, Vec<CellRef>)> {
