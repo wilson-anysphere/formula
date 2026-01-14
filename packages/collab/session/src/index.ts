@@ -1192,15 +1192,19 @@ export class CollabSession {
     this.docUpdateListener = handleDocUpdate;
     this.doc.on("update", handleDocUpdate);
 
-    void this.localPersistenceLoaded.then(
-      () => {
-        this.localPersistenceLoadedFlag = true;
-      },
-      () => {
-        // If persistence fails to load, keep the loaded flag false so callers can
-        // treat it as an unhealthy persistence state.
-      }
-    );
+    void this.localPersistenceLoaded
+      .then(
+        () => {
+          this.localPersistenceLoadedFlag = true;
+        },
+        () => {
+          // If persistence fails to load, keep the loaded flag false so callers can
+          // treat it as an unhealthy persistence state.
+        }
+      )
+      .catch(() => {
+        // Best-effort: avoid unhandled rejections if the `.then` bookkeeping callback throws.
+      });
 
     this.scheduleCommentsMigration(options.comments);
   }
@@ -1396,10 +1400,14 @@ export class CollabSession {
       }
     })();
 
-    void this.localPersistenceStartPromise.then(
-      () => this.resolveLocalPersistenceLoaded?.(),
-      (err) => this.rejectLocalPersistenceLoaded?.(err)
-    );
+    void this.localPersistenceStartPromise
+      .then(
+        () => this.resolveLocalPersistenceLoaded?.(),
+        (err) => this.rejectLocalPersistenceLoaded?.(err)
+      )
+      .catch(() => {
+        // Best-effort: avoid unhandled rejections if the resolve/reject hooks throw.
+      });
   }
 
   private async createPersistenceFromOfflineOptions(
