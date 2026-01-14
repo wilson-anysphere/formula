@@ -40,6 +40,8 @@ pub enum PivotError {
     CalculatedFieldNameConflictsWithSource(String),
     #[error("calculated item field not in layout: {0}")]
     CalculatedItemFieldNotInLayout(String),
+    #[error("calculated item name conflicts with existing item in field {field}: {item}")]
+    CalculatedItemNameConflictsWithExistingItem { field: String, item: String },
     #[error("invalid calculated field formula for {field}: {message}")]
     InvalidCalculatedFieldFormula { field: String, message: String },
     #[error("invalid calculated item formula for {field}::{item}: {message}")]
@@ -558,6 +560,437 @@ impl Accumulator {
     }
 }
 
+fn normalize_pivot_item_name(name: &str) -> String {
+    name.to_ascii_lowercase()
+}
+
+#[derive(Debug, Clone)]
+struct FieldItemResolver {
+    /// Normalized display string -> concrete key part.
+    by_name: HashMap<String, PivotKeyPart>,
+    /// Normalized display strings that map to multiple distinct key parts.
+    ambiguous: HashSet<String>,
+}
+
+impl FieldItemResolver {
+    fn from_cache(cache: &PivotCache, field: &str) -> Self {
+        let mut by_name: HashMap<String, PivotKeyPart> = HashMap::new();
+        let mut ambiguous: HashSet<String> = HashSet::new();
+
+        if let Some(values) = cache.unique_values.get(field) {
+            for value in values {
+                let part = value.to_key_part();
+                let display = part.display_string();
+                let normalized = normalize_pivot_item_name(&display);
+
+                if ambiguous.contains(&normalized) {
+                    continue;
+                }
+
+                match by_name.get(&normalized) {
+                    None => {
+                        by_name.insert(normalized, part);
+                    }
+                    Some(existing) if existing == &part => {
+                        // Same underlying item; ignore.
+                    }
+                    Some(_) => {
+                        // Multiple distinct key parts share the same display string; item references would be
+                        // ambiguous, so mark the name as ambiguous.
+                        by_name.remove(&normalized);
+                        ambiguous.insert(normalized);
+                    }
+                }
+            }
+        }
+
+        Self { by_name, ambiguous }
+    }
+
+    fn contains_display_name(&self, name: &str) -> bool {
+        let normalized = normalize_pivot_item_name(name);
+        self.by_name.contains_key(&normalized) || self.ambiguous.contains(&normalized)
+    }
+
+    fn insert_calculated_item(&mut self, name: &str) {
+        let normalized = normalize_pivot_item_name(name);
+        self.by_name
+            .insert(normalized, PivotKeyPart::Text(name.to_string()));
+    }
+
+    fn resolve(&self, name: &str) -> Result<PivotKeyPart, String> {
+        let normalized = normalize_pivot_item_name(name);
+        if self.ambiguous.contains(&normalized) {
+            return Err(format!(
+                "item reference \"{name}\" is ambiguous (multiple distinct items share that display name)"
+            ));
+        }
+        self.by_name
+            .get(&normalized)
+            .cloned()
+            .ok_or_else(|| format!("unknown item reference \"{name}\""))
+    }
+}
+
+/// Expression grammar for calculated items.
+///
+/// Supported syntax (MVP):
+/// - Item references are double-quoted display strings, e.g. `"East"` or `"(blank)"`.
+/// - Numeric literals (floating point) like `10` or `3.5`.
+/// - Operators: `+`, `-`, `*`, `/` with standard precedence.
+/// - Parentheses for grouping, e.g. `("East" + "West") / 2`.
+#[derive(Debug, Clone, PartialEq)]
+enum CalculatedItemExprRaw {
+    Number(f64),
+    Item(String),
+    Neg(Box<CalculatedItemExprRaw>),
+    Add(Box<CalculatedItemExprRaw>, Box<CalculatedItemExprRaw>),
+    Sub(Box<CalculatedItemExprRaw>, Box<CalculatedItemExprRaw>),
+    Mul(Box<CalculatedItemExprRaw>, Box<CalculatedItemExprRaw>),
+    Div(Box<CalculatedItemExprRaw>, Box<CalculatedItemExprRaw>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum CalculatedItemExpr {
+    Number(f64),
+    Item(PivotKeyPart),
+    Neg(Box<CalculatedItemExpr>),
+    Add(Box<CalculatedItemExpr>, Box<CalculatedItemExpr>),
+    Sub(Box<CalculatedItemExpr>, Box<CalculatedItemExpr>),
+    Mul(Box<CalculatedItemExpr>, Box<CalculatedItemExpr>),
+    Div(Box<CalculatedItemExpr>, Box<CalculatedItemExpr>),
+}
+
+impl CalculatedItemExprRaw {
+    fn resolve(self, resolver: &FieldItemResolver) -> Result<CalculatedItemExpr, String> {
+        Ok(match self {
+            CalculatedItemExprRaw::Number(n) => CalculatedItemExpr::Number(n),
+            CalculatedItemExprRaw::Item(name) => CalculatedItemExpr::Item(resolver.resolve(&name)?),
+            CalculatedItemExprRaw::Neg(expr) => {
+                CalculatedItemExpr::Neg(Box::new(expr.resolve(resolver)?))
+            }
+            CalculatedItemExprRaw::Add(a, b) => CalculatedItemExpr::Add(
+                Box::new(a.resolve(resolver)?),
+                Box::new(b.resolve(resolver)?),
+            ),
+            CalculatedItemExprRaw::Sub(a, b) => CalculatedItemExpr::Sub(
+                Box::new(a.resolve(resolver)?),
+                Box::new(b.resolve(resolver)?),
+            ),
+            CalculatedItemExprRaw::Mul(a, b) => CalculatedItemExpr::Mul(
+                Box::new(a.resolve(resolver)?),
+                Box::new(b.resolve(resolver)?),
+            ),
+            CalculatedItemExprRaw::Div(a, b) => CalculatedItemExpr::Div(
+                Box::new(a.resolve(resolver)?),
+                Box::new(b.resolve(resolver)?),
+            ),
+        })
+    }
+}
+
+impl CalculatedItemExpr {
+    fn eval<F>(&self, lookup: &F) -> Result<f64, String>
+    where
+        F: Fn(&PivotKeyPart) -> f64,
+    {
+        Ok(match self {
+            CalculatedItemExpr::Number(n) => *n,
+            CalculatedItemExpr::Item(part) => lookup(part),
+            CalculatedItemExpr::Neg(expr) => -expr.eval(lookup)?,
+            CalculatedItemExpr::Add(a, b) => a.eval(lookup)? + b.eval(lookup)?,
+            CalculatedItemExpr::Sub(a, b) => a.eval(lookup)? - b.eval(lookup)?,
+            CalculatedItemExpr::Mul(a, b) => a.eval(lookup)? * b.eval(lookup)?,
+            CalculatedItemExpr::Div(a, b) => {
+                let denom = b.eval(lookup)?;
+                if denom == 0.0 {
+                    return Err("division by zero".to_string());
+                }
+                a.eval(lookup)? / denom
+            }
+        })
+    }
+}
+
+struct CalculatedItemParser<'a> {
+    input: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> CalculatedItemParser<'a> {
+    fn parse(formula: &'a str) -> Result<CalculatedItemExprRaw, String> {
+        let mut parser = Self {
+            input: formula.as_bytes(),
+            pos: 0,
+        };
+        let expr = parser.parse_expr()?;
+        parser.skip_ws();
+        if parser.pos < parser.input.len() {
+            return Err(format!(
+                "unexpected token at position {}",
+                parser.pos.saturating_add(1)
+            ));
+        }
+        Ok(expr)
+    }
+
+    fn skip_ws(&mut self) {
+        while let Some(b) = self.peek() {
+            if b.is_ascii_whitespace() {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.input.get(self.pos).copied()
+    }
+
+    fn consume(&mut self) -> Option<u8> {
+        let b = self.peek()?;
+        self.pos += 1;
+        Some(b)
+    }
+
+    fn parse_expr(&mut self) -> Result<CalculatedItemExprRaw, String> {
+        let mut left = self.parse_term()?;
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                Some(b'+') => {
+                    self.pos += 1;
+                    let right = self.parse_term()?;
+                    left = CalculatedItemExprRaw::Add(Box::new(left), Box::new(right));
+                }
+                Some(b'-') => {
+                    self.pos += 1;
+                    let right = self.parse_term()?;
+                    left = CalculatedItemExprRaw::Sub(Box::new(left), Box::new(right));
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_term(&mut self) -> Result<CalculatedItemExprRaw, String> {
+        let mut left = self.parse_factor()?;
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                Some(b'*') => {
+                    self.pos += 1;
+                    let right = self.parse_factor()?;
+                    left = CalculatedItemExprRaw::Mul(Box::new(left), Box::new(right));
+                }
+                Some(b'/') => {
+                    self.pos += 1;
+                    let right = self.parse_factor()?;
+                    left = CalculatedItemExprRaw::Div(Box::new(left), Box::new(right));
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_factor(&mut self) -> Result<CalculatedItemExprRaw, String> {
+        self.skip_ws();
+        match self.peek() {
+            Some(b'-') => {
+                self.pos += 1;
+                let inner = self.parse_factor()?;
+                Ok(CalculatedItemExprRaw::Neg(Box::new(inner)))
+            }
+            Some(b'(') => {
+                self.pos += 1;
+                let expr = self.parse_expr()?;
+                self.skip_ws();
+                match self.consume() {
+                    Some(b')') => Ok(expr),
+                    _ => Err("expected ')'".to_string()),
+                }
+            }
+            Some(b'"') => Ok(CalculatedItemExprRaw::Item(self.parse_string()?)),
+            Some(b'.') | Some(b'0'..=b'9') => {
+                Ok(CalculatedItemExprRaw::Number(self.parse_number()?))
+            }
+            _ => Err("expected number, item reference, or '('".to_string()),
+        }
+    }
+
+    fn parse_string(&mut self) -> Result<String, String> {
+        match self.consume() {
+            Some(b'"') => {}
+            _ => return Err("expected '\"'".to_string()),
+        }
+
+        let mut out = String::new();
+        while let Some(b) = self.consume() {
+            match b {
+                b'"' => return Ok(out),
+                b'\\' => {
+                    let escaped = self
+                        .consume()
+                        .ok_or_else(|| "unterminated escape sequence".to_string())?;
+                    match escaped {
+                        b'"' => out.push('"'),
+                        b'\\' => out.push('\\'),
+                        b'n' => out.push('\n'),
+                        b't' => out.push('\t'),
+                        other => {
+                            return Err(format!("unsupported escape sequence: \\{}", other as char))
+                        }
+                    }
+                }
+                other => out.push(other as char),
+            }
+        }
+
+        Err("unterminated string literal".to_string())
+    }
+
+    fn parse_number(&mut self) -> Result<f64, String> {
+        let start = self.pos;
+        // Integer part.
+        while matches!(self.peek(), Some(b'0'..=b'9')) {
+            self.pos += 1;
+        }
+        // Fractional part.
+        if self.peek() == Some(b'.') {
+            self.pos += 1;
+            while matches!(self.peek(), Some(b'0'..=b'9')) {
+                self.pos += 1;
+            }
+        }
+        // Exponent part.
+        if matches!(self.peek(), Some(b'e' | b'E')) {
+            let exp_start = self.pos;
+            self.pos += 1;
+            if matches!(self.peek(), Some(b'+' | b'-')) {
+                self.pos += 1;
+            }
+            let digits_start = self.pos;
+            while matches!(self.peek(), Some(b'0'..=b'9')) {
+                self.pos += 1;
+            }
+            if digits_start == self.pos {
+                // Roll back to before the exponent to produce a more helpful error below.
+                self.pos = exp_start;
+            }
+        }
+
+        let s = std::str::from_utf8(&self.input[start..self.pos])
+            .map_err(|_| "invalid number literal".to_string())?;
+        if s.is_empty() || s == "." {
+            return Err("invalid number literal".to_string());
+        }
+        s.parse::<f64>()
+            .map_err(|_| format!("invalid number literal: {s}"))
+    }
+}
+
+fn synthetic_accumulator_from_value(
+    value: f64,
+    agg: AggregationType,
+) -> Result<Accumulator, String> {
+    if !value.is_finite() {
+        return Err("calculated item evaluated to a non-finite number".to_string());
+    }
+
+    match agg {
+        AggregationType::Count | AggregationType::CountNumbers => {
+            let rounded = value.round();
+            if (value - rounded).abs() > 1e-9 {
+                return Err(format!(
+                    "expected an integer result for {:?}, got {value}",
+                    agg
+                ));
+            }
+            if rounded < 0.0 {
+                return Err(format!(
+                    "expected a non-negative result for {:?}, got {value}",
+                    agg
+                ));
+            }
+            if rounded > u64::MAX as f64 {
+                return Err(format!(
+                    "result for {:?} is too large ({} > {})",
+                    agg,
+                    rounded,
+                    u64::MAX
+                ));
+            }
+
+            let n = rounded as u64;
+
+            // Treat a calculated Count/CountNumbers result as `n` synthetic numeric observations with
+            // value `0`. This keeps the accumulator merge logic stable and ensures the grand totals
+            // include the calculated item.
+            Ok(Accumulator {
+                count: n,
+                count_numbers: n,
+                sum: 0.0,
+                product: if n == 0 { 1.0 } else { 0.0 },
+                min: if n == 0 { f64::INFINITY } else { 0.0 },
+                max: if n == 0 { f64::NEG_INFINITY } else { 0.0 },
+                mean: 0.0,
+                m2: 0.0,
+            })
+        }
+        AggregationType::Var => {
+            if value < 0.0 {
+                return Err(format!("variance cannot be negative: {value}"));
+            }
+            let a = (value / 2.0).sqrt();
+            let mut acc = Accumulator::new();
+            acc.update(&PivotValue::Number(a));
+            acc.update(&PivotValue::Number(-a));
+            Ok(acc)
+        }
+        AggregationType::StdDev => {
+            if value < 0.0 {
+                return Err(format!("standard deviation cannot be negative: {value}"));
+            }
+            // For two observations +/-a, sample stdev = |a| * sqrt(2).
+            let a = value / 2.0_f64.sqrt();
+            let mut acc = Accumulator::new();
+            acc.update(&PivotValue::Number(a));
+            acc.update(&PivotValue::Number(-a));
+            Ok(acc)
+        }
+        AggregationType::VarP => {
+            if value < 0.0 {
+                return Err(format!("variance cannot be negative: {value}"));
+            }
+            // For two observations +/-a, population variance = a^2.
+            let a = value.sqrt();
+            let mut acc = Accumulator::new();
+            acc.update(&PivotValue::Number(a));
+            acc.update(&PivotValue::Number(-a));
+            Ok(acc)
+        }
+        AggregationType::StdDevP => {
+            if value < 0.0 {
+                return Err(format!("standard deviation cannot be negative: {value}"));
+            }
+            // For two observations +/-a, population stdev = |a|.
+            let a = value;
+            let mut acc = Accumulator::new();
+            acc.update(&PivotValue::Number(a));
+            acc.update(&PivotValue::Number(-a));
+            Ok(acc)
+        }
+        _ => {
+            let mut acc = Accumulator::new();
+            acc.update(&PivotValue::Number(value));
+            Ok(acc)
+        }
+    }
+}
+
 pub struct PivotEngine;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -567,6 +1000,12 @@ enum PivotRowKind {
     /// A subtotal row for the prefix `prefix_key` (length = level + 1).
     Subtotal { level: usize, prefix_key: PivotKey },
     GrandTotal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CalculatedItemPlacement {
+    Row(usize),
+    Column(usize),
 }
 
 impl PivotEngine {
@@ -606,6 +1045,8 @@ impl PivotEngine {
                 cell[vf_idx].update(val);
             }
         }
+
+        Self::apply_calculated_items(cache, cfg, &mut cube, &mut row_keys, &mut col_keys)?;
 
         let mut row_keys: Vec<PivotKey> = row_keys.into_iter().collect();
         let row_sort_specs = cfg
@@ -779,6 +1220,288 @@ impl PivotEngine {
         }
 
         Ok(PivotResult { data })
+    }
+
+    fn calculated_item_placement(
+        cfg: &PivotConfig,
+        field: &str,
+    ) -> Option<CalculatedItemPlacement> {
+        cfg.row_fields
+            .iter()
+            .position(|f| f.source_field == field)
+            .map(CalculatedItemPlacement::Row)
+            .or_else(|| {
+                cfg.column_fields
+                    .iter()
+                    .position(|f| f.source_field == field)
+                    .map(CalculatedItemPlacement::Column)
+            })
+    }
+
+    fn apply_calculated_items(
+        cache: &PivotCache,
+        cfg: &PivotConfig,
+        cube: &mut HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &mut HashSet<PivotKey>,
+        col_keys: &mut HashSet<PivotKey>,
+    ) -> Result<(), PivotError> {
+        if cfg.calculated_items.is_empty() {
+            return Ok(());
+        }
+
+        let mut resolvers: HashMap<String, FieldItemResolver> = HashMap::new();
+
+        for item in &cfg.calculated_items {
+            let placement = Self::calculated_item_placement(cfg, &item.field)
+                .ok_or_else(|| PivotError::CalculatedItemFieldNotInLayout(item.field.clone()))?;
+
+            let resolver = resolvers
+                .entry(item.field.clone())
+                .or_insert_with(|| FieldItemResolver::from_cache(cache, &item.field));
+
+            // Excel disallows calculated item captions colliding with existing item captions.
+            if resolver.contains_display_name(&item.name) {
+                return Err(PivotError::CalculatedItemNameConflictsWithExistingItem {
+                    field: item.field.clone(),
+                    item: item.name.clone(),
+                });
+            }
+
+            let raw_expr = CalculatedItemParser::parse(&item.formula).map_err(|message| {
+                PivotError::InvalidCalculatedItemFormula {
+                    field: item.field.clone(),
+                    item: item.name.clone(),
+                    message,
+                }
+            })?;
+            let expr = raw_expr.resolve(resolver).map_err(|message| {
+                PivotError::InvalidCalculatedItemFormula {
+                    field: item.field.clone(),
+                    item: item.name.clone(),
+                    message,
+                }
+            })?;
+
+            match placement {
+                CalculatedItemPlacement::Row(idx) => Self::apply_row_calculated_item(
+                    cube,
+                    row_keys,
+                    col_keys,
+                    cfg,
+                    idx,
+                    &item.field,
+                    &item.name,
+                    &expr,
+                )?,
+                CalculatedItemPlacement::Column(idx) => Self::apply_column_calculated_item(
+                    cube,
+                    row_keys,
+                    col_keys,
+                    cfg,
+                    idx,
+                    &item.field,
+                    &item.name,
+                    &expr,
+                )?,
+            }
+
+            resolver.insert_calculated_item(&item.name);
+        }
+
+        Ok(())
+    }
+
+    fn apply_row_calculated_item(
+        cube: &mut HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &mut HashSet<PivotKey>,
+        col_keys: &HashSet<PivotKey>,
+        cfg: &PivotConfig,
+        row_field_idx: usize,
+        field: &str,
+        item_name: &str,
+        expr: &CalculatedItemExpr,
+    ) -> Result<(), PivotError> {
+        let existing_row_keys: Vec<PivotKey> = row_keys.iter().cloned().collect();
+        if existing_row_keys.is_empty() {
+            return Ok(());
+        }
+
+        #[derive(Debug, Clone)]
+        struct RowGroup {
+            template: PivotKey,
+            items: HashMap<PivotKeyPart, PivotKey>,
+        }
+
+        let mut groups: HashMap<PivotKey, RowGroup> = HashMap::new();
+        for row_key in &existing_row_keys {
+            let Some(item_part) = row_key.0.get(row_field_idx).cloned() else {
+                continue;
+            };
+            let mut base_parts = row_key.0.clone();
+            base_parts.remove(row_field_idx);
+            let base_key = PivotKey(base_parts);
+            let entry = groups.entry(base_key).or_insert_with(|| RowGroup {
+                template: row_key.clone(),
+                items: HashMap::new(),
+            });
+            entry.items.insert(item_part, row_key.clone());
+        }
+
+        let col_keys_vec: Vec<PivotKey> = col_keys.iter().cloned().collect();
+        let new_part = PivotKeyPart::Text(item_name.to_string());
+
+        let mut new_rows: Vec<(PivotKey, HashMap<PivotKey, Vec<Accumulator>>)> = Vec::new();
+
+        for group in groups.values() {
+            let mut new_row_key = group.template.clone();
+            if row_field_idx < new_row_key.0.len() {
+                new_row_key.0[row_field_idx] = new_part.clone();
+            } else {
+                // Should not happen with valid layout, but keep output deterministic.
+                continue;
+            }
+
+            let mut new_row_map: HashMap<PivotKey, Vec<Accumulator>> = HashMap::new();
+
+            for col_key in &col_keys_vec {
+                let mut cell_accs: Vec<Accumulator> = Vec::with_capacity(cfg.value_fields.len());
+                for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
+                    let agg = vf.aggregation;
+                    let lookup = |part: &PivotKeyPart| -> f64 {
+                        let Some(src_row_key) = group.items.get(part) else {
+                            return 0.0;
+                        };
+                        let Some(src_row_map) = cube.get(src_row_key) else {
+                            return 0.0;
+                        };
+                        let Some(src_cell) = src_row_map.get(col_key) else {
+                            return 0.0;
+                        };
+                        src_cell
+                            .get(vf_idx)
+                            .map(|acc| acc.finalize(agg).as_number().unwrap_or(0.0))
+                            .unwrap_or(0.0)
+                    };
+
+                    let value = expr.eval(&lookup).map_err(|message| {
+                        PivotError::InvalidCalculatedItemFormula {
+                            field: field.to_string(),
+                            item: item_name.to_string(),
+                            message,
+                        }
+                    })?;
+
+                    let acc = synthetic_accumulator_from_value(value, agg).map_err(|message| {
+                        PivotError::InvalidCalculatedItemFormula {
+                            field: field.to_string(),
+                            item: item_name.to_string(),
+                            message,
+                        }
+                    })?;
+                    cell_accs.push(acc);
+                }
+
+                new_row_map.insert(col_key.clone(), cell_accs);
+            }
+
+            new_rows.push((new_row_key, new_row_map));
+        }
+
+        for (row_key, row_map) in new_rows {
+            row_keys.insert(row_key.clone());
+            cube.insert(row_key, row_map);
+        }
+
+        Ok(())
+    }
+
+    fn apply_column_calculated_item(
+        cube: &mut HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &HashSet<PivotKey>,
+        col_keys: &mut HashSet<PivotKey>,
+        cfg: &PivotConfig,
+        col_field_idx: usize,
+        field: &str,
+        item_name: &str,
+        expr: &CalculatedItemExpr,
+    ) -> Result<(), PivotError> {
+        let existing_col_keys: Vec<PivotKey> = col_keys.iter().cloned().collect();
+        if existing_col_keys.is_empty() {
+            return Ok(());
+        }
+
+        #[derive(Debug, Clone)]
+        struct ColGroup {
+            template: PivotKey,
+            items: HashMap<PivotKeyPart, PivotKey>,
+        }
+
+        let mut groups: HashMap<PivotKey, ColGroup> = HashMap::new();
+        for col_key in &existing_col_keys {
+            let Some(item_part) = col_key.0.get(col_field_idx).cloned() else {
+                continue;
+            };
+            let mut base_parts = col_key.0.clone();
+            base_parts.remove(col_field_idx);
+            let base_key = PivotKey(base_parts);
+            let entry = groups.entry(base_key).or_insert_with(|| ColGroup {
+                template: col_key.clone(),
+                items: HashMap::new(),
+            });
+            entry.items.insert(item_part, col_key.clone());
+        }
+
+        let row_keys_vec: Vec<PivotKey> = row_keys.iter().cloned().collect();
+        let new_part = PivotKeyPart::Text(item_name.to_string());
+
+        for group in groups.values() {
+            let mut new_col_key = group.template.clone();
+            if col_field_idx < new_col_key.0.len() {
+                new_col_key.0[col_field_idx] = new_part.clone();
+            } else {
+                continue;
+            }
+
+            col_keys.insert(new_col_key.clone());
+
+            for row_key in &row_keys_vec {
+                let row_map = cube.entry(row_key.clone()).or_default();
+                let mut cell_accs: Vec<Accumulator> = Vec::with_capacity(cfg.value_fields.len());
+                for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
+                    let agg = vf.aggregation;
+                    let value = expr
+                        .eval(&|part: &PivotKeyPart| -> f64 {
+                            let Some(src_col_key) = group.items.get(part) else {
+                                return 0.0;
+                            };
+                            let Some(src_cell) = row_map.get(src_col_key) else {
+                                return 0.0;
+                            };
+                            src_cell
+                                .get(vf_idx)
+                                .map(|acc| acc.finalize(agg).as_number().unwrap_or(0.0))
+                                .unwrap_or(0.0)
+                        })
+                        .map_err(|message| PivotError::InvalidCalculatedItemFormula {
+                            field: field.to_string(),
+                            item: item_name.to_string(),
+                            message,
+                        })?;
+
+                    let acc = synthetic_accumulator_from_value(value, agg).map_err(|message| {
+                        PivotError::InvalidCalculatedItemFormula {
+                            field: field.to_string(),
+                            item: item_name.to_string(),
+                            message,
+                        }
+                    })?;
+                    cell_accs.push(acc);
+                }
+                row_map.insert(new_col_key.clone(), cell_accs);
+            }
+        }
+
+        Ok(())
     }
 
     fn build_header_row(col_keys: &[PivotKey], cfg: &PivotConfig) -> Vec<PivotValue> {
@@ -2520,6 +3243,149 @@ mod tests {
                 vec!["Grand Total".into(), 700.into()],
             ]
         );
+    }
+
+    #[test]
+    fn calculated_item_on_row_field_creates_synthetic_row_and_updates_grand_total() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), 100.into()]),
+            pv_row(&["East".into(), "B".into(), 150.into()]),
+            pv_row(&["West".into(), "A".into(), 200.into()]),
+            pv_row(&["West".into(), "B".into(), 250.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![CalculatedItem {
+                field: "Region".to_string(),
+                name: "East+West".to_string(),
+                formula: "\"East\" + \"West\"".to_string(),
+            }],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        // Text sorting puts "East+West" after "East" and before "West".
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Sum of Sales".into()],
+                vec!["East".into(), 250.into()],
+                vec!["East+West".into(), 700.into()],
+                vec!["West".into(), 450.into()],
+                vec!["Grand Total".into(), 1400.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn calculated_item_field_must_be_in_layout() {
+        let data = vec![
+            pv_row(&["Region".into(), "Sales".into()]),
+            pv_row(&["East".into(), 100.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![CalculatedItem {
+                field: "NotInLayout".to_string(),
+                name: "Any".to_string(),
+                formula: "\"East\"".to_string(),
+            }],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let err = PivotEngine::calculate(&cache, &cfg).unwrap_err();
+        match err {
+            PivotError::CalculatedItemFieldNotInLayout(field) => {
+                assert_eq!(field, "NotInLayout");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn calculated_item_name_must_not_collide_with_existing_item() {
+        let data = vec![
+            pv_row(&["Region".into(), "Sales".into()]),
+            pv_row(&["East".into(), 100.into()]),
+            pv_row(&["West".into(), 200.into()]),
+        ];
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![CalculatedItem {
+                field: "Region".to_string(),
+                name: "East".to_string(),
+                formula: "\"West\"".to_string(),
+            }],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let err = PivotEngine::calculate(&cache, &cfg).unwrap_err();
+        match err {
+            PivotError::CalculatedItemNameConflictsWithExistingItem { field, item } => {
+                assert_eq!(field, "Region");
+                assert_eq!(item, "East");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
