@@ -591,7 +591,7 @@ validate_desktop_mime_associations_extracted() {
 
   if [ "$has_any_mimetype" -ne 1 ]; then
     err "No extracted .desktop file contained a MimeType= entry (file associations missing)."
-    err "Expected MimeType= to advertise spreadsheet MIME types based on apps/desktop/src-tauri/tauri.conf.json bundle.fileAssociations."
+    err "Expected MimeType= to advertise spreadsheet MIME types based on $(rel_path "$TAURI_CONF") bundle.fileAssociations."
     err "Extracted .desktop files inspected:"
     for desktop_file in "${desktop_files[@]}"; do
       echo "  - ${desktop_file#${tmpdir}/}" >&2

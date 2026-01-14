@@ -779,7 +779,7 @@ validate_appimage() {
   if [ "$has_any_mimetype" -ne 1 ]; then
     echo "${SCRIPT_NAME}: error: No .desktop file contained a MimeType= entry for AppImage: $appimage_path" >&2
     echo "${SCRIPT_NAME}: error: This usually means Linux file associations were not included in the bundle." >&2
-    echo "${SCRIPT_NAME}: error: Check apps/desktop/src-tauri/tauri.conf.json → bundle.fileAssociations." >&2
+    echo "${SCRIPT_NAME}: error: Check ${TAURI_CONF_PATH} → bundle.fileAssociations." >&2
     echo "${SCRIPT_NAME}: error: .desktop files inspected:" >&2
     for desktop_file in "${desktop_files[@]}"; do
       echo "  - ${desktop_file#$appdir/}" >&2
