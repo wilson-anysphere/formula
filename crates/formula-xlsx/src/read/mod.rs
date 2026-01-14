@@ -2428,6 +2428,8 @@ fn parse_worksheet_into_model(
                 let mut max: Option<u32> = None;
                 let mut width: Option<f32> = None;
                 let mut custom_width: Option<bool> = None;
+                let mut style: Option<u32> = None;
+                let mut custom_format: Option<bool> = None;
                 let mut hidden = false;
 
                 for attr in e.attributes() {
@@ -2445,6 +2447,13 @@ fn parse_worksheet_into_model(
                         b"customWidth" => {
                             let v = attr.unescape_value()?.into_owned();
                             custom_width = Some(parse_xml_bool(&v));
+                        }
+                        b"style" => {
+                            style = Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
+                        }
+                        b"customFormat" => {
+                            let v = attr.unescape_value()?.into_owned();
+                            custom_format = Some(parse_xml_bool(&v));
                         }
                         b"hidden" => {
                             let v = attr.unescape_value()?.into_owned();
@@ -2471,6 +2480,15 @@ fn parse_worksheet_into_model(
                     }
                     if hidden {
                         worksheet.set_col_hidden(col, true);
+                    }
+                    // Column default formatting (`col/@style`) is separate from per-cell formatting.
+                    // It is required to interpret Excel serial dates where cells inherit the
+                    // number format from the column.
+                    if custom_format == Some(false) {
+                        worksheet.set_col_style_id(col, None);
+                    } else if let Some(xf_index) = style {
+                        let style_id = styles_part.style_id_for_xf(xf_index);
+                        worksheet.set_col_style_id(col, (style_id != 0).then_some(style_id));
                     }
                 }
             }
@@ -2590,6 +2608,8 @@ fn parse_worksheet_into_model(
                 let mut row_1_based: Option<u32> = None;
                 let mut height: Option<f32> = None;
                 let mut custom_height: Option<bool> = None;
+                let mut style: Option<u32> = None;
+                let mut custom_format: Option<bool> = None;
                 let mut hidden = false;
 
                 for attr in e.attributes() {
@@ -2606,6 +2626,13 @@ fn parse_worksheet_into_model(
                             let v = attr.unescape_value()?.into_owned();
                             custom_height = Some(parse_xml_bool(&v));
                         }
+                        b"s" => {
+                            style = Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0));
+                        }
+                        b"customFormat" => {
+                            let v = attr.unescape_value()?.into_owned();
+                            custom_format = Some(parse_xml_bool(&v));
+                        }
                         b"hidden" => {
                             let v = attr.unescape_value()?.into_owned();
                             hidden = parse_xml_bool(&v);
@@ -2619,6 +2646,15 @@ fn parse_worksheet_into_model(
                     // unsigned integers and our model supports sheets beyond Excel's UI limits).
                     if row_1_based > 0 {
                         let row = row_1_based - 1;
+                        // Row default formatting (`row/@s`) is separate from per-cell formatting.
+                        // It is needed to interpret Excel serial dates where cells inherit the
+                        // number format from the row.
+                        if custom_format == Some(false) {
+                            worksheet.set_row_style_id(row, None);
+                        } else if let Some(xf_index) = style {
+                            let style_id = styles_part.style_id_for_xf(xf_index);
+                            worksheet.set_row_style_id(row, (style_id != 0).then_some(style_id));
+                        }
                         if custom_height != Some(false) {
                             if let Some(height) = height {
                                 worksheet.set_row_height(row, Some(height));
