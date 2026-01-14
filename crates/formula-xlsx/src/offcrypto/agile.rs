@@ -7,9 +7,9 @@ use digest::Digest as _;
 use super::encryption_info::decode_encryption_info_xml_text;
 use crate::offcrypto::{
     decode_base64_field_limited, decrypt_aes_cbc_no_padding_in_place, derive_iv, derive_key,
-    derive_segment_iv, extract_encryption_info_xml, hash_password, AesCbcDecryptError, HashAlgorithm,
-    OffCryptoError, ParseOptions, Result, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK,
-    VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK, AES_BLOCK_SIZE,
+    derive_segment_iv, extract_encryption_info_xml, hash_password, AesCbcDecryptError,
+    HashAlgorithm, OffCryptoError, ParseOptions, Result, AES_BLOCK_SIZE, HMAC_KEY_BLOCK,
+    HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
 };
 
 const OOXML_PASSWORD_KEY_ENCRYPTOR_URI: &str =
@@ -228,6 +228,13 @@ fn validate_aes_cbc_params(
         });
     }
 
+    if key_bits % 8 != 0 {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: element.to_string(),
+            attr: "keyBits".to_string(),
+            reason: "keyBits must be divisible by 8".to_string(),
+        });
+    }
     let key_len = (key_bits / 8) as usize;
     if !matches!(key_len, 16 | 24 | 32) {
         return Err(OffCryptoError::InvalidAttribute {
@@ -242,6 +249,29 @@ fn validate_aes_cbc_params(
         });
     }
 
+    Ok(())
+}
+
+fn hash_output_len(hash_alg: HashAlgorithm) -> u32 {
+    match hash_alg {
+        HashAlgorithm::Sha1 => 20,
+        HashAlgorithm::Sha256 => 32,
+        HashAlgorithm::Sha384 => 48,
+        HashAlgorithm::Sha512 => 64,
+    }
+}
+
+fn validate_hash_size(element: &str, hash_alg: HashAlgorithm, hash_size: u32) -> Result<()> {
+    let expected = hash_output_len(hash_alg);
+    if hash_size != expected {
+        return Err(OffCryptoError::InvalidAttribute {
+            element: element.to_string(),
+            attr: "hashSize".to_string(),
+            reason: format!(
+                "hashSize must match hashAlgorithm output length ({expected}, got {hash_size})"
+            ),
+        });
+    }
     Ok(())
 }
 
@@ -326,7 +356,7 @@ pub fn parse_agile_encryption_info_stream_with_options_and_decrypt_options(
         });
     }
     let key_data_salt_value = decode_b64_attr("keyData", key_data_node, "saltValue", parse_opts)?;
-    if key_data_salt_value.len() > key_data_salt_size as usize {
+    if key_data_salt_value.len() != key_data_salt_size as usize {
         return Err(OffCryptoError::InvalidAttribute {
             element: "keyData".to_string(),
             attr: "saltValue".to_string(),
@@ -347,6 +377,7 @@ pub fn parse_agile_encryption_info_stream_with_options_and_decrypt_options(
         block_size: key_data_block_size,
         hash_size: parse_u32_attr("keyData", key_data_node, "hashSize")?,
     };
+    validate_hash_size("keyData", key_data.hash_algorithm, key_data.hash_size)?;
 
     let data_integrity = doc
         .descendants()
@@ -462,13 +493,9 @@ pub fn parse_agile_encryption_info_stream_with_options_and_decrypt_options(
             reason: "saltSize must be non-zero".to_string(),
         });
     }
-    let key_encryptor_salt_value = decode_b64_attr(
-        "encryptedKey",
-        encrypted_key_node,
-        "saltValue",
-        parse_opts,
-    )?;
-    if key_encryptor_salt_value.len() > key_encryptor_salt_size as usize {
+    let key_encryptor_salt_value =
+        decode_b64_attr("encryptedKey", encrypted_key_node, "saltValue", parse_opts)?;
+    if key_encryptor_salt_value.len() != key_encryptor_salt_size as usize {
         return Err(OffCryptoError::InvalidAttribute {
             element: "encryptedKey".to_string(),
             attr: "saltValue".to_string(),
@@ -520,6 +547,11 @@ pub fn parse_agile_encryption_info_stream_with_options_and_decrypt_options(
             parse_opts,
         )?,
     };
+    validate_hash_size(
+        "encryptedKey",
+        password_key_encryptor.hash_algorithm,
+        password_key_encryptor.hash_size,
+    )?;
 
     let mut warnings = Vec::new();
     if password_encryptor_count > 1 {
@@ -656,17 +688,24 @@ fn decrypt_key_encryptor_blob_derived_iv(
     let key_len = (key_encryptor.key_bits / 8) as usize;
     let iv_len = key_encryptor.block_size as usize;
 
-    let key =
-        derive_key(password_hash, block_key, key_len, key_encryptor.hash_algorithm).map_err(|e| match e {
-            crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
-                OffCryptoError::UnsupportedHashAlgorithm { hash: name }
-            }
-            crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
+    let key = derive_key(
+        password_hash,
+        block_key,
+        key_len,
+        key_encryptor.hash_algorithm,
+    )
+    .map_err(|e| match e {
+        crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
+            OffCryptoError::UnsupportedHashAlgorithm { hash: name }
+        }
+        crate::offcrypto::CryptoError::InvalidParameter(reason) => {
+            OffCryptoError::InvalidAttribute {
                 element: "encryptedKey".to_string(),
                 attr: "keyBits".to_string(),
                 reason: reason.to_string(),
-            },
-        })?;
+            }
+        }
+    })?;
     let iv = derive_iv(
         &key_encryptor.salt_value,
         block_key,
@@ -677,11 +716,13 @@ fn decrypt_key_encryptor_blob_derived_iv(
         crate::offcrypto::CryptoError::UnsupportedHashAlgorithm(name) => {
             OffCryptoError::UnsupportedHashAlgorithm { hash: name }
         }
-        crate::offcrypto::CryptoError::InvalidParameter(reason) => OffCryptoError::InvalidAttribute {
-            element: "encryptedKey".to_string(),
-            attr: "saltValue".to_string(),
-            reason: reason.to_string(),
-        },
+        crate::offcrypto::CryptoError::InvalidParameter(reason) => {
+            OffCryptoError::InvalidAttribute {
+                element: "encryptedKey".to_string(),
+                attr: "saltValue".to_string(),
+                reason: reason.to_string(),
+            }
+        }
     })?;
 
     let mut buf = ciphertext.to_vec();
@@ -823,13 +864,13 @@ pub fn decrypt_agile_keys_with_options(
             .to_vec();
 
         let computed_full = hash_bytes(key_encryptor.hash_algorithm, &verifier_hash_input);
-        let computed = computed_full.get(..verifier_hash_value.len()).ok_or_else(|| {
-            OffCryptoError::InvalidAttribute {
+        let computed = computed_full
+            .get(..verifier_hash_value.len())
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
                 element: "encryptedKey".to_string(),
                 attr: "hashAlgorithm".to_string(),
                 reason: "hash output shorter than hashSize".to_string(),
-            }
-        })?;
+            })?;
         if !ct_eq(computed, verifier_hash_value.as_slice()) {
             return Err(OffCryptoError::WrongPassword);
         }
@@ -848,7 +889,9 @@ pub fn decrypt_agile_keys_with_options(
 
     let package_key = match decrypt_package_key(PasswordKeyIvDerivation::SaltValue) {
         Ok(key) => key,
-        Err(OffCryptoError::WrongPassword) => decrypt_package_key(PasswordKeyIvDerivation::Derived)?,
+        Err(OffCryptoError::WrongPassword) => {
+            decrypt_package_key(PasswordKeyIvDerivation::Derived)?
+        }
         Err(other) => return Err(other),
     };
 
@@ -933,7 +976,8 @@ pub fn decrypt_agile_keys_with_options(
                         .ok_or_else(|| OffCryptoError::InvalidAttribute {
                             element: "dataIntegrity".to_string(),
                             attr: "encryptedHmacValue".to_string(),
-                            reason: "decrypted HMAC value shorter than keyData.hashSize".to_string(),
+                            reason: "decrypted HMAC value shorter than keyData.hashSize"
+                                .to_string(),
                         })?
                         .to_vec(),
                 ),
@@ -1077,9 +1121,12 @@ pub fn decrypt_agile_encrypted_package_stream_with_key(
 
         out.extend_from_slice(&decrypted);
         offset += seg_len;
-        segment_index = segment_index.checked_add(1).ok_or(OffCryptoError::InvalidAgileParameter {
-            param: "EncryptedPackage segment index overflow",
-        })?;
+        segment_index =
+            segment_index
+                .checked_add(1)
+                .ok_or(OffCryptoError::InvalidAgileParameter {
+                    param: "EncryptedPackage segment index overflow",
+                })?;
     }
 
     if out.len() < declared_len {
@@ -1258,8 +1305,12 @@ mod tests {
 
     #[test]
     fn encrypted_package_errors_on_short_stream() {
-        let err = decrypt_agile_encrypted_package_stream_with_key(&[0u8; 7], &dummy_key_data(), &[0u8; 16])
-            .expect_err("expected EncryptedPackageTooShort");
+        let err = decrypt_agile_encrypted_package_stream_with_key(
+            &[0u8; 7],
+            &dummy_key_data(),
+            &[0u8; 16],
+        )
+        .expect_err("expected EncryptedPackageTooShort");
         assert!(
             matches!(err, OffCryptoError::EncryptedPackageTooShort { len: 7 }),
             "unexpected error: {err:?}"
@@ -1272,8 +1323,9 @@ mod tests {
         bytes.extend_from_slice(&0u64.to_le_bytes());
         bytes.extend_from_slice(&[0u8; 15]); // not multiple of 16
 
-        let err = decrypt_agile_encrypted_package_stream_with_key(&bytes, &dummy_key_data(), &[0u8; 16])
-            .expect_err("expected CiphertextNotBlockAligned");
+        let err =
+            decrypt_agile_encrypted_package_stream_with_key(&bytes, &dummy_key_data(), &[0u8; 16])
+                .expect_err("expected CiphertextNotBlockAligned");
         assert!(
             matches!(
                 err,
@@ -1293,8 +1345,9 @@ mod tests {
         bytes.extend_from_slice(&32u64.to_le_bytes());
         bytes.extend_from_slice(&[0u8; 16]);
 
-        let err = decrypt_agile_encrypted_package_stream_with_key(&bytes, &dummy_key_data(), &[0u8; 16])
-            .expect_err("expected DecryptedLengthShorterThanHeader");
+        let err =
+            decrypt_agile_encrypted_package_stream_with_key(&bytes, &dummy_key_data(), &[0u8; 16])
+                .expect_err("expected DecryptedLengthShorterThanHeader");
         assert!(
             matches!(
                 err,
@@ -1429,6 +1482,79 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rejects_salt_value_len_mismatch_when_salt_value_shorter() {
+        let salt_b64 = BASE64.encode([0u8; 8]); // 8-byte saltValue
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
+                 <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
+                          cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                          saltValue="{salt_b64}"/>
+               </encryption>"#
+        );
+        let stream = wrap_xml_in_encryption_info_stream(&xml);
+
+        let err = parse_agile_encryption_info_stream(&stream).unwrap_err();
+        assert!(
+            matches!(err, OffCryptoError::InvalidAttribute { .. }),
+            "expected InvalidAttribute, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("saltSize") && msg.contains("16") && msg.contains("8"),
+            "expected message to mention saltSize mismatch, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn rejects_key_bits_not_divisible_by_8() {
+        let salt_b64 = BASE64.encode([0u8; 16]);
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
+                 <keyData saltSize="16" blockSize="16" keyBits="129" hashSize="20"
+                          cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                          saltValue="{salt_b64}"/>
+               </encryption>"#
+        );
+        let stream = wrap_xml_in_encryption_info_stream(&xml);
+
+        let err = parse_agile_encryption_info_stream(&stream).unwrap_err();
+        assert!(
+            matches!(err, OffCryptoError::InvalidAttribute { .. }),
+            "expected InvalidAttribute, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("keyBits") && msg.contains("divisible by 8"),
+            "expected message to mention keyBits divisibility, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn rejects_hash_size_mismatch() {
+        // `hashSize` must match the output size of `hashAlgorithm`.
+        let salt_b64 = BASE64.encode([0u8; 16]);
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
+                 <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="32"
+                          cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                          saltValue="{salt_b64}"/>
+               </encryption>"#
+        );
+        let stream = wrap_xml_in_encryption_info_stream(&xml);
+
+        let err = parse_agile_encryption_info_stream(&stream).unwrap_err();
+        assert!(
+            matches!(err, OffCryptoError::InvalidAttribute { .. }),
+            "expected InvalidAttribute, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("hashSize") && msg.contains("hashAlgorithm"),
+            "expected message to mention hashSize mismatch, got: {msg}"
+        );
+    }
+
     fn zero_pad(mut bytes: Vec<u8>) -> Vec<u8> {
         if bytes.is_empty() {
             return bytes;
@@ -1504,8 +1630,8 @@ mod tests {
 
         let padded_plaintext = zero_pad(plaintext.clone());
         for (i, chunk) in padded_plaintext.chunks(0x1000).enumerate() {
-            let iv =
-                derive_segment_iv(&key_data_salt, i as u32, AES_BLOCK_SIZE, key_data_hash_alg).unwrap();
+            let iv = derive_segment_iv(&key_data_salt, i as u32, AES_BLOCK_SIZE, key_data_hash_alg)
+                .unwrap();
             let ct = encrypt_aes_cbc_no_padding(&package_key, &iv, chunk);
             encrypted_package.extend_from_slice(&ct);
         }
@@ -1689,8 +1815,8 @@ mod tests {
 
         let padded_plaintext = zero_pad(plaintext.clone());
         for (i, chunk) in padded_plaintext.chunks(0x1000).enumerate() {
-            let iv =
-                derive_segment_iv(&key_data_salt, i as u32, AES_BLOCK_SIZE, key_data_hash_alg).unwrap();
+            let iv = derive_segment_iv(&key_data_salt, i as u32, AES_BLOCK_SIZE, key_data_hash_alg)
+                .unwrap();
             let ct = encrypt_aes_cbc_no_padding(&package_key, &iv, chunk);
             encrypted_package.extend_from_slice(&ct);
         }
@@ -1749,12 +1875,25 @@ mod tests {
         // dataIntegrity blobs encrypted using the *package key* and IVs derived from keyData salt.
         let hmac_key_plain = (100u8..120).collect::<Vec<_>>(); // 20 bytes
         let hmac_value_plain = (200u8..220).collect::<Vec<_>>(); // 20 bytes
-        let iv_hmac_key =
-            derive_iv(&key_data_salt, &HMAC_KEY_BLOCK, AES_BLOCK_SIZE, key_data_hash_alg).unwrap();
-        let encrypted_hmac_key =
-            encrypt_aes_cbc_no_padding(&package_key, &iv_hmac_key, &zero_pad(hmac_key_plain.clone()));
-        let iv_hmac_val =
-            derive_iv(&key_data_salt, &HMAC_VALUE_BLOCK, AES_BLOCK_SIZE, key_data_hash_alg).unwrap();
+        let iv_hmac_key = derive_iv(
+            &key_data_salt,
+            &HMAC_KEY_BLOCK,
+            AES_BLOCK_SIZE,
+            key_data_hash_alg,
+        )
+        .unwrap();
+        let encrypted_hmac_key = encrypt_aes_cbc_no_padding(
+            &package_key,
+            &iv_hmac_key,
+            &zero_pad(hmac_key_plain.clone()),
+        );
+        let iv_hmac_val = derive_iv(
+            &key_data_salt,
+            &HMAC_VALUE_BLOCK,
+            AES_BLOCK_SIZE,
+            key_data_hash_alg,
+        )
+        .unwrap();
         let encrypted_hmac_value = encrypt_aes_cbc_no_padding(
             &package_key,
             &iv_hmac_val,
@@ -1802,121 +1941,55 @@ mod tests {
         let keys = decrypt_agile_keys(&parsed, password).expect("decrypt keys");
         assert_eq!(keys.package_key, package_key);
         assert_eq!(keys.hmac_key.as_deref(), Some(hmac_key_plain.as_slice()));
-        assert_eq!(keys.hmac_value.as_deref(), Some(hmac_value_plain.as_slice()));
+        assert_eq!(
+            keys.hmac_value.as_deref(),
+            Some(hmac_value_plain.as_slice())
+        );
 
-        let decrypted =
-            decrypt_agile_encrypted_package_stream(&encryption_info_stream, &encrypted_package, password)
-                .expect("decrypt package");
+        let decrypted = decrypt_agile_encrypted_package_stream(
+            &encryption_info_stream,
+            &encrypted_package,
+            password,
+        )
+        .expect("decrypt package");
         assert_eq!(decrypted, plaintext);
     }
 
     #[test]
     fn errors_when_password_key_hash_size_exceeds_hash_output() {
-        // If `p:encryptedKey/@hashSize` is larger than the hash output size for `hashAlgorithm`,
-        // treat the file as malformed instead of returning `WrongPassword`.
-        let password = "password";
-
-        // keyData (package encryption parameters).
-        let key_data_salt = (0u8..=15).collect::<Vec<_>>();
-        let key_data_key_bits = 128u32;
-        let key_data_block_size = 16u32;
-        let key_data_hash_size = 20u32;
-
-        // password key encryptor parameters (intentionally invalid hashSize for SHA1).
-        let ke_salt = (16u8..=31).collect::<Vec<_>>();
-        let ke_spin = 10u32;
-        let ke_key_bits = 128u32;
-        let ke_block_size = 16u32;
-        let ke_hash_alg = HashAlgorithm::Sha1;
-        let ke_hash_size = 32u32; // SHA1 outputs 20 bytes; 32 is invalid.
-
-        let package_key = b"0123456789ABCDEF".to_vec();
-        let pw_hash = hash_password(password, &ke_salt, ke_spin, ke_hash_alg).unwrap();
-
-        let verifier_hash_input = b"abcdefghijklmnop".to_vec(); // 16 bytes
-        let verifier_hash_value = hash_bytes(ke_hash_alg, &verifier_hash_input); // 20 bytes for SHA1
-
-        fn encrypt_ke_blob(
-            pw_hash: &[u8],
-            ke_salt: &[u8],
-            ke_key_bits: u32,
-            ke_block_size: u32,
-            ke_hash_alg: HashAlgorithm,
-            block_key: &[u8],
-            plaintext: &[u8],
-        ) -> Vec<u8> {
-            let key_len = (ke_key_bits / 8) as usize;
-            let iv_len = ke_block_size as usize;
-            let key = derive_key(pw_hash, block_key, key_len, ke_hash_alg).unwrap();
-            // MS-OFFCRYPTO: password key encryptor blobs use `saltValue` directly as the IV.
-            let iv = ke_salt.get(..iv_len).unwrap();
-            let padded = zero_pad(plaintext.to_vec());
-            encrypt_aes_cbc_no_padding(&key, iv, &padded)
-        }
-
-        let encrypted_verifier_hash_input = encrypt_ke_blob(
-            &pw_hash,
-            &ke_salt,
-            ke_key_bits,
-            ke_block_size,
-            ke_hash_alg,
-            &VERIFIER_HASH_INPUT_BLOCK,
-            &verifier_hash_input,
-        );
-        let encrypted_verifier_hash_value = encrypt_ke_blob(
-            &pw_hash,
-            &ke_salt,
-            ke_key_bits,
-            ke_block_size,
-            ke_hash_alg,
-            &VERIFIER_HASH_VALUE_BLOCK,
-            &verifier_hash_value,
-        );
-        let encrypted_key_value = encrypt_ke_blob(
-            &pw_hash,
-            &ke_salt,
-            ke_key_bits,
-            ke_block_size,
-            ke_hash_alg,
-            &KEY_VALUE_BLOCK,
-            &package_key,
-        );
-
+        // If `p:encryptedKey/@hashSize` is not the output size of `hashAlgorithm`, treat the file
+        // as malformed.
+        let salt_b64 = BASE64.encode([0u8; 16]);
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
             xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-  <keyData saltSize="16" blockSize="{key_data_block_size}" keyBits="{key_data_key_bits}" hashSize="{key_data_hash_size}"
+  <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
            cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
-           saltValue="{key_data_salt_b64}"/>
+           saltValue="{salt_b64}"/>
   <keyEncryptors>
     <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
-      <p:encryptedKey saltSize="16" blockSize="{ke_block_size}" keyBits="{ke_key_bits}" hashSize="{ke_hash_size}"
-                      spinCount="{ke_spin}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
-                      saltValue="{ke_salt_b64}"
-                      encryptedVerifierHashInput="{evhi_b64}"
-                      encryptedVerifierHashValue="{evhv_b64}"
-                      encryptedKeyValue="{ekv_b64}"/>
+      <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="32"
+                      spinCount="10" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                      saltValue="{salt_b64}"
+                      encryptedVerifierHashInput="" encryptedVerifierHashValue="" encryptedKeyValue=""/>
     </keyEncryptor>
   </keyEncryptors>
-</encryption>"#,
-            key_data_salt_b64 = BASE64.encode(&key_data_salt),
-            ke_salt_b64 = BASE64.encode(&ke_salt),
-            evhi_b64 = BASE64.encode(&encrypted_verifier_hash_input),
-            evhv_b64 = BASE64.encode(&encrypted_verifier_hash_value),
-            ekv_b64 = BASE64.encode(&encrypted_key_value),
+</encryption>"#
         );
 
-        let encryption_info_stream = wrap_xml_in_encryption_info_stream(&xml);
-        let parsed = parse_agile_encryption_info_stream(&encryption_info_stream).expect("parse");
-
-        let err = decrypt_agile_keys(&parsed, password).expect_err("expected invalid hashSize to fail");
+        let stream = wrap_xml_in_encryption_info_stream(&xml);
+        let err = parse_agile_encryption_info_stream(&stream).expect_err("expected error");
         match err {
-            OffCryptoError::InvalidAttribute { element, attr, reason } => {
+            OffCryptoError::InvalidAttribute {
+                element,
+                attr,
+                reason,
+            } => {
                 assert_eq!(element, "encryptedKey");
-                assert_eq!(attr, "hashAlgorithm");
+                assert_eq!(attr, "hashSize");
                 assert!(
-                    reason.contains("hash output shorter than hashSize"),
+                    reason.contains("hashSize must match hashAlgorithm output length"),
                     "unexpected reason: {reason}"
                 );
             }
@@ -1998,16 +2071,21 @@ mod tests {
         let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
 
         // High-level stream decryption should roundtrip.
-        let decrypted = decrypt_agile_encrypted_package_stream(&encryption_info, &encrypted_package, password)
-            .expect("decrypt_agile_encrypted_package_stream should succeed");
+        let decrypted =
+            decrypt_agile_encrypted_package_stream(&encryption_info, &encrypted_package, password)
+                .expect("decrypt_agile_encrypted_package_stream should succeed");
         assert_eq!(decrypted, plain_zip);
 
         // Key/hmac extraction should match `dataIntegrity` semantics used by real Office writers.
-        let info = parse_agile_encryption_info_stream(&encryption_info).expect("parse agile encryption info");
+        let info = parse_agile_encryption_info_stream(&encryption_info)
+            .expect("parse agile encryption info");
         let keys = decrypt_agile_keys(&info, password).expect("decrypt agile keys");
 
         let hmac_key = keys.hmac_key.as_ref().expect("expected decrypted hmac key");
-        let expected_hmac = keys.hmac_value.as_ref().expect("expected decrypted hmac value");
+        let expected_hmac = keys
+            .hmac_value
+            .as_ref()
+            .expect("expected decrypted hmac value");
         let hash_size = info.key_data.hash_size as usize;
         assert_eq!(hmac_key.len(), hash_size);
         assert_eq!(expected_hmac.len(), hash_size);
@@ -2015,7 +2093,8 @@ mod tests {
         // MS-OFFCRYPTO describes `dataIntegrity` as an HMAC over the *EncryptedPackage stream bytes*
         // (length prefix + ciphertext). However, some producers appear to HMAC the plaintext
         // package instead; accept either to keep this test robust.
-        let actual_ciphertext = compute_hmac(info.key_data.hash_algorithm, hmac_key, &encrypted_package);
+        let actual_ciphertext =
+            compute_hmac(info.key_data.hash_algorithm, hmac_key, &encrypted_package);
         let actual_plaintext = compute_hmac(info.key_data.hash_algorithm, hmac_key, &decrypted);
         assert!(
             actual_ciphertext.get(..hash_size) == Some(expected_hmac.as_slice())
@@ -2366,4 +2445,4 @@ mod tests {
             "unexpected error: {err:?}"
         );
     }
-} 
+}
