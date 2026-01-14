@@ -256,7 +256,7 @@ async fn remove_existing_cache_entry(path: &Path) -> Result<(), String> {
                     tokio::fs::remove_file(path).await
                 }
             } else if meta.is_dir() {
-                tokio::fs::remove_dir_all(path).await
+                remove_dir_all_without_following_links(path).await
             } else {
                 tokio::fs::remove_file(path).await
             };
@@ -266,6 +266,62 @@ async fn remove_existing_cache_entry(path: &Path) -> Result<(), String> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err.to_string()),
     }
+}
+
+async fn remove_dir_all_without_following_links(path: &Path) -> std::io::Result<()> {
+    use std::io::ErrorKind;
+
+    let mut dirs_to_remove: Vec<PathBuf> = Vec::new();
+    let mut stack: Vec<PathBuf> = vec![path.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let mut rd = match tokio::fs::read_dir(&dir).await {
+            Ok(rd) => rd,
+            Err(err) if err.kind() == ErrorKind::NotFound => continue,
+            Err(err) => return Err(err),
+        };
+
+        // Remove children before the directory itself (post-order).
+        dirs_to_remove.push(dir.clone());
+
+        while let Some(entry) = rd.next_entry().await? {
+            let entry_path = entry.path();
+            let meta = match tokio::fs::symlink_metadata(&entry_path).await {
+                Ok(meta) => meta,
+                Err(err) if err.kind() == ErrorKind::NotFound => continue,
+                Err(err) => return Err(err),
+            };
+
+            let is_link_like = meta.file_type().is_symlink() || is_windows_reparse_point(&meta);
+            if meta.is_dir() && !is_link_like {
+                stack.push(entry_path);
+                continue;
+            }
+
+            let res = if meta.is_dir() {
+                // Directory symlink/junction: remove the entry itself without recursing.
+                tokio::fs::remove_dir(&entry_path).await
+            } else {
+                tokio::fs::remove_file(&entry_path).await
+            };
+
+            match res {
+                Ok(()) => {}
+                Err(err) if err.kind() == ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    for dir in dirs_to_remove.into_iter().rev() {
+        match tokio::fs::remove_dir(&dir).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok(())
 }
 
 async fn download_to_path_with_progress(
@@ -775,6 +831,48 @@ mod tests {
         assert!(ok);
         assert!(bad_entry.is_file(), "expected cached directory to be replaced");
         assert_eq!(std::fs::read(&bad_entry).unwrap(), b"hello");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn directory_cached_assets_do_not_follow_nested_symlinks_when_replaced() {
+        use std::os::unix::fs::symlink;
+
+        let files = vec![("a.txt".to_string(), b"hello".to_vec())];
+        let base_url = serve_files_once(files.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        // Simulate a corrupted cache entry where a directory exists at the expected file path and
+        // contains a symlink to an out-of-cache target directory.
+        let bad_entry = cache_dir.join("a.txt");
+        std::fs::create_dir_all(&bad_entry).unwrap();
+
+        let outside_dir = tmp.path().join("outside_dir");
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        let outside_file = outside_dir.join("victim.txt");
+        std::fs::write(&outside_file, b"secret").unwrap();
+        symlink(&outside_dir, bad_entry.join("escape")).unwrap();
+
+        let expected_sha = sha256_bytes(b"hello");
+        let specs = vec![PyodideAssetSpec {
+            file_name: "a.txt",
+            sha256: expected_sha.as_str(),
+        }];
+
+        let ok = ensure_pyodide_assets_in_dir(&cache_dir, &base_url, &specs, true, |_| {})
+            .await
+            .unwrap();
+        assert!(ok);
+        assert!(bad_entry.is_file(), "expected cached directory to be replaced");
+        assert_eq!(std::fs::read(&bad_entry).unwrap(), b"hello");
+        assert_eq!(
+            std::fs::read(&outside_file).unwrap(),
+            b"secret",
+            "expected cached directory cleanup to not delete symlink targets"
+        );
     }
 
     #[tokio::test]
