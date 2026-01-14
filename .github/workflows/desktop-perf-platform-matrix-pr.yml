@@ -170,8 +170,9 @@ jobs:
         run: node scripts/ci/check-windows-timestamp-url.mjs
 
       - name: Setup Rust toolchain (pinned + wasm32)
-        uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561 # master
         with:
+          toolchain: 1.92.0
           targets: wasm32-unknown-unknown
 
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent

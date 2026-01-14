@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure CI/release workflows use the same pinned Rust version as rust-toolchain.toml.
+# Ensure CI/release workflows install the same Rust toolchain as rust-toolchain.toml.
 #
 # Rationale:
 # - rust-toolchain.toml is the single "intended" Rust version for the repo.
-# - GitHub Actions workflows also pin dtolnay/rust-toolchain@<version> for deterministic installs.
-# - This script fails fast if the two diverge, so Rust upgrades are an explicit PR with CI signal.
+# - GitHub Actions workflows install Rust via dtolnay/rust-toolchain pinned to a commit SHA
+#   (supply-chain hardening). When pinning by SHA, upstream recommends selecting a SHA that is in
+#   master history to avoid garbage collection of old branch-only commits.
+# - Because the action is pinned by SHA, workflows must pass the Rust version via `with: toolchain:`.
+# - This script fails fast if workflows drift from rust-toolchain.toml, making Rust upgrades an
+#   explicit PR/change with CI validation.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
@@ -38,99 +42,202 @@ fi
 
 fail=0
 
-# `git grep` exits:
-#   0 = matches found
-#   1 = no matches
-#   2 = error
-set +e
-# Scan all tracked workflow files (supports both `.yml` and `.yaml`).
-# Match both quoted and unquoted YAML action refs:
-#   uses: dtolnay/rust-toolchain@...
-#   uses: "dtolnay/rust-toolchain@..."
-#   uses: 'dtolnay/rust-toolchain@...'
-matches="$(git grep -n -E "uses:[[:space:]]*['\"]?dtolnay/rust-toolchain@" -- .github/workflows 2>/dev/null)"
-status=$?
-set -e
+workflow_files=()
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  workflow_files+=("$file")
+done < <(git ls-files .github/workflows | grep -E '\.(yml|yaml)$' || true)
 
-if [ "$status" -eq 2 ]; then
-  echo "git grep failed while scanning workflow pins" >&2
+if [ "${#workflow_files[@]}" -eq 0 ]; then
+  echo "No workflow files found under .github/workflows" >&2
   exit 2
 fi
 
-while IFS= read -r match; do
-  [ -z "$match" ] && continue
-  # Example match: ".github/workflows/ci.yml:23:      - uses: dtolnay/rust-toolchain@1.92.0"
-  file="${match%%:*}"
-  rest="${match#*:}"
-  line="${rest%%:*}"
-  ref="${match#*dtolnay/rust-toolchain@}"
-  ref="${ref%%[[:space:]]*}"
-  # Normalize common YAML quoting + CRLF.
-  ref="${ref%$'\r'}"
-  ref="${ref%\"}"
-  ref="${ref%\'}"
-  ref="${ref#v}"
+for workflow in "${workflow_files[@]}"; do
+  # Parse each workflow and validate every dtolnay/rust-toolchain step declares a matching toolchain.
+  awk -v workflow="$workflow" -v expected="$channel" '
+    function ltrim(s) { sub(/^[[:space:]]+/, "", s); return s }
+    function rtrim(s) { sub(/[[:space:]]+$/, "", s); return s }
+    function trim(s) { return rtrim(ltrim(s)) }
+    function strip_quotes(s) {
+      s = trim(s)
+      if (s ~ /^"/) { sub(/^"/, "", s); sub(/"$/, "", s) }
+      else if (s ~ /^'\''/) { sub(/^'\''/, "", s); sub(/'\''$/, "", s) }
+      return s
+    }
+    function normalize_toolchain(s) {
+      s = strip_quotes(s)
+      sub(/^v/, "", s)
+      return s
+    }
+    function finalize_step() {
+      if (!step_dtolnay) return
+      if (step_toolchain == "") {
+        printf("Rust toolchain workflow step is missing an explicit toolchain input:\n") > "/dev/stderr"
+        printf("  rust-toolchain.toml channel = %s\n", expected) > "/dev/stderr"
+        printf("  %s:%d uses dtolnay/rust-toolchain but no `with: toolchain:` was found\n", workflow, step_uses_line) > "/dev/stderr"
+        printf("  Fix: add:\n    with:\n      toolchain: %s\n\n", expected) > "/dev/stderr"
+        fail = 1
+        return
+      }
+      if (step_toolchain !~ /^[0-9]+\.[0-9]+\.[0-9]+$/) {
+        printf("Rust toolchain must be patch-pinned (X.Y.Z):\n") > "/dev/stderr"
+        printf("  rust-toolchain.toml channel = %s\n", expected) > "/dev/stderr"
+        printf("  %s:%d toolchain: %s\n", workflow, step_toolchain_line, step_toolchain) > "/dev/stderr"
+        printf("  Fix: set toolchain: %s\n\n", expected) > "/dev/stderr"
+        fail = 1
+        return
+      }
+      if (step_toolchain != expected) {
+        printf("Rust toolchain pin mismatch:\n") > "/dev/stderr"
+        printf("  rust-toolchain.toml channel = %s\n", expected) > "/dev/stderr"
+        printf("  %s:%d toolchain: %s\n", workflow, step_toolchain_line, step_toolchain) > "/dev/stderr"
+        printf("  Fix: update the workflow to use toolchain: %s (or update rust-toolchain.toml).\n\n", expected) > "/dev/stderr"
+        fail = 1
+      }
+    }
 
-  if [ -z "$ref" ]; then
-    continue
-  fi
+    BEGIN {
+      fail = 0
+      in_block = 0
+      block_indent = 0
+      in_steps = 0
+      steps_indent = 0
+      step_item_indent = 0
+      in_with = 0
+      with_indent = 0
+      step_dtolnay = 0
+      step_toolchain = ""
+      step_uses_line = 0
+      step_toolchain_line = 0
+    }
 
-  # dtolnay/rust-toolchain can be pinned either to:
-  # - a toolchain version tag (e.g. `@1.92.0`), or
-  # - an immutable commit SHA (supply-chain hardening), often with a trailing `# 1.92.0` comment.
-  #
-  # Normalize both forms into the underlying Rust toolchain version we expect.
-  toolchain_ref=""
-  if [[ "$ref" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    toolchain_ref="$ref"
-  else
-    if ! [[ "$ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
-      echo "Rust toolchain action must be pinned to a Rust version tag (X.Y.Z) or a full commit SHA:"
-      echo "  rust-toolchain.toml channel = ${channel}"
-      echo "  ${file}:${line} uses dtolnay/rust-toolchain@${ref}"
-      echo "  Fix: use dtolnay/rust-toolchain@${channel}, or pin to a commit SHA with a trailing toolchain comment:"
-      echo "    uses: dtolnay/rust-toolchain@<sha> # ${channel}"
-      echo
-      fail=1
-      continue
-    fi
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      trimmed = trim(line)
+      match(line, /^[ ]*/)
+      indent = RLENGTH
 
-    # Commit SHA pins: require an explicit semver toolchain comment so we can validate the intent
-    # without reaching out to GitHub during CI.
-    #
-    # Example:
-    #   uses: dtolnay/rust-toolchain@<sha> # 1.92.0
-    comment="${match#*#}"
-    if [ "$comment" != "$match" ]; then
-      comment="${comment#"${comment%%[![:space:]]*}"}" # ltrim
-      comment="${comment%%[[:space:]]*}"
-      comment="${comment#v}"
-      if [[ "$comment" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        toolchain_ref="$comment"
-      fi
-    fi
-  fi
+      # Skip YAML literal/folded block scalar contents (run: |, restore-keys: |, etc).
+      if (in_block) {
+        if (trimmed != "" && indent <= block_indent) {
+          in_block = 0
+        } else {
+          next
+        }
+      }
+      if (!in_block && trimmed ~ /^[^#].*:[[:space:]]*[|>][+-]?[[:space:]]*($|#)/) {
+        in_block = 1
+        block_indent = indent
+        next
+      }
 
-  if [ -z "$toolchain_ref" ]; then
-    echo "Rust toolchain pin could not be interpreted as a semver version:"
-    echo "  rust-toolchain.toml channel = ${channel}"
-    echo "  ${file}:${line} uses dtolnay/rust-toolchain@${ref}"
-    echo "  Fix: pin to @${channel}, or add a trailing comment with the toolchain version:"
-    echo "    uses: dtolnay/rust-toolchain@<sha> # ${channel}"
-    echo
-    fail=1
-    continue
-  fi
+      # Enter a steps: block.
+      if (!in_steps) {
+        if (trimmed ~ /^steps:[[:space:]]*($|#)/) {
+          in_steps = 1
+          steps_indent = indent
+          step_item_indent = steps_indent + 2
+          in_with = 0
+          with_indent = 0
+          step_dtolnay = 0
+          step_toolchain = ""
+          step_uses_line = 0
+          step_toolchain_line = 0
+        }
+        next
+      }
 
-  if [ "$toolchain_ref" != "$channel" ]; then
-    echo "Rust toolchain pin mismatch:"
-    echo "  rust-toolchain.toml channel = ${channel}"
-    echo "  ${file}:${line} uses dtolnay/rust-toolchain@${ref}"
-    echo "  Fix: update the workflow to match ${channel} (or update rust-toolchain.toml)."
-    echo
-    fail=1
-  fi
-done <<<"$matches"
+      # Leaving a steps: block.
+      if (trimmed != "" && trimmed !~ /^#/) {
+        if (indent <= steps_indent) {
+          finalize_step()
+          in_steps = 0
+          in_with = 0
+          step_dtolnay = 0
+          step_toolchain = ""
+          next
+        }
+      }
+
+      # New step item (only when indent matches the list under steps:).
+      if (indent == step_item_indent && trimmed ~ /^-[[:space:]]/) {
+        finalize_step()
+        in_with = 0
+        with_indent = 0
+        step_dtolnay = 0
+        step_toolchain = ""
+        step_uses_line = 0
+        step_toolchain_line = 0
+
+        # Inline "- uses: ..." form.
+        step_line = trimmed
+        sub(/^-+/, "", step_line)
+        step_line = trim(step_line)
+        if (step_line ~ /^uses:[[:space:]]*/) {
+          value = step_line
+          sub(/^uses:[[:space:]]*/, "", value)
+          value = trim(value)
+          # Strip YAML comments.
+          sub(/[[:space:]]+#.*/, "", value)
+          value = strip_quotes(value)
+          if (value ~ /^dtolnay\/rust-toolchain@/) {
+            step_dtolnay = 1
+            step_uses_line = NR
+          }
+        }
+        next
+      }
+
+      # Within a step item.
+      if (indent < step_item_indent) {
+        next
+      }
+
+      # Track with: block scope.
+      if (in_with && trimmed != "" && indent <= with_indent) {
+        in_with = 0
+        with_indent = 0
+      }
+      if (trimmed ~ /^with:[[:space:]]*($|#)/) {
+        in_with = 1
+        with_indent = indent
+        next
+      }
+
+      # Detect uses: dtolnay/rust-toolchain inside a named step.
+      if (trimmed ~ /^uses:[[:space:]]*/) {
+        value = trimmed
+        sub(/^uses:[[:space:]]*/, "", value)
+        value = trim(value)
+        sub(/[[:space:]]+#.*/, "", value)
+        value = strip_quotes(value)
+        if (value ~ /^dtolnay\/rust-toolchain@/) {
+          step_dtolnay = 1
+          step_uses_line = NR
+        }
+      }
+
+      if (step_dtolnay && in_with && trimmed ~ /^toolchain:[[:space:]]*/) {
+        value = trimmed
+        sub(/^toolchain:[[:space:]]*/, "", value)
+        value = trim(value)
+        sub(/[[:space:]]+#.*/, "", value)
+        value = normalize_toolchain(value)
+        step_toolchain = value
+        step_toolchain_line = NR
+      }
+    }
+
+    END {
+      if (in_steps) {
+        finalize_step()
+      }
+      exit fail
+    }
+  ' "$workflow" || fail=1
+done
 
 if [ "$fail" -ne 0 ]; then
   exit 1
