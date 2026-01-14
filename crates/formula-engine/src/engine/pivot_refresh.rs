@@ -12,6 +12,24 @@ use crate::value::{ErrorKind, Value};
 use super::{CellKey, Engine, SheetId};
 
 impl Engine {
+    /// Build a [`PivotCache`] directly from the engine's current workbook state.
+    ///
+    /// This is similar to [`Engine::calculate_pivot_from_range`], but returns the cache so callers
+    /// can inspect schema/unique values or run calculations separately.
+    pub fn pivot_cache_from_range(
+        &self,
+        sheet: &str,
+        range: Range,
+    ) -> Result<PivotCache, PivotError> {
+        let sheet_id = self
+            .workbook
+            .sheet_id(sheet)
+            .ok_or_else(|| PivotError::SheetNotFound(sheet.to_string()))?;
+
+        let source = materialize_range_as_pivot_values(self, sheet_id, range);
+        PivotCache::from_range(&source)
+    }
+
     /// Calculate a pivot table directly from the engine's current workbook state.
     ///
     /// This avoids marshalling the source range through JS/IPC: the engine materializes the

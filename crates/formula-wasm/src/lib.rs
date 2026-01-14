@@ -1028,24 +1028,6 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
     }
 }
 
-fn engine_value_to_pivot_value(value: EngineValue) -> pivot_engine::PivotValue {
-    match value {
-        EngineValue::Blank => pivot_engine::PivotValue::Blank,
-        EngineValue::Bool(b) => pivot_engine::PivotValue::Bool(b),
-        EngineValue::Number(n) => pivot_engine::PivotValue::Number(n),
-        EngineValue::Text(s) => pivot_engine::PivotValue::Text(s),
-        EngineValue::Entity(entity) => pivot_engine::PivotValue::Text(entity.display),
-        EngineValue::Record(record) => pivot_engine::PivotValue::Text(record.display),
-        EngineValue::Error(kind) => pivot_engine::PivotValue::Text(kind.as_code().to_string()),
-        // Arrays should generally be spilled into grid cells. If one reaches pivot extraction,
-        // degrade to its top-left value for a scalar-like experience.
-        EngineValue::Array(arr) => engine_value_to_pivot_value(arr.top_left()),
-        // Degrade any other rich/non-scalar value (references, lambdas, spill markers, etc.) to
-        // its display string so the pivot engine can treat it as a grouping key.
-        other => pivot_engine::PivotValue::Text(other.to_string()),
-    }
-}
-
 fn pivot_value_to_json(value: pivot_engine::PivotValue) -> JsonValue {
     match value {
         pivot_engine::PivotValue::Blank => JsonValue::Null,
@@ -1846,27 +1828,6 @@ impl WorkbookState {
         Range::from_a1(range).map_err(|_| js_err(format!("invalid range: {range}")))
     }
 
-    fn read_range_values_as_pivot_values(
-        &self,
-        sheet: &str,
-        range: &Range,
-    ) -> Result<Vec<Vec<pivot_engine::PivotValue>>, JsValue> {
-        let values = self
-            .engine
-            .get_range_values(sheet, range.clone())
-            .map_err(|err| js_err(err.to_string()))?;
-
-        let mut out = Vec::with_capacity(values.len());
-        for row in values {
-            let mut row_values = Vec::with_capacity(row.len());
-            for value in row {
-                row_values.push(engine_value_to_pivot_value(value));
-            }
-            out.push(row_values);
-        }
-        Ok(out)
-    }
-
     fn get_pivot_schema_internal(
         &self,
         sheet: &str,
@@ -1875,9 +1836,10 @@ impl WorkbookState {
     ) -> Result<pivot_engine::PivotSchema, JsValue> {
         let sheet = self.require_sheet(sheet)?.to_string();
         let range = Self::parse_range(source_range_a1)?;
-        let source = self.read_range_values_as_pivot_values(&sheet, &range)?;
-        let cache =
-            pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
+        let cache = self
+            .engine
+            .pivot_cache_from_range(&sheet, range)
+            .map_err(|err| js_err(err.to_string()))?;
         Ok(cache.schema(sample_size))
     }
 
@@ -1892,10 +1854,9 @@ impl WorkbookState {
         let range = Self::parse_range(source_range_a1)?;
         let destination = Self::parse_address(destination_top_left_a1)?;
 
-        let source = self.read_range_values_as_pivot_values(&sheet, &range)?;
-        let cache =
-            pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
-        let result = pivot_engine::PivotEngine::calculate(&cache, config)
+        let result = self
+            .engine
+            .calculate_pivot_from_range(&sheet, range, config)
             .map_err(|err| js_err(err.to_string()))?;
 
         let writes = result.to_cell_writes(pivot_engine::CellRef {
@@ -3473,6 +3434,17 @@ impl WasmWorkbook {
             }
         }
 
+        // Import workbook styles (including number formats) so pivot extraction and worksheet
+        // information functions (`CELL("format")`, etc.) can interpret Excel serial dates.
+        //
+        // Note: The WASM DTO surface does not currently expose style edits, so we only apply style
+        // ids for cells that have values/formulas and for row/column defaults.
+        let mut style_id_map: Vec<u32> = Vec::with_capacity(model.styles.styles.len());
+        style_id_map.push(0);
+        for style in model.styles.styles.iter().skip(1) {
+            style_id_map.push(wb.engine.intern_style(style.clone()));
+        }
+
         // Best-effort column width overrides (Excel character units).
         //
         // These are persisted in OOXML (`col/@width`) and are needed for workbook info functions
@@ -3481,6 +3453,40 @@ impl WasmWorkbook {
             for (&col, props) in &sheet.col_properties {
                 if let Some(width) = props.width {
                     wb.set_col_width_chars_internal(&sheet.name, col, Some(width))?;
+                }
+            }
+        }
+
+        // Row/column default styles.
+        for sheet in &model.sheets {
+            let sheet_name = wb
+                .resolve_sheet(&sheet.name)
+                .expect("sheet just ensured must resolve")
+                .to_string();
+
+            for (&row, props) in &sheet.row_properties {
+                let Some(old_style_id) = props.style_id else {
+                    continue;
+                };
+                let mapped = style_id_map
+                    .get(old_style_id as usize)
+                    .copied()
+                    .unwrap_or(0);
+                if mapped != 0 {
+                    wb.engine.set_row_style_id(&sheet_name, row, Some(mapped));
+                }
+            }
+
+            for (&col, props) in &sheet.col_properties {
+                let Some(old_style_id) = props.style_id else {
+                    continue;
+                };
+                let mapped = style_id_map
+                    .get(old_style_id as usize)
+                    .copied()
+                    .unwrap_or(0);
+                if mapped != 0 {
+                    wb.engine.set_col_style_id(&sheet_name, col, Some(mapped));
                 }
             }
         }
@@ -3556,6 +3562,19 @@ impl WasmWorkbook {
                 wb.engine
                     .set_cell_value(&sheet_name, &address, cell_value_to_engine(&cell.value))
                     .map_err(|err| js_err(err.to_string()))?;
+
+                // Apply cell formatting metadata for non-empty cells.
+                if cell.style_id != 0 {
+                    let mapped = style_id_map
+                        .get(cell.style_id as usize)
+                        .copied()
+                        .unwrap_or(0);
+                    if mapped != 0 {
+                        wb.engine
+                            .set_cell_style_id(&sheet_name, &address, mapped)
+                            .map_err(|err| js_err(err.to_string()))?;
+                    }
+                }
 
                 if let Some(formula) = cell.formula.as_deref() {
                     // `formula-model` stores formulas without a leading '='.
@@ -3875,9 +3894,21 @@ impl WasmWorkbook {
             if let Some(start_row) = used_start_row {
                 let used_obj = Object::new();
                 object_set(&used_obj, "start_row", &JsValue::from_f64(start_row as f64))?;
-                object_set(&used_obj, "end_row", &JsValue::from_f64(used_end_row as f64))?;
-                object_set(&used_obj, "start_col", &JsValue::from_f64(used_start_col as f64))?;
-                object_set(&used_obj, "end_col", &JsValue::from_f64(used_end_col as f64))?;
+                object_set(
+                    &used_obj,
+                    "end_row",
+                    &JsValue::from_f64(used_end_row as f64),
+                )?;
+                object_set(
+                    &used_obj,
+                    "start_col",
+                    &JsValue::from_f64(used_start_col as f64),
+                )?;
+                object_set(
+                    &used_obj,
+                    "end_col",
+                    &JsValue::from_f64(used_end_col as f64),
+                )?;
                 object_set(&sheet_obj, "usedRange", &used_obj.into())?;
             }
 
@@ -3900,7 +3931,11 @@ impl WasmWorkbook {
     /// Note: This is currently a narrow interop hook so JS callers can preserve formatting when
     /// clearing cell contents.
     #[wasm_bindgen(js_name = "getCellStyleId")]
-    pub fn get_cell_style_id(&self, address: String, sheet: Option<String>) -> Result<u32, JsValue> {
+    pub fn get_cell_style_id(
+        &self,
+        address: String,
+        sheet: Option<String>,
+    ) -> Result<u32, JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         self.inner.get_cell_style_id_internal(sheet, &address)
     }
@@ -4275,9 +4310,11 @@ impl WasmWorkbook {
         ensure_rust_constructors_run();
         let sheet = self.inner.require_sheet(&sheet)?.to_string();
         let range = WorkbookState::parse_range(&source_range_a1)?;
-        let source = self.inner.read_range_values_as_pivot_values(&sheet, &range)?;
-        let cache =
-            pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
+        let cache = self
+            .inner
+            .engine
+            .pivot_cache_from_range(&sheet, range)
+            .map_err(|err| js_err(err.to_string()))?;
 
         let Some(values) = cache.unique_values.get(&field) else {
             return Err(js_err(format!("missing field in pivot cache: {field}")));
@@ -4301,9 +4338,11 @@ impl WasmWorkbook {
         ensure_rust_constructors_run();
         let sheet = self.inner.require_sheet(&sheet)?.to_string();
         let range = WorkbookState::parse_range(&source_range_a1)?;
-        let source = self.inner.read_range_values_as_pivot_values(&sheet, &range)?;
-        let cache =
-            pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
+        let cache = self
+            .inner
+            .engine
+            .pivot_cache_from_range(&sheet, range)
+            .map_err(|err| js_err(err.to_string()))?;
 
         let Some(values) = cache.unique_values.get(&field) else {
             return Err(js_err(format!("missing field in pivot cache: {field}")));
@@ -5362,6 +5401,69 @@ mod tests {
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!("'=hello"));
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A2"], json!("''hello"));
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A3"], json!("'#REF!"));
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_xlsx_bytes_imports_cell_styles_for_pivot_date_inference() {
+        use std::io::Cursor;
+
+        use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+
+        let mut workbook = formula_model::Workbook::new();
+        let sheet_id = workbook.add_sheet("Sheet1").unwrap();
+
+        // Add a date-like numeric column + number format applied via the cell style id.
+        let date_style_id = workbook.styles.intern(formula_model::Style {
+            number_format: Some("m/d/yyyy".to_string()),
+            ..Default::default()
+        });
+        {
+            let sheet = workbook.sheet_mut(sheet_id).unwrap();
+            sheet
+                .set_value_a1("A1", CellValue::String("Date".to_string()))
+                .unwrap();
+            sheet
+                .set_value_a1("B1", CellValue::String("Amount".to_string()))
+                .unwrap();
+
+            let date_1 = ymd_to_serial(ExcelDate::new(2024, 1, 15), ExcelDateSystem::EXCEL_1900)
+                .unwrap() as f64;
+            let date_2 = ymd_to_serial(ExcelDate::new(2024, 1, 16), ExcelDateSystem::EXCEL_1900)
+                .unwrap() as f64;
+
+            sheet.set_value_a1("A2", CellValue::Number(date_1)).unwrap();
+            sheet.set_value_a1("B2", CellValue::Number(10.0)).unwrap();
+            sheet.set_value_a1("A3", CellValue::Number(date_2)).unwrap();
+            sheet.set_value_a1("B3", CellValue::Number(20.0)).unwrap();
+
+            sheet.set_style_id_a1("A2", date_style_id).unwrap();
+            sheet.set_style_id_a1("A3", date_style_id).unwrap();
+        }
+
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&workbook, &mut cursor).unwrap();
+        let bytes = cursor.into_inner();
+
+        let wb = WasmWorkbook::from_xlsx_bytes(&bytes).unwrap();
+        let schema = wb
+            .inner
+            .get_pivot_schema_internal("Sheet1", "A1:B3", 10)
+            .unwrap();
+
+        let date_field = schema
+            .fields
+            .iter()
+            .find(|f| f.name == "Date")
+            .expect("expected Date field in schema");
+        assert_eq!(date_field.field_type, pivot_engine::PivotFieldType::Date);
+
+        let amount_field = schema
+            .fields
+            .iter()
+            .find(|f| f.name == "Amount")
+            .expect("expected Amount field in schema");
+        assert_eq!(amount_field.field_type, pivot_engine::PivotFieldType::Number);
     }
 
     #[test]
