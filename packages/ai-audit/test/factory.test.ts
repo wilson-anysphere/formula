@@ -121,6 +121,15 @@ describe("createDefaultAIAuditStore", () => {
     expect((store as LocalStorageAIAuditStore).maxEntries).toBe(7);
   });
 
+  it('prefer: "localstorage" forwards max_age_ms to LocalStorageAIAuditStore', async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+
+    const store = await createDefaultAIAuditStore({ prefer: "localstorage", max_age_ms: 1234, bounded: false });
+    expect(store).toBeInstanceOf(LocalStorageAIAuditStore);
+    expect((store as LocalStorageAIAuditStore).maxAgeMs).toBe(1234);
+  });
+
   it('prefer: "localstorage" wraps LocalStorageAIAuditStore in BoundedAIAuditStore by default', async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
@@ -156,10 +165,12 @@ describe("createDefaultAIAuditStore", () => {
     (globalThis as any).indexedDB = indexedDB;
     (globalThis as any).IDBKeyRange = IDBKeyRange;
 
-    const store = await createDefaultAIAuditStore({ prefer: "memory", max_entries: 7, bounded: false });
+    const store = await createDefaultAIAuditStore({ prefer: "memory", max_entries: 7, max_age_ms: 1234, bounded: false });
     expect(store).toBeInstanceOf(MemoryAIAuditStore);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((store as any).maxEntries).toBe(7);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).maxAgeMs).toBe(1234);
   });
 
   it('prefer: "memory" wraps MemoryAIAuditStore in BoundedAIAuditStore by default', async () => {
