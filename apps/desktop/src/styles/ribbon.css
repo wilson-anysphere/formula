@@ -24,8 +24,8 @@
   align-items: stretch;
   justify-content: space-between;
   height: 26px;
-  padding: 0 6px;
-  gap: 6px;
+  padding: var(--space-0) var(--space-3);
+  gap: var(--space-3);
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
 }
@@ -33,7 +33,7 @@
 .ribbon__tabs {
   display: flex;
   align-items: stretch;
-  gap: 2px;
+  gap: var(--space-1);
   flex: 1;
   min-width: 0;
   overflow-x: auto;
@@ -96,12 +96,12 @@
 
 .ribbon__tab-menu {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + var(--space-2));
   left: 0;
   min-width: 180px;
   max-height: min(360px, calc(100vh - 160px));
   overflow: auto;
-  padding: 4px;
+  padding: var(--space-2);
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-primary);
@@ -117,7 +117,7 @@
   width: 100%;
   text-align: left;
   border-radius: var(--radius-sm);
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   cursor: pointer;
   font-size: 12px;
 }
@@ -170,7 +170,7 @@
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 500;
-  padding: 0 10px;
+  padding: var(--space-0) calc(var(--space-4) + var(--space-1));
   border-bottom: 2px solid transparent;
   cursor: pointer;
   flex: 0 0 auto;
@@ -207,7 +207,7 @@
   color: var(--text-on-accent);
   border-bottom-color: transparent;
   border-radius: var(--radius);
-  padding: 0 12px;
+  padding: var(--space-0) var(--space-5);
 }
 
 .ribbon__tab.ribbon__tab--file:hover {
@@ -237,7 +237,7 @@
 }
 
 .ribbon__content {
-  padding: 3px 8px;
+  padding: calc(var(--space-3) / 2) var(--space-4);
   min-height: 58px;
   background: var(--bg-surface);
   overflow-x: auto;
@@ -247,7 +247,7 @@
 .ribbon__tabpanel {
   display: inline-flex;
   align-items: stretch;
-  gap: 12px;
+  gap: var(--space-5);
   min-height: 52px;
 }
 
@@ -260,8 +260,8 @@
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding-right: 12px;
+  gap: calc(var(--space-1) / 2);
+  padding-right: var(--space-5);
   border-right: 1px solid var(--border);
 }
 
@@ -275,7 +275,7 @@
   grid-template-rows: repeat(2, minmax(0, 1fr));
   grid-auto-flow: column;
   grid-auto-columns: max-content;
-  gap: 1px 6px;
+  gap: calc(var(--space-1) / 2) var(--space-3);
   align-items: start;
 }
 
@@ -292,12 +292,12 @@
   background: transparent;
   color: var(--text-primary);
   border-radius: var(--radius);
-  padding: 1px 6px;
+  padding: calc(var(--space-1) / 2) var(--space-3);
   font-size: 11px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: var(--space-2);
   cursor: pointer;
   min-height: 20px;
   font-family: inherit;
@@ -370,7 +370,7 @@
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
-  margin-left: 2px;
+  margin-left: var(--space-1);
 }
 
 /* Sizes */
@@ -380,9 +380,9 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 3px 8px;
+  padding: calc(var(--space-3) / 2) var(--space-4);
   min-width: 60px;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .ribbon-button--large .ribbon-button__icon {
@@ -393,8 +393,8 @@
 
 .ribbon-button--large .ribbon-button__caret {
   position: absolute;
-  top: 3px;
-  right: 4px;
+  top: calc(var(--space-3) / 2);
+  right: var(--space-2);
   margin: 0;
   width: 9px;
   height: 9px;
@@ -409,7 +409,7 @@
 
 .ribbon-button--small {
   justify-content: flex-start;
-  padding-right: 8px;
+  padding-right: var(--space-4);
 }
 
 .ribbon-button--icon {
@@ -423,8 +423,8 @@
 
 .ribbon-button--icon .ribbon-button__caret {
   position: absolute;
-  right: 4px;
-  bottom: 2px;
+  right: var(--space-2);
+  bottom: var(--space-1);
   margin: 0;
   width: 9px;
   height: 9px;
@@ -449,12 +449,12 @@
 
 .ribbon-dropdown__menu {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + var(--space-2));
   left: 0;
   min-width: 180px;
   max-height: min(360px, calc(100vh - 160px));
   overflow: auto;
-  padding: 4px;
+  padding: var(--space-2);
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-primary);
@@ -470,10 +470,10 @@
   width: 100%;
   text-align: left;
   border-radius: var(--radius-sm);
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   cursor: pointer;
   font-size: 12px;
 }
@@ -517,18 +517,18 @@
 /* Density modes (responsive + user-collapsed) */
 
 .ribbon[data-density="compact"] .ribbon__content {
-  padding: 4px 6px;
+  padding: var(--space-2) var(--space-3);
   min-height: 52px;
 }
 
 .ribbon[data-density="compact"] .ribbon__tabpanel {
   min-height: 44px;
-  gap: 10px;
+  gap: calc(var(--space-4) + var(--space-1));
 }
 
 .ribbon[data-density="compact"] .ribbon-group {
-  gap: 2px;
-  padding-right: 10px;
+  gap: var(--space-1);
+  padding-right: calc(var(--space-4) + var(--space-1));
 }
 
 .ribbon[data-density="compact"] .ribbon-group__label {
@@ -536,7 +536,7 @@
 }
 
 .ribbon[data-density="compact"] .ribbon-button {
-  padding: 1px 4px;
+  padding: calc(var(--space-1) / 2) var(--space-2);
   min-height: 20px;
 }
 
@@ -549,9 +549,9 @@
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  padding: 1px 4px;
+  padding: calc(var(--space-1) / 2) var(--space-2);
   min-width: 28px;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .ribbon[data-density="compact"] .ribbon-button--large .ribbon-button__icon {
@@ -601,29 +601,29 @@
   color: var(--text-primary);
   border-right: 1px solid var(--border);
   box-shadow: var(--dialog-shadow);
-  padding: 14px 12px;
+  padding: calc(var(--space-6) - var(--space-1)) var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .ribbon-backstage__title {
   font-weight: 700;
   font-size: 14px;
   line-height: 18px;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
 }
 
 .ribbon-backstage__list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .ribbon-backstage__item-main {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(var(--space-4) + var(--space-1));
   min-width: 0;
 }
 
@@ -642,8 +642,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 10px;
+  gap: var(--space-5);
+  padding: calc(var(--space-5) - var(--space-1));
   border-radius: var(--radius);
   border: 1px solid transparent;
   background: transparent;

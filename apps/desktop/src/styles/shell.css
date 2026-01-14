@@ -50,7 +50,7 @@ dialog.goto-dialog {
   width: min(680px, 92vw);
   border: 1px solid var(--dialog-border);
   border-radius: var(--radius);
-  padding: 12px;
+  padding: var(--space-5);
   background: var(--dialog-bg);
   color: var(--text-primary);
   box-shadow: var(--dialog-shadow);
@@ -105,7 +105,7 @@ dialog.print-preview-dialog::backdrop {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  padding: calc(var(--space-4) + var(--space-1)) var(--space-5);
   border-bottom: 1px solid var(--dialog-border);
 }
 
@@ -128,16 +128,16 @@ dialog.print-preview-dialog::backdrop {
 .goto-dialog .row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 .find-replace-dialog__look-in-label {
-  margin-left: 8px;
+  margin-left: var(--space-4);
 }
 
 .find-replace-dialog__whole-cell-label {
-  margin-left: 12px;
+  margin-left: var(--space-5);
 }
 
 .find-replace-dialog__close {
@@ -145,14 +145,14 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .goto-dialog__cancel {
-  margin-left: 8px;
+  margin-left: var(--space-4);
 }
 
 .find-replace-dialog input,
 .goto-dialog input,
 .find-replace-dialog select,
 .goto-dialog select {
-  padding: 4px 8px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
@@ -177,7 +177,7 @@ dialog.print-preview-dialog::backdrop {
 
 .find-replace-dialog button,
 .goto-dialog button {
-  padding: 4px 8px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border);
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -222,13 +222,13 @@ dialog.print-preview-dialog::backdrop {
 .find-results {
   max-height: 240px;
   overflow: auto;
-  padding-left: 18px;
-  margin: 8px 0 0;
+  padding-left: calc(var(--space-5) + var(--space-3));
+  margin: var(--space-4) 0 0;
 }
 
 .find-results li {
   cursor: pointer;
-  padding: 2px 0;
+  padding: var(--space-1) 0;
 }
 
 /* --- Grid canvas layering ------------------------------------------------ */
@@ -294,7 +294,7 @@ dialog.print-preview-dialog::backdrop {
      especially in shared-grid mode where canvases are explicitly z-indexed. */
   z-index: 10;
   box-sizing: border-box;
-  padding: 2px 4px;
+  padding: var(--space-1) var(--space-2);
   border: 2px solid var(--formula-grid-selection-border, var(--selection-border));
   outline: none;
   resize: none;
@@ -316,8 +316,8 @@ dialog.print-preview-dialog::backdrop {
   display: flex;
   flex-direction: column;
   flex-wrap: nowrap;
-  gap: 2px;
-  padding: 2px 8px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-4);
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -336,7 +336,7 @@ dialog.print-preview-dialog::backdrop {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-4);
   min-width: 0;
 }
 
@@ -354,7 +354,7 @@ dialog.print-preview-dialog::backdrop {
 .statusbar__collab {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   min-width: 0;
   max-width: 280px;
 }
@@ -400,11 +400,11 @@ dialog.print-preview-dialog::backdrop {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .statusbar-mode {
-  padding: 1px 8px;
+  padding: calc(var(--space-1) / 2) var(--space-4);
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg-primary);
@@ -416,7 +416,7 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar-readonly {
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-4);
   border: 1px solid var(--warning);
   border-radius: 999px;
   background: var(--bg-primary);
@@ -431,7 +431,7 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar button {
-  padding: 0 8px;
+  padding: var(--space-0) var(--space-4);
   height: 22px;
   border: 1px solid var(--border);
   background: var(--bg-primary);
@@ -469,7 +469,7 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar select {
-  padding: 0 8px;
+  padding: var(--space-0) var(--space-4);
   height: 22px;
   border: 1px solid var(--border);
   background: var(--bg-primary);
@@ -504,7 +504,7 @@ dialog.print-preview-dialog::backdrop {
 
 @media (max-width: 760px) {
   .statusbar__main {
-    gap: 6px;
+    gap: var(--space-3);
   }
 
   .statusbar [data-testid="status-zoom"] {
@@ -522,12 +522,12 @@ dialog.print-preview-dialog::backdrop {
 
 @media (max-width: 700px) {
   .statusbar__main {
-    gap: 4px;
+    gap: var(--space-2);
   }
 
   .statusbar button,
   .statusbar select {
-    padding: 0 6px;
+    padding: var(--space-0) var(--space-3);
   }
 
   /*
