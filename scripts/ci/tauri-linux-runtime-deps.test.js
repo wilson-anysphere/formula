@@ -47,6 +47,16 @@ test("tauri.conf.json declares Linux .rpm runtime dependencies (WebKitGTK/GTK/Ap
   assert.ok(deps.length > 0, "bundle.linux.rpm.depends is missing/empty in tauri.conf.json");
 
   // We use RPM rich dependencies (`(a or b)`) to cover Fedora/RHEL + openSUSE naming differences.
+  // Reject common copy/paste mistakes from Debian-style dependency syntax.
+  assert.ok(
+    deps.every((d) => !d.includes("|")),
+    `bundle.linux.rpm.depends must not use Debian-style '|' alternation.\nFound:\n- ${deps.join("\n- ")}`,
+  );
+  assert.ok(
+    deps.every((d) => !/\bt64\b/i.test(d)),
+    `bundle.linux.rpm.depends must not reference Ubuntu/Debian t64 package variants.\nFound:\n- ${deps.join("\n- ")}`,
+  );
+
   assertAnyMatch(deps, /webkit2gtk4\.1/i);
   assertAnyMatch(deps, /libwebkit2gtk-4_1/i);
   assertAnyMatch(deps, /\bgtk3\b/i);
@@ -55,4 +65,3 @@ test("tauri.conf.json declares Linux .rpm runtime dependencies (WebKitGTK/GTK/Ap
   assertAnyMatch(deps, /librsvg/i);
   assertAnyMatch(deps, /openssl/i);
 });
-
