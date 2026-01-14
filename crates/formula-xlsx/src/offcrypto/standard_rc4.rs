@@ -147,13 +147,7 @@ fn derive_rc4_key_for_block(
         h_final.len()
     );
 
-    let mut key = h_final[..key_size_bytes].to_vec();
-    if key_size_bytes == 5 {
-        // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit (16-byte) key where the high
-        // 88 bits are zero.
-        key.resize(16, 0);
-    }
-    key
+    h_final[..key_size_bytes].to_vec()
 }
 
 /// Standard / CryptoAPI RC4 verifier bundle (MS-OFFCRYPTO `EncryptionVerifier`).
@@ -326,14 +320,11 @@ mod tests {
             0x0E, 0x0F,
         ];
 
-        let expected_padded_key: [u8; 16] = [
-            0x6A, 0xD7, 0xDE, 0xDF, 0x2D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00,
-        ];
+        let expected_key: [u8; 5] = [0x6A, 0xD7, 0xDE, 0xDF, 0x2D];
 
         let key_size_bits = 0;
         let key0 = derive_rc4_key_for_block(password, &salt, CryptoApiHashAlg::Sha1, key_size_bits, 0);
-        assert_eq!(key0.as_slice(), expected_padded_key.as_slice());
+        assert_eq!(key0.as_slice(), expected_key.as_slice());
 
         // Ensure `keySize=0` matches the `keySize=40` behavior.
         let key0_40 = derive_rc4_key_for_block(password, &salt, CryptoApiHashAlg::Sha1, 40, 0);
