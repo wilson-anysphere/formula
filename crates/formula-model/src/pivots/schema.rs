@@ -603,6 +603,55 @@ mod tests {
     }
 
     #[test]
+    fn pivot_field_ref_display_formats_dax_identifiers() {
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "Sales".to_string(),
+                column: "Amount".to_string(),
+            }
+            .to_string(),
+            "Sales[Amount]"
+        );
+
+        // Tables containing non-identifier characters should be single-quoted with escaped quotes.
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "Dim Product".to_string(),
+                column: "Category".to_string(),
+            }
+            .to_string(),
+            "'Dim Product'[Category]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "O'Reilly".to_string(),
+                column: "Name".to_string(),
+            }
+            .to_string(),
+            "'O''Reilly'[Name]"
+        );
+
+        // Column names escape `]` by doubling it inside `[...]`.
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "Sales".to_string(),
+                column: "A]B".to_string(),
+            }
+            .to_string(),
+            "Sales[A]]B]"
+        );
+
+        assert_eq!(
+            PivotFieldRef::DataModelMeasure("Total Sales".to_string()).to_string(),
+            "[Total Sales]"
+        );
+        assert_eq!(
+            PivotFieldRef::CacheFieldName("Region".to_string()).to_string(),
+            "Region"
+        );
+    }
+
+    #[test]
     fn pivot_field_ref_serde_back_compat() {
         // Plain strings should decode as cache field names.
         let raw = serde_json::json!("Region");
