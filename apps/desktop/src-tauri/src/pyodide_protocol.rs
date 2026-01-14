@@ -193,7 +193,7 @@ fn get_response(
             path: &path,
             range,
         },
-        |path| Path::new(path).starts_with(&cache_root),
+        |path| desktop::pyodide_assets::pyodide_cache_path_is_allowed(Path::new(path), &cache_root),
     );
 
     let mut builder = Response::builder()

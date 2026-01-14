@@ -108,6 +108,50 @@ pub fn pyodide_cache_dir() -> Result<PathBuf, String> {
     Ok(pyodide_cache_root()?.join(pyodide_version_tag()).join("full"))
 }
 
+/// Returns true if `path` is safe to serve from the `pyodide://` protocol.
+///
+/// Security goal: prevent arbitrary file reads by ensuring the requested path resolves within the
+/// app-controlled Pyodide cache directory (including after resolving symlinks).
+pub fn pyodide_cache_path_is_allowed(path: &Path, cache_root: &Path) -> bool {
+    if !path.starts_with(cache_root) {
+        return false;
+    }
+
+    // Canonicalize the cache root so we compare paths in a stable format (and so symlinked roots
+    // can't be used to bypass the scope check).
+    let Ok(cache_root) = dunce::canonicalize(cache_root) else {
+        return false;
+    };
+
+    // If the target exists, canonicalize it directly to ensure symlinks can't escape.
+    if let Ok(canon) = dunce::canonicalize(path) {
+        return canon.starts_with(&cache_root);
+    }
+
+    // If the file doesn't exist, fall back to canonicalizing the parent directory so we still
+    // detect symlink escapes in the directory chain. Allowing this keeps missing files behaving as
+    // 404s (instead of 403s) when they are within the cache scope.
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let Ok(parent) = dunce::canonicalize(parent) else {
+        return false;
+    };
+    if !parent.starts_with(&cache_root) {
+        return false;
+    }
+
+    // Treat dangling symlinks as out-of-scope. If the entry exists as a symlink but its target is
+    // missing/unreadable, we deny rather than serving it as an allowed missing file.
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            return false;
+        }
+    }
+
+    true
+}
+
 fn validate_relative_path(path: &str) -> bool {
     if path.is_empty() || path.contains('\0') {
         return false;
@@ -412,6 +456,37 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn pyodide_cache_path_scope_allows_paths_inside_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("file.txt");
+        std::fs::write(&file, b"hello").unwrap();
+
+        assert!(pyodide_cache_path_is_allowed(&file, &root));
+        assert!(pyodide_cache_path_is_allowed(&root.join("missing.txt"), &root));
+        assert!(!pyodide_cache_path_is_allowed(&tmp.path().join("other.txt"), &root));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pyodide_cache_path_scope_denies_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let outside = tmp.path().join("outside.txt");
+        std::fs::write(&outside, b"secret").unwrap();
+
+        let link = root.join("escape.txt");
+        symlink(&outside, &link).unwrap();
+
+        assert!(!pyodide_cache_path_is_allowed(&link, &root));
+    }
 
     async fn serve_files_once(files: Vec<(String, Vec<u8>)>) -> String {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
