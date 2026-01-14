@@ -220,6 +220,10 @@ function main() {
     return;
   }
 
+  // Strip XML comments so we don't accidentally treat commented-out entitlements as enabled.
+  // (Some developers temporarily comment out `<key>...</key>` blocks during debugging.)
+  const xmlForScan = xml.replace(/<!--[\s\S]*?-->/g, "");
+
   if (!xml.includes("<plist") || !xml.includes("<dict")) {
     errBlock(`Invalid entitlements plist (${relativeEntitlementsPath})`, [
       `File does not look like a plist (<plist>/<dict> tags not found).`,
@@ -249,7 +253,7 @@ function main() {
     },
   ];
 
-  const missing = required.filter(({ key }) => !hasTrueEntitlement(xml, key));
+  const missing = required.filter(({ key }) => !hasTrueEntitlement(xmlForScan, key));
   if (missing.length > 0) {
     errBlock(`Invalid macOS entitlements (${relativeEntitlementsPath})`, [
       `Missing required entitlement(s) (must be present and set to <true/>):`,
@@ -279,7 +283,7 @@ function main() {
     },
   ];
 
-  const forbiddenEnabled = forbiddenTrue.filter(({ key }) => hasTrueEntitlement(xml, key));
+  const forbiddenEnabled = forbiddenTrue.filter(({ key }) => hasTrueEntitlement(xmlForScan, key));
   if (forbiddenEnabled.length > 0) {
     errBlock(`Disallowed macOS entitlements enabled (${relativeEntitlementsPath})`, [
       `The following entitlements are present and set to <true/>:`,
