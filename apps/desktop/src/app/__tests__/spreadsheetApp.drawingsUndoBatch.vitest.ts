@@ -130,7 +130,7 @@ describe("SpreadsheetApp drawings undo batching", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
     const doc = (app as any).document as any;
     const sheetId = (app as any).sheetId as string;
 
@@ -155,22 +155,57 @@ describe("SpreadsheetApp drawings undo batching", () => {
     const startClientY = colHeaderHeight + 10;
 
     selectionCanvas.dispatchEvent(
-      new PointerEvent("pointerdown", { clientX: startClientX, clientY: startClientY, pointerId: 1, buttons: 1 }),
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        clientX: startClientX,
+        clientY: startClientY,
+        pointerId: 1,
+        button: 0,
+        buttons: 1,
+      }),
     );
 
     // Multiple pointermove events should still produce a single undo entry.
     selectionCanvas.dispatchEvent(
-      new PointerEvent("pointermove", { clientX: startClientX + 10, clientY: startClientY, pointerId: 1, buttons: 1 }),
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        clientX: startClientX + 10,
+        clientY: startClientY,
+        pointerId: 1,
+        buttons: 1,
+      }),
     );
     selectionCanvas.dispatchEvent(
-      new PointerEvent("pointermove", { clientX: startClientX + 20, clientY: startClientY + 5, pointerId: 1, buttons: 1 }),
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        clientX: startClientX + 20,
+        clientY: startClientY + 5,
+        pointerId: 1,
+        buttons: 1,
+      }),
     );
     selectionCanvas.dispatchEvent(
-      new PointerEvent("pointermove", { clientX: startClientX + 30, clientY: startClientY + 10, pointerId: 1, buttons: 1 }),
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        clientX: startClientX + 30,
+        clientY: startClientY + 10,
+        pointerId: 1,
+        buttons: 1,
+      }),
     );
 
     selectionCanvas.dispatchEvent(
-      new PointerEvent("pointerup", { clientX: startClientX + 30, clientY: startClientY + 10, pointerId: 1 }),
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        cancelable: true,
+        clientX: startClientX + 30,
+        clientY: startClientY + 10,
+        pointerId: 1,
+      }),
     );
 
     expect(doc.history.length).toBe(historyBeforeDrag + 1);

@@ -170,7 +170,6 @@ import {
   CollaboratorsListUiController,
   type CollaboratorListEntry,
 } from "../collab/presence-ui/collaborators-list-ui-controller.js";
-
 type FormulaBarCommit = Parameters<ConstructorParameters<typeof FormulaBarView>[1]["onCommit"]>[1];
 
 type NameBoxDropdownProvider = NonNullable<
@@ -1318,11 +1317,6 @@ export class SpreadsheetApp {
       }
     | null = null;
   private chartDragAbort: AbortController | null = null;
-
-  // --- Sheet drawings / pictures -------------------------------------------
-  private sheetDrawings: DrawingObject[] = [];
-  private drawingsInteraction: DrawingInteractionController | null = null;
-
   private commentsPanel!: HTMLDivElement;
   private commentsPanelThreads!: HTMLDivElement;
   private commentsPanelCell!: HTMLDivElement;
@@ -1850,63 +1844,6 @@ export class SpreadsheetApp {
     if (this.presenceCanvas) this.root.appendChild(this.presenceCanvas);
     this.root.appendChild(this.selectionCanvas);
     this.root.appendChild(this.chartSelectionCanvas);
-
-    // Drawing interactions (pictures/shapes) listen on the selection overlay canvas so they can
-    // stop propagation when a picture is dragged/resized, avoiding conflicts with grid selection
-    // gestures on the root element.
-    //
-    // The drawings implementation keeps pointer-move updates in-memory and only commits to the
-    // DocumentController once on pointerup (batched), preventing excessive undo/collab churn.
-    const drawingsGeom = {
-      cellOriginPx: (cell: { row: number; col: number }) => ({ x: cell.col * this.cellWidth, y: cell.row * this.cellHeight }),
-      cellSizePx: (_cell: { row: number; col: number }) => ({ width: this.cellWidth, height: this.cellHeight }),
-    };
-    this.drawingsInteraction = new DrawingInteractionController(this.selectionCanvas, drawingsGeom, {
-      getViewport: () => ({
-        // DrawingInteractionController works in "overlay canvas" coordinates. Our selection canvas
-        // includes frozen headers, so offset scroll by the header sizes to align sheet-space (A1=0,0)
-        // with canvas-space (A1 rendered at rowHeaderWidth/colHeaderHeight when scroll=0).
-        scrollX: this.scrollX - this.rowHeaderWidth,
-        scrollY: this.scrollY - this.colHeaderHeight,
-        width: this.width,
-        height: this.height,
-        dpr: this.dpr,
-      }),
-      getObjects: () => this.sheetDrawings,
-      setObjects: (next) => {
-        this.sheetDrawings = next;
-        // Avoid writing to the DocumentController here; see commitObjects. Keep the local render
-        // cache updated so the drawing overlay can repaint immediately while dragging/resizing.
-        const doc = this.document as any;
-        const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
-        this.drawingObjectsCache = { sheetId: this.sheetId, objects: next, source: drawingsGetter };
-        this.scheduleDrawingsRender();
-      },
-      commitObjects: (next) => {
-        this.document.setSheetDrawings(this.sheetId, next, { source: "drawings" });
-      },
-      beginBatch: ({ label }) => this.document.beginBatch({ label }),
-      endBatch: () => this.document.endBatch(),
-      cancelBatch: () => this.document.cancelBatch(),
-      onSelectionChange: (selectedId) => {
-        const prev = this.selectedDrawingId;
-        this.selectedDrawingId = selectedId;
-        if (selectedId != null && this.selectedChartId != null) {
-          // Drawings and charts share a single selection model; selecting one should clear the other.
-          this.setSelectedChartId(null);
-        }
-        // Ensure selection outlines/handles repaint immediately when the interaction
-        // controller updates selection (it can stop propagation to the root grid
-        // pointer handlers, so we cannot rely on `onPointerDown` to trigger a redraw).
-        this.drawingOverlay.setSelectedId(selectedId);
-        this.scheduleDrawingsRender("drawings:selection");
-        if (prev !== selectedId) {
-          this.dispatchDrawingSelectionChanged();
-        }
-      },
-    });
-    this.syncSheetDrawings();
-
     // Avoid allocating a fresh `{row,col}` object for every chart cell lookup.
     const chartCoordScratch = { row: 0, col: 0 };
     const getChartCellValue = (sheetId: string, row: number, col: number): unknown => {
@@ -2392,13 +2329,19 @@ export class SpreadsheetApp {
         getObjects: () => this.listDrawingObjectsForSheet(),
         setObjects: (next) => {
           this.setDrawingObjectsForSheet(next);
-          this.renderDrawings();
+          this.scheduleDrawingsRender();
           const selected = this.selectedDrawingId != null ? next.find((obj) => obj.id === this.selectedDrawingId) : undefined;
           if (selected?.kind.type === "chart") {
             // Best-effort: keep chart overlays aligned when moving/resizing chart drawings.
             this.renderCharts(false);
           }
         },
+        commitObjects: (next) => {
+          this.document.setSheetDrawings(this.sheetId, next, { source: "drawings" });
+        },
+        beginBatch: ({ label }) => this.document.beginBatch({ label }),
+        endBatch: () => this.document.endBatch(),
+        cancelBatch: () => this.document.cancelBatch(),
         shouldHandlePointerDown: () => !this.formulaBar?.isFormulaEditing(),
         onPointerDownHit: () => {
           if (this.editor.isOpen()) {
@@ -2790,8 +2733,6 @@ export class SpreadsheetApp {
         Array.isArray(payload?.sheetViewDeltas) &&
         payload.sheetViewDeltas.some((delta: any) => delta?.sheetId === this.sheetId);
       if (hasActiveSheetViewDelta) {
-        // Keep sheet-level drawing metadata (pictures, shapes) in sync with the document.
-        this.syncSheetDrawings();
         if (source !== "sharedGridAxis") {
           this.syncFrozenPanes();
         }
@@ -2880,10 +2821,7 @@ export class SpreadsheetApp {
     const drawingUnsubs: Array<() => void> = [];
     const invalidateAndRenderDrawings = (reason?: string) => {
       // Keep memory bounded: only cache the active sheet's objects.
-      this.syncSheetDrawings();
-      const doc = this.document as any;
-      const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
-      this.drawingObjectsCache = { sheetId: this.sheetId, objects: this.sheetDrawings, source: drawingsGetter };
+      this.drawingObjectsCache = null;
       this.drawingHitTestIndex = null;
       this.drawingHitTestIndexObjects = null;
       this.scheduleDrawingsRender(reason);
@@ -3695,8 +3633,6 @@ export class SpreadsheetApp {
     this.externalRepaintUnsubscribe = null;
     this.drawingsUnsubscribe?.();
     this.drawingsUnsubscribe = null;
-    this.drawingsInteraction?.dispose();
-    this.drawingsInteraction = null;
     this.wasmEngine?.terminate();
     this.wasmEngine = null;
     this.stopCommentPersistence?.();
@@ -3725,7 +3661,6 @@ export class SpreadsheetApp {
     this.drawingHitTestIndex = null;
     this.drawingHitTestIndexObjects = null;
     this.drawingObjects = [];
-    this.sheetDrawings = [];
     this.root.replaceChildren();
   }
 
@@ -4994,42 +4929,6 @@ export class SpreadsheetApp {
     };
   }
 
-  private syncSheetDrawings(): void {
-    // Keep an in-memory copy in sync so drawing interactions/hit-testing reflect undo/redo +
-    // external updates.
-    //
-    // When the document provides drawings in the UI schema already, preserve them verbatim so
-    // any extra metadata (e.g. preserved DrawingML fragments) survives drag/resize edits.
-    const raw = this.document.getSheetDrawings(this.sheetId) as unknown;
-
-    const isUiDrawingObject = (value: unknown): value is DrawingObject => {
-      if (!value || typeof value !== "object") return false;
-      const anyValue = value as any;
-      return (
-        typeof anyValue.id === "number" &&
-        anyValue.kind &&
-        typeof anyValue.kind.type === "string" &&
-        anyValue.anchor &&
-        typeof anyValue.anchor.type === "string"
-      );
-    };
-
-    if (Array.isArray(raw)) {
-      if (raw.length === 0) {
-        this.sheetDrawings = [];
-      } else if (raw.every(isUiDrawingObject)) {
-        this.sheetDrawings = raw as DrawingObject[];
-      } else {
-        this.sheetDrawings = convertDocumentSheetDrawingsToUiDrawingObjects(raw, { sheetId: this.sheetId });
-      }
-    } else {
-      this.sheetDrawings = [];
-    }
-    if (this.selectedDrawingId != null && !this.sheetDrawings.some((d) => d.id === this.selectedDrawingId)) {
-      this.selectedDrawingId = null;
-    }
-  }
-
   private syncFrozenPanes(): void {
     const { frozenRows, frozenCols } = this.getFrozen();
     if (this.sharedGrid) {
@@ -6080,12 +5979,6 @@ export class SpreadsheetApp {
     this.drawingHitTestIndex = null;
     this.drawingHitTestIndexObjects = null;
     this.selectedDrawingId = null;
-    this.syncSheetDrawings();
-    {
-      const doc = this.document as any;
-      const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
-      this.drawingObjectsCache = { sheetId: this.sheetId, objects: this.sheetDrawings, source: drawingsGetter };
-    }
     this.syncActiveSheetBackgroundImage();
     if (this.collabMode) this.reindexCommentCells();
     const presence = this.collabSession?.presence;
@@ -6144,12 +6037,6 @@ export class SpreadsheetApp {
       this.drawingHitTestIndex = null;
       this.drawingHitTestIndexObjects = null;
       this.selectedDrawingId = null;
-      this.syncSheetDrawings();
-      {
-        const doc = this.document as any;
-        const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
-        this.drawingObjectsCache = { sheetId: this.sheetId, objects: this.sheetDrawings, source: drawingsGetter };
-      }
       this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
@@ -6217,12 +6104,6 @@ export class SpreadsheetApp {
       this.drawingHitTestIndex = null;
       this.drawingHitTestIndexObjects = null;
       this.selectedDrawingId = null;
-      this.syncSheetDrawings();
-      {
-        const doc = this.document as any;
-        const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
-        this.drawingObjectsCache = { sheetId: this.sheetId, objects: this.sheetDrawings, source: drawingsGetter };
-      }
       this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
@@ -7112,7 +6993,6 @@ export class SpreadsheetApp {
     // Keep all drawing interaction controllers in sync so keyboard-driven selection changes
     // (e.g. Escape to deselect) don't leave pointer interactions thinking an object is still
     // selected (which could enable invisible resize/rotate handles).
-    this.drawingsInteraction?.setSelectedId(id);
     this.drawingInteractionController?.setSelectedId(id);
     this.drawingOverlay.setSelectedId(id);
     if (prev !== id) {
@@ -12213,7 +12093,7 @@ export class SpreadsheetApp {
     // in-memory moves that would diverge from the persisted state.
     if (setSheetDrawings && this.isReadOnly()) return;
 
-    const objects = this.sheetDrawings.length > 0 ? this.sheetDrawings : this.listDrawingObjectsForSheet();
+    const objects = this.listDrawingObjectsForSheet();
     if (objects.length === 0) return;
 
     const index = objects.findIndex((obj) => obj.id === selectedId);
@@ -12230,7 +12110,6 @@ export class SpreadsheetApp {
 
     // Update in-memory caches immediately so render/hit-test paths see the new positions even if
     // the DocumentController publishes drawing changes asynchronously.
-    this.sheetDrawings = nextObjects;
     const docAny: any = this.document as any;
     const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
     this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
