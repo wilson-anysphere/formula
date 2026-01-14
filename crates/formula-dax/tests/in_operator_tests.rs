@@ -134,3 +134,26 @@ fn in_operator_calculate_filter_rhs_physical_mask() {
     // Only the CustomerId=1 row should match the IN filter.
     assert_eq!(value, Value::from(1i64));
 }
+
+#[test]
+fn in_operator_calculate_filter_rhs_physical_mask_same_table() {
+    // Also cover the case where the RHS filter is evaluated over the same physical table as the
+    // LHS column. This should not introduce dependency cycles and still needs to handle the
+    // PhysicalMask representation.
+    let mut model = DataModel::new();
+    let mut t = Table::new("T", vec!["Value"]);
+    for i in 1..=10 {
+        t.push_row(vec![i.into()]).unwrap();
+    }
+    model.add_table(t).unwrap();
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "CALCULATE(COUNTROWS(T), T[Value] IN FILTER(T, T[Value] > 5))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(5i64));
+}
