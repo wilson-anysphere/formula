@@ -14441,6 +14441,93 @@ fn walk_calc_expr(
         }
     }
 
+    fn walk_calc_expr_reference_context(
+        expr: &CompiledExpr,
+        current_cell: CellKey,
+        tables_by_sheet: &[Vec<Table>],
+        workbook: &Workbook,
+        spills: &SpillState,
+        precedents: &mut HashSet<Precedent>,
+        visiting_names: &mut HashSet<(SheetId, String)>,
+        lexical_scopes: &mut Vec<HashSet<String>>,
+    ) {
+        match expr {
+            // These functions only care about the reference's address/shape, not the referenced
+            // cell values. Avoid introducing calc-graph precedents for direct references so
+            // self-referential formulas like `=ROW(A1)` in `A1` aren't treated as circular.
+            Expr::CellRef(_) | Expr::RangeRef(_) | Expr::StructuredRef(_) => {}
+            Expr::ImplicitIntersection(inner) => {
+                // Treat implicit-intersection wrappers over direct references like the references
+                // themselves so `ROW(@A1)` (or similar compiler-inserted wrappers) doesn't create
+                // a spurious calc-graph cycle.
+                match inner.as_ref() {
+                    Expr::CellRef(_) | Expr::RangeRef(_) | Expr::StructuredRef(_) => {}
+                    other => walk_calc_expr_reference_context(
+                        other,
+                        current_cell,
+                        tables_by_sheet,
+                        workbook,
+                        spills,
+                        precedents,
+                        visiting_names,
+                        lexical_scopes,
+                    ),
+                }
+            }
+            Expr::FunctionCall { name, args, .. } if name == "OFFSET" => {
+                if args.is_empty() {
+                    return;
+                }
+
+                // OFFSET's base reference is used for its address; the row/col/size arguments
+                // determine the returned reference and should participate in dependency analysis.
+                walk_calc_expr_reference_context(
+                    &args[0],
+                    current_cell,
+                    tables_by_sheet,
+                    workbook,
+                    spills,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                );
+                for a in args.iter().skip(1) {
+                    walk_calc_expr(
+                        a,
+                        current_cell,
+                        tables_by_sheet,
+                        workbook,
+                        spills,
+                        precedents,
+                        visiting_names,
+                        lexical_scopes,
+                    );
+                }
+            }
+            // Spilled ranges are dynamic; consumers like ROW/COLUMN depend on the spill bounds.
+            Expr::SpillRange(_) => walk_calc_expr(
+                expr,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            ),
+            other => walk_calc_expr(
+                other,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            ),
+        }
+    }
+
     match expr {
         Expr::CellRef(r) => {
             if let Some(sheets) = resolve_sheet_span(&r.sheet, current_cell.sheet, workbook) {
@@ -14821,37 +14908,20 @@ fn walk_calc_expr(
                         return;
                     }
                     "ROW" | "COLUMN" | "ROWS" | "COLUMNS" | "AREAS" | "SHEET" | "SHEETS" => {
-                        // These functions accept a reference argument but only consult its
-                        // address/shape metadata, not the referenced cells' values. Avoid creating
-                        // calc precedents for a bare reference/range:
-                        // - `=ROW(A1)` should not become a self-cycle when entered into `A1`
-                        // - `=SUM(ROW(1:5))` should not become a cycle when entered into a cell
-                        //   inside rows 1:5 (range nodes participate in calc ordering)
-                        //
-                        // When the argument is more complex (e.g. `ROW(OFFSET(...))`), fall back to
-                        // the generic walker so we still pick up dependencies used to compute the
-                        // reference.
                         let Some(arg0) = args.first() else {
                             return;
                         };
-                        match arg0 {
-                            Expr::CellRef(_)
-                            | Expr::RangeRef(_)
-                            | Expr::StructuredRef(_)
-                            | Expr::SpillRange(_) => return,
-                            Expr::ImplicitIntersection(inner)
-                                if matches!(
-                                    inner.as_ref(),
-                                    Expr::CellRef(_)
-                                        | Expr::RangeRef(_)
-                                        | Expr::StructuredRef(_)
-                                        | Expr::SpillRange(_)
-                                ) =>
-                            {
-                                return;
-                            }
-                            _ => {}
-                        }
+                        walk_calc_expr_reference_context(
+                            arg0,
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        return;
                     }
                     _ => {}
                 }
@@ -15700,6 +15770,12 @@ mod tests {
         engine.set_cell_formula("Sheet1", "D5", "=SHEET(D5)").unwrap();
         engine.set_cell_formula("Sheet1", "D6", "=SHEETS(D6)").unwrap();
         engine.set_cell_formula("Sheet1", "D7", "=AREAS(D7)").unwrap();
+        engine
+            .set_cell_formula("Sheet1", "D8", "=ROW(OFFSET(D8,0,0))")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "D9", "=COLUMN(OFFSET(D9,0,0))")
+            .unwrap();
 
         // Range arguments that include the formula cell should not create range-node cycles.
         engine
@@ -15720,6 +15796,8 @@ mod tests {
         assert_eq!(engine.get_cell_value("Sheet1", "D5"), Value::Number(1.0));
         assert_eq!(engine.get_cell_value("Sheet1", "D6"), Value::Number(1.0));
         assert_eq!(engine.get_cell_value("Sheet1", "D7"), Value::Number(1.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "D8"), Value::Number(8.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "D9"), Value::Number(4.0));
 
         assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(15.0));
         assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(6.0));
