@@ -1322,6 +1322,353 @@ fn snowflake_filter_excludes_unmatched_fact_rows_when_blank_category_filtered_ou
 }
 
 #[test]
+fn snowflake_filter_does_not_exclude_unmatched_fact_rows_when_product_category_relationship_disabled()
+{
+    // If the Products -> Categories relationship is disabled via CROSSFILTER(NONE), a filter on
+    // Categories should not propagate to Products/Sales. In particular, the upstream BLANK
+    // exclusion should not cascade down to exclude unmatched Sales rows.
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories.push_row(vec![1.into(), Value::from("A")]).unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![10.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["SaleId", "ProductId", "Amount"]);
+    sales.push_row(vec![100.into(), 10.into(), 10.0.into()]).unwrap(); // A
+    sales
+        .push_row(vec![101.into(), 999.into(), 5.0.into()])
+        .unwrap(); // unknown product -> would normally map to Categories blank row
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let filter = engine
+        .apply_calculate_filters(
+            &model,
+            &FilterContext::empty(),
+            &[
+                "Categories[CategoryName] = \"A\"",
+                "CROSSFILTER(Products[CategoryId], Categories[CategoryId], NONE)",
+            ],
+        )
+        .unwrap();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "SUM(Sales[Amount])",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    // Categories filter is disconnected; both sales rows remain visible.
+    assert_eq!(value, 15.0.into());
+}
+
+#[test]
+fn snowflake_filter_does_not_exclude_unmatched_fact_rows_when_product_category_relationship_reversed()
+{
+    // If the Products -> Categories relationship is reversed (Products filters Categories), a
+    // filter on Categories should not propagate to Products/Sales, so unmatched Sales rows should
+    // remain visible.
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories.push_row(vec![1.into(), Value::from("A")]).unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![10.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["SaleId", "ProductId", "Amount"]);
+    sales.push_row(vec![100.into(), 10.into(), 10.0.into()]).unwrap(); // A
+    sales
+        .push_row(vec![101.into(), 999.into(), 5.0.into()])
+        .unwrap(); // unknown product
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let filter = engine
+        .apply_calculate_filters(
+            &model,
+            &FilterContext::empty(),
+            &[
+                "Categories[CategoryName] = \"A\"",
+                // Reverse the default propagation direction so Categories filters do not restrict
+                // Products/Sales.
+                "CROSSFILTER(Products[CategoryId], Categories[CategoryId], ONEWAY_LEFTFILTERSRIGHT)",
+            ],
+        )
+        .unwrap();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "SUM(Sales[Amount])",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, 15.0.into());
+}
+
+#[test]
+fn snowflake_filter_does_not_exclude_unmatched_fact_rows_when_product_category_relationship_disabled_columnar_fact(
+) {
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories.push_row(vec![1.into(), Value::from("A")]).unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![10.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let sales_schema = vec![
+        ColumnSchema {
+            name: "SaleId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "ProductId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let mut sales = ColumnarTableBuilder::new(sales_schema, options);
+    sales.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    sales.append_row(&[
+        formula_columnar::Value::Number(101.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(5.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Sales", sales.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let filter = engine
+        .apply_calculate_filters(
+            &model,
+            &FilterContext::empty(),
+            &[
+                "Categories[CategoryName] = \"A\"",
+                "CROSSFILTER(Products[CategoryId], Categories[CategoryId], NONE)",
+            ],
+        )
+        .unwrap();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "SUM(Sales[Amount])",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 15.0.into());
+}
+
+#[test]
+fn snowflake_filter_does_not_exclude_unmatched_fact_rows_when_product_category_relationship_reversed_columnar_fact(
+) {
+    let mut model = DataModel::new();
+
+    let mut categories = Table::new("Categories", vec!["CategoryId", "CategoryName"]);
+    categories.push_row(vec![1.into(), Value::from("A")]).unwrap();
+    model.add_table(categories).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "CategoryId"]);
+    products.push_row(vec![10.into(), 1.into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let sales_schema = vec![
+        ColumnSchema {
+            name: "SaleId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "ProductId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let mut sales = ColumnarTableBuilder::new(sales_schema, options);
+    sales.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(10.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    sales.append_row(&[
+        formula_columnar::Value::Number(101.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(5.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Sales", sales.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Products_Categories".into(),
+            from_table: "Products".into(),
+            from_column: "CategoryId".into(),
+            to_table: "Categories".into(),
+            to_column: "CategoryId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let filter = engine
+        .apply_calculate_filters(
+            &model,
+            &FilterContext::empty(),
+            &[
+                "Categories[CategoryName] = \"A\"",
+                "CROSSFILTER(Products[CategoryId], Categories[CategoryId], ONEWAY_LEFTFILTERSRIGHT)",
+            ],
+        )
+        .unwrap();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "SUM(Sales[Amount])",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 15.0.into());
+}
+
+#[test]
 fn snowflake_values_includes_blank_category_member_for_unmatched_fact_keys() {
     // Scenario:
     // - Sales contains an unknown ProductId (no matching Products row), which creates a virtual
