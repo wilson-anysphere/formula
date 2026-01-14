@@ -47,6 +47,26 @@ describe("FormulaBarView function hint UI", () => {
     host.remove();
   });
 
+  it("treats whitespace between the function name and '(' as a function call (Excel-style)", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=IF (A1>0,1,2)";
+
+    const inFirstArg = view.textarea.value.indexOf(">") + 1;
+    view.textarea.setSelectionRange(inFirstArg, inFirstArg);
+    view.textarea.dispatchEvent(new Event("input"));
+    await nextFrame();
+    expect(getSignatureName(host)).toBe("IF(");
+    expect(getActiveParamText(host)).toBe("logical_test");
+
+    host.remove();
+  });
+
   it("updates the active parameter as the cursor moves across commas", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
