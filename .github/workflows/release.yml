@@ -1545,7 +1545,7 @@ jobs:
         run: bash scripts/validate-linux-rpm.sh --no-container
 
       - name: Verify Linux .deb package (deps + ldd + desktop integration)
-        if: matrix.platform == 'ubuntu-24.04'
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
