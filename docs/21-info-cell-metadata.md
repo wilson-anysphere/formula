@@ -100,9 +100,9 @@ Keys are **trimmed** and **case-insensitive**. Unknown keys return `#VALUE!`.
 | `col` | number | none | implemented |
 | `contents` | value/text | cell formula/value | implemented |
 | `type` | text | cell formula/value | implemented |
-| `format` | text | **effective style** (`number_format`) | implemented (uses `formula-format`, ignores conditional formatting) |
-| `color` | number | **effective style** (`number_format`) | implemented (uses `formula-format`, ignores conditional formatting) |
-| `parentheses` | number | **effective style** (`number_format`) | implemented (uses `formula-format`, ignores conditional formatting) |
+| `format` | text | **effective number format string** | implemented (uses `formula-format`, ignores conditional formatting) |
+| `color` | number | **effective number format string** | implemented (uses `formula-format`, ignores conditional formatting) |
+| `parentheses` | number | **effective number format string** | implemented (uses `formula-format`, ignores conditional formatting) |
 | `filename` | text | workbook file metadata + sheet name | implemented (returns `""` until metadata is set) |
 | `protect` | number | **effective style** (`protection.locked`) | implemented |
 | `prefix` | text | **effective style** (`alignment.horizontal`) | implemented |
@@ -193,7 +193,7 @@ Current behavior (Excel encoding):
 
 #### `CELL("format")` / `CELL("color")` / `CELL("parentheses")`
 
-These keys are computed from the cell’s **effective number format string** (`Style.number_format`), not from the cell’s value.
+These keys are computed from the cell’s **effective number format string**, not from the cell’s value.
 
 - `CELL("format")` returns an Excel format code string (e.g. `"G"`, `"F2"`, `"N0"`, `"C2"`).
 - `CELL("color")` returns `1` if the **negative section** of the number format specifies a color (e.g. a second section with a color tag), otherwise `0`.
@@ -207,7 +207,9 @@ Example number format with a colored negative section:
 
 Notes:
 
-- The number format is resolved from the effective formatting layers (Excel-like precedence): `cell (non-zero) > range-run > row > col > sheet default > 0 (General)`.
+- The engine first checks for an **explicit per-cell number format override** (if one exists). In Rust, hosts can set this via `Engine::set_cell_number_format(sheet, addr, pattern)`. This override takes precedence over style layers.
+- Spilled output cells (dynamic arrays) inherit their number format from the spill origin cell.
+- Otherwise, the number format is resolved from the effective formatting layers (Excel-like precedence): `cell (non-zero) > range-run > row > col > sheet default > 0 (General)`.
   - Styles that do not specify `number_format` are treated as “inherit”, so lower-precedence layers can contribute the number format.
 - Conditional formatting is ignored.
 - When number format metadata is unavailable (no style table, or external workbook refs), the engine falls back to General semantics:
