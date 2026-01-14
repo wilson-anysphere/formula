@@ -465,18 +465,27 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
     functions: &ES_ES_FUNCTIONS,
 };
 
+static ALL_LOCALES: [&FormulaLocale; 8] = [
+    &EN_US,
+    &JA_JP,
+    &ZH_CN,
+    &KO_KR,
+    &ZH_TW,
+    &DE_DE,
+    &FR_FR,
+    &ES_ES,
+];
+
+pub fn iter_locales() -> impl Iterator<Item = &'static FormulaLocale> {
+    ALL_LOCALES.iter().copied()
+}
+
 pub fn get_locale(id: &str) -> Option<&'static FormulaLocale> {
-    match super::normalize_locale_id(id)? {
-        "en-US" => Some(&EN_US),
-        "ja-JP" => Some(&JA_JP),
-        "zh-CN" => Some(&ZH_CN),
-        "ko-KR" => Some(&KO_KR),
-        "zh-TW" => Some(&ZH_TW),
-        "de-DE" => Some(&DE_DE),
-        "fr-FR" => Some(&FR_FR),
-        "es-ES" => Some(&ES_ES),
-        _ => None,
-    }
+    let normalized = super::normalize_locale_id(id)?;
+    ALL_LOCALES
+        .iter()
+        .copied()
+        .find(|locale| locale.id == normalized)
 }
 
 #[cfg(test)]

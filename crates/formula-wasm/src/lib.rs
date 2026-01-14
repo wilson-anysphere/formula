@@ -4,7 +4,7 @@ use formula_engine::calc_settings::{CalcSettings, CalculationMode, IterativeCalc
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{
     canonicalize_formula_with_style, get_locale, localize_formula_with_style, FormulaLocale,
-    ValueLocaleConfig, DE_DE, EN_US, ES_ES, FR_FR,
+    iter_locales, ValueLocaleConfig, EN_US,
 };
 use formula_engine::pivot as pivot_engine;
 use formula_engine::{
@@ -393,11 +393,61 @@ fn style_json_to_model_style(value: &JsonValue) -> Style {
     out
 }
 
+fn supported_locale_ids_sorted() -> Vec<&'static str> {
+    let mut ids: Vec<&'static str> = iter_locales().map(|locale| locale.id).collect();
+    ids.sort_unstable();
+    ids
+}
+
+#[wasm_bindgen(js_name = "supportedLocaleIds")]
+pub fn supported_locale_ids() -> JsValue {
+    ensure_rust_constructors_run();
+    let ids = supported_locale_ids_sorted();
+    let out = Array::new();
+    for id in ids {
+        out.push(&JsValue::from_str(id));
+    }
+    out.into()
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocaleInfoDto {
+    locale_id: &'static str,
+    decimal_separator: String,
+    arg_separator: String,
+    array_row_separator: String,
+    array_col_separator: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thousands_separator: Option<String>,
+    is_rtl: bool,
+    boolean_true: &'static str,
+    boolean_false: &'static str,
+}
+
+#[wasm_bindgen(js_name = "getLocaleInfo")]
+pub fn get_locale_info(locale_id: &str) -> Result<JsValue, JsValue> {
+    ensure_rust_constructors_run();
+    let locale = require_formula_locale(locale_id)?;
+    let info = LocaleInfoDto {
+        locale_id: locale.id,
+        decimal_separator: locale.config.decimal_separator.to_string(),
+        arg_separator: locale.config.arg_separator.to_string(),
+        array_row_separator: locale.config.array_row_separator.to_string(),
+        array_col_separator: locale.config.array_col_separator.to_string(),
+        thousands_separator: locale.config.thousands_separator.map(|ch| ch.to_string()),
+        is_rtl: locale.is_rtl,
+        boolean_true: locale.boolean_true,
+        boolean_false: locale.boolean_false,
+    };
+    serde_wasm_bindgen::to_value(&info).map_err(|err| js_err(err.to_string()))
+}
+
 fn require_formula_locale(locale_id: &str) -> Result<&'static FormulaLocale, JsValue> {
     get_locale(locale_id).ok_or_else(|| {
+        let supported = supported_locale_ids_sorted().join(", ");
         js_err(format!(
-            "unknown localeId: {locale_id}. Supported locale ids: {}, {}, {}, {}",
-            EN_US.id, DE_DE.id, FR_FR.id, ES_ES.id
+            "unknown localeId: {locale_id}. Supported locale ids: {supported}",
         ))
     })
 }
@@ -5349,6 +5399,23 @@ impl WasmWorkbook {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn supported_locale_ids_are_sorted_and_contain_known_ids() {
+        let ids = supported_locale_ids_sorted();
+
+        for expected in ["de-DE", "en-US", "es-ES", "fr-FR"] {
+            assert!(
+                ids.contains(&expected),
+                "expected locale list to contain {expected:?}, got {ids:?}"
+            );
+        }
+
+        assert!(
+            ids.windows(2).all(|pair| pair[0] <= pair[1]),
+            "expected locale list to be sorted, got {ids:?}"
+        );
+    }
 
     #[test]
     fn from_json_sheet_order_controls_3d_reference_semantics() {
