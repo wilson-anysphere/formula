@@ -246,4 +246,54 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     app.dispose();
     root.remove();
   });
+
+  it("ignores drawing interaction commits when the app is read-only", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "shape", label: "Box" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
+        size: { cx: pxToEmu(120), cy: pxToEmu(80) },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    expect(before.anchor.type).toBe("absolute");
+    if (before.anchor.type !== "absolute") {
+      throw new Error("Expected absolute anchor for test drawing");
+    }
+    const after = {
+      ...before,
+      anchor: {
+        ...before.anchor,
+        pos: { xEmu: pxToEmu(20), yEmu: pxToEmu(10) },
+      },
+    };
+
+    // Simulate read-only session.
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit({ kind: "move", id: before.id, before, after, objects: [after] });
+
+    const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+    expect(updated?.anchor).toEqual(rawDrawing.anchor);
+
+    app.dispose();
+    root.remove();
+  });
 });
