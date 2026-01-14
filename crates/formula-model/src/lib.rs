@@ -29,6 +29,7 @@ pub mod pivots;
 mod protection;
 mod print_settings;
 pub mod rich_text;
+mod serde_defaults;
 mod sheet_name;
 mod style;
 pub mod table;

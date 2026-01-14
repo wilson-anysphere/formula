@@ -12,10 +12,6 @@ pub(crate) fn is_default_zoom(z: &f32) -> bool {
     (*z - 1.0).abs() < f32::EPSILON
 }
 
-fn default_true() -> bool {
-    true
-}
-
 fn is_true(b: &bool) -> bool {
     *b
 }
@@ -80,15 +76,15 @@ pub struct SheetView {
     pub selection: Option<SheetSelection>,
 
     /// Display gridlines.
-    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    #[serde(default = "crate::serde_defaults::default_true", skip_serializing_if = "is_true")]
     pub show_grid_lines: bool,
 
     /// Display row/column headings.
-    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    #[serde(default = "crate::serde_defaults::default_true", skip_serializing_if = "is_true")]
     pub show_headings: bool,
 
     /// Display zeros.
-    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    #[serde(default = "crate::serde_defaults::default_true", skip_serializing_if = "is_true")]
     pub show_zeros: bool,
 
     /// View zoom level (1.0 = 100%).
