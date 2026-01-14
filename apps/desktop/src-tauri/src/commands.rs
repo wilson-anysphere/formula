@@ -2533,6 +2533,7 @@ fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, Str
             let doc = roxmltree::Document::parse(&xml)
                 .map_err(|e| format!("agile EncryptionInfo descriptor is not valid XML: {e}"))?;
 
+            let mut cipher_algorithm = None;
             let mut hash_algorithm = None;
             let mut spin_count = None;
             let mut key_bits = None;
@@ -2541,6 +2542,10 @@ fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, Str
                 match node.tag_name().name() {
                     // Password encryption parameters.
                     "encryptedKey" => {
+                        if cipher_algorithm.is_none() {
+                            cipher_algorithm =
+                                node.attribute("cipherAlgorithm").map(|s| s.to_string());
+                        }
                         if spin_count.is_none() {
                             spin_count = node
                                 .attribute("spinCount")
@@ -2558,6 +2563,10 @@ fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, Str
                     }
                     // Document encryption parameters (also includes `hashAlgorithm` / `keyBits`).
                     "keyData" => {
+                        if cipher_algorithm.is_none() {
+                            cipher_algorithm =
+                                node.attribute("cipherAlgorithm").map(|s| s.to_string());
+                        }
                         if hash_algorithm.is_none() {
                             hash_algorithm =
                                 node.attribute("hashAlgorithm").map(|s| s.to_string());
@@ -2572,12 +2581,28 @@ fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, Str
                 }
             }
 
+            let cipher = cipher_algorithm.and_then(|raw| {
+                let raw = raw.trim();
+                if raw.is_empty() {
+                    return None;
+                }
+                let alg = raw.to_ascii_uppercase();
+                if alg == "AES" {
+                    Some(match key_bits {
+                        Some(bits) => format!("AES-{bits}"),
+                        None => "AES".to_string(),
+                    })
+                } else {
+                    Some(alg)
+                }
+            });
+
             Ok(EncryptionSummaryDto {
                 encryption_type: EncryptionTypeDto::Agile,
                 hash_algorithm,
                 spin_count,
                 key_bits,
-                cipher: None,
+                cipher,
                 key_size: None,
             })
         }
@@ -10561,7 +10586,7 @@ mod tests {
             .expect("create temp dir");
         let path = dir.path().join("encrypted.xlsx");
 
-        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
+        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512" cipherAlgorithm="AES"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
 
         let cursor = Cursor::new(Vec::new());
         let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -10592,6 +10617,7 @@ mod tests {
         assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
         assert_eq!(summary.spin_count, Some(100000));
         assert_eq!(summary.key_bits, Some(256));
+        assert_eq!(summary.cipher.as_deref(), Some("AES-256"));
     }
 
     #[test]
@@ -10605,7 +10631,7 @@ mod tests {
             .expect("create temp dir");
         let path = dir.path().join("encrypted.xlsx");
 
-        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
+        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512" cipherAlgorithm="AES"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
 
         let mut xml_utf16 = Vec::new();
         // UTF-16LE BOM.
@@ -10645,6 +10671,7 @@ mod tests {
         assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
         assert_eq!(summary.spin_count, Some(100000));
         assert_eq!(summary.key_bits, Some(256));
+        assert_eq!(summary.cipher.as_deref(), Some("AES-256"));
     }
 
     #[test]
@@ -10658,7 +10685,7 @@ mod tests {
             .expect("create temp dir");
         let path = dir.path().join("encrypted.xlsx");
 
-        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
+        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512" cipherAlgorithm="AES"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
 
         let mut xml_utf16 = Vec::new();
         for unit in xml.encode_utf16() {
@@ -10696,6 +10723,7 @@ mod tests {
         assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
         assert_eq!(summary.spin_count, Some(100000));
         assert_eq!(summary.key_bits, Some(256));
+        assert_eq!(summary.cipher.as_deref(), Some("AES-256"));
     }
 
     #[test]
@@ -10709,7 +10737,7 @@ mod tests {
             .expect("create temp dir");
         let path = dir.path().join("encrypted.xlsx");
 
-        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
+        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512" cipherAlgorithm="AES"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
 
         let mut xml_utf16 = Vec::new();
         for unit in xml.encode_utf16() {
@@ -10747,6 +10775,7 @@ mod tests {
         assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
         assert_eq!(summary.spin_count, Some(100000));
         assert_eq!(summary.key_bits, Some(256));
+        assert_eq!(summary.cipher.as_deref(), Some("AES-256"));
     }
 
     #[test]
