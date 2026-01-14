@@ -6,12 +6,22 @@
 */
 
 .dialog {
+  /*
+    Dialogs are mounted directly under <body> (outside `.formula-app`), so they do not inherit
+    the global `box-sizing: border-box` rule from `ui.css`. Opt into border-box here so
+    100%-width elements don't overflow when padded.
+  */
+  box-sizing: border-box;
   border: 1px solid var(--dialog-border);
   border-radius: var(--radius);
   padding: var(--space-5);
   background: var(--dialog-bg);
   color: var(--text-primary);
   box-shadow: var(--dialog-shadow);
+}
+
+.dialog * {
+  box-sizing: border-box;
 }
 
 .dialog::backdrop {
@@ -176,11 +186,6 @@ dialog.custom-sort-dialog {
 
 dialog.custom-sort-dialog::backdrop {
   background: var(--dialog-backdrop);
-}
-
-.custom-sort-dialog,
-.custom-sort-dialog * {
-  box-sizing: border-box;
 }
 
 /* --- Organize Sheets dialog ------------------------------------------------ */

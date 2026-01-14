@@ -15,7 +15,7 @@ function el(tag, attrs = {}, children = []) {
 }
 
 export function createGoToDialog({ workbook, getCurrentSheetName, setActiveCell, selectRange }) {
-  const dialog = el("dialog", { className: "goto-dialog" });
+  const dialog = el("dialog", { className: "dialog goto-dialog" });
   dialog.dataset.testid = "goto-dialog";
   markKeybindingBarrier(dialog);
   const input = el("input", { type: "text", placeholder: "Reference (e.g. Sheet1!A1 or MyName)" });

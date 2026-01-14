@@ -7,21 +7,6 @@
 
 /* --- Page setup dialog --------------------------------------------------- */
 
-/*
-  Print dialogs are mounted directly under <body> (outside `.formula-app`), so they do not inherit
-  the global `box-sizing: border-box` rule from `ui.css`. Opt into border-box here so 100%-width
-  elements (like the dialog body) don't overflow when padded.
-*/
-dialog.page-setup-dialog,
-dialog.page-setup-dialog * {
-  box-sizing: border-box;
-}
-
-dialog.print-preview-dialog,
-dialog.print-preview-dialog * {
-  box-sizing: border-box;
-}
-
 dialog.page-setup-dialog .page-setup-dialog__body {
   padding: var(--space-4);
   width: 100%;

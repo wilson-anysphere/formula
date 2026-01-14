@@ -48,33 +48,14 @@ body {
 dialog.find-replace-dialog,
 dialog.goto-dialog {
   width: min(680px, 92vw);
-  border: 1px solid var(--dialog-border);
-  border-radius: var(--radius);
   padding: var(--space-4);
-  background: var(--dialog-bg);
-  color: var(--text-primary);
-  box-shadow: var(--dialog-shadow);
-}
-
-dialog.find-replace-dialog::backdrop,
-dialog.goto-dialog::backdrop {
-  background: var(--dialog-backdrop);
 }
 
 /* --- Page setup dialog --------------------------------------------------- */
 
 dialog.page-setup-dialog {
   width: min(520px, calc(100vw - (var(--space-6) * 2)));
-  border: 1px solid var(--dialog-border);
-  border-radius: var(--radius);
   padding: 0;
-  background: var(--dialog-bg);
-  color: var(--text-primary);
-  box-shadow: var(--dialog-shadow);
-}
-
-dialog.page-setup-dialog::backdrop {
-  background: var(--dialog-backdrop);
 }
 
 /* --- Print preview dialog ------------------------------------------------- */
@@ -82,16 +63,7 @@ dialog.page-setup-dialog::backdrop {
 dialog.print-preview-dialog {
   width: min(1100px, calc(100vw - (var(--space-6) * 2)));
   height: min(820px, calc(100vh - (var(--space-6) * 2)));
-  border: 1px solid var(--dialog-border);
-  border-radius: var(--radius);
   padding: 0;
-  background: var(--dialog-bg);
-  color: var(--text-primary);
-  box-shadow: var(--dialog-shadow);
-}
-
-dialog.print-preview-dialog::backdrop {
-  background: var(--dialog-backdrop);
 }
 
 .print-preview-dialog__root {
