@@ -26676,15 +26676,15 @@ export class SpreadsheetApp {
 
       if (encRaw !== undefined) {
         const keyId = typeof encRaw === "object" && encRaw && typeof encRaw.keyId === "string" ? String(encRaw.keyId).trim() : "";
-        if (!key) {
-          return { rejectionReason: "encryption", ...(keyId ? { encryptionKeyId: keyId } : {}) };
-        }
         if (!isEncryptedCellPayload(encRaw)) {
           return {
             rejectionReason: "encryption",
             encryptionPayloadUnsupported: true,
             ...(keyId ? { encryptionKeyId: keyId } : {}),
           };
+        }
+        if (!key) {
+          return { rejectionReason: "encryption", ...(keyId ? { encryptionKeyId: keyId } : {}) };
         }
         if (key.keyId !== encRaw.keyId) {
           return { rejectionReason: "encryption", ...(keyId ? { encryptionKeyId: keyId } : {}) };
