@@ -110,7 +110,11 @@ function parseErrorTsv(contents, label) {
     // comments as `#` followed by whitespace (or `#` alone).
     const isComment =
       trimmed === "#" ||
-      (trimmed.startsWith("#") && (trimmed[1] === " " || trimmed[1] === "\t"));
+      // Error TSVs allow data lines that start with `#` (e.g. `#VALUE!`), so we treat
+      // comments as `#` followed by whitespace (or `#` alone).
+      //
+      // Use a Unicode-aware whitespace test to match the runtime parser's behavior.
+      (trimmed.startsWith("#") && /\s/u.test(trimmed[1]));
     if (trimmed.length === 0 || isComment) {
       continue;
     }
