@@ -1970,7 +1970,8 @@ pub fn parse_encrypted_package_header(
     // While MS-OFFCRYPTO describes `original_size` as a `u64le`, some producers/libraries treat it
     // as `u32 totalSize` + `u32 reserved` (often 0). When the high DWORD is non-zero but the
     // combined 64-bit value is not plausible for the available ciphertext, fall back to the low
-    // DWORD for compatibility.
+    // DWORD for compatibility *only when it is non-zero* (so we don't misinterpret true 64-bit
+    // sizes that are exact multiples of 2^32).
     let original_size =
         if len_lo != 0 && len_hi != 0 && original_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
             len_lo
@@ -2376,7 +2377,8 @@ pub fn decrypt_encrypted_package_ecb(
     let total_size_u64 = len_lo | (len_hi << 32);
     let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
     // Compatibility: treat a non-zero high DWORD as "reserved" when the resulting 64-bit value is
-    // not plausible for the available ciphertext.
+    // not plausible for the available ciphertext (but do not fall back when the low DWORD is zero,
+    // to avoid misinterpreting true 64-bit sizes that are exact multiples of 2^32).
     let total_size = if len_lo != 0 && len_hi != 0 && total_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
         len_lo
     } else {
@@ -3949,6 +3951,17 @@ mod tests {
     fn decode_b64_attr_whitespace() {
         let decoded = decode_b64_attr("A QID\r\nBA==\t").expect("decode");
         assert_eq!(decoded, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn encrypted_package_header_does_not_fall_back_when_low_dword_is_zero() {
+        // Some producers treat the size prefix as `(u32 size, u32 reserved)`, but that heuristic
+        // must not misread true 64-bit sizes that are exact multiples of 2^32 (low DWORD = 0).
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // low DWORD
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // high DWORD
+        let header = parse_encrypted_package_header(&bytes).expect("parse header");
+        assert_eq!(header.original_size, 1u64 << 32);
     }
 
     fn minimal_agile_xml() -> String {

@@ -72,7 +72,9 @@ where
     let ciphertext_len_u64 = reader.remaining().len() as u64;
     // MS-OFFCRYPTO describes `original_size` as a `u64le`, but some producers/libraries treat it as
     // `u32 totalSize` + `u32 reserved` (often 0). When the high DWORD is non-zero but the combined
-    // 64-bit value is not plausible for the available ciphertext, fall back to the low DWORD.
+    // 64-bit value is not plausible for the available ciphertext, fall back to the low DWORD
+    // *only when it is non-zero* (so we don't misinterpret true 64-bit sizes that are exact
+    // multiples of 2^32).
     let total_size =
         if len_lo != 0
             && len_hi != 0

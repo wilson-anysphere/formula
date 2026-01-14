@@ -139,9 +139,11 @@ pub(crate) fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, OfficeCryp
 /// Parse the 8-byte plaintext size prefix at the start of an `EncryptedPackage` stream.
 ///
 /// MS-OFFCRYPTO describes this field as a `u64le`, but some producers/libraries treat it as
-/// `(u32 totalSize, u32 reserved)` (often with `reserved = 0`). When the high DWORD is non-zero but
-/// the combined 64-bit value is not plausible for the available ciphertext, fall back to the low
-/// DWORD for compatibility.
+/// `(u32 totalSize, u32 reserved)` (often with `reserved = 0`).
+///
+/// For compatibility, when the high DWORD is non-zero *and* the combined 64-bit value is not
+/// plausible for the available ciphertext, we fall back to the low DWORD **only when it is
+/// non-zero** (so we don't misinterpret true 64-bit sizes that are exact multiples of `2^32`).
 pub(crate) fn parse_encrypted_package_original_size(
     encrypted_package: &[u8],
 ) -> Result<u64, OfficeCryptoError> {
