@@ -5,6 +5,7 @@ import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { stripComments } from "../test/sourceTextUtils.js";
 
 /**
  * Node's `--test` runner started detecting TypeScript test files (`*.test.ts`) once
@@ -317,7 +318,8 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
   }
 
   for (const file of files) {
-    const text = await readFile(file, "utf8").catch(() => "");
+    const rawText = await readFile(file, "utf8").catch(() => "");
+    const text = stripComments(rawText);
     if (tsImportRe.test(text)) continue;
     if (importsWorkspaceTypeScriptEntrypoint(text)) continue;
     out.push(file);
@@ -844,7 +846,8 @@ async function filterExternalDependencyTests(files, opts) {
 
     visiting.add(file);
     let hasExternal = false;
-    const text = await readFile(file, "utf8").catch(() => "");
+    const rawText = await readFile(file, "utf8").catch(() => "");
+    const text = stripComments(rawText);
 
     /** @type {string[]} */
     const specifiers = [];
@@ -1421,7 +1424,8 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
     visiting.add(file);
 
     let missing = false;
-    const text = await readFile(file, "utf8").catch(() => "");
+    const rawText = await readFile(file, "utf8").catch(() => "");
+    const text = stripComments(rawText);
 
     /** @type {Array<{ specifier: string, typeOnly: boolean }>} */
     const imports = [];

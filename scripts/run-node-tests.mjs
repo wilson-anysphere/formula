@@ -5,6 +5,7 @@ import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { stripComments } from "../apps/desktop/test/sourceTextUtils.js";
 
 // `import.meta.url` is a file URL; use `fileURLToPath` to avoid platform-specific quirks
 // (e.g. Windows drive letter handling) when turning it into a filesystem path.
@@ -511,7 +512,8 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
   }
 
   for (const file of files) {
-    const text = await readFile(file, "utf8").catch(() => "");
+    const rawText = await readFile(file, "utf8").catch(() => "");
+    const text = stripComments(rawText);
     // Heuristic: skip tests that import TypeScript modules when the runtime can't execute them.
     if (tsImportRe.test(text)) continue;
     if (importsWorkspaceTypeScriptEntrypoint(text)) continue;
@@ -986,7 +988,8 @@ async function filterExternalDependencyTests(files, opts) {
 
     visiting.add(file);
     let hasExternal = false;
-    const text = await readFile(file, "utf8").catch(() => "");
+    const rawText = await readFile(file, "utf8").catch(() => "");
+    const text = stripComments(rawText);
 
     /** @type {string[]} */
     const specifiers = [];
@@ -1506,7 +1509,8 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
     visiting.add(file);
 
     let missing = false;
-    const text = await readFile(file, "utf8").catch(() => "");
+    const rawText = await readFile(file, "utf8").catch(() => "");
+    const text = stripComments(rawText);
 
     /** @type {Array<{ specifier: string, typeOnly: boolean }>} */
     const imports = [];
