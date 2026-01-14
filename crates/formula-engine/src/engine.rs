@@ -20,6 +20,9 @@ use crate::locale::{
     localize_formula_with_style, FormulaLocale, ValueLocaleConfig,
 };
 use crate::value::{Array, ErrorKind, Value};
+use formula_format::{
+    DateSystem as FmtDateSystem, FormatOptions as FmtFormatOptions, Value as FmtValue,
+};
 use formula_model::{
     sheet_name_eq_case_insensitive, CellId, CellRef, ColProperties, Range, RowProperties, Style,
     StyleTable, Table, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
@@ -206,6 +209,7 @@ struct Cell {
     formula: Option<String>,
     compiled: Option<CompiledFormula>,
     bytecode_compile_reason: Option<BytecodeCompileReason>,
+    number_format: Option<String>,
     volatile: bool,
     thread_safe: bool,
     dynamic_deps: bool,
@@ -220,6 +224,7 @@ impl Default for Cell {
             formula: None,
             compiled: None,
             bytecode_compile_reason: None,
+            number_format: None,
             volatile: false,
             thread_safe: true,
             dynamic_deps: false,
@@ -840,7 +845,11 @@ impl Engine {
         let remove_cell = {
             let cell = self.workbook.get_or_create_cell_mut(key);
             cell.style_id = style_id;
-            cell.value == Value::Blank && cell.formula.is_none() && cell.style_id == 0
+            cell.value == Value::Blank
+                && cell.formula.is_none()
+                && cell.style_id == 0
+                && cell.phonetic.is_none()
+                && cell.number_format.is_none()
         };
         if remove_cell {
             if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
@@ -1384,6 +1393,47 @@ impl Engine {
         self.calc_settings = settings;
     }
 
+    fn fmt_date_system(&self) -> FmtDateSystem {
+        match self.date_system {
+            ExcelDateSystem::Excel1900 { .. } => FmtDateSystem::Excel1900,
+            ExcelDateSystem::Excel1904 => FmtDateSystem::Excel1904,
+        }
+    }
+
+    fn fmt_options(&self) -> FmtFormatOptions {
+        FmtFormatOptions {
+            locale: self.value_locale.separators,
+            date_system: self.fmt_date_system(),
+        }
+    }
+
+    fn round_number_as_displayed(&self, number: f64, format_pattern: Option<&str>) -> f64 {
+        if self.calc_settings.full_precision {
+            return number;
+        }
+
+        // Excel's "precision as displayed" mode ("Set precision as displayed") rounds numeric
+        // values at cell boundaries based on the cell's number format.
+        //
+        // We implement this by:
+        // 1) Formatting the number using `formula-format` (Excel-compatible formatting),
+        // 2) Parsing the formatted text back into a number using the engine's numeric coercion
+        //    logic (locale-aware, percent-aware).
+        //
+        // If the formatted string cannot be parsed back into a number (e.g. date/time formats or
+        // patterns with non-numeric literal text), we fall back to storing the full-precision value.
+        let options = self.fmt_options();
+        let formatted = formula_format::format_value(FmtValue::Number(number), format_pattern, &options);
+        match crate::coercion::number::parse_number_strict(
+            &formatted.text,
+            options.locale.decimal_sep,
+            Some(options.locale.thousands_sep),
+        ) {
+            Ok(parsed) => parsed,
+            Err(_) => number,
+        }
+    }
+
     pub fn locale_config(&self) -> &crate::LocaleConfig {
         &self.locale_config
     }
@@ -1670,6 +1720,67 @@ impl Engine {
         self.circular_references.len()
     }
 
+    /// Set the number format pattern for a cell (e.g. `"0.00"`, `"0%"`).
+    ///
+    /// When `None` (or an empty/whitespace string) is provided, the cell behaves like Excel's
+    /// `"General"` format.
+    pub fn set_cell_number_format(
+        &mut self,
+        sheet: &str,
+        addr: &str,
+        format_pattern: Option<String>,
+    ) -> Result<(), EngineError> {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let addr = parse_a1(addr)?;
+
+        // Keep the same safety bounds as `set_cell_value`/formula compilation paths.
+        if addr.row >= i32::MAX as u32 {
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::RowOutOfRange,
+            ));
+        }
+
+        if self.workbook.grow_sheet_dimensions(sheet_id, addr) {
+            self.mark_all_compiled_cells_dirty();
+        }
+
+        let key = CellKey { sheet: sheet_id, addr };
+        let cell = self.workbook.get_or_create_cell_mut(key);
+        cell.number_format = format_pattern.and_then(|s| {
+            if s.trim().is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        });
+        Ok(())
+    }
+
+    /// Get a cell's number format pattern.
+    ///
+    /// Returns `Ok(None)` when the cell has no explicit number format (Excel `"General"`) or does
+    /// not exist.
+    pub fn cell_number_format(
+        &self,
+        sheet: &str,
+        addr: &str,
+    ) -> Result<Option<String>, EngineError> {
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return Ok(None);
+        };
+        let addr = parse_a1(addr)?;
+        if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
+            if addr.row >= sheet_state.row_count || addr.col >= sheet_state.col_count {
+                return Ok(None);
+            }
+        }
+        let key = CellKey { sheet: sheet_id, addr };
+        Ok(self
+            .workbook
+            .get_cell(key)
+            .and_then(|cell| cell.number_format.clone()))
+    }
+
     pub fn set_cell_value(
         &mut self,
         sheet: &str,
@@ -1700,6 +1811,18 @@ impl Engine {
         };
         let cell_id = cell_id_from_key(key);
 
+        let format_pattern = self
+            .workbook
+            .get_cell(key)
+            .and_then(|cell| cell.number_format.clone());
+        let value: Value = value.into();
+        let value = match value {
+            Value::Number(n) => {
+                Value::Number(self.round_number_as_displayed(n, format_pattern.as_deref()))
+            }
+            other => other,
+        };
+
         self.clear_spill_for_cell(key);
         self.clear_blocked_spill_for_origin(key);
 
@@ -1709,7 +1832,6 @@ impl Engine {
         self.dirty.remove(&key);
         self.dirty_reasons.remove(&key);
 
-        let value = value.into();
         let remove_cell = {
             let cell = self.workbook.get_or_create_cell_mut(key);
             cell.value = value;
@@ -1728,6 +1850,7 @@ impl Engine {
                 && cell.formula.is_none()
                 && cell.style_id == 0
                 && cell.phonetic.is_none()
+                && cell.number_format.is_none()
         };
         if remove_cell {
             if let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) {
@@ -1805,6 +1928,7 @@ impl Engine {
                         && cell.formula.is_none()
                         && cell.style_id == 0
                         && cell.phonetic.is_none()
+                        && cell.number_format.is_none()
                 };
                 if remove_cell {
                     sheet.cells.remove(&addr);
@@ -3943,6 +4067,11 @@ impl Engine {
             other => other,
         };
 
+        let format_pattern = self
+            .workbook
+            .get_cell(key)
+            .and_then(|cell| cell.number_format.as_deref());
+
         match value {
             Value::Array(mut array) => {
                 if array.rows == 0 || array.cols == 0 {
@@ -3962,6 +4091,14 @@ impl Engine {
                 for value in &mut array.values {
                     if matches!(value, Value::Lambda(_)) {
                         *value = Value::Error(ErrorKind::Calc);
+                    }
+                }
+
+                if !self.calc_settings.full_precision {
+                    for value in &mut array.values {
+                        if let Value::Number(n) = value {
+                            *n = self.round_number_as_displayed(*n, format_pattern.as_deref());
+                        }
                     }
                 }
 
@@ -4114,6 +4251,11 @@ impl Engine {
                 self.apply_new_spill(key, end, array, snapshot, spill_dirty_roots, value_changes);
             }
             other => {
+                let other = match other {
+                    Value::Number(n) => Value::Number(self.round_number_as_displayed(n, format_pattern.as_deref())),
+                    v => v,
+                };
+
                 let cleared = self.clear_spill_for_origin(key);
                 snapshot.spill_end_by_origin.remove(&key);
                 for cleared_key in cleared {
