@@ -374,6 +374,27 @@ describe("extractFormulaReferences", () => {
     });
   });
 
+  it("does not resolve structured refs with unsupported selectors (e.g. #This Row)", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"]
+        }
+      ]
+    ]);
+
+    const input = "=SUM(Table1[[#This Row],[Amount]])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toEqual([]);
+  });
+
   it("extracts structured table specifiers like #All/#Headers/#Data", () => {
     const tables = new Map([
       [

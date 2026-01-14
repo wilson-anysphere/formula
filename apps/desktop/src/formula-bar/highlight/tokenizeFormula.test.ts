@@ -135,6 +135,13 @@ describe("tokenizeFormula", () => {
     expect(totalsRefs.map((t) => t.text)).toEqual(["Table1[[#Totals],[Amount]]"]);
   });
 
+  it("tokenizes structured references with `#This Row` selectors as single tokens", () => {
+    const input = "=SUM(Table1[[#This Row],[Amount]])";
+    const tokens = tokenizeFormula(input);
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["Table1[[#This Row],[Amount]]"]);
+  });
+
   it("tokenizes structured references followed by operators (no trailing parens/commas)", () => {
     // Regression: bracket escaping logic should not prevent recognizing structured refs when they
     // are followed by an operator (e.g. `...]]+1`).

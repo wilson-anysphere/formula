@@ -338,11 +338,15 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
     refEndRow = baseEndRow;
   } else if (selector === "#all") {
     // Keep the full range, including headers.
-  } else {
+  } else if (selector === null || selector === "#data") {
     // Default / #Data: exclude header row when the table has at least one data row.
     if (refEndRow > refStartRow) {
       refStartRow = refStartRow + 1;
     }
+  } else {
+    // Unsupported selector (e.g. `#This Row`) - we can't resolve it to a stable
+    // rectangular range without additional context.
+    return null;
   }
 
   return {
