@@ -17,6 +17,10 @@ function collectSourceFiles(dir, out) {
   }
 
   for (const entry of entries) {
+    // Skip colocated unit tests. These are not part of the runtime command catalog and
+    // may contain intentionally duplicated `registerBuiltinCommand(...)` calls that
+    // mirror `main.ts` wiring for regression coverage.
+    if (entry.isDirectory() && entry.name === "__tests__") continue;
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       collectSourceFiles(fullPath, out);
@@ -25,6 +29,16 @@ function collectSourceFiles(dir, out) {
     if (!entry.isFile()) continue;
     if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) continue;
     if (entry.name.endsWith(".d.ts")) continue;
+    if (
+      entry.name.endsWith(".test.ts") ||
+      entry.name.endsWith(".test.js") ||
+      entry.name.endsWith(".spec.ts") ||
+      entry.name.endsWith(".spec.js") ||
+      entry.name.endsWith(".vitest.ts") ||
+      entry.name.endsWith(".vitest.js")
+    ) {
+      continue;
+    }
     out.push(fullPath);
   }
 }
