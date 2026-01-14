@@ -1253,6 +1253,7 @@ export class SpreadsheetApp {
   private readonly chartOverlayImages: ImageStore = { get: () => undefined, set: () => {} };
   private chartOverlayGeom: DrawingGridGeometry | null = null;
   private chartSelectionOverlay: DrawingOverlay | null = null;
+  private chartSelectionViewportMemo: { width: number; height: number; dpr: number } | null = null;
   private chartSelectionCanvas: HTMLCanvasElement | null = null;
   private chartDrawingInteraction: DrawingInteractionController | null = null;
   private chartDragState:
@@ -3613,6 +3614,7 @@ export class SpreadsheetApp {
     this.dirtyChartIds.clear();
     this.chartHasFormulaCells.clear();
     this.chartRangeRectsCache.clear();
+    this.chartSelectionViewportMemo = null;
     this.conflictUiContainer = null;
     this.root.replaceChildren();
   }
@@ -10483,7 +10485,11 @@ export class SpreadsheetApp {
       headerOffsetX: layout.originX,
       headerOffsetY: layout.originY,
     };
-    overlay.resize(viewport);
+    const memo = this.chartSelectionViewportMemo;
+    if (!memo || memo.width !== viewport.width || memo.height !== viewport.height || memo.dpr !== viewport.dpr) {
+      overlay.resize(viewport);
+      this.chartSelectionViewportMemo = { width: viewport.width, height: viewport.height, dpr: viewport.dpr };
+    }
 
     if (!selected) {
       overlay.setSelectedId(null);
