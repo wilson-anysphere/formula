@@ -2808,11 +2808,6 @@ function toNumber(cell: CellData, opts: { includeFormulaValues?: boolean } = {})
   return parseSpreadsheetNumber(cell.value);
 }
 
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  return quantileSorted(sorted, 0.5);
-}
-
 function quantileSorted(sorted: number[], q: number): number {
   if (sorted.length === 0) return NaN;
   const pos = (sorted.length - 1) * q;
@@ -2820,38 +2815,6 @@ function quantileSorted(sorted: number[], q: number): number {
   const rest = pos - base;
   if (sorted[base + 1] === undefined) return sorted[base]!;
   return sorted[base]! + rest * (sorted[base + 1]! - sorted[base]!);
-}
-
-function quantile(values: number[], q: number): number {
-  if (values.length === 0) return NaN;
-  const sorted = [...values].sort((a, b) => a - b);
-  return quantileSorted(sorted, q);
-}
-
-function mode(values: number[]): number | null {
-  const counts = new Map<number, number>();
-  for (const value of values) {
-    counts.set(value, (counts.get(value) ?? 0) + 1);
-  }
-  let maxCount = 0;
-  let modeValue: number | null = null;
-  for (const [value, count] of counts.entries()) {
-    if (count > maxCount) {
-      maxCount = count;
-      modeValue = value;
-    }
-  }
-  return maxCount > 1 ? modeValue : null;
-}
-
-function variance(values: number[]): number {
-  if (values.length < 2) return 0;
-  const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
-  return values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (values.length - 1);
-}
-
-function stdev(values: number[]): number {
-  return Math.sqrt(variance(values));
 }
 
 interface IsolationTreeNode {
@@ -3001,25 +2964,6 @@ function isolationForestScores(values: number[], options: { seed: number; trees?
     const avgPath = sum / trees;
     return Math.pow(2, -avgPath / cSample);
   });
-}
-
-function correlation(pairs: Array<[number, number]>): number {
-  const xs = pairs.map(([x]) => x);
-  const ys = pairs.map(([, y]) => y);
-  const meanX = xs.reduce((sum, x) => sum + x, 0) / xs.length;
-  const meanY = ys.reduce((sum, y) => sum + y, 0) / ys.length;
-  let numerator = 0;
-  let denomX = 0;
-  let denomY = 0;
-  for (let i = 0; i < pairs.length; i++) {
-    const dx = xs[i]! - meanX;
-    const dy = ys[i]! - meanY;
-    numerator += dx * dy;
-    denomX += dx ** 2;
-    denomY += dy ** 2;
-  }
-  const denominator = Math.sqrt(denomX * denomY);
-  return denominator === 0 ? 0 : numerator / denominator;
 }
 
 function cellsEqual(left: CellData, right: CellData): boolean {
