@@ -8329,6 +8329,10 @@ function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: 
   // Prefer computed values for formula cells so filtering matches what users see in the grid.
   const hasFormula = typeof state?.formula === "string" && state.formula.trim() !== "";
   if (hasFormula) {
+    // Respect the View → Show Formulas toggle so the filter dialog matches the grid display.
+    if (app.getShowFormulas()) {
+      return state?.formula ?? "";
+    }
     const computed = app.getCellComputedValueForSheet(sheetId, cell);
     return formatValue(computed);
   }
