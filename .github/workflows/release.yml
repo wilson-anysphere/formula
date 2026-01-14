@@ -2666,6 +2666,27 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
+      - name: Sanity-check SBOM includes Rust + JS dependencies
+        if: steps.generate_sbom.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cargo_count="$(grep -c 'pkg:cargo' sbom.spdx.json || true)"
+          npm_count="$(grep -c 'pkg:npm' sbom.spdx.json || true)"
+
+          echo "SBOM purl counts:"
+          echo "  - pkg:cargo: ${cargo_count}"
+          echo "  - pkg:npm: ${npm_count}"
+
+          if [[ "${cargo_count}" -eq 0 ]]; then
+            echo "::warning::sbom.spdx.json did not contain any pkg:cargo entries; Rust dependency metadata may be missing."
+          fi
+
+          if [[ "${npm_count}" -eq 0 ]]; then
+            echo "::warning::sbom.spdx.json did not contain any pkg:npm entries; JS dependency metadata may be missing (check pnpm-lock.yaml support)."
+          fi
+
       - name: Upload SBOM (workflow artifact)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
