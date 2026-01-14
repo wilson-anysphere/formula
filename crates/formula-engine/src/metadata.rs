@@ -4,8 +4,8 @@ use std::fmt;
 ///
 /// This mirrors the document model's `formatRunsByCol` representation:
 /// - Each run covers rows `[start_row, end_row_exclusive)`.
-/// - `style_id` references the workbook [`formula_model::StyleTable`] (`0` is the default/empty
-///   style).
+/// - `style_id` references an entry in the workbook [`formula_model::StyleTable`] (`0` is the
+///   default/empty style).
 ///
 /// When computing effective formatting, these runs have precedence:
 /// `sheet < col < row < range-run < cell`.
