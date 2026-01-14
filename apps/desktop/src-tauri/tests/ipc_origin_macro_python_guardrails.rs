@@ -263,16 +263,16 @@ fn macro_and_python_commands_enforce_ipc_origin() {
             || body.contains("ensure_main_window_and_stable_origin(")
             || body.contains("ensure_main_window_and_trusted_origin(");
         let has_origin = body.contains("ensure_stable_origin(")
-            || body.contains("ensure_trusted_origin(")
             || body.contains("ensure_main_window_and_stable_origin(")
-            || body.contains("ensure_main_window_and_trusted_origin(");
+            // Match both `foo(` and `foo (` call styles.
+            || body.contains("ensure_main_window_and_stable_origin (");
         assert!(
             has_main,
             "{command} must enforce ipc_origin main-window checks"
         );
         assert!(
             has_origin,
-            "{command} must enforce ipc_origin origin checks"
+            "{command} must enforce ipc_origin stable-origin checks"
         );
     }
 }

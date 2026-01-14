@@ -35,15 +35,14 @@ fn verify_ed25519_signature_command_has_ipc_origin_checks() {
         || body.contains("ensure_main_window_and_stable_origin(")
         || body.contains("ensure_main_window_and_trusted_origin(");
     let has_origin = body.contains("ensure_stable_origin(")
-        || body.contains("ensure_trusted_origin(")
         || body.contains("ensure_main_window_and_stable_origin(")
-        || body.contains("ensure_main_window_and_trusted_origin(");
+        || body.contains("ensure_main_window_and_stable_origin (");
     assert!(
         has_main,
         "expected verify_ed25519_signature to enforce main-window checks"
     );
     assert!(
         has_origin,
-        "expected verify_ed25519_signature to enforce origin checks"
+        "expected verify_ed25519_signature to enforce stable-origin checks"
     );
 }

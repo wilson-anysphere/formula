@@ -95,20 +95,17 @@ fn contains_call(body: &str, fn_name: &str) -> bool {
 fn assert_ipc_origin_checks(src: &str, file: &str, fn_name: &str) {
     let window = function_scan_window(src, fn_name, file);
 
-    let has_combined = contains_call(window, "ensure_main_window_and_trusted_origin")
-        || contains_call(window, "ensure_main_window_and_stable_origin");
+    let has_combined = contains_call(window, "ensure_main_window_and_stable_origin");
     let has_main = has_combined || contains_call(window, "ensure_main_window");
-    let has_origin = has_combined
-        || contains_call(window, "ensure_trusted_origin")
-        || contains_call(window, "ensure_stable_origin");
+    let has_origin = has_combined || contains_call(window, "ensure_stable_origin");
 
     assert!(
         has_main,
-        "{file}:{fn_name} is missing a main-window guard (expected `ipc_origin::ensure_main_window(...)` or `ipc_origin::ensure_main_window_and_stable_origin(...)` / `ipc_origin::ensure_main_window_and_trusted_origin(...)`)"
+        "{file}:{fn_name} is missing a main-window guard (expected `ipc_origin::ensure_main_window(...)` or `ipc_origin::ensure_main_window_and_stable_origin(...)`)"
     );
     assert!(
         has_origin,
-        "{file}:{fn_name} is missing an origin guard (expected `ipc_origin::ensure_stable_origin(...)` / `ipc_origin::ensure_trusted_origin(...)` or `ipc_origin::ensure_main_window_and_stable_origin(...)` / `ipc_origin::ensure_main_window_and_trusted_origin(...)`)"
+        "{file}:{fn_name} is missing a stable-origin guard (expected `ipc_origin::ensure_stable_origin(...)` or `ipc_origin::ensure_main_window_and_stable_origin(...)`)"
     );
 }
 
