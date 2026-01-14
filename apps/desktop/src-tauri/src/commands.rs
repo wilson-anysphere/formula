@@ -8161,7 +8161,7 @@ async fn marketplace_fetch_json_with_limit(
     serde_json::from_slice::<JsonValue>(&bytes).map_err(|e| e.to_string())
 }
 
-#[cfg(any(feature = "desktop", test))]
+#[cfg(feature = "desktop")]
 async fn marketplace_fetch_optional_json_with_limit(
     url: reqwest::Url,
     limit_bytes: usize,
