@@ -112,7 +112,8 @@ fn normalize_column_ref(base_table: &str, source_field: &str) -> String {
     if source_field.contains('[') && source_field.ends_with(']') && !source_field.starts_with('[') {
         source_field.to_string()
     } else {
-        format!("{base_table}[{source_field}]")
+        let escaped = crate::ident::escape_dax_bracket_identifier(source_field);
+        format!("{base_table}[{escaped}]")
     }
 }
 
@@ -152,20 +153,15 @@ pub fn measures_from_pivot_model_value_fields(
 
 #[cfg(feature = "pivot-model")]
 fn pivot_model_field_ref_to_dax_source(_base_table: &str, field: &PivotFieldRef) -> String {
+    use crate::ident::{format_dax_column_ref, format_dax_measure_ref};
+
     match field {
         PivotFieldRef::CacheFieldName(name) => name.clone(),
-        PivotFieldRef::DataModelMeasure(name) => format!("[{}]", name),
+        PivotFieldRef::DataModelMeasure(name) => format_dax_measure_ref(name),
         PivotFieldRef::DataModelColumn { table, column } => {
-            let table = dax_quote_table_name(table);
-            format!("{table}[{column}]")
+            format_dax_column_ref(table, column)
         }
     }
-}
-
-#[cfg(feature = "pivot-model")]
-fn dax_quote_table_name(table: &str) -> String {
-    // Always single-quote table names for safety and escape internal quotes.
-    format!("'{}'", table.replace('\'', "''"))
 }
 
 fn measure_from_value_field(
