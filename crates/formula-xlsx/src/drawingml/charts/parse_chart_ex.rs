@@ -6,7 +6,7 @@ use formula_model::RichText;
 use roxmltree::{Document, Node};
 use std::collections::{HashMap, HashSet};
 
-use super::cache::{parse_num_cache, parse_str_cache};
+use super::cache::{parse_num_cache, parse_num_ref, parse_str_cache, parse_str_ref};
 use super::REL_NS;
 
 #[derive(Debug, thiserror::Error)]
@@ -912,45 +912,6 @@ fn parse_series_data(
     }
 
     None
-}
-
-fn parse_str_ref(
-    str_ref_node: Node<'_, '_>,
-    diagnostics: &mut Vec<ChartDiagnostic>,
-    context: &str,
-) -> SeriesTextData {
-    let formula = descendant_text(str_ref_node, "f").map(str::to_string);
-    let cache = str_ref_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "strCache")
-        .and_then(|cache| parse_str_cache(cache, diagnostics, context));
-
-    SeriesTextData {
-        formula,
-        cache,
-        literal: None,
-        multi_cache: None,
-    }
-}
-
-fn parse_num_ref(
-    num_ref_node: Node<'_, '_>,
-    diagnostics: &mut Vec<ChartDiagnostic>,
-    context: &str,
-) -> SeriesNumberData {
-    let formula = descendant_text(num_ref_node, "f").map(str::to_string);
-    let (cache, format_code) = num_ref_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "numCache")
-        .map(|cache| parse_num_cache(cache, diagnostics, context))
-        .unwrap_or((None, None));
-
-    SeriesNumberData {
-        formula,
-        cache,
-        format_code,
-        literal: None,
-    }
 }
 
 fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {

@@ -1,4 +1,6 @@
-use formula_model::charts::{ChartDiagnostic, ChartDiagnosticLevel};
+use formula_model::charts::{
+    ChartDiagnostic, ChartDiagnosticLevel, SeriesNumberData, SeriesTextData,
+};
 use roxmltree::Node;
 
 pub fn parse_str_cache(
@@ -169,9 +171,54 @@ pub fn parse_num_cache(
     (Some(values), format_code)
 }
 
+pub fn parse_str_ref(
+    str_ref_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> SeriesTextData {
+    let formula = descendant_text(str_ref_node, "f").map(str::to_string);
+    let cache = str_ref_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "strCache")
+        .and_then(|cache| parse_str_cache(cache, diagnostics, context));
+
+    SeriesTextData {
+        formula,
+        cache,
+        multi_cache: None,
+        literal: None,
+    }
+}
+
+pub fn parse_num_ref(
+    num_ref_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> SeriesNumberData {
+    let formula = descendant_text(num_ref_node, "f").map(str::to_string);
+    let (cache, format_code) = num_ref_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "numCache")
+        .map(|cache| parse_num_cache(cache, diagnostics, context))
+        .unwrap_or((None, None));
+
+    SeriesNumberData {
+        formula,
+        cache,
+        format_code,
+        literal: None,
+    }
+}
+
 fn warn(diagnostics: &mut Vec<ChartDiagnostic>, message: impl Into<String>) {
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
         message: message.into(),
     });
+}
+
+fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
+    node.descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == name)
+        .and_then(|n| n.text())
 }

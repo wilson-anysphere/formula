@@ -9,8 +9,8 @@
 //!   descriptor).
 //! - `EncryptedPackage`: the encrypted bytes of the original ZIP/OPC package.
 //!
-//! This module supports the `[MS-OFFCRYPTO]` **Agile Encryption** scheme (the default in modern
-//! Office) as well as the older **Standard Encryption** scheme used by Office 2007-era files.
+//! This module focuses on the `[MS-OFFCRYPTO]` **Agile Encryption** scheme (the default in modern
+//! Office).
 //!
 //! In addition to higher-level parsing/decryption routines, this module also exposes small,
 //! reusable crypto primitives (password hashing, key derivation, IV derivation) used by Agile
@@ -50,8 +50,8 @@
 //! (wrong password vs unsupported algorithms vs file corruption) without leaking sensitive inputs
 //! such as passwords or derived keys.
 
-mod agile;
 mod aes_cbc;
+mod agile;
 mod agile_decrypt;
 mod crypto;
 mod encryption_info;
@@ -60,6 +60,10 @@ mod ooxml;
 mod rc4;
 
 #[allow(unused_imports)]
+pub use aes_cbc::{
+    decrypt_aes_cbc_no_padding, decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError,
+    AES_BLOCK_SIZE,
+};
 pub use agile::{
     decrypt_agile_encrypted_package_stream, decrypt_agile_encrypted_package_stream_with_key,
     decrypt_agile_keys, parse_agile_encryption_info_stream,
@@ -67,29 +71,19 @@ pub use agile::{
     AgileEncryptionInfo, AgileKeyData, AgilePasswordKeyEncryptor,
     AgileEncryptionInfoWarning,
 };
-
-#[allow(unused_imports)]
-pub use aes_cbc::{
-    decrypt_aes_cbc_no_padding, decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError,
-    AES_BLOCK_SIZE,
-};
-
 pub use agile_decrypt::decrypt_agile_encrypted_package;
-
 #[allow(unused_imports)]
 pub use crypto::{
     derive_iv, derive_key, derive_segment_iv, hash_password, segment_block_key, CryptoError,
     HashAlgorithm, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,
     VERIFIER_HASH_VALUE_BLOCK,
 };
-
 #[allow(unused_imports)]
 pub use encryption_info::{
     decode_base64_field_limited, extract_encryption_info_xml, parse_agile_encryption_info_xml,
-    AgileEncryptionInfoXml, EncryptionInfoWarning, ParseOptions,
-    PasswordKeyEncryptor, KEY_ENCRYPTOR_URI_CERTIFICATE, KEY_ENCRYPTOR_URI_PASSWORD,
+    AgileEncryptionInfoXml, EncryptionInfoWarning, ParseOptions, PasswordKeyEncryptor,
+    KEY_ENCRYPTOR_URI_CERTIFICATE, KEY_ENCRYPTOR_URI_PASSWORD,
 };
-
 pub use error::{OffCryptoError, Result};
 pub use ooxml::decrypt_ooxml_encrypted_package;
 
