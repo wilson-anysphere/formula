@@ -8,10 +8,10 @@ const SEGMENT_SIZE: usize = 0x1000;
 
 #[derive(Debug, Clone)]
 pub(crate) enum EncryptionMethod {
-    /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption.
+    /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption (CBC-segmented compatibility layout).
     ///
-    /// The `EncryptedPackage` ciphertext is encrypted in 4096-byte segments using AES-CBC.
-    /// For segment `i`, the IV is `SHA1(salt || LE32(i))[0..16]`.
+    /// Baseline Standard AES uses AES-ECB (no IV), but some producers encrypt `EncryptedPackage` in
+    /// 4096-byte segments using AES-CBC. For segment `i`, the IV is `SHA1(salt || LE32(i))[0..16]`.
     StandardCryptoApi {
         /// AES key bytes (16/24/32).
         key: Vec<u8>,
@@ -155,8 +155,8 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
             (self.plaintext_len - seg_plain_start).min(SEGMENT_SIZE as u64) as usize;
         let seg_cipher_len = round_up_to_multiple(seg_plain_len, AES_BLOCK_SIZE);
 
-        // For both Standard and Agile encryption, the ciphertext segments are laid out so that
-        // segment `i` starts at ciphertext offset `i * 0x1000`.
+        // For Agile (and the CBC-segmented Standard variant handled by this reader), ciphertext
+        // segments are laid out so that segment `i` starts at ciphertext offset `i * 0x1000`.
         let seg_cipher_start = seg_plain_start;
 
         // Reuse the old cached plaintext buffer as scratch space to avoid copies.

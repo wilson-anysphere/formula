@@ -388,9 +388,11 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
         // We don't support decryption here; detect and return a user-friendly error so callers
         // don't try to route it through the legacy `.xls` importer.
         //
-        // Decryption spec note (MS-OFFCRYPTO): `EncryptedPackage` is segmented (0x1000 plaintext
-        // chunks) with a per-segment IV derived from the salt + segment index; see
-        // `docs/offcrypto-standard-encryptedpackage.md`.
+        // Decryption framing note (MS-OFFCRYPTO): `EncryptedPackage` begins with an 8-byte
+        // little-endian plaintext size prefix, followed by block-aligned ciphertext that can include
+        // padding beyond the declared size. The exact cipher mode differs by scheme and producer;
+        // see `docs/offcrypto-standard-encryptedpackage.md` (Standard) and `docs/22-ooxml-encryption.md`
+        // (Agile).
         file.rewind().map_err(|source| Error::DetectIo {
             path: path.to_path_buf(),
             source,

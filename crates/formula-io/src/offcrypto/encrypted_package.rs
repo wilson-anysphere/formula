@@ -180,17 +180,24 @@ pub fn decrypt_encrypted_package_standard_aes_to_writer<R: Read, W: Write>(
     Ok(orig_size)
 }
 
-/// Decrypt an MS-OFFCRYPTO "Standard" (CryptoAPI) `EncryptedPackage` stream.
+/// Decrypt an MS-OFFCRYPTO "Standard" (CryptoAPI) AES `EncryptedPackage` stream.
+///
+/// Note: Standard/CryptoAPI AES `EncryptedPackage` decryption is not entirely uniform in the wild.
+/// The baseline MS-OFFCRYPTO/ECMA-376 scheme uses **AES-ECB** (no IV), but some producers use a
+/// CBC-segmented variant. This helper implements the CBC-segmented variant because it requires the
+/// verifier salt to derive per-segment IVs.
 ///
 /// The caller must provide:
 /// - `key`: the file encryption key (AES-128/192/256).
 /// - `salt`: the `EncryptionVerifier` salt used to derive per-segment IVs.
 ///
-/// Algorithm summary (MS-OFFCRYPTO Standard/CryptoAPI):
+/// Algorithm summary (CBC-segmented compatibility layout):
 /// - First 8 bytes are the original plaintext size (`orig_size`) as a little-endian `u64`.
 /// - Remaining bytes are AES-CBC ciphertext split into 0x1000-byte segments (except the last).
 /// - Each segment `i` uses IV = `SHA1(salt || LE32(i))[0..16]` and is decrypted independently.
 /// - The concatenated plaintext is truncated to `orig_size` (do **not** rely on PKCS#7 unpadding).
+///
+/// For baseline AES-ECB framing + truncation rules, see `docs/offcrypto-standard-encryptedpackage.md`.
 pub fn decrypt_standard_encrypted_package_stream(
     encrypted_package_stream: &[u8],
     key: &[u8],
@@ -513,7 +520,7 @@ impl CryptoapiRc4EncryptedPackageDecryptor {
 /// - first 8 bytes: `orig_size` (`u64le`, plaintext size)
 /// - remaining bytes: ciphertext (RC4-encrypted package bytes)
 ///
-/// Unlike AES-based `EncryptedPackage` encryption (0x1000-byte segments), the RC4 variant uses
+/// Unlike the AES-CBC segmented variant above (0x1000-byte segments), the RC4 variant uses
 /// **0x200-byte blocks** (note: this differs from BIFF8 `FILEPASS` RC4, which re-keys every 0x400 bytes)
 /// and derives a fresh RC4 key for each block:
 /// - `password_hash = SHA1(salt || UTF16LE(password))`
