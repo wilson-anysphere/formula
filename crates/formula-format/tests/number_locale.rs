@@ -15,6 +15,14 @@ fn formats_thousands_grouping_for_each_locale() {
         "1,234,567.5"
     );
     assert_eq!(
+        locale::format_number(value, locale::get_locale("zh-CN").unwrap()),
+        "1,234,567.5"
+    );
+    assert_eq!(
+        locale::format_number(value, locale::get_locale("ko-KR").unwrap()),
+        "1,234,567.5"
+    );
+    assert_eq!(
         locale::format_number(value, locale::get_locale("en-GB").unwrap()),
         "1,234,567.5"
     );
@@ -76,6 +84,18 @@ fn formats_thousands_grouping_for_each_locale() {
     );
     assert_eq!(
         locale::format_number(value, locale::get_locale("ru-RU").unwrap()),
+        format!("1{nbsp}234{nbsp}567,5")
+    );
+    assert_eq!(
+        locale::format_number(value, locale::get_locale("pl-PL").unwrap()),
+        format!("1{nbsp}234{nbsp}567,5")
+    );
+    assert_eq!(
+        locale::format_number(value, locale::get_locale("sv-SE").unwrap()),
+        format!("1{nbsp}234{nbsp}567,5")
+    );
+    assert_eq!(
+        locale::format_number(value, locale::get_locale("nb-NO").unwrap()),
         format!("1{nbsp}234{nbsp}567,5")
     );
 
