@@ -2031,6 +2031,24 @@ fn main() {
                     CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
                     return;
                 };
+                let url = match webview_window.url() {
+                    Ok(url) => url,
+                    Err(err) => {
+                        eprintln!(
+                            "[close] blocked close-requested flow: failed to read webview URL ({err})"
+                        );
+                        let _ = window.hide();
+                        CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+                        return;
+                    }
+                };
+
+                if !desktop::ipc_origin::is_trusted_app_origin(&url) {
+                    eprintln!("[close] blocked close-requested flow from untrusted origin: {url}");
+                    let _ = window.hide();
+                    CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+                    return;
+                }
 
                 let url = match webview_window.url() {
                     Ok(url) => url,
@@ -2297,7 +2315,7 @@ fn main() {
                         Ok(url) => url,
                         Err(err) => {
                             eprintln!(
-                                "[file-dropped] ignored drop event because window URL could not be read: {err}"
+                                "[file-dropped] blocked drop event: failed to read window URL ({err})"
                             );
                             return;
                         }

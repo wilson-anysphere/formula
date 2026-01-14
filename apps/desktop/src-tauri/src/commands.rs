@@ -2803,11 +2803,10 @@ pub async fn read_text_file(
     window: tauri::WebviewWindow,
     path: LimitedString<MAX_IPC_PATH_BYTES>,
 ) -> Result<String, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "filesystem access",
-        ipc_origin::Verb::Is,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "filesystem access", ipc_origin::Verb::Is)?;
 
     let path = path.into_inner();
     tauri::async_runtime::spawn_blocking(move || {
@@ -3995,7 +3994,18 @@ pub async fn list_imported_chart_objects(
     window: tauri::WebviewWindow,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<ImportedChartObjectInfo>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "imported chart object extraction",
+        ipc_origin::Verb::Are,
+    )?;
+    ipc_origin::ensure_trusted_origin(
+        &url,
+        "imported chart object extraction",
+        ipc_origin::Verb::Are,
+    )?;
+    ipc_origin::ensure_stable_origin(
         &window,
         "imported chart object extraction",
         ipc_origin::Verb::Are,
@@ -4064,7 +4074,18 @@ pub async fn list_imported_embedded_cell_images(
     window: tauri::WebviewWindow,
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<ImportedEmbeddedCellImageInfo>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "imported embedded cell image extraction",
+        ipc_origin::Verb::Are,
+    )?;
+    ipc_origin::ensure_trusted_origin(
+        &url,
+        "imported embedded cell image extraction",
+        ipc_origin::Verb::Are,
+    )?;
+    ipc_origin::ensure_stable_origin(
         &window,
         "imported embedded cell image extraction",
         ipc_origin::Verb::Are,
