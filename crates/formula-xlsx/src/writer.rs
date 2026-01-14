@@ -434,7 +434,11 @@ fn trim_float(value: f64) -> String {
 
     let s = format!("{value:.15}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() { "0".to_string() } else { s.to_string() }
+    if s.is_empty() {
+        "0".to_string()
+    } else {
+        s.to_string()
+    }
 }
 
 fn workbook_defined_names_xml(workbook: &Workbook) -> String {

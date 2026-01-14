@@ -94,6 +94,80 @@ fn build_source_package() -> Vec<u8> {
     ])
 }
 
+fn build_source_package_with_invalid_workbook_cache_relationships() -> Vec<u8> {
+    let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/pivotCache/pivotCacheDefinition1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml"/>
+  <Override PartName="/xl/slicerCaches/slicerCache1.xml" ContentType="application/vnd.ms-excel.slicerCache+xml"/>
+  <Override PartName="/xl/timelineCaches/timelineCacheDefinition1.xml" ContentType="application/vnd.ms-excel.timelineCacheDefinition+xml"/>
+</Types>"#;
+
+    let root_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#;
+
+    // Workbook references rId10/rId11 for slicer/timeline caches, but workbook.xml.rels is
+    // intentionally missing/mismatching those relationships. Preservation should skip the
+    // corresponding `<slicerCaches>`/`<timelineCaches>` blocks to avoid re-applying broken r:id
+    // references.
+    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+  <pivotCaches count="1">
+    <pivotCache cacheId="1" r:id="rId5"/>
+  </pivotCaches>
+  <slicerCaches count="1">
+    <slicerCache r:id="rId10"/>
+  </slicerCaches>
+  <timelineCaches count="1">
+    <timelineCache r:id="rId11"/>
+  </timelineCaches>
+</workbook>"#;
+
+    let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/>
+  <Relationship Id="rId10" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>
+</Relationships>"#;
+
+    let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+
+    let pivot_cache_def = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="1"/>"#;
+
+    let slicer_cache = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="SlicerCache1"/>"#;
+
+    let timeline_cache = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="TimelineCache1"/>"#;
+
+    build_zip(&[
+        ("[Content_Types].xml", content_types),
+        ("_rels/.rels", root_rels),
+        ("xl/workbook.xml", workbook_xml),
+        ("xl/_rels/workbook.xml.rels", workbook_rels),
+        ("xl/worksheets/sheet1.xml", sheet_xml),
+        ("xl/pivotCache/pivotCacheDefinition1.xml", pivot_cache_def),
+        ("xl/slicerCaches/slicerCache1.xml", slicer_cache),
+        (
+            "xl/timelineCaches/timelineCacheDefinition1.xml",
+            timeline_cache,
+        ),
+    ])
+}
+
 fn build_destination_package() -> Vec<u8> {
     let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -241,3 +315,40 @@ fn preserves_and_reapplies_workbook_slicer_and_timeline_cache_lists() {
     );
 }
 
+#[test]
+fn skips_workbook_cache_lists_when_relationships_are_missing_or_wrong_type() {
+    let source_bytes = build_source_package_with_invalid_workbook_cache_relationships();
+    let source_pkg = XlsxPackage::from_bytes(&source_bytes).expect("read source package");
+
+    let preserved = source_pkg
+        .preserve_pivot_parts()
+        .expect("preserve pivot parts");
+    assert!(
+        preserved.workbook_pivot_caches.is_some(),
+        "pivotCaches should still be preserved when its rels are valid"
+    );
+    assert!(
+        preserved.workbook_slicer_caches.is_none(),
+        "slicerCaches should be skipped when workbook rels are invalid"
+    );
+    assert!(
+        preserved.workbook_timeline_caches.is_none(),
+        "timelineCaches should be skipped when workbook rels are invalid"
+    );
+    assert!(preserved.workbook_slicer_cache_rels.is_empty());
+    assert!(preserved.workbook_timeline_cache_rels.is_empty());
+
+    // Raw parts are still preserved; we only avoid re-applying a broken workbook.xml subtree.
+    assert!(preserved.parts.contains_key("xl/slicerCaches/slicerCache1.xml"));
+    assert!(preserved
+        .parts
+        .contains_key("xl/timelineCaches/timelineCacheDefinition1.xml"));
+
+    let preserved_streaming =
+        preserve_pivot_parts_from_reader(Cursor::new(source_bytes)).expect("streaming preserve");
+    assert!(preserved_streaming.workbook_pivot_caches.is_some());
+    assert!(preserved_streaming.workbook_slicer_caches.is_none());
+    assert!(preserved_streaming.workbook_timeline_caches.is_none());
+    assert!(preserved_streaming.workbook_slicer_cache_rels.is_empty());
+    assert!(preserved_streaming.workbook_timeline_cache_rels.is_empty());
+}
