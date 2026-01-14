@@ -211,6 +211,11 @@ export class ImageBitmapCache {
         if (this.maxEntries === 0) {
           this.entries.delete(id);
           this.fireReadyCallbacks(record);
+          // With caching disabled, any `getOrRequest()` callers will never receive the bitmap value.
+          // Close it unless there is an active `get()` consumer waiting on the same decode.
+          if (!record.pinned && record.waiters === 0) {
+            ImageBitmapCache.tryClose(bitmap);
+          }
           return;
         }
 

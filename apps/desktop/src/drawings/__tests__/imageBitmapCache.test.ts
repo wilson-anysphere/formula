@@ -292,4 +292,31 @@ describe("ImageBitmapCache", () => {
     expect(onReady).toHaveBeenCalledTimes(1);
     expect(close).not.toHaveBeenCalled();
   });
+
+  it("closes decoded bitmaps when caching is disabled and get() waiters abort but getOrRequest callbacks remain", async () => {
+    const close = vi.fn();
+    const bitmap = { close } as unknown as ImageBitmap;
+    let resolveDecode!: (value: ImageBitmap) => void;
+    const inflightDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveDecode = resolve;
+    });
+    vi.stubGlobal("createImageBitmap", vi.fn(() => inflightDecode) as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 0, negativeCacheMs: 0 });
+    const entry = makeEntry("img_abort_then_onready");
+
+    const controller = new AbortController();
+    const pending = cache.get(entry, { signal: controller.signal }).catch(() => {});
+    const onReady = vi.fn();
+    expect(cache.getOrRequest(entry, onReady)).toBeNull();
+
+    controller.abort();
+    await pending;
+
+    resolveDecode(bitmap);
+    await Promise.resolve();
+
+    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
 });
