@@ -420,6 +420,71 @@ impl XlsxPackage {
         )
     }
 
+    /// Update the persisted selection state for a slicer cache (and optionally its slicer
+    /// definition part).
+    ///
+    /// Slicer selections are persisted on the `xl/slicerCaches/slicerCache*.xml` items via
+    /// per-`<slicerCacheItem>` selection flags. This helper patches the provided part and, when
+    /// given a slicer definition part (`xl/slicers/slicer*.xml`), also attempts to patch the
+    /// referenced cache part.
+    ///
+    /// Relationship traversal is best-effort: missing or malformed `.rels` parts will not prevent
+    /// patching the explicitly provided part (when it exists).
+    pub fn set_slicer_selection(
+        &mut self,
+        slicer_cache_or_slicer_part: &str,
+        selection: &SlicerSelectionState,
+    ) -> Result<(), XlsxError> {
+        let canonical = slicer_cache_or_slicer_part
+            .trim()
+            .trim_start_matches('/')
+            .to_string();
+
+        let mut explicit_targets: BTreeSet<String> = BTreeSet::new();
+        if !canonical.is_empty() {
+            explicit_targets.insert(canonical.clone());
+        }
+
+        // Only attempt relationship traversal when the caller passes a slicer definition part.
+        let mut inferred_cache_targets: BTreeSet<String> = BTreeSet::new();
+        if canonical.starts_with("xl/slicers/") && canonical.ends_with(".xml") {
+            if let Some(xml) = self.part(&canonical) {
+                if let Ok(parsed) = parse_slicer_xml(xml) {
+                    if let Some(rid) = parsed.cache_rid.as_deref() {
+                        match resolve_relationship_target(self, &canonical, rid) {
+                            Ok(Some(cache_part)) => {
+                                inferred_cache_targets.insert(cache_part);
+                            }
+                            // Best-effort: ignore missing or malformed relationship parts.
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        // Patch explicit parts (erroring when missing).
+        for target in explicit_targets {
+            let bytes = self
+                .part(&target)
+                .ok_or_else(|| XlsxError::MissingPart(target.clone()))?
+                .to_vec();
+            let updated = patch_slicer_selection_xml(&bytes, selection)?;
+            self.set_part(target, updated);
+        }
+
+        // Patch inferred cache parts (best-effort: skip missing).
+        for target in inferred_cache_targets {
+            let Some(bytes) = self.part(&target) else {
+                continue;
+            };
+            let updated = patch_slicer_selection_xml(bytes, selection)?;
+            self.set_part(target, updated);
+        }
+
+        Ok(())
+    }
+
     /// Update the persisted selection state for a timeline cache (and any connected timeline
     /// definition parts).
     ///
@@ -1390,6 +1455,188 @@ fn parse_excel_bool(value: &str) -> Option<bool> {
         return Some(false);
     }
     None
+}
+
+fn patch_slicer_selection_xml(
+    xml: &[u8],
+    selection: &SlicerSelectionState,
+) -> Result<Vec<u8>, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(xml.len() + 128));
+    let mut buf = Vec::new();
+
+    let selected_items = selection.selected_items.as_ref();
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(e) => {
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") {
+                    if let Some(selected_items) = selected_items {
+                        let (key, _, _) = parse_slicer_cache_item(&e, None)?;
+                        if key.is_empty() {
+                            let start_owned = e.into_owned();
+                            buf.clear();
+                            let (payload, nested_text) =
+                                read_slicer_cache_item_payload(&mut reader, &mut buf)?;
+                            let (key, _, _) =
+                                parse_slicer_cache_item(&start_owned, nested_text.as_deref())?;
+                            let desired = selected_items.contains(&key);
+                            let patched =
+                                patch_slicer_cache_item_start(&start_owned, Some(desired))?;
+                            writer.write_event(Event::Start(patched))?;
+                            for ev in payload {
+                                writer.write_event(ev)?;
+                            }
+                        } else {
+                            let desired = selected_items.contains(&key);
+                            let patched = patch_slicer_cache_item_start(&e, Some(desired))?;
+                            writer.write_event(Event::Start(patched))?;
+                        }
+                    } else {
+                        // Clear explicit subset selections by removing any selection attributes.
+                        let patched = patch_slicer_cache_item_start(&e, None)?;
+                        writer.write_event(Event::Start(patched))?;
+                    }
+                } else {
+                    writer.write_event(Event::Start(e))?;
+                }
+            }
+            Event::Empty(e) => {
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") {
+                    if let Some(selected_items) = selected_items {
+                        let (key, _, _) = parse_slicer_cache_item(&e, None)?;
+                        let desired = selected_items.contains(&key);
+                        let patched = patch_slicer_cache_item_start(&e, Some(desired))?;
+                        writer.write_event(Event::Empty(patched))?;
+                    } else {
+                        let patched = patch_slicer_cache_item_start(&e, None)?;
+                        writer.write_event(Event::Empty(patched))?;
+                    }
+                } else {
+                    writer.write_event(Event::Empty(e))?;
+                }
+            }
+            Event::Eof => break,
+            other => writer.write_event(other.into_owned())?,
+        }
+
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn patch_slicer_cache_item_start(
+    e: &BytesStart<'_>,
+    desired_selected: Option<bool>,
+) -> Result<BytesStart<'static>, XlsxError> {
+    let name = e.name();
+    let name = name.as_ref();
+    let tag_name = std::str::from_utf8(name).unwrap_or("slicerCacheItem");
+    let mut patched = BytesStart::new(tag_name);
+
+    let mut saw_s = false;
+    let mut saw_selected = false;
+
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key_local = local_name(attr.key.as_ref());
+
+        if key_local.eq_ignore_ascii_case(b"s") {
+            saw_s = true;
+            if let Some(desired) = desired_selected {
+                let value = if desired { "1" } else { "0" };
+                patched.push_attribute((attr.key.as_ref(), value.as_bytes()));
+            }
+            // Clearing selection removes the attribute.
+            continue;
+        }
+
+        if key_local.eq_ignore_ascii_case(b"selected") {
+            saw_selected = true;
+            if let Some(desired) = desired_selected {
+                let value = if desired { "true" } else { "false" };
+                patched.push_attribute((attr.key.as_ref(), value.as_bytes()));
+            }
+            continue;
+        }
+
+        let value = attr.unescape_value()?.into_owned();
+        patched.push_attribute((attr.key.as_ref(), value.as_bytes()));
+    }
+
+    // Ensure every slicerCacheItem has an explicit selection attribute when setting an explicit
+    // subset selection.
+    if let Some(desired) = desired_selected {
+        if !saw_s && !saw_selected {
+            patched.push_attribute(("s", if desired { "1" } else { "0" }));
+        }
+    }
+
+    Ok(patched.into_owned())
+}
+
+fn read_slicer_cache_item_payload<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+    buf: &mut Vec<u8>,
+) -> Result<(Vec<Event<'static>>, Option<String>), XlsxError> {
+    let mut depth = 0u32;
+    let mut payload: Vec<Event<'static>> = Vec::new();
+    let mut text = None;
+
+    loop {
+        let event = reader.read_event_into(buf)?;
+        let mut done = false;
+
+        match &event {
+            Event::Start(start) => {
+                if local_name(start.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") {
+                    depth = depth.saturating_add(1);
+                }
+            }
+            Event::End(end) => {
+                if local_name(end.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") {
+                    if depth == 0 {
+                        done = true;
+                    } else {
+                        depth -= 1;
+                    }
+                }
+            }
+            Event::Text(value) => {
+                if text.is_none() {
+                    let value = value.unescape()?.into_owned();
+                    if !value.trim().is_empty() {
+                        text = Some(value.trim().to_string());
+                    }
+                }
+            }
+            Event::CData(value) => {
+                if text.is_none() {
+                    let value = String::from_utf8_lossy(value.as_ref()).into_owned();
+                    if !value.trim().is_empty() {
+                        text = Some(value.trim().to_string());
+                    }
+                }
+            }
+            Event::Eof => {
+                buf.clear();
+                break;
+            }
+            _ => {}
+        }
+
+        payload.push(event.into_owned());
+        buf.clear();
+
+        if done {
+            break;
+        }
+    }
+
+    Ok((payload, text))
 }
 
 fn parse_slicer_cache_selection(xml: &[u8]) -> Result<SlicerSelectionState, XlsxError> {
@@ -3180,6 +3427,119 @@ mod engine_filter_field_tests {
         expected.insert(PivotKeyPart::Date(NaiveDate::from_ymd_opt(1904, 1, 3).unwrap()));
 
         assert_eq!(filter.allowed, Some(expected));
+    }
+}
+
+#[cfg(test)]
+mod slicer_selection_write_tests {
+    use super::*;
+
+    use std::collections::HashSet;
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        let bytes = zip.finish().unwrap().into_inner();
+        XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
+
+    #[test]
+    fn slicer_selection_round_trip_updates_cache_items() {
+        let slicer_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+        name="Slicer1">
+  <slicerCache r:id="rId1"/>
+</slicer>"#;
+
+        let slicer_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="urn:example:slicerCache" Target="../slicerCaches/slicerCache1.xml"/>
+</Relationships>"#;
+
+        let slicer_cache_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <slicerCacheItems>
+    <slicerCacheItem n="East" s="0"/>
+    <slicerCacheItem n="West" s="1"/>
+    <slicerCacheItem n="North" s="0"/>
+  </slicerCacheItems>
+</slicerCache>"#;
+
+        let mut pkg = build_package(&[
+            ("xl/slicers/slicer1.xml", slicer_xml),
+            ("xl/slicers/_rels/slicer1.xml.rels", slicer_rels),
+            ("xl/slicerCaches/slicerCache1.xml", slicer_cache_xml),
+        ]);
+
+        let selection = SlicerSelectionState {
+            available_items: Vec::new(),
+            selected_items: Some(HashSet::from(["East".to_string()])),
+        };
+
+        pkg.set_slicer_selection("xl/slicerCaches/slicerCache1.xml", &selection)
+            .expect("set selection");
+
+        let parts = pkg.pivot_slicer_parts().expect("parse slicer parts");
+        assert_eq!(parts.slicers.len(), 1);
+        assert_eq!(
+            parts.slicers[0].selection.selected_items,
+            Some(HashSet::from(["East".to_string()]))
+        );
+    }
+
+    #[test]
+    fn slicer_selection_all_selected_clears_explicit_subset() {
+        let slicer_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+        name="Slicer1">
+  <slicerCache r:id="rId1"/>
+</slicer>"#;
+
+        let slicer_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="urn:example:slicerCache" Target="../slicerCaches/slicerCache1.xml"/>
+</Relationships>"#;
+
+        let slicer_cache_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <slicerCacheItems>
+    <slicerCacheItem n="East" s="1"/>
+    <slicerCacheItem n="West" s="0"/>
+    <slicerCacheItem n="North" s="0"/>
+  </slicerCacheItems>
+</slicerCache>"#;
+
+        let mut pkg = build_package(&[
+            ("xl/slicers/slicer1.xml", slicer_xml),
+            ("xl/slicers/_rels/slicer1.xml.rels", slicer_rels),
+            ("xl/slicerCaches/slicerCache1.xml", slicer_cache_xml),
+        ]);
+
+        let selection = SlicerSelectionState {
+            available_items: Vec::new(),
+            selected_items: None,
+        };
+
+        pkg.set_slicer_selection("xl/slicerCaches/slicerCache1.xml", &selection)
+            .expect("set selection");
+
+        let parts = pkg.pivot_slicer_parts().expect("parse slicer parts");
+        assert_eq!(parts.slicers.len(), 1);
+        assert_eq!(parts.slicers[0].selection.selected_items, None);
     }
 }
 
