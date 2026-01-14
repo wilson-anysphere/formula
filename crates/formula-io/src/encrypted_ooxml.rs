@@ -93,11 +93,9 @@ pub(crate) fn decrypt_encrypted_package(
         ));
     }
 
-    let plaintext_len = u64::from_le_bytes(
-        encrypted_package[..8]
-            .try_into()
-            .expect("slice length already checked"),
-    );
+    let plaintext_len = crate::parse_encrypted_package_original_size(encrypted_package).ok_or_else(|| {
+        DecryptError::InvalidInfo("EncryptedPackage truncated (missing size prefix)".to_string())
+    })?;
 
     match (major, minor) {
         (4, 4) => {
@@ -177,11 +175,9 @@ fn decrypt_encrypted_package_standard(
     })?;
 
     // Validate orig_size (and avoid allocating attacker-controlled buffers).
-    let plaintext_len = u64::from_le_bytes(
-        encrypted_package[..8]
-            .try_into()
-            .expect("slice length already checked"),
-    );
+    let plaintext_len = crate::parse_encrypted_package_original_size(encrypted_package).ok_or_else(|| {
+        DecryptError::InvalidInfo("EncryptedPackage truncated (missing size prefix)".to_string())
+    })?;
     let plaintext_len_usize = usize::try_from(plaintext_len).map_err(|_| {
         DecryptError::InvalidInfo(format!(
             "EncryptedPackage orig_size {plaintext_len} does not fit into usize"

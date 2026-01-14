@@ -215,6 +215,24 @@ fn read_sequential_yields_exact_plaintext() {
 }
 
 #[test]
+fn reader_accepts_reserved_high_dword_in_size_prefix() {
+    let key = [0x42u8; 32];
+    let salt = [0xA5u8; 16];
+    let plaintext = make_plaintext(10_000);
+    let mut encrypted = make_encrypted_package(&plaintext, &key, &salt);
+    encrypted[4..8].copy_from_slice(&1u32.to_le_bytes());
+
+    let cursor = Cursor::new(encrypted);
+    let mut reader =
+        StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec()).expect("new reader");
+
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).expect("read_to_end");
+    assert_eq!(out, plaintext);
+    assert_eq!(reader.orig_size(), plaintext.len() as u64);
+}
+
+#[test]
 fn seek_and_read_across_segment_boundaries() {
     let key = [0x11u8; 16];
     let salt = [0x22u8; 16];

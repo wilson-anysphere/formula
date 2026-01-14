@@ -69,4 +69,22 @@ fn decrypts_real_excel_standard_aes_encryptedpackage_fixture() {
     .expect("stream decrypt");
     assert_eq!(written as usize, expected.len());
     assert_eq!(streamed, expected);
+
+    // Regression: some producers treat the 8-byte size prefix as (u32 size, u32 reserved).
+    let mut mutated = encrypted_package.clone();
+    mutated[4..8].copy_from_slice(&1u32.to_le_bytes());
+
+    let decrypted = decrypt_standard_encrypted_package_stream(&mutated, &KEY, &SALT).expect("decrypt");
+    assert_eq!(decrypted, expected);
+
+    let mut streamed = Vec::new();
+    let written = decrypt_encrypted_package_standard_aes_to_writer(
+        Cursor::new(mutated.as_slice()),
+        &KEY,
+        &SALT,
+        &mut streamed,
+    )
+    .expect("stream decrypt");
+    assert_eq!(written as usize, expected.len());
+    assert_eq!(streamed, expected);
 }

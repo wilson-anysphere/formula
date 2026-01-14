@@ -163,3 +163,24 @@ fn stops_at_orig_size_and_ignores_trailing_ciphertext() {
     assert_eq!(bytes_written, plaintext.len() as u64);
     assert_eq!(out, plaintext);
 }
+
+#[test]
+fn decrypts_standard_aes_encrypted_package_when_size_prefix_high_dword_is_reserved() {
+    let key = [0x42u8; 16];
+    let plaintext = make_plaintext(1234);
+    let mut encrypted = encrypt_encrypted_package_standard_aes_ecb(&plaintext, &key);
+
+    // Mutate the size prefix to mimic producers that store it as (u32 size, u32 reserved).
+    encrypted[4..8].copy_from_slice(&1u32.to_le_bytes());
+
+    let mut out = Vec::new();
+    let bytes_written = decrypt_encrypted_package_standard_aes_to_writer(
+        Cursor::new(encrypted),
+        &key,
+        &[],
+        &mut out,
+    )
+    .expect("decrypt");
+    assert_eq!(bytes_written, plaintext.len() as u64);
+    assert_eq!(out, plaintext);
+}

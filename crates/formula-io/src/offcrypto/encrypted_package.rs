@@ -302,7 +302,7 @@ pub fn decrypt_encrypted_package_standard_aes_to_writer<R: Read, W: Write>(
     reader
         .read_exact(&mut size_bytes)
         .map_err(|source| EncryptedPackageToWriterError::ReadOrigSize { source })?;
-    let orig_size = u64::from_le_bytes(size_bytes);
+    let orig_size = crate::parse_encrypted_package_size_prefix_bytes(size_bytes, None);
 
     if orig_size == 0 {
         return Ok(0);
@@ -371,9 +371,9 @@ pub fn decrypt_standard_encrypted_package_stream(
 
     let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
     size_bytes.copy_from_slice(&encrypted_package_stream[..ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN]);
-    let orig_size = u64::from_le_bytes(size_bytes);
     let ciphertext = &encrypted_package_stream[ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN..];
     let ciphertext_len = ciphertext.len();
+    let orig_size = crate::parse_encrypted_package_size_prefix_bytes(size_bytes, Some(ciphertext_len as u64));
     if ciphertext_len == 0 && orig_size == 0 {
         return Ok(Vec::new());
     }
@@ -670,8 +670,8 @@ pub fn decrypt_encrypted_package_standard_aes(
 
     let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
     size_bytes.copy_from_slice(&encrypted_package_stream[..ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN]);
-    let orig_size = u64::from_le_bytes(size_bytes);
     let ciphertext = &encrypted_package_stream[ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN..];
+    let orig_size = crate::parse_encrypted_package_size_prefix_bytes(size_bytes, Some(ciphertext.len() as u64));
 
     if ciphertext.is_empty() && orig_size == 0 {
         return Ok(Vec::new());

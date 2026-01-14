@@ -30,6 +30,41 @@ mod encrypted_ooxml;
 mod encrypted_package_reader;
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
+
+pub(crate) fn parse_encrypted_package_size_prefix_bytes(prefix: [u8; 8], ciphertext_len: Option<u64>) -> u64 {
+    // MS-OFFCRYPTO describes this field as a `u64le`, but some producers/libraries treat it as
+    // `(u32 size, u32 reserved)` (often with `reserved = 0`). When the high DWORD is non-zero but
+    // the combined 64-bit value is not plausible for the available ciphertext, fall back to the
+    // low DWORD for compatibility.
+    let len_lo = u32::from_le_bytes([prefix[0], prefix[1], prefix[2], prefix[3]]) as u64;
+    let len_hi = u32::from_le_bytes([prefix[4], prefix[5], prefix[6], prefix[7]]) as u64;
+    let size_u64 = len_lo | (len_hi << 32);
+
+    match ciphertext_len {
+        Some(ciphertext_len) => {
+            if len_hi != 0 && size_u64 > ciphertext_len && len_lo <= ciphertext_len {
+                len_lo
+            } else {
+                size_u64
+            }
+        }
+        None => {
+            // Without ciphertext length (e.g. streaming readers), prefer compatibility with
+            // producers that treat the high DWORD as reserved.
+            if len_hi != 0 { len_lo } else { size_u64 }
+        }
+    }
+}
+
+pub(crate) fn parse_encrypted_package_original_size(encrypted_package: &[u8]) -> Option<u64> {
+    if encrypted_package.len() < 8 {
+        return None;
+    }
+    let mut prefix = [0u8; 8];
+    prefix.copy_from_slice(&encrypted_package[..8]);
+    let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
+    Some(parse_encrypted_package_size_prefix_bytes(prefix, Some(ciphertext_len)))
+}
 // BIFF record ids for legacy `.xls` encryption detection.
 //
 // Presence of `FILEPASS` in the workbook globals substream indicates the workbook stream is
@@ -1698,7 +1733,9 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                     }
                     let mut len_bytes = [0u8; 8];
                     len_bytes.copy_from_slice(&encrypted_package[..8]);
-                    let plaintext_len = u64::from_le_bytes(len_bytes);
+                    let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
+                    let plaintext_len =
+                        parse_encrypted_package_size_prefix_bytes(len_bytes, Some(ciphertext_len));
                     let ciphertext = &encrypted_package[8..];
 
                     let reader = encrypted_ooxml::decrypted_package_reader(
@@ -2147,7 +2184,9 @@ fn try_decrypt_ooxml_encrypted_package_from_path_with_preserved_ole(
                         }
                         let mut len_bytes = [0u8; 8];
                         len_bytes.copy_from_slice(&encrypted_package[..8]);
-                        let plaintext_len = u64::from_le_bytes(len_bytes);
+                        let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
+                        let plaintext_len =
+                            parse_encrypted_package_size_prefix_bytes(len_bytes, Some(ciphertext_len));
                         let ciphertext = &encrypted_package[8..];
 
                         let reader = encrypted_ooxml::decrypted_package_reader(
@@ -2228,7 +2267,7 @@ fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> 
     // the bytes after the size prefix may already be a ZIP file. Support that shape so callers can
     // still open such inputs via the "password-open" path.
     if encrypted_package.len() >= 8 {
-        let declared_len = u64::from_le_bytes(encrypted_package[..8].try_into().ok()?);
+        let declared_len = parse_encrypted_package_original_size(encrypted_package)?;
         let declared_len = usize::try_from(declared_len).ok()?;
         let rest = &encrypted_package[8..];
         if rest.starts_with(b"PK") {

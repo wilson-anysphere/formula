@@ -48,7 +48,6 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
         inner
             .read_exact(&mut size_buf)
             .map_err(|e| truncated("EncryptedPackage size prefix", e))?;
-        let orig_size = u64::from_le_bytes(size_buf);
 
         let ciphertext_start = stream_start.checked_add(SIZE_PREFIX_LEN).ok_or_else(|| {
             std::io::Error::new(
@@ -64,6 +63,8 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
             ));
         }
         let ciphertext_len = end - ciphertext_start;
+
+        let orig_size = crate::parse_encrypted_package_size_prefix_bytes(size_buf, Some(ciphertext_len));
 
         // Restore position to the ciphertext start so subsequent reads work as expected.
         inner.seek(SeekFrom::Start(ciphertext_start))?;

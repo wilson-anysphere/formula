@@ -706,11 +706,8 @@ mod tests {
             formula_offcrypto::standard_derive_key_zeroizing(&info, password).expect("derive key");
         formula_offcrypto::standard_verify_key(&info, key.as_slice()).expect("verify key");
 
-        let plaintext_len = u64::from_le_bytes(
-            encrypted_package[..8]
-                .try_into()
-                .expect("EncryptedPackage size header"),
-        );
+        let plaintext_len = crate::parse_encrypted_package_original_size(&encrypted_package)
+            .expect("EncryptedPackage size header");
         let ciphertext = encrypted_package[8..].to_vec();
 
         let method = if plaintext_len == 0 {
