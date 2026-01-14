@@ -531,7 +531,7 @@ impl CreatePivotTableRequest {
                         .name
                         .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, &field));
                     ValueField {
-                        source_field: pivot_field_ref_from_legacy_string(field),
+                        source_field: PivotFieldRef::CacheFieldName(field),
                         name,
                         aggregation: vf.aggregation,
                         number_format: None,
@@ -545,7 +545,7 @@ impl CreatePivotTableRequest {
                 .filter_fields
                 .into_iter()
                 .map(|f| FilterField {
-                    source_field: pivot_field_ref_from_legacy_string(f.field),
+                    source_field: PivotFieldRef::CacheFieldName(f.field),
                     allowed: f
                         .allowed
                         .map(|vals| vals.into_iter().map(|v| v.to_key_part()).collect()),
