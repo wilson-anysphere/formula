@@ -159,6 +159,9 @@ fn translate_formula_with_style(
                 // the reserved item keywords (`[#Headers]`, `[#Data]`, `[#Totals]`, `[#All]`,
                 // `[#This Row]`) canonical across locales, so we intentionally avoid rewriting
                 // anything inside the bracketed segments.
+                //
+                // To verify the `Formula` ↔ `FormulaLocal` behavior against a real Excel install,
+                // see `tools/excel-oracle/extract-structured-reference-keywords.ps1`.
                 out.push_str(token_slice(expr_src, tok)?);
                 idx += 1;
             }
