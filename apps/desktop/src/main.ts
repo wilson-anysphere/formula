@@ -8022,6 +8022,7 @@ registerDesktopCommands({
         app.focus();
       }
     },
+    // Excel-style: "Clear" clears filter criteria (shows all rows) but keeps AutoFilter enabled.
     clear: () => clearRibbonAutoFilterCriteriaForActiveSheet(),
     reapply: () => reapplyRibbonAutoFiltersForActiveSheet(),
   },

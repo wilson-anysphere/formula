@@ -80,7 +80,8 @@ export type RibbonAutoFilterCommandHandlers = {
    */
   toggle: (pressed?: boolean) => void | Promise<void>;
   /**
-   * Clear the active ribbon AutoFilter criteria on the active sheet (while keeping filter ranges active).
+   * Clear any active ribbon AutoFilter criteria on the active sheet (show all rows) while keeping
+   * AutoFilter enabled (Excel-style "Clear").
    */
   clear: () => void | Promise<void>;
   /**
@@ -1083,7 +1084,7 @@ export function registerDesktopCommands(params: {
     {
       category: commandCategoryData,
       icon: null,
-      description: "Clear the current AutoFilter criteria",
+      description: "Clear AutoFilter criteria (show all rows)",
       keywords: ["clear", "filter", "auto filter", "autofilter"],
     },
   );
@@ -1115,7 +1116,7 @@ export function registerDesktopCommands(params: {
     {
       category: commandCategoryData,
       icon: null,
-      description: "Clear the current AutoFilter criteria",
+      description: "Clear AutoFilter criteria (show all rows)",
       keywords: ["clear filter", "filter", "auto filter", "autofilter"],
     },
   );
