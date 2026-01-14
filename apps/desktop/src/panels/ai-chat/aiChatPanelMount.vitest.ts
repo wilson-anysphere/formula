@@ -95,6 +95,8 @@ describe("AI chat panel", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     clearAiStorage();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (globalThis as any).__formulaSpreadsheetIsEditing;
     mocks.createAiChatOrchestrator.mockClear();
     mocks.getDesktopAIAuditStore.mockClear();
     mocks.getDesktopLLMClient.mockClear();
@@ -241,5 +243,60 @@ describe("AI chat panel", () => {
       expect(orchestrator.dispose).toHaveBeenCalled();
     },
     TEST_TIMEOUT_MS
+  );
+
+  it(
+    "disables the agent Run button while spreadsheet edit mode is active",
+    async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).__formulaSpreadsheetIsEditing = true;
+
+      const doc = new DocumentController();
+      const getDocumentController = vi.fn(() => doc);
+
+      const renderer = createPanelBodyRenderer({ getDocumentController });
+
+      const body = document.createElement("div");
+      document.body.appendChild(body);
+
+      await act(async () => {
+        renderer.renderPanelBody(PanelIds.AI_CHAT, body);
+      });
+
+      await waitFor(() => {
+        expect(body.querySelector('[data-testid="ai-tab-agent"]')).toBeInstanceOf(HTMLButtonElement);
+      }, 10_000);
+
+      const agentTab = body.querySelector('[data-testid="ai-tab-agent"]') as HTMLButtonElement | null;
+      expect(agentTab).toBeInstanceOf(HTMLButtonElement);
+      await act(async () => {
+        agentTab?.click();
+      });
+
+      await waitFor(() => {
+        expect(body.querySelector('[data-testid="agent-goal"]')).toBeInstanceOf(HTMLTextAreaElement);
+      });
+
+      const goal = body.querySelector('[data-testid="agent-goal"]') as HTMLTextAreaElement | null;
+      expect(goal).toBeInstanceOf(HTMLTextAreaElement);
+      await act(async () => {
+        if (!goal) return;
+        goal.value = "Summarize this workbook";
+        goal.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+
+      await waitFor(() => {
+        expect(body.querySelector('[data-testid="agent-run"]')).toBeInstanceOf(HTMLButtonElement);
+      });
+
+      const runButton = body.querySelector('[data-testid="agent-run"]') as HTMLButtonElement | null;
+      expect(runButton).toBeInstanceOf(HTMLButtonElement);
+      expect(runButton?.disabled).toBe(true);
+
+      act(() => {
+        renderer.cleanup([]);
+      });
+    },
+    TEST_TIMEOUT_MS,
   );
 });

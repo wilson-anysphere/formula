@@ -17,6 +17,8 @@ import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 import { cellToA1, rangeToA1 as rangeToA1Selection } from "../../selection/a1.js";
 import type { Range } from "../../selection/types.js";
 import { DEFAULT_EXTENSION_RANGE_CELL_LIMIT, getExtensionRangeSize, normalizeExtensionRange } from "../../extensions/rangeSizeGuard.js";
+import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../../collab/permissionGuards.js";
+import { showToast } from "../../extensions/ui.js";
 
 import { AIChatPanel, type AIChatPanelSendMessage, type AIChatPanelChartOption, type AIChatPanelTableOption } from "./AIChatPanel.js";
 import { ApprovalModal } from "./ApprovalModal.js";
@@ -208,7 +210,65 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
 
   const sheetNameResolver = props.sheetNameResolver ?? null;
 
+  const toastBestEffort = useCallback((message: string, type: "info" | "warning" | "error" = "warning") => {
+    try {
+      showToast(message, type);
+    } catch {
+      // `showToast` requires a #toast-root; unit tests and some headless environments may omit it.
+    }
+  }, []);
+
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(() => {
+    const globalReadOnly = (globalThis as any).__formulaSpreadsheetIsReadOnly;
+    return globalReadOnly === true;
+  });
+
+  const [isEditing, setIsEditing] = useState<boolean>(() => {
+    const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+    return globalEditing === true;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onEditingChanged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail as any;
+      if (detail && typeof detail.isEditing === "boolean") {
+        setIsEditing(detail.isEditing);
+        return;
+      }
+      const globalEditing = (globalThis as any).__formulaSpreadsheetIsEditing;
+      setIsEditing(globalEditing === true);
+    };
+    window.addEventListener("formula:spreadsheet-editing-changed", onEditingChanged as EventListener);
+    return () => window.removeEventListener("formula:spreadsheet-editing-changed", onEditingChanged as EventListener);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onReadOnlyChanged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail as any;
+      if (detail && typeof detail.readOnly === "boolean") {
+        setIsReadOnly(detail.readOnly);
+        return;
+      }
+      const globalReadOnly = (globalThis as any).__formulaSpreadsheetIsReadOnly;
+      setIsReadOnly(globalReadOnly === true);
+    };
+    window.addEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+    return () => window.removeEventListener("formula:read-only-changed", onReadOnlyChanged as EventListener);
+  }, []);
+
+  const mutationsDisabled = isEditing || isReadOnly;
+
   const onApprovalRequired = useCallback(async (request: { call: LLMToolCall; preview: ToolPlanPreview }) => {
+    if (isEditing) {
+      toastBestEffort("Finish editing to approve this action.", "warning");
+      return false;
+    }
+    if (isReadOnly) {
+      toastBestEffort(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+      return false;
+    }
     // If we're not in a browser DOM environment, fall back to a native dialog helper.
     if (typeof document === "undefined") return confirmPreviewApproval(request as any);
 
@@ -221,7 +281,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     return new Promise<boolean>((resolve) => {
       approvalResolver.current = resolve;
     });
-  }, [sheetNameResolver, setApprovalRequest]);
+  }, [isEditing, isReadOnly, sheetNameResolver, toastBestEffort]);
 
   const resolveApproval = useCallback((approved: boolean) => {
     const resolve = approvalResolver.current;
@@ -505,6 +565,17 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     const goal = agentGoal.trim();
     if (!goal) return;
 
+    if (isEditing) {
+      toastBestEffort("Finish editing before running the agent.", "warning");
+      setAgentResult({ status: "error", session_id: "unknown", error: "Finish editing before running the agent." });
+      return;
+    }
+    if (isReadOnly) {
+      toastBestEffort(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+      setAgentResult({ status: "error", session_id: "unknown", error: READ_ONLY_SHEET_MUTATION_MESSAGE });
+      return;
+    }
+
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -567,6 +638,8 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     auditStore,
     client,
     includeFormulaValues,
+    isEditing,
+    isReadOnly,
     documentController,
     getCellComputedValueForSheet,
     model,
@@ -574,6 +647,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     props,
     ragService,
     schemaProvider,
+    toastBestEffort,
     workbookId,
   ]);
 
@@ -639,7 +713,12 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
               />
             </div>
             <div className="ai-chat-agent__buttons">
-              <button type="button" onClick={() => void runAgent()} disabled={agentRunning || !agentGoal.trim()} data-testid="agent-run">
+              <button
+                type="button"
+                onClick={() => void runAgent()}
+                disabled={agentRunning || !agentGoal.trim() || mutationsDisabled}
+                data-testid="agent-run"
+              >
                 {agentRunning ? "Running…" : "Run"}
               </button>
               <button type="button" onClick={cancelAgent} disabled={!agentRunning} data-testid="agent-cancel">

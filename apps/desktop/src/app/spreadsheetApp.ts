@@ -4491,6 +4491,16 @@ export class SpreadsheetApp {
   }
 
   private dispatchReadOnlyChanged(): void {
+    // Expose the current read-only state for panels that mount after the latest
+    // `formula:read-only-changed` event already fired.
+    //
+    // Unlike `__formulaSpreadsheetIsEditing` (owned by the desktop shell to include split-view
+    // secondary editor state), read-only is SpreadsheetApp-owned.
+    try {
+      (globalThis as any).__formulaSpreadsheetIsReadOnly = this.readOnly === true;
+    } catch {
+      // ignore
+    }
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent("formula:read-only-changed", { detail: { readOnly: this.readOnly, role: this.readOnlyRole } }));
   }
