@@ -29,9 +29,9 @@ This repo’s File I/O workstream uses the following shorthand (see [`instructio
 | Feature | L1 impact | L4 impact | Preservation / patching summary |
 |---|---:|---:|---|
 | Data validations (`<dataValidations>`) | Low (UI affordance) | High | Preserve the `<dataValidations>` subtree byte-for-byte on round-trip; ensure schema-ordering when inserting/replacing nearby sections (e.g. `<mergeCells>` must come before `<dataValidations>`). |
-| Row/column default styles (`row/@s`, `col/@style`) | Medium (formatting/render) | High | Preserved when we don’t rewrite the containing rows/cols; note that **empty style-only** `<row>` elements can be dropped by the sheet-data patcher unless they carry other unknown attrs (e.g. `spans`) or are explicitly modeled. Regenerating `<cols>` currently drops `col/@style`. |
+| Row/column default styles (`row/@s`, `col/@style`) | Medium (formatting/render) | High | The reader imports `row/@s`+`row/@customFormat` and `col/@style`+`col/@customFormat` into `Worksheet.row_properties/col_properties[*].style_id`. `write_workbook*` emits these defaults from the model; `formula_xlsx::write::write_to_vec` preserves them on round-trip and re-emits them when it has to regenerate `<cols>` or synthesize `<row>` elements. Remaining risk: `<cols>` regeneration is semantic (may drop unmodeled col attrs / collapse ranges), and truly-empty `<row>` placeholders with no modeled properties may still be dropped. |
 | Rich text (`sharedStrings` runs + `inlineStr`) | High (display fidelity) | High | Parse rich runs for display; preserve raw `<si>` records and unchanged inline `<is>` subtrees to avoid reserializing formatting. |
-| Sheet view state (`<sheetViews>` beyond zoom/freeze) | Medium (UI state) | Medium | Preserve the full `<sheetViews>` block when unchanged; if we need to update zoom/freeze, we currently rewrite `<sheetViews>` as a minimal block (zoom + pane), which may drop other view state. |
+| Sheet view state (`<sheetViews>` beyond zoom/freeze) | Medium (UI state) | Medium | Preserve the full `<sheetViews>` block when unchanged; if we need to update view state, we rewrite `<sheetViews>` as a minimal modeled block (zoom + frozen/split pane + topLeftCell + selection + gridlines/headings/zeros), which may drop other unmodeled view state. |
 | Worksheet protection (`<sheetProtection>`) | Low (editability) | High | Preserve modern hashing attrs (`algorithmName`, `hashValue`, `saltValue`, `spinCount`) byte-for-byte when protection settings are unchanged; avoid rewriting `<sheetProtection>` unless the model edits it. |
 | Tables (`xl/tables/table*.xml`) | Medium (structured refs/filters) | High | Preserve `xl/tables/*` parts + worksheet `<tableParts>` + relationships. Table `<autoFilter>` shares worksheet `<autoFilter>` semantics; preserve advanced criteria via `raw_xml`. |
 | Typed date cells (`c/@t="d"`) | Medium (display fidelity) | High | Stored as ISO-8601 text in `<v>`; should behave as an Excel date serial for calc. Round-trip must preserve `t` and the original ISO string even if the in-memory model stores a plain string. |
@@ -68,16 +68,22 @@ SpreadsheetML supports row/column-level default formatting:
 
 #### Preservation strategy
 
-- **Parsed into model:** the workbook model supports row/col default styles via `RowProperties.style_id` / `ColProperties.style_id`, but the current XLSX reader does **not** populate these from `row/@s` or `col/@style` yet.
+- **Parsed into model:** the XLSX reader maps:
+  - `row/@s` + `row/@customFormat` → `Worksheet.row_properties[*].style_id`
+  - `col/@style` + `col/@customFormat` → `Worksheet.col_properties[*].style_id`
 - **Preserved byte-for-byte:**
-  - `row/@s` + `row/@customFormat` are preserved *when the original `<row>` element survives the sheet-data patcher*. Note: truly-empty rows can be dropped unless they contain “unknown” attributes (e.g. `spans`) or are represented in `Worksheet.row_properties`; since `row/@s` is not imported today, **rows that exist only to carry default styles may be lost**.
-  - `col/@style` is preserved as long as the original `<cols>` section is preserved. (Regenerating `<cols>` currently emits only width/hidden/outline-related attributes, and may drop `style`.)
+  - `row/@s` + `row/@customFormat` are preserved on round-trip because style-only rows are now represented in `Worksheet.row_properties` (so the sheet-data patcher does not treat them as droppable “empty rows”).
+  - `col/@style` + `col/@customFormat` are preserved:
+    - byte-for-byte when the existing `<cols>` section is preserved, and
+    - semantically when `<cols>` is regenerated (the regenerated `<col>` ranges include `style` + `customFormat` when `Worksheet.col_properties[*].style_id` is set).
 
 #### Patch/write rules
 
 - Treat row/col default styles as **formatting-critical** round-trip metadata: avoid dropping rows/cols that exist solely to carry `row/@s` or `col/@style`.
 - When patching existing worksheet XML, prefer preserving the original `<row>` / `<cols>` elements rather than regenerating them.
-- When we *must* regenerate, we currently do not emit row/col default styles unless the writer gains explicit support for `RowProperties.style_id` / `ColProperties.style_id`.
+- When we *must* synthesize or regenerate these sections:
+  - the workbook writer (`write_workbook*`) emits row/col default styles from `RowProperties.style_id` / `ColProperties.style_id`
+  - the XlsxDocument round-trip writer (`formula_xlsx::write::write_to_vec`) emits them when generating `<row>` / `<cols>` content (note that regenerated `<cols>` may still drop **unmodeled** `<col>` attributes and range fragmentation).
 
 ### Rich text (shared strings `<r>` runs + `inlineStr`)
 
@@ -109,17 +115,22 @@ Excel can encode rich text in two places:
 
 #### Preservation strategy
 
-- **Parsed into model:** currently limited to:
-  - `sheetView/@zoomScale` → `Worksheet.zoom`
-  - frozen panes (`<pane state="frozen|frozenSplit" xSplit="…" ySplit="…">`) → `Worksheet.frozen_rows` / `Worksheet.frozen_cols`
-- **Preserved byte-for-byte:** the full `<sheetViews>` subtree is preserved **only** when we do not need to update zoom/freeze. (If we update zoom/freeze, we currently rewrite the block as a minimal `sheetView` + `pane`.)
+- **Parsed into model:** best-effort subset:
+  - `sheetView/@zoomScale` → `Worksheet.zoom` + `Worksheet.view.zoom`
+  - `sheetView/@showGridLines`, `@showHeadings`, `@showZeros` → `Worksheet.view.*`
+  - panes:
+    - frozen panes (`<pane state="frozen|frozenSplit" xSplit="…" ySplit="…">`) → `Worksheet.frozen_rows` / `Worksheet.frozen_cols` (+ `Worksheet.view.pane.frozen_*`)
+    - split panes (`<pane … xSplit="…" ySplit="…">`) → `Worksheet.view.pane.x_split` / `y_split`
+    - `pane/@topLeftCell` → `Worksheet.view.pane.top_left_cell`
+  - selection (`<selection activeCell="…" sqref="…"/>`) → `Worksheet.view.selection`
+- **Preserved byte-for-byte:** the full `<sheetViews>` subtree is preserved **only** when we do not need to update modeled view state. When we update, we replace `<sheetViews>` with a minimal modeled block (zoom + pane + selection + gridlines/headings/zeros), which may drop other view state and extension payloads.
 
 #### Patch/write rules
 
 - When `Worksheet.zoom` / frozen panes are unchanged, we keep the original `<sheetViews>` bytes unchanged.
-- When zoom/freeze changes, we replace `<sheetViews>` with a minimal block and do not currently attempt to merge/preserve:
-  - selections (`<selection>`)
-  - visibility flags (`showGridLines`, `showRowColHeaders`, etc.)
+- When modeled view state changes, we replace `<sheetViews>` with a minimal block and do not currently attempt to merge/preserve unmodeled state such as:
+  - extra `<sheetView>` attributes we don’t model
+  - multiple `<sheetView>` entries / non-zero `workbookViewId`
   - extension payloads (`<extLst>`)
 
 ### Worksheet protection (`<sheetProtection>`)
