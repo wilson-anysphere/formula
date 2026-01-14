@@ -13876,6 +13876,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
+    if (this.isSpreadsheetEditingIncludingSecondary()) return;
     if (this.inlineEditController.isOpen()) return;
     if (this.editor.isOpen()) return;
     // Inline edit should not trigger while the formula bar is actively editing.
@@ -18410,6 +18411,8 @@ export class SpreadsheetApp {
 
     if (this.editor.isOpen()) return false;
     if (this.formulaBar?.isEditing()) return false;
+    // Avoid auditing mode changes while any spreadsheet editor is active (including split-view secondary editors).
+    if (this.isSpreadsheetEditingIncludingSecondary()) return false;
 
     const target = e.target as HTMLElement | null;
     if (target) {
@@ -21869,6 +21872,11 @@ export class SpreadsheetApp {
         e.preventDefault();
         return;
       }
+      // Avoid opening comment UI while any editor is active (including split-view secondary editors).
+      if (this.isSpreadsheetEditingIncludingSecondary()) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       if (!this.canUserComment()) {
         // Viewer roles can still read comment threads, but should get explicit feedback
@@ -21889,6 +21897,12 @@ export class SpreadsheetApp {
     if (e.key === "F2") {
       // In-cell editing should never start while the formula bar is actively editing (range selection mode).
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+      // In split-view mode, the shell can report active editing via `__formulaSpreadsheetIsEditing`
+      // even when the primary cell editor is closed. Avoid starting a second editor session.
+      if (this.isSpreadsheetEditingIncludingSecondary()) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       const cell = this.selection.active;
       if (this.isReadOnly()) {
@@ -22589,6 +22603,8 @@ export class SpreadsheetApp {
       const tag = target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
     }
+    // When split-view secondary editors are active, keyboard shortcuts should not mutate the sheet.
+    if (this.isSpreadsheetEditingIncludingSecondary()) return false;
 
     const keyLower = e.key.toLowerCase();
     const primary = e.ctrlKey || e.metaKey;
@@ -22759,6 +22775,8 @@ export class SpreadsheetApp {
       const tag = target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
     }
+    // In split-view mode, the secondary editor may own clipboard shortcuts. Avoid intercepting here.
+    if (this.isSpreadsheetEditingIncludingSecondary()) return false;
 
     const key = e.key.toLowerCase();
 
