@@ -248,6 +248,7 @@ def _render_markdown(
     cargo_bloat_version: str | None,
     file_info: str | None,
     stripped: bool | None,
+    build_ran: bool,
     build_cmd: list[str] | None,
     crates_cmd: list[str] | None,
     crates_out: CmdResult | None,
@@ -302,6 +303,9 @@ def _render_markdown(
     if build_cmd:
         lines.append("### Build command")
         lines.append("")
+        if not build_ran:
+            lines.append("_(not executed; this report was generated with `--no-build`)_")
+            lines.append("")
         lines.append("```bash")
         lines.append(_render_cmd(build_cmd))
         lines.append("```")
@@ -458,9 +462,11 @@ def main() -> int:
     if target:
         build_cmd.extend(["--target", target])
 
+    build_ran = False
     if not args.no_build:
         try:
             subprocess.run(build_cmd, cwd=repo_root, check=True)
+            build_ran = True
         except subprocess.CalledProcessError:
             md = _render_markdown(
                 package=package,
@@ -476,6 +482,7 @@ def main() -> int:
                 cargo_bloat_version=None,
                 file_info=None,
                 stripped=None,
+                build_ran=False,
                 build_cmd=build_cmd,
                 crates_cmd=None,
                 crates_out=None,
@@ -514,6 +521,7 @@ def main() -> int:
             cargo_bloat_version=None,
             file_info=None,
             stripped=None,
+            build_ran=build_ran,
             build_cmd=build_cmd,
             crates_cmd=None,
             crates_out=None,
@@ -664,6 +672,7 @@ def main() -> int:
         cargo_bloat_version=cargo_bloat_version,
         file_info=file_info,
         stripped=stripped,
+        build_ran=build_ran,
         build_cmd=build_cmd,
         crates_cmd=crates_cmd,
         crates_out=crates_out,
