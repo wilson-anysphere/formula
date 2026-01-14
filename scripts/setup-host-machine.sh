@@ -153,7 +153,54 @@ else
     expected_node_major="$(grep -E '^[[:space:]]*node[[:space:]]*=' "${repo_root}/mise.toml" | head -n 1 | sed -E 's/.*=[[:space:]]*\"?([0-9]+).*/\\1/')"
   fi
   if ! [[ "${expected_node_major}" =~ ^[0-9]+$ ]] && [ -f "${repo_root}/.github/workflows/ci.yml" ]; then
-    expected_node_major="$(grep -E '^[[:space:]]*NODE_VERSION[[:space:]]*:' "${repo_root}/.github/workflows/ci.yml" | head -n 1 | sed -E 's/.*:[[:space:]]*\"?([0-9]+).*/\\1/')"
+    # Avoid matching YAML-like strings inside block scalar bodies (e.g. `run: |` scripts) so
+    # non-semantic text can't influence this best-effort extraction.
+    expected_node_major="$(
+      awk '
+        function indent(s) {
+          match(s, /^[ ]*/);
+          return RLENGTH;
+        }
+        BEGIN {
+          in_block = 0;
+          block_indent = 0;
+          block_re = ":[[:space:]]*[>|][0-9+-]*[[:space:]]*$";
+        }
+        {
+          raw = $0;
+          sub(/\r$/, "", raw);
+          ind = indent(raw);
+
+          if (in_block) {
+            if (raw ~ /^[[:space:]]*$/) next;
+            if (ind > block_indent) next;
+            in_block = 0;
+          }
+
+          trimmed = raw;
+          sub(/^[[:space:]]*/, "", trimmed);
+          if (trimmed ~ /^#/) next;
+
+          line = raw;
+          sub(/#.*/, "", line);
+          is_block = (line ~ block_re);
+
+          if (line ~ /^[[:space:]]*NODE_VERSION[[:space:]]*:/) {
+            value = line;
+            sub(/^[[:space:]]*NODE_VERSION[[:space:]]*:[[:space:]]*/, "", value);
+            if (match(value, /[0-9]+/)) {
+              print substr(value, RSTART, RLENGTH);
+            }
+            exit;
+          }
+
+          if (is_block) {
+            in_block = 1;
+            block_indent = ind;
+          }
+        }
+      ' "${repo_root}/.github/workflows/ci.yml"
+    )"
   fi
   if ! [[ "${expected_node_major}" =~ ^[0-9]+$ ]]; then
     expected_node_major="22"
