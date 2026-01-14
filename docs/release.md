@@ -414,12 +414,7 @@ toolchain.
 Code signing is **optional**. Unsigned macOS/Windows/Linux artifacts should build successfully (useful
 for forks, local development, and dry-run releases).
 
-Important: `apps/desktop/src-tauri/tauri.conf.json` intentionally does **not** hard-code a macOS
-`bundle.macOS.signingIdentity`. This prevents Tauri from attempting to code sign on macOS when no
-Developer ID certificate is available.
-
-Signing / notarization is enabled **only** when CI provides the relevant secrets via environment
-variables (wired in `.github/workflows/release.yml` by `tauri-apps/tauri-action@v0`).
+Signing / notarization is enabled **only** when CI provides the relevant platform secrets (see below).
 
 CI behavior note:
 
