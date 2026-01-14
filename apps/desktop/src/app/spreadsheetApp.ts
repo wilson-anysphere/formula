@@ -9698,6 +9698,76 @@ export class SpreadsheetApp {
       return kind;
     };
 
+    const patchAnchorPreservingSchema = (rawAnchor: any, uiAnchor: any): any => {
+      if (!rawAnchor || typeof rawAnchor !== "object") return uiAnchor;
+      if (!uiAnchor || typeof uiAnchor !== "object") return uiAnchor;
+
+      const normalizeTag = (tag: string): string => tag.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+
+      const patchCellRef = (cell: any, next: { row: number; col: number }): void => {
+        if (!cell || typeof cell !== "object") return;
+        (cell as any).row = next.row;
+        (cell as any).col = next.col;
+      };
+
+      const patchCellOffset = (offset: any, next: { xEmu: number; yEmu: number }): void => {
+        if (!offset || typeof offset !== "object") return;
+        // Support both formula-model (`x_emu`) and UI (`xEmu`) key conventions.
+        if ("x_emu" in offset) (offset as any).x_emu = next.xEmu;
+        if ("y_emu" in offset) (offset as any).y_emu = next.yEmu;
+        if ("xEmu" in offset) (offset as any).xEmu = next.xEmu;
+        if ("yEmu" in offset) (offset as any).yEmu = next.yEmu;
+      };
+
+      const patchAnchorPoint = (point: any, next: { cell: { row: number; col: number }; offset: { xEmu: number; yEmu: number } }): void => {
+        if (!point || typeof point !== "object") return;
+        const cell = (point as any).cell;
+        const offset = (point as any).offset;
+        patchCellRef(cell, next.cell);
+        patchCellOffset(offset, next.offset);
+      };
+
+      const patchEmuSize = (size: any, next: { cx: number; cy: number }): void => {
+        if (!size || typeof size !== "object") return;
+        if ("cx" in size) (size as any).cx = next.cx;
+        if ("cy" in size) (size as any).cy = next.cy;
+      };
+
+      // Preserve the raw enum representation when the anchor is stored as a formula-model/Rust enum
+      // (externally tagged like `{ Absolute: {...} }`). This keeps snapshots compatible with any
+      // downstream serde deserializers while still applying the UI edits.
+      if (!("type" in rawAnchor) && !("kind" in rawAnchor)) {
+        const keys = Object.keys(rawAnchor);
+        if (keys.length === 1) {
+          const tag = keys[0]!;
+          const value = (rawAnchor as any)[tag];
+          const normalized = normalizeTag(tag);
+          if (value && typeof value === "object") {
+            if (normalized === "onecell" && uiAnchor.type === "oneCell") {
+              patchAnchorPoint((value as any).from, uiAnchor.from);
+              // Formula-model uses `ext` for size; accept `size` too for compatibility.
+              patchEmuSize((value as any).ext, uiAnchor.size);
+              patchEmuSize((value as any).size, uiAnchor.size);
+              return rawAnchor;
+            }
+            if (normalized === "twocell" && uiAnchor.type === "twoCell") {
+              patchAnchorPoint((value as any).from, uiAnchor.from);
+              patchAnchorPoint((value as any).to, uiAnchor.to);
+              return rawAnchor;
+            }
+            if (normalized === "absolute" && uiAnchor.type === "absolute") {
+              patchCellOffset((value as any).pos, uiAnchor.pos);
+              patchEmuSize((value as any).ext, uiAnchor.size);
+              patchEmuSize((value as any).size, uiAnchor.size);
+              return rawAnchor;
+            }
+          }
+        }
+      }
+
+      return uiAnchor;
+    };
+
     const applyDrawingPatch = (drawing: any): any => {
       if (!drawing || typeof drawing !== "object") return drawing;
       const stableId = (drawing as any).id;
@@ -9706,7 +9776,7 @@ export class SpreadsheetApp {
       const next: any = {
         ...drawing,
         // Always persist the updated anchor (position/size).
-        anchor: after.anchor,
+        anchor: patchAnchorPreservingSchema((drawing as any).anchor, after.anchor),
       };
 
       // Persist rotation/flips (or clear if the UI removed them).

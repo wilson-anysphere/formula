@@ -362,6 +362,59 @@ describe("SpreadsheetApp drawing interaction commits", () => {
     root.remove();
   });
 
+  it("preserves formula-model anchor encodings when committing interactions (updates values without rewriting schema)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument() as any;
+
+    const rawDrawing = {
+      id: "drawing_foo",
+      zOrder: 0,
+      kind: { type: "chart", chart_id: "Sheet1:7", raw_xml: "<xdr:graphicFrame/>" },
+      // Formula-model/Rust anchor enum encoding (externally tagged).
+      anchor: {
+        Absolute: {
+          pos: { x_emu: pxToEmu(0), y_emu: pxToEmu(0) },
+          ext: { cx: pxToEmu(120), cy: pxToEmu(80) },
+        },
+      },
+    };
+    doc.setSheetDrawings(sheetId, [rawDrawing]);
+
+    const before = convertDocumentSheetDrawingsToUiDrawingObjects(doc.getSheetDrawings(sheetId), { sheetId })[0]!;
+    expect(before.anchor.type).toBe("absolute");
+    if (before.anchor.type !== "absolute") {
+      throw new Error("Expected absolute anchor for test drawing");
+    }
+
+    const after = {
+      ...before,
+      anchor: {
+        ...before.anchor,
+        pos: { xEmu: pxToEmu(20), yEmu: pxToEmu(10) },
+      },
+    };
+
+    const callbacks = (app as any).drawingInteractionCallbacks;
+    callbacks.onInteractionCommit({ kind: "move", id: before.id, before, after, objects: [after] });
+
+    const updated = doc.getSheetDrawings(sheetId).find((d: any) => String(d?.id) === "drawing_foo");
+    expect(updated).toBeTruthy();
+    expect(Object.keys(updated.anchor ?? {})).toEqual(["Absolute"]);
+    expect(updated.anchor.Absolute.pos).toEqual({ x_emu: pxToEmu(20), y_emu: pxToEmu(10) });
+    expect(updated.anchor.Absolute.ext).toEqual({ cx: pxToEmu(120), cy: pxToEmu(80) });
+
+    app.dispose();
+    root.remove();
+  });
+
   it("persists kind.rawXml patches for internally-tagged kind encodings (type/value) without flattening the payload", () => {
     const root = createRoot();
     const status = {
