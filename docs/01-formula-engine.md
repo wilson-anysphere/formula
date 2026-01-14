@@ -223,6 +223,9 @@ Expansion rules:
   * The engine currently treats the workbook identifier as an **opaque string** (no case folding,
     no path normalization beyond the path-qualified ref canonicalization described below). Hosts
     should normalize/match it as needed.
+  * Excel may use non-filename workbook identifiers in some contexts (e.g. numeric workbook indices
+    like `[1]Sheet1!A1` for other open workbooks). The engine does not interpret the identifier; it
+    is passed through as-is.
 * The returned sheet names must be **plain sheet display names**:
   * No `[workbook]` prefix.
   * No formula quoting (e.g. return `Sheet 1`, not `'Sheet 1'`).

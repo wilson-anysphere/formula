@@ -9796,7 +9796,9 @@ pub trait ExternalValueProvider: Send + Sync {
     /// to the provider's `get` keying strategy.
     ///
     /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"` or
-    /// `"C:\\path\\Book.xlsx"`).
+    /// `"C:\\path\\Book.xlsx"`). In some Excel contexts the workbook identifier may not be a
+    /// filename at all (e.g. numeric workbook indices like `[1]Sheet1!A1` for other open
+    /// workbooks); the engine treats it as an opaque string and passes it through as-is.
     ///
     /// For example, `=SUM('C:\path\[Book.xlsx]Sheet1:Sheet3'!A1)` calls
     /// `sheet_order("C:\path\Book.xlsx")`.
