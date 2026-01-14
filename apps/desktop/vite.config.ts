@@ -268,6 +268,8 @@ export default defineConfig({
       "src/sort-filter/**/__tests__/**/*.test.ts",
       "src/scripting/**/*.test.ts",
       "src/dlp/**/*.test.ts",
+      // Spreadsheet model/evaluation suites use `.test.ts`.
+      "src/spreadsheet/**/*.test.ts",
       "src/layout/__tests__/**/*.test.ts",
       // AI tests are `.test.ts` (not `*.vitest.ts`) across several subdirectories.
       "src/ai/**/*.test.ts",
