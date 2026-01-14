@@ -60,6 +60,10 @@ test("binder: DocumentController→Yjs syncs sheet view state (freeze panes + ro
     // Backwards compatibility: mirror frozen panes at the sheet root (legacy schema).
     assert.equal(entry.get?.("frozenRows") ?? entry.frozenRows, 2);
     assert.equal(entry.get?.("frozenCols") ?? entry.frozenCols, 3);
+
+    // Axis overrides live under `sheet.view.*` and should not be written at the root.
+    assert.equal(entry.get?.("colWidths") ?? entry.colWidths, undefined);
+    assert.equal(entry.get?.("rowHeights") ?? entry.rowHeights, undefined);
   } finally {
     binder.destroy();
     ydoc.destroy();
