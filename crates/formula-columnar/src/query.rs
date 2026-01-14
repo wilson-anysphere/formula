@@ -3723,9 +3723,20 @@ where
         FastHashMap::with_capacity_and_hasher(capacity_hint, FastBuildHasher::default());
 
     // Build phase (right).
+    let right_chunks_by_plan: Vec<&[EncodedChunk]> = plans
+        .iter()
+        .map(|plan| {
+            right.encoded_chunks(plan.right_col)
+                .ok_or(QueryError::ColumnOutOfBounds {
+                    col: plan.right_col,
+                    column_count: right.column_count(),
+                })
+        })
+        .collect::<Result<_, _>>()?;
     let page = right.page_size_rows();
     let chunk_count = (right_rows + page - 1) / page;
     let mut scratch_keys: Vec<KeyValue> = vec![KeyValue::Null; plans.len()];
+    let mut cursors: Vec<ScalarChunkCursor<'_>> = Vec::with_capacity(plans.len());
     for chunk_idx in 0..chunk_count {
         let base = chunk_idx * page;
         if base >= right_rows {
@@ -3733,15 +3744,9 @@ where
         }
         let chunk_rows = (right_rows - base).min(page);
 
-        let mut cursors: Vec<ScalarChunkCursor<'_>> = Vec::with_capacity(plans.len());
-        for plan in &plans {
-            let chunks = right
-                .encoded_chunks(plan.right_col)
-                .ok_or(QueryError::ColumnOutOfBounds {
-                    col: plan.right_col,
-                    column_count: right.column_count(),
-                })?;
-            let chunk = chunks.get(chunk_idx).ok_or(QueryError::RowOutOfBounds {
+        cursors.clear();
+        for (pos, plan) in plans.iter().enumerate() {
+            let chunk = right_chunks_by_plan[pos].get(chunk_idx).ok_or(QueryError::RowOutOfBounds {
                 row: base,
                 row_count: right_rows,
             })?;
@@ -3799,6 +3804,17 @@ where
 
     let page = left.page_size_rows();
     let chunk_count = (left_rows + page - 1) / page;
+    let left_chunks_by_plan: Vec<&[EncodedChunk]> = plans
+        .iter()
+        .map(|plan| {
+            left.encoded_chunks(plan.left_col)
+                .ok_or(QueryError::ColumnOutOfBounds {
+                    col: plan.left_col,
+                    column_count: left.column_count(),
+                })
+        })
+        .collect::<Result<_, _>>()?;
+    let mut cursors: Vec<ScalarChunkCursor<'_>> = Vec::with_capacity(plans.len());
     for chunk_idx in 0..chunk_count {
         let base = chunk_idx * page;
         if base >= left_rows {
@@ -3806,15 +3822,9 @@ where
         }
         let chunk_rows = (left_rows - base).min(page);
 
-        let mut cursors: Vec<ScalarChunkCursor<'_>> = Vec::with_capacity(plans.len());
-        for plan in &plans {
-            let chunks = left
-                .encoded_chunks(plan.left_col)
-                .ok_or(QueryError::ColumnOutOfBounds {
-                    col: plan.left_col,
-                    column_count: left.column_count(),
-                })?;
-            let chunk = chunks.get(chunk_idx).ok_or(QueryError::RowOutOfBounds {
+        cursors.clear();
+        for (pos, plan) in plans.iter().enumerate() {
+            let chunk = left_chunks_by_plan[pos].get(chunk_idx).ok_or(QueryError::RowOutOfBounds {
                 row: base,
                 row_count: left_rows,
             })?;
