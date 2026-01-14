@@ -57,6 +57,15 @@ test("desktop-bundle-dry-run workflow validates built Windows bundles (MSI + NSI
   );
 });
 
+test("desktop-bundle-dry-run workflow validates desktop compliance artifact bundling config (LICENSE/NOTICE)", async () => {
+  const text = await readWorkflow();
+  assert.match(
+    text,
+    /node\s+scripts\/ci\/check-desktop-compliance-artifacts\.mjs\b/,
+    `Expected ${path.relative(repoRoot, workflowPath)} to run scripts/ci/check-desktop-compliance-artifacts.mjs in preflight.`,
+  );
+});
+
 test("desktop-bundle-dry-run workflow verifies the produced desktop binary is stripped", async () => {
   const text = await readWorkflow();
   const lines = text.split(/\r?\n/);

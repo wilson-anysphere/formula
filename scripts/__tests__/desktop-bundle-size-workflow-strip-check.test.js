@@ -68,3 +68,11 @@ test("desktop-bundle-size workflow verifies the produced desktop binary is strip
   );
 });
 
+test("desktop-bundle-size workflow validates desktop compliance artifact bundling config (LICENSE/NOTICE)", async () => {
+  const text = await readWorkflow();
+  assert.match(
+    text,
+    /node\s+scripts\/ci\/check-desktop-compliance-artifacts\.mjs\b/,
+    `Expected ${path.relative(repoRoot, workflowPath)} to run scripts/ci/check-desktop-compliance-artifacts.mjs before building bundles.`,
+  );
+});
