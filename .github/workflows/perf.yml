@@ -237,6 +237,14 @@ jobs:
           # Keep the metric names stable for CI gating by explicitly using cold-start mode
           # (which also produces the legacy `desktop.startup.*` aliases).
           FORMULA_DESKTOP_STARTUP_MODE: cold
+          # Optional: full desktop idle-memory benchmark (Linux RSS, process tree) after TTI.
+          # This is gated because it requires a built binary + the built frontend assets.
+          FORMULA_RUN_DESKTOP_MEMORY_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.build_desktop_binary.outcome == 'success' && '1' || '0' }}
+          FORMULA_DESKTOP_IDLE_RSS_TARGET_MB: ${{ vars.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB || '100' }}
+          FORMULA_DESKTOP_MEMORY_RUNS: ${{ steps.desktop_bench.outputs.runs }}
+          FORMULA_DESKTOP_MEMORY_TIMEOUT_MS: 20000
+          # Give the app a short window to settle after TTI before sampling RSS.
+          FORMULA_DESKTOP_MEMORY_SETTLE_MS: 3000
           # Desktop startup benchmark kind: `shell` is lightweight (no apps/desktop/dist required),
           # while `full` measures end-to-end app bootstrap.
           FORMULA_DESKTOP_STARTUP_BENCH_KIND: ${{ steps.desktop_bench.outputs.kind }}
@@ -261,6 +269,7 @@ jobs:
         if: always() && steps.desktop_bench.outputs.run == 'true' && steps.build_desktop_binary.outcome == 'success'
         env:
           DESKTOP_STARTUP_BENCH_KIND: ${{ steps.desktop_bench.outputs.kind }}
+          RUN_DESKTOP_MEMORY_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.build_desktop_binary.outcome == 'success' && '1' || '0' }}
         run: |
           node - <<'NODE'
           const fs = require('node:fs');
@@ -276,6 +285,7 @@ jobs:
            }
            const names = new Set(results.map((r) => r && r.name).filter((n) => typeof n === 'string'));
            const kind = String(process.env.DESKTOP_STARTUP_BENCH_KIND || '').trim().toLowerCase();
+           const runMemory = String(process.env.RUN_DESKTOP_MEMORY_BENCH || '').trim() === '1';
            const prefix = kind === 'shell' ? 'desktop.shell_startup' : 'desktop.startup';
            const required = [
              // Explicit cold-start metrics (preferred for CI perf gating).
@@ -289,10 +299,13 @@ jobs:
              // First render is only recorded for the full app startup benchmark.
              required.push(`${prefix}.cold.first_render_ms.p95`, `${prefix}.first_render_ms.p95`);
            }
-           const missing = required.filter((n) => !names.has(n));
-           if (missing.length) {
-             console.error(`[perf] Missing desktop startup benchmark metrics: ${missing.join(', ')}`);
-             console.error(
+           if (runMemory) {
+             required.push('desktop.memory.idle_rss_mb.p95');
+           }
+            const missing = required.filter((n) => !names.has(n));
+            if (missing.length) {
+              console.error(`[perf] Missing desktop startup benchmark metrics: ${missing.join(', ')}`);
+              console.error(
                `[perf] Startup bench kind=${JSON.stringify(kind || 'full')} (expected metrics: ${required.join(', ')})`,
             );
             console.error('[perf] Ensure FORMULA_RUN_DESKTOP_STARTUP_BENCH=1 and the desktop binary emits [startup] metrics.');
