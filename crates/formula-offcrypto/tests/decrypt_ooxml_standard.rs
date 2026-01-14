@@ -17,6 +17,7 @@ const STANDARD_SALT: [u8; 16] = [
     0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
     0x1f,
 ];
+const STANDARD_CBC_VARIANT_SPIN_COUNT: u32 = 1_000;
 
 fn aes_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {
     assert_eq!(buf.len() % 16, 0);
@@ -112,6 +113,109 @@ fn build_standard_encryption_info_and_key(password: &str) -> (Vec<u8>, Vec<u8>) 
     out.extend_from_slice(&info.verifier.encrypted_verifier);
     out.extend_from_slice(&info.verifier.verifier_hash_size.to_le_bytes()); // verifierHashSize
     out.extend_from_slice(&info.verifier.encrypted_verifier_hash);
+
+    (out, key)
+}
+
+fn password_to_utf16le_bytes(password: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(password.len().saturating_mul(2));
+    for cu in password.encode_utf16() {
+        out.extend_from_slice(&cu.to_le_bytes());
+    }
+    out
+}
+
+fn derive_iterated_hash_sha1(password: &str, salt: &[u8], spin_count: u32) -> [u8; 20] {
+    let pw = password_to_utf16le_bytes(password);
+    let mut hasher = Sha1::new();
+    hasher.update(salt);
+    hasher.update(&pw);
+    let mut h: [u8; 20] = hasher.finalize().into();
+
+    for i in 0..spin_count {
+        let mut hasher = Sha1::new();
+        hasher.update(i.to_le_bytes());
+        hasher.update(h);
+        h = hasher.finalize().into();
+    }
+
+    h
+}
+
+fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
+    if bytes.len() >= out_len {
+        return bytes[..out_len].to_vec();
+    }
+
+    // MS-OFFCRYPTO `TruncateHash` expansion: append 0x36 bytes.
+    let mut out = vec![0x36u8; out_len];
+    out[..bytes.len()].copy_from_slice(bytes);
+    out
+}
+
+fn derive_standard_cbc_variant_key(password: &str, salt: &[u8], key_len: usize) -> Vec<u8> {
+    // Match formula-offcrypto's Standard CBC-variant key derivation:
+    // - spinCount=1000
+    // - key = SHA1(pwHash || LE32(0)) normalized to key_len
+    let pw_hash = derive_iterated_hash_sha1(password, salt, STANDARD_CBC_VARIANT_SPIN_COUNT);
+
+    let mut hasher = Sha1::new();
+    hasher.update(pw_hash);
+    hasher.update(0u32.to_le_bytes());
+    let digest: [u8; 20] = hasher.finalize().into();
+    normalize_key_material(&digest, key_len)
+}
+
+fn build_standard_encryption_info_and_cbc_variant_key(password: &str) -> (Vec<u8>, Vec<u8>) {
+    // Build a Standard (3.2) EncryptionInfo payload whose verifier fields are encrypted using the
+    // Agile-like CBC variant supported by formula-offcrypto:
+    // - spinCount=1000
+    // - verifier and verifierHash are AES-CBC encrypted with IVs derived from the verifier salt.
+    let key = derive_standard_cbc_variant_key(password, &STANDARD_SALT, 16);
+
+    let verifier_plain: [u8; 16] = *b"formula-std-test";
+    let verifier_hash: [u8; 20] = Sha1::digest(&verifier_plain).into();
+
+    let iv_verifier = derive_standard_segment_iv(&STANDARD_SALT, 0);
+    let iv_hash = derive_standard_segment_iv(&STANDARD_SALT, 1);
+
+    let mut encrypted_verifier_buf = verifier_plain.to_vec();
+    aes_cbc_encrypt_in_place(&key, &iv_verifier, &mut encrypted_verifier_buf);
+    let encrypted_verifier: [u8; 16] = encrypted_verifier_buf
+        .as_slice()
+        .try_into()
+        .expect("verifier ciphertext is 16 bytes");
+
+    let mut verifier_hash_padded = [0u8; 32];
+    verifier_hash_padded[..20].copy_from_slice(&verifier_hash);
+    aes_cbc_encrypt_in_place(&key, &iv_hash, &mut verifier_hash_padded);
+
+    // Serialize Standard (3.2) EncryptionInfo.
+    let mut out = Vec::new();
+    out.extend_from_slice(&3u16.to_le_bytes()); // major
+    out.extend_from_slice(&2u16.to_le_bytes()); // minor
+    out.extend_from_slice(&0u32.to_le_bytes()); // flags
+
+    let header_flags =
+        StandardEncryptionHeaderFlags::F_CRYPTOAPI | StandardEncryptionHeaderFlags::F_AES;
+    let mut header_bytes = Vec::new();
+    header_bytes.extend_from_slice(&header_flags.to_le_bytes()); // header flags
+    header_bytes.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+    header_bytes.extend_from_slice(&CALG_AES_128.to_le_bytes()); // algId
+    header_bytes.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash
+    header_bytes.extend_from_slice(&128u32.to_le_bytes()); // keySize
+    header_bytes.extend_from_slice(&0u32.to_le_bytes()); // providerType
+    header_bytes.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+    header_bytes.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+
+    out.extend_from_slice(&(header_bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(&header_bytes);
+
+    out.extend_from_slice(&16u32.to_le_bytes()); // saltSize
+    out.extend_from_slice(&STANDARD_SALT);
+    out.extend_from_slice(&encrypted_verifier);
+    out.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize (SHA1)
+    out.extend_from_slice(&verifier_hash_padded);
 
     (out, key)
 }
@@ -239,6 +343,27 @@ fn decrypt_ooxml_standard_supports_cbc_segmented_encryptedpackage_variant() {
         encrypt_encrypted_package_cbc_segmented(&key, &STANDARD_SALT, &zip_bytes);
     let decrypted = decrypt_ooxml_standard(&encryption_info, &encrypted_package, password)
         .expect("decrypt CBC-segmented Standard EncryptedPackage");
+
+    assert_eq!(decrypted, zip_bytes);
+}
+
+#[test]
+fn decrypt_ooxml_standard_supports_cbc_key_derivation_variant() {
+    // Some producers emit a Standard/CryptoAPI AES container but derive the file key and encrypt the
+    // verifier fields using an Agile-like SHA1+spinCount=1000 CBC scheme. `formula-offcrypto` tries
+    // this variant before the baseline 50k-spin ECB scheme.
+    let password = "Password1234_";
+    let (encryption_info, key) = build_standard_encryption_info_and_cbc_variant_key(password);
+
+    let zip_bytes = build_tiny_zip();
+    assert_eq!(&zip_bytes[..2], b"PK");
+
+    // Keep EncryptedPackage itself in ECB mode; the key-derivation/verifier variant should still be
+    // enough for `decrypt_ooxml_standard` to succeed (it auto-detects ECB vs CBC-segmented package
+    // layout separately).
+    let encrypted_package = encrypt_encrypted_package_ecb(&key, &zip_bytes);
+    let decrypted = decrypt_ooxml_standard(&encryption_info, &encrypted_package, password)
+        .expect("decrypt Standard CBC-key-derivation variant");
 
     assert_eq!(decrypted, zip_bytes);
 }
