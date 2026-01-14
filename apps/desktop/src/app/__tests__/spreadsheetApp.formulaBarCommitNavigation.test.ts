@@ -165,6 +165,15 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     expect(doc.getCell("Sheet1", { row: 0, col: 0 }).formula).toBeNull();
     expect(cellValueToDisplayString(doc.getCell("Sheet1", { row: 0, col: 0 }).value)).toBe("3");
 
+    // Shift+Enter moves back up.
+    input!.focus();
+    input!.value = "4";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, cancelable: true }));
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+    expect(doc.getCell("Sheet1", { row: 1, col: 0 }).formula).toBeNull();
+    expect(cellValueToDisplayString(doc.getCell("Sheet1", { row: 1, col: 0 }).value)).toBe("4");
+
     app.destroy();
     root.remove();
     formulaBar.remove();
@@ -216,6 +225,15 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     root.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
     expect(app.getActiveCell()).toEqual({ row: 1, col: 0 });
     expect(cellValueToDisplayString(doc.getCell("Sheet1", { row: 0, col: 0 }).value)).toBe("3");
+
+    // Shift+Enter moves back up (even when the grid has focus).
+    input!.focus();
+    input!.value = "4";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    root.focus();
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, cancelable: true }));
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+    expect(cellValueToDisplayString(doc.getCell("Sheet1", { row: 1, col: 0 }).value)).toBe("4");
 
     app.destroy();
     root.remove();
