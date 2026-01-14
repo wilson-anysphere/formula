@@ -787,6 +787,33 @@ mod tests {
             PivotFieldRef::DataModelMeasure("Total Sales".to_string()).to_string(),
             "[Total Sales]"
         );
+
+        // Keywords that are valid as quoted identifiers should be quoted to avoid ambiguity when
+        // rendered as bare identifiers.
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "VAR".to_string(),
+                column: "C".to_string()
+            }
+            .to_string(),
+            "'VAR'[C]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "RETURN".to_string(),
+                column: "C".to_string()
+            }
+            .to_string(),
+            "'RETURN'[C]"
+        );
+        assert_eq!(
+            PivotFieldRef::DataModelColumn {
+                table: "IN".to_string(),
+                column: "C".to_string()
+            }
+            .to_string(),
+            "'IN'[C]"
+        );
     }
 
     #[test]
