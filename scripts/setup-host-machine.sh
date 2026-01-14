@@ -152,6 +152,9 @@ else
   elif [ -f "${repo_root}/mise.toml" ]; then
     expected_node_major="$(grep -E '^[[:space:]]*node[[:space:]]*=' "${repo_root}/mise.toml" | head -n 1 | sed -E 's/.*=[[:space:]]*\"?([0-9]+).*/\\1/')"
   fi
+  if ! [[ "${expected_node_major}" =~ ^[0-9]+$ ]] && [ -f "${repo_root}/.github/workflows/ci.yml" ]; then
+    expected_node_major="$(grep -E '^[[:space:]]*NODE_VERSION[[:space:]]*:' "${repo_root}/.github/workflows/ci.yml" | head -n 1 | sed -E 's/.*:[[:space:]]*\"?([0-9]+).*/\\1/')"
+  fi
   if ! [[ "${expected_node_major}" =~ ^[0-9]+$ ]]; then
     expected_node_major="22"
   fi
