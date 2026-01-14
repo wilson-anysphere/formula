@@ -18,8 +18,8 @@ use formula_engine::what_if::{
 };
 use formula_model::{
     display_formula_text, Alignment, CellRef, CellValue, DateSystem, DefinedNameScope, Font,
-    HorizontalAlignment, Protection, Range, Style, VerticalAlignment, EXCEL_MAX_COLS,
-    EXCEL_MAX_ROWS,
+    HorizontalAlignment, Protection, Range, SheetVisibility, Style, TabColor, VerticalAlignment,
+    EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
@@ -1623,6 +1623,16 @@ struct WorkbookState {
     sheets: BTreeMap<String, BTreeMap<String, JsonValue>>,
     /// Case-insensitive mapping (Excel semantics) from sheet key -> display name.
     sheet_lookup: HashMap<String, String>,
+    /// Optional sheet visibility metadata (Excel-compatible).
+    ///
+    /// This is not currently modeled by the calc engine, but we preserve it for UI/workbook
+    /// metadata consumers (e.g. `WorkbookInfo.sheets[*].visibility`).
+    sheet_visibility: HashMap<String, SheetVisibility>,
+    /// Optional sheet tab color metadata (`<sheetPr><tabColor ...>`).
+    ///
+    /// This is not currently modeled by the calc engine, but we preserve it for UI/workbook
+    /// metadata consumers (e.g. `WorkbookInfo.sheets[*].tabColor`).
+    sheet_tab_colors: HashMap<String, TabColor>,
     /// Per-sheet per-column width overrides in Excel "character" units (OOXML `col/@width`).
     ///
     /// This is separate from the calc engine's grid state today; it exists to support worksheet
@@ -1862,6 +1872,8 @@ impl WorkbookState {
             sheets: BTreeMap::new(),
             sheets_rich: BTreeMap::new(),
             sheet_lookup: HashMap::new(),
+            sheet_visibility: HashMap::new(),
+            sheet_tab_colors: HashMap::new(),
             col_widths_chars: BTreeMap::new(),
             pending_spill_clears: BTreeSet::new(),
             pending_formula_baselines: BTreeMap::new(),
@@ -2022,6 +2034,12 @@ impl WorkbookState {
         }
         if let Some(cols) = self.col_widths_chars.remove(&old_display) {
             self.col_widths_chars.insert(new_display.clone(), cols);
+        }
+        if let Some(visibility) = self.sheet_visibility.remove(&old_display) {
+            self.sheet_visibility.insert(new_display.clone(), visibility);
+        }
+        if let Some(color) = self.sheet_tab_colors.remove(&old_display) {
+            self.sheet_tab_colors.insert(new_display.clone(), color);
         }
 
         // Rename pending spill/formula bookkeeping entries so the next recalc tick stays coherent.
@@ -4039,7 +4057,20 @@ impl WasmWorkbook {
 
         // Create all sheets up-front so formulas can resolve cross-sheet references.
         for sheet in &model.sheets {
-            wb.ensure_sheet(&sheet.name);
+            let sheet_name = wb.ensure_sheet(&sheet.name);
+            if sheet.visibility != SheetVisibility::Visible {
+                wb.sheet_visibility.insert(sheet_name.clone(), sheet.visibility);
+            }
+            if let Some(color) = sheet.tab_color.as_ref() {
+                let is_empty = color.rgb.is_none()
+                    && color.theme.is_none()
+                    && color.indexed.is_none()
+                    && color.tint.is_none()
+                    && color.auto.is_none();
+                if !is_empty {
+                    wb.sheet_tab_colors.insert(sheet_name, color.clone());
+                }
+            }
         }
 
         // Sheet default column widths (Excel "character" units).
@@ -4605,6 +4636,23 @@ impl WasmWorkbook {
             let sheet_obj = Object::new();
             object_set(&sheet_obj, "id", &JsValue::from_str(sheet_name))?;
             object_set(&sheet_obj, "name", &JsValue::from_str(sheet_name))?;
+
+            if let Some(visibility) = self.inner.sheet_visibility.get(sheet_name).copied() {
+                let value = match visibility {
+                    SheetVisibility::Visible => "visible",
+                    SheetVisibility::Hidden => "hidden",
+                    SheetVisibility::VeryHidden => "veryHidden",
+                };
+                object_set(&sheet_obj, "visibility", &JsValue::from_str(value))?;
+            }
+
+            if let Some(color) = self.inner.sheet_tab_colors.get(sheet_name) {
+                use serde::ser::Serialize as _;
+                let js = color
+                    .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+                    .map_err(|err| js_err(err.to_string()))?;
+                object_set(&sheet_obj, "tabColor", &js)?;
+            }
 
             // Include sheet dimensions when they differ from Excel defaults (to match `toJson()`).
             let (rows, cols) = self

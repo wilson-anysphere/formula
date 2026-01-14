@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { formulaWasmNodeEntryUrl } from "../../../../scripts/build-formula-wasm-node.mjs";
 
@@ -160,6 +162,32 @@ const skipWasmBuild = process.env.FORMULA_SKIP_WASM_BUILD === "1" || process.env
 const describeWasm = skipWasmBuild ? describe.skip : describe;
 
 describeWasm("EngineWorker getWorkbookInfo (wasm)", () => {
+  it("includes optional sheet visibility + tabColor metadata when available", async () => {
+    const wasm = await loadFormulaWasm();
+    const fixturePath = fileURLToPath(
+      new URL("../../../../crates/formula-xlsx/tests/fixtures/sheet-metadata.xlsx", import.meta.url)
+    );
+    const bytes = new Uint8Array(readFileSync(fixturePath));
+
+    const workbook = wasm.WasmWorkbook.fromXlsxBytes(bytes);
+    const info = workbook.getWorkbookInfo() as WorkbookInfoDto;
+
+    const byId = new Map(info.sheets.map((sheet) => [sheet.id, sheet]));
+    expect(Array.from(byId.keys()).sort()).toEqual(["Hidden", "VeryHidden", "Visible"]);
+
+    const visible = byId.get("Visible")!;
+    expect(visible.visibility).toBeUndefined();
+    expect(visible.tabColor).toEqual({ rgb: "FFFF0000" });
+
+    const hidden = byId.get("Hidden")!;
+    expect(hidden.visibility).toBe("hidden");
+    expect(hidden.tabColor).toBeUndefined();
+
+    const veryHidden = byId.get("VeryHidden")!;
+    expect(veryHidden.visibility).toBe("veryHidden");
+    expect(veryHidden.tabColor).toBeUndefined();
+  });
+
   it("returns sheet list, dimensions, and best-effort used ranges (including rich inputs)", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
@@ -229,4 +257,3 @@ describeWasm("EngineWorker getWorkbookInfo (wasm)", () => {
     }
   });
 });
-
