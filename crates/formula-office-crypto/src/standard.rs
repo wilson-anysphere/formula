@@ -490,7 +490,6 @@ fn verify_password_standard_with_key_ecb_only(
         ))),
     }
 }
-
 fn verify_password_standard_rc4_key_style(
     header: &EncryptionHeader,
     verifier: &EncryptionVerifier,
