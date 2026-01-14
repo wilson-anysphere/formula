@@ -589,6 +589,29 @@ describe("ToolExecutor", () => {
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
+  it("read_range handles circular rich values without crashing", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    const arr: any[] = Array.from({ length: 300 }, (_, idx) => idx);
+    arr[0] = arr;
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: arr as any });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    const value = result.data?.values?.[0]?.[0];
+    expect(typeof value).toBe("string");
+    expect(value).toContain("[Circular]");
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
   it("read_range tolerates missing/invalid CellData entries from SpreadsheetApi.readRange", async () => {
     const spreadsheet: any = {
       listSheets: () => ["Sheet1"],

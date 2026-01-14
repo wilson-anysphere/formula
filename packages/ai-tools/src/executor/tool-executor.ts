@@ -143,8 +143,17 @@ function richValueJsonReplacer(_key: string, value: unknown): unknown {
 
 function stringifyCellValue(value: unknown): string {
   if (typeof value === "bigint") return value.toString();
+  const seen = typeof WeakSet !== "undefined" ? new WeakSet<object>() : null;
+  const replacer = (key: string, nextValue: unknown): unknown => {
+    if (seen && nextValue && typeof nextValue === "object") {
+      const obj = nextValue as object;
+      if (seen.has(obj)) return "[Circular]";
+      seen.add(obj);
+    }
+    return richValueJsonReplacer(key, nextValue);
+  };
   try {
-    const json = JSON.stringify(value, richValueJsonReplacer);
+    const json = JSON.stringify(value, replacer);
     if (typeof json === "string") return json;
   } catch {
     // ignore
