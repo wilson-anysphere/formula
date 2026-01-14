@@ -1145,8 +1145,10 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
           cellsMap.set(key, yCell);
         }
 
-        if (normalizedCell.enc !== undefined && normalizedCell.enc !== null) {
-          // Preserve ciphertext exactly; branch snapshots treat it as opaque.
+        if (normalizedCell.enc !== undefined) {
+          // Preserve the encrypted payload (or encryption marker) exactly; branch
+          // snapshots treat it as opaque and must not fall back to plaintext when
+          // an `enc` field exists (including `enc: null` markers).
           yCell.set("enc", structuredClone(normalizedCell.enc));
           yCell.delete("value");
           yCell.delete("formula");

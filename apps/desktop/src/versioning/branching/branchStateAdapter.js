@@ -543,7 +543,9 @@ export function applyBranchStateToDocumentController(doc, state) {
         continue;
       }
 
-      const hasEnc = cell.enc !== undefined && cell.enc !== null;
+      // Treat any `enc` marker (including `null`) as encrypted so we never fall
+      // back to plaintext fields when a marker exists.
+      const hasEnc = cell.enc !== undefined;
       const formula = !hasEnc && typeof cell.formula === "string" ? cell.formula : null;
       const value = hasEnc ? MASKED_CELL_VALUE : (formula !== null ? null : cell.value ?? null);
       const format = cell.format ?? null;

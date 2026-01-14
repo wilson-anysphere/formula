@@ -87,3 +87,26 @@ test("documentControllerToBranchState/applyBranchStateToDocumentController: incl
   assert.equal(roundTrip.sheets.metaById.Sheet2?.tabColor, null);
 });
 
+test("applyBranchStateToDocumentController: masks cells with enc=null markers", () => {
+  const doc = new DocumentController();
+
+  applyBranchStateToDocumentController(doc, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+    },
+    cells: {
+      Sheet1: {
+        A1: { enc: null },
+      },
+    },
+    metadata: {},
+    namedRanges: {},
+    comments: {},
+  });
+
+  const cell = doc.getCell("Sheet1", "A1");
+  assert.equal(cell.value, "###");
+  assert.equal(cell.formula, null);
+});

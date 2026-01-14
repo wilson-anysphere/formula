@@ -244,7 +244,9 @@ function cellHasFormula(cell: Cell | null): boolean {
 }
 
 function cellHasEnc(cell: Cell | null): boolean {
-  return cell?.enc !== null && cell?.enc !== undefined;
+  // Treat any `enc` marker (including `null`) as encrypted so we never fall back
+  // to plaintext fields when an encryption marker exists.
+  return cell?.enc !== undefined;
 }
 
 function stringifyForKey(value: unknown): string {
@@ -425,7 +427,7 @@ function normalizeManualCell(cell: Cell | null): Cell | null {
 
   const out: Cell = {};
 
-  if (cell.enc !== null && cell.enc !== undefined) out.enc = cell.enc;
+  if (cell.enc !== undefined) out.enc = cell.enc;
 
   const formula = normalizeFormulaInput(cell.formula);
   if (formula) out.formula = formula;

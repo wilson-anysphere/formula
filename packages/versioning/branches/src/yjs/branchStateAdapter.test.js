@@ -620,6 +620,34 @@ test("branchStateFromYjsDoc: treats enc=null markers as encrypted and ignores pl
   assert.deepEqual(state.cells.Sheet1.A1, { enc: null });
 });
 
+test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: preserves enc=null markers", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+
+    const cells = doc.getMap("cells");
+    const cell = new Y.Map();
+    cell.set("enc", null);
+    cells.set("Sheet1:0:0", cell);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.cells.Sheet1.A1, { enc: null });
+
+  const doc2 = new Y.Doc();
+  applyBranchStateToYjsDoc(doc2, state);
+
+  const cell2 = doc2.getMap("cells").get("Sheet1:0:0");
+  assert.ok(cell2 instanceof Y.Map);
+  assert.equal(cell2.get("enc"), null);
+  assert.equal(cell2.get("value"), undefined);
+  assert.equal(cell2.get("formula"), undefined);
+});
+
 test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: round-trips workbook metadata", () => {
   const doc = new Y.Doc();
   doc.transact(() => {
