@@ -74,11 +74,6 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
     const deadlineMs = Date.now() + 10_000;
     let delayMs = 1;
     while (!g[LISTENERS_KEY] && Date.now() < deadlineMs) {
-      try {
-        await installStartupTimingsListeners();
-      } catch {
-        // ignore
-      }
       // If the `core.invoke` binding becomes available after the first JS tick, send a best-effort
       // report as soon as possible (still re-emitting again once listeners are installed).
       if (!g[WEBVIEW_REPORTED_KEY]) {
@@ -91,6 +86,11 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
         } catch {
           // ignore
         }
+      }
+      try {
+        await installStartupTimingsListeners();
+      } catch {
+        // ignore
       }
       if (g[LISTENERS_KEY]) break;
       await new Promise<void>((resolve) => setTimeout(resolve, delayMs));

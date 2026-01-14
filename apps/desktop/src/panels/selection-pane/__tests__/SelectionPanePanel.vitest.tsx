@@ -196,15 +196,18 @@ describe("Selection Pane panel", () => {
     expect(app.getSelectedDrawingId()).toBe(1);
     expect(itemEls[2]?.getAttribute("aria-selected")).toBe("true");
 
-    // Bring Forward should update z-order and re-render the list (so Picture 1 becomes topmost).
+    // Bring Forward should update z-order and re-render the list (Picture 1 moves one step forward,
+    // swapping above Picture 2 while still staying below the topmost drawing).
     const bringForwardBtn = panelBody.querySelector<HTMLButtonElement>('[data-testid="selection-pane-bring-forward-1"]');
     expect(bringForwardBtn).toBeInstanceOf(HTMLButtonElement);
     await act(async () => {
       bringForwardBtn!.click();
     });
     const reorderedItemEls = panelBody.querySelectorAll('[data-testid^="selection-pane-item-"]');
-    expect(reorderedItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
-    expect(reorderedItemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
+    expect(reorderedItemEls.length).toBe(3);
+    expect(reorderedItemEls[0]?.getAttribute("data-testid")).toBe("selection-pane-item-3");
+    expect(reorderedItemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
+    expect(reorderedItemEls[2]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
 
     // Adding a drawing should update the panel list via subscribeDrawings.
     const currentDrawings = (app.getDocument() as any).getSheetDrawings(sheetId);
