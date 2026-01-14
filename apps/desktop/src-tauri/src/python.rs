@@ -1109,6 +1109,31 @@ mod tests {
     }
 
     #[test]
+    fn stderr_capture_does_not_append_truncation_marker_when_under_limit() {
+        let input = b"hello";
+        let out = read_stream_lossy_truncated(Cursor::new(input), 10, STDERR_TRUNCATED_MARKER)
+            .unwrap();
+        assert_eq!(out, "hello");
+    }
+
+    #[test]
+    fn stderr_capture_is_always_valid_utf8() {
+        // Construct input with invalid UTF-8 sequences.
+        let input: &[u8] = &[0xff, b'a', 0xf0, 0x28, 0x8c, 0x28];
+        let out =
+            read_stream_lossy_truncated(Cursor::new(input), 1024, STDERR_TRUNCATED_MARKER).unwrap();
+        assert!(out.contains('a'), "expected output to contain original bytes: {out}");
+        assert!(
+            out.contains('\u{FFFD}'),
+            "expected invalid UTF-8 to be replaced: {out}"
+        );
+        assert!(
+            !out.contains(STDERR_TRUNCATED_MARKER),
+            "expected marker only when truncated: {out}"
+        );
+    }
+
+    #[test]
     fn protocol_line_reader_rejects_oversized_lines() {
         let mut buf = Vec::new();
 
