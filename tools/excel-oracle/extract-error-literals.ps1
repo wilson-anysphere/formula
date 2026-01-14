@@ -49,6 +49,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
+  throw "extract-error-literals.ps1 is Windows-only (requires Excel desktop + COM automation)."
+}
+
 function Release-ComObject {
   param([object]$Object)
   if ($null -eq $Object) { return }
@@ -150,6 +154,9 @@ try {
   }
   if (-not $Locale) {
     throw "Could not determine Excel UI locale. Pass -Locale (e.g. -Locale es-ES)."
+  }
+  if ($excelUiLocale -and -not ($excelUiLocale -ieq $Locale)) {
+    Write-Warning "Excel UI locale '$excelUiLocale' does not match requested -Locale '$Locale'. Output reflects the active Excel UI language; ensure the correct Office language pack / display language is configured before extracting."
   }
 
   if (-not $OutPath) {
@@ -266,4 +273,3 @@ try {
   [GC]::Collect()
   [GC]::WaitForPendingFinalizers()
 }
-
