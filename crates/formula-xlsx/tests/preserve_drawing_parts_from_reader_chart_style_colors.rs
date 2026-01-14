@@ -14,10 +14,6 @@ const STYLE_XML: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" standalone="ye
 const COLORS_XML: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cs:colorStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle" id="1"/>"#;
 
-const REL_TYPE_CHART_STYLE: &str = "http://schemas.microsoft.com/office/2011/relationships/chartStyle";
-const REL_TYPE_CHART_COLOR_STYLE: &str =
-    "http://schemas.microsoft.com/office/2011/relationships/chartColorStyle";
-
 const CT_CHART_STYLE: &str = "application/vnd.ms-office.chartstyle+xml";
 const CT_CHART_COLOR_STYLE: &str = "application/vnd.ms-office.chartcolorstyle+xml";
 
@@ -66,16 +62,13 @@ fn insert_before_closing_tag(xml: &str, closing_tag: &str, insert: &str) -> Stri
     updated
 }
 
-fn assert_relationship_exists(xml: &str, rel_type: &str, target: &str) {
+fn assert_relationship_target_exists(xml: &str, target: &str) {
     let doc = Document::parse(xml).expect("parse .rels xml");
     let found = doc
         .descendants()
         .filter(|n| n.is_element() && n.tag_name().name() == "Relationship")
-        .any(|n| n.attribute("Type") == Some(rel_type) && n.attribute("Target") == Some(target));
-    assert!(
-        found,
-        "expected relationship Type={rel_type} Target={target} in:\n{xml}"
-    );
+        .any(|n| n.attribute("Target") == Some(target));
+    assert!(found, "expected relationship Target={target} in:\n{xml}");
 }
 
 #[test]
@@ -99,8 +92,8 @@ fn preserve_drawing_parts_from_reader_includes_chart_style_and_color_parts() {
                 .to_string()
         });
     let insert = format!(
-        r#"  <Relationship Id="rId9000" Type="{REL_TYPE_CHART_STYLE}" Target="style1.xml"/>
-  <Relationship Id="rId9001" Type="{REL_TYPE_CHART_COLOR_STYLE}" Target="colors1.xml"/>
+        r#"  <Relationship Id="rId9000" Target="style1.xml"/>
+  <Relationship Id="rId9001" Target="colors1.xml"/>
 "#
     );
     let updated_rels = insert_before_closing_tag(&rels_xml, "</Relationships>", &insert);
@@ -135,17 +128,9 @@ fn preserve_drawing_parts_from_reader_includes_chart_style_and_color_parts() {
         COLORS_XML
     );
 
-    let preserved_chart_rels_xml = std::str::from_utf8(preserved.parts.get(&chart_rels_part).unwrap())
-        .expect("preserved chart rels should be utf-8");
-    assert_relationship_exists(
-        preserved_chart_rels_xml,
-        REL_TYPE_CHART_STYLE,
-        "style1.xml",
-    );
-    assert_relationship_exists(
-        preserved_chart_rels_xml,
-        REL_TYPE_CHART_COLOR_STYLE,
-        "colors1.xml",
-    );
+    let preserved_chart_rels_xml =
+        std::str::from_utf8(preserved.parts.get(&chart_rels_part).unwrap())
+            .expect("preserved chart rels should be utf-8");
+    assert_relationship_target_exists(preserved_chart_rels_xml, "style1.xml");
+    assert_relationship_target_exists(preserved_chart_rels_xml, "colors1.xml");
 }
-

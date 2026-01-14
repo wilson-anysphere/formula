@@ -60,11 +60,11 @@ fn detects_and_preserves_chart_style_and_color_style_parts() {
         .expect("closing Relationships tag");
     updated_rels.insert_str(
         insert_idx,
-        r#"  <Relationship Id="rId998" Type="http://schemas.microsoft.com/office/2011/relationships/chartStyle" Target="style1.xml"/>"#,
+        r#"  <Relationship Id="rId998" Target="style1.xml"/>"#,
     );
     updated_rels.insert_str(
         insert_idx,
-        r#"  <Relationship Id="rId997" Type="http://schemas.microsoft.com/office/2011/relationships/chartColorStyle" Target="colors1.xml"/>"#,
+        r#"  <Relationship Id="rId997" Target="colors1.xml"/>"#,
     );
     package.set_part(chart_rels_part.clone(), updated_rels.into_bytes());
 

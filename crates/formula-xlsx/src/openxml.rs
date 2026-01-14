@@ -89,11 +89,13 @@ pub fn parse_relationships(xml: &[u8]) -> Result<Vec<Relationship>, XlsxError> {
                             target_mode = Some(value);
                         }
                     }
-                    if let (Some(id), Some(target), Some(type_uri)) = (id, target, type_uri) {
+                    // Best-effort: some producers emit incomplete relationship entries (missing
+                    // `Type`). For traversal/preservation, `Id` + `Target` are sufficient.
+                    if let (Some(id), Some(target)) = (id, target) {
                         relationships.push(Relationship {
                             id,
                             target,
-                            type_uri,
+                            type_uri: type_uri.unwrap_or_default(),
                             target_mode,
                         });
                     }
@@ -150,6 +152,20 @@ mod tests {
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].id, "rId1");
         assert_eq!(parsed[0].target_mode.as_deref(), Some("External"));
+    }
+
+    #[test]
+    fn parse_relationships_tolerates_missing_type() {
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Target="../media/image1.png"/>
+</Relationships>"#;
+
+        let parsed = parse_relationships(rels).expect("parse relationships");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].id, "rId1");
+        assert_eq!(parsed[0].target, "../media/image1.png");
+        assert_eq!(parsed[0].type_uri, "");
     }
 
     #[test]

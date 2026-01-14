@@ -201,6 +201,7 @@ fn parse_legend(
     Some(LegendModel {
         position,
         overlay,
+        layout: None,
         text_style: None,
         style: None,
         layout: None,
