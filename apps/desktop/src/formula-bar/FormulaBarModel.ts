@@ -1312,7 +1312,8 @@ function highlightFromEngineTokensSorted(
   let lastNonWhitespaceSpanIndex: number | null = null;
   let lastTokenStart = -Infinity;
 
-  for (const token of tokens) {
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!;
     if (token.kind === "Eof") continue;
     if (abortOnUnsorted) {
       const start = token.span.start;
@@ -1327,7 +1328,9 @@ function highlightFromEngineTokensSorted(
       // The engine lexer intentionally omits some characters (e.g. leading `=` in formula inputs).
       // Highlight any uncovered gaps using the local tokenizer as a best-effort fallback.
       const gapText = formula.slice(pos, start);
-      for (const gapSpan of highlightFormula(gapText)) {
+      const gapSpans = highlightFormula(gapText);
+      for (let j = 0; j < gapSpans.length; j += 1) {
+        const gapSpan = gapSpans[j]!;
         const gapStart = pos + gapSpan.start;
         const gapEnd = pos + gapSpan.end;
         if (gapEnd <= gapStart) continue;
@@ -1367,7 +1370,9 @@ function highlightFromEngineTokensSorted(
 
   if (pos < formula.length) {
     const gapText = formula.slice(pos);
-    for (const gapSpan of highlightFormula(gapText)) {
+    const gapSpans = highlightFormula(gapText);
+    for (let i = 0; i < gapSpans.length; i += 1) {
+      const gapSpan = gapSpans[i]!;
       const gapStart = pos + gapSpan.start;
       const gapEnd = pos + gapSpan.end;
       if (gapEnd <= gapStart) continue;
@@ -1488,7 +1493,8 @@ function spliceReferenceSpans(
     }
   };
 
-  for (const ref of refs) {
+  for (let i = 0; i < refs.length; i += 1) {
+    const ref = refs[i]!;
     let start = Math.max(0, Math.min(ref.start, formula.length));
     const end = Math.max(0, Math.min(ref.end, formula.length));
     if (end <= start) continue;
@@ -1528,7 +1534,8 @@ function applyErrorSpan(formula: string, spans: HighlightSpan[], errorSpan: Form
     }
     out.push(span);
   };
-  for (const span of spans) {
+  for (let i = 0; i < spans.length; i += 1) {
+    const span = spans[i]!;
     if (span.end <= start || span.start >= end) {
       pushSpan(span);
       continue;
