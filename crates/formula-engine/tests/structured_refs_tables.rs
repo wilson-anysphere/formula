@@ -938,6 +938,36 @@ fn insert_cols_inside_table_updates_table_sort_state_ranges() {
 }
 
 #[test]
+fn insert_cols_rewrites_table_column_formulas() {
+    let mut engine = setup_engine_with_table();
+    let mut tables: Vec<Table> = engine
+        .get_sheet_tables("Sheet1")
+        .expect("tables")
+        .to_vec();
+    assert_eq!(tables.len(), 1);
+    // Give Col2 a calculated-column formula that references the first data cell of Col1.
+    tables[0].columns[1].formula = Some("A2".to_string());
+    engine.set_sheet_tables("Sheet1", tables);
+
+    engine
+        .apply_operation(EditOp::InsertCols {
+            sheet: "Sheet1".into(),
+            col: 0, // Insert at the left edge of the table.
+            count: 1,
+        })
+        .expect("insert cols");
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    let table = &tables[0];
+    let col2 = table
+        .columns
+        .iter()
+        .find(|c| c.name == "Col2")
+        .expect("Col2 column");
+    assert_eq!(col2.formula.as_deref(), Some("B2"));
+}
+
+#[test]
 fn delete_cols_removing_referenced_column_yields_ref_error() {
     let mut engine = setup_engine_with_table();
     engine
@@ -967,6 +997,36 @@ fn delete_cols_removing_referenced_column_yields_ref_error() {
     assert_eq!(table.columns.len(), table.range.width() as usize);
     let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, vec!["Col1", "Col2", "Col4"]);
+}
+
+#[test]
+fn delete_cols_rewrites_table_column_formulas_to_ref_error() {
+    let mut engine = setup_engine_with_table();
+    let mut tables: Vec<Table> = engine
+        .get_sheet_tables("Sheet1")
+        .expect("tables")
+        .to_vec();
+    assert_eq!(tables.len(), 1);
+    // Give Col2 a calculated-column formula that points at Col3's first data cell (C2).
+    tables[0].columns[1].formula = Some("C2".to_string());
+    engine.set_sheet_tables("Sheet1", tables);
+
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".into(),
+            col: 2, // Delete Col3 (column C).
+            count: 1,
+        })
+        .expect("delete cols");
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    let table = &tables[0];
+    let col2 = table
+        .columns
+        .iter()
+        .find(|c| c.name == "Col2")
+        .expect("Col2 column");
+    assert_eq!(col2.formula.as_deref(), Some("#REF!"));
 }
 
 #[test]

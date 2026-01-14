@@ -9879,6 +9879,51 @@ fn rewrite_all_formulas_structural(
                 cell.formula = Some(new_formula.into());
             }
         }
+
+        // Table column formulas live outside the worksheet cell map, but still need to be kept in
+        // sync with structural edits so XLSX table metadata round-trips correctly.
+        for table in &mut sheet.tables {
+            let data_origin_row = table
+                .data_range()
+                .map(|r| r.start.row)
+                .unwrap_or(table.range.start.row);
+            let totals_origin_row = table
+                .totals_range()
+                .map(|r| r.start.row)
+                .unwrap_or(table.range.end.row);
+
+            for (idx, column) in table.columns.iter_mut().enumerate() {
+                let col = table.range.start.col.saturating_add(idx as u32);
+
+                if let Some(formula) = column.formula.as_mut() {
+                    let origin = crate::CellAddr::new(data_origin_row, col);
+                    let (new_formula, changed) = rewrite_formula_for_structural_edit_with_resolver(
+                        formula,
+                        ctx_sheet,
+                        origin,
+                        &edit,
+                        |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
+                    );
+                    if changed {
+                        *formula = new_formula;
+                    }
+                }
+
+                if let Some(formula) = column.totals_formula.as_mut() {
+                    let origin = crate::CellAddr::new(totals_origin_row, col);
+                    let (new_formula, changed) = rewrite_formula_for_structural_edit_with_resolver(
+                        formula,
+                        ctx_sheet,
+                        origin,
+                        &edit,
+                        |name| sheet_order_indices.get(&Workbook::sheet_key(name)).copied(),
+                    );
+                    if changed {
+                        *formula = new_formula;
+                    }
+                }
+            }
+        }
     }
     rewrites
 }
