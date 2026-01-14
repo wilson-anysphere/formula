@@ -30,6 +30,10 @@ export interface WorkbookSchemaSheetObjectInput {
   values?: unknown[][];
   origin?: { row: number; col: number };
   getCell?: (row: number, col: number) => unknown;
+  /**
+   * Allow host-specific fields (ids, metadata, etc) without tripping TS excess-property checks.
+   */
+  [key: string]: unknown;
 }
 
 export interface WorkbookSchemaKeyedSheetObjectInput {
@@ -41,10 +45,12 @@ export interface WorkbookSchemaKeyedSheetObjectInput {
   values?: unknown[][];
   origin?: { row: number; col: number };
   getCell?: (row: number, col: number) => unknown;
+  [key: string]: unknown;
 }
 
 export interface WorkbookSchemaCellMapLike {
   get(key: string): unknown;
+  [key: string]: unknown;
 }
 
 /**
@@ -104,12 +110,14 @@ export interface WorkbookSchemaTableObjectInput {
   name: string;
   sheetName: string;
   rect: WorkbookSchemaRectInput;
+  [key: string]: unknown;
 }
 
 export interface WorkbookSchemaKeyedTableObjectInput {
   name?: string;
   sheetName: string;
   rect: WorkbookSchemaRectInput;
+  [key: string]: unknown;
 }
 
 export type WorkbookSchemaTables =
@@ -122,12 +130,14 @@ export interface WorkbookSchemaNamedRangeObjectInput {
   name: string;
   sheetName: string;
   rect: WorkbookSchemaRectInput;
+  [key: string]: unknown;
 }
 
 export interface WorkbookSchemaKeyedNamedRangeObjectInput {
   name?: string;
   sheetName: string;
   rect: WorkbookSchemaRectInput;
+  [key: string]: unknown;
 }
 
 export type WorkbookSchemaNamedRanges =
