@@ -10,7 +10,7 @@ use formula_engine::pivot as pivot_engine;
 use formula_engine::{
     CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
     EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, NameDefinition, NameScope,
-    ParseOptions, RecalcMode, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
+    ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
 use formula_engine::what_if::{
     goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult},
