@@ -183,11 +183,18 @@ if [[ -z "$EXPECTED_VERSION" ]]; then
   die "Expected $TAURI_CONF to contain a non-empty \"version\" field."
 fi
 
-# RPM %{NAME} (package name) should match our decided package name. By default we
-# keep this in sync with tauri.conf.json mainBinaryName.
-EXPECTED_RPM_NAME="${FORMULA_RPM_NAME_OVERRIDE:-$(read_tauri_conf_value mainBinaryName)}"
+# The main installed binary name should match tauri.conf.json mainBinaryName.
+EXPECTED_MAIN_BINARY_NAME="$(read_tauri_conf_value mainBinaryName)"
+if [[ -z "$EXPECTED_MAIN_BINARY_NAME" ]]; then
+  EXPECTED_MAIN_BINARY_NAME="formula-desktop"
+fi
+
+# RPM %{NAME} (package name) should match our decided package name. By default we keep this
+# in sync with tauri.conf.json mainBinaryName, but allow overriding just the *package name*
+# for validation purposes (some distros may prefer different naming conventions).
+EXPECTED_RPM_NAME="${FORMULA_RPM_NAME_OVERRIDE:-$EXPECTED_MAIN_BINARY_NAME}"
 if [[ -z "$EXPECTED_RPM_NAME" ]]; then
-  EXPECTED_RPM_NAME="formula-desktop"
+  EXPECTED_RPM_NAME="$EXPECTED_MAIN_BINARY_NAME"
 fi
 
 rel_path() {
@@ -552,8 +559,9 @@ validate_static() {
   local file_list
   file_list="$(rpm -qp --list "${rpm_path}")" || die "rpm --list query failed for: ${rpm_path}"
 
-  if ! grep -qx '/usr/bin/formula-desktop' <<<"${file_list}"; then
-    err "RPM payload missing expected desktop binary path: /usr/bin/formula-desktop"
+  local expected_binary_path="/usr/bin/${EXPECTED_MAIN_BINARY_NAME}"
+  if ! grep -qx "${expected_binary_path}" <<<"${file_list}"; then
+    err "RPM payload missing expected desktop binary path: ${expected_binary_path}"
     err "First 200 lines of rpm file list:"
     echo "${file_list}" | head -n 200 >&2
     exit 1
@@ -618,7 +626,7 @@ validate_container() {
   # We generally do not GPG-sign the built RPM in CI; use --nogpgcheck so this
   # validates runtime deps/installability rather than signature policy.
   container_cmd+=$'dnf -y install --nogpgcheck --setopt=install_weak_deps=False /rpms/*.rpm\n'
-  container_cmd+=$'test -x /usr/bin/formula-desktop\n'
+  container_cmd+=$'test -x /usr/bin/'"${EXPECTED_MAIN_BINARY_NAME}"$'\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/LICENSE\n'
   container_cmd+=$'test -f /usr/share/doc/'"${EXPECTED_RPM_NAME}"$'/NOTICE\n'
   container_cmd+=$'\n'
@@ -703,7 +711,7 @@ validate_container() {
   container_cmd+=$'  echo "WARN: No installed .desktop file explicitly listed xlsx MIME ${required_xlsx_mime}." >&2\n'
   container_cmd+=$'fi\n'
   container_cmd+=$'set +e\n'
-  container_cmd+=$'ldd_out="$(ldd /usr/bin/formula-desktop 2>&1)"\n'
+  container_cmd+=$'ldd_out="$(ldd /usr/bin/'"${EXPECTED_MAIN_BINARY_NAME}"$' 2>&1)"\n'
   container_cmd+=$'ldd_status=$?\n'
   container_cmd+=$'set -e\n'
   container_cmd+=$'echo "${ldd_out}"\n'
