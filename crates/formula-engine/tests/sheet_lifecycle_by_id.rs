@@ -1,4 +1,5 @@
 use formula_engine::{Engine, SheetLifecycleError};
+use formula_model::SheetNameError;
 
 #[test]
 fn sheet_lifecycle_by_id_rename_reorder_delete() {
@@ -59,5 +60,33 @@ fn sheet_delete_by_id_cannot_delete_last_sheet() {
     assert_eq!(
         engine.delete_sheet_by_id(sheet1_id).unwrap_err(),
         SheetLifecycleError::CannotDeleteLastSheet
+    );
+}
+
+#[test]
+fn sheet_lifecycle_by_id_validates_names_and_indices() {
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Sheet1");
+    engine.ensure_sheet("Sheet2");
+
+    let sheet1_id = engine.sheet_id("Sheet1").expect("Sheet1 id");
+    let sheet2_id = engine.sheet_id("Sheet2").expect("Sheet2 id");
+
+    assert_eq!(
+        engine.rename_sheet_by_id(sheet2_id, "Sheet1").unwrap_err(),
+        SheetLifecycleError::InvalidName(SheetNameError::DuplicateName)
+    );
+    assert_eq!(
+        engine.rename_sheet_by_id(sheet2_id, "").unwrap_err(),
+        SheetLifecycleError::InvalidName(SheetNameError::EmptyName)
+    );
+    assert_eq!(
+        engine.rename_sheet_by_id(sheet2_id, "Bad:Name").unwrap_err(),
+        SheetLifecycleError::InvalidName(SheetNameError::InvalidCharacter(':'))
+    );
+
+    assert_eq!(
+        engine.reorder_sheet_by_id(sheet1_id, 2).unwrap_err(),
+        SheetLifecycleError::IndexOutOfRange
     );
 }
