@@ -10531,8 +10531,17 @@ export class SpreadsheetApp {
   }
 
   private chartCursorAtPoint(x: number, y: number): string | null {
-    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    const charts = this.chartStore.listCharts();
     if (charts.length === 0) return null;
+    const sheetId = this.sheetId;
+    let hasChartOnSheet = false;
+    for (const chart of charts) {
+      if (chart.sheetId === sheetId) {
+        hasChartOnSheet = true;
+        break;
+      }
+    }
+    if (!hasChartOnSheet) return null;
 
     const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
     const px = x - layout.originX;
@@ -10559,6 +10568,7 @@ export class SpreadsheetApp {
 
     for (let i = charts.length - 1; i >= 0; i -= 1) {
       const chart = charts[i]!;
+      if (chart.sheetId !== sheetId) continue;
       const rect = this.chartAnchorToViewportRect(chart.anchor);
       if (!rect) continue;
 
@@ -14098,9 +14108,27 @@ export class SpreadsheetApp {
     const viewport = this.getDrawingRenderViewport(sharedViewport);
     const baseObjects = this.listDrawingObjectsForSheet();
     this.drawingObjects = baseObjects;
-    if (this.selectedDrawingId != null && !baseObjects.some((o) => o.id === this.selectedDrawingId)) {
-      this.selectedDrawingId = null;
-      this.selectedDrawingIndex = null;
+    const selectedDrawingId = this.selectedDrawingId;
+    if (selectedDrawingId != null) {
+      // `renderDrawings()` can be called on scroll/resize and other high-frequency repaint paths.
+      // Keep selection validation O(1) for the common case by reusing the cached selected index.
+      let idx = this.selectedDrawingIndex;
+      const hasCachedIndex =
+        typeof idx === "number" && idx >= 0 && idx < baseObjects.length && baseObjects[idx]?.id === selectedDrawingId;
+      if (!hasCachedIndex) {
+        idx = -1;
+        for (let i = 0; i < baseObjects.length; i += 1) {
+          if (baseObjects[i]!.id === selectedDrawingId) {
+            idx = i;
+            break;
+          }
+        }
+        this.selectedDrawingIndex = idx >= 0 ? idx : null;
+      }
+      if (idx < 0) {
+        this.selectedDrawingId = null;
+        this.selectedDrawingIndex = null;
+      }
     }
     const objects = this.listDrawingOverlayObjectsForSheet(this.sheetId, baseObjects);
 
