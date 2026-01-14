@@ -348,13 +348,47 @@ function Find-BundleFiles {
     return @()
   }
 
-  # We intentionally search for bundle directories first to avoid walking the
-  # entire Cargo target tree for all files.
-  $bundleDirs = @(Get-ChildItem -LiteralPath $TargetRoot -Recurse -Directory -Filter $BundleKind -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -match "[\\\\/](release)[\\\\/](bundle)[\\\\/]$BundleKind$" })
+  # Prefer checking the expected Tauri/Cargo output locations:
+  #   - <target>/release/bundle/<kind>
+  #   - <target>/<triple>/release/bundle/<kind>
+  #
+  # Avoid recursive enumeration of the entire Cargo target tree, which can be very large in CI.
+  $bundleDirs = New-Object System.Collections.Generic.List[string]
+
+  $native = Join-Path $TargetRoot (Join-Path "release" (Join-Path "bundle" $BundleKind))
+  if (Test-Path -LiteralPath $native -PathType Container) {
+    $bundleDirs.Add($native)
+  }
+
+  $targetEntries = @()
+  try {
+    $targetEntries = @(Get-ChildItem -LiteralPath $TargetRoot -Directory -ErrorAction SilentlyContinue)
+  } catch {
+    $targetEntries = @()
+  }
+  foreach ($ent in $targetEntries) {
+    $maybe = Join-Path $ent.FullName (Join-Path "release" (Join-Path "bundle" $BundleKind))
+    if (Test-Path -LiteralPath $maybe -PathType Container) {
+      $bundleDirs.Add($maybe)
+    }
+  }
 
   $out = New-Object System.Collections.Generic.List[System.IO.FileInfo]
-  foreach ($dir in $bundleDirs) {
+  foreach ($dirPath in $bundleDirs) {
+    $files = Get-ChildItem -LiteralPath $dirPath -Recurse -File -Filter "*$Extension" -ErrorAction SilentlyContinue
+    foreach ($f in $files) { $out.Add($f) }
+  }
+
+  if ($out.Count -gt 0) {
+    return @($out | Sort-Object FullName -Unique)
+  }
+
+  # Fall back to a recursive search for bundle directories for any non-standard layouts.
+  $bundleDirsFallback = @(
+    Get-ChildItem -LiteralPath $TargetRoot -Recurse -Directory -Filter $BundleKind -ErrorAction SilentlyContinue |
+      Where-Object { $_.FullName -match "[\\\\/](release)[\\\\/](bundle)[\\\\/]$BundleKind$" }
+  )
+  foreach ($dir in $bundleDirsFallback) {
     $files = Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Filter "*$Extension" -ErrorAction SilentlyContinue
     foreach ($f in $files) { $out.Add($f) }
   }
