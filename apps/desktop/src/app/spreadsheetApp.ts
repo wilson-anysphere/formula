@@ -3241,7 +3241,10 @@ export class SpreadsheetApp {
       // Keep memory bounded: only cache the active sheet's objects.
       this.drawingObjectsCache = null;
       this.canvasChartCombinedDrawingObjectsCache = null;
-      this.invalidateDrawingHitTestIndexCaches();
+      // Drawings/pictures hit-testing and viewport-culling rely on cached sheet-space bounds.
+      // Invalidate all geometry-dependent caches so drawing interactions stay aligned even if the
+      // `DrawingObject[]` reference is stable across document updates.
+      this.invalidateDrawingGeometryCaches();
       this.scheduleDrawingsRender(reason);
       this.dispatchDrawingsChanged();
     };

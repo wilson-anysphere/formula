@@ -410,6 +410,9 @@ export class SecondaryGridView {
       }
 
       if (this.documentChangeAffectsDrawings(payload)) {
+        // Drawings/pictures overlay caches sheet-space bounds inside its spatial index. Invalidate
+        // so the next render recomputes even if `getDrawingObjects` returns a stable array reference.
+        this.drawingsOverlay.invalidateSpatialIndex();
         void this.renderDrawings();
       }
     });
@@ -420,6 +423,7 @@ export class SecondaryGridView {
       if (this.disposed) return;
       const sheetId = typeof payload?.sheetId === "string" ? payload.sheetId : null;
       if (sheetId && sheetId !== this.getSheetId()) return;
+      this.drawingsOverlay.invalidateSpatialIndex();
       void this.renderDrawings();
     });
     this.disposeFns.push(() => unsubscribeDrawings());
@@ -703,12 +707,8 @@ export class SecondaryGridView {
     this.grid.renderer.applyAxisSizeOverrides({ rows: rowSizes, cols: colSizes }, { resetUnspecified: true });
     // Row/col overrides change the grid geometry while `drawingsOverlay` keeps a stable
     // `GridGeometry` reference. Invalidate cached bounds so the next render recomputes
-    // anchors against the updated axis sizes.
-    this.drawingsOverlay.invalidateSpatialIndex();
-
-    // Row/col size overrides change the underlying grid geometry used by DrawingOverlay's spatial
-    // index. Invalidate so the next render recomputes bounds even if the object list reference is
-    // unchanged (e.g. drawings stored in DocumentController).
+    // anchors against the updated axis sizes even if the object list reference is unchanged
+    // (e.g. drawings stored in DocumentController).
     this.drawingsOverlay.invalidateSpatialIndex();
 
     this.grid.syncScrollbars();
