@@ -257,4 +257,34 @@ describe("FormulaBarView error panel", () => {
 
     host.remove();
   });
+
+  it("disables referenced range highlighting when the draft is not a formula", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    let lastHighlights: any[] = [];
+    const view = new FormulaBarView(host, {
+      onCommit: () => {},
+      onReferenceHighlights: (highlights) => {
+        lastHighlights = highlights;
+      },
+    });
+    // Error value, but non-formula input.
+    view.setActiveCell({ address: "A1", input: "hello", value: "#DIV/0!" });
+
+    const errorButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-button"]')!;
+    errorButton.click();
+
+    const showRanges = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-show-ranges"]')!;
+    expect(showRanges.disabled).toBe(true);
+    expect(showRanges.getAttribute("aria-pressed")).toBe("false");
+    expect(showRanges.textContent).toContain("Show");
+
+    // Disabled button should not toggle highlights.
+    showRanges.click();
+    expect(showRanges.getAttribute("aria-pressed")).toBe("false");
+    expect(lastHighlights).toEqual([]);
+
+    host.remove();
+  });
 });
