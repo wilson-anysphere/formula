@@ -47,10 +47,45 @@ def _find_signtool() -> str | None:
     roots.append(Path("C:/Program Files (x86)/Windows Kits/10/bin"))
 
     candidates: list[Path] = []
+    existing_roots: list[Path] = []
     for root in roots:
         if not root.is_dir():
             continue
-        candidates.extend([p for p in root.glob("**/signtool.exe") if p.is_file()])
+        existing_roots.append(root)
+
+        # Fast path: the Windows SDK layout is predictable:
+        #   .../Windows Kits/10/bin/<sdk-version>/<arch>/signtool.exe
+        #   .../Windows Kits/10/bin/<arch>/signtool.exe
+        #
+        # Avoid a recursive `**/signtool.exe` glob when possible; those directories can be
+        # large and recursive scanning slows CI.
+        try:
+            children = [p for p in root.iterdir() if p.is_dir()]
+        except OSError:
+            children = []
+
+        # Check versioned directories first (prefer highest version, then x64).
+        version_dirs: list[Path] = []
+        for child in children:
+            name = child.name
+            if name and name[0].isdigit() and "." in name:
+                version_dirs.append(child)
+        for version_dir in version_dirs:
+            for arch in ("x64", "x86", "arm64"):
+                p = version_dir / arch / "signtool.exe"
+                if p.is_file():
+                    candidates.append(p)
+
+        # Also handle non-versioned layout: bin/<arch>/signtool.exe
+        for arch in ("x64", "x86", "arm64"):
+            p = root / arch / "signtool.exe"
+            if p.is_file():
+                candidates.append(p)
+
+    # Fallback: recursive scan only when the expected layout isn't present.
+    if not candidates:
+        for root in existing_roots:
+            candidates.extend([p for p in root.glob("**/signtool.exe") if p.is_file()])
 
     if not candidates:
         return None
