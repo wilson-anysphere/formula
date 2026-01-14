@@ -30,6 +30,16 @@ See also:
 // Note: the canonical persisted schema (formula-model) uses an untagged Rust enum
 // `PivotFieldRef` for `sourceField`. Cache-backed fields serialize as a plain string
 // for backward compatibility; Data Model pivots serialize as structured objects.
+//
+// Important: when ingesting existing XLSX PivotCaches, Excel may encode Data Model
+// field captions using DAX-like strings such as:
+// - `Table[Column]`
+// - `'Table Name'[Column]` (quoted table identifiers)
+// - bracket escapes inside `[...]` (e.g. `A]]B` to represent `A]B`)
+// - measures sometimes stored as `Total Sales` (no brackets) or `[Total Sales]`
+//
+// The engine normalizes UI captions (e.g. Pivot header rows) but resolves multiple
+// legacy encodings when binding `PivotFieldRef` values to cache fields.
 type PivotFieldRef =
   | string                               // cache field (worksheet header text)
   | { table: string; column: string }    // Data Model column (Table[Column])
