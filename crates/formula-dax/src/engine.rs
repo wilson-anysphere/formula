@@ -305,13 +305,6 @@ impl RowContext {
         self.row_for_level(table, 0)
     }
 
-    fn row_for_outermost(&self, table: &str) -> Option<usize> {
-        self.stack.iter().find_map(|frame| match frame {
-            RowContextFrame::Physical { table: t, row, .. } if t == table => Some(*row),
-            _ => None,
-        })
-    }
-
     fn virtual_binding(&self, table: &str, column: &str) -> Option<&Value> {
         for frame in self.stack.iter().rev() {
             let RowContextFrame::Virtual { bindings } = frame else {
@@ -1356,7 +1349,20 @@ impl DaxEngine {
                     1
                 };
 
-                let Some(row) = row_ctx.row_for_level(table, level_from_inner) else {
+                let Some((row, visible_cols)) = row_ctx
+                    .stack
+                    .iter()
+                    .rev()
+                    .filter_map(|frame| match frame {
+                        RowContextFrame::Physical {
+                            table: t,
+                            row,
+                            visible_cols,
+                        } if t == table => Some((*row, visible_cols.as_deref())),
+                        _ => None,
+                    })
+                    .nth(level_from_inner)
+                else {
                     let available = row_ctx
                         .stack
                         .iter()
@@ -1373,17 +1379,21 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
+                    table: table.clone(),
+                    column: column.clone(),
+                })?;
+                if let Some(visible_cols) = visible_cols {
+                    if !visible_cols.contains(&idx) {
+                        return Err(DaxError::Eval(format!(
+                            "column {table}[{column}] is not available in the current row context"
+                        )));
+                    }
+                }
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                let value =
-                    table_ref
-                        .value(row, column)
-                        .ok_or_else(|| DaxError::UnknownColumn {
-                            table: table.clone(),
-                            column: column.clone(),
-                        })?;
-                Ok(value)
+                Ok(table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
             }
             "EARLIEST" => {
                 let [arg] = args else {
@@ -1395,7 +1405,16 @@ impl DaxEngine {
                     ));
                 };
 
-                let Some(row) = row_ctx.row_for_outermost(table) else {
+                let Some((row, visible_cols)) =
+                    row_ctx.stack.iter().find_map(|frame| match frame {
+                        RowContextFrame::Physical {
+                            table: t,
+                            row,
+                            visible_cols,
+                        } if t == table => Some((*row, visible_cols.as_deref())),
+                        _ => None,
+                    })
+                else {
                     return Err(DaxError::Eval(format!(
                         "EARLIEST requires row context for {table}[{column}]"
                     )));
@@ -1404,17 +1423,21 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
+                    table: table.clone(),
+                    column: column.clone(),
+                })?;
+                if let Some(visible_cols) = visible_cols {
+                    if !visible_cols.contains(&idx) {
+                        return Err(DaxError::Eval(format!(
+                            "column {table}[{column}] is not available in the current row context"
+                        )));
+                    }
+                }
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                let value =
-                    table_ref
-                        .value(row, column)
-                        .ok_or_else(|| DaxError::UnknownColumn {
-                            table: table.clone(),
-                            column: column.clone(),
-                        })?;
-                Ok(value)
+                Ok(table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
             }
             other => Err(DaxError::Eval(format!("unsupported function {other}"))),
         }
