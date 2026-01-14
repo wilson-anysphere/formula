@@ -333,8 +333,58 @@ def find_desktop_files(package_root: Path) -> list[Path]:
         candidates.extend(sorted(app_dir.glob("*.desktop")))
     if candidates:
         return candidates
-    # Fallback: anything in the extracted root.
-    return sorted(package_root.rglob("*.desktop"))
+    # Common for extracted AppImage AppDirs: the `.desktop` file lives at the root.
+    root_desktops = sorted(package_root.glob("*.desktop"))
+    if root_desktops:
+        return root_desktops
+    # Fallback: bounded walk. Package roots can include very large `usr/lib`/`lib` trees, so avoid an
+    # unbounded recursive glob which can be slow in CI.
+    return _fallback_find_desktop_files(package_root)
+
+
+def _fallback_find_desktop_files(package_root: Path) -> list[Path]:
+    candidates: list[Path] = []
+    # `.desktop` files should generally live under *share/applications. If packages place them in
+    # odd locations, we do a best-effort search, but avoid descending into large directories that
+    # cannot reasonably contain `.desktop` entries.
+    skip_dirnames = {
+        ".git",
+        "node_modules",
+        "target",
+        # Typical package payload dirs (very large, `.desktop` files should not live here).
+        "bin",
+        "sbin",
+        "lib",
+        "lib64",
+        "include",
+        # Common `usr/share` subtrees that can contain lots of files.
+        "doc",
+        "icons",
+        "locale",
+        "man",
+        "mime",
+    }
+    max_depth = 8
+
+    for root, dirs, files in os.walk(package_root):
+        root_path = Path(root)
+        try:
+            depth = len(root_path.relative_to(package_root).parts)
+        except ValueError:
+            # Defensive: if os.walk yields an unexpected path, treat it as "deep" to avoid runaway
+            # traversals rather than crashing.
+            depth = max_depth
+
+        if depth >= max_depth:
+            dirs[:] = []
+        else:
+            dirs[:] = [d for d in dirs if d not in skip_dirnames]
+
+        for filename in files:
+            if filename.endswith(".desktop"):
+                candidates.append(root_path / filename)
+
+    return sorted(candidates)
 
 
 def parse_desktop_entry(path: Path) -> tuple[set[str], str]:

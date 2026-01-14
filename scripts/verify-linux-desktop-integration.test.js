@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,6 +8,11 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "verify_linux_desktop_integration.py");
+
+test("verify_linux_desktop_integration avoids Path.rglob() scans (perf guardrail)", () => {
+  const contents = readFileSync(scriptPath, "utf8");
+  assert.doesNotMatch(contents, /\.rglob\(/, "Expected verifier to avoid unbounded recursive scans");
+});
 
 const hasPython3 = (() => {
   const probe = spawnSync("python3", ["--version"], { stdio: "ignore" });
