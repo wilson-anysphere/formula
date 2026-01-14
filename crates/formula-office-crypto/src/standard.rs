@@ -17,6 +17,40 @@ const CALG_AES_128: u32 = 0x0000_660E;
 const CALG_AES_192: u32 = 0x0000_660F;
 const CALG_AES_256: u32 = 0x0000_6610;
 
+/// Parsed MS-OFFCRYPTO `EncryptionHeader.Flags` bits for Standard (CryptoAPI) encryption.
+///
+/// The raw value may contain additional bits not currently modeled here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EncryptionHeaderFlags {
+    raw: u32,
+    f_cryptoapi: bool,
+    #[allow(dead_code)]
+    f_doc_props: bool,
+    f_external: bool,
+    f_aes: bool,
+}
+
+impl EncryptionHeaderFlags {
+    const F_CRYPTOAPI: u32 = 0x0000_0004;
+    const F_DOCPROPS: u32 = 0x0000_0008;
+    const F_EXTERNAL: u32 = 0x0000_0010;
+    const F_AES: u32 = 0x0000_0020;
+
+    fn from_raw(raw: u32) -> Self {
+        Self {
+            raw,
+            f_cryptoapi: raw & Self::F_CRYPTOAPI != 0,
+            f_doc_props: raw & Self::F_DOCPROPS != 0,
+            f_external: raw & Self::F_EXTERNAL != 0,
+            f_aes: raw & Self::F_AES != 0,
+        }
+    }
+}
+
+fn is_aes_alg_id(alg_id: u32) -> bool {
+    matches!(alg_id, CALG_AES_128 | CALG_AES_192 | CALG_AES_256)
+}
+
 /// Conservative upper bound on `EncryptionVerifier.saltSize` to avoid allocating attacker-controlled
 /// buffers.
 ///
@@ -96,7 +130,7 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OfficeCrypt
         ));
     }
     // DWORD flags, sizeExtra, algId, algIdHash, keySize, providerType, reserved1, reserved2
-    let _flags = read_u32_le(bytes, 0)?;
+    let flags_raw = read_u32_le(bytes, 0)?;
     let _size_extra = read_u32_le(bytes, 4)?;
     let alg_id = read_u32_le(bytes, 8)?;
     let alg_id_hash = read_u32_le(bytes, 12)?;
@@ -105,6 +139,29 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OfficeCrypt
     let _reserved1 = read_u32_le(bytes, 24)?;
     let _reserved2 = read_u32_le(bytes, 28)?;
     let csp_name = decode_utf16le_nul_terminated(&bytes[32..])?;
+
+    // Validate key `EncryptionHeader.Flags` semantics. This is conservative and avoids silently
+    // treating random bytes as a supported Standard encryption header.
+    let flags = EncryptionHeaderFlags::from_raw(flags_raw);
+    if flags.f_external {
+        return Err(OfficeCryptoError::UnsupportedEncryption(
+            "unsupported external Standard encryption (fExternal flag set)".to_string(),
+        ));
+    }
+    if !flags.f_cryptoapi {
+        return Err(OfficeCryptoError::UnsupportedEncryption(
+            "unsupported Standard encryption: fCryptoAPI flag not set".to_string(),
+        ));
+    }
+
+    // Policy: treat AES flag/algId mismatches as invalid. This avoids ambiguous or inconsistent
+    // inputs when parsing untrusted streams.
+    let alg_is_aes = is_aes_alg_id(alg_id);
+    if flags.f_aes != alg_is_aes {
+        return Err(OfficeCryptoError::InvalidFormat(format!(
+            "invalid Standard EncryptionHeader flags for algId {alg_id:#x}: flags={flags_raw:#x}"
+        )));
+    }
 
     Ok(EncryptionHeader {
         alg_id,
@@ -578,7 +635,7 @@ pub(crate) fn encrypt_standard_encrypted_package(
     verifier_bytes.extend_from_slice(&encrypted_verifier_hash);
 
     // EncryptionHeader (see MS-OFFCRYPTO).
-    let header_flags = 0u32;
+    let header_flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES;
     let size_extra = 0u32;
     let reserved1 = 0u32;
     let reserved2 = 0u32;
@@ -657,7 +714,7 @@ pub(crate) mod tests {
         let version_minor = 2u16;
         let flags = 0x0000_0040u32;
 
-        let header_flags = 0u32;
+        let header_flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES;
         let size_extra = 0u32;
         let alg_id = 0x0000_660Eu32; // CALG_AES_128
         let alg_id_hash = 0x0000_8004u32; // CALG_SHA1
@@ -726,6 +783,72 @@ pub(crate) mod tests {
         let hdr = parse_encryption_info_header(&out).expect("header");
         assert_eq!(hdr.kind, crate::util::EncryptionInfoKind::Standard);
         out
+    }
+
+    fn minimal_encryption_header_bytes(flags: u32, alg_id: u32) -> Vec<u8> {
+        let size_extra = 0u32;
+        let alg_id_hash = 0x0000_8004u32; // CALG_SHA1
+        let key_bits = 128u32;
+        let provider_type = 0u32;
+        let reserved1 = 0u32;
+        let reserved2 = 0u32;
+        let csp_name_utf16_nul = [0u8, 0u8];
+
+        let mut header_bytes = Vec::new();
+        header_bytes.extend_from_slice(&flags.to_le_bytes());
+        header_bytes.extend_from_slice(&size_extra.to_le_bytes());
+        header_bytes.extend_from_slice(&alg_id.to_le_bytes());
+        header_bytes.extend_from_slice(&alg_id_hash.to_le_bytes());
+        header_bytes.extend_from_slice(&key_bits.to_le_bytes());
+        header_bytes.extend_from_slice(&provider_type.to_le_bytes());
+        header_bytes.extend_from_slice(&reserved1.to_le_bytes());
+        header_bytes.extend_from_slice(&reserved2.to_le_bytes());
+        header_bytes.extend_from_slice(&csp_name_utf16_nul);
+        header_bytes
+    }
+
+    #[test]
+    fn standard_encryption_header_rejects_external_flag() {
+        let flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_EXTERNAL;
+        let bytes = minimal_encryption_header_bytes(flags, CALG_RC4);
+        let err = parse_encryption_header(&bytes).expect_err("expected error");
+        assert!(
+            matches!(
+                err,
+                OfficeCryptoError::UnsupportedEncryption(ref msg) if msg.contains("external")
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn standard_encryption_header_rejects_missing_cryptoapi_flag() {
+        let flags = 0u32;
+        let bytes = minimal_encryption_header_bytes(flags, CALG_RC4);
+        let err = parse_encryption_header(&bytes).expect_err("expected error");
+        assert!(
+            matches!(
+                err,
+                OfficeCryptoError::UnsupportedEncryption(ref msg) if msg.contains("fCryptoAPI")
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn standard_encryption_header_rejects_aes_algid_without_faes_flag() {
+        let flags = EncryptionHeaderFlags::F_CRYPTOAPI;
+        let bytes = minimal_encryption_header_bytes(flags, CALG_AES_128);
+        let err = parse_encryption_header(&bytes).expect_err("expected error");
+        assert!(matches!(err, OfficeCryptoError::InvalidFormat(_)));
+    }
+
+    #[test]
+    fn standard_encryption_header_rejects_faes_flag_with_rc4_algid() {
+        let flags = EncryptionHeaderFlags::F_CRYPTOAPI | EncryptionHeaderFlags::F_AES;
+        let bytes = minimal_encryption_header_bytes(flags, CALG_RC4);
+        let err = parse_encryption_header(&bytes).expect_err("expected error");
+        assert!(matches!(err, OfficeCryptoError::InvalidFormat(_)));
     }
 
     #[test]
