@@ -321,6 +321,30 @@ mod leading_slash_zip_entries_tests {
     }
 
     #[test]
+    fn streaming_patcher_tolerates_noncanonical_zip_entries() {
+        let bytes = build_minimal_xlsx_with_noncanonical_entries();
+        let patch = WorksheetCellPatch::new(
+            "xl/worksheets/sheet1.xml",
+            CellRef::new(0, 0),
+            CellValue::Number(42.0),
+            None,
+        );
+        let mut out = Cursor::new(Vec::new());
+        patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch]).expect("streaming patch");
+
+        let pkg = XlsxPackage::from_bytes(&out.into_inner()).expect("read patched package");
+        let sheet_xml = std::str::from_utf8(
+            pkg.part("xl/worksheets/sheet1.xml")
+                .expect("worksheet part present"),
+        )
+        .expect("worksheet xml utf-8");
+        assert!(
+            sheet_xml.contains("<v>42</v>") || sheet_xml.contains("<v>42.0</v>"),
+            "expected patched worksheet XML to contain cell value 42 (got {sheet_xml:?})"
+        );
+    }
+
+    #[test]
     fn load_from_bytes_tolerates_noncanonical_worksheet_part_names_when_sheet_rels_are_required() {
         use formula_model::HyperlinkTarget;
 

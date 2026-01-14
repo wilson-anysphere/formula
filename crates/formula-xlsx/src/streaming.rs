@@ -198,12 +198,11 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
 ) -> Result<(), StreamingPatchError> {
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
     for patch in cell_patches {
-        // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
-        // callers that include it by normalizing the patch target part name.
+        // ZIP entry names in valid XLSX/XLSM packages should not start with `/` (or `\`), but
+        // tolerate callers that include it by normalizing the patch target part name.
         let worksheet_part = patch
             .worksheet_part
-            .strip_prefix('/')
-            .unwrap_or(patch.worksheet_part.as_str())
+            .trim_start_matches(|c| c == '/' || c == '\\')
             .to_string();
         let mut patch = patch.clone();
         patch.worksheet_part = worksheet_part.clone();
@@ -212,11 +211,31 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
             .or_default()
             .push(patch);
     }
+    let mut archive = ZipArchive::new(input)?;
+    let part_names = list_zip_part_names(&mut archive)?;
+
+    // Remap patch targets to the exact ZIP entry names present in the container when possible.
+    // This keeps downstream lookups (which often key by `ZipFile::name()`) working even when a
+    // producer used non-canonical naming (case differences, `\` separators, leading separators,
+    // percent-encoding).
+    if !patches_by_part.is_empty() {
+        let mut remapped: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
+        for (candidate, patches) in std::mem::take(&mut patches_by_part) {
+            let resolved = find_zip_part_name(&part_names, &candidate).unwrap_or(candidate);
+            let entry = remapped.entry(resolved.clone()).or_default();
+            for mut patch in patches {
+                patch.worksheet_part = resolved.clone();
+                entry.push(patch);
+            }
+        }
+        patches_by_part = remapped;
+    }
+
     // Deterministic patching within a worksheet.
     for patches in patches_by_part.values_mut() {
         patches.sort_by_key(|p| (p.cell.row, p.cell.col));
     }
-    let mut archive = ZipArchive::new(input)?;
+
     // `vm` (cell value-metadata) is preserved by default for fidelity. Callers can explicitly
     // override/clear it via `WorksheetCellPatch`.
     let mut formula_changed = cell_patches
