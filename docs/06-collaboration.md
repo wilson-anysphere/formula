@@ -958,6 +958,8 @@ comments.addReply({
 });
 ```
 
+Permissions note: `CommentManager` supports an optional `canComment()` guard (and throws on comment mutations when it returns `false`). When you construct a comment manager from a `CollabSession` via `createCommentManagerForSession(session)`, it will use `session.canComment()` so viewer roles remain read-only for comments.
+
 Desktop note: desktop collaboration uses a *binder-origin* undo scope (DocumentController→Yjs),
 so comment edits must run inside the binder-origin transact wrapper (not `session.transactLocal`).
 Use `createCommentManagerForDoc({ doc: session.doc, transact: undoService.transact })` (see
@@ -990,6 +992,7 @@ Migration behavior (implementation-backed):
 - Runs **after initial hydration**, queued in a microtask:
   - after local persistence load completes (if `options.persistence` / legacy `options.offline` is enabled), and/or
   - after the provider reports initial `sync=true` (if a provider is enabled).
+- Gated by comment permissions: migration is skipped when `session.canComment()` is false (e.g. viewer role) so read-only clients do not generate Yjs updates. If permissions are later updated to allow comments, migration is retried.
 - Uses `migrateCommentsArrayToMap(doc, { origin: "comments-migrate" })`, which:
   - renames the legacy root to `comments_legacy*` (so old content remains accessible), and
   - creates a canonical Map-backed `comments` root and copies entries keyed by comment id.
