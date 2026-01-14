@@ -52,7 +52,7 @@ Verifier options (forwarded to scripts/verify-desktop-release-assets.mjs; option
   --out <path>             Output path for SHA256SUMS.txt (default: ./SHA256SUMS.txt)
   --all-assets             Hash all release assets (still excludes .sig by default)
   --include-sigs           Include .sig assets in SHA256SUMS (use with --all-assets to match CI)
-  --allow-windows-msi      Legacy/no-op (Windows updater uses raw .msi by default in this repo)
+  --allow-windows-msi      Deprecated/no-op (Windows updater uses raw .msi by default in this repo)
   --allow-windows-exe      Allow raw .exe in latest.json Windows entries (defaults to disallowed)
 
 Expectations (also forwarded; optional):
