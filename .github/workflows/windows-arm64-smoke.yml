@@ -431,7 +431,7 @@ jobs:
 
       - name: Upload desktop dist asset report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-arm64-desktop-dist-assets-report
           path: desktop-dist-assets-report.json
@@ -518,7 +518,7 @@ jobs:
         run: python scripts/ci/check-windows-webview2-installer.py
 
       - name: Upload bundles
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-arm64-bundles
           path: apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/**

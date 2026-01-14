@@ -142,7 +142,7 @@ jobs:
           fi
       - name: Upload excel-oracle artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: excel-oracle-compat
           path: |
@@ -278,7 +278,7 @@ jobs:
 
       - name: Upload frontend asset size report (web, JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: web-frontend-asset-size-report
           path: web-frontend-asset-size-report.json
@@ -320,7 +320,7 @@ jobs:
 
       - name: Upload desktop dist asset report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: desktop-dist-assets-report
           path: desktop-dist-assets-report.json
@@ -335,7 +335,7 @@ jobs:
 
       - name: Upload frontend asset size report (desktop, JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: desktop-frontend-asset-size-report
           path: desktop-frontend-asset-size-report.json
@@ -389,7 +389,7 @@ jobs:
 
       - name: Upload desktop size report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: desktop-size-report
           path: desktop-size-report.json
@@ -425,7 +425,7 @@ jobs:
 
       - name: Upload desktop binary size report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: desktop-binary-size-report
           path: desktop-binary-size-report.json

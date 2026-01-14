@@ -460,7 +460,7 @@ jobs:
 
       - name: Upload desktop perf artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: desktop-perf-${{ matrix.os }}
           if-no-files-found: warn
@@ -614,7 +614,7 @@ jobs:
 
       - name: Upload merged desktop perf metrics
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: desktop-perf-platform-matrix
           if-no-files-found: warn

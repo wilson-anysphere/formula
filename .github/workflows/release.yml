@@ -1010,7 +1010,7 @@ jobs:
 
       - name: Upload provenance bundle (workflow artifact, macOS)
         if: steps.provenance_macos.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: provenance-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: ${{ steps.provenance_macos.outputs.bundle-path }}
@@ -1217,7 +1217,7 @@ jobs:
 
       - name: Upload debug symbol archives (macOS)
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: debug-symbols-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: debug-symbols/*.zip
@@ -1360,7 +1360,7 @@ jobs:
 
       - name: Upload provenance bundle (workflow artifact)
         if: steps.provenance_non_macos.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: provenance-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: ${{ steps.provenance_non_macos.outputs.bundle-path }}
@@ -1468,7 +1468,7 @@ jobs:
 
       - name: Upload debug symbol archives (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: debug-symbols-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: debug-symbols/*.zip
@@ -1508,7 +1508,7 @@ jobs:
 
       - name: Upload desktop dist asset report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: desktop-dist-assets-report-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
           path: desktop-dist-assets-report.json
@@ -1755,7 +1755,7 @@ jobs:
 
       - name: Upload desktop bundles (dry run)
         if: needs.preflight.outputs.upload != 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: desktop-bundles-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
           if-no-files-found: error
@@ -1770,7 +1770,7 @@ jobs:
 
       - name: Upload updater manifest artifact (per-platform)
         if: needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: updater-manifest-${{ matrix.cache_target }}
           path: updater-manifest/latest-${{ matrix.cache_target }}.json
@@ -2361,7 +2361,7 @@ jobs:
 
       - name: Upload desktop installer artifact size report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           # Note: historical name; the report contains per-installer artifact sizes (DMG/MSI/AppImage/etc).
           name: desktop-bundle-size-report-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
@@ -3021,7 +3021,7 @@ jobs:
 
       - name: Upload SBOM (workflow artifact)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: sbom-${{ needs.preflight.outputs.artifact_label }}
           path: sbom.spdx.json

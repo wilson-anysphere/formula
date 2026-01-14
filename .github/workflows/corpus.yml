@@ -136,14 +136,14 @@ jobs:
           else
             echo "No corpus summary found at tools/corpus/out/public/summary.md"
           fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         if: always()
         with:
           name: corpus-public-${{ github.sha }}
           path: tools/corpus/out/public
       - name: Upload corpus public summary (stable paths)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: corpus-public-summary
           path: |
@@ -310,14 +310,14 @@ jobs:
         with:
           path: tools/corpus/out/private/trend.json
           key: corpus-private-trend-${{ github.run_id }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         if: always()
         with:
           name: corpus-private-${{ github.sha }}
           path: tools/corpus/out/private
       - name: Upload corpus private summary (stable paths)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: corpus-private-summary
           path: |
@@ -326,7 +326,7 @@ jobs:
           if-no-files-found: ignore
       - name: Upload corpus private trend (stable path)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: corpus-private-trend
           path: tools/corpus/out/private/trend.json

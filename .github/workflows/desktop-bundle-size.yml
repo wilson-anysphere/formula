@@ -329,7 +329,7 @@ jobs:
 
       - name: Upload desktop dist asset report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: desktop-dist-assets-report
           path: desktop-dist-assets-report.json
@@ -363,7 +363,7 @@ jobs:
 
       - name: Upload desktop installer artifact size report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           # Note: historical name; the report contains per-installer artifact sizes (AppImage/DEB/RPM/etc).
           name: desktop-bundle-size-report
