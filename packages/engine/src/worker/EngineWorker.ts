@@ -149,6 +149,8 @@ export class EngineWorker {
   private readonly worker: WorkerLike;
   private readonly port: MessagePortLike;
   private portListener: ((event: MessageEvent<unknown>) => void) | null = null;
+  private workerErrorListener: ((event: any) => void) | null = null;
+  private shuttingDown = false;
   private readonly pending = new Map<number, PendingRequest>();
   private nextId = 1;
 
@@ -165,6 +167,22 @@ export class EngineWorker {
     this.portListener = handler;
     this.port.addEventListener("message", handler);
     this.port.start?.();
+
+    // If the worker crashes after startup, pending RPC promises would otherwise hang forever unless
+    // callers supplied timeouts or AbortSignals. Treat worker "error" as fatal and reject all
+    // pending requests to avoid leaks/hangs.
+    if (typeof this.worker.addEventListener === "function") {
+      const onWorkerError = (event: any) => {
+        const message = event && typeof event === "object" && "message" in event ? String((event as any).message) : "";
+        this.shutdown(new Error(message ? `worker error: ${message}` : "worker error"));
+      };
+      this.workerErrorListener = onWorkerError;
+      try {
+        this.worker.addEventListener("error", onWorkerError);
+      } catch {
+        // ignore
+      }
+    }
   }
 
   static async connect(options: {
@@ -328,7 +346,12 @@ export class EngineWorker {
     return new EngineWorker(worker, port);
   }
 
-  terminate(): void {
+  private shutdown(error: Error | ((id: number) => Error)): void {
+    if (this.shuttingDown) {
+      return;
+    }
+    this.shuttingDown = true;
+
     // If the caller fired-and-forgot `setCell`, we may have a microtask-batched `setCells`
     // flush pending. Clearing the update batch avoids posting a message to a closed port
     // (which would reject the flush promise and can surface as an unhandled rejection).
@@ -338,7 +361,7 @@ export class EngineWorker {
       if (pending.signal && pending.abortListener) {
         pending.signal.removeEventListener("abort", pending.abortListener);
       }
-      pending.reject(new Error(`worker terminated (request ${id})`));
+      pending.reject(typeof error === "function" ? error(id) : error);
     }
     this.pending.clear();
 
@@ -350,6 +373,14 @@ export class EngineWorker {
       }
       this.portListener = null;
     }
+    if (this.workerErrorListener && typeof this.worker.removeEventListener === "function") {
+      try {
+        this.worker.removeEventListener("error", this.workerErrorListener);
+      } catch {
+        // ignore
+      }
+      this.workerErrorListener = null;
+    }
     try {
       this.worker.terminate();
     } catch {
@@ -360,6 +391,10 @@ export class EngineWorker {
     } catch {
       // ignore
     }
+  }
+
+  terminate(): void {
+    this.shutdown((id) => new Error(`worker terminated (request ${id})`));
   }
 
   /**

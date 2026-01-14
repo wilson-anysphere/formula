@@ -366,6 +366,63 @@ describe("EngineWorker RPC", () => {
     engine.terminate();
   });
 
+  it("rejects pending RPCs when the underlying worker emits an error after connect", async () => {
+    class ErrorAfterReadyWorker implements WorkerLike {
+      terminated = false;
+      postMessageCalls = 0;
+      private readonly errorListeners = new Set<(event: any) => void>();
+      private port: MockMessagePort | null = null;
+
+      addEventListener(type: string, listener: (event: any) => void): void {
+        if (type === "error") this.errorListeners.add(listener);
+      }
+
+      removeEventListener(type: string, listener: (event: any) => void): void {
+        if (type === "error") this.errorListeners.delete(listener);
+      }
+
+      postMessage(message: unknown): void {
+        this.postMessageCalls += 1;
+        const init = message as InitMessage;
+        if (!init || typeof init !== "object" || (init as any).type !== "init") return;
+        this.port = init.port as unknown as MockMessagePort;
+
+        // Do not respond to requests; we'll trigger a fatal worker error instead.
+        this.port.addEventListener("message", () => {});
+        this.port.postMessage({ type: "ready" } as WorkerOutboundMessage);
+      }
+
+      emitError(message: string): void {
+        for (const listener of this.errorListeners) {
+          listener({ message });
+        }
+      }
+
+      terminate(): void {
+        this.terminated = true;
+        try {
+          this.port?.close();
+        } catch {
+          // ignore
+        }
+        this.port = null;
+      }
+    }
+
+    const worker = new ErrorAfterReadyWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    const pingPromise = engine.ping();
+    worker.emitError("crash");
+
+    await expect(pingPromise).rejects.toThrow(/worker error/i);
+    expect(worker.terminated).toBe(true);
+  });
+
   it("sends lexFormulaPartial requests with formula + options params", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
