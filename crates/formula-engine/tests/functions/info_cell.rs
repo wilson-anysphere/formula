@@ -223,6 +223,8 @@ fn cell_width_reflects_column_width_metadata() {
         .set_cell_formula("Sheet1", "B1", "=CELL(\"width\",A1)")
         .unwrap();
     engine.recalculate_single_threaded();
+    // Default Excel column width is 8.43 characters, but CELL("width") returns the rounded
+    // integer component (plus 0.1 when the width is custom).
     assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.0);
 
     // Update the column width metadata and ensure the formula result updates on recalc.
@@ -1588,6 +1590,104 @@ fn cell_color_and_parentheses_reflect_number_format_sections() {
     assert_number(&engine.get_cell_value("Sheet1", "B2"), 0.0);
     assert_number(&engine.get_cell_value("Sheet1", "B3"), 1.0);
     assert_number(&engine.get_cell_value("Sheet1", "B4"), 1.0);
+}
+
+#[test]
+fn cell_protect_reflects_locked_style_and_precedence() {
+    use formula_engine::Engine;
+    use formula_model::{Protection, Style};
+
+    let mut engine = Engine::new();
+
+    let unlocked = engine.intern_style(Style {
+        protection: Some(Protection {
+            locked: false,
+            hidden: false,
+        }),
+        ..Style::default()
+    });
+    let locked = engine.intern_style(Style {
+        protection: Some(Protection {
+            locked: true,
+            hidden: false,
+        }),
+        ..Style::default()
+    });
+
+    // Row style should apply when cell has no explicit style id.
+    engine.set_row_style_id("Sheet1", 0, Some(unlocked));
+    // Column style is lower precedence than row style.
+    engine.set_col_style_id("Sheet1", 0, Some(locked));
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"protect\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 0.0);
+
+    // Cell style overrides row/column styles.
+    engine.set_cell_style_id("Sheet1", "A1", locked).unwrap();
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 1.0);
+}
+
+#[test]
+fn cell_prefix_matches_horizontal_alignment() {
+    use formula_engine::Engine;
+    use formula_model::{Alignment, HorizontalAlignment, Style};
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"prefix\",A1)")
+        .unwrap();
+
+    let cases = [
+        (HorizontalAlignment::Left, "'"),
+        (HorizontalAlignment::Right, "\""),
+        (HorizontalAlignment::Center, "^"),
+        (HorizontalAlignment::Fill, "\\"),
+        (HorizontalAlignment::General, ""),
+        (HorizontalAlignment::Justify, ""),
+    ];
+
+    for (alignment, expected) in cases {
+        let style_id = engine.intern_style(Style {
+            alignment: Some(Alignment {
+                horizontal: Some(alignment),
+                ..Alignment::default()
+            }),
+            ..Style::default()
+        });
+        engine.set_cell_style_id("Sheet1", "A1", style_id).unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "B1"),
+            Value::Text(expected.to_string())
+        );
+    }
+}
+
+#[test]
+fn cell_width_reflects_column_width_and_hidden_flag() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"width\",A1)")
+        .unwrap();
+
+    // Default Excel width is 8.43 characters, but CELL("width") returns the rounded integer part
+    // plus an indicator for custom width.
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.0);
+
+    engine.set_col_width("Sheet1", 0, Some(10.0));
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 10.1);
+
+    engine.set_col_hidden("Sheet1", 0, true);
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 0.0);
 }
 
 #[test]

@@ -162,7 +162,8 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
         // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
         "filename" => Some(CellInfoType::Filename),
         // Notes:
-        // - `CELL("width")` consults per-column metadata when available (defaulting to 8.43).
+        // - `CELL("width")` consults per-column metadata when available (defaulting to 8.43) and
+        //   encodes whether the width is explicitly set using Excel's `+0.1` convention.
         // - `CELL("prefix")` consults the cell's effective horizontal alignment.
         // - `CELL("protect")` consults the cell's effective protection formatting.
         // - `CELL("color")`/`CELL("parentheses")`/`CELL("format")` are implemented based on the
@@ -461,6 +462,8 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             Value::Number(if locked { 1.0 } else { 0.0 })
         }
         CellInfoType::Prefix => {
+            use formula_model::HorizontalAlignment;
+
             // `CELL("prefix")` consults alignment/prefix metadata but should avoid recording an
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
             let cell_ref = record_explicit_cell(ctx);
