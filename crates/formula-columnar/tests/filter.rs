@@ -211,6 +211,9 @@ fn filter_or_and_not_combinators() {
         mask_to_bools(&mask_is_not_null),
         vec![true, true, false, true, true, true]
     );
+
+    let indices = table.filter_indices(&expr_or).unwrap();
+    assert_eq!(indices, vec![0, 4]);
 }
 
 #[test]

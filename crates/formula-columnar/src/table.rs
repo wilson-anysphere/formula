@@ -615,6 +615,13 @@ impl ColumnarTable {
         crate::query::filter_mask(self, expr)
     }
 
+    pub fn filter_indices(
+        &self,
+        expr: &crate::query::FilterExpr,
+    ) -> Result<Vec<usize>, crate::query::QueryError> {
+        crate::query::filter_indices(self, expr)
+    }
+
     /// Materialize a filtered table using a previously computed mask.
     pub fn filter_table(&self, mask: &BitVec) -> Result<ColumnarTable, crate::query::QueryError> {
         crate::query::filter_table(self, mask)

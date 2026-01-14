@@ -368,6 +368,24 @@ pub fn filter_mask(table: &ColumnarTable, expr: &FilterExpr) -> Result<BitVec, Q
     eval_filter_expr(table, expr)
 }
 
+/// Evaluate a filter expression and return the matching row indices.
+///
+/// This is a convenience helper for callers that need an explicit row mapping (e.g. interop with
+/// APIs that accept `&[usize]`). Prefer [`filter_mask`] when possible to avoid materializing an
+/// index vector.
+pub fn filter_indices(table: &ColumnarTable, expr: &FilterExpr) -> Result<Vec<usize>, QueryError> {
+    let mask = filter_mask(table, expr)?;
+    if mask.count_ones() == 0 {
+        return Ok(Vec::new());
+    }
+    if mask.all_true() {
+        return Ok((0..table.row_count()).collect());
+    }
+    let mut out = Vec::with_capacity(mask.count_ones());
+    out.extend(mask.iter_ones());
+    Ok(out)
+}
+
 /// Materialize a filtered table using a previously computed row mask.
 pub fn filter_table(table: &ColumnarTable, mask: &BitVec) -> Result<ColumnarTable, QueryError> {
     if mask.len() != table.row_count() {
