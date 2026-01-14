@@ -169,8 +169,9 @@ describe("SpreadsheetApp restoreDocumentState sheet fallback activation", () => 
       await app.restoreDocumentState(snapshot);
 
       expect(app.getCurrentSheetId()).toBe("Sheet3");
-      expect(activateSpy).toHaveBeenCalledTimes(1);
-      expect(activateSpy).toHaveBeenCalledWith("Sheet3");
+      // restoreDocumentState updates the active sheet directly after applyState completes; it should
+      // not call activateSheet during the applyState change dispatch (avoids redundant re-renders).
+      expect(activateSpy).not.toHaveBeenCalled();
     } finally {
       app.destroy();
     }

@@ -1235,6 +1235,7 @@ export class SpreadsheetApp {
   private drawingsUnsubscribe: (() => void) | null = null;
   private formulaRangePreviewTooltipUpdateUnsubscribe: (() => void) | null = null;
   private undoRedoSheetOrderSnapshot: string[] | null = null;
+  private suppressActiveSheetGuard = false;
 
   private gridCanvas: HTMLCanvasElement;
   private chartCanvas: HTMLCanvasElement;
@@ -3647,6 +3648,7 @@ export class SpreadsheetApp {
     // resurrect "phantom" sheets. Mirror Excel behavior: prefer activating the adjacent visible
     // sheet (next to the right, else left).
     this.undoRedoActiveSheetGuardUnsubscribe = this.document.on("change", (payload: any) => {
+      if (this.suppressActiveSheetGuard) return;
       const activeId = this.sheetId;
       if (!activeId) return;
 
@@ -7571,11 +7573,14 @@ export class SpreadsheetApp {
       // DocumentController emits a synchronous `change` event during `applyState(...)`. Several
       // listeners (including the active-sheet guard) need access to the pre-restore ordering so
       // we can choose an Excel-like adjacent visible sheet when the active sheet disappears.
+      const priorSuppressActiveSheetGuard = this.suppressActiveSheetGuard;
+      this.suppressActiveSheetGuard = true;
       this.undoRedoSheetOrderSnapshot = prevSheetOrder;
       try {
         this.document.applyState(snapshot);
       } finally {
         this.undoRedoSheetOrderSnapshot = null;
+        this.suppressActiveSheetGuard = priorSuppressActiveSheetGuard;
       }
       // The DocumentController snapshot format can include workbook-scoped image bytes
       // (`snapshot.images`). Keep the UI-level in-cell image store aligned with the
