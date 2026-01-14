@@ -255,10 +255,9 @@ export function openCustomSortDialog(host: CustomSortDialogHost): void {
           | null
           | undefined;
         if (typeof canEditCell === "function") {
-          const dataStartRow = spec.hasHeader ? selection.startRow + 1 : selection.startRow;
           let blocked: { row: number; col: number } | null = null;
           try {
-            outer: for (let row = dataStartRow; row <= selection.endRow; row += 1) {
+            outer: for (let row = selection.startRow; row <= selection.endRow; row += 1) {
               for (let col = selection.startCol; col <= selection.endCol; col += 1) {
                 if (!canEditCell.call(host.getDocument(), { sheetId, row, col })) {
                   blocked = { row, col };

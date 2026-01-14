@@ -372,22 +372,22 @@ export function applySortSpecToSelection(params: {
   const dataHeight = endRow - dataStartRow + 1;
   if (dataHeight <= 1) return true;
  
-   // Reject partial sorts when any cell in the sort payload is non-writable. `DocumentController`
-   // filters disallowed deltas per-cell; for sort that can corrupt row integrity.
-   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-   const canEditCell = (params.doc as any)?.canEditCell as
-     | ((cell: { sheetId: string; row: number; col: number }) => boolean)
-     | null
-     | undefined;
-   if (typeof canEditCell === "function") {
-     try {
-       for (let row = dataStartRow; row <= endRow; row += 1) {
-         for (let col = startCol; col <= endCol; col += 1) {
-           if (!canEditCell.call(params.doc, { sheetId: params.sheetId, row, col })) {
-             return false;
-           }
-         }
-       }
+  // Reject partial sorts when any cell in the sort payload is non-writable. `DocumentController`
+  // filters disallowed deltas per-cell; for sort that can corrupt row integrity.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const canEditCell = (params.doc as any)?.canEditCell as
+    | ((cell: { sheetId: string; row: number; col: number }) => boolean)
+    | null
+    | undefined;
+  if (typeof canEditCell === "function") {
+    try {
+      for (let row = startRow; row <= endRow; row += 1) {
+        for (let col = startCol; col <= endCol; col += 1) {
+          if (!canEditCell.call(params.doc, { sheetId: params.sheetId, row, col })) {
+            return false;
+          }
+        }
+      }
      } catch {
        // Best-effort: if `canEditCell` throws, fall through to attempting the sort.
      }

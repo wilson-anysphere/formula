@@ -204,4 +204,49 @@ describe("custom sort command wiring", () => {
     expect(toast?.textContent).toMatch(/Missing encryption key/i);
     toast?.click();
   });
+
+  it("blocks custom sort when a header cell is non-writable (does not allow partial sort)", async () => {
+    const doc = new DocumentController();
+    doc.setRangeValues("Sheet1", "A1:B2", [
+      ["Name", "Age"],
+      ["Alice", 30],
+    ]);
+
+    // Only header row is blocked. Even though sorting would only rewrite the data row,
+    // we treat sorts as all-or-nothing to avoid partial corruption under protected ranges.
+    (doc as any).canEditCell = ({ row }: { sheetId: string; row: number; col: number }) => row !== 0;
+
+    const applySpy = vi.spyOn(sortSelection, "applySortSpecToSelection").mockReturnValue(true);
+
+    await act(async () => {
+      handleCustomSortCommand("data.sortFilter.sort.customSort", {
+        isEditing: () => false,
+        getDocument: () => doc,
+        getSheetId: () => "Sheet1",
+        getSelectionRanges: () => [{ startRow: 0, startCol: 0, endRow: 1, endCol: 1 }],
+        getCellValue: (sheetId, cell) => {
+          const state = doc.getCell(sheetId, cell) as { value: any };
+          return (state?.value ?? null) as any;
+        },
+        focusGrid: () => {},
+      });
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.custom-sort-dialog");
+    expect(dialog).not.toBeNull();
+
+    const okBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="sort-dialog-ok"]');
+    expect(okBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      okBtn!.click();
+    });
+
+    expect(applySpy).not.toHaveBeenCalled();
+    expect(document.querySelector("dialog.custom-sort-dialog")).not.toBeNull();
+
+    const toast = document.querySelector<HTMLElement>('[data-testid="toast"]');
+    expect(toast?.textContent).toMatch(/Read-only/i);
+    toast?.click();
+  });
 });
