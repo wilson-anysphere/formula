@@ -359,10 +359,63 @@ function pickPowerShellCommand() {
 }
 
 /**
- * Best-effort check: do we appear to have any local Tauri `release/bundle` output directories?
- * This avoids surprising `--local-bundles` failures when the user hasn't built anything yet.
+ * @param {string} validatorPath
+ * @param {string} key
+ * @param {{ extraArgs?: string[]; skipReason?: string }} [opts]
+ * @returns {Step}
  */
-async function detectLocalBundleOutputs() {
+function makeValidatorStep(validatorPath, key, opts = {}) {
+  const extraArgs = Array.isArray(opts.extraArgs) ? opts.extraArgs : [];
+  const base = path.basename(validatorPath);
+  const ext = path.extname(base).toLowerCase();
+
+  if (ext === ".mjs") {
+    return {
+      id: `local-bundles:${base}`,
+      title: `Validate local bundles (${key}): ${base}`,
+      command: process.execPath,
+      args: [validatorPath, ...extraArgs],
+      skipIfMissing: true,
+      fileToCheck: validatorPath,
+      skipReason: opts.skipReason,
+    };
+  }
+
+  if (ext === ".sh") {
+    return {
+      id: `local-bundles:${base}`,
+      title: `Validate local bundles (${key}): ${base}`,
+      command: "bash",
+      args: [validatorPath, ...extraArgs],
+      skipIfMissing: true,
+      fileToCheck: validatorPath,
+      skipReason: opts.skipReason,
+    };
+  }
+
+  if (ext === ".ps1") {
+    const pwsh = pickPowerShellCommand();
+    return {
+      id: `local-bundles:${base}`,
+      title: `Validate local bundles (${key}): ${base}`,
+      command: pwsh,
+      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", validatorPath, ...extraArgs],
+      skipIfMissing: true,
+      fileToCheck: validatorPath,
+      skipReason: opts.skipReason,
+    };
+  }
+
+  return {
+    id: `local-bundles:${base}`,
+    title: `Validate local bundles (${key}): ${base}`,
+    command: process.execPath,
+    args: [],
+    skipReason: `Unsupported validator script type: ${base}`,
+  };
+}
+
+async function collectBundleDirs() {
   /** @type {string[]} */
   const roots = [];
 
@@ -379,10 +432,14 @@ async function detectLocalBundleOutputs() {
     path.join(repoRoot, "target")
   );
 
+  /** @type {string[]} */
+  const bundleDirs = [];
+
   for (const root of roots) {
     if (!existsSync(root)) continue;
 
-    if (existsSync(path.join(root, "release", "bundle"))) return true;
+    const direct = path.join(root, "release", "bundle");
+    if (existsSync(direct)) bundleDirs.push(direct);
 
     // Tauri sometimes nests by target triple:
     //   <target>/<triple>/release/bundle/...
@@ -390,66 +447,79 @@ async function detectLocalBundleOutputs() {
       const children = await readdir(root, { withFileTypes: true });
       for (const child of children) {
         if (!child.isDirectory()) continue;
-        if (existsSync(path.join(root, child.name, "release", "bundle"))) return true;
+        const nested = path.join(root, child.name, "release", "bundle");
+        if (existsSync(nested)) bundleDirs.push(nested);
       }
     } catch {
       // ignore
     }
   }
 
+  return Array.from(new Set(bundleDirs)).sort();
+}
+
+/**
+ * @param {string} dir
+ * @param {string} suffixLower
+ */
+async function dirHasFileWithSuffix(dir, suffixLower) {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (entry.name.toLowerCase().endsWith(suffixLower)) return true;
+    }
+  } catch {
+    // ignore
+  }
   return false;
 }
 
 /**
- * @param {string} validatorPath
- * @param {string} key
- * @returns {Step}
+ * @param {string[]} bundleDirs
  */
-function makeValidatorStep(validatorPath, key) {
-  const base = path.basename(validatorPath);
-  const ext = path.extname(base).toLowerCase();
-
-  if (ext === ".mjs") {
-    return {
-      id: `local-bundles:${base}`,
-      title: `Validate local bundles (${key}): ${base}`,
-      command: process.execPath,
-      args: [validatorPath],
-      skipIfMissing: true,
-      fileToCheck: validatorPath,
-    };
-  }
-
-  if (ext === ".sh") {
-    return {
-      id: `local-bundles:${base}`,
-      title: `Validate local bundles (${key}): ${base}`,
-      command: "bash",
-      args: [validatorPath],
-      skipIfMissing: true,
-      fileToCheck: validatorPath,
-    };
-  }
-
-  if (ext === ".ps1") {
-    const pwsh = pickPowerShellCommand();
-    return {
-      id: `local-bundles:${base}`,
-      title: `Validate local bundles (${key}): ${base}`,
-      command: pwsh,
-      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", validatorPath],
-      skipIfMissing: true,
-      fileToCheck: validatorPath,
-    };
-  }
-
-  return {
-    id: `local-bundles:${base}`,
-    title: `Validate local bundles (${key}): ${base}`,
-    command: process.execPath,
-    args: [],
-    skipReason: `Unsupported validator script type: ${base}`,
+async function detectBundleArtifacts(bundleDirs) {
+  const artifacts = {
+    appimage: false,
+    rpm: false,
+    deb: false,
+    dmg: false,
+    msi: false,
+    exe: false,
   };
+
+  for (const bundleDir of bundleDirs) {
+    if (!artifacts.appimage) {
+      artifacts.appimage = await dirHasFileWithSuffix(path.join(bundleDir, "appimage"), ".appimage");
+    }
+    if (!artifacts.rpm) {
+      artifacts.rpm = await dirHasFileWithSuffix(path.join(bundleDir, "rpm"), ".rpm");
+    }
+    if (!artifacts.deb) {
+      artifacts.deb = await dirHasFileWithSuffix(path.join(bundleDir, "deb"), ".deb");
+    }
+    if (!artifacts.dmg) {
+      artifacts.dmg = await dirHasFileWithSuffix(path.join(bundleDir, "dmg"), ".dmg");
+    }
+    if (!artifacts.msi) {
+      artifacts.msi = await dirHasFileWithSuffix(path.join(bundleDir, "msi"), ".msi");
+    }
+    if (!artifacts.exe) {
+      artifacts.exe =
+        (await dirHasFileWithSuffix(path.join(bundleDir, "nsis"), ".exe")) ||
+        (await dirHasFileWithSuffix(path.join(bundleDir, "nsis-web"), ".exe"));
+    }
+  }
+
+  return artifacts;
+}
+
+/**
+ * @param {string} cmd
+ */
+function commandExists(cmd) {
+  const res = spawnSync(cmd, ["--version"], { stdio: "ignore" });
+  return !res.error;
 }
 
 /**
@@ -647,8 +717,8 @@ async function main() {
     const key = platformKey(process.platform);
     const scriptsDir = path.join(repoRoot, "scripts");
 
-    const hasBundles = await detectLocalBundleOutputs();
-    if (!hasBundles) {
+    const bundleDirs = await collectBundleDirs();
+    if (bundleDirs.length === 0) {
       steps.push({
         id: "local-bundles",
         title: `Local bundle validation (${key})`,
@@ -658,6 +728,7 @@ async function main() {
           "No local Tauri bundles found (expected output under apps/desktop/src-tauri/target/**/release/bundle). Build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build",
       });
     } else {
+      const artifacts = await detectBundleArtifacts(bundleDirs);
       const validators = await discoverLocalBundleValidators(scriptsDir, key);
       if (validators.length === 0) {
         steps.push({
@@ -669,7 +740,35 @@ async function main() {
         });
       } else {
         for (const validator of validators) {
-          steps.push(makeValidatorStep(validator, key));
+          const base = path.basename(validator);
+          const lower = base.toLowerCase();
+
+          /** @type {string | undefined} */
+          let skipReason;
+          /** @type {string[]} */
+          const extraArgs = [];
+
+          if (key === "linux" && lower.includes("appimage") && !artifacts.appimage) {
+            skipReason =
+              "No local .AppImage bundles found under target/**/release/bundle/appimage/*.AppImage (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+          } else if (key === "linux" && lower.includes("rpm") && !artifacts.rpm) {
+            skipReason =
+              "No local .rpm bundles found under target/**/release/bundle/rpm/*.rpm (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+          } else if (key === "macos" && lower.includes("macos") && !artifacts.dmg) {
+            skipReason =
+              "No local .dmg bundles found under target/**/release/bundle/dmg/*.dmg (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+          } else if (key === "windows" && lower.includes("windows") && !artifacts.exe && !artifacts.msi) {
+            skipReason =
+              "No local Windows installer bundles found under target/**/release/bundle/(msi|nsis) (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
+          }
+
+          // validate-linux-rpm.sh can optionally run an installability check inside a Fedora container.
+          // If Docker isn't available locally, still run the static checks.
+          if (base === "validate-linux-rpm.sh" && skipReason === undefined && !commandExists("docker")) {
+            extraArgs.push("--no-container");
+          }
+
+          steps.push(makeValidatorStep(validator, key, { extraArgs, skipReason }));
         }
       }
     }
