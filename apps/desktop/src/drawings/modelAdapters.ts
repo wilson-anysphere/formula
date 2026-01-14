@@ -680,17 +680,33 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
   if (!isRecord(anchorJson)) return null;
   const anchorType = readOptionalString(pick(anchorJson, ["type"])) ?? "";
 
-  const resolveOffsetEmu = (axis: "x" | "y"): number => {
+  const resolveOffsetEmuFrom = (record: JsonRecord, axis: "x" | "y"): number => {
     const emuKeys =
       axis === "x"
         ? ["xEmu", "x_emu", "dxEmu", "offsetXEmu", "offset_x_emu"]
         : ["yEmu", "y_emu", "dyEmu", "offsetYEmu", "offset_y_emu"];
     const pxKeys = axis === "x" ? ["x", "dx", "offsetX", "offsetXPx", "offset_x"] : ["y", "dy", "offsetY", "offsetYPx", "offset_y"];
 
-    const directEmu = readOptionalNumber(pick(anchorJson, emuKeys));
+    const directEmu = readOptionalNumber(pick(record, emuKeys));
     if (directEmu != null) return directEmu;
-    const px = readOptionalNumber(pick(anchorJson, pxKeys));
+    const px = readOptionalNumber(pick(record, pxKeys));
     return px != null ? pxToEmu(px) : 0;
+  };
+  const resolveOffsetEmu = (axis: "x" | "y"): number => resolveOffsetEmuFrom(anchorJson, axis);
+
+  const hasOffsetKeys = (record: JsonRecord, axis: "x" | "y"): boolean => {
+    const emuKeys =
+      axis === "x"
+        ? ["xEmu", "x_emu", "dxEmu", "offsetXEmu", "offset_x_emu"]
+        : ["yEmu", "y_emu", "dyEmu", "offsetYEmu", "offset_y_emu"];
+    const pxKeys = axis === "x" ? ["x", "dx", "offsetX", "offsetXPx", "offset_x"] : ["y", "dy", "offsetY", "offsetYPx", "offset_y"];
+    for (const key of emuKeys) {
+      if (Object.prototype.hasOwnProperty.call(record, key)) return true;
+    }
+    for (const key of pxKeys) {
+      if (Object.prototype.hasOwnProperty.call(record, key)) return true;
+    }
+    return false;
   };
 
   const resolvedSize =
@@ -724,8 +740,12 @@ function convertDocumentDrawingAnchorToUiAnchor(anchorJson: unknown, size: EmuSi
       return { type: "oneCell", from: { cell: { row, col }, offset }, size: resolvedSize };
     }
     case "absolute": {
-      const xEmu = resolveOffsetEmu("x");
-      const yEmu = resolveOffsetEmu("y");
+      // Support both DocumentController-style anchors (which may store `xEmu/yEmu` on the root)
+      // and UI-like anchors (which store `pos: { xEmu, yEmu }`).
+      const posValue = pick(anchorJson, ["pos"]);
+      const pos = isRecord(posValue) ? posValue : null;
+      const xEmu = pos && hasOffsetKeys(pos, "x") ? resolveOffsetEmuFrom(pos, "x") : resolveOffsetEmu("x");
+      const yEmu = pos && hasOffsetKeys(pos, "y") ? resolveOffsetEmuFrom(pos, "y") : resolveOffsetEmu("y");
       return { type: "absolute", pos: { xEmu, yEmu }, size: resolvedSize };
     }
     case "twoCell": {
