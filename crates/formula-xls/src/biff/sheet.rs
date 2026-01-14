@@ -1699,17 +1699,18 @@ pub(crate) fn parse_biff_sheet_merged_cells(
                         continue;
                     }
 
-                    if out.ranges.len() >= MAX_MERGED_RANGES_PER_SHEET {
+                    out.ranges.push(Range::new(
+                        CellRef::new(rw_first, col_first),
+                        CellRef::new(rw_last, col_last),
+                    ));
+
+                    if out.ranges.len() == MAX_MERGED_RANGES_PER_SHEET {
                         out.warnings.push(format!(
                             "too many merged ranges (cap={MAX_MERGED_RANGES_PER_SHEET}); stopping after {} ranges",
                             out.ranges.len()
                         ));
                         return Ok(out);
                     }
-                    out.ranges.push(Range::new(
-                        CellRef::new(rw_first, col_first),
-                        CellRef::new(rw_last, col_last),
-                    ));
                 }
             }
             records::RECORD_EOF => break,
@@ -2916,32 +2917,56 @@ mod tests {
     }
 
     #[test]
-    fn mergedcells_records_truncates_when_exceeding_cap() {
-        // Construct a single MERGEDCELLS record with (cap + 1) valid Ref8 entries.
-        let total = MAX_MERGED_RANGES_PER_SHEET + 1;
-        assert!(
-            total <= u16::MAX as usize,
-            "test cap must fit in a single MERGEDCELLS record"
-        );
+    fn caps_mergedcells_ranges_per_sheet() {
+        let cap = MAX_MERGED_RANGES_PER_SHEET;
+        assert!(cap >= 2, "test requires cap >= 2");
 
-        let mut merged = Vec::new();
-        merged.extend_from_slice(&(total as u16).to_le_bytes()); // cAreas
-        for idx in 0..total {
-            let row = idx as u16;
-            merged.extend_from_slice(&row.to_le_bytes()); // rwFirst
-            merged.extend_from_slice(&row.to_le_bytes()); // rwLast
-            merged.extend_from_slice(&0u16.to_le_bytes()); // colFirst
-            merged.extend_from_slice(&0u16.to_le_bytes()); // colLast
+        // Build more valid Ref8 areas than the hard cap:
+        // - First record includes `cap - 1` ranges.
+        // - Second record includes 2 ranges: one to reach the cap, plus a unique one beyond it.
+        let first_count = cap - 1;
+        let first_count_u16 =
+            u16::try_from(first_count).expect("test cap must fit in a MERGEDCELLS record");
+
+        let mut merged1 = Vec::new();
+        merged1.extend_from_slice(&first_count_u16.to_le_bytes());
+        for i in 0..first_count {
+            let row = u16::try_from(i).expect("row should fit in u16");
+            merged1.extend_from_slice(&row.to_le_bytes()); // rwFirst
+            merged1.extend_from_slice(&row.to_le_bytes()); // rwLast
+            merged1.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+            merged1.extend_from_slice(&1u16.to_le_bytes()); // colLast
         }
 
+        let cap_row = first_count_u16;
+        let beyond_row = 9999u16;
+        let beyond_range = Range::new(
+            CellRef::new(beyond_row as u32, 5),
+            CellRef::new(beyond_row as u32, 6),
+        );
+
+        let mut merged2 = Vec::new();
+        merged2.extend_from_slice(&2u16.to_le_bytes()); // cAreas
+        // Range that reaches the cap.
+        merged2.extend_from_slice(&cap_row.to_le_bytes()); // rwFirst
+        merged2.extend_from_slice(&cap_row.to_le_bytes()); // rwLast
+        merged2.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        merged2.extend_from_slice(&1u16.to_le_bytes()); // colLast
+        // Unique range beyond the cap.
+        merged2.extend_from_slice(&beyond_row.to_le_bytes()); // rwFirst
+        merged2.extend_from_slice(&beyond_row.to_le_bytes()); // rwLast
+        merged2.extend_from_slice(&5u16.to_le_bytes()); // colFirst
+        merged2.extend_from_slice(&6u16.to_le_bytes()); // colLast
+
         let stream = [
-            record(RECORD_MERGEDCELLS, &merged),
+            record(RECORD_MERGEDCELLS, &merged1),
+            record(RECORD_MERGEDCELLS, &merged2),
             record(records::RECORD_EOF, &[]),
         ]
         .concat();
 
         let parsed = parse_biff_sheet_merged_cells(&stream, 0).expect("parse");
-        assert_eq!(parsed.ranges.len(), MAX_MERGED_RANGES_PER_SHEET);
+        assert_eq!(parsed.ranges.len(), cap);
         assert!(
             parsed
                 .warnings
@@ -2949,6 +2974,17 @@ mod tests {
                 .any(|w| w.contains("too many merged ranges")),
             "expected cap warning, got {:?}",
             parsed.warnings
+        );
+        assert_eq!(
+            parsed.ranges.last().copied(),
+            Some(Range::new(
+                CellRef::new(cap_row as u32, 0),
+                CellRef::new(cap_row as u32, 1),
+            ))
+        );
+        assert!(
+            !parsed.ranges.contains(&beyond_range),
+            "expected range beyond cap to be absent"
         );
     }
 
