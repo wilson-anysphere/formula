@@ -242,6 +242,10 @@
   outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
 }
 
+.formula-table-filter-dropdown .formula-sort-filter__checkbox {
+  accent-color: var(--formula-grid-selection-border, var(--selection-border));
+}
+
 .formula-table-filter-dropdown .formula-sort-filter__checkbox:focus-visible {
   outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
 }

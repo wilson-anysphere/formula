@@ -32,6 +32,10 @@ test("AutoFilterDropdown uses grid-scoped --formula-grid-* tokens in sort-filter
       "Expected table filter dropdown checkboxes to use --formula-grid-selection-border for focus",
     ],
     [
+      /\.formula-table-filter-dropdown\s+\.formula-sort-filter__checkbox\s*\{[\s\S]*?accent-color:\s*var\(--formula-grid-selection-border\b/,
+      "Expected table filter dropdown checkboxes to use --formula-grid-selection-border for accent-color",
+    ],
+    [
       /\.formula-table-filter-dropdown\s+\.formula-sort-filter__button:not\(\.formula-sort-filter__button--primary\):hover:not\(:disabled\)\s*\{[\s\S]*?--formula-grid-scrollbar-track\b/,
       "Expected table filter dropdown secondary buttons to use --formula-grid-scrollbar-track for hover",
     ],
