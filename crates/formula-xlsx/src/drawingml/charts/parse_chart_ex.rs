@@ -262,7 +262,6 @@ fn detect_chart_kind(
 
     "unknown".to_string()
 }
-
 fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
     const MAX_HINTS: usize = 12;
 
