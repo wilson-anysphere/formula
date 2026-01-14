@@ -695,4 +695,3 @@ mod tests {
         assert!(!verify_password_standard(&parsed, wrong_password).unwrap());
     }
 }
-

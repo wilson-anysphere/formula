@@ -382,6 +382,7 @@ impl XlsbWorkbook {
             return parse_sheet(
                 &mut cursor,
                 &self.shared_strings,
+                Some(&self.shared_strings_table),
                 &self.workbook_context,
                 self.preserve_parsed_parts,
                 self.decode_formulas,
@@ -459,6 +460,7 @@ impl XlsbWorkbook {
             parse_sheet_stream(
                 &mut cursor,
                 &self.shared_strings,
+                Some(&self.shared_strings_table),
                 &self.workbook_context,
                 self.preserve_parsed_parts,
                 self.decode_formulas,

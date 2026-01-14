@@ -246,4 +246,3 @@ mod tests {
         assert_eq!(h, expected);
     }
 }
-

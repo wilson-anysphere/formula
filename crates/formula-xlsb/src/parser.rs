@@ -1640,7 +1640,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
     shared_strings: &[String],
     shared_strings_table: Option<&[SharedString]>,
     ctx: &WorkbookContext,
-    _preserve_parsed_parts: bool,
+    preserve_parsed_parts: bool,
     decode_formulas: bool,
     mut on_cell: F,
 ) -> Result<Option<Dimension>, Error> {
