@@ -94,6 +94,18 @@ export interface EngineSyncTarget {
   setColStyleId?: (col: number, styleId: number, sheet?: string) => Promise<void> | void;
   setSheetDefaultStyleId?: (styleId: number, sheet?: string) => Promise<void> | void;
   /**
+   * Update a sheet's compressed range-run formatting layer (`DocumentController`'s `formatRunsByCol`).
+   *
+   * Runs are half-open row intervals `[startRow, endRowExclusive)` and reference an engine style id.
+   *
+   * This is an additive API and may not be implemented by all engine targets.
+   */
+  setFormatRunsByCol?: (
+    sheet: string,
+    col: number,
+    runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+  ) => Promise<void> | void;
+  /**
    * Set (or clear) a per-column width override for a sheet.
    *
    * `widthChars` is expressed in Excel "character" units (OOXML `col/@width`), not pixels.
@@ -359,9 +371,9 @@ export async function engineHydrateFromDocument(
   // opening a document that already contains persisted column width overrides).
   const setColWidthChars =
     typeof engine.setColWidthChars === "function"
-      ? engine.setColWidthChars
+      ? engine.setColWidthChars.bind(engine)
       : typeof engine.setColWidth === "function"
-        ? engine.setColWidth
+        ? engine.setColWidth.bind(engine)
         : null;
 
   if (setColWidthChars && typeof doc?.getSheetView === "function") {
@@ -425,6 +437,35 @@ export async function engineHydrateFromDocument(
             if (!Number.isInteger(docStyleId) || docStyleId === 0) continue;
             const engineStyleId = await resolveEngineStyleIdForDocStyleId(engine, ctx, docStyleId);
             await engine.setColStyleId(col, engineStyleId, engineSheetId);
+          }
+        }
+
+        // Sync compressed range-run formatting (`SheetModel.formatRunsByCol`) when the engine
+        // exposes the optional hook. This ensures large range formatting operations are visible
+        // to Excel-compatible functions like `CELL("prefix")` / `CELL("protect")` even when the
+        // DocumentController did not materialize per-cell style ids.
+        if (typeof engine.setFormatRunsByCol === "function" && sheet?.formatRunsByCol?.entries) {
+          for (const [col, rawRuns] of sheet.formatRunsByCol.entries() as Iterable<[number, any[]]>) {
+            if (!Number.isInteger(col) || col < 0 || col >= 16_384) continue;
+            if (!Array.isArray(rawRuns) || rawRuns.length === 0) continue;
+
+            const runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }> = [];
+            for (const run of rawRuns) {
+              const startRow = Number((run as any)?.startRow);
+              const endRowExclusive = Number((run as any)?.endRowExclusive);
+              const docStyleId = Number((run as any)?.styleId);
+
+              if (!Number.isInteger(startRow) || startRow < 0 || startRow >= 1_048_576) continue;
+              if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow || endRowExclusive > 1_048_576) continue;
+              if (!Number.isInteger(docStyleId) || docStyleId <= 0) continue;
+
+              const engineStyleId = await resolveEngineStyleIdForDocStyleId(engine, ctx, docStyleId);
+              runs.push({ startRow, endRowExclusive, styleId: engineStyleId });
+            }
+
+            if (runs.length > 0) {
+              await engine.setFormatRunsByCol(engineSheetId, col, runs);
+            }
           }
         }
       }
@@ -640,9 +681,9 @@ export async function engineApplyDocumentChange(
   let didApplyAnyColWidths = false;
   const setColWidthChars =
     typeof engine.setColWidthChars === "function"
-      ? engine.setColWidthChars
+      ? engine.setColWidthChars.bind(engine)
       : typeof engine.setColWidth === "function"
-        ? engine.setColWidth
+        ? engine.setColWidth.bind(engine)
         : null;
 
   if (setColWidthChars && sheetViewDeltas.length > 0) {

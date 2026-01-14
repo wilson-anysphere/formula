@@ -167,6 +167,14 @@ describe("engine sync helpers", () => {
     readonly setCalls: Array<{ address: string; value: unknown; sheet?: string }> = [];
     readonly internStyleCalls: unknown[] = [];
     readonly setStyleCalls: Array<{ address: string; styleId: number; sheet?: string }> = [];
+    readonly sheetDefaultStyleCalls: Array<{ sheet?: string; styleId: number }> = [];
+    readonly rowStyleCalls: Array<{ sheet?: string; row: number; styleId: number }> = [];
+    readonly colStyleCalls: Array<{ sheet?: string; col: number; styleId: number }> = [];
+    readonly formatRunsByColCalls: Array<{
+      sheet: string;
+      col: number;
+      runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>;
+    }> = [];
     readonly colWidthCalls: Array<{ sheet: string; col: number; widthChars: number | null }> = [];
     readonly recalcCalls: Array<string | undefined> = [];
     constructor(private readonly recalcResult: CellChange[]) {}
@@ -186,6 +194,26 @@ describe("engine sync helpers", () => {
 
     async setCellStyleId(sheet: string, address: string, styleId: number): Promise<void> {
       this.setStyleCalls.push({ address, styleId, sheet });
+    }
+
+    async setSheetDefaultStyleId(styleId: number, sheet?: string): Promise<void> {
+      this.sheetDefaultStyleCalls.push({ sheet, styleId });
+    }
+
+    async setRowStyleId(row: number, styleId: number, sheet?: string): Promise<void> {
+      this.rowStyleCalls.push({ sheet, row, styleId });
+    }
+
+    async setColStyleId(col: number, styleId: number, sheet?: string): Promise<void> {
+      this.colStyleCalls.push({ sheet, col, styleId });
+    }
+
+    async setFormatRunsByCol(
+      sheet: string,
+      col: number,
+      runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }>,
+    ): Promise<void> {
+      this.formatRunsByColCalls.push({ sheet, col, runs });
     }
 
     async setColWidth(sheet: string, col: number, widthChars: number | null): Promise<void> {
@@ -247,6 +275,54 @@ describe("engine sync helpers", () => {
 
     expect(engine.internStyleCalls).toEqual([doc.styleTable.get(styleId)]);
     expect(engine.setStyleCalls).toEqual([{ address: "A1", styleId: 1, sheet: "Sheet1" }]);
+  });
+
+  it("engineHydrateFromDocument syncs sheet/row/col style layers when the engine supports them", async () => {
+    const doc = new DocumentController();
+    doc.addSheet({ sheetId: "sheet_2", name: "Budget" });
+
+    doc.setSheetFormat("sheet_2", { font: { italic: true } });
+    doc.setRowFormat("sheet_2", 0, { font: { bold: true } });
+    doc.setColFormat("sheet_2", 1, { font: { underline: true } });
+
+    const sheet = (doc as any)?.model?.sheets?.get?.("sheet_2");
+    expect(sheet).toBeTruthy();
+    expect(sheet.defaultStyleId).not.toBe(0);
+    expect(sheet.rowStyleIds.get(0)).not.toBe(0);
+    expect(sheet.colStyleIds.get(1)).not.toBe(0);
+
+    const engine = new FakeEngine([]);
+    await engineHydrateFromDocument(engine, doc);
+
+    // Uses the display name as the engine sheet id.
+    expect(engine.sheetDefaultStyleCalls).toEqual([{ sheet: "Budget", styleId: expect.any(Number) }]);
+    expect(engine.rowStyleCalls).toEqual([{ sheet: "Budget", row: 0, styleId: expect.any(Number) }]);
+    expect(engine.colStyleCalls).toEqual([{ sheet: "Budget", col: 1, styleId: expect.any(Number) }]);
+  });
+
+  it("engineHydrateFromDocument syncs compressed range-run formatting when the engine supports it", async () => {
+    const doc = new DocumentController();
+
+    // Force range-run formatting (area > RANGE_RUN_FORMAT_THRESHOLD).
+    doc.setRangeFormat("Sheet1", "A1:Z2000", { font: { italic: true } });
+
+    const sheet = (doc as any)?.model?.sheets?.get?.("Sheet1");
+    const col0Runs = sheet?.formatRunsByCol?.get?.(0) ?? [];
+    expect(col0Runs.length).toBeGreaterThan(0);
+
+    const docStyleId = col0Runs[0]?.styleId ?? 0;
+    expect(docStyleId).not.toBe(0);
+
+    const engine = new FakeEngine([]);
+    await engineHydrateFromDocument(engine, doc);
+
+    expect(engine.internStyleCalls).toEqual(expect.arrayContaining([doc.styleTable.get(docStyleId)]));
+
+    const col0 = engine.formatRunsByColCalls.find((call) => call.sheet === "Sheet1" && call.col === 0);
+    expect(col0).toBeTruthy();
+    expect(col0?.runs).toEqual(
+      expect.arrayContaining([{ startRow: 0, endRowExclusive: 2000, styleId: 1 }]),
+    );
   });
 
   it("engineHydrateFromDocument syncs sheet view column widths into engine metadata", async () => {
