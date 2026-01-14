@@ -265,7 +265,9 @@ APIs (source: [`packages/collab/encrypted-ranges/src/index.ts`](../packages/coll
 - `EncryptedRangeManager`
   - `list(): EncryptedRange[]` (deterministic ordering)
   - `add(range: { sheetId, startRow, startCol, endRow, endCol, keyId, createdAt?, createdBy? }): string`
+    - `sheetId` should be the stable workbook sheet id; as a best-effort convenience, `EncryptedRangeManager` will resolve a sheet *display name* to its id when possible (useful for legacy/UI-driven callsites).
   - `update(id: string, patch: Partial<...>): void`
+    - Like `add`, `patch.sheetId` is best-effort resolved from sheet display name → stable id when possible.
   - `remove(id: string): void`
 - `createEncryptedRangeManagerForSession(session)` → `EncryptedRangeManager`
   - Uses `session.transactLocal(...)` so range edits participate in collaborative undo scope.
