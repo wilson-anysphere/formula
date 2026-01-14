@@ -775,6 +775,22 @@ test("tauri-updater-manifest: validateTauriUpdaterManifest rejects Linux AppImag
   );
 });
 
+test("tauri-updater-manifest: validateTauriUpdaterManifest ignores installer-specific platform keys", () => {
+  assert.doesNotThrow(() =>
+    validateTauriUpdaterManifest({
+      version: "0.1.0",
+      platforms: {
+        // Runtime updater key: must be AppImage.
+        "linux-x86_64": { url: "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_x86_64.AppImage" },
+        // Installer-specific key: allowed to point at a distro package.
+        "linux-x86_64-deb": { url: "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0_amd64.deb" },
+        // Installer-specific key: allowed to point at a macOS installer bundle.
+        "darwin-x86_64-dmg": { url: "https://example.invalid/download/v0.1.0/formula-desktop_0.1.0.dmg" },
+      },
+    }),
+  );
+});
+
 test("tauri-updater-manifest: verifyTauriManifestSignature returns false for a wrong signature", async () => {
   const manifestText = await readTextFixture("latest.multi-platform.json");
   const keypair = await readJsonFixture("test-keypair.json");

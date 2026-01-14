@@ -163,6 +163,14 @@ export function validateTauriUpdaterManifest(manifest, opts = {}) {
       const path = urlPathname(url);
       const lower = path.toLowerCase();
       const os = inferOsFromPlatformKey(platformKey);
+      // Only enforce "updater-friendly" artifact type rules for the runtime `{os}-{arch}` keys.
+      //
+      // Some Tauri versions/tools may emit additional installer-specific keys of the form
+      // `{os}-{arch}-{bundle}` (e.g. `linux-x86_64-deb` / `windows-x86_64-nsis`). Those are allowed
+      // to reference installer bundles like `.deb`/`.rpm`/`.dmg`/`.exe`.
+      const keyParts = platformKey.split("-");
+      const isRuntimeKey = keyParts.length === 2;
+      if (!isRuntimeKey) continue;
 
       if (os === "darwin") {
         if (lower.endsWith(".dmg") || lower.endsWith(".pkg")) {
