@@ -93,9 +93,7 @@ export function getDocTypeConstructors(doc: unknown): DocTypeConstructors {
   }
 }
 
-const patchedItemConstructors = new WeakSet<Function>();
 const patchedAbstractTypeConstructors = new WeakSet<Function>();
-const patchedContentConstructors = new WeakMap<Function, Function>();
 
 function isYjsItemStruct(value: unknown): value is any {
   if (!value || typeof value !== "object") return false;
@@ -150,13 +148,13 @@ export function patchForeignAbstractTypeConstructor(type: unknown): void {
 export function patchForeignItemConstructor(item: unknown): void {
   if (!isYjsItemStruct(item)) return;
   if (item instanceof Y.Item) return;
-  const ctor = (item as any).constructor as Function | undefined;
-  if (!ctor || ctor === Y.Item) return;
-  if (patchedItemConstructors.has(ctor)) return;
-  patchedItemConstructors.add(ctor);
+  // Patch the *instance* (not the constructor prototype) so we don't mutate the foreign
+  // module instance's global prototypes. Mutating foreign constructors breaks that
+  // module's own constructor equality checks (notably for Y.Text Content* helpers),
+  // which can corrupt subsequent uses of the foreign `yjs` instance in the same process
+  // (e.g. tests that create multiple CJS docs).
   try {
-    Object.setPrototypeOf((ctor as any).prototype, Y.Item.prototype);
-    (ctor as any).prototype.constructor = Y.Item;
+    Object.setPrototypeOf(item as any, Y.Item.prototype);
   } catch {
     // Best-effort.
   }
@@ -164,31 +162,40 @@ export function patchForeignItemConstructor(item: unknown): void {
 
 function patchForeignContentConstructor(content: unknown): void {
   if (!content || typeof content !== "object") return;
-  const ctor = (content as any).constructor as Function | undefined;
-  if (!ctor) return;
-  if (patchedContentConstructors.has(ctor)) return;
-
-  // Prefer duck typing over constructor names so bundlers that rename constructors
-  // still work. Patch only the content types we know are used by Y.Text methods.
-  let localCtor: Function | null = null;
+  // Prefer patching the instance prototype (not the constructor prototype) so we
+  // avoid mutating the foreign module instance's global prototypes. Y.Text methods
+  // in the foreign module rely on constructor equality checks; patching the foreign
+  // Content* constructors can make subsequent foreign docs behave incorrectly.
   const maybe = content as any;
+  if (typeof maybe.getRef === "function") {
+    const ref = maybe.getRef();
+    if (typeof ref === "number") {
+      const proto = getYTextContentPrototypesByRef().get(ref);
+      if (proto && Object.getPrototypeOf(content) !== proto) {
+        try {
+          Object.setPrototypeOf(content, proto);
+        } catch {
+          // Ignore: non-extensible content objects (unexpected).
+        }
+      }
+      return;
+    }
+  }
+
+  // Best-effort fallback when `getRef` isn't available: patch only the known simple
+  // content types used by Y.Text methods (string + formatting + embed objects).
+  let localProto: object | null = null;
   if (typeof maybe.str === "string") {
-    localCtor = Y.ContentString;
+    localProto = Y.ContentString.prototype;
   } else if (typeof maybe.key === "string" && ("value" in maybe || "val" in maybe)) {
-    localCtor = Y.ContentFormat;
+    localProto = Y.ContentFormat.prototype;
   } else if ("embed" in maybe) {
-    localCtor = Y.ContentEmbed;
+    localProto = Y.ContentEmbed.prototype;
   }
 
-  if (!localCtor || ctor === localCtor) {
-    patchedContentConstructors.set(ctor, ctor);
-    return;
-  }
-
-  patchedContentConstructors.set(ctor, localCtor);
+  if (!localProto || Object.getPrototypeOf(content) === localProto) return;
   try {
-    Object.setPrototypeOf((ctor as any).prototype, (localCtor as any).prototype);
-    (ctor as any).prototype.constructor = localCtor;
+    Object.setPrototypeOf(content, localProto);
   } catch {
     // Best-effort.
   }
@@ -410,6 +417,17 @@ export function getTextRoot(doc: Y.Doc, name: string): Y.Text {
   }
 
   if (existing instanceof Y.AbstractType && (existing as any).constructor === Y.AbstractType) {
+    // Yjs' built-in `doc.getText(name)` conversion logic is sufficient for same-module
+    // placeholders, but fails in mixed-module environments (ESM doc + CJS applyUpdate).
+    // In that case, the placeholder's Item.content objects come from the foreign module
+    // instance, so the resulting local Y.Text may treat them as "unknown" and report
+    // an empty string via `toString()`.
+    //
+    // Reuse the `replaceForeignRootType` path so we can patch Content* prototypes for
+    // the local module instance (see Y.Text special case inside that helper).
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Text() }) as any;
+    }
     return doc.getText(name);
   }
 
