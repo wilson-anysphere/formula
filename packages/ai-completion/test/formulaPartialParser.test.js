@@ -107,3 +107,15 @@ test("parsePartialFormula ignores ';' inside nested function calls (depth > base
   assert.equal(parsed.argIndex, 1);
   assert.equal(parsed.currentArg?.text, "A");
 });
+
+test("parsePartialFormula supports non-ASCII function names (localized identifiers)", () => {
+  const registry = new FunctionRegistry();
+  const input = "=zählenwenn(A1;"; // COUNTIF in German Excel.
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, true);
+  assert.equal(parsed.functionName, "ZÄHLENWENN");
+  assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.currentArg?.text, "");
+});

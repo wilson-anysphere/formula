@@ -126,6 +126,42 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
   };
 }
 
+const UNICODE_ALNUM_RE = (() => {
+  try {
+    // Match the Rust backend's `char::is_alphanumeric` (Alphabetic || Number).
+    return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
+  } catch {
+    // Older JS engines may not support Unicode property escapes.
+    return null;
+  }
+})();
+
+/**
+ * True when `ch` is a valid identifier character for function names / name prefixes.
+ *
+ * This is intentionally conservative and only needs to support Excel-like function identifiers:
+ * letters/digits plus `.` and `_` (e.g. `_xlfn.XLOOKUP`, `WEIBULL.DIST`).
+ *
+ * @param {string} ch
+ */
+function isIdentChar(ch) {
+  if (!ch) return false;
+  // Fast path for ASCII.
+  const code = ch.charCodeAt(0);
+  if (
+    (code >= 48 && code <= 57) || // 0-9
+    (code >= 65 && code <= 90) || // A-Z
+    (code >= 97 && code <= 122) || // a-z
+    code === 46 || // .
+    code === 95 // _
+  ) {
+    return true;
+  }
+
+  // Best-effort Unicode support for localized function names (e.g. ZÄHLENWENN).
+  return Boolean(UNICODE_ALNUM_RE && UNICODE_ALNUM_RE.test(ch));
+}
+
 function clampCursor(input, cursorPosition) {
   const len = typeof input === "string" ? input.length : 0;
   if (!Number.isInteger(cursorPosition)) return len;
@@ -144,7 +180,7 @@ function findFunctionNameBeforeParen(input, openParenIndex) {
   let i = openParenIndex - 1;
   while (i >= 0 && /\s/.test(input[i])) i--;
   const end = i + 1;
-  while (i >= 0 && /[A-Za-z0-9._]/.test(input[i])) i--;
+  while (i >= 0 && isIdentChar(input[i])) i--;
   const start = i + 1;
   const token = input.slice(start, end);
   if (!token) return null;
@@ -260,7 +296,7 @@ function findTokenAtCursor(inputPrefix, cursorPosition) {
   // When completing function names we look at the token at cursor in the formula.
   // Example: "=VLO" => token "VLO" spanning [1, 4).
   let i = cursorPosition - 1;
-  while (i >= 0 && /[A-Za-z0-9._]/.test(inputPrefix[i])) i--;
+  while (i >= 0 && isIdentChar(inputPrefix[i])) i--;
   const start = i + 1;
   const end = cursorPosition;
   const text = inputPrefix.slice(start, end);
