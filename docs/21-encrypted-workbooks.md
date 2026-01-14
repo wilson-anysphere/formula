@@ -53,6 +53,12 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
     the `.xls` importer (XOR, RC4 “standard”, and RC4 CryptoAPI; see below).
 - The desktop app (with `formula-io/encrypted-workbooks` enabled) surfaces a **password required**
   style error (so the UI can prompt for a password).
+- The web/WASM engine can decrypt and open Office-encrypted OOXML `.xlsx` bytes in-memory:
+  - WASM entrypoint: `crates/formula-wasm::WasmWorkbook::fromEncryptedXlsxBytes(bytes, password)`
+  - Worker API: `packages/engine` exposes `EngineClient.loadWorkbookFromEncryptedXlsxBytes(bytes, password)`
+  - Limitation: the WASM loader currently only supports decrypted packages that contain
+    `xl/workbook.xml` (i.e. `.xlsx` / `.xlsm`); decrypted `.xlsb` packages (`xl/workbook.bin`) are
+    rejected with a clear error.
 
 **Intended behavior / remaining work:**
 
