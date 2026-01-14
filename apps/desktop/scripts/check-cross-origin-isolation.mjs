@@ -249,12 +249,12 @@ async function main() {
     const buildFrontendCode = await run("pnpm", ["build"], { cwd: desktopDir });
     if (buildFrontendCode !== 0) process.exit(buildFrontendCode);
 
-    if (!fs.existsSync(frontendDistIndex) || !fs.existsSync(frontendDistWorker)) {
+    if (!statIsFile(frontendDistIndex) || !statIsFile(frontendDistWorker)) {
       console.error("[coi-check] ERROR: desktop frontend build completed but required dist files are missing.");
-      if (!fs.existsSync(frontendDistIndex)) {
+      if (!statIsFile(frontendDistIndex)) {
         console.error(`[coi-check] Missing: ${frontendDistIndex}`);
       }
-      if (!fs.existsSync(frontendDistWorker)) {
+      if (!statIsFile(frontendDistWorker)) {
         console.error(`[coi-check] Missing: ${frontendDistWorker}`);
       }
       console.error("[coi-check] Hint: ensure Vite outputs to apps/desktop/dist and includes public/coi-check-worker.js.");
@@ -263,8 +263,8 @@ async function main() {
   } else {
     console.log("[coi-check] --no-build enabled; skipping frontend + Rust builds.");
     const missingDist = [];
-    if (!fs.existsSync(frontendDistIndex)) missingDist.push(frontendDistIndex);
-    if (!fs.existsSync(frontendDistWorker)) missingDist.push(frontendDistWorker);
+    if (!statIsFile(frontendDistIndex)) missingDist.push(frontendDistIndex);
+    if (!statIsFile(frontendDistWorker)) missingDist.push(frontendDistWorker);
     if (missingDist.length > 0) {
       console.error("[coi-check] ERROR: expected built frontend dist is missing required files:");
       for (const p of missingDist) console.error(`  - ${p}`);
@@ -284,7 +284,7 @@ async function main() {
 
   const binary = explicitBin ? resolveBinPath(explicitBin) : noBuild ? detectBuiltDesktopBinary() : desktopBinaryPath();
 
-  if (!binary || !fs.existsSync(binary)) {
+  if (!binary || !statIsFile(binary)) {
     const exe = process.platform === "win32" ? `${DESKTOP_BINARY_NAME}.exe` : DESKTOP_BINARY_NAME;
     const searched = [
       path.join(repoRoot, "target", "release", exe),
@@ -294,7 +294,7 @@ async function main() {
     ];
     console.error("[coi-check] ERROR: could not find a built desktop binary to run.");
     if (explicitBin) {
-      console.error(`[coi-check] --bin was provided but does not exist: ${binary}`);
+      console.error(`[coi-check] --bin was provided but is not a file: ${binary}`);
     } else if (noBuild) {
       console.error("[coi-check] Searched common locations such as:");
       for (const p of searched) console.error(`  - ${p}`);

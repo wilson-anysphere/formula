@@ -44,7 +44,7 @@ test("pnpm check:coi script builds via cargo_agent and targets the desktop tauri
   // Should ensure the expected release binary exists after the build.
   assert.match(
     src,
-    /existsSync\(\s*binary\s*\)/,
+    /(?:existsSync|statIsFile)\(\s*binary\s*\)/,
     "expected COI smoke-check script to verify the built binary exists",
   );
 
