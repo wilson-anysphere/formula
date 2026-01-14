@@ -1350,11 +1350,11 @@ jobs:
             target/**/release/bundle/**
 
       - name: Export updater manifest for merge (latest.json)
-        if: needs.preflight.outputs.upload == 'true'
+        if: needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
         run: node scripts/ci/export-updater-manifest.mjs "updater-manifest/latest-${{ matrix.cache_target }}.json"
 
       - name: Upload updater manifest artifact (per-platform)
-        if: needs.preflight.outputs.upload == 'true'
+        if: needs.preflight.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: updater-manifest-${{ matrix.cache_target }}
