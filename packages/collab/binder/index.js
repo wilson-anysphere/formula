@@ -1773,8 +1773,18 @@ export function bindYjsToDocumentController(options) {
     for (const delta of deltas) {
       const sheetId = delta?.sheetId;
       if (typeof sheetId !== "string" || sheetId === "") continue;
+      const before = delta?.before ?? emptySheetViewState();
       const after = delta?.after ?? emptySheetViewState();
-      prepared.push({ sheetId, view: normalizeSheetViewState(after) });
+
+      // Some DocumentController implementations store additional shared layout metadata inside
+      // sheet view state (e.g. drawings, merged ranges). The binder intentionally does not
+      // sync those fields. When a view delta only touches unknown keys, skip the write to
+      // avoid clobbering (or redundantly rewriting) the existing Yjs `sheet.view` payload.
+      const normalizedBefore = normalizeSheetViewState(before);
+      const normalizedAfter = normalizeSheetViewState(after);
+      if (sheetViewStateEquals(normalizedBefore, normalizedAfter)) continue;
+
+      prepared.push({ sheetId, view: normalizedAfter });
     }
 
     if (prepared.length === 0) return;
