@@ -236,6 +236,14 @@ fn pivot_field_ref_display_and_canonical_name_handle_dax_quoting_and_escaping() 
     };
     assert_eq!(leading_digit_table.to_string(), "'2024Orders'[Amount]");
 
+    // DAX keywords must be quoted to avoid ambiguity in DAX expressions.
+    let keyword_table = PivotFieldRef::DataModelColumn {
+        table: "VAR".to_string(),
+        column: "Amount".to_string(),
+    };
+    assert_eq!(keyword_table.to_string(), "'VAR'[Amount]");
+    assert_eq!(keyword_table.canonical_name().as_ref(), "VAR[Amount]");
+
     // Column and measure names escape `]` as `]]` inside DAX brackets.
     let bracketed_column = PivotFieldRef::DataModelColumn {
         table: "Orders".to_string(),
