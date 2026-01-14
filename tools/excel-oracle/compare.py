@@ -96,6 +96,41 @@ def _redact_tag_name(tag: str, *, privacy_mode: str) -> str:
     return f"sha256={_sha256_text(normalized)}"
 
 
+def _redact_case_id(case_id: str, *, privacy_mode: str) -> str:
+    """Redact case IDs that may embed sensitive identifiers.
+
+    The canonical in-repo oracle corpus uses stable, non-sensitive IDs, but external/private corpora
+    may include case IDs derived from filenames, domains, or custom namespaces. In privacy mode we
+    hash case IDs that look like they contain such identifiers while keeping simple IDs readable.
+    """
+
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return case_id
+    if not case_id or case_id.startswith("sha256="):
+        return case_id
+
+    # If it looks like an absolute path or URI, always redact.
+    redacted = _redact_text(case_id, privacy_mode=privacy_mode)
+    if redacted is not None and redacted != case_id:
+        return redacted
+
+    lowered = case_id.casefold()
+    if any(ch in case_id for ch in ("/", "\\", "@")):
+        return f"sha256={_sha256_text(case_id)}"
+
+    # Domain-like / file-like indicators.
+    if "." in case_id:
+        return f"sha256={_sha256_text(case_id)}"
+    if re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", case_id):
+        return f"sha256={_sha256_text(case_id)}"
+    if re.search(r"\.(xlsx|xlsm|xlsb|xltx|xltm|xls|csv|tsv)\b", lowered):
+        return f"sha256={_sha256_text(case_id)}"
+    if re.search(r"\.(com|net|org|io|ai|dev|edu|gov|local|internal|corp)\b", lowered):
+        return f"sha256={_sha256_text(case_id)}"
+
+    return case_id
+
+
 def _load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
@@ -925,6 +960,10 @@ def main() -> int:
 
         # Redact per-case mismatch tags.
         for m in mismatches:
+            cid = m.get("caseId")
+            if isinstance(cid, str) and cid:
+                m["caseId"] = _redact_case_id(cid, privacy_mode=args.privacy_mode)
+
             tags = m.get("tags")
             if isinstance(tags, list):
                 out_tags: list[str] = []
