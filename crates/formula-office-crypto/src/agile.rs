@@ -315,11 +315,13 @@ pub(crate) fn decrypt_agile_encrypted_package(
             &iv_hmac_key,
             &info.data_integrity.encrypted_hmac_key,
         )?);
-        let hmac_key_plain = hmac_key_plain.get(..digest_len).ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat(
-                "decrypted encryptedHmacKey shorter than hash output".to_string(),
-            )
-        })?;
+        let hmac_key_len = std::cmp::min(digest_len, hmac_key_plain.len());
+        if hmac_key_len == 0 {
+            return Err(OfficeCryptoError::InvalidFormat(
+                "decrypted encryptedHmacKey is empty".to_string(),
+            ));
+        }
+        let hmac_key_plain = &hmac_key_plain[..hmac_key_len];
 
         let iv_hmac_val = derive_iv(
             info.key_data.hash_algorithm,
@@ -373,30 +375,11 @@ pub(crate) fn decrypt_agile_encrypted_package(
 
         // Validate data integrity (HMAC).
         //
-        // Most producers (including `ms-offcrypto-writer`) compute the HMAC over the full
-        // EncryptedPackage stream bytes (length prefix + ciphertext). Other producers compute it
-        // over the ciphertext only, or even over the decrypted plaintext bytes. Accept any variant
-        // that matches the decrypted `encryptedHmacValue` to maximize compatibility with real-world
-        // files and our committed fixture corpus.
-        let computed_hmac_stream =
+        // MS-OFFCRYPTO: dataIntegrity HMAC is computed over the **exact EncryptedPackage stream
+        // bytes as stored** (size header + ciphertext + any stored padding).
+        let computed_hmac =
             compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, encrypted_package);
-        let computed_hmac_ciphertext =
-            compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, ciphertext);
-        let mut integrity_ok = ct_eq(expected_hmac, &computed_hmac_stream)
-            || ct_eq(expected_hmac, &computed_hmac_ciphertext);
-        if !integrity_ok {
-            let computed_hmac_plaintext =
-                compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, &out);
-            let computed_hmac_plaintext_with_size = compute_hmac_two(
-                info.key_data.hash_algorithm,
-                hmac_key_plain,
-                &encrypted_package[..8],
-                &out,
-            );
-            integrity_ok = ct_eq(expected_hmac, &computed_hmac_plaintext)
-                || ct_eq(expected_hmac, &computed_hmac_plaintext_with_size);
-        }
-        if !integrity_ok {
+        if !ct_eq(expected_hmac, &computed_hmac) {
             last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
             continue;
         }
@@ -635,44 +618,6 @@ fn compute_hmac(hash_alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
             let mut mac: Hmac<Sha512> =
                 Hmac::new_from_slice(key).expect("HMAC accepts any key size");
             mac.update(data);
-            mac.finalize().into_bytes().to_vec()
-        }
-    }
-}
-
-fn compute_hmac_two(hash_alg: HashAlgorithm, key: &[u8], part1: &[u8], part2: &[u8]) -> Vec<u8> {
-    match hash_alg {
-        HashAlgorithm::Md5 => {
-            let mut mac: Hmac<Md5> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
-            mac.update(part1);
-            mac.update(part2);
-            mac.finalize().into_bytes().to_vec()
-        }
-        HashAlgorithm::Sha1 => {
-            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
-            mac.update(part1);
-            mac.update(part2);
-            mac.finalize().into_bytes().to_vec()
-        }
-        HashAlgorithm::Sha256 => {
-            let mut mac: Hmac<Sha256> =
-                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
-            mac.update(part1);
-            mac.update(part2);
-            mac.finalize().into_bytes().to_vec()
-        }
-        HashAlgorithm::Sha384 => {
-            let mut mac: Hmac<Sha384> =
-                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
-            mac.update(part1);
-            mac.update(part2);
-            mac.finalize().into_bytes().to_vec()
-        }
-        HashAlgorithm::Sha512 => {
-            let mut mac: Hmac<Sha512> =
-                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
-            mac.update(part1);
-            mac.update(part2);
             mac.finalize().into_bytes().to_vec()
         }
     }
