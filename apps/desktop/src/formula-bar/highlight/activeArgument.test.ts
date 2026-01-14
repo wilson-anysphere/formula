@@ -57,6 +57,18 @@ describe("getActiveArgumentSpan", () => {
     });
   });
 
+  it("ignores commas inside structured refs with escaped closing brackets", () => {
+    // Regression: `]]` escapes inside column names should not cause us to treat internal
+    // structured-ref commas as argument separators.
+    const formula = "=SUM(Table1[[#Headers],[A]]B],[Col2]], 1)";
+    const insideSecondArg = formula.lastIndexOf("1") + 1;
+    expect(getActiveArgumentSpan(formula, insideSecondArg)).toMatchObject({
+      fnName: "SUM",
+      argIndex: 1,
+      argText: "1",
+    });
+  });
+
   it("treats parentheses inside structured references as plain text", () => {
     const formula = "=SUM(Table1[Amount)], 1)";
     const insideSecondArg = formula.lastIndexOf("1") + 1;

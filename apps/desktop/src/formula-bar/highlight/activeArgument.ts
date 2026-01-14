@@ -8,7 +8,6 @@ type ActiveArgumentSpan = {
 type StackFrame =
   | { kind: "function"; name: string; argIndex: number; argStart: number; parenIndex: number }
   | { kind: "group" }
-  | { kind: "bracket" }
   | { kind: "brace" };
 
 function isIdentifierStart(ch: string): boolean {
@@ -21,6 +20,72 @@ function isIdentifierPart(ch: string): boolean {
 
 function isWhitespace(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+}
+
+function findMatchingBracketEnd(formulaText: string, start: number): number | null {
+  // Structured references escape closing brackets inside items by doubling: `]]` -> literal `]`.
+  // That makes naive depth counting incorrect (it will pop twice for an escaped bracket).
+  //
+  // We match the bracket span using a small backtracking parser:
+  // - On `[[` (or any nested brackets), increase depth.
+  // - On `]]`, prefer treating it as an escape (consume both, depth unchanged), but remember
+  //   a choice point. If we later fail to close all brackets, backtrack and reinterpret that
+  //   `]]` as a real closing bracket.
+  //
+  // This keeps argument parsing stable for structured refs like:
+  //   Table1[[#Headers],[A]]B],[Col2]]
+  if (formulaText[start] !== "[") return null;
+
+  let i = start;
+  let depth = 0;
+  const escapeChoices: Array<{ i: number; depth: number }> = [];
+
+  const backtrack = (): boolean => {
+    const choice = escapeChoices.pop();
+    if (!choice) return false;
+    i = choice.i;
+    depth = choice.depth;
+    // Reinterpret the first `]` of the `]]` pair as a real closing bracket.
+    depth -= 1;
+    i += 1;
+    return true;
+  };
+
+  while (true) {
+    if (i >= formulaText.length) {
+      // Unclosed bracket span.
+      if (!backtrack()) return null;
+      continue;
+    }
+
+    const ch = formulaText[i] ?? "";
+    if (ch === "[") {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "]") {
+      if (formulaText[i + 1] === "]" && depth > 0) {
+        // Prefer treating `]]` as an escaped literal `]` inside an item. Record a choice point
+        // so we can reinterpret it as a closing bracket if needed.
+        escapeChoices.push({ i, depth });
+        i += 2;
+        continue;
+      }
+
+      depth -= 1;
+      i += 1;
+      if (depth === 0) return i;
+      if (depth < 0) {
+        // Too many closing brackets - try reinterpreting an earlier escape.
+        if (!backtrack()) return null;
+      }
+      continue;
+    }
+
+    i += 1;
+  }
 }
 
 function popUntilKind(stack: StackFrame[], kind: StackFrame["kind"]): void {
@@ -42,43 +107,25 @@ function popParenFrame(stack: StackFrame[]): void {
   }
 }
 
-function isEscapedStructuredRefBracket(formulaText: string, index: number, bracketDepth: number): boolean {
-  // Excel escapes `]` inside structured reference items by doubling it: `]]` -> `]`.
-  //
-  // We only need a best-effort heuristic here: treat `]]` as an escaped literal `]`
-  // when it's followed by a character that couldn't immediately follow a closing
-  // bracket group. This matches the heuristic used by the formula tokenizer.
-  if (formulaText[index] !== "]" || formulaText[index + 1] !== "]") return false;
-  // When only a single bracket group is open, `]]` can't represent closing multiple
-  // nested groups (there's nothing to pop twice). Treat it as an escaped literal.
-  if (bracketDepth === 1) return true;
-  // `]]]...` implies at least one escaped `]` (consume the first two as the escape).
-  if (formulaText[index + 2] === "]") return true;
-  let k = index + 2;
-  while (k < formulaText.length && isWhitespace(formulaText[k] ?? "")) k += 1;
-  const after = formulaText[k] ?? "";
-  const isDelimiterAfterClose = after === "" || after === "," || after === ";" || after === "]" || after === ")";
-  return !isDelimiterAfterClose;
-}
-
 function findArgumentEnd(formulaText: string, start: number): number {
   let inString = false;
   let inSheetQuote = false;
   let parenDepth = 0;
-  let bracketDepth = 0;
   let braceDepth = 0;
 
-  for (let i = start; i < formulaText.length; i += 1) {
+  let i = start;
+  while (i < formulaText.length) {
     const ch = formulaText[i];
 
     if (inString) {
       if (ch === '"') {
         if (formulaText[i + 1] === '"') {
-          i += 1;
+          i += 2;
           continue;
         }
         inString = false;
       }
+      i += 1;
       continue;
     }
 
@@ -86,63 +133,66 @@ function findArgumentEnd(formulaText: string, start: number): number {
       if (ch === "'") {
         // Excel escapes apostrophes in sheet names by doubling them: '' -> '
         if (formulaText[i + 1] === "'") {
-          i += 1;
+          i += 2;
           continue;
         }
         inSheetQuote = false;
       }
+      i += 1;
       continue;
     }
 
     if (ch === '"') {
       inString = true;
+      i += 1;
       continue;
     }
 
     if (ch === "'") {
       inSheetQuote = true;
+      i += 1;
       continue;
     }
 
     if (ch === "[") {
-      bracketDepth += 1;
-      continue;
-    }
-    if (ch === "]") {
-      if (bracketDepth > 0 && isEscapedStructuredRefBracket(formulaText, i, bracketDepth)) {
-        // Skip the escaped `]]` sequence without closing the bracket scope.
-        i += 1;
-        continue;
-      }
-      if (bracketDepth > 0) bracketDepth -= 1;
+      const end = findMatchingBracketEnd(formulaText, i);
+      if (!end) return formulaText.length;
+      i = end;
       continue;
     }
 
     if (ch === "{") {
       braceDepth += 1;
+      i += 1;
       continue;
     }
     if (ch === "}") {
       if (braceDepth > 0) braceDepth -= 1;
+      i += 1;
       continue;
     }
 
     // Treat parentheses inside `[]` / `{}` as plain characters so structured references
     // like `Table1[Amount)]` don't accidentally break argument parsing.
-    if (ch === "(" && bracketDepth === 0) {
+    if (ch === "(") {
       parenDepth += 1;
+      i += 1;
       continue;
     }
-    if (ch === ")" && bracketDepth === 0) {
+    if (ch === ")") {
       if (parenDepth > 0) {
         parenDepth -= 1;
+        i += 1;
         continue;
       }
-      if (bracketDepth === 0 && braceDepth === 0) return i;
+      if (braceDepth === 0) return i;
+      i += 1;
       continue;
     }
 
-    if ((ch === "," || ch === ";") && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) return i;
+    if ((ch === "," || ch === ";") && parenDepth === 0 && braceDepth === 0) return i;
+
+    i += 1;
   }
 
   return formulaText.length;
@@ -207,30 +257,18 @@ export function getActiveArgumentSpan(formulaText: string, cursorIndex: number):
       continue;
     }
 
-    // Bracketed structured references/external refs should be treated as opaque
-    // (except for nested bracket matching). Otherwise column names like
-    // `Table1[Amount(USD)]` could be misread as function calls.
+    // Bracketed structured references/external refs should be treated as opaque. Otherwise
+    // column names like `Table1[Amount(USD)]` or escaped brackets like `A]]B` could be
+    // misread as nested calls / argument separators.
     if (ch === "[") {
-      stack.push({ kind: "bracket" });
-      i += 1;
-      continue;
-    }
-    if (ch === "]") {
-      const bracketDepth = stack.filter((frame) => frame.kind === "bracket").length;
-      if (bracketDepth > 0 && isEscapedStructuredRefBracket(formulaText, i, bracketDepth)) {
-        // Skip escaped bracket sequences inside structured reference items so
-        // delimiters like commas within column names don't break arg parsing.
-        i += 2;
+      const end = findMatchingBracketEnd(formulaText, i);
+      if (!end || end > cursor) {
+        // Cursor is inside an unterminated bracket span - stop scanning, but keep the
+        // function stack intact so we can still return the enclosing function call.
+        i = cursor;
         continue;
       }
-      popUntilKind(stack, "bracket");
-      i += 1;
-      continue;
-    }
-
-    const inBracket = stack.some((frame) => frame.kind === "bracket");
-    if (inBracket) {
-      i += 1;
+      i = end;
       continue;
     }
 
