@@ -203,10 +203,13 @@ Many-to-many semantics:
 - `RELATEDTABLE` returns the set of matching rows (can be >1 for many-to-many).
 - Pivot/group-by note: grouping by columns across a many-to-many relationship **expands** a base row
   into multiple related rows. When a key matches multiple rows on the `to_table` side, the engine
-  treats the group key as a set of possible values and produces groups for all combinations
-  (Cartesian product across group-by columns). This can duplicate measure contributions (a single
-  fact row can contribute to multiple groups), so summing group totals can “double count” compared to
-  an ungrouped total. This differs from scalar navigation (`RELATED`), which errors on ambiguity.
+  treats the group key as a set of possible related **rows/tuples**. Columns that come from the same
+  related table (i.e. share the same relationship path) stay correlated per related row
+  (e.g. `(Category, Color)` pairs come from the same related row), while the engine takes a cartesian
+  product across **independent** grouping sources (base-table columns and each distinct relationship
+  path). This can duplicate measure contributions (a single fact row can contribute to multiple
+  groups), so summing group totals can “double count” compared to an ungrouped total. This differs
+  from scalar navigation (`RELATED`), which errors on ambiguity.
 
 ### Cross-filter direction
 
