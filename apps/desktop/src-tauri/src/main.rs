@@ -432,34 +432,37 @@ fn emit_open_file_event(app: &tauri::AppHandle, paths: Vec<String>) {
 
     show_main_window(app);
 
-    if let Some(window) = app.get_webview_window("main") {
-        let window_url = match window.url() {
-            Ok(window_url) => window_url,
-            Err(err) => {
-                eprintln!(
-                    "[open-file] blocked event delivery because window URL could not be read: {err}"
-                );
-                return;
-            }
-        };
-        if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
-            eprintln!("[open-file] blocked event delivery to untrusted origin: {window_url}");
-            return;
-        }
-        if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
-            &window,
-            "open-file event delivery",
-            desktop::ipc_origin::Verb::Is,
-        ) {
+    let Some(window) = app.get_webview_window("main") else {
+        // Fail closed: if the main window is missing, we can't validate its origin and should not
+        // broadcast sensitive local file paths to any other window.
+        eprintln!("[open-file] blocked event delivery because main window is missing");
+        return;
+    };
+
+    let window_url = match window.url() {
+        Ok(window_url) => window_url,
+        Err(err) => {
             eprintln!(
-                "[open-file] blocked event delivery from unexpected origin: {window_url} ({err})"
+                "[open-file] blocked event delivery because window URL could not be read: {err}"
             );
             return;
         }
-        let _ = window.emit(OPEN_FILE_EVENT, paths);
-    } else {
-        let _ = app.emit(OPEN_FILE_EVENT, paths);
+    };
+    if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+        eprintln!("[open-file] blocked event delivery to untrusted origin: {window_url}");
+        return;
     }
+    if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
+        &window,
+        "open-file event delivery",
+        desktop::ipc_origin::Verb::Is,
+    ) {
+        eprintln!(
+            "[open-file] blocked event delivery from unexpected origin: {window_url} ({err})"
+        );
+        return;
+    }
+    let _ = window.emit(OPEN_FILE_EVENT, paths);
 }
 
 fn emit_oauth_redirect_event(app: &tauri::AppHandle, url: String) {
@@ -470,34 +473,38 @@ fn emit_oauth_redirect_event(app: &tauri::AppHandle, url: String) {
 
     show_main_window(app);
 
-    if let Some(window) = app.get_webview_window("main") {
-        let window_url = match window.url() {
-            Ok(window_url) => window_url,
-            Err(err) => {
-                eprintln!(
-                    "[oauth-redirect] blocked event delivery because window URL could not be read: {err}"
-                );
-                return;
-            }
-        };
-        if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
-            eprintln!("[oauth-redirect] blocked event delivery to untrusted origin: {window_url}");
-            return;
-        }
-        if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
-            &window,
-            "oauth-redirect event delivery",
-            desktop::ipc_origin::Verb::Is,
-        ) {
+    let Some(window) = app.get_webview_window("main") else {
+        // Fail closed: if the main window is missing, we can't validate its origin and should not
+        // broadcast sensitive OAuth redirect URLs (which may contain auth codes) to any other
+        // window.
+        eprintln!("[oauth-redirect] blocked event delivery because main window is missing");
+        return;
+    };
+
+    let window_url = match window.url() {
+        Ok(window_url) => window_url,
+        Err(err) => {
             eprintln!(
-                "[oauth-redirect] blocked event delivery from unexpected origin: {window_url} ({err})"
+                "[oauth-redirect] blocked event delivery because window URL could not be read: {err}"
             );
             return;
         }
-        let _ = window.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
-    } else {
-        let _ = app.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
+    };
+    if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+        eprintln!("[oauth-redirect] blocked event delivery to untrusted origin: {window_url}");
+        return;
     }
+    if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
+        &window,
+        "oauth-redirect event delivery",
+        desktop::ipc_origin::Verb::Is,
+    ) {
+        eprintln!(
+            "[oauth-redirect] blocked event delivery from unexpected origin: {window_url} ({err})"
+        );
+        return;
+    }
+    let _ = window.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
 }
 
 fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
