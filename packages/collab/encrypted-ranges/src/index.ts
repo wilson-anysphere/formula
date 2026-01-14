@@ -322,11 +322,29 @@ export class EncryptedRangeManager {
       for (let i = 0; i < items.length; i += 1) {
         const yMap = getYMap(items[i]);
         if (!yMap) continue;
-        const entryId = coerceString(yMap.get("id"))?.trim();
-        if (entryId !== normalizedId) continue;
+        const entryIdRaw = coerceString(yMap.get("id"))?.trim() ?? "";
+        // Fast-path: if the range has an id and it doesn't match, skip without parsing.
+        if (entryIdRaw && entryIdRaw !== normalizedId) continue;
 
         const existing = yRangeToEncryptedRange(yMap);
-        if (!existing) throw new Error(`Encrypted range is missing required fields: ${normalizedId}`);
+        if (!existing) {
+          // If a row has an explicit id but is missing required fields, treat it as corrupt
+          // rather than silently ignoring the update.
+          if (entryIdRaw === normalizedId) {
+            throw new Error(`Encrypted range is missing required fields: ${normalizedId}`);
+          }
+          continue;
+        }
+
+        // Legacy support: tolerate entries without an explicit `id` field by matching against
+        // the derived id returned by `yRangeToEncryptedRange` (which may be `legacy:...`).
+        if (existing.id !== normalizedId) continue;
+
+        // Persist the derived id so future updates/removes can reference a stable identifier
+        // even if the range is later resized (which would change the legacy derived id).
+        if (!entryIdRaw) {
+          yMap.set("id", normalizedId);
+        }
 
         const next: EncryptedRangeAddInput = {
           sheetId: patchSheetId ?? existing.sheetId,
@@ -416,11 +434,11 @@ export class EncryptedRangeManager {
       if (arr) {
         for (const item of arr.toArray()) pushFrom(item);
       } else {
-      const map = getYMap(current);
-      if (map) {
-        map.forEach((value, key) => {
-          pushFrom(value, String(key));
-        });
+        const map = getYMap(current);
+        if (map) {
+          map.forEach((value, key) => {
+            pushFrom(value, String(key));
+          });
         } else if (Array.isArray(current)) {
           for (const item of current) pushFrom(item);
         } else {

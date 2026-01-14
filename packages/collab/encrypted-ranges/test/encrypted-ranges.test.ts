@@ -273,4 +273,39 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(list).toHaveLength(1);
     expect(list[0]!.id).toMatch(/^legacy:/);
   });
+
+  it("manager update supports legacy Y.Map entries without id by persisting a derived id", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<Y.Map<unknown>>();
+    const r = new Y.Map<unknown>();
+    // Legacy-ish shape: a Y.Map entry without an explicit `id` field.
+    r.set("sheetId", "s1");
+    r.set("startRow", 0);
+    r.set("startCol", 0);
+    r.set("endRow", 0);
+    r.set("endCol", 0);
+    r.set("keyId", "k1");
+    ranges.push([r]);
+
+    doc.transact(() => {
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const mgr = new EncryptedRangeManager({ doc });
+    const [entry] = mgr.list();
+    expect(entry?.id).toMatch(/^legacy:/);
+
+    mgr.update(entry!.id, { endCol: 1 });
+    const updated = mgr.list().find((e) => e.id === entry!.id);
+    expect(updated?.endCol).toBe(1);
+
+    // The update should persist the derived id into the underlying Y.Map so it remains stable
+    // even though the legacy-id derivation would otherwise change when resizing the range.
+    const stored = (metadata.get("encryptedRanges") as any).toArray?.()[0];
+    expect(stored && typeof stored.get === "function").toBe(true);
+    expect(stored.get("id")).toBe(entry!.id);
+  });
 });
