@@ -10705,12 +10705,13 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       const wasmEngine = (app as any).wasmEngine as any;
       if (wasmEngine && typeof wasmEngine.setColHidden === "function") {
         for (const [sheetId, cols] of importedHiddenColsBySheetId) {
-          const meta = typeof doc.getSheetMeta === "function" ? doc.getSheetMeta(sheetId) : null;
-          const sheetName = typeof meta?.name === "string" && meta.name.trim() ? meta.name.trim() : sheetId;
           for (const col of cols) {
             const idx = Number(col);
             if (!Number.isInteger(idx) || idx < 0) continue;
-            await wasmEngine.setColHidden(idx, true, sheetName);
+            // The WASM engine workbook is keyed by stable sheet ids (not display/tab names). Use
+            // the DocumentController sheet id directly so we don't accidentally create phantom
+            // sheets after a sheet rename.
+            await wasmEngine.setColHidden(idx, true, sheetId);
           }
         }
 
