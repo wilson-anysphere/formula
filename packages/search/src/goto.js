@@ -191,10 +191,15 @@ function parseStructuredRef(input) {
     };
   }
 
-  const simpleMatch = suffix.match(/^\[[ \t\n\r]*((?:[^\]]|]])+)[ \t\n\r]*\]$/);
+  // Avoid mis-parsing nested bracket groups like `[[#All],[Amount]]` as a single item.
+  // If the nested parser fails, treat the reference as invalid rather than falling back to
+  // a simple `[Column]` match.
+  if (suffix.startsWith("[[")) return null;
+
+  const simpleMatch = suffix.match(/^\[\s*((?:[^\]]|]])+)\s*\]$/);
   if (simpleMatch) {
     // Excel escapes `]` inside structured reference items by doubling it: `]]` -> `]`.
-    const columnName = simpleMatch[1].replaceAll("]]", "]");
+    const columnName = simpleMatch[1].replaceAll("]]", "]").trim();
     return { tableName, selector: null, columnName, columns: null, columnMode: null };
   }
 
