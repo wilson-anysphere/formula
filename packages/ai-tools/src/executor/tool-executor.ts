@@ -143,7 +143,8 @@ function richValueJsonReplacer(_key: string, value: unknown): unknown {
 
 function stringifyCellValue(value: unknown): string {
   if (typeof value === "bigint") return value.toString();
-  const seen = typeof WeakSet !== "undefined" ? new WeakSet<object>() : null;
+  const seen: WeakSet<object> | Set<object> | null =
+    typeof WeakSet !== "undefined" ? new WeakSet<object>() : typeof Set !== "undefined" ? new Set<object>() : null;
   const replacer = (key: string, nextValue: unknown): unknown => {
     if (seen && nextValue && typeof nextValue === "object") {
       const obj = nextValue as object;
