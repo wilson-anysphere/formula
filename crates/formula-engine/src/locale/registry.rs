@@ -177,6 +177,16 @@ impl ErrorTranslations {
                         "invalid error translation line (empty entry) at line {line_no}: {raw_line:?}"
                     );
                 }
+                if canon.contains('\t') || loc.contains('\t') {
+                    panic!(
+                        "invalid error translation line (too many columns) at line {line_no}: {raw_line:?}"
+                    );
+                }
+                if !canon.starts_with('#') || !loc.starts_with('#') {
+                    panic!(
+                        "invalid error translation line (expected error literals to start with '#') at line {line_no}: {raw_line:?}"
+                    );
+                }
 
                 let canon_key = casefold(canon);
                 let loc_key = casefold(loc);

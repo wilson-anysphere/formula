@@ -1,8 +1,8 @@
+use formula_engine::{EditOp, Engine, Value};
 use formula_engine::pivot::{
     AggregationType, GrandTotals, Layout, PivotConfig, PivotDestination, PivotField, PivotFieldRef,
     PivotSource, PivotTableDefinition, SubtotalPosition, ValueField,
 };
-use formula_engine::{EditOp, Engine, Value};
 use formula_model::{CellRef, Range};
 use pretty_assertions::assert_eq;
 
