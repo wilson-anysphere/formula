@@ -227,6 +227,28 @@ fn unknown_formats_return_n() {
     assert_eq!(info.cell_format_code, "N");
 }
 
+#[test]
+fn negative_parentheses_ignore_layout_fill_operands() {
+    // Layout fill token `*X` repeats `X`; `X` is not a literal. Parentheses used only as
+    // fill operands must not trigger `CELL("parentheses")` semantics.
+    assert!(
+        !classify_cell_format(Some("0;0*(0*)")).negative_in_parentheses,
+        "fill-token operands should not count as parentheses"
+    );
+
+    // Control: explicit parentheses in the negative section should still count.
+    assert!(
+        classify_cell_format(Some("0;(0)")).negative_in_parentheses,
+        "explicit parentheses should count"
+    );
+
+    // Underscore layout token `_X` also uses an operand that should be ignored.
+    assert!(
+        !classify_cell_format(Some("0;0_(0_)")).negative_in_parentheses,
+        "underscore-token operands should not count as parentheses"
+    );
+}
+
 // Ensure the classification struct remains cheap to compare for tests.
 #[test]
 fn cell_format_classification_is_eq() {
@@ -242,4 +264,3 @@ fn cell_format_classification_is_eq() {
     };
     assert_eq!(a, b);
 }
-

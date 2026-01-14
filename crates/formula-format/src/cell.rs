@@ -564,6 +564,12 @@ fn section_has_parentheses(pattern: &str) -> bool {
                 // following character for parentheses detection.
                 skip_next = true;
             }
+            '*' => {
+                // `*X` repeats `X` to fill the cell width, but `X` is a layout operand
+                // rather than a literal. Ignore the following character for
+                // parentheses detection.
+                skip_next = true;
+            }
             '[' => in_brackets = true,
             '(' => saw_open = true,
             ')' => saw_close = true,
