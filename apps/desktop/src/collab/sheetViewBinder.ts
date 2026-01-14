@@ -599,6 +599,40 @@ export function bindSheetViewToCollabSession(options: {
   let destroyed = false;
   let applyingRemote = false;
 
+  // DocumentController lazily materializes sheets: calling `getCell()` / `getSheetView()` (and
+  // helpers that depend on them) with a missing sheet id will create a new empty sheet model.
+  //
+  // Collab state can briefly contain stale sheet entries (e.g. a sheet deleted locally but still
+  // present in the shared Yjs `sheets` array until schema reconciliation). Avoid resurrecting
+  // deleted sheets by treating ids as "known missing" when the workbook already has *some*
+  // sheets, but the requested id is present in neither `document.model.sheets` nor
+  // `document.sheetMeta`.
+  const isSheetKnownMissing = (sheetId: string): boolean => {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return true;
+
+    const docAny: any = documentController as any;
+    const sheets: any = docAny?.model?.sheets;
+    const sheetMeta: any = docAny?.sheetMeta;
+
+    if (
+      sheets &&
+      typeof sheets.has === "function" &&
+      typeof sheets.size === "number" &&
+      sheetMeta &&
+      typeof sheetMeta.has === "function" &&
+      typeof sheetMeta.size === "number"
+    ) {
+      const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+      if (!workbookHasAnySheets) return false;
+      return !sheets.has(id) && !sheetMeta.has(id);
+    }
+
+    // If we can't introspect the document internals, conservatively assume the sheet exists so
+    // we preserve historical behavior.
+    return false;
+  };
+
   const findYjsSheetEntriesById = (sheetId: string): any[] => {
     if (!sheetId) return [];
     /** @type {any[]} */
@@ -636,6 +670,7 @@ export function bindSheetViewToCollabSession(options: {
       typeof (documentController as any).applyExternalDrawingDeltas === "function";
 
     for (const sheetId of sheetIds) {
+      if (isSheetKnownMissing(sheetId)) continue;
       const sheet = findYjsSheetEntryById(sheetId);
       if (!sheet) continue;
 
