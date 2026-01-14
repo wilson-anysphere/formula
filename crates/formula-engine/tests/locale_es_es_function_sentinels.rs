@@ -214,3 +214,66 @@ fn locale_es_es_identity_mapping_rate_is_not_suspiciously_high() {
         "es-ES identity mapping rate too high ({identity}/{total} = {identity_rate:.3}); this suggests the locale table is incomplete and falling back to English"
     );
 }
+
+/// Secondary robustness check: detect cases where `es-ES` is identity-mapped (English fallback)
+/// even though *both* `de-DE` and `fr-FR` have non-identity spellings for the same canonical
+/// function.
+///
+/// We expect this set to be small: while Spanish sometimes keeps English names (especially for
+/// niche functions), widespread identity mappings here are a strong signal that `es-ES` was
+/// extracted from an older Excel build that treated newer functions as unknown and returned
+/// canonical names.
+#[test]
+fn locale_es_es_suspicious_identity_mappings_are_rare() {
+    const DE_DE_TSV: &str = include_str!("../src/locale/data/de-DE.tsv");
+    const ES_ES_TSV: &str = include_str!("../src/locale/data/es-ES.tsv");
+    const FR_FR_TSV: &str = include_str!("../src/locale/data/fr-FR.tsv");
+
+    fn parse(tsv: &str) -> std::collections::BTreeMap<String, String> {
+        let mut out = std::collections::BTreeMap::new();
+        for line in tsv.lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (canon, loc) = line
+                .split_once('\t')
+                .unwrap_or_else(|| panic!("invalid TSV entry (expected Canonical<TAB>Localized): {line}"));
+            out.insert(canon.to_string(), loc.to_string());
+        }
+        out
+    }
+
+    let de = parse(DE_DE_TSV);
+    let es = parse(ES_ES_TSV);
+    let fr = parse(FR_FR_TSV);
+
+    let mut base = 0usize;
+    let mut suspicious: Vec<String> = Vec::new();
+    for (canon, es_loc) in es {
+        let Some(de_loc) = de.get(&canon) else { continue };
+        let Some(fr_loc) = fr.get(&canon) else { continue };
+        if de_loc != &canon && fr_loc != &canon {
+            base += 1;
+            if es_loc == canon {
+                suspicious.push(canon);
+            }
+        }
+    }
+
+    assert!(base > 0, "test invariant: expected some de-DE/fr-FR translated functions");
+
+    let suspicious_count = suspicious.len();
+    let ratio = suspicious_count as f64 / base as f64;
+
+    // Keep this guard intentionally loose: Spanish can legitimately keep English names for a few
+    // functions even when other locales translate them. We just want to catch big regressions.
+    const MAX_SUSPICIOUS_RATIO: f64 = 0.10;
+
+    if ratio > MAX_SUSPICIOUS_RATIO {
+        suspicious.sort();
+        let sample = suspicious.iter().take(25).cloned().collect::<Vec<_>>().join(", ");
+        panic!(
+            "es-ES has too many suspicious identity mappings vs de-DE+fr-FR ({suspicious_count}/{base} = {ratio:.3}). Examples: {sample}"
+        );
+    }
+}
