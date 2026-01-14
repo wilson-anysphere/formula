@@ -536,4 +536,128 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     app.destroy();
     root.remove();
   });
+
+  it("shows a read-only toast when canEditCell blocks paste", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).document.canEditCell = () => false;
+    const setRangeValuesSpy = vi.spyOn((app as any).document, "setRangeValues");
+    (app as any).getClipboardProvider = async () => ({
+      read: async () => ({ text: "hello" }),
+    });
+
+    await app.pasteClipboardToSelection();
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+    expect(setRangeValuesSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("allows image-only paste even when canEditCell blocks cell edits", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).document.canEditCell = () => false;
+
+    const pasteImageSpy = vi.spyOn(app as any, "pasteClipboardImageAsDrawing").mockResolvedValue(true);
+    (app as any).getClipboardProvider = async () => ({
+      read: async () => ({
+        // Some clipboard sources include `text/plain=""` alongside image payloads.
+        text: "",
+        pngBase64:
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Xn0kAAAAASUVORK5CYII=",
+      }),
+    });
+
+    await app.pasteClipboardToSelection();
+
+    expect(pasteImageSpy).toHaveBeenCalled();
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toBe("");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("shows a read-only toast when canEditCell blocks cut", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).document.canEditCell = () => false;
+    const clearRangeSpy = vi.spyOn((app as any).document, "clearRange");
+
+    await (app as any).cutSelectionToClipboard();
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+    expect(clearRangeSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("shows a read-only toast when canEditCell blocks clear contents", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).document.canEditCell = () => false;
+    const clearRangeSpy = vi.spyOn((app as any).document, "clearRange");
+
+    app.clearSelectionContents();
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+    expect(clearRangeSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("shows an encryption toast when canEditCell blocks insertDate", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).document.canEditCell = () => false;
+    (app as any).collabSession = {
+      getEncryptionConfig: () => ({
+        keyForCell: () => null,
+        shouldEncryptCell: () => true,
+      }),
+    };
+
+    const setRangeValuesSpy = vi.spyOn((app as any).document, "setRangeValues");
+
+    app.insertDate();
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Missing encryption key");
+    expect(setRangeValuesSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
 });

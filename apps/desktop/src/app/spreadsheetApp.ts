@@ -5942,6 +5942,8 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
+    const cell = this.selection.active;
+    if (!this.canEditCellOrShowToast({ sheetId: this.sheetId, row: cell.row, col: cell.col })) return;
     this.clearSelectionContentsInternal();
     this.refresh();
   }
@@ -6013,6 +6015,8 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
+    const cell = this.selection.active;
+    if (!this.canEditCellOrShowToast({ sheetId: this.sheetId, row: cell.row, col: cell.col })) return;
     this.clearSelectionContentsInternal();
     this.refresh();
   }
@@ -12705,6 +12709,8 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
+    const cell = this.selection.active;
+    if (!this.canEditCellOrShowToast({ sheetId: this.sheetId, row: cell.row, col: cell.col })) return;
     this.insertCurrentDateTimeIntoSelection("date");
     this.refresh();
     this.focus();
@@ -12719,6 +12725,8 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
+    const cell = this.selection.active;
+    if (!this.canEditCellOrShowToast({ sheetId: this.sheetId, row: cell.row, col: cell.col })) return;
     this.insertCurrentDateTimeIntoSelection("time");
     this.refresh();
     this.focus();
@@ -24827,6 +24835,9 @@ export class SpreadsheetApp {
         return source.map((row: any[]) => row.map((cell: any) => ({ value: cell?.value ?? null })));
       })();
 
+      if (!this.canEditCellOrShowToast({ sheetId: pasteSheetId, row: start.row, col: start.col })) {
+        return;
+      }
       this.document.setRangeValues(pasteSheetId, start, values, { label: t("clipboard.paste") });
 
       const pastedRowCount = values.length;
@@ -24905,6 +24916,11 @@ export class SpreadsheetApp {
         } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
+        return;
+      }
+
+      const activeCell = this.selection.active;
+      if (!this.canEditCellOrShowToast({ sheetId, row: activeCell.row, col: activeCell.col })) {
         return;
       }
 
@@ -26810,6 +26826,33 @@ export class SpreadsheetApp {
     return value;
   }
 
+  private canEditCellOrShowToast(cell: { sheetId: string; row: number; col: number }): boolean {
+    // In collab/permissioned contexts, `DocumentController.canEditCell` may filter out edits
+    // entirely. Without a UX signal this can look like the UI "snapped back".
+    const canEditCell = (this.document as any)?.canEditCell;
+    if (typeof canEditCell !== "function") return true;
+    try {
+      const allowed = Boolean(canEditCell.call(this.document, { sheetId: cell.sheetId, row: cell.row, col: cell.col }));
+      if (allowed) return true;
+    } catch {
+      // Best-effort: if `canEditCell` throws (or is unexpectedly shaped), fall through to attempting
+      // the edit rather than breaking commands.
+      return true;
+    }
+
+    const rejection = this.inferCollabEditRejection({ sheetId: cell.sheetId, row: cell.row, col: cell.col });
+    showCollabEditRejectedToast([
+      {
+        sheetId: cell.sheetId,
+        row: cell.row,
+        col: cell.col,
+        rejectionKind: "cell",
+        ...rejection,
+      },
+    ]);
+    return false;
+  }
+
   private applyEdit(sheetId: string, cell: CellCoord, rawValue: string, options?: { label?: string }): void {
     if (this.isReadOnly()) {
       showCollabEditRejectedToast([
@@ -26817,29 +26860,7 @@ export class SpreadsheetApp {
       ]);
       return;
     }
-    // In collab/permissioned contexts, `DocumentController.canEditCell` may filter out
-    // user edits entirely. Without a UX signal this can look like the UI "snapped back".
-    const canEditCell = (this.document as any)?.canEditCell;
-    if (typeof canEditCell === "function") {
-      try {
-        const allowed = Boolean(canEditCell.call(this.document, { sheetId, row: cell.row, col: cell.col }));
-          if (!allowed) {
-            const rejection = this.inferCollabEditRejection({ sheetId, row: cell.row, col: cell.col });
-            showCollabEditRejectedToast([
-              {
-                sheetId,
-                row: cell.row,
-                col: cell.col,
-                rejectionKind: "cell",
-                ...rejection,
-              },
-            ]);
-            return;
-          }
-      } catch {
-        // Best-effort: fall through to attempting the edit.
-      }
-    }
+    if (!this.canEditCellOrShowToast({ sheetId, row: cell.row, col: cell.col })) return;
 
     const label = options?.label ?? "Edit cell";
     const original = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
@@ -27294,6 +27315,8 @@ export class SpreadsheetApp {
       return;
     }
     if (this.isSpreadsheetEditingIncludingSecondary()) return;
+    const cell = this.selection.active;
+    if (!this.canEditCellOrShowToast({ sheetId: this.sheetId, row: cell.row, col: cell.col })) return;
     this.clearSelectionContentsInternal();
     this.refresh();
   }
