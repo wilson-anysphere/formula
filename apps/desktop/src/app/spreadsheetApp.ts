@@ -10879,6 +10879,25 @@ export class SpreadsheetApp {
     const bounds = this.drawingHitTestScratchRect;
     const index = this.getDrawingHitTestIndex(objects);
 
+    const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+    const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+
+    // Drawings are clipped to the cell grid body area (under headers). Avoid showing drawing cursors
+    // while hovering over row/col headers even if a selected object's handles would fall into the
+    // header region due to scroll offsets.
+    if (x < headerOffsetX || y < headerOffsetY) return null;
+
+    const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
+    const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
+    const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx)
+      ? Math.max(headerOffsetX, Math.min(viewport.frozenWidthPx!, viewport.width))
+      : headerOffsetX;
+    const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx)
+      ? Math.max(headerOffsetY, Math.min(viewport.frozenHeightPx!, viewport.height))
+      : headerOffsetY;
+    const pointInFrozenCols = frozenCols > 0 && x < frozenBoundaryX;
+    const pointInFrozenRows = frozenRows > 0 && y < frozenBoundaryY;
+
     // Rotation handles are only rendered by DrawingOverlay. In legacy mode without the dedicated
     // interaction controller, drawing selection chrome is rendered on the selection canvas layer
     // (which does not include the rotation handle), so avoid returning a rotation cursor there.
@@ -10890,38 +10909,30 @@ export class SpreadsheetApp {
       const selected = selectedIndex != null ? index.ordered[selectedIndex] ?? null : null;
       if (selected) {
         const sheetRect = index.bounds[selectedIndex!]!;
-        const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
-        const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
         const anchor = selected.anchor;
-        const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
-        const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
-        const scrollX = anchor.type === "absolute" ? viewport.scrollX : inFrozenCols ? 0 : viewport.scrollX;
-        const scrollY = anchor.type === "absolute" ? viewport.scrollY : inFrozenRows ? 0 : viewport.scrollY;
-        const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
-        const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
-        bounds.x = sheetRect.x - scrollX + headerOffsetX;
-        bounds.y = sheetRect.y - scrollY + headerOffsetY;
-        bounds.width = sheetRect.width;
-        bounds.height = sheetRect.height;
+        const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+        const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
 
-        // Selection handles/rotation handle are clipped to the drawing's frozen pane quadrant. Avoid
-        // returning resize/rotation cursors when hovering the clipped-off portion in another pane.
-        if (x >= headerOffsetX && y >= headerOffsetY) {
-          const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? (viewport.frozenWidthPx as number) : headerOffsetX;
-          const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? (viewport.frozenHeightPx as number) : headerOffsetY;
-          const pointInFrozenCols = frozenCols > 0 && x < frozenBoundaryX;
-          const pointInFrozenRows = frozenRows > 0 && y < frozenBoundaryY;
-          if (pointInFrozenCols === inFrozenCols && pointInFrozenRows === inFrozenRows) {
-            // Charts behave like Excel chart objects: movable/resizable but not rotatable.
-            const canRotate = rotationHandleEnabled && selected.kind.type !== "chart";
-            if (canRotate && hitTestRotationHandle(bounds, x, y, selected.transform)) {
-              return cursorForRotationHandle(false);
-            }
-            // When selected, handles can extend slightly outside the untransformed bounds. Check the selected
-            // object explicitly so hover feedback works even when the cursor lies just beyond the anchor rect.
-            const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
-            if (handle) return cursorForResizeHandleWithTransform(handle, selected.transform);
+        // Selection handles are clipped to the object's pane. If a scrollable object is selected and
+        // the user hovers over the frozen pane (or vice versa), the unclipped handle bounds can
+        // overlap but should not produce hover cursors.
+        if (objInFrozenCols === pointInFrozenCols && objInFrozenRows === pointInFrozenRows) {
+          const scrollX = anchor.type === "absolute" ? viewport.scrollX : objInFrozenCols ? 0 : viewport.scrollX;
+          const scrollY = anchor.type === "absolute" ? viewport.scrollY : objInFrozenRows ? 0 : viewport.scrollY;
+          bounds.x = sheetRect.x - scrollX + headerOffsetX;
+          bounds.y = sheetRect.y - scrollY + headerOffsetY;
+          bounds.width = sheetRect.width;
+          bounds.height = sheetRect.height;
+
+          // Charts behave like Excel chart objects: movable/resizable but not rotatable.
+          const canRotate = rotationHandleEnabled && selected.kind.type !== "chart";
+          if (canRotate && hitTestRotationHandle(bounds, x, y, selected.transform)) {
+            return cursorForRotationHandle(false);
           }
+          // When selected, handles can extend slightly outside the untransformed bounds. Check the selected
+          // object explicitly so hover feedback works even when the cursor lies just beyond the anchor rect.
+          const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
+          if (handle) return cursorForResizeHandleWithTransform(handle, selected.transform);
         }
       }
     }
