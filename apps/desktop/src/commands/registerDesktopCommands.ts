@@ -724,6 +724,7 @@ export function registerDesktopCommands(params: {
       commandRegistry,
       app,
       layoutController,
+      isEditing: isEditingFn,
       focusAfterSheetNavigation,
       getVisibleSheetIds,
       ensureExtensionsLoaded,
@@ -1074,7 +1075,7 @@ export function registerDesktopCommands(params: {
   }
 
   if (ribbonMacroHandlers) {
-    registerRibbonMacroCommands({ commandRegistry, handlers: ribbonMacroHandlers });
+    registerRibbonMacroCommands({ commandRegistry, handlers: ribbonMacroHandlers, isEditing: isEditingFn });
   }
 
   if (dataQueriesHandlers) {
@@ -1089,6 +1090,7 @@ export function registerDesktopCommands(params: {
       commandRegistry,
       layoutController,
       refreshRibbonUiState,
+      isEditing: isEditingFn,
       ...dataQueriesHandlers,
       focusAfterExecute,
     });
@@ -1170,6 +1172,7 @@ export function registerDesktopCommands(params: {
     "pageLayout.arrange.bringForward",
     "Bring Forward",
     () => {
+      if (isEditingFn()) return;
       app.bringSelectedDrawingForward();
       app.focus();
     },
@@ -1184,6 +1187,7 @@ export function registerDesktopCommands(params: {
     "pageLayout.arrange.sendBackward",
     "Send Backward",
     () => {
+      if (isEditingFn()) return;
       app.sendSelectedDrawingBackward();
       app.focus();
     },
@@ -1247,21 +1251,30 @@ export function registerDesktopCommands(params: {
     { category: commandCategoryFormat },
   );
 
-  commandRegistry.registerBuiltinCommand("edit.find", t("command.edit.find"), () => findReplace.openFind(), {
+  commandRegistry.registerBuiltinCommand("edit.find", t("command.edit.find"), () => {
+    if (isEditingFn()) return;
+    findReplace.openFind();
+  }, {
     category: t("commandCategory.editing"),
     icon: null,
     description: t("commandDescription.edit.find"),
     keywords: ["find", "search"],
   });
 
-  commandRegistry.registerBuiltinCommand("edit.replace", t("command.edit.replace"), () => findReplace.openReplace(), {
+  commandRegistry.registerBuiltinCommand("edit.replace", t("command.edit.replace"), () => {
+    if (isEditingFn()) return;
+    findReplace.openReplace();
+  }, {
     category: t("commandCategory.editing"),
     icon: null,
     description: t("commandDescription.edit.replace"),
     keywords: ["replace", "find"],
   });
 
-  commandRegistry.registerBuiltinCommand("navigation.goTo", t("command.navigation.goTo"), () => findReplace.openGoTo(), {
+  commandRegistry.registerBuiltinCommand("navigation.goTo", t("command.navigation.goTo"), () => {
+    if (isEditingFn()) return;
+    findReplace.openGoTo();
+  }, {
     category: t("commandCategory.navigation"),
     icon: null,
     description: t("commandDescription.navigation.goTo"),

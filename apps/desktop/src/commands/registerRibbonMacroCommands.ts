@@ -46,8 +46,16 @@ export type RibbonMacroCommandHandlers = {
 export function registerRibbonMacroCommands(params: {
   commandRegistry: CommandRegistry;
   handlers: RibbonMacroCommandHandlers;
+  /**
+   * Optional spreadsheet edit-state predicate. When omitted, macro commands are assumed to be runnable.
+   *
+   * The desktop shell passes a custom predicate (`isSpreadsheetEditing`) that includes split-view
+   * secondary editor state so command palette/keybindings cannot bypass ribbon disabling.
+   */
+  isEditing?: (() => boolean) | null;
 }): void {
-  const { commandRegistry, handlers } = params;
+  const { commandRegistry, handlers, isEditing = null } = params;
+  const isEditingFn = isEditing ?? (() => false);
   const {
     openPanel,
     focusScriptEditorPanel,
@@ -214,13 +222,16 @@ export function registerRibbonMacroCommands(params: {
     commandRegistry.registerBuiltinCommand(
       commandId,
       titleForCommand(commandId),
-      () => (delegateTo ? commandRegistry.executeCommand(delegateTo) : runCommand(commandId)),
+      () => {
+        if (isEditingFn()) return;
+        return delegateTo ? commandRegistry.executeCommand(delegateTo) : runCommand(commandId);
+      },
       {
-      category,
-      icon: null,
-      description: null,
-      keywords: ["macros", "vba", "script"],
-      when,
+        category,
+        icon: null,
+        description: null,
+        keywords: ["macros", "vba", "script"],
+        when,
       },
     );
   }

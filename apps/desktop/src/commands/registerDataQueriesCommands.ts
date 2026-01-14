@@ -24,6 +24,13 @@ type PowerQueryServiceLike = {
 export function registerDataQueriesCommands(params: {
   commandRegistry: CommandRegistry;
   layoutController: LayoutController | null;
+  /**
+   * Optional spreadsheet edit-state predicate. When omitted, refresh commands are assumed to be runnable.
+   *
+   * The desktop shell passes a custom predicate (`isSpreadsheetEditing`) that includes split-view
+   * secondary editor state so command palette/keybindings cannot bypass ribbon disabling.
+   */
+  isEditing?: (() => boolean) | null;
   getPowerQueryService: () => PowerQueryServiceLike | null;
   showToast: ToastFn;
   notify: NotifyFn;
@@ -47,6 +54,7 @@ export function registerDataQueriesCommands(params: {
   const {
     commandRegistry,
     layoutController,
+    isEditing = null,
     getPowerQueryService,
     showToast,
     notify,
@@ -54,6 +62,7 @@ export function registerDataQueriesCommands(params: {
     focusAfterExecute = null,
     now = () => Date.now(),
   } = params;
+  const isEditingFn = isEditing ?? (() => false);
 
   commandRegistry.registerBuiltinCommand(
     DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections,
@@ -121,6 +130,7 @@ export function registerDataQueriesCommands(params: {
   );
 
   const refreshAll = () => {
+    if (isEditingFn()) return;
     void (async () => {
       const service = getPowerQueryService();
       if (!service) {

@@ -90,7 +90,7 @@ test("Builtin Comments commands are registered with the expected behavior", () =
   // Add comment command: must open the panel and focus the input (Shift+F2 behavior).
   assert.match(
     commands,
-    /\bregisterBuiltinCommand\(\s*["']comments\.addComment["'][\s\S]*?if\s*\(app\.isEditing\(\)\)\s*return;[\s\S]*?app\.openCommentsPanel\(\);[\s\S]*?app\.focusNewCommentInput\(\);/,
-    "Expected comments.addComment to open comments panel + focus new comment input (guarded by app.isEditing())",
+    /\bregisterBuiltinCommand\(\s*["']comments\.addComment["'][\s\S]*?if\s*\(isEditingFn\(\)\)\s*return;[\s\S]*?app\.openCommentsPanel\(\);[\s\S]*?app\.focusNewCommentInput\(\);/,
+    "Expected comments.addComment to open comments panel + focus new comment input (guarded by isEditingFn())",
   );
 });

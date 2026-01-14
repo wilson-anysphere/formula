@@ -29,6 +29,12 @@ export function registerBuiltinCommands(params: {
   app: SpreadsheetApp;
   layoutController: LayoutController;
   /**
+   * Optional spreadsheet edit-state predicate. When omitted, falls back to `app.isEditing()`.
+   *
+   * The desktop shell passes a custom predicate that includes split-view secondary editor state.
+   */
+  isEditing?: (() => boolean) | null;
+  /**
    * Optional focus restoration hook after sheet navigation actions.
    *
    * The desktop shell can use this to avoid stealing focus while the user is in
@@ -65,6 +71,7 @@ export function registerBuiltinCommands(params: {
     commandRegistry,
     app,
     layoutController,
+    isEditing = null,
     focusAfterSheetNavigation = null,
     getVisibleSheetIds = null,
     ensureExtensionsLoaded = null,
@@ -89,6 +96,9 @@ export function registerBuiltinCommands(params: {
       // ignore
     }
   };
+
+  const isEditingFn =
+    isEditing ?? (() => (typeof (app as any)?.isEditing === "function" ? Boolean((app as any).isEditing()) : false));
 
   const commandCategoryFormat = t("commandCategory.format");
   const commandCategoryData = t("commandCategory.data");
@@ -162,7 +172,14 @@ export function registerBuiltinCommands(params: {
     //
     // Exception: while the formula bar is actively editing a *formula* (range selection mode),
     // allow switching sheets so users can build cross-sheet references.
-    if (app.isEditing() && !app.isFormulaBarFormulaEditing()) return;
+    if (isEditingFn()) {
+      // Only allow the formula-bar exception when the primary editor is the one that is editing.
+      // When a split-view secondary editor is active, sheet navigation should still be blocked.
+      const appAny = app as any;
+      const primaryEditing = typeof appAny?.isEditing === "function" ? Boolean(appAny.isEditing()) : false;
+      const formulaEditing = typeof appAny?.isFormulaBarFormulaEditing === "function" ? Boolean(appAny.isFormulaBarFormulaEditing()) : false;
+      if (!(primaryEditing && formulaEditing)) return;
+    }
     const sheetIds = listVisibleSheetIds();
     if (sheetIds.length <= 1) return;
     const active = app.getCurrentSheetId();
@@ -274,7 +291,7 @@ export function registerBuiltinCommands(params: {
   ): void => {
     // Match SpreadsheetApp guards: formatting commands should never mutate the sheet while the user is
     // actively editing (cell editor / formula bar / inline edit).
-    if (typeof (app as any)?.isEditing === "function" && (app as any).isEditing()) return;
+    if (isEditingFn()) return;
 
     const doc = typeof (app as any)?.getDocument === "function" ? (app as any).getDocument() : null;
     const sheetId = typeof (app as any)?.getCurrentSheetId === "function" ? (app as any).getCurrentSheetId() : null;
@@ -582,7 +599,7 @@ export function registerBuiltinCommands(params: {
       // so we avoid focusing here (the host owns returning focus after it closes overlays).
       const focusAfter = typeof next === "boolean";
 
-      if (app.isEditing() || getTextEditingTarget()) {
+      if (isEditingFn() || getTextEditingTarget()) {
         // Ribbon toggles optimistically update their internal pressed state before the command runs.
         // Refresh so the toggle reflects the actual (unchanged) app state.
         refresh();
@@ -630,6 +647,10 @@ export function registerBuiltinCommands(params: {
     "view.toggleSplitView",
     t("command.view.toggleSplitView"),
     (next?: boolean) => {
+      if (isEditingFn()) {
+        refresh();
+        return;
+      }
       const currentDirection = layoutController.layout.splitView.direction;
       const shouldEnable = typeof next === "boolean" ? next : currentDirection === "none";
 
@@ -656,7 +677,7 @@ export function registerBuiltinCommands(params: {
     "audit.togglePrecedents",
     t("command.audit.togglePrecedents"),
     () => {
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       if (getTextEditingTarget()) return;
       app.toggleAuditingPrecedents();
       app.focus();
@@ -673,7 +694,7 @@ export function registerBuiltinCommands(params: {
     "audit.toggleDependents",
     t("command.audit.toggleDependents"),
     () => {
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       if (getTextEditingTarget()) return;
       app.toggleAuditingDependents();
       app.focus();
@@ -760,7 +781,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "ai.inlineEdit",
     t("command.ai.inlineEdit"),
-    () => app.openInlineAiEdit(),
+    () => {
+      if (isEditingFn()) return;
+      app.openInlineAiEdit();
+    },
     {
       category: t("commandCategory.ai"),
       icon: null,
@@ -773,6 +797,7 @@ export function registerBuiltinCommands(params: {
     "view.insertPivotTable",
     t("command.view.insertPivotTable"),
     () => {
+      if (isEditingFn()) return;
       // Always call openPanel so we activate docked panels and also trigger a layout re-render
       // even when the panel is already floating (useful for refreshing panel-local state).
       const layout = (() => {
@@ -847,6 +872,7 @@ export function registerBuiltinCommands(params: {
     "pageLayout.arrange.selectionPane",
     "Selection Pane",
     () => {
+      if (isEditingFn()) return;
       openDockPanel(PanelIds.SELECTION_PANE);
 
       // The panel is a React mount; wait a frame so DOM nodes exist before focusing.
@@ -877,7 +903,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "data.forecast.whatIfAnalysis.scenarioManager",
     `${t("whatIf.scenario.title")}…`,
-    () => openDockPanel(PanelIds.SCENARIO_MANAGER),
+    () => {
+      if (isEditingFn()) return;
+      openDockPanel(PanelIds.SCENARIO_MANAGER);
+    },
     {
       category: commandCategoryData,
       icon: null,
@@ -889,7 +918,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "data.forecast.whatIfAnalysis.monteCarlo",
     `${t("whatIf.monteCarlo.title")}…`,
-    () => openDockPanel(PanelIds.MONTE_CARLO),
+    () => {
+      if (isEditingFn()) return;
+      openDockPanel(PanelIds.MONTE_CARLO);
+    },
     {
       category: commandCategoryData,
       icon: null,
@@ -902,6 +934,7 @@ export function registerBuiltinCommands(params: {
     "data.forecast.whatIfAnalysis.goalSeek",
     `${t("whatIf.goalSeek.title")}…`,
     () => {
+      if (isEditingFn()) return;
       if (openGoalSeekDialog) {
         openGoalSeekDialog();
         return;
@@ -924,7 +957,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "formulas.solutions.solver",
     t("panels.solver.title"),
-    () => openDockPanel(PanelIds.SOLVER),
+    () => {
+      if (isEditingFn()) return;
+      openDockPanel(PanelIds.SOLVER);
+    },
     {
       category: commandCategoryData,
       icon: null,
@@ -1128,7 +1164,7 @@ export function registerBuiltinCommands(params: {
     () => {
       // Match spreadsheet shortcut behavior: don't trigger comment UX while the user is
       // actively editing a cell/formula (Excel-style).
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       // Defense-in-depth: even if some UI surface executes this command while the current
       // role cannot comment (viewer), surface a message and avoid focusing the disabled
       // composer.
@@ -1175,6 +1211,7 @@ export function registerBuiltinCommands(params: {
     "view.freezePanes",
     t("command.view.freezePanes"),
     () => {
+      if (isEditingFn()) return;
       app.freezePanes();
       app.focus();
     },
@@ -1190,6 +1227,7 @@ export function registerBuiltinCommands(params: {
     "view.freezeTopRow",
     t("command.view.freezeTopRow"),
     () => {
+      if (isEditingFn()) return;
       app.freezeTopRow();
       app.focus();
     },
@@ -1205,6 +1243,7 @@ export function registerBuiltinCommands(params: {
     "view.freezeFirstColumn",
     t("command.view.freezeFirstColumn"),
     () => {
+      if (isEditingFn()) return;
       app.freezeFirstColumn();
       app.focus();
     },
@@ -1220,6 +1259,7 @@ export function registerBuiltinCommands(params: {
     "view.unfreezePanes",
     t("command.view.unfreezePanes"),
     () => {
+      if (isEditingFn()) return;
       app.unfreezePanes();
       app.focus();
     },
@@ -1349,6 +1389,7 @@ export function registerBuiltinCommands(params: {
     "view.splitVertical",
     t("command.view.splitVertical"),
     () => {
+      if (isEditingFn()) return;
       layoutController.setSplitDirection("vertical", 0.5);
       app.focus();
     },
@@ -1364,6 +1405,7 @@ export function registerBuiltinCommands(params: {
     "view.splitHorizontal",
     t("command.view.splitHorizontal"),
     () => {
+      if (isEditingFn()) return;
       layoutController.setSplitDirection("horizontal", 0.5);
       app.focus();
     },
@@ -1379,6 +1421,7 @@ export function registerBuiltinCommands(params: {
     "view.splitNone",
     t("command.view.splitNone"),
     () => {
+      if (isEditingFn()) return;
       layoutController.setSplitDirection("none", 0.5);
       app.focus();
     },
@@ -1394,7 +1437,7 @@ export function registerBuiltinCommands(params: {
     "audit.tracePrecedents",
     t("command.audit.tracePrecedents"),
     () => {
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       if (getTextEditingTarget()) return;
       app.clearAuditing();
       app.toggleAuditingPrecedents();
@@ -1428,7 +1471,7 @@ export function registerBuiltinCommands(params: {
     "audit.traceDependents",
     t("command.audit.traceDependents"),
     () => {
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       if (getTextEditingTarget()) return;
       app.clearAuditing();
       app.toggleAuditingDependents();
@@ -1462,7 +1505,7 @@ export function registerBuiltinCommands(params: {
     "audit.traceBoth",
     t("command.audit.traceBoth"),
     () => {
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       if (getTextEditingTarget()) return;
       app.clearAuditing();
       app.toggleAuditingPrecedents();
@@ -1481,7 +1524,7 @@ export function registerBuiltinCommands(params: {
     "audit.clearAuditing",
     t("command.audit.clearAuditing"),
     () => {
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       if (getTextEditingTarget()) return;
       app.clearAuditing();
       app.focus();
@@ -1499,7 +1542,7 @@ export function registerBuiltinCommands(params: {
     "formulas.formulaAuditing.removeArrows",
     "Remove Arrows",
     () => {
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       if (getTextEditingTarget()) return;
       app.clearAuditing();
       app.focus();
@@ -1516,7 +1559,7 @@ export function registerBuiltinCommands(params: {
     "audit.toggleTransitive",
     t("command.audit.toggleTransitive"),
     () => {
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       if (getTextEditingTarget()) return;
       app.toggleAuditingTransitive();
       app.focus();
@@ -1546,6 +1589,7 @@ export function registerBuiltinCommands(params: {
         tryExecCommand("copy");
         return;
       }
+      if (isEditingFn()) return;
       return app.copyToClipboard();
     },
     {
@@ -1569,6 +1613,7 @@ export function registerBuiltinCommands(params: {
         tryExecCommand("cut");
         return;
       }
+      if (isEditingFn()) return;
       return app.cutToClipboard();
     },
     {
@@ -1592,6 +1637,7 @@ export function registerBuiltinCommands(params: {
         tryExecCommand("paste");
         return;
       }
+      if (isEditingFn()) return;
       return app.pasteFromClipboard();
     },
     {
@@ -1605,7 +1651,7 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "clipboard.pasteSpecial.all",
     t("clipboard.pasteSpecial.paste"),
-    () => app.pasteFromClipboard(),
+    () => commandRegistry.executeCommand("clipboard.paste"),
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -1623,6 +1669,7 @@ export function registerBuiltinCommands(params: {
     async () => {
       if (getTextEditingTarget()) return;
       if ((app as any).isFormulaBarEditing?.()) return;
+      if (isEditingFn()) return;
       try {
         await app.clipboardPasteSpecial("values");
       } finally {
@@ -1643,6 +1690,7 @@ export function registerBuiltinCommands(params: {
     async () => {
       if (getTextEditingTarget()) return;
       if ((app as any).isFormulaBarEditing?.()) return;
+      if (isEditingFn()) return;
       try {
         await app.clipboardPasteSpecial("formulas");
       } finally {
@@ -1663,6 +1711,7 @@ export function registerBuiltinCommands(params: {
     async () => {
       if (getTextEditingTarget()) return;
       if ((app as any).isFormulaBarEditing?.()) return;
+      if (isEditingFn()) return;
       try {
         await app.clipboardPasteSpecial("formats");
       } finally {
@@ -1683,6 +1732,7 @@ export function registerBuiltinCommands(params: {
     async () => {
       if (getTextEditingTarget()) return;
       if ((app as any).isFormulaBarEditing?.()) return;
+      if (isEditingFn()) return;
       try {
         await app.clipboardPasteSpecial("all", { transpose: true });
       } finally {
@@ -1704,6 +1754,7 @@ export function registerBuiltinCommands(params: {
     async () => {
       if (getTextEditingTarget()) return;
       if ((app as any).isFormulaBarEditing?.()) return;
+      if (isEditingFn()) return;
       const items = getPasteSpecialMenuItems();
       const picked = await showQuickPick(
         items.map((item) => ({ label: item.label, value: item.mode })),
@@ -1979,7 +2030,7 @@ export function registerBuiltinCommands(params: {
     "edit.editCell",
     t("command.edit.editCell"),
     () => {
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       app.openCellEditorAtActiveCell();
     },
     {
@@ -1993,7 +2044,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "edit.clearContents",
     t("command.edit.clearContents"),
-    () => app.clearSelectionContents(),
+    () => {
+      if (isEditingFn()) return;
+      app.clearSelectionContents();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -2005,7 +2059,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "edit.fillDown",
     t("command.edit.fillDown"),
-    () => app.fillDown(),
+    () => {
+      if (isEditingFn()) return;
+      app.fillDown();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -2017,7 +2074,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "edit.fillRight",
     t("command.edit.fillRight"),
-    () => app.fillRight(),
+    () => {
+      if (isEditingFn()) return;
+      app.fillRight();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -2029,7 +2089,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "edit.fillUp",
     t("command.edit.fillUp"),
-    () => app.fillUp(),
+    () => {
+      if (isEditingFn()) return;
+      app.fillUp();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -2041,7 +2104,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "edit.fillLeft",
     t("command.edit.fillLeft"),
-    () => app.fillLeft(),
+    () => {
+      if (isEditingFn()) return;
+      app.fillLeft();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -2054,7 +2120,7 @@ export function registerBuiltinCommands(params: {
     "edit.selectCurrentRegion",
     t("command.edit.selectCurrentRegion"),
     () => {
-      if (app.isEditing()) return;
+      if (isEditingFn()) return;
       app.selectCurrentRegion();
     },
     {
@@ -2092,7 +2158,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "edit.autoSum",
     t("command.edit.autoSum"),
-    () => app.autoSum(),
+    () => {
+      if (isEditingFn()) return;
+      app.autoSum();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -2105,31 +2174,58 @@ export function registerBuiltinCommands(params: {
   //
   // These are implemented by SpreadsheetApp (and were historically routed via `main.ts`), but are
   // now registered so the ribbon can rely on the CommandRegistry baseline enable/disable behavior.
-  commandRegistry.registerBuiltinCommand("home.editing.autoSum.average", "AutoSum: Average", () => app.autoSumAverage(), {
-    category: t("commandCategory.editing"),
-    icon: null,
-    keywords: ["autosum", "sum", "average", "excel"],
-  });
+  commandRegistry.registerBuiltinCommand(
+    "home.editing.autoSum.average",
+    "AutoSum: Average",
+    () => {
+      if (isEditingFn()) return;
+      app.autoSumAverage();
+    },
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      keywords: ["autosum", "sum", "average", "excel"],
+    },
+  );
   commandRegistry.registerBuiltinCommand(
     "home.editing.autoSum.countNumbers",
     "AutoSum: Count Numbers",
-    () => app.autoSumCountNumbers(),
+    () => {
+      if (isEditingFn()) return;
+      app.autoSumCountNumbers();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
       keywords: ["autosum", "sum", "count", "count numbers", "excel"],
     },
   );
-  commandRegistry.registerBuiltinCommand("home.editing.autoSum.max", "AutoSum: Max", () => app.autoSumMax(), {
-    category: t("commandCategory.editing"),
-    icon: null,
-    keywords: ["autosum", "sum", "max", "maximum", "excel"],
-  });
-  commandRegistry.registerBuiltinCommand("home.editing.autoSum.min", "AutoSum: Min", () => app.autoSumMin(), {
-    category: t("commandCategory.editing"),
-    icon: null,
-    keywords: ["autosum", "sum", "min", "minimum", "excel"],
-  });
+  commandRegistry.registerBuiltinCommand(
+    "home.editing.autoSum.max",
+    "AutoSum: Max",
+    () => {
+      if (isEditingFn()) return;
+      app.autoSumMax();
+    },
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      keywords: ["autosum", "sum", "max", "maximum", "excel"],
+    },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "home.editing.autoSum.min",
+    "AutoSum: Min",
+    () => {
+      if (isEditingFn()) return;
+      app.autoSumMin();
+    },
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      keywords: ["autosum", "sum", "min", "minimum", "excel"],
+    },
+  );
 
   if (themeController) {
     const categoryView = t("commandCategory.view");
