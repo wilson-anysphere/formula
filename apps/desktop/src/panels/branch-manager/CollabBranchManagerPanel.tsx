@@ -7,6 +7,7 @@ import { t } from "../../i18n/index.js";
 import { BranchManagerPanel, type Actor as BranchActor } from "./BranchManagerPanel.js";
 import { MergeBranchPanel } from "./MergeBranchPanel.js";
 import { clearReservedRootGuardError, useReservedRootGuardError } from "../collabReservedRootGuard.js";
+import { commitIfDocumentStateChanged } from "./commitIfChanged.js";
 
 // Import branching helpers from the browser-safe entrypoint so bundlers don't
 // accidentally pull Node-only stores (e.g. SQLite) into the WebView bundle.
@@ -178,8 +179,13 @@ export function CollabBranchManagerPanel({
     }
 
     const commitCurrentState = async (message: string) => {
-      const nextState = yjsDocToDocumentState(session.doc);
-      await branchService.commit(actor as any, { nextState, message });
+      await commitIfDocumentStateChanged({
+        actor: actor as any,
+        branchService: branchService as any,
+        doc: session.doc,
+        message,
+        docToState: yjsDocToDocumentState as any,
+      });
     };
 
     return {
