@@ -282,4 +282,48 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
     root.remove();
     formulaBarHost.remove();
   });
+
+  it("supports #This Row and @Column structured references when editing inside the table", () => {
+    const root = createRoot();
+    const formulaBarHost = document.createElement("div");
+    document.body.appendChild(formulaBarHost);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar: formulaBarHost });
+
+    const doc = app.getDocument();
+    // Table range includes header row at A1 and data rows at A2:A4.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 10);
+    doc.setCellValue("Sheet1", { row: 2, col: 0 }, 20);
+    doc.setCellValue("Sheet1", { row: 3, col: 0 }, 30);
+
+    app.getSearchWorkbook().addTable({
+      name: "TableThisRow",
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 3,
+      endCol: 0,
+      columns: ["Amount"],
+    });
+
+    // Pretend we're editing the formula in row 3 (0-based row 2), inside the table.
+    (app as any).formulaEditCell = { sheetId: "Sheet1", cell: { row: 2, col: 0 } };
+
+    const evalPreview = (expr: string) => (app as any).evaluateFormulaBarArgumentPreview(expr);
+
+    expect(evalPreview("TableThisRow[[#This Row],[Amount]]")).toBe(20);
+    expect(evalPreview("TableThisRow[@Amount]")).toBe(20);
+    expect(evalPreview("SUM(TableThisRow[[#This Row],[Amount]], 5)")).toBe(25);
+
+    app.destroy();
+    root.remove();
+    formulaBarHost.remove();
+  });
 });

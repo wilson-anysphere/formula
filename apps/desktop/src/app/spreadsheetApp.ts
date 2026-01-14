@@ -16922,6 +16922,103 @@ export class SpreadsheetApp {
       // Excel structured refs are never sheet-qualified in formula text.
       if (!trimmed.includes("[") || trimmed.includes("!")) return null;
 
+      const unescapeStructuredRefItem = (value: string): string => value.replaceAll("]]", "]");
+
+      const findColumnIndex = (columns: unknown, columnName: string): number | null => {
+        if (!Array.isArray(columns)) return null;
+        const target = columnName.trim().toUpperCase();
+        if (!target) return null;
+        for (let i = 0; i < columns.length; i += 1) {
+          const col = String(columns[i] ?? "").trim();
+          if (!col) continue;
+          if (col.toUpperCase() === target) return i;
+        }
+        return null;
+      };
+
+      // Support "This Row" structured references (`Table1[[#This Row],[Amount]]`, `Table1[@Amount]`)
+      // when the edited cell is within the referenced table. This avoids rewriting them to an entire
+      // column range (which would be misleading) and keeps previews useful for calculated columns.
+      const resolveThisRowStructuredRef = (tableName: string, columnName: string): string | null => {
+        const name = String(tableName ?? "").trim();
+        if (!name) return null;
+        const table: any = this.searchWorkbook.getTable(name);
+        if (!table) return null;
+
+        const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+        const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+        const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+        const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+        if (startRow == null || startCol == null || endRow == null || endCol == null) return null;
+        if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) return null;
+
+        const baseStartRow = Math.min(startRow, endRow);
+        const baseEndRow = Math.max(startRow, endRow);
+        const baseStartCol = Math.min(startCol, endCol);
+        const baseEndCol = Math.max(startCol, endCol);
+
+        const colIdx = findColumnIndex(table.columns, columnName);
+        if (colIdx == null) return null;
+        const col = baseStartCol + colIdx;
+        if (col < baseStartCol || col > baseEndCol) return null;
+
+        // Require the formula edit target to be on the same sheet as the table.
+        const tableSheet =
+          typeof table.sheetName === "string" && table.sheetName.trim()
+            ? table.sheetName.trim()
+            : typeof table.sheet === "string" && table.sheet.trim()
+              ? table.sheet.trim()
+              : sheetId;
+        const resolvedSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
+        if (resolvedSheetId && resolvedSheetId.toLowerCase() !== sheetId.toLowerCase()) return null;
+        if (resolvedSheetId && !sheetExists(resolvedSheetId)) return null;
+
+        // "This Row" refers to a single data/totals row (not the header).
+        const row = editTarget.cell.row;
+        const dataStartRow = baseStartRow + 1;
+        if (row < dataStartRow || row > baseEndRow) return null;
+
+        const addr = cellToA1({ row, col });
+        const sheetToken = tableSheet ? formatSheetNameForA1(tableSheet) : "";
+        const prefix = sheetToken ? `${sheetToken}!` : "";
+        return `${prefix}${addr}`;
+      };
+
+      // Fast-path: resolve `Table1[[#This Row],[Column]]` and `Table1[@Column]` without going through
+      // `extractFormulaReferences` (which would otherwise approximate #This Row as a whole-column ref).
+      const escapedItem = "((?:[^\\]]|\\]\\])+)"; // match non-] or escaped `]]`
+      const qualifiedRe = new RegExp(
+        `^([A-Za-z_][A-Za-z0-9_.]*)\\[\\[\\s*${escapedItem}\\s*\\]\\s*,\\s*\\[\\s*${escapedItem}\\s*\\]\\]$`,
+        "i",
+      );
+      const qualifiedMatch = qualifiedRe.exec(trimmed);
+      if (qualifiedMatch) {
+        const selector = unescapeStructuredRefItem(qualifiedMatch[2]!.trim());
+        const normalizedSelector = selector.trim().replace(/\s+/g, " ").toLowerCase();
+        if (normalizedSelector === "#this row") {
+          const columnName = unescapeStructuredRefItem(qualifiedMatch[3]!.trim());
+          const resolved = resolveThisRowStructuredRef(qualifiedMatch[1]!, columnName);
+          if (resolved) return resolved;
+          // If we can't resolve this-row semantics, treat it as unsupported rather than falling back
+          // to a whole-column approximation.
+          return null;
+        }
+      }
+
+      const simpleRe = new RegExp(`^([A-Za-z_][A-Za-z0-9_.]*)\\[\\s*${escapedItem}\\s*\\]$`);
+      const simpleMatch = simpleRe.exec(trimmed);
+      if (simpleMatch) {
+        const item = unescapeStructuredRefItem(simpleMatch[2]!.trim());
+        if (item.startsWith("@")) {
+          const columnName = item.slice(1).trim();
+          if (columnName) {
+            const resolved = resolveThisRowStructuredRef(simpleMatch[1]!, columnName);
+            if (resolved) return resolved;
+          }
+          return null;
+        }
+      }
+
       const { references } = extractFormulaReferences(trimmed, undefined, undefined, { tables: this.searchWorkbook.tables as any });
       const first = references[0];
       if (!first) return null;
