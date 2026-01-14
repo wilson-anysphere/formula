@@ -910,6 +910,7 @@ test(
 
     const log = readFileSync(logPath, "utf8");
     assert.match(log, /codesign --verify/, "expected codesign verify invocation");
+    assert.match(log, /codesign -dv --verbose=4/, "expected codesign -dv hardened runtime probe");
     assert.match(log, /spctl --assess --type execute/, "expected spctl execute assessment");
   },
 );
