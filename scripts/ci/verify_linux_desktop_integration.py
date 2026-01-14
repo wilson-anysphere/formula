@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import json
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -230,6 +231,32 @@ def exec_accepts_file_arg(exec_line: str) -> bool:
     return any(token in exec_line for token in ("%u", "%U", "%f", "%F"))
 
 
+def exec_targets_expected_binary(exec_line: str, expected_binary: str) -> bool:
+    """
+    Ensure we're validating *our* desktop integration entry, not some unrelated .desktop file.
+
+    Linux packages can technically contain multiple .desktop files. Our file association checks
+    should apply to the entry that actually launches Formula.
+
+    We match either:
+      - <expected_binary> (from tauri.conf.json mainBinaryName), or
+      - AppRun (common for extracted AppImage AppDirs)
+    as a token in the Exec= line (allowing an optional path prefix).
+    """
+
+    exec_line = exec_line.strip()
+    if not exec_line:
+        return False
+
+    expected_binary = expected_binary.strip()
+    if not expected_binary:
+        expected_binary = "formula-desktop"
+
+    token = re.escape(expected_binary)
+    pattern = rf'(^|\s)["\']?(?:[^\s"\']*/)?(AppRun|{token})["\']?(\s|$)'
+    return re.search(pattern, exec_line, flags=re.IGNORECASE) is not None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -256,6 +283,7 @@ def main() -> int:
     expected_mime_types = load_expected_mime_types(args.tauri_config)
     expected_schemes = load_expected_deep_link_schemes(args.tauri_config)
     expected_doc_pkg = load_expected_doc_package_name(args.tauri_config)
+    expected_main_binary = expected_doc_pkg
     if not expected_schemes:
         expected_scheme = args.url_scheme.strip().lower()
         if not expected_scheme:
@@ -285,9 +313,36 @@ def main() -> int:
         f"[linux] Expected MIME types from tauri.conf.json ({len(expected_mime_types)}): {_format_set(expected_mime_types)}"
     )
     print(f"[linux] Expected deep link scheme MIME types ({len(expected_scheme_mimes)}): {_format_set(expected_scheme_mimes)}")
-    print(f"[linux] Observed MIME types from .desktop files ({len(observed_mime_types)}): {_format_set(observed_mime_types)}")
+    print(f"[linux] Expected main Exec binary: {expected_main_binary!r} (or 'AppRun')")
+    print(f"[linux] Observed MIME types from all .desktop files ({len(observed_mime_types)}): {_format_set(observed_mime_types)}")
 
-    missing_mime_types = expected_mime_types - observed_mime_types
+    app_entries = [
+        (path, mime_types, exec_line)
+        for (path, mime_types, exec_line) in desktop_entries
+        if exec_targets_expected_binary(exec_line, expected_main_binary)
+    ]
+    if not app_entries:
+        print(
+            f"[linux] ERROR: no .desktop files appear to target the expected executable '{expected_main_binary}' (or AppRun).",
+            file=sys.stderr,
+        )
+        print("[linux] .desktop Exec entries inspected:", file=sys.stderr)
+        for (path, _mime_types, exec_line) in desktop_entries:
+            print(f"[linux] - {path} Exec={exec_line!r}", file=sys.stderr)
+        return 1
+
+    observed_mime_types_app: set[str] = set()
+    for _path, mime_types, _exec in app_entries:
+        observed_mime_types_app |= mime_types
+    print(
+        f"[linux] Desktop entries targeting app ({len(app_entries)}): "
+        + ", ".join(str(p) for (p, _m, _e) in app_entries)
+    )
+    print(
+        f"[linux] Observed MIME types from app .desktop entries ({len(observed_mime_types_app)}): {_format_set(observed_mime_types_app)}"
+    )
+
+    missing_mime_types = expected_mime_types - observed_mime_types_app
     if missing_mime_types:
         print(
             f"[linux] ERROR: missing MIME types in .desktop MimeType=: {_format_set(missing_mime_types)}",
@@ -295,7 +350,7 @@ def main() -> int:
         )
         return 1
 
-    missing_scheme_mimes = expected_scheme_mimes - observed_mime_types
+    missing_scheme_mimes = expected_scheme_mimes - observed_mime_types_app
     if missing_scheme_mimes:
         print(
             f"[linux] ERROR: missing deep link scheme handler(s) in .desktop MimeType=: {_format_set(missing_scheme_mimes)}",
@@ -305,7 +360,7 @@ def main() -> int:
 
     file_assoc_entries = [
         (path, exec_line)
-        for (path, mime_types, exec_line) in desktop_entries
+        for (path, mime_types, exec_line) in app_entries
         if mime_types & expected_mime_types
     ]
     if not file_assoc_entries:
@@ -332,7 +387,7 @@ def main() -> int:
 
     scheme_entries = [
         (path, exec_line)
-        for (path, mime_types, exec_line) in desktop_entries
+        for (path, mime_types, exec_line) in app_entries
         if mime_types & expected_scheme_mimes
     ]
     if not scheme_entries:
