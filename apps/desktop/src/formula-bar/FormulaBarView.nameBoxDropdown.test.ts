@@ -182,7 +182,9 @@ describe("FormulaBarView name box dropdown", () => {
     dropdown.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(popup.hidden).toBe(false);
     expect(list.textContent).toContain("No named ranges");
-    expect(list.querySelector('[role="option"]')).toBeNull();
+    const emptyOption = list.querySelector<HTMLElement>('[role="option"][aria-disabled="true"]');
+    expect(emptyOption).toBeTruthy();
+    expect(emptyOption?.textContent).toContain("No named ranges");
 
     // Escape should close without navigating.
     const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;

@@ -2980,6 +2980,11 @@ export class FormulaBarView {
     if (this.#nameBoxDropdownOptionEls.length === 0) {
       const empty = document.createElement("div");
       empty.className = "formula-bar-name-box-empty";
+      // Match Excel semantics: an empty dropdown still renders a disabled item rather than
+      // being completely blank, so keyboard users get feedback about why nothing is selectable.
+      empty.setAttribute("role", "option");
+      empty.setAttribute("aria-disabled", "true");
+      empty.setAttribute("aria-selected", "false");
       empty.textContent =
         this.#nameBoxDropdownAllItems.length === 0 && this.#nameBoxDropdownQuery === "" ? "No named ranges" : "No matches";
       list.appendChild(empty);
