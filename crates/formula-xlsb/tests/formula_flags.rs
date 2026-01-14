@@ -1,7 +1,9 @@
-use std::io::{Read, Seek, Write};
+use std::io::{Cursor, Read, Seek, Write};
 use std::path::Path;
 
-use formula_xlsb::{biff12_varint, patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
+use formula_xlsb::{
+    biff12_varint, patch_sheet_bin, patch_sheet_bin_streaming, CellEdit, CellValue, XlsbWorkbook,
+};
 use pretty_assertions::assert_eq;
 
 const WORKSHEET: u32 = 0x0081;
@@ -216,18 +218,18 @@ fn patcher_can_override_existing_brt_fmla_flags() {
     let extra = [0xAA, 0xBB];
     let sheet_bin = synthetic_sheet_brt_fmla_num(flags, 10.0, &extra);
 
-    let edit = CellEdit {
+    let edits = [CellEdit {
         row: 0,
         col: 0,
         new_value: CellValue::Number(99.5),
+        new_style: None,
         clear_formula: false,
         new_formula: None,
         new_rgcb: None,
         new_formula_flags: Some(new_flags),
         shared_string_index: None,
-        new_style: None,
-    };
-    let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+    }];
+    let patched_sheet = patch_sheet_bin(&sheet_bin, &edits).expect("patch sheet");
 
     let tmp = write_fixture_like_xlsb(&patched_sheet);
     let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
@@ -239,6 +241,17 @@ fn patcher_can_override_existing_brt_fmla_flags() {
     let formula = cell.formula.as_ref().expect("formula expected");
     assert_eq!(formula.flags, new_flags);
     assert_eq!(formula.extra, extra.to_vec());
+
+    // Streaming patcher should apply the same flag override semantics.
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch sheet streaming");
+    assert!(changed);
+    let tmp = write_fixture_like_xlsb(&patched_stream);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+    let formula = sheet.cells[0].formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, new_flags);
 }
 
 #[test]
@@ -249,18 +262,18 @@ fn patcher_can_insert_formula_cells_with_explicit_flags() {
     push_record(&mut sheet_bin, SHEETDATA_END, &[]);
 
     let flags = 0x1234;
-    let edit = CellEdit {
+    let edits = [CellEdit {
         row: 0,
         col: 0,
         new_value: CellValue::Number(1.0),
+        new_style: None,
         clear_formula: false,
         new_formula: Some(Vec::new()), // empty rgce
         new_rgcb: None,
         new_formula_flags: Some(flags),
         shared_string_index: None,
-        new_style: None,
-    };
-    let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+    }];
+    let patched_sheet = patch_sheet_bin(&sheet_bin, &edits).expect("patch sheet");
 
     let tmp = write_fixture_like_xlsb(&patched_sheet);
     let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
@@ -272,6 +285,16 @@ fn patcher_can_insert_formula_cells_with_explicit_flags() {
     assert_eq!(cell.col, 0);
     assert_eq!(cell.value, CellValue::Number(1.0));
     let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, flags);
+
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch sheet streaming");
+    assert!(changed);
+    let tmp = write_fixture_like_xlsb(&patched_stream);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+    let formula = sheet.cells[0].formula.as_ref().expect("formula expected");
     assert_eq!(formula.flags, flags);
 }
 
