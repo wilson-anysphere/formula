@@ -78,28 +78,39 @@ export function renderRichText(ctx, richText, rect, options = {}) {
   };
   const defaultColor = options.color ?? resolveCssVar("--text-primary", { fallback: "CanvasText" });
 
-  const offsets = buildCodePointIndex(richText.text);
-  const textLen = offsets.length - 1;
-
-  const runs = Array.isArray(richText.runs) && richText.runs.length > 0
-    ? richText.runs
-    : [{ start: 0, end: textLen, style: undefined }];
-
   const engine = getSharedTextLayoutEngine(ctx);
+  const hasRuns = Array.isArray(richText.runs) && richText.runs.length > 0;
+  const rawText = String(richText.text ?? "");
 
   /** @type {Array<{ text: string, font: any, color: string | undefined, underline: boolean }>} */
-  const layoutRuns = runs.map((run) => {
-    const text = sliceByCodePointRange(richText.text, offsets, run.start, run.end);
-    const font = fontSpecForStyle(run.style, defaults);
-    return {
-      text,
-      font,
-      color: engineColorToCanvasColor(run.style?.color),
-      underline: Boolean(run.style?.underline && run.style.underline !== "none"),
-    };
-  });
+  let layoutRuns;
+  let fullText;
+  if (!hasRuns) {
+    layoutRuns = [
+      {
+        text: rawText,
+        font: fontSpecForStyle(undefined, defaults),
+        color: undefined,
+        underline: false,
+      },
+    ];
+    fullText = rawText;
+  } else {
+    const offsets = buildCodePointIndex(rawText);
 
-  const fullText = layoutRuns.map((r) => r.text).join("");
+    layoutRuns = richText.runs.map((run) => {
+      const text = sliceByCodePointRange(rawText, offsets, run.start, run.end);
+      const font = fontSpecForStyle(run.style, defaults);
+      return {
+        text,
+        font,
+        color: engineColorToCanvasColor(run.style?.color),
+        underline: Boolean(run.style?.underline && run.style.underline !== "none"),
+      };
+    });
+
+    fullText = layoutRuns.map((r) => r.text).join("");
+  }
   const hasExplicitNewline = /[\r\n]/.test(fullText);
 
   const availableWidth = Math.max(0, rect.width - padding * 2);
