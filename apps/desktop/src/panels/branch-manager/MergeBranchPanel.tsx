@@ -813,6 +813,7 @@ export function MergeBranchPanel({
                     const contentDisabled = mutationsDisabled || draft.deleteCell || contentLocked;
                     const formatDisabled = mutationsDisabled || draft.deleteCell;
                     const formulaActive = draft.formulaText.trim().length > 0;
+                    const formatErrorId = `branch-merge-format-error-${idx}`;
 
                     return (
                       <div className="branch-merge__manual-cell-editor">
@@ -922,12 +923,16 @@ export function MergeBranchPanel({
                             value={draft.formatText}
                             disabled={formatDisabled}
                             aria-label={t("branchMerge.manualCell.formatJson")}
+                            aria-invalid={Boolean(draft.formatError)}
+                            aria-describedby={draft.formatError ? formatErrorId : undefined}
                             onChange={(e) => updateManualDraft({ ...draft, formatText: e.target.value }, c)}
                           />
                         </div>
 
                         {draft.formatError ? (
-                          <div className="branch-merge__manual-cell-error">{draft.formatError}</div>
+                          <div id={formatErrorId} role="alert" className="branch-merge__manual-cell-error">
+                            {draft.formatError}
+                          </div>
                         ) : null}
                       </div>
                     );
