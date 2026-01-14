@@ -302,6 +302,24 @@ pub trait ValueResolver {
     fn external_sheet_order(&self, _workbook: &str) -> Option<Vec<String>> {
         None
     }
+
+    /// Return table metadata for an external workbook.
+    ///
+    /// This is used to resolve external workbook structured references like
+    /// `"[Book.xlsx]Sheet1!Table1[Col]"`.
+    ///
+    /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"`),
+    /// matching what [`split_external_sheet_key`] returns.
+    ///
+    /// Returning `None` indicates that table metadata is unavailable, in which case external
+    /// structured references evaluate to `#REF!`.
+    fn external_workbook_table(
+        &self,
+        _workbook: &str,
+        _table_name: &str,
+    ) -> Option<(String, formula_model::Table)> {
+        None
+    }
     /// Optional external data provider used by RTD / CUBE* functions.
     fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
         None
@@ -765,40 +783,122 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 }
                 None => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
             },
-            Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref)
-            {
-                Ok(ranges) if !ranges.is_empty() => {
-                    if !ranges
-                        .iter()
-                        .all(|(sheet_id, _, _)| self.resolver.sheet_exists(*sheet_id))
-                    {
-                        return EvalValue::Scalar(Value::Error(ErrorKind::Name));
+            Expr::StructuredRef(sref_expr) => {
+                // External workbook structured references (e.g. `[Book.xlsx]Sheet1!Table1[Col]`)
+                // are resolved dynamically using provider-supplied table metadata.
+                if let SheetReference::External(key) = &sref_expr.sheet {
+                    if !key.starts_with('[') {
+                        // `SheetReference::External` without a bracketed workbook prefix represents
+                        // an invalid/missing sheet at compile time; preserve `#REF!` semantics.
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                     }
 
-                    if !ranges.iter().all(|(sheet_id, start, end)| {
-                        self.reference_endpoints_in_bounds(
-                            &FnSheetId::Local(*sheet_id),
-                            *start,
-                            *end,
-                        )
+                    let (workbook, explicit_sheet_key) = match split_external_sheet_key(key) {
+                        Some((workbook, sheet)) if !sheet.contains(':') => {
+                            (workbook, Some(key.as_str()))
+                        }
+                        Some((_workbook, _sheet)) => {
+                            // External 3D sheet spans are not valid structured-ref prefixes.
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                        }
+                        None => {
+                            // Workbook-only external reference (`[Book.xlsx]...`); parse the
+                            // bracketed workbook prefix.
+                            let Some(end) = key.find(']') else {
+                                return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                            };
+                            let workbook = &key[1..end];
+                            if workbook.is_empty() {
+                                return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                            }
+                            (workbook, None)
+                        }
+                    };
+
+                    let Some(table_name) = sref_expr.sref.table_name.as_deref() else {
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                    };
+
+                    // Excel's `[@ThisRow]` semantics depend on the formula being inside the table.
+                    // For external workbooks we do not currently model the row context, so return
+                    // `#REF!`.
+                    if sref_expr.sref.items.iter().any(|item| {
+                        matches!(item, crate::structured_refs::StructuredRefItem::ThisRow)
                     }) {
                         return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                     }
 
-                    EvalValue::Reference(
+                    let Some((table_sheet, table)) =
+                        self.resolver.external_workbook_table(workbook, table_name)
+                    else {
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                    };
+
+                    let sheet_key = explicit_sheet_key
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("[{workbook}]{table_sheet}"));
+
+                    let ranges =
+                        match crate::structured_refs::resolve_structured_ref_in_table(
+                            &table,
+                            self.ctx.current_cell,
+                            &sref_expr.sref,
+                        ) {
+                            Ok(ranges) => ranges,
+                            Err(_) => return EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                        };
+
+                    if ranges.is_empty() {
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                    }
+
+                    return EvalValue::Reference(
                         ranges
                             .into_iter()
-                            .map(|(sheet_id, start, end)| ResolvedRange {
-                                sheet_id: FnSheetId::Local(sheet_id),
+                            .map(|(start, end)| ResolvedRange {
+                                sheet_id: FnSheetId::External(sheet_key.clone()),
                                 start,
                                 end,
                             })
                             .collect(),
-                    )
+                    );
                 }
-                Ok(_) => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
-                Err(e) => EvalValue::Scalar(Value::Error(e)),
-            },
+
+                // Local structured references resolve via workbook table metadata.
+                match self.resolver.resolve_structured_ref(self.ctx, &sref_expr.sref) {
+                    Ok(ranges) if !ranges.is_empty() => {
+                        if !ranges
+                            .iter()
+                            .all(|(sheet_id, _, _)| self.resolver.sheet_exists(*sheet_id))
+                        {
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Name));
+                        }
+
+                        if !ranges.iter().all(|(sheet_id, start, end)| {
+                            self.reference_endpoints_in_bounds(
+                                &FnSheetId::Local(*sheet_id),
+                                *start,
+                                *end,
+                            )
+                        }) {
+                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                        }
+
+                        EvalValue::Reference(
+                            ranges
+                                .into_iter()
+                                .map(|(sheet_id, start, end)| ResolvedRange {
+                                    sheet_id: FnSheetId::Local(sheet_id),
+                                    start,
+                                    end,
+                                })
+                                .collect(),
+                        )
+                    }
+                    Ok(_) => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                    Err(e) => EvalValue::Scalar(Value::Error(e)),
+                }
+            }
             Expr::NameRef(nref) => self.eval_name_ref(nref),
             Expr::FieldAccess { base, field } => {
                 let base = self.deref_eval_value_dynamic(self.eval_value(base));

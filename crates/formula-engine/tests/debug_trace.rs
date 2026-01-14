@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Default)]
 struct TestExternalProvider {
     values: Mutex<HashMap<(String, CellAddr), Value>>,
+    tables: Mutex<HashMap<(String, String), (String, Table)>>,
 }
 
 impl TestExternalProvider {
@@ -21,6 +22,13 @@ impl TestExternalProvider {
             .expect("lock poisoned")
             .insert((sheet.to_string(), addr), value.into());
     }
+
+    fn set_table(&self, workbook: &str, sheet: &str, table: Table) {
+        self.tables
+            .lock()
+            .expect("lock poisoned")
+            .insert((workbook.to_string(), table.name.clone()), (sheet.to_string(), table));
+    }
 }
 
 impl ExternalValueProvider for TestExternalProvider {
@@ -29,6 +37,14 @@ impl ExternalValueProvider for TestExternalProvider {
             .lock()
             .expect("lock poisoned")
             .get(&(sheet.to_string(), addr))
+            .cloned()
+    }
+
+    fn workbook_table(&self, workbook: &str, table_name: &str) -> Option<(String, Table)> {
+        self.tables
+            .lock()
+            .expect("lock poisoned")
+            .get(&(workbook.to_string(), table_name.to_string()))
             .cloned()
     }
 }
@@ -1083,18 +1099,22 @@ fn debug_trace_supports_sheet_prefixed_structured_references() {
 }
 
 #[test]
-fn debug_trace_rejects_external_workbook_structured_references() {
-    let mut engine = Engine::new();
-    engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col()]);
-    engine.set_cell_value("Sheet1", "B2", 10.0).unwrap();
+fn debug_trace_supports_external_workbook_structured_references() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_table("Book.xlsx", "Sheet1", table_fixture_multi_col());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 1 }, 10.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 1 }, 20.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 3, col: 1 }, 30.0);
 
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
     engine
         .set_cell_formula("Summary", "A1", "=SUM([Book.xlsx]Sheet1!Table1[Col2])")
         .unwrap();
     engine.recalculate_single_threaded();
 
     let computed = engine.get_cell_value("Summary", "A1");
-    assert_eq!(computed, Value::Error(formula_engine::ErrorKind::Ref));
+    assert_eq!(computed, Value::Number(60.0));
 
     let dbg = engine.debug_evaluate("Summary", "A1").unwrap();
     assert_eq!(dbg.value, computed);
@@ -1108,8 +1128,15 @@ fn debug_trace_rejects_external_workbook_structured_references() {
         slice(&dbg.formula, arg.span),
         "[Book.xlsx]Sheet1!Table1[Col2]"
     );
-    assert!(matches!(arg.kind, TraceKind::Error));
-    assert_eq!(arg.value, Value::Error(formula_engine::ErrorKind::Ref));
+    assert!(matches!(arg.kind, TraceKind::StructuredRef));
+    assert_eq!(
+        arg.reference,
+        Some(TraceRef::Range {
+            sheet: formula_engine::functions::SheetId::External("[Book.xlsx]Sheet1".to_string()),
+            start: CellAddr { row: 1, col: 1 },
+            end: CellAddr { row: 3, col: 1 }
+        })
+    );
 }
 
 #[test]

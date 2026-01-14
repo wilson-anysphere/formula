@@ -149,6 +149,12 @@ pub struct RangeRef<S> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StructuredRefExpr<S> {
+    pub sheet: SheetReference<S>,
+    pub sref: crate::structured_refs::StructuredRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NameRef<S> {
     pub sheet: SheetReference<S>,
     pub name: String,
@@ -212,7 +218,7 @@ pub enum Expr<S> {
     NameRef(NameRef<S>),
     CellRef(CellRef<S>),
     RangeRef(RangeRef<S>),
-    StructuredRef(crate::structured_refs::StructuredRef),
+    StructuredRef(StructuredRefExpr<S>),
     /// Postfix field access on a scalar value, e.g. `A1.Price` or `A1.["Change%"]`.
     ///
     /// This is currently intended for Excel "entity" / rich value fields. The `field` string is
@@ -290,7 +296,10 @@ impl<S: Clone> Expr<S> {
                 start: r.start,
                 end: r.end,
             }),
-            Expr::StructuredRef(r) => Expr::StructuredRef(r.clone()),
+            Expr::StructuredRef(r) => Expr::StructuredRef(StructuredRefExpr {
+                sheet: f(&r.sheet),
+                sref: r.sref.clone(),
+            }),
             Expr::FieldAccess { base, field } => Expr::FieldAccess {
                 base: Box::new(base.map_sheets(f)),
                 field: field.clone(),

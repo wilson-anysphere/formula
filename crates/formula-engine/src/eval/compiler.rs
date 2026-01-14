@@ -1,7 +1,7 @@
 use crate::eval::address::CellAddr;
 use crate::eval::ast::{
     BinaryOp, CellRef, CompareOp, CompiledExpr, Expr, NameRef, PostfixOp, RangeRef, Ref,
-    SheetReference, UnaryOp,
+    SheetReference, StructuredRefExpr, UnaryOp,
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
@@ -266,13 +266,7 @@ fn coord_to_index_opt(coord: &crate::Coord, origin: Option<u32>, max: u32) -> Op
 }
 
 fn lower_structured_ref(r: &crate::StructuredRef) -> Expr<String> {
-    // External workbook structured refs are accepted syntactically but not supported.
-    if r.workbook.is_some() {
-        return Expr::Error(ErrorKind::Ref);
-    }
-
-    // The structured-ref resolver is table-name driven when available, so we ignore any `sheet`
-    // prefix for now.
+    let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
     let mut text = String::new();
     if let Some(table) = &r.table {
         text.push_str(table);
@@ -282,7 +276,10 @@ fn lower_structured_ref(r: &crate::StructuredRef) -> Expr<String> {
     text.push(']');
 
     match crate::structured_refs::parse_structured_ref(&text, 0) {
-        Some((sref, end)) if end == text.len() => Expr::StructuredRef(sref),
+        Some((sref, end)) if end == text.len() => Expr::StructuredRef(StructuredRefExpr {
+            sheet,
+            sref,
+        }),
         _ => Expr::Error(ErrorKind::Name),
     }
 }
@@ -529,13 +526,8 @@ fn compile_expr_inner(
             })
         }
         crate::Expr::StructuredRef(r) => {
-            // External workbook structured refs are accepted syntactically but not supported.
-            if r.workbook.is_some() {
-                return Expr::Error(ErrorKind::Ref);
-            }
-
-            // The calc engine's structured-ref resolver is sheet-agnostic when the table name is
-            // provided, so we ignore any `sheet` prefix for now.
+            let sheet =
+                compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
             let mut text = String::new();
             if let Some(table) = &r.table {
                 text.push_str(table);
@@ -544,7 +536,10 @@ fn compile_expr_inner(
             text.push_str(&r.spec);
             text.push(']');
             match crate::structured_refs::parse_structured_ref(&text, 0) {
-                Some((sref, end)) if end == text.len() => Expr::StructuredRef(sref),
+                Some((sref, end)) if end == text.len() => Expr::StructuredRef(StructuredRefExpr {
+                    sheet,
+                    sref,
+                }),
                 _ => Expr::Error(ErrorKind::Name),
             }
         }

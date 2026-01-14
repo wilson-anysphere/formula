@@ -223,7 +223,8 @@ fn resolves_table_name_case_insensitively() {
     };
 
     let ranges =
-        resolve_structured_ref(&tables_by_sheet, 0, CellAddr { row: 0, col: 0 }, sref).unwrap();
+        resolve_structured_ref(&tables_by_sheet, 0, CellAddr { row: 0, col: 0 }, &sref.sref)
+            .unwrap();
     let [(_sheet, start, end)] = ranges.as_slice() else {
         panic!("expected a single resolved range");
     };
@@ -242,10 +243,10 @@ fn parses_multi_column_selection() {
         panic!("expected structured ref argument");
     };
 
-    assert_eq!(sref.table_name.as_deref(), Some("Table1"));
-    assert_eq!(sref.items, Vec::<StructuredRefItem>::new());
+    assert_eq!(sref.sref.table_name.as_deref(), Some("Table1"));
+    assert!(sref.sref.items.is_empty());
     assert_eq!(
-        sref.columns,
+        sref.sref.columns,
         StructuredColumns::Multi(vec![
             StructuredColumn::Single("Col1".into()),
             StructuredColumn::Single("Col3".into()),
@@ -263,12 +264,12 @@ fn parses_multi_item_structured_ref() {
         panic!("expected structured ref argument");
     };
 
-    assert_eq!(sref.table_name.as_deref(), Some("Table1"));
+    assert_eq!(sref.sref.table_name.as_deref(), Some("Table1"));
     assert_eq!(
-        sref.items,
+        sref.sref.items,
         vec![StructuredRefItem::Headers, StructuredRefItem::Data]
     );
-    assert_eq!(sref.columns, StructuredColumns::Single("Col1".into()));
+    assert_eq!(sref.sref.columns, StructuredColumns::Single("Col1".into()));
 }
 
 #[test]
@@ -281,9 +282,12 @@ fn parses_multi_item_structured_ref_without_columns() {
         panic!("expected structured ref argument");
     };
 
-    assert_eq!(sref.table_name.as_deref(), Some("Table1"));
-    assert_eq!(sref.items, vec![StructuredRefItem::All, StructuredRefItem::Totals]);
-    assert_eq!(sref.columns, StructuredColumns::All);
+    assert_eq!(sref.sref.table_name.as_deref(), Some("Table1"));
+    assert_eq!(
+        sref.sref.items,
+        vec![StructuredRefItem::All, StructuredRefItem::Totals]
+    );
+    assert_eq!(sref.sref.columns, StructuredColumns::All);
 }
 
 #[test]
@@ -296,13 +300,13 @@ fn parses_multi_item_structured_ref_with_column_range() {
         panic!("expected structured ref argument");
     };
 
-    assert_eq!(sref.table_name.as_deref(), Some("Table1"));
+    assert_eq!(sref.sref.table_name.as_deref(), Some("Table1"));
     assert_eq!(
-        sref.items,
+        sref.sref.items,
         vec![StructuredRefItem::Headers, StructuredRefItem::Data]
     );
     assert_eq!(
-        sref.columns,
+        sref.sref.columns,
         StructuredColumns::Range {
             start: "Col1".into(),
             end: "Col3".into()
@@ -324,9 +328,9 @@ fn parses_escaped_bracket_nested_group_even_with_bracket_in_string_literal() {
         panic!("expected structured ref argument");
     };
 
-    assert_eq!(sref.table_name.as_deref(), Some("Table1"));
-    assert_eq!(sref.items, vec![StructuredRefItem::Headers]);
-    assert_eq!(sref.columns, StructuredColumns::Single("A]B".into()));
+    assert_eq!(sref.sref.table_name.as_deref(), Some("Table1"));
+    assert_eq!(sref.sref.items, vec![StructuredRefItem::Headers]);
+    assert_eq!(sref.sref.columns, StructuredColumns::Single("A]B".into()));
 }
 
 #[test]

@@ -96,7 +96,7 @@ pub enum SpannedExprKind<S> {
     },
     CellRef(crate::eval::CellRef<S>),
     RangeRef(crate::eval::RangeRef<S>),
-    StructuredRef(crate::structured_refs::StructuredRef),
+    StructuredRef(crate::eval::StructuredRefExpr<S>),
     NameRef(crate::eval::NameRef<S>),
     FieldAccess {
         base: Box<SpannedExpr<S>>,
@@ -152,7 +152,12 @@ impl<S: Clone> SpannedExpr<S> {
                 start: r.start,
                 end: r.end,
             }),
-            SpannedExprKind::StructuredRef(r) => SpannedExprKind::StructuredRef(r.clone()),
+            SpannedExprKind::StructuredRef(r) => {
+                SpannedExprKind::StructuredRef(crate::eval::StructuredRefExpr {
+                    sheet: f(&r.sheet),
+                    sref: r.sref.clone(),
+                })
+            }
             SpannedExprKind::NameRef(n) => SpannedExprKind::NameRef(crate::eval::NameRef {
                 sheet: f(&n.sheet),
                 name: n.name.clone(),
@@ -1076,7 +1081,10 @@ impl ParserImpl {
                 self.next();
                 Ok(SpannedExpr {
                     span: tok.span,
-                    kind: SpannedExprKind::StructuredRef(r.clone()),
+                    kind: SpannedExprKind::StructuredRef(crate::eval::StructuredRefExpr {
+                        sheet: SheetReference::Current,
+                        sref: r.clone(),
+                    }),
                 })
             }
             TokenKind::Ident(id) => {
@@ -1784,28 +1792,12 @@ impl ParserImpl {
                 _ => unreachable!("peeked structured ref then consumed different token"),
             };
 
-            // Excel accepts sheet-prefixed structured references like `Sheet1!Table1[Col]`, but
-            // external workbook structured references (`[Book.xlsx]Sheet1!Table1[Col]`) are not
-            // supported by the engine and must evaluate to `#REF!`.
-            let is_external = match &sheet {
-                SheetReference::External(_) => true,
-                SheetReference::Sheet(name) => crate::eval::is_valid_external_sheet_key(name),
-                SheetReference::SheetRange(a, b) => {
-                    crate::eval::is_valid_external_sheet_key(a)
-                        || crate::eval::is_valid_external_sheet_key(b)
-                }
-                SheetReference::Current => false,
-            };
-
-            let kind = if is_external {
-                SpannedExprKind::Error(ErrorKind::Ref)
-            } else {
-                SpannedExprKind::StructuredRef(sref)
-            };
-
             return Ok(SpannedExpr {
                 span: Span::new(sheet_tok.span.start, sref_tok.span.end),
-                kind,
+                kind: SpannedExprKind::StructuredRef(crate::eval::StructuredRefExpr {
+                    sheet,
+                    sref,
+                }),
             });
         }
 
@@ -2586,8 +2578,185 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     )
                 }
             },
-            SpannedExprKind::StructuredRef(sref) => {
-                match self.resolver.resolve_structured_ref(self.ctx, sref) {
+            SpannedExprKind::StructuredRef(sref_expr) => {
+                // External workbook structured references are resolved dynamically using
+                // provider-supplied table metadata.
+                if let SheetReference::External(key) = &sref_expr.sheet {
+                    if !key.starts_with('[') {
+                        let value = Value::Error(ErrorKind::Ref);
+                        return (
+                            EvalValue::Scalar(value.clone()),
+                            TraceNode {
+                                kind: TraceKind::StructuredRef,
+                                span: expr.span,
+                                value,
+                                reference: None,
+                                children: Vec::new(),
+                            },
+                        );
+                    }
+
+                    let (workbook, explicit_sheet_key) = match crate::eval::split_external_sheet_key(key)
+                    {
+                        Some((workbook, sheet)) if !sheet.contains(':') => {
+                            (workbook, Some(key.as_str()))
+                        }
+                        Some((_workbook, _sheet)) => {
+                            let value = Value::Error(ErrorKind::Ref);
+                            return (
+                                EvalValue::Scalar(value.clone()),
+                                TraceNode {
+                                    kind: TraceKind::StructuredRef,
+                                    span: expr.span,
+                                    value,
+                                    reference: None,
+                                    children: Vec::new(),
+                                },
+                            );
+                        }
+                        None => {
+                            let Some(end) = key.find(']') else {
+                                let value = Value::Error(ErrorKind::Ref);
+                                return (
+                                    EvalValue::Scalar(value.clone()),
+                                    TraceNode {
+                                        kind: TraceKind::StructuredRef,
+                                        span: expr.span,
+                                        value,
+                                        reference: None,
+                                        children: Vec::new(),
+                                    },
+                                );
+                            };
+                            let workbook = &key[1..end];
+                            if workbook.is_empty() {
+                                let value = Value::Error(ErrorKind::Ref);
+                                return (
+                                    EvalValue::Scalar(value.clone()),
+                                    TraceNode {
+                                        kind: TraceKind::StructuredRef,
+                                        span: expr.span,
+                                        value,
+                                        reference: None,
+                                        children: Vec::new(),
+                                    },
+                                );
+                            }
+                            (workbook, None)
+                        }
+                    };
+
+                    let Some(table_name) = sref_expr.sref.table_name.as_deref() else {
+                        let value = Value::Error(ErrorKind::Ref);
+                        return (
+                            EvalValue::Scalar(value.clone()),
+                            TraceNode {
+                                kind: TraceKind::StructuredRef,
+                                span: expr.span,
+                                value,
+                                reference: None,
+                                children: Vec::new(),
+                            },
+                        );
+                    };
+
+                    // We do not currently support `[@ThisRow]` semantics for external workbooks.
+                    if sref_expr
+                        .sref
+                        .items
+                        .iter()
+                        .any(|item| matches!(item, crate::structured_refs::StructuredRefItem::ThisRow))
+                    {
+                        let value = Value::Error(ErrorKind::Ref);
+                        return (
+                            EvalValue::Scalar(value.clone()),
+                            TraceNode {
+                                kind: TraceKind::StructuredRef,
+                                span: expr.span,
+                                value,
+                                reference: None,
+                                children: Vec::new(),
+                            },
+                        );
+                    }
+
+                    let Some((table_sheet, table)) =
+                        self.resolver.external_workbook_table(workbook, table_name)
+                    else {
+                        let value = Value::Error(ErrorKind::Ref);
+                        return (
+                            EvalValue::Scalar(value.clone()),
+                            TraceNode {
+                                kind: TraceKind::StructuredRef,
+                                span: expr.span,
+                                value,
+                                reference: None,
+                                children: Vec::new(),
+                            },
+                        );
+                    };
+
+                    let sheet_key = explicit_sheet_key
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("[{workbook}]{table_sheet}"));
+
+                    let ranges = match crate::structured_refs::resolve_structured_ref_in_table(
+                        &table,
+                        self.ctx.current_cell,
+                        &sref_expr.sref,
+                    ) {
+                        Ok(ranges) => ranges,
+                        Err(_) => {
+                            let value = Value::Error(ErrorKind::Ref);
+                            return (
+                                EvalValue::Scalar(value.clone()),
+                                TraceNode {
+                                    kind: TraceKind::StructuredRef,
+                                    span: expr.span,
+                                    value,
+                                    reference: None,
+                                    children: Vec::new(),
+                                },
+                            );
+                        }
+                    };
+
+                    let resolved: Vec<ResolvedRange> = ranges
+                        .into_iter()
+                        .map(|(start, end)| ResolvedRange {
+                            sheet_id: FnSheetId::External(sheet_key.clone()),
+                            start,
+                            end,
+                        })
+                        .collect();
+
+                    let reference = match resolved.as_slice() {
+                        [only] if only.is_single_cell() => Some(TraceRef::Cell {
+                            sheet: only.sheet_id.clone(),
+                            addr: only.start,
+                        }),
+                        [only] => Some(TraceRef::Range {
+                            sheet: only.sheet_id.clone(),
+                            start: only.start,
+                            end: only.end,
+                        }),
+                        _ => None,
+                    };
+
+                    return (
+                        EvalValue::Reference(resolved),
+                        TraceNode {
+                            kind: TraceKind::StructuredRef,
+                            span: expr.span,
+                            value: Value::Blank,
+                            reference,
+                            children: Vec::new(),
+                        },
+                    );
+                }
+
+                // Local structured refs resolve via workbook table metadata.
+                match self.resolver.resolve_structured_ref(self.ctx, &sref_expr.sref) {
                     Ok(ranges)
                         if !ranges.is_empty()
                             && ranges

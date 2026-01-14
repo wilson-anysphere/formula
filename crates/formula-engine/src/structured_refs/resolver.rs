@@ -105,7 +105,33 @@ pub fn resolve_structured_ref(
     sref: &StructuredRef,
 ) -> Result<Vec<(usize, CellAddr, CellAddr)>, ErrorKind> {
     let (sheet_id, table) = find_table(tables_by_sheet, origin_sheet, origin_cell, sref)?;
+    // `@ThisRow` structured references are only valid on the table's own sheet. Once the engine has
+    // stable sheet ids, callers can pass a different `origin_sheet`, so preserve the explicit
+    // sheet-id check here.
+    if sheet_id != origin_sheet
+        && sref
+            .items
+            .iter()
+            .any(|item| matches!(item, StructuredRefItem::ThisRow))
+    {
+        return Err(ErrorKind::Name);
+    }
 
+    let ranges = resolve_structured_ref_in_table(table, origin_cell, sref)?;
+    Ok(ranges
+        .into_iter()
+        .map(|(start, end)| (sheet_id, start, end))
+        .collect())
+}
+
+/// Resolve a structured reference against a specific table.
+///
+/// Returns one or more `(start, end)` ranges in the table's sheet coordinate space.
+pub fn resolve_structured_ref_in_table(
+    table: &Table,
+    origin_cell: CellAddr,
+    sref: &StructuredRef,
+) -> Result<Vec<(CellAddr, CellAddr)>, ErrorKind> {
     // Excel defaults to `#Data` when no item specifier is present.
     let items: Vec<StructuredRefItem> = if sref.items.is_empty() {
         vec![StructuredRefItem::Data]
@@ -136,9 +162,6 @@ pub fn resolve_structured_ref(
     for item in items {
         match item {
             StructuredRefItem::ThisRow => {
-                if sheet_id != origin_sheet {
-                    return Err(ErrorKind::Name);
-                }
                 let data_range = table.data_range().ok_or(ErrorKind::Ref)?;
                 if !data_range.contains(addr_to_model(origin_cell)) {
                     return Err(ErrorKind::Name);
@@ -165,12 +188,11 @@ pub fn resolve_structured_ref(
     }
 
     let row_intervals = merge_intervals(row_intervals);
-    let mut out: Vec<(usize, CellAddr, CellAddr)> =
+    let mut out: Vec<(CellAddr, CellAddr)> =
         Vec::with_capacity(row_intervals.len().saturating_mul(col_intervals.len()));
     for (row_start, row_end) in row_intervals {
         for (left_idx, right_idx) in &col_intervals {
             out.push((
-                sheet_id,
                 CellAddr {
                     row: row_start,
                     col: table_start.col + *left_idx,
@@ -185,11 +207,11 @@ pub fn resolve_structured_ref(
 
     // Stable ordering for deterministic union behavior.
     out.sort_by(|a, b| {
-        a.0.cmp(&b.0)
+        a.0.row
+            .cmp(&b.0.row)
+            .then_with(|| a.0.col.cmp(&b.0.col))
             .then_with(|| a.1.row.cmp(&b.1.row))
             .then_with(|| a.1.col.cmp(&b.1.col))
-            .then_with(|| a.2.row.cmp(&b.2.row))
-            .then_with(|| a.2.col.cmp(&b.2.col))
     });
 
     Ok(out)

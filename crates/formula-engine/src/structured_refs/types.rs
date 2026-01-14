@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StructuredRefItem {
     All,
     Data,
@@ -7,13 +7,13 @@ pub enum StructuredRefItem {
     ThisRow,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StructuredColumn {
     Single(String),
     Range { start: String, end: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StructuredColumns {
     All,
     Single(String),
@@ -22,7 +22,7 @@ pub enum StructuredColumns {
     Multi(Vec<StructuredColumn>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructuredRef {
     pub table_name: Option<String>,
     /// Special table item specifiers like `#Headers`/`#Data`.

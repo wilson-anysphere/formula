@@ -3,7 +3,7 @@ use std::str::FromStr;
 use crate::eval::address::{AddressParseError, CellAddr};
 use crate::eval::ast::{
     BinaryOp, CellRef, CompareOp, Expr, NameRef, ParsedExpr, PostfixOp, RangeRef, Ref,
-    SheetReference, UnaryOp,
+    SheetReference, StructuredRefExpr, UnaryOp,
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
@@ -365,10 +365,7 @@ fn coord_index(coord: &crate::Coord) -> Option<u32> {
 }
 
 fn lower_structured_ref(r: &crate::StructuredRef) -> ParsedExpr {
-    if r.workbook.is_some() || r.sheet.is_some() {
-        return Expr::Error(ErrorKind::Ref);
-    }
-
+    let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
     let mut text = String::new();
     if let Some(table) = &r.table {
         text.push_str(table);
@@ -378,7 +375,10 @@ fn lower_structured_ref(r: &crate::StructuredRef) -> ParsedExpr {
     text.push(']');
 
     match crate::structured_refs::parse_structured_ref(&text, 0) {
-        Some((sref, end)) if end == text.len() => Expr::StructuredRef(sref),
+        Some((sref, end)) if end == text.len() => Expr::StructuredRef(StructuredRefExpr {
+            sheet,
+            sref,
+        }),
         _ => Expr::Error(ErrorKind::Name),
     }
 }

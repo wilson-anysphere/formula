@@ -7388,13 +7388,13 @@ fn rewrite_table_names_in_compiled_expr(expr: &mut CompiledExpr, renames: &[(Str
                 }
             }
         }
-        Expr::StructuredRef(sref) => {
-            let Some(name) = sref.table_name.as_deref() else {
+        Expr::StructuredRef(sref_expr) => {
+            let Some(name) = sref_expr.sref.table_name.clone() else {
                 return;
             };
             for (old, new) in renames {
                 if name.eq_ignore_ascii_case(old) {
-                    sref.table_name = Some(new.clone());
+                    sref_expr.sref.table_name = Some(new.clone());
                     break;
                 }
             }
@@ -9365,6 +9365,16 @@ impl crate::eval::ValueResolver for Snapshot {
             .and_then(|provider| provider.sheet_order(workbook))
     }
 
+    fn external_workbook_table(
+        &self,
+        workbook: &str,
+        table_name: &str,
+    ) -> Option<(String, Table)> {
+        self.external_value_provider
+            .as_ref()
+            .and_then(|provider| provider.workbook_table(workbook, table_name))
+    }
+
     fn sheet_id(&self, name: &str) -> Option<usize> {
         // Excel resolves sheet names case-insensitively across Unicode using compatibility
         // normalization (NFKC). This ensures runtime lookups (e.g. INDIRECT, SHEET("name"))
@@ -9452,10 +9462,13 @@ impl crate::eval::ValueResolver for Snapshot {
                         == Ordering::Equal
                 {
                     return Some(crate::eval::ResolvedName::Expr(Expr::StructuredRef(
-                        crate::structured_refs::StructuredRef {
-                            table_name: Some(name.to_string()),
-                            items: Vec::new(),
-                            columns: crate::structured_refs::StructuredColumns::All,
+                        crate::eval::StructuredRefExpr {
+                            sheet: crate::eval::SheetReference::Current,
+                            sref: crate::structured_refs::StructuredRef {
+                                table_name: Some(name.to_string()),
+                                items: Vec::new(),
+                                columns: crate::structured_refs::StructuredColumns::All,
+                            },
                         },
                     )));
                 }
@@ -9947,6 +9960,20 @@ pub trait ExternalValueProvider: Send + Sync {
     /// Returning `None` indicates that the sheet order is not available, in which case external
     /// 3D spans evaluate to `#REF!`.
     fn sheet_order(&self, _workbook: &str) -> Option<Vec<String>> {
+        None
+    }
+
+    /// Return table metadata for an external workbook.
+    ///
+    /// This is used to evaluate external workbook structured references like
+    /// `"[Book.xlsx]Sheet1!Table1[Col]"`.
+    ///
+    /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"` or
+    /// `"C:\\path\\Book.xlsx"`), matching what [`crate::eval::split_external_sheet_key`] returns.
+    ///
+    /// Returning `None` indicates that table metadata is not available, in which case external
+    /// structured references evaluate to `#REF!`.
+    fn workbook_table(&self, _workbook: &str, _table_name: &str) -> Option<(String, Table)> {
         None
     }
 }
@@ -12839,8 +12866,14 @@ fn walk_expr_flags(
                 }
             }
         }
-        Expr::StructuredRef(_)
-        | Expr::Number(_)
+        Expr::StructuredRef(r) => {
+            if let SheetReference::External(key) = &r.sheet {
+                if key.starts_with('[') {
+                    *volatile = true;
+                }
+            }
+        }
+        Expr::Number(_)
         | Expr::Text(_)
         | Expr::Bool(_)
         | Expr::Blank
@@ -13661,12 +13694,19 @@ fn walk_calc_expr(
                 }
             }
         }
-        Expr::StructuredRef(sref) => {
+        Expr::StructuredRef(sref_expr) => {
+            // Only local structured refs participate in the dependency graph. External workbook
+            // structured refs are resolved dynamically through the external value provider and are
+            // treated as volatile rather than producing calc precedents.
+            if matches!(&sref_expr.sheet, SheetReference::External(_)) {
+                return;
+            }
+
             if let Ok(ranges) = crate::structured_refs::resolve_structured_ref(
                 tables_by_sheet,
                 current_cell.sheet,
                 current_cell.addr,
-                sref,
+                &sref_expr.sref,
             ) {
                 for (sheet_id, start, end) in ranges {
                     let range = Range::new(

@@ -1,5 +1,7 @@
 use formula_engine::eval::CellAddr;
 use formula_engine::{Engine, ExternalValueProvider, PrecedentNode, Value};
+use formula_model::table::TableColumn;
+use formula_model::{Range, Table};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -7,6 +9,7 @@ use std::sync::{Arc, Mutex};
 struct TestExternalProvider {
     values: Mutex<HashMap<(String, CellAddr), Value>>,
     sheet_order: Mutex<HashMap<String, Vec<String>>>,
+    tables: Mutex<HashMap<(String, String), (String, Table)>>,
 }
 
 impl TestExternalProvider {
@@ -22,6 +25,13 @@ impl TestExternalProvider {
             .lock()
             .expect("lock poisoned")
             .insert(workbook.to_string(), order.into());
+    }
+
+    fn set_table(&self, workbook: &str, sheet: &str, table: Table) {
+        self.tables
+            .lock()
+            .expect("lock poisoned")
+            .insert((workbook.to_string(), table.name.clone()), (sheet.to_string(), table));
     }
 }
 
@@ -40,6 +50,55 @@ impl ExternalValueProvider for TestExternalProvider {
             .expect("lock poisoned")
             .get(workbook)
             .cloned()
+    }
+
+    fn workbook_table(&self, workbook: &str, table_name: &str) -> Option<(String, Table)> {
+        self.tables
+            .lock()
+            .expect("lock poisoned")
+            .get(&(workbook.to_string(), table_name.to_string()))
+            .cloned()
+    }
+}
+
+fn table_fixture_multi_col() -> Table {
+    Table {
+        id: 1,
+        name: "Table1".into(),
+        display_name: "Table1".into(),
+        range: Range::from_a1("A1:D4").unwrap(),
+        header_row_count: 1,
+        totals_row_count: 0,
+        columns: vec![
+            TableColumn {
+                id: 1,
+                name: "Col1".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 2,
+                name: "Col2".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 3,
+                name: "Col3".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 4,
+                name: "Col4".into(),
+                formula: None,
+                totals_formula: None,
+            },
+        ],
+        style: None,
+        auto_filter: None,
+        relationship_id: None,
+        part_path: None,
     }
 }
 
@@ -568,6 +627,44 @@ fn external_3d_sheet_range_refs_are_ref_error_even_if_provider_has_value() {
     engine.set_external_value_provider(Some(provider));
     engine
         .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet3!A1")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(formula_engine::ErrorKind::Ref)
+    );
+}
+
+#[test]
+fn sum_over_external_table_structured_ref_resolves_via_provider_metadata() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_table("Book.xlsx", "Sheet1", table_fixture_multi_col());
+
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 1 }, 10.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 1 }, 20.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 3, col: 1 }, 30.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1!Table1[Col2])")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(60.0));
+}
+
+#[test]
+fn external_table_this_row_structured_ref_is_ref_error() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_table("Book.xlsx", "Sheet1", table_fixture_multi_col());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 1 }, 10.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1!Table1[@Col2]")
         .unwrap();
     engine.recalculate();
 
