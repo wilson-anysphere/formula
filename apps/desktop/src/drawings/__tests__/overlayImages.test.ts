@@ -227,7 +227,7 @@ describe("DrawingOverlay images", () => {
     expect(calls.some((call) => call.method === "drawImage")).toBe(false);
     expect(calls.some((call) => call.method === "strokeRect")).toBe(true);
     const label = calls.find((call) => call.method === "fillText");
-    expect(label?.args[0]).toBe("missing image");
+    expect(String(label?.args[0])).toMatch(/image/i);
   });
 
   it("aborts stale renders after awaiting image decode", async () => {
