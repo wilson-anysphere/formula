@@ -1977,13 +1977,14 @@ mod tests {
 
     #[test]
     fn selects_password_key_encryptor_when_multiple_present() {
+        let salt_b64 = BASE64.encode([0u8; 16]);
         let xml = format!(
             r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
                 xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
                 xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
               <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                        cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
-                       saltValue="AAECAwQFBgcICQoLDA0ODw=="/>
+                       saltValue="{salt_b64}"/>
               <keyEncryptors>
                 <keyEncryptor uri="{OOXML_CERTIFICATE_KEY_ENCRYPTOR_URI}">
                   <c:encryptedKey/>
@@ -1991,7 +1992,7 @@ mod tests {
                 <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
                   <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                                   spinCount="99" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
-                                  hashAlgorithm="SHA1" saltValue="AAECAwQFBgcICQoLDA0ODw=="
+                                  hashAlgorithm="SHA1" saltValue="{salt_b64}"
                                   encryptedVerifierHashInput="" encryptedVerifierHashValue=""
                                   encryptedKeyValue=""/>
                  </keyEncryptor>
@@ -2007,12 +2008,13 @@ mod tests {
 
     #[test]
     fn errors_when_password_key_encryptor_missing() {
+        let salt_b64 = BASE64.encode([0u8; 16]);
         let xml = format!(
             r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
                 xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
               <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                        cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
-                       saltValue="AAECAwQFBgcICQoLDA0ODw=="/>
+                       saltValue="{salt_b64}"/>
               <keyEncryptors>
                 <keyEncryptor uri="{OOXML_CERTIFICATE_KEY_ENCRYPTOR_URI}">
                   <c:encryptedKey/>
@@ -2038,24 +2040,25 @@ mod tests {
 
     #[test]
     fn warns_on_multiple_password_key_encryptors() {
+        let salt_b64 = BASE64.encode([0u8; 16]);
         let xml = format!(
             r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
                 xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
               <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                        cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
-                       saltValue="AAECAwQFBgcICQoLDA0ODw=="/>
+                       saltValue="{salt_b64}"/>
               <keyEncryptors>
                 <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
                   <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                                   spinCount="1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
-                                  hashAlgorithm="SHA1" saltValue="AAECAwQFBgcICQoLDA0ODw=="
+                                  hashAlgorithm="SHA1" saltValue="{salt_b64}"
                                   encryptedVerifierHashInput="" encryptedVerifierHashValue=""
                                   encryptedKeyValue=""/>
                 </keyEncryptor>
                 <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
                   <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
                                   spinCount="2" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
-                                  hashAlgorithm="SHA1" saltValue="AAECAwQFBgcICQoLDA0ODw=="
+                                  hashAlgorithm="SHA1" saltValue="{salt_b64}"
                                   encryptedVerifierHashInput="" encryptedVerifierHashValue=""
                                   encryptedKeyValue=""/>
                  </keyEncryptor>
