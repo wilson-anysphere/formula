@@ -6330,9 +6330,14 @@ export class SpreadsheetApp {
       }
     }
 
-    // Include any locally-overridden drawing objects (e.g. interactive editing).
-    for (const objects of this.drawingObjectsBySheetId.values()) {
-      for (const obj of objects) {
+    // Include locally-cached drawings (e.g. drag/resize interactions) that may not yet be
+    // reflected in the DocumentController snapshot.
+    for (const obj of this.sheetDrawings) {
+      if (obj.kind.type === "image") keep.add(obj.kind.imageId);
+    }
+    const cachedObjects = this.drawingObjectsCache;
+    if (cachedObjects && cachedObjects.sheetId === this.sheetId) {
+      for (const obj of cachedObjects.objects) {
         if (obj.kind.type === "image") keep.add(obj.kind.imageId);
       }
     }
