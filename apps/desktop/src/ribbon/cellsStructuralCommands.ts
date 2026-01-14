@@ -17,6 +17,10 @@ export type CellsStructuralCommandApp = {
   getActiveCell(): { row: number; col: number };
   getGridLimits(): GridLimits;
   focus(): void;
+  insertRows?(row0: number, count: number): Promise<void> | void;
+  deleteRows?(row0: number, count: number): Promise<void> | void;
+  insertCols?(col0: number, count: number): Promise<void> | void;
+  deleteCols?(col0: number, count: number): Promise<void> | void;
 };
 
 function normalizeSelectionRange(range: Range): { startRow: number; endRow: number; startCol: number; endCol: number } {
@@ -75,29 +79,53 @@ export function executeCellsStructuralRibbonCommand(app: CellsStructuralCommandA
     case "home.cells.insert.insertSheetRows": {
       const row0 = isFullRowBand ? startRow : active.row;
       const count = isFullRowBand ? endRow - startRow + 1 : 1;
-      doc.insertRows(sheetId, row0, count, { label: "Insert Rows", source: "ribbon" });
-      app.focus();
+      if (typeof app.insertRows === "function") {
+        void Promise.resolve(app.insertRows(row0, count))
+          .catch(() => {})
+          .finally(() => app.focus());
+      } else {
+        doc.insertRows(sheetId, row0, count, { label: "Insert Rows", source: "ribbon" });
+        app.focus();
+      }
       return true;
     }
     case "home.cells.insert.insertSheetColumns": {
       const col0 = isFullColBand ? startCol : active.col;
       const count = isFullColBand ? endCol - startCol + 1 : 1;
-      doc.insertCols(sheetId, col0, count, { label: "Insert Columns", source: "ribbon" });
-      app.focus();
+      if (typeof app.insertCols === "function") {
+        void Promise.resolve(app.insertCols(col0, count))
+          .catch(() => {})
+          .finally(() => app.focus());
+      } else {
+        doc.insertCols(sheetId, col0, count, { label: "Insert Columns", source: "ribbon" });
+        app.focus();
+      }
       return true;
     }
     case "home.cells.delete.deleteSheetRows": {
       const row0 = isFullRowBand ? startRow : active.row;
       const count = isFullRowBand ? endRow - startRow + 1 : 1;
-      doc.deleteRows(sheetId, row0, count, { label: "Delete Rows", source: "ribbon" });
-      app.focus();
+      if (typeof app.deleteRows === "function") {
+        void Promise.resolve(app.deleteRows(row0, count))
+          .catch(() => {})
+          .finally(() => app.focus());
+      } else {
+        doc.deleteRows(sheetId, row0, count, { label: "Delete Rows", source: "ribbon" });
+        app.focus();
+      }
       return true;
     }
     case "home.cells.delete.deleteSheetColumns": {
       const col0 = isFullColBand ? startCol : active.col;
       const count = isFullColBand ? endCol - startCol + 1 : 1;
-      doc.deleteCols(sheetId, col0, count, { label: "Delete Columns", source: "ribbon" });
-      app.focus();
+      if (typeof app.deleteCols === "function") {
+        void Promise.resolve(app.deleteCols(col0, count))
+          .catch(() => {})
+          .finally(() => app.focus());
+      } else {
+        doc.deleteCols(sheetId, col0, count, { label: "Delete Columns", source: "ribbon" });
+        app.focus();
+      }
       return true;
     }
     default:

@@ -99,3 +99,23 @@ test("structural edits rewrite formulas (best-effort A1 semantics)", () => {
   assert.equal(doc.getCell("Sheet1", "B2").formula, "=#REF!");
 });
 
+test("structural edits apply engine-provided formulaRewrites when present", () => {
+  const doc = new DocumentController();
+
+  // B1 will move to B2 when we insert row 0.
+  doc.setCellFormula("Sheet1", "B1", "=A1");
+
+  // Formula on a different sheet should also rewrite when provided by the engine.
+  doc.setCellFormula("Sheet2", "A1", "='Sheet1'!A1");
+
+  doc.insertRows("Sheet1", 0, 1, {
+    label: "Insert Rows",
+    formulaRewrites: [
+      { sheet: "Sheet1", address: "B2", before: "=A1", after: "=Z99" },
+      { sheet: "Sheet2", address: "A1", before: "='Sheet1'!A1", after: "='Sheet1'!A2" },
+    ],
+  });
+
+  assert.equal(doc.getCell("Sheet1", "B2").formula, "=Z99");
+  assert.equal(doc.getCell("Sheet2", "A1").formula, "='Sheet1'!A2");
+});

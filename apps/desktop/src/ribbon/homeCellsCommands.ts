@@ -96,12 +96,20 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
           return true;
         }
         case "entireRow": {
+          if (typeof (app as any).insertRows === "function") {
+            await (app as any).insertRows(range.startRow, rowCount);
+            return true;
+          }
           const doc = app.getDocument();
           const sheetId = app.getCurrentSheetId();
           doc.insertRows(sheetId, range.startRow, rowCount, { label: "Insert Rows", source: "ribbon" });
           return true;
         }
         case "entireColumn": {
+          if (typeof (app as any).insertCols === "function") {
+            await (app as any).insertCols(range.startCol, colCount);
+            return true;
+          }
           const doc = app.getDocument();
           const sheetId = app.getCurrentSheetId();
           doc.insertCols(sheetId, range.startCol, colCount, { label: "Insert Columns", source: "ribbon" });
@@ -145,12 +153,20 @@ export async function handleHomeCellsInsertDeleteCommand(params: {
         return true;
       }
       case "entireRow": {
+        if (typeof (app as any).deleteRows === "function") {
+          await (app as any).deleteRows(range.startRow, rowCount);
+          return true;
+        }
         const doc = app.getDocument();
         const sheetId = app.getCurrentSheetId();
         doc.deleteRows(sheetId, range.startRow, rowCount, { label: "Delete Rows", source: "ribbon" });
         return true;
       }
       case "entireColumn": {
+        if (typeof (app as any).deleteCols === "function") {
+          await (app as any).deleteCols(range.startCol, colCount);
+          return true;
+        }
         const doc = app.getDocument();
         const sheetId = app.getCurrentSheetId();
         doc.deleteCols(sheetId, range.startCol, colCount, { label: "Delete Columns", source: "ribbon" });

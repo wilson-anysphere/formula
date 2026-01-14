@@ -4030,7 +4030,7 @@ export class DocumentController {
    * @param {string} sheetId
    * @param {number} row0
    * @param {number} count
-   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   * @param {{ label?: string, mergeKey?: string, source?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
    */
   insertRows(sheetId, row0, count, options = {}) {
     this.#applyStructuralAxisEdit({ sheetId, axis: "row", mode: "insert", index0: row0, count }, {
@@ -4045,7 +4045,7 @@ export class DocumentController {
    * @param {string} sheetId
    * @param {number} row0
    * @param {number} count
-   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   * @param {{ label?: string, mergeKey?: string, source?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
    */
   deleteRows(sheetId, row0, count, options = {}) {
     this.#applyStructuralAxisEdit({ sheetId, axis: "row", mode: "delete", index0: row0, count }, {
@@ -4063,7 +4063,7 @@ export class DocumentController {
    * @param {string} sheetId
    * @param {number} col0
    * @param {number} count
-   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   * @param {{ label?: string, mergeKey?: string, source?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
    */
   insertCols(sheetId, col0, count, options = {}) {
     this.#applyStructuralAxisEdit({ sheetId, axis: "col", mode: "insert", index0: col0, count }, {
@@ -4078,7 +4078,7 @@ export class DocumentController {
    * @param {string} sheetId
    * @param {number} col0
    * @param {number} count
-   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   * @param {{ label?: string, mergeKey?: string, source?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} [options]
    */
   deleteCols(sheetId, col0, count, options = {}) {
     this.#applyStructuralAxisEdit({ sheetId, axis: "col", mode: "delete", index0: col0, count }, {
@@ -4091,7 +4091,7 @@ export class DocumentController {
    * Core structural edit implementation (rows/cols insert/delete).
    *
    * @param {{ sheetId: string, axis: "row" | "col", mode: "insert" | "delete", index0: number, count: number }} edit
-   * @param {{ label?: string, mergeKey?: string, source?: string }} options
+   * @param {{ label?: string, mergeKey?: string, source?: string, formulaRewrites?: Array<{ sheet?: string, sheetId?: string, address: string, before: string, after: string }> }} options
    */
   #applyStructuralAxisEdit(edit, options) {
     const id = String(edit?.sheetId ?? "").trim();
@@ -4207,29 +4207,73 @@ export class DocumentController {
     }
     const normalizedView = normalizeSheetViewState(afterView);
 
-    // --- Formula rewrites (best-effort) ---------------------------------------
-    // Rewrite formulas across the workbook so references to the edited sheet update Excel-style.
-    const meta = this.getSheetMeta(id) ?? { name: id, visibility: "visible" };
-    const targetNamesCi = new Set([
-      normalizeSheetNameForCaseInsensitiveCompare(id),
-      normalizeSheetNameForCaseInsensitiveCompare(meta.name),
-    ]);
+    // --- Formula rewrites ------------------------------------------------------
+    //
+    // Prefer engine-computed formula rewrites (from `@formula/engine` structural ops) when provided,
+    // otherwise fall back to the best-effort A1 regex rewrite above.
+    const hasEngineRewrites = Array.isArray(options?.formulaRewrites);
+    const engineRewrites = hasEngineRewrites ? options.formulaRewrites : null;
+    /** @type {Map<string, Map<string, string>> | null} */
+    let rewriteAfterBySheet = null;
 
-    const rewriteType =
-      axis === "row" ? (mode === "insert" ? "insertRows" : "deleteRows") : mode === "insert" ? "insertCols" : "deleteCols";
+    if (engineRewrites) {
+      rewriteAfterBySheet = new Map();
+      for (const rewrite of engineRewrites) {
+        const targetSheetId = String(rewrite?.sheet ?? rewrite?.sheetId ?? "").trim();
+        if (!targetSheetId) continue;
+        if (typeof rewrite?.after !== "string") continue;
+        const address = typeof rewrite?.address === "string" ? rewrite.address : "";
+        if (!address) continue;
+        let coord;
+        try {
+          coord = parseA1(address);
+        } catch {
+          continue;
+        }
+        let perSheet = rewriteAfterBySheet.get(targetSheetId);
+        if (!perSheet) {
+          perSheet = new Map();
+          rewriteAfterBySheet.set(targetSheetId, perSheet);
+        }
+        perSheet.set(`${coord.row},${coord.col}`, rewrite.after);
+      }
 
-    // Apply formula rewrites to the shifted sheet state first (so diffs include the updated formula text).
-    for (const [key, cell] of afterCells.entries()) {
-      if (!cell || cell.formula == null) continue;
-      const rewritten = rewriteFormulaForStructuralEdit(cell.formula, {
-        type: rewriteType,
-        index0,
-        count,
-        rewriteUnqualified: true,
-        targetSheetNamesCi: targetNamesCi,
-      });
-      if (rewritten !== cell.formula) {
-        cell.formula = rewritten;
+      const perEdited = rewriteAfterBySheet.get(id);
+      if (perEdited) {
+        for (const [key, afterFormula] of perEdited.entries()) {
+          const cell = afterCells.get(key);
+          if (!cell) continue;
+          const normalized = normalizeFormula(afterFormula);
+          cell.formula = normalized;
+          if (normalized != null) {
+            cell.value = null;
+          }
+        }
+      }
+    } else {
+      // Best-effort: rewrite formulas across the workbook so references to the edited sheet update Excel-style.
+      const meta = this.getSheetMeta(id) ?? { name: id, visibility: "visible" };
+      const targetNamesCi = new Set([
+        normalizeSheetNameForCaseInsensitiveCompare(id),
+        normalizeSheetNameForCaseInsensitiveCompare(meta.name),
+      ]);
+
+      const rewriteType =
+        axis === "row" ? (mode === "insert" ? "insertRows" : "deleteRows") : mode === "insert" ? "insertCols" : "deleteCols";
+
+      // Apply formula rewrites to the shifted sheet state first (so diffs include the updated formula text).
+      for (const [key, cell] of afterCells.entries()) {
+        if (!cell || cell.formula == null) continue;
+        const rewritten = rewriteFormulaForStructuralEdit(cell.formula, {
+          type: rewriteType,
+          index0,
+          count,
+          rewriteUnqualified: true,
+          targetSheetNamesCi: targetNamesCi,
+        });
+        if (rewritten !== cell.formula) {
+          cell.formula = rewritten;
+        }
       }
     }
 
@@ -4254,26 +4298,52 @@ export class DocumentController {
       cellDeltas.push({ sheetId: id, row, col, before: cloneCellState(before), after: cloneCellState(after) });
     }
 
-    // Formula rewrites in other sheets (only for explicitly sheet-qualified references).
-    for (const [otherId, otherSheet] of this.model.sheets.entries()) {
-      if (!otherSheet || otherId === id) continue;
-      if (!otherSheet.cells || otherSheet.cells.size === 0) continue;
-      for (const [key, cell] of otherSheet.cells.entries()) {
-        if (!cell || cell.formula == null) continue;
-        const rewritten = rewriteFormulaForStructuralEdit(cell.formula, {
-          type: rewriteType,
-          index0,
-          count,
-          rewriteUnqualified: false,
-          targetSheetNamesCi: targetNamesCi,
-        });
-        if (rewritten === cell.formula) continue;
-        const coord = parseRowColKey(key);
-        if (!coord) continue;
-        const before = cloneCellState(cell);
-        const after = { value: before.value, formula: rewritten, styleId: before.styleId };
-        if (cellStateEquals(before, after)) continue;
-        cellDeltas.push({ sheetId: otherId, row: coord.row, col: coord.col, before, after: cloneCellState(after) });
+    // Formula rewrites in other sheets.
+    if (engineRewrites) {
+      for (const [targetSheetId, perSheet] of rewriteAfterBySheet?.entries() ?? []) {
+        if (!perSheet || perSheet.size === 0) continue;
+        if (targetSheetId === id) continue;
+        // Ensure sheet exists for rewrite-only updates.
+        this.model.getCell(targetSheetId, 0, 0);
+        for (const [key, afterFormula] of perSheet.entries()) {
+          const coord = parseRowColKey(key);
+          const before = this.model.getCell(targetSheetId, coord.row, coord.col);
+          const normalized = normalizeFormula(afterFormula);
+          const after = { value: normalized != null ? null : before.value, formula: normalized, styleId: before.styleId };
+          if (cellStateEquals(before, after)) continue;
+          cellDeltas.push({ sheetId: targetSheetId, row: coord.row, col: coord.col, before, after: cloneCellState(after) });
+        }
+      }
+    } else {
+      // Best-effort rewrite: only rewrite explicitly sheet-qualified references.
+      const meta = this.getSheetMeta(id) ?? { name: id, visibility: "visible" };
+      const targetNamesCi = new Set([
+        normalizeSheetNameForCaseInsensitiveCompare(id),
+        normalizeSheetNameForCaseInsensitiveCompare(meta.name),
+      ]);
+      const rewriteType =
+        axis === "row" ? (mode === "insert" ? "insertRows" : "deleteRows") : mode === "insert" ? "insertCols" : "deleteCols";
+
+      for (const [otherId, otherSheet] of this.model.sheets.entries()) {
+        if (!otherSheet || otherId === id) continue;
+        if (!otherSheet.cells || otherSheet.cells.size === 0) continue;
+        for (const [key, cell] of otherSheet.cells.entries()) {
+          if (!cell || cell.formula == null) continue;
+          const rewritten = rewriteFormulaForStructuralEdit(cell.formula, {
+            type: rewriteType,
+            index0,
+            count,
+            rewriteUnqualified: false,
+            targetSheetNamesCi: targetNamesCi,
+          });
+          if (rewritten === cell.formula) continue;
+          const coord = parseRowColKey(key);
+          if (!coord) continue;
+          const before = cloneCellState(cell);
+          const after = { value: before.value, formula: rewritten, styleId: before.styleId };
+          if (cellStateEquals(before, after)) continue;
+          cellDeltas.push({ sheetId: otherId, row: coord.row, col: coord.col, before, after: cloneCellState(after) });
+        }
       }
     }
 

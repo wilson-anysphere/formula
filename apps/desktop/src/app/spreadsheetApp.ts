@@ -7152,6 +7152,151 @@ export class SpreadsheetApp {
     this.applyFillShortcut(direction, "series");
   }
 
+  async insertRows(row: number, count: number): Promise<void> {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+
+    const sheetId = this.sheetId;
+    const row0 = Math.trunc(row);
+    const count0 = Math.trunc(count);
+    if (!Number.isInteger(row0) || row0 < 0) return;
+    if (!Number.isInteger(count0) || count0 <= 0) return;
+
+    // Best-effort fallback when the engine is unavailable (e.g. restricted environments).
+    if (!this.wasmEngine) {
+      this.document.insertRows(sheetId, row0, count0, { label: "Insert Rows", source: "ribbon" });
+      this.refresh();
+      this.focus();
+      return;
+    }
+
+    const op: EditOp = { type: "InsertRows", sheet: sheetId, row: row0, count: count0 };
+    await this.applyStructuralEdit(op, (result) => {
+      this.document.insertRows(sheetId, row0, count0, {
+        label: "Insert Rows",
+        source: "ribbon",
+        formulaRewrites: result.formulaRewrites,
+      });
+    }, { label: "Insert Rows" });
+
+    this.refresh();
+    this.focus();
+  }
+
+  async deleteRows(row: number, count: number): Promise<void> {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+
+    const sheetId = this.sheetId;
+    const row0 = Math.trunc(row);
+    const count0 = Math.trunc(count);
+    if (!Number.isInteger(row0) || row0 < 0) return;
+    if (!Number.isInteger(count0) || count0 <= 0) return;
+
+    if (!this.wasmEngine) {
+      this.document.deleteRows(sheetId, row0, count0, { label: "Delete Rows", source: "ribbon" });
+      this.refresh();
+      this.focus();
+      return;
+    }
+
+    const op: EditOp = { type: "DeleteRows", sheet: sheetId, row: row0, count: count0 };
+    await this.applyStructuralEdit(op, (result) => {
+      this.document.deleteRows(sheetId, row0, count0, {
+        label: "Delete Rows",
+        source: "ribbon",
+        formulaRewrites: result.formulaRewrites,
+      });
+    }, { label: "Delete Rows" });
+
+    this.refresh();
+    this.focus();
+  }
+
+  async insertCols(col: number, count: number): Promise<void> {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+
+    const sheetId = this.sheetId;
+    const col0 = Math.trunc(col);
+    const count0 = Math.trunc(count);
+    if (!Number.isInteger(col0) || col0 < 0) return;
+    if (!Number.isInteger(count0) || count0 <= 0) return;
+
+    if (!this.wasmEngine) {
+      this.document.insertCols(sheetId, col0, count0, { label: "Insert Columns", source: "ribbon" });
+      this.refresh();
+      this.focus();
+      return;
+    }
+
+    const op: EditOp = { type: "InsertCols", sheet: sheetId, col: col0, count: count0 };
+    await this.applyStructuralEdit(op, (result) => {
+      this.document.insertCols(sheetId, col0, count0, {
+        label: "Insert Columns",
+        source: "ribbon",
+        formulaRewrites: result.formulaRewrites,
+      });
+    }, { label: "Insert Columns" });
+
+    this.refresh();
+    this.focus();
+  }
+
+  async deleteCols(col: number, count: number): Promise<void> {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+
+    const sheetId = this.sheetId;
+    const col0 = Math.trunc(col);
+    const count0 = Math.trunc(count);
+    if (!Number.isInteger(col0) || col0 < 0) return;
+    if (!Number.isInteger(count0) || count0 <= 0) return;
+
+    if (!this.wasmEngine) {
+      this.document.deleteCols(sheetId, col0, count0, { label: "Delete Columns", source: "ribbon" });
+      this.refresh();
+      this.focus();
+      return;
+    }
+
+    const op: EditOp = { type: "DeleteCols", sheet: sheetId, col: col0, count: count0 };
+    await this.applyStructuralEdit(op, (result) => {
+      this.document.deleteCols(sheetId, col0, count0, {
+        label: "Delete Columns",
+        source: "ribbon",
+        formulaRewrites: result.formulaRewrites,
+      });
+    }, { label: "Delete Columns" });
+
+    this.refresh();
+    this.focus();
+  }
+
   async insertCells(range: Range, direction: "right" | "down"): Promise<void> {
     if (this.isEditing()) return;
     const sheetId = this.sheetId;
