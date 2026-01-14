@@ -9054,30 +9054,11 @@ export class SpreadsheetApp {
     const secondary = this.splitViewSecondaryGrid;
     if (!secondary) return;
     const selectionCanvas = this.splitViewSecondarySelectionCanvas;
-    const clearDrawingCursorOverride = (): void => {
-      // Cursor overrides for drawings are applied directly to the selection canvas because the
-      // shared-grid renderer controls its own cursor there. When we are no longer hovering a
-      // drawing, clear any prior drawing cursor override so we don't leave a "move"/resize cursor
-      // stuck if the grid doesn't update it on this frame.
-      if (!selectionCanvas) return;
-      const cursor = selectionCanvas.style.cursor;
-      if (
-        cursor === "move" ||
-        cursor === "grab" ||
-        cursor === "grabbing" ||
-        cursor === "nwse-resize" ||
-        cursor === "nesw-resize" ||
-        cursor === "ns-resize" ||
-        cursor === "ew-resize"
-      ) {
-        selectionCanvas.style.cursor = "";
-      }
-    };
 
     // Touch pointers do not have a hover state; skip cursor work to avoid overhead during scroll/pan.
     if (e.pointerType === "touch") {
       if (secondary.container.style.cursor) secondary.container.style.cursor = "";
-      clearDrawingCursorOverride();
+      this.clearSplitViewSecondaryDrawingCursorOverride(selectionCanvas);
       return;
     }
 
@@ -9087,7 +9068,7 @@ export class SpreadsheetApp {
     // When the formula bar is in range-selection mode, do not show drawing hover cursors.
     if (this.formulaBar?.isFormulaEditing()) {
       if (secondary.container.style.cursor) secondary.container.style.cursor = "";
-      clearDrawingCursorOverride();
+      this.clearSplitViewSecondaryDrawingCursorOverride(selectionCanvas);
       return;
     }
 
@@ -9098,7 +9079,7 @@ export class SpreadsheetApp {
       try {
         if (target.closest?.(".grid-scrollbar-track") || target.closest?.(".grid-scrollbar-thumb") || target.closest?.(".cell-editor")) {
           if (secondary.container.style.cursor) secondary.container.style.cursor = "";
-          clearDrawingCursorOverride();
+          this.clearSplitViewSecondaryDrawingCursorOverride(selectionCanvas);
           return;
         }
       } catch {
@@ -9122,7 +9103,7 @@ export class SpreadsheetApp {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     if (x < 0 || y < 0 || x > width || y > height) {
       if (secondary.container.style.cursor) secondary.container.style.cursor = "";
-      clearDrawingCursorOverride();
+      this.clearSplitViewSecondaryDrawingCursorOverride(selectionCanvas);
       return;
     }
 
@@ -9136,7 +9117,27 @@ export class SpreadsheetApp {
     if (cursor && selectionCanvas && selectionCanvas.style.cursor !== cursor) {
       selectionCanvas.style.cursor = cursor;
     } else if (!cursor) {
-      clearDrawingCursorOverride();
+      this.clearSplitViewSecondaryDrawingCursorOverride(selectionCanvas);
+    }
+  }
+
+  private clearSplitViewSecondaryDrawingCursorOverride(selectionCanvas: HTMLCanvasElement | null): void {
+    // Cursor overrides for drawings are applied directly to the selection canvas because the
+    // shared-grid renderer controls its own cursor there. When we are no longer hovering a
+    // drawing, clear any prior drawing cursor override so we don't leave a "move"/resize cursor
+    // stuck if the grid doesn't update it on this frame.
+    if (!selectionCanvas) return;
+    const cursor = selectionCanvas.style.cursor;
+    if (
+      cursor === "move" ||
+      cursor === "grab" ||
+      cursor === "grabbing" ||
+      cursor === "nwse-resize" ||
+      cursor === "nesw-resize" ||
+      cursor === "ns-resize" ||
+      cursor === "ew-resize"
+    ) {
+      selectionCanvas.style.cursor = "";
     }
   }
 
@@ -19013,25 +19014,31 @@ export class SpreadsheetApp {
     return { row, col };
   }
 
-  private computeFillDragTarget(
-    source: Range,
-    cell: CellCoord
-  ): { targetRange: Range; endCell: CellCoord } {
-    const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+  private computeFillDragTargetInto(source: Range, cell: CellCoord, outTargetRange: Range, outEndCell: CellCoord): void {
     const srcTop = source.startRow;
     const srcBottom = source.endRow;
     const srcLeft = source.startCol;
     const srcRight = source.endCol;
 
-    const rowExtension = cell.row < srcTop ? cell.row - srcTop : cell.row > srcBottom ? cell.row - srcBottom : 0;
-    const colExtension = cell.col < srcLeft ? cell.col - srcLeft : cell.col > srcRight ? cell.col - srcRight : 0;
+    const row = cell.row;
+    const col = cell.col;
+
+    const rowExtension = row < srcTop ? row - srcTop : row > srcBottom ? row - srcBottom : 0;
+    const colExtension = col < srcLeft ? col - srcLeft : col > srcRight ? col - srcRight : 0;
+
+    let startRow = srcTop;
+    let endRow = srcBottom;
+    let startCol = srcLeft;
+    let endCol = srcRight;
 
     if (rowExtension === 0 && colExtension === 0) {
-      const endCell: CellCoord = {
-        row: clamp(cell.row, srcTop, srcBottom),
-        col: clamp(cell.col, srcLeft, srcRight)
-      };
-      return { targetRange: source, endCell };
+      outTargetRange.startRow = startRow;
+      outTargetRange.endRow = endRow;
+      outTargetRange.startCol = startCol;
+      outTargetRange.endCol = endCol;
+      outEndCell.row = clampNumber(row, startRow, endRow);
+      outEndCell.col = clampNumber(col, startCol, endCol);
+      return;
     }
 
     const axis =
@@ -19044,50 +19051,27 @@ export class SpreadsheetApp {
           : "horizontal";
 
     if (axis === "vertical") {
-      const targetRange: Range =
-        rowExtension > 0
-          ? {
-              startRow: source.startRow,
-              endRow: Math.max(source.endRow, cell.row),
-              startCol: source.startCol,
-              endCol: source.endCol
-            }
-          : {
-              startRow: Math.min(source.startRow, cell.row),
-              endRow: source.endRow,
-              startCol: source.startCol,
-              endCol: source.endCol
-            };
-
-      const endCell: CellCoord = {
-        row: clamp(cell.row, targetRange.startRow, targetRange.endRow),
-        col: clamp(cell.col, targetRange.startCol, targetRange.endCol)
-      };
-
-      return { targetRange, endCell };
+      if (rowExtension > 0) {
+        endRow = Math.max(srcBottom, row);
+      } else {
+        startRow = Math.min(srcTop, row);
+      }
+    }
+    if (axis === "horizontal") {
+      if (colExtension > 0) {
+        endCol = Math.max(srcRight, col);
+      } else {
+        startCol = Math.min(srcLeft, col);
+      }
     }
 
-    const targetRange: Range =
-      colExtension > 0
-        ? {
-            startRow: source.startRow,
-            endRow: source.endRow,
-            startCol: source.startCol,
-            endCol: Math.max(source.endCol, cell.col)
-          }
-        : {
-            startRow: source.startRow,
-            endRow: source.endRow,
-            startCol: Math.min(source.startCol, cell.col),
-            endCol: source.endCol
-          };
+    outTargetRange.startRow = startRow;
+    outTargetRange.endRow = endRow;
+    outTargetRange.startCol = startCol;
+    outTargetRange.endCol = endCol;
 
-    const endCell: CellCoord = {
-      row: clamp(cell.row, targetRange.startRow, targetRange.endRow),
-      col: clamp(cell.col, targetRange.startCol, targetRange.endCol)
-    };
-
-    return { targetRange, endCell };
+    outEndCell.row = clampNumber(row, startRow, endRow);
+    outEndCell.col = clampNumber(col, startCol, endCol);
   }
 
   private maybeStartDragAutoScroll(): void {
@@ -19150,9 +19134,9 @@ export class SpreadsheetApp {
       if (this.dragState.mode === "fill") {
         const state = this.dragState;
         const source = state.sourceRange;
-        const { targetRange, endCell } = this.computeFillDragTarget(source, cell);
-        state.targetRange = targetRange;
-        state.endCell = endCell;
+        const targetRange = state.targetRange;
+        const endCell = state.endCell;
+        this.computeFillDragTargetInto(source, cell, targetRange, endCell);
         this.fillPreviewRange =
           targetRange.startRow === source.startRow &&
           targetRange.endRow === source.endRow &&
@@ -19676,7 +19660,7 @@ export class SpreadsheetApp {
           pointerId: e.pointerId,
           mode: "fill",
           sourceRange,
-          targetRange: sourceRange,
+          targetRange: { ...sourceRange },
           endCell: { row: sourceRange.endRow, col: sourceRange.endCol },
           fillMode,
           activeRangeIndex: this.selection.activeRangeIndex
@@ -19947,9 +19931,9 @@ export class SpreadsheetApp {
       if (this.dragState.mode === "fill") {
         const state = this.dragState;
         const source = state.sourceRange;
-        const { targetRange, endCell } = this.computeFillDragTarget(source, cell);
-        state.targetRange = targetRange;
-        state.endCell = endCell;
+        const targetRange = state.targetRange;
+        const endCell = state.endCell;
+        this.computeFillDragTargetInto(source, cell, targetRange, endCell);
         this.fillPreviewRange =
           targetRange.startRow === source.startRow &&
           targetRange.endRow === source.endRow &&
