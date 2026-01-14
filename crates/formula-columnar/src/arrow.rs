@@ -173,7 +173,10 @@ pub(crate) fn column_type_from_field(field: &Field) -> Result<ColumnType, ArrowI
 
     // Fall back to the physical Arrow data type.
     Ok(match field.data_type() {
-        DataType::Float16 | DataType::Float32 | DataType::Float64 => ColumnType::Number,
+        DataType::Float16
+        | DataType::Float32
+        | DataType::Float64
+        | DataType::Decimal128(_, _) => ColumnType::Number,
         DataType::Boolean => ColumnType::Boolean,
         DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => ColumnType::String,
         DataType::Dictionary(_, value) => match value.as_ref() {
@@ -209,6 +212,20 @@ pub(crate) fn value_from_array(
                     .downcast_ref::<arrow_array::Float16Array>()
                     .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
                 Ok(Value::Number(f32::from(arr.value(row)) as f64))
+            }
+            DataType::Decimal128(_, scale) => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::Decimal128Array>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                let v = arr.value(row);
+                let scale = *scale as i32;
+                let out = if scale >= 0 {
+                    (v as f64) / 10_f64.powi(scale)
+                } else {
+                    (v as f64) * 10_f64.powi(-scale)
+                };
+                Ok(Value::Number(out))
             }
             DataType::Float32 => {
                 let arr = array

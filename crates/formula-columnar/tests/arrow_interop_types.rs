@@ -245,3 +245,25 @@ fn record_batch_to_columnar_treats_null_dictionary_values_as_nulls(
     assert_eq!(table.get_cell(2, 0), Value::String(Arc::<str>::from("B")));
     Ok(())
 }
+
+#[test]
+fn record_batch_to_columnar_accepts_decimal128_as_number() -> Result<(), Box<dyn std::error::Error>>
+{
+    use arrow_array::Decimal128Array;
+
+    let arr = Decimal128Array::from(vec![Some(12_345_i128), None, Some(-100_i128)])
+        .with_precision_and_scale(10, 2)?;
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "dec",
+        DataType::Decimal128(10, 2),
+        true,
+    )]));
+    let batch = RecordBatch::try_new(schema, vec![Arc::new(arr) as ArrayRef])?;
+
+    let table = record_batch_to_columnar(&batch)?;
+    assert_eq!(table.row_count(), 3);
+    assert_eq!(table.get_cell(0, 0), Value::Number(123.45));
+    assert_eq!(table.get_cell(1, 0), Value::Null);
+    assert_eq!(table.get_cell(2, 0), Value::Number(-1.0));
+    Ok(())
+}
