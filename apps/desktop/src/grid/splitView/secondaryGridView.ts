@@ -473,8 +473,6 @@ export class SecondaryGridView {
     this.editor.commit("command");
     this.editingCell = null;
     this.editor.close();
-    // Release overlay caches (ImageBitmaps, parsed XML) promptly when the split pane is torn down.
-    this.drawingsOverlay.destroy();
     this.grid.destroy();
     // Remove any DOM we created (the container stays in place).
     this.container.replaceChildren();
