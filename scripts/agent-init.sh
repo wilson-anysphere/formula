@@ -55,9 +55,18 @@ fi
 #
 # Clear it when we're inside this repo so subsequent `cargo` invocations (including ones that don't
 # use wrapper scripts) respect `rust-toolchain.toml`.
-if [ -n "${RUSTUP_TOOLCHAIN:-}" ] && command -v git >/dev/null 2>&1; then
-  _formula_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-  if [ -n "${_formula_repo_root}" ] && [ -f "${_formula_repo_root}/rust-toolchain.toml" ]; then
+if [ -n "${RUSTUP_TOOLCHAIN:-}" ]; then
+  _formula_repo_root=""
+  if command -v git >/dev/null 2>&1; then
+    _formula_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  fi
+  if [ -z "${_formula_repo_root}" ] && [ -n "${BASH_VERSION:-}" ]; then
+    _formula_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+  if [ -z "${_formula_repo_root}" ]; then
+    _formula_repo_root="$(pwd)"
+  fi
+  if [ -f "${_formula_repo_root}/rust-toolchain.toml" ]; then
     unset RUSTUP_TOOLCHAIN
   fi
   unset _formula_repo_root

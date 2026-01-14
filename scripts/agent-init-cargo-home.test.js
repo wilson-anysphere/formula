@@ -20,6 +20,12 @@ const hasSh = (() => {
   return probe.status === 0;
 })();
 
+const hasGitRepo = (() => {
+  if (process.platform === 'win32') return false;
+  const probe = spawnSync('git', ['rev-parse', '--show-toplevel'], { stdio: 'ignore', cwd: repoRoot });
+  return probe.status === 0;
+})();
+
 function runBash(command) {
   const proc = spawnSync('bash', ['-lc', command], {
     encoding: 'utf8',
@@ -86,6 +92,39 @@ test('agent-init does not leak REPO_ROOT helper variable (bash)', { skip: !hasBa
     ].join(' && '),
   );
   assert.equal(out, 'ok');
+});
+
+test('agent-init unsets RUSTUP_TOOLCHAIN when inside repo (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'export RUSTUP_TOOLCHAIN=stable',
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'if [ -z "${RUSTUP_TOOLCHAIN+x}" ]; then echo ok; else echo leak; fi',
+    ].join(' && '),
+  );
+  assert.equal(out, 'ok');
+});
+
+test('agent-init resolves repo root without git when sourced from a subdir (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      // Force `git rev-parse` to fail so agent-init must fall back to script location.
+      'export GIT_DIR=/dev/null',
+      'export RUSTUP_TOOLCHAIN=stable',
+      'unset CARGO_HOME',
+      'cd crates/formula-engine',
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      'source ../../scripts/agent-init.sh >/dev/null',
+      'printf "%s\\nRUSTUP_TOOLCHAIN_SET=%s" "$CARGO_HOME" "${RUSTUP_TOOLCHAIN+x}"',
+    ].join(' && '),
+  );
+
+  const [cargoHome, toolchainLine] = out.split('\n');
+  assert.equal(cargoHome, resolve(repoRoot, 'target', 'cargo-home'));
+  assert.equal(toolchainLine, 'RUSTUP_TOOLCHAIN_SET=', 'expected RUSTUP_TOOLCHAIN to be unset');
 });
 
 test('agent-init preserves existing NODE_OPTIONS flags while adding heap cap (bash)', { skip: !hasBash }, () => {
@@ -512,6 +551,41 @@ test('agent-init can be sourced under /bin/sh (no bash-only syntax)', { skip: !h
   assert.equal(stderr, '');
   assert.equal(stdout, resolve(repoRoot, 'target', 'cargo-home'));
 });
+
+test('agent-init unsets RUSTUP_TOOLCHAIN when inside repo under /bin/sh', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'export RUSTUP_TOOLCHAIN=stable',
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      '. scripts/agent-init.sh >/dev/null',
+      'if [ -z "${RUSTUP_TOOLCHAIN+x}" ]; then echo ok; else echo leak; fi',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, 'ok');
+});
+
+test(
+  'agent-init resolves repo root when sourced from a subdir under /bin/sh',
+  { skip: !hasSh || !hasGitRepo },
+  () => {
+    const { stdout, stderr } = runSh(
+      [
+        'unset CARGO_HOME',
+        'cd crates/formula-engine',
+        // Prevent agent-init from spawning Xvfb during this test.
+        'export DISPLAY=:99',
+        '. ../../scripts/agent-init.sh >/dev/null',
+        'printf "%s" "$CARGO_HOME"',
+      ].join(' && '),
+    );
+
+    assert.equal(stderr, '');
+    assert.equal(stdout, resolve(repoRoot, 'target', 'cargo-home'));
+  },
+);
 
 test('agent-init does not leak REPO_ROOT helper variable under /bin/sh', { skip: !hasSh }, () => {
   const { stdout, stderr } = runSh(
