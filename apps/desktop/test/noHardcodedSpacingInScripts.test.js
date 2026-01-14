@@ -66,17 +66,17 @@ test("desktop UI scripts should not hardcode px values for padding/margin/gap in
       },
       // DOM style assignment (e.g. `el.style.marginTop = "8px"`).
       {
-        re: /\.style\.(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\.\s*style\b\s*\.\s*(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "style.prop",
       },
       // DOM style assignment via bracket access to the `style` property (e.g. `el["style"].marginTop = "8px"`).
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\.(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\.\s*(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "style['style'].prop",
       },
       // DOM style assignment via bracket notation (e.g. `el.style["marginTop"] = "8px"`).
       {
-        re: /\.style\s*\[\s*(?:["'`])(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+        re: /\.\s*style\b\s*\[\s*(?:["'`])(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
         kind: "style[prop]",
       },
       // DOM style assignment via bracket access to `style` + bracket notation (e.g. `el["style"]["marginTop"] = "8px"`).
@@ -86,17 +86,17 @@ test("desktop UI scripts should not hardcode px values for padding/margin/gap in
       },
       // DOM style assignment (numeric) (e.g. `el.style.marginTop = 8`).
       {
-        re: /\.style\.(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:=|\+=)\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.\s*style\b\s*\.\s*(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:=|\+=)\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "style.prop-number",
       },
       // DOM style assignment via bracket access to `style` (numeric) (e.g. `el["style"].marginTop = 8`).
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\.(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:=|\+=)\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\.\s*(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:=|\+=)\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "style['style'].prop-number",
       },
       // DOM style assignment via bracket notation (numeric) (e.g. `el.style["marginTop"] = 8`).
       {
-        re: /\.style\s*\[\s*(?:["'`])(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:["'`])\s*]\s*(?:=|\+=)\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.\s*style\b\s*\[\s*(?:["'`])(?<prop>gap|rowGap|columnGap|padding(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?|margin(?:Top|Right|Bottom|Left|Inline|InlineStart|InlineEnd|Block|BlockStart|BlockEnd)?)\s*(?:["'`])\s*]\s*(?:=|\+=)\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "style[prop]-number",
       },
       // DOM style assignment via bracket access to `style` + bracket notation (numeric) (e.g. `el["style"]["marginTop"] = 8`).
@@ -106,42 +106,42 @@ test("desktop UI scripts should not hardcode px values for padding/margin/gap in
       },
       // setProperty("margin-top", "8px")
       {
-        re: /\.style\??\.setProperty\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
+        re: /\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
         kind: "setProperty",
       },
       // setProperty via bracket access to `style` (e.g. `el["style"].setProperty("margin-top", "8px")`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
         kind: "setProperty['style']",
       },
       // setProperty via bracket notation (e.g. `el.style["setProperty"]("margin-top", "8px")`)
       {
-        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
+        re: /\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
         kind: "setProperty[prop]",
       },
       // setProperty via bracket access to `style` + bracket notation (e.g. `el["style"]["setProperty"]("margin-top", "8px")`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\3/gi,
         kind: "setProperty['style'][prop]",
       },
       // setProperty("margin-top", 8)
       {
-        re: /\.style\??\.setProperty\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty-number",
       },
       // setProperty via bracket access to `style` (numeric) (e.g. `el["style"].setProperty("margin-top", 8)`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty['style']-number",
       },
       // setProperty via bracket notation (numeric) (e.g. `el.style["setProperty"]("margin-top", 8)`)
       {
-        re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty[prop]-number",
       },
       // setProperty via bracket access to `style` + bracket notation (numeric) (e.g. `el["style"]["setProperty"]("margin-top", 8)`)
       {
-        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
+        re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*\(\s*(["'`])(?<prop>gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)\1\s*,\s*(?<num>[+-]?(?:\d+(?:\.\d+)?|\.\d+))\b/gi,
         kind: "setProperty['style'][prop]-number",
       },
     ];

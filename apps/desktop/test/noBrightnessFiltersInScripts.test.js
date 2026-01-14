@@ -56,15 +56,18 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
     // React style objects (e.g. `{ filter: "brightness(0.9)" }`).
     { re: /\b(?:filter|backdropFilter)\s*:\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "filter (style object)" },
     // DOM style assignment (e.g. `el.style.filter = "brightness(0.9)"`)
-    { re: /\.style\.(?:filter|backdropFilter)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.filter" },
+    {
+      re: /\.\s*style\b\s*\.\s*(?:filter|backdropFilter)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
+      kind: "style.filter",
+    },
     // DOM style assignment via bracket access to the `style` property (e.g. `el["style"].filter = "brightness(0.9)"`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\.(?:filter|backdropFilter)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\.\s*(?:filter|backdropFilter)\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
       kind: "style['style'].filter",
     },
     // DOM style assignment via bracket notation (e.g. `el.style["filter"] = "brightness(0.9)"`)
     {
-      re: /\.style\s*\[\s*(?:["'`])(?:filter|backdropFilter)(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
+      re: /\.\s*style\b\s*\[\s*(?:["'`])(?:filter|backdropFilter)(?:["'`])\s*]\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
       kind: "style[filter]",
     },
     // DOM style assignment via bracket access to `style` + bracket notation (e.g. `el["style"]["filter"] = "brightness(0.9)"`)
@@ -74,22 +77,22 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
     },
     // setProperty("filter", "brightness(0.9)") / setProperty("backdrop-filter", "brightness(0.9)")
     {
-      re: /\.style\??\.setProperty\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty(filter)",
     },
     // setProperty via bracket access to `style` (e.g. `el["style"].setProperty("filter", "brightness(0.9)")`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*\??\.setProperty\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty['style'](filter)",
     },
     // setProperty via bracket notation (e.g. `el.style["setProperty"]("filter", "brightness(0.9)")`)
     {
-      re: /\.style(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty[filter]",
     },
     // setProperty via bracket access to `style` + bracket notation (e.g. `el["style"]["setProperty"]("filter", "brightness(0.9)")`)
     {
-      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
+      re: /\[\s*(?:["'`])style(?:["'`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'`])setProperty(?:["'`])\s*]\s*\(\s*(["'`])(?:filter|backdrop-filter)\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi,
       kind: "setProperty['style'][filter]",
     },
     // setAttribute("style", "filter: brightness(0.9)")
@@ -98,7 +101,10 @@ test("desktop UI scripts should not use brightness() filters (use tokens instead
       kind: "setAttribute(style)",
     },
     // cssText assignment (e.g. `el.style.cssText = "filter: brightness(0.9)"`)
-    { re: /\.style\.cssText\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi, kind: "style.cssText" },
+    {
+      re: /\.\s*style\b\s*\.\s*cssText\s*(?:=|\+=)\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi,
+      kind: "style.cssText",
+    },
   ];
 
   for (const file of files) {

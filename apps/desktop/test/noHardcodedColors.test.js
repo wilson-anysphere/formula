@@ -155,12 +155,12 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   );
   const domStyleColor = new RegExp(
     // DOM style assignments (e.g. `el.style.color = "red"`)
-    String.raw`\.style\.(?:accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|backdropFilter|outlineColor|stroke|textDecoration|textDecorationColor)\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    String.raw`\.\s*style\b\s*\.\s*(?:accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|backdropFilter|outlineColor|stroke|textDecoration|textDecorationColor)\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
     "gi",
   );
   const domStyleStyleBracketColor = new RegExp(
     // DOM style assignments via bracket access to the `style` property (e.g. `el["style"].color = "red"`)
-    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\.(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|backdropFilter|outlineColor|stroke|textDecoration|textDecorationColor)\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
+    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*\.\s*(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|backdropFilter|outlineColor|stroke|textDecoration|textDecorationColor)\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
     "gi",
   );
   const domStyleStyleBracketBracketColor = new RegExp(
@@ -170,7 +170,7 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   );
   const domStyleBracketColor = new RegExp(
     // DOM style assignments via bracket notation (e.g. `el.style["color"] = "red"`)
-    String.raw`\.style\s*\[\s*(?:["'\`])(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|backdropFilter|outlineColor|stroke|textDecoration|textDecorationColor)(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
+    String.raw`\.\s*style\b\s*\[\s*(?:["'\`])(?<prop>accentColor|background|backgroundColor|borderColor|borderBottomColor|borderLeftColor|borderRightColor|borderTopColor|caretColor|color|fill|filter|backdropFilter|outlineColor|stroke|textDecoration|textDecorationColor)(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
     "gi",
   );
   const canvasStyleColor = new RegExp(
@@ -183,31 +183,32 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     String.raw`\[\s*(?:["'\`])(?<prop>fillStyle|strokeStyle)(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\2`,
     "gi",
   );
-  const styleCssTextAssignment = /\.style\.cssText\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
-  const styleCssTextBracketAssignment = /\.style\s*\[\s*(?:["'\`])cssText(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
+  const styleCssTextAssignment = /\.\s*style\b\s*\.\s*cssText\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
+  const styleCssTextBracketAssignment =
+    /\.\s*style\b\s*\[\s*(?:["'\`])cssText(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
   const styleCssTextStyleBracketAssignment =
-    /\[\s*(?:["'\`])style(?:["'\`])\s*]\.cssText\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
+    /\[\s*(?:["'\`])style(?:["'\`])\s*]\s*\.\s*cssText\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
   const styleCssTextStyleBracketBracketAssignment =
     /\[\s*(?:["'\`])style(?:["'\`])\s*]\s*\[\s*(?:["'\`])cssText(?:["'\`])\s*]\s*(?:=|\+=)\s*(["'\`])\s*(?<value>[^"'`]*?)\1/gi;
   const setAttributeStyleAssignment = /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'\`])\s*(?<value>[^"'`]*?)\2/gi;
   const setPropertyStyleColor = new RegExp(
     // DOM style setProperty assignments (e.g. `el.style.setProperty("color", "red")` or `setProperty("--foo", "red")`)
-    String.raw`\.style\??\.setProperty\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    String.raw`\.\s*style\b\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setPropertyStyleStyleBracketColor = new RegExp(
     // DOM style setProperty assignments via bracket access to the `style` property (e.g. `el["style"].setProperty("color", "red")`)
-    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*\??\.setProperty\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*(?:\?\.|\.)\s*setProperty\s*\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setPropertyStyleBracketColor = new RegExp(
     // DOM style setProperty assignments via bracket notation (e.g. `el.style["setProperty"]("color", "red")`)
-    String.raw`\.style(?:\?\.)?\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    String.raw`\.\s*style\b\s*(?:\?\.)?\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\s*\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setPropertyStyleStyleBracketBracketColor = new RegExp(
     // DOM style setProperty assignments via bracket access to `style` + bracket notation (e.g. `el["style"]["setProperty"]("color", "red")`)
-    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
+    String.raw`\[\s*(?:["'\`])style(?:["'\`])\s*]\s*(?:\?\.)?\s*\[\s*(?:["'\`])setProperty(?:["'\`])\s*]\s*\(\s*(["'\`])(?<prop>[-\w]+)\1\s*,\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\3`,
     "gi",
   );
   const setAttributeColor = new RegExp(
