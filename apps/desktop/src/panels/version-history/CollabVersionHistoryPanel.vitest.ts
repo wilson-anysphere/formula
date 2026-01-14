@@ -75,6 +75,7 @@ describe("CollabVersionHistoryPanel named checkpoints", () => {
 
     let versions: any[] = [];
     let idCounter = 0;
+    confirmMock.mockClear();
 
     const collabVersioning = {
       listVersions: vi.fn(async () => versions.map((v) => ({ ...v }))),
@@ -184,6 +185,20 @@ describe("CollabVersionHistoryPanel named checkpoints", () => {
       ) as HTMLButtonElement | undefined;
       return Boolean(updated && !updated.disabled);
     });
+
+    const deleteButtonAfterUnlock = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent === t("versionHistory.actions.deleteSelected"),
+    ) as HTMLButtonElement | undefined;
+    expect(deleteButtonAfterUnlock).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      deleteButtonAfterUnlock!.click();
+      await flushPromises();
+    });
+
+    expect(confirmMock).toHaveBeenCalledWith(t("versionHistory.confirm.deleteIrreversible"));
+    expect(collabVersioning.deleteVersion).toHaveBeenCalledWith("ckpt_1");
+    await waitFor(() => (container.textContent?.includes(t("versionHistory.panel.empty")) ?? false));
 
     act(() => root.unmount());
   });
