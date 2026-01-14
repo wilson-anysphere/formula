@@ -220,6 +220,51 @@ describe("FormulaBarView hover previews", () => {
     host.remove();
   });
 
+  it("highlights multi-column structured refs and emits hover previews (with text) in view mode", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    let hoveredRange = null as ReturnType<typeof parseA1Range>;
+    let hoveredText = null as string | null;
+    const view = new FormulaBarView(host, {
+      onCommit: () => {},
+      onHoverRangeWithText: (range, refText) => {
+        hoveredRange = range;
+        hoveredText = refText;
+      },
+    });
+
+    view.model.setExtractFormulaReferencesOptions({
+      tables: [
+        {
+          name: "Table1",
+          columns: ["Col1", "Col2", "Col3"],
+          startRow: 0,
+          startCol: 0,
+          endRow: 2,
+          endCol: 2,
+          sheetName: "Sheet1",
+        },
+      ],
+    });
+
+    view.setActiveCell({ address: "A1", input: "=SUM(Table1[[#All],[Col1],[Col2]])", value: null });
+
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpans = highlight?.querySelectorAll<HTMLElement>('span[data-kind="reference"]') ?? [];
+    expect(refSpans).toHaveLength(1);
+    const refSpan = refSpans[0]!;
+    expect(refSpan.textContent).toBe("Table1[[#All],[Col1],[Col2]]");
+
+    refSpan.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    expect(hoveredText).toBe("Table1[[#All],[Col1],[Col2]]");
+    // #All includes the header row; with a 3-row table this is A1:B3.
+    expect(hoveredRange).toEqual(parseA1Range("A1:B3"));
+
+    host.remove();
+  });
+
   it("highlights structured ref specifiers (Table1[#All]) and emits hover previews (with text) in view mode", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
