@@ -1733,6 +1733,91 @@ impl Engine {
             .iter()
             .filter_map(|&id| self.workbook.sheet_key_name(id).map(|name| name.to_string()))
             .collect();
+        let sheet_order_display_names: Vec<String> = self
+            .workbook
+            .sheet_ids_in_order()
+            .iter()
+            .filter_map(|&id| self.workbook.sheet_name(id).map(|name| name.to_string()))
+            .collect();
+
+        // Formulas can reference sheets by either their user-visible display name (Excel semantics)
+        // or by their stable sheet key (backward compatibility / host-provided identifiers). When
+        // deleting a sheet, we must rewrite both forms so references cannot resurrect if a sheet
+        // with the same name/key is later re-created.
+        let rewrite_deleted_sheet_formula = |formula: &str, origin: crate::CellAddr| -> Option<String> {
+            let (key_rewritten, key_changed) = rewrite_formula_for_sheet_delete(
+                formula,
+                origin,
+                &deleted_sheet_key,
+                &sheet_order_keys,
+            );
+            let (display_rewritten, display_changed) = rewrite_formula_for_sheet_delete(
+                formula,
+                origin,
+                &deleted_sheet_display_name,
+                &sheet_order_display_names,
+            );
+
+            match (key_changed, display_changed) {
+                (false, false) => None,
+                (true, false) => Some(key_rewritten),
+                (false, true) => Some(display_rewritten),
+                (true, true) => {
+                    // Prefer the rewrite that preserves the most structure (i.e. doesn't overly
+                    // invalidate 3D spans due to using the wrong naming scheme).
+                    let key_ref_count = key_rewritten.matches("#REF!").count();
+                    let display_ref_count = display_rewritten.matches("#REF!").count();
+                    if display_ref_count < key_ref_count {
+                        Some(display_rewritten)
+                    } else if key_ref_count < display_ref_count {
+                        Some(key_rewritten)
+                    } else {
+                        // Tie-breaker: prefer display-name rewrites to match Excel's serialized
+                        // formula text, but avoid allocating twice when the strings are identical.
+                        if key_rewritten == display_rewritten {
+                            Some(key_rewritten)
+                        } else {
+                            Some(display_rewritten)
+                        }
+                    }
+                }
+            }
+        };
+
+        let rewrite_deleted_sheet_table_formula = |formula: &str| -> Option<String> {
+            let key_rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
+                formula,
+                &deleted_sheet_key,
+                &sheet_order_keys,
+            );
+            let display_rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
+                formula,
+                &deleted_sheet_display_name,
+                &sheet_order_display_names,
+            );
+
+            let key_changed = key_rewritten != formula;
+            let display_changed = display_rewritten != formula;
+
+            match (key_changed, display_changed) {
+                (false, false) => None,
+                (true, false) => Some(key_rewritten),
+                (false, true) => Some(display_rewritten),
+                (true, true) => {
+                    let key_ref_count = key_rewritten.matches("#REF!").count();
+                    let display_ref_count = display_rewritten.matches("#REF!").count();
+                    if display_ref_count < key_ref_count {
+                        Some(display_rewritten)
+                    } else if key_ref_count < display_ref_count {
+                        Some(key_rewritten)
+                    } else if key_rewritten == display_rewritten {
+                        Some(key_rewritten)
+                    } else {
+                        Some(display_rewritten)
+                    }
+                }
+            }
+        };
 
         // Mark the sheet as deleted while keeping its id stable.
         self.workbook.sheet_key_to_id.remove(&deleted_sheet_key_norm);
@@ -1769,13 +1854,7 @@ impl Engine {
                     continue;
                 };
                 let origin = crate::CellAddr::new(addr.row, addr.col);
-                let (rewritten, changed) = rewrite_formula_for_sheet_delete(
-                    &formula,
-                    origin,
-                    &deleted_sheet_key,
-                    &sheet_order_keys,
-                );
-                if changed {
+                if let Some(rewritten) = rewrite_deleted_sheet_formula(&formula, origin) {
                     cell.formula = Some(rewritten);
                 }
             }
@@ -1784,20 +1863,14 @@ impl Engine {
             for table in &mut sheet.tables {
                 for column in &mut table.columns {
                     if let Some(formula) = column.formula.as_mut() {
-                        let rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
-                            formula,
-                            &deleted_sheet_key,
-                            &sheet_order_keys,
-                        );
-                        *formula = rewritten;
+                        if let Some(rewritten) = rewrite_deleted_sheet_table_formula(formula) {
+                            *formula = rewritten;
+                        }
                     }
                     if let Some(formula) = column.totals_formula.as_mut() {
-                        let rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
-                            formula,
-                            &deleted_sheet_key,
-                            &sheet_order_keys,
-                        );
-                        *formula = rewritten;
+                        if let Some(rewritten) = rewrite_deleted_sheet_table_formula(formula) {
+                            *formula = rewritten;
+                        }
                     }
                 }
             }
@@ -1810,13 +1883,7 @@ impl Engine {
                 NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => formula,
             };
             let origin = crate::CellAddr::new(0, 0);
-            let (rewritten, changed) = rewrite_formula_for_sheet_delete(
-                formula,
-                origin,
-                &deleted_sheet_key,
-                &sheet_order_keys,
-            );
-            if changed {
+            if let Some(rewritten) = rewrite_deleted_sheet_formula(formula, origin) {
                 *formula = rewritten;
             }
         }
@@ -1834,13 +1901,7 @@ impl Engine {
                     }
                 };
                 let origin = crate::CellAddr::new(0, 0);
-                let (rewritten, changed) = rewrite_formula_for_sheet_delete(
-                    formula,
-                    origin,
-                    &deleted_sheet_key,
-                    &sheet_order_keys,
-                );
-                if changed {
+                if let Some(rewritten) = rewrite_deleted_sheet_formula(formula, origin) {
                     *formula = rewritten;
                 }
             }

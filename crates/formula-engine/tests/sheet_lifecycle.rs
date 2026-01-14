@@ -64,6 +64,65 @@ fn delete_sheet_rewrites_local_refs_but_not_external_workbook_refs() {
 }
 
 #[test]
+fn delete_sheet_rewrites_refs_when_display_name_differs_from_stable_key() {
+    let mut engine = Engine::new();
+
+    // Create sheets with stable keys that differ from their user-visible display names.
+    engine.ensure_sheet("sheet1_key");
+    engine.ensure_sheet("sheet2_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
+    engine.set_sheet_display_name("sheet2_key", "Sheet2");
+
+    engine
+        .set_cell_formula("Sheet2", "A1", "=Sheet1!A1")
+        .unwrap();
+
+    engine.delete_sheet("Sheet1").unwrap();
+
+    // Deleting a sheet should rewrite local references using the *display name* to `#REF!`
+    // (Excel semantics), even when the stable key differs.
+    assert_eq!(engine.get_cell_formula("Sheet2", "A1"), Some("=#REF!"));
+
+    // Recreating a new sheet with the same display name must not resurrect the reference.
+    engine.ensure_sheet("sheet1_new");
+    engine.set_sheet_display_name("sheet1_new", "Sheet1");
+    assert_eq!(engine.get_cell_formula("Sheet2", "A1"), Some("=#REF!"));
+}
+
+#[test]
+fn delete_sheet_adjusts_3d_boundaries_when_display_name_differs_from_stable_key() {
+    let mut engine = Engine::new();
+
+    for (key, display) in [
+        ("sheet1_key", "Sheet1"),
+        ("sheet2_key", "Sheet2"),
+        ("sheet3_key", "Sheet3"),
+    ] {
+        engine.ensure_sheet(key);
+        engine.set_sheet_display_name(key, display);
+    }
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+    engine
+        .set_cell_formula("Sheet2", "B1", "=SUM(Sheet1:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "B1"), Value::Number(6.0));
+
+    engine.delete_sheet("Sheet1").unwrap();
+
+    // If a deleted sheet was a 3D boundary, Excel shifts the boundary inward by one sheet.
+    assert_eq!(
+        engine.get_cell_formula("Sheet2", "B1"),
+        Some("=SUM(Sheet2:Sheet3!A1)")
+    );
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "B1"), Value::Number(5.0));
+}
+
+#[test]
 fn rename_sheet_rewrites_table_column_formulas_but_not_external_refs() {
     let mut engine = Engine::new();
     engine.ensure_sheet("Sheet1");
