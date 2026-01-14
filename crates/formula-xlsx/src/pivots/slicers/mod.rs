@@ -632,23 +632,31 @@ impl XlsxPackage {
             }
         }
 
-        // Patch explicit parts (erroring when missing).
+        // Patch explicit parts (erroring when missing). Prefer updating the existing raw part key
+        // to avoid adding duplicate entries when the package uses non-canonical casing/separators.
         for target in explicit_targets {
+            let part_key = resolve_part_key_equivalent(self.parts_map(), &target)
+                .ok_or_else(|| XlsxError::MissingPart(target.clone()))?;
             let bytes = self
-                .part(&target)
+                .parts_map()
+                .get(&part_key)
                 .ok_or_else(|| XlsxError::MissingPart(target.clone()))?
                 .to_vec();
             let updated = patch_slicer_selection_xml(&bytes, selection)?;
-            self.set_part(target, updated);
+            self.parts_map_mut().insert(part_key, updated);
         }
 
-        // Patch inferred cache parts (best-effort: skip missing).
+        // Patch inferred cache parts (best-effort: skip missing). Prefer updating existing keys to
+        // avoid duplicate entries for non-canonical part names.
         for target in inferred_cache_targets {
-            let Some(bytes) = self.part(&target) else {
+            let Some(part_key) = resolve_part_key_equivalent(self.parts_map(), &target) else {
                 continue;
             };
-            let updated = patch_slicer_selection_xml(bytes, selection)?;
-            self.set_part(target, updated);
+            let Some(bytes) = self.parts_map().get(&part_key).map(|b| b.to_vec()) else {
+                continue;
+            };
+            let updated = patch_slicer_selection_xml(&bytes, selection)?;
+            self.parts_map_mut().insert(part_key, updated);
         }
 
         Ok(())
@@ -790,6 +798,16 @@ fn resolve_part_key(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> Option<Str
     parts
         .keys()
         .find(|key| crate::zip_util::zip_part_names_equivalent(key.as_str(), name))
+        .cloned()
+}
+
+fn resolve_part_key_equivalent(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> Option<String> {
+    if let Some(key) = resolve_part_key(parts, name) {
+        return Some(key);
+    }
+    parts
+        .keys()
+        .find(|candidate| crate::zip_util::zip_part_names_equivalent(candidate.as_str(), name))
         .cloned()
 }
 
@@ -3909,6 +3927,51 @@ mod slicer_selection_write_tests {
         };
 
         pkg.set_slicer_selection("xl/slicerCaches/slicerCache1.xml", &selection)
+            .expect("set selection");
+
+        let parts = pkg.pivot_slicer_parts().expect("parse slicer parts");
+        assert_eq!(parts.slicers.len(), 1);
+        assert_eq!(
+            parts.slicers[0].selection.selected_items,
+            Some(HashSet::from(["East".to_string()]))
+        );
+    }
+
+    #[test]
+    fn slicer_selection_updates_cache_when_called_with_slicer_part() {
+        let slicer_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+        name="Slicer1">
+  <slicerCache r:id="rId1"/>
+</slicer>"#;
+
+        let slicer_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="urn:example:slicerCache" Target="../slicerCaches/slicerCache1.xml"/>
+</Relationships>"#;
+
+        let slicer_cache_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <slicerCacheItems>
+    <slicerCacheItem n="East" s="0"/>
+    <slicerCacheItem n="West" s="1"/>
+    <slicerCacheItem n="North" s="0"/>
+  </slicerCacheItems>
+</slicerCache>"#;
+
+        let mut pkg = build_package(&[
+            ("xl/slicers/slicer1.xml", slicer_xml),
+            ("xl/slicers/_rels/slicer1.xml.rels", slicer_rels),
+            ("xl/slicerCaches/slicerCache1.xml", slicer_cache_xml),
+        ]);
+
+        let selection = SlicerSelectionState {
+            available_items: Vec::new(),
+            selected_items: Some(HashSet::from(["East".to_string()])),
+        };
+
+        pkg.set_slicer_selection("xl/slicers/slicer1.xml", &selection)
             .expect("set selection");
 
         let parts = pkg.pivot_slicer_parts().expect("parse slicer parts");
