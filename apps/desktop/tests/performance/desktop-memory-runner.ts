@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, parse, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
@@ -284,6 +284,10 @@ function processTreeMemoryMb(rootPid: number): number {
 
 async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Promise<number> {
   if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === "1") {
+    const rootDir = parse(perfHome).root;
+    if (perfHome === rootDir || perfHome === repoRoot) {
+      throw new Error(`Refusing to reset unsafe desktop benchmark home dir: ${perfHome}`);
+    }
     rmSync(perfHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
   mkdirSync(perfHome, { recursive: true });
