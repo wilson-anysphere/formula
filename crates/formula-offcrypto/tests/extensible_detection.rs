@@ -22,4 +22,3 @@ fn standard_only_rejects_extensible_encryption() {
         "expected UnsupportedEncryption(Extensible), got {err:?}"
     );
 }
-

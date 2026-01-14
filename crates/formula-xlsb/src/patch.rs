@@ -1570,6 +1570,7 @@ fn convert_value_record_to_formula<W: io::Write>(
         )));
     }
 
+    let flags = edit.new_formula_flags.unwrap_or(0);
     match &edit.new_value {
         CellValue::Number(v) => write_new_fmla_num(writer, col, style, *v, flags, rgce, rgcb),
         CellValue::Text(s) => write_new_fmla_string(writer, col, style, s, flags, rgce, rgcb),
