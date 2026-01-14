@@ -632,13 +632,13 @@ try {
         size_mb: Number((f.sizeBytes / BYTES_PER_MB).toFixed(3)),
         ext: f.ext,
       }));
-      const groupRows = groupTotals.slice(0, DEFAULT_GROUP_LIMIT).map((g) => ({
+      const groupRows = groupTotals.map((g) => ({
         group: g.group,
         files: g.files,
         size_bytes: g.bytes,
         size_mb: Number((g.bytes / BYTES_PER_MB).toFixed(3)),
       }));
-      const typeRows = typeTotals.slice(0, DEFAULT_TYPE_LIMIT).map((t) => ({
+      const typeRows = typeTotals.map((t) => ({
         type: t.type,
         files: t.files,
         size_bytes: t.bytes,
