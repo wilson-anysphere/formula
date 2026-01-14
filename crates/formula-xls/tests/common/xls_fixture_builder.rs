@@ -2121,6 +2121,24 @@ pub fn build_invalid_margins_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a worksheet with a NaN page margin value.
+///
+/// This is used to validate that the importer ignores non-finite BIFF margin records and surfaces a
+/// warning, rather than importing NaN/Inf into `PageSetup`.
+pub fn build_invalid_margins_nan_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_invalid_margins_nan_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Notes`
 /// with a NOTE/OBJ/TXO comment anchored to `A1`.
 pub fn build_note_comment_fixture_xls() -> Vec<u8> {
@@ -4824,6 +4842,18 @@ fn build_invalid_margins_workbook_stream() -> Vec<u8> {
 }
 
 fn build_invalid_margins_sheet_stream() -> Vec<u8> {
+    build_invalid_margins_sheet_stream_with_left_margin(100.0f64.to_le_bytes())
+}
+
+fn build_invalid_margins_nan_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "Margins",
+        &build_invalid_margins_sheet_stream_with_left_margin(f64::NAN.to_le_bytes()),
+        1252,
+    )
+}
+
+fn build_invalid_margins_sheet_stream_with_left_margin(invalid_left: [u8; 8]) -> Vec<u8> {
     // The workbook globals above create 16 style XFs + 1 cell XF, so the first usable
     // cell XF index is 16.
     const XF_GENERAL_CELL: u16 = 16;
@@ -4843,7 +4873,6 @@ fn build_invalid_margins_sheet_stream() -> Vec<u8> {
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
 
     // LEFTMARGIN with an invalid Xnum value (out of spec range).
-    let invalid_left = 100.0f64.to_le_bytes();
     push_record(&mut sheet, RECORD_LEFTMARGIN, &invalid_left);
 
     // RIGHTMARGIN with a valid non-default value so the importer produces a non-default PageSetup.
