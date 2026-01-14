@@ -753,9 +753,9 @@ export class DrawingOverlay {
             withClip(() => {
               try {
                 withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
-                  drawShape(ctx, localRect, specToDraw, colors, cssVarStyle);
+                  drawShape(ctx, localRect, specToDraw, colors, cssVarStyle, zoom);
                   if (canRenderText) {
-                    renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel });
+                    renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
                   }
                 });
                 rendered = true;
@@ -776,7 +776,7 @@ export class DrawingOverlay {
                   ctx.beginPath();
                   ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
                   ctx.clip();
-                  renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel });
+                  renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel, zoom });
                 } finally {
                   ctx.restore();
                 }
@@ -1148,6 +1148,7 @@ function drawShape(
   spec: ShapeRenderSpec,
   colors: OverlayColorTokens,
   cssVarStyle: CssVarStyle | null,
+  zoom: number,
 ): void {
   // Clip to the anchored bounds; this matches the chart rendering behaviour and
   // avoids accidental overdraw if we misinterpret a shape transform.
@@ -1155,7 +1156,8 @@ function drawShape(
   ctx.rect(rect.x, rect.y, rect.width, rect.height);
   ctx.clip();
 
-  const strokeWidthPx = spec.stroke ? emuToPx(spec.stroke.widthEmu) : 0;
+  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const strokeWidthPx = spec.stroke ? emuToPx(spec.stroke.widthEmu) * scale : 0;
   const inset = strokeWidthPx > 0 ? strokeWidthPx / 2 : 0;
   const x = rect.x + inset;
   const y = rect.y + inset;
@@ -1201,7 +1203,8 @@ function drawShape(
   if (spec.label) {
     ctx.fillStyle = spec.labelColor ?? colors.placeholderLabel;
     ctx.globalAlpha = 0.8;
-    const size = typeof spec.labelFontSizePx === "number" && Number.isFinite(spec.labelFontSizePx) ? spec.labelFontSizePx : 12;
+    const size =
+      typeof spec.labelFontSizePx === "number" && Number.isFinite(spec.labelFontSizePx) ? spec.labelFontSizePx * scale : 12 * scale;
     const family = spec.labelFontFamily?.trim() ? spec.labelFontFamily : "sans-serif";
     const weight = spec.labelBold ? "bold " : "";
     ctx.font = `${weight}${size}px ${family}`;
@@ -1209,7 +1212,7 @@ function drawShape(
     const vAlign = spec.labelVAlign ?? "top";
     ctx.textAlign = align;
     ctx.textBaseline = vAlign === "middle" ? "middle" : vAlign;
-    const padding = 4;
+    const padding = 4 * scale;
     const xText =
       align === "center" ? rect.x + rect.width / 2 : align === "right" ? rect.x + rect.width - padding : rect.x + padding;
     const yText =
@@ -1387,9 +1390,10 @@ type RenderedLine = {
   height: number;
 };
 
-function shapeRunFont(run: ShapeTextRun): { font: string; fontSizePx: number } {
+function shapeRunFont(run: ShapeTextRun, zoom: number): { font: string; fontSizePx: number } {
+  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   const fontSizePt = run.fontSizePt ?? DEFAULT_SHAPE_FONT_SIZE_PT;
-  const fontSizePx = Math.max(1, fontSizePt * PX_PER_PT);
+  const fontSizePx = Math.max(1, fontSizePt * PX_PER_PT * scale);
   const family = run.fontFamily?.trim() || DEFAULT_SHAPE_FONT_FAMILY;
   const parts: string[] = [];
   if (run.italic) parts.push("italic");
@@ -1414,16 +1418,17 @@ function layoutShapeTextLines(
   ctx: CanvasRenderingContext2D,
   runs: ShapeTextRun[],
   maxWidth: number,
-  opts: { wrap: boolean; defaultColor: string },
+  opts: { wrap: boolean; defaultColor: string; zoom: number },
 ): RenderedLine[] {
   const lines: RenderedLine[] = [];
   let segments: RenderedSegment[] = [];
   let width = 0;
   let maxFontSizePx = 0;
+  const scale = Number.isFinite(opts.zoom) && opts.zoom > 0 ? opts.zoom : 1;
 
   const flush = () => {
     if (segments.length === 0) {
-      lines.push({ segments: [], width: 0, height: DEFAULT_SHAPE_FONT_SIZE_PT * PX_PER_PT * 1.2 });
+      lines.push({ segments: [], width: 0, height: DEFAULT_SHAPE_FONT_SIZE_PT * PX_PER_PT * scale * 1.2 });
     } else {
       lines.push({
         segments,
@@ -1438,7 +1443,7 @@ function layoutShapeTextLines(
 
   const appendText = (text: string, run: ShapeTextRun) => {
     if (text === "") return;
-    const { font, fontSizePx } = shapeRunFont(run);
+    const { font, fontSizePx } = shapeRunFont(run, scale);
     ctx.font = font;
     const measured = ctx.measureText(text).width;
     const color = run.color ?? opts.defaultColor;
@@ -1468,7 +1473,7 @@ function layoutShapeTextLines(
       if (token === "") continue;
       if (segments.length === 0 && token.trim() === "") continue;
 
-      const { font } = shapeRunFont(run);
+      const { font } = shapeRunFont(run, scale);
       ctx.font = font;
       const tokenWidth = ctx.measureText(token).width;
       if (segments.length > 0 && width + tokenWidth > maxWidth) {
@@ -1502,9 +1507,10 @@ function renderShapeText(
   ctx: CanvasRenderingContext2D,
   bounds: Rect,
   layout: ShapeTextLayout,
-  opts: { defaultColor: string },
+  opts: { defaultColor: string; zoom: number },
 ): void {
-  const padding = 4;
+  const scale = Number.isFinite(opts.zoom) && opts.zoom > 0 ? opts.zoom : 1;
+  const padding = 4 * scale;
   const inner = {
     x: bounds.x + padding,
     y: bounds.y + padding,
@@ -1515,7 +1521,7 @@ function renderShapeText(
   if (layout.textRuns.length === 0) return;
 
   const wrap = layout.wrap ?? true;
-  const lines = layoutShapeTextLines(ctx, layout.textRuns, inner.width, { wrap, defaultColor: opts.defaultColor });
+  const lines = layoutShapeTextLines(ctx, layout.textRuns, inner.width, { wrap, defaultColor: opts.defaultColor, zoom: scale });
   if (lines.length === 0) return;
 
   const totalHeight = lines.reduce((sum, line) => sum + line.height, 0);
@@ -1550,7 +1556,7 @@ function renderShapeText(
       ctx.fillText(seg.text, x, y);
       if (seg.underline) {
         ctx.strokeStyle = seg.color;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = Math.max(1, scale);
         const underlineY = y + seg.fontSizePx;
         ctx.beginPath();
         ctx.moveTo(x, underlineY);
