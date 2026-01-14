@@ -4,7 +4,17 @@
  *   runs?: Array<{ start: number, end: number, style?: Record<string, unknown> }>
  * }} RichText
  *
- * @typedef {string | number | boolean | RichText | null} CellValue
+ * @typedef {{
+ *   type: "image",
+ *   value: {
+ *     imageId: string,
+ *     altText?: string,
+ *     width?: number,
+ *     height?: number,
+ *   }
+ * }} ImageValue
+ *
+ * @typedef {string | number | boolean | RichText | ImageValue | null} CellValue
  *
  * Canonical cell state owned by the DocumentController.
  *

@@ -59,3 +59,15 @@ test("clipboard TSV escapes values that would otherwise look like formulas", () 
   assert.equal(grid[0][0].value, " =literal");
   assert.equal(grid[0][0].formula, null);
 });
+
+test("clipboard TSV serializes in-cell image values as alt text / placeholders (not [object Object])", () => {
+  const tsvWithAlt = serializeCellGridToTsv([
+    [{ value: { type: "image", value: { imageId: "img1", altText: "Alt" } } }],
+  ]);
+  assert.equal(tsvWithAlt, "Alt");
+
+  const tsvWithoutAlt = serializeCellGridToTsv([
+    [{ value: { type: "image", value: { imageId: "img1" } } }],
+  ]);
+  assert.equal(tsvWithoutAlt, "[Image]");
+});

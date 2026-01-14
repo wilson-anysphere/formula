@@ -9,6 +9,7 @@
  */
 
 import { excelSerialToDate } from "../shared/valueParsing.js";
+import { parseImageCellValue } from "../shared/imageCellValue.js";
 
 /**
  * @typedef {{ r: number, g: number, b: number }} RgbColor
@@ -352,6 +353,9 @@ function cellValueToRtf(cell) {
 
   // DocumentController rich text values should copy as plain text.
   if (typeof value === "object" && typeof value.text === "string") return value.text;
+
+  const image = parseImageCellValue(value);
+  if (image) return image.altText ?? "[Image]";
 
   const numberFormat = cell.format?.numberFormat;
   if (typeof value === "number" && isLikelyDateNumberFormat(numberFormat)) {

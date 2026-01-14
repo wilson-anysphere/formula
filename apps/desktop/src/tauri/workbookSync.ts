@@ -1,5 +1,6 @@
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import { showToast } from "../extensions/ui.js";
+import { parseImageCellValue } from "../shared/imageCellValue.js";
 
 import { getTauriInvokeOrNull, type TauriInvoke } from "./api";
 
@@ -213,7 +214,14 @@ function toRangeCellEdit(state: CellState): RangeCellEdit {
       return { value: null, formula: normalized };
     }
   }
-  return { value: (state.value ?? null) as unknown | null, formula: null };
+
+  const value = (state.value ?? null) as unknown | null;
+  // Desktop-only: embedded in-cell images are represented as JSON-ish objects in the
+  // DocumentController so the grid can resolve bytes by id. The Rust workbook backend does
+  // not (yet) accept these objects via `set_cell`/`set_range`, so strip them out when
+  // mirroring deltas to avoid IPC serialization failures.
+  if (parseImageCellValue(value)) return { value: null, formula: null };
+  return { value, formula: null };
 }
 
 function normalizeFormulaText(formula: unknown): string | null {

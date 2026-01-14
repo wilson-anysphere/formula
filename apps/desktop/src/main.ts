@@ -118,6 +118,7 @@ import { parseA1Range, splitSheetQualifier } from "../../../packages/search/inde
 import type { DesktopPowerQueryService } from "./power-query/service.js";
 import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
+import { parseImageCellValue } from "./shared/imageCellValue.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
 import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js";
 import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
@@ -4944,6 +4945,8 @@ if (
     if (typeof value === "object" && value && "text" in value && typeof (value as any).text === "string") {
       return String((value as any).text);
     }
+    const image = parseImageCellValue(value);
+    if (image) return image.altText ?? "[Image]";
     return null;
   }
 

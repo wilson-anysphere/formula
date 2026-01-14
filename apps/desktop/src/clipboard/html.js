@@ -1,4 +1,5 @@
 import { excelSerialToDate, parseScalar } from "../shared/valueParsing.js";
+import { parseImageCellValue } from "../shared/imageCellValue.js";
 import { ClipboardParseLimitError, DEFAULT_MAX_CLIPBOARD_HTML_CHARS, DEFAULT_MAX_CLIPBOARD_PARSE_CELLS } from "./limits.js";
 
 /**
@@ -260,6 +261,12 @@ function cellValueToHtml(cell) {
   // DocumentController rich text values should copy as plain text.
   if (typeof value === "object" && typeof value.text === "string") {
     return escapeHtml(value.text).replaceAll("\n", "<br>");
+  }
+
+  const image = parseImageCellValue(value);
+  if (image) {
+    const text = image.altText ?? "[Image]";
+    return escapeHtml(text).replaceAll("\n", "<br>");
   }
 
   const numberFormat = cell.format?.numberFormat;

@@ -1,5 +1,6 @@
 import { normalizeRange, parseRangeA1 } from "../../document/coords.js";
 import { excelSerialToDate } from "../../shared/valueParsing.js";
+import { parseImageCellValue } from "../../shared/imageCellValue.js";
 import { stringifyCsv } from "./csv.js";
 import { enforceExport } from "../../dlp/enforceExport.js";
 
@@ -68,6 +69,20 @@ function cellToCsvField(cell) {
   if (typeof value === "object" && typeof value.text === "string") {
     const text = value.text;
     // Escape so CSV import doesn't treat literal rich text (e.g. "=literal") as a formula.
+    if (text.trimStart().startsWith("=") || text.startsWith("'")) return `'${text}`;
+    return text;
+  }
+
+  const image = parseImageCellValue(value);
+  if (image) {
+    const formula = cell.formula;
+    if (typeof formula === "string" && formula.trim() !== "") {
+      // Mirror the "formula fallback" behavior above, even though image payloads are represented
+      // as objects rather than the normal `value=null` formula convention.
+      return formula;
+    }
+
+    const text = image.altText ?? "[Image]";
     if (text.trimStart().startsWith("=") || text.startsWith("'")) return `'${text}`;
     return text;
   }

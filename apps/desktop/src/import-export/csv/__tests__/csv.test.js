@@ -97,6 +97,31 @@ test("CSV export serializes rich text values as plain text", () => {
   assert.equal(csv, "Hello");
 });
 
+test("CSV export serializes in-cell image values as alt text / placeholders (not [object Object])", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", { type: "image", value: { imageId: "img1", altText: "Alt" } });
+  assert.equal(exportDocumentRangeToCsv(doc, "Sheet1", "A1"), "Alt");
+
+  doc.setCellValue("Sheet1", "A2", { type: "image", value: { imageId: "img1" } });
+  assert.equal(exportDocumentRangeToCsv(doc, "Sheet1", "A2"), "[Image]");
+});
+
+test("CSV export falls back to formula text for image payload cells with formulas", () => {
+  const doc = new DocumentController();
+  // `setCell` is a low-level escape hatch that can set both `value` and `formula` simultaneously
+  // (matching the XLSX IMAGE() cached rich-value import behavior).
+  doc.setCell(
+    "Sheet1",
+    0,
+    0,
+    { value: { type: "image", value: { imageId: "img1" } }, formula: "IMAGE(1,2)" },
+    { source: "test" },
+  );
+
+  // Commas require quoting in CSV.
+  assert.equal(exportDocumentRangeToCsv(doc, "Sheet1", "A1"), '"=IMAGE(1,2)"');
+});
+
 test("CSV export falls back to formula text when no value is present", () => {
   const doc = new DocumentController();
   doc.setCellFormula("Sheet1", "A1", "SUM(1,2)");

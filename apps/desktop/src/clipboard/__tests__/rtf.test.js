@@ -84,6 +84,14 @@ test("serializeCellGridToClipboardPayload includes rtf", () => {
   assert.ok(payload.rtf.startsWith("{\\rtf1"));
 });
 
+test("clipboard RTF serializes in-cell image values as alt text / placeholders (not [object Object])", () => {
+  const rtfWithAlt = serializeCellGridToRtf([[{ value: { type: "image", value: { imageId: "img1", altText: "Alt" } } }]]);
+  assert.match(rtfWithAlt, /Alt/);
+
+  const rtfWithoutAlt = serializeCellGridToRtf([[{ value: { type: "image", value: { imageId: "img1" } } }]]);
+  assert.match(rtfWithoutAlt, /\[Image\]/);
+});
+
 test("clipboard RTF fallback converts tab/paragraph control words into TSV-like text", () => {
   const text = extractPlainTextFromRtf(
     "{\\rtf1\\ansi{\\fonttbl{\\f0\\fnil Calibri;}}A\\tab B\\par C\\tab D}"

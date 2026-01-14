@@ -73,6 +73,26 @@ test("clipboard HTML round-trips basic values and formatting", () => {
   assert.equal(grid[0][1].value, "Hello");
 });
 
+test("clipboard HTML serializes in-cell image values as alt text / placeholders (not [object Object])", () => {
+  const htmlWithAlt = serializeCellGridToHtml([
+    [{ value: { type: "image", value: { imageId: "img1", altText: "Alt" } } }],
+  ]);
+  assert.match(htmlWithAlt, /Alt/);
+
+  const gridWithAlt = parseHtmlToCellGrid(htmlWithAlt);
+  assert.ok(gridWithAlt);
+  assert.equal(gridWithAlt[0][0].value, "Alt");
+
+  const htmlWithoutAlt = serializeCellGridToHtml([
+    [{ value: { type: "image", value: { imageId: "img1" } } }],
+  ]);
+  assert.match(htmlWithoutAlt, /\[Image\]/);
+
+  const gridWithoutAlt = parseHtmlToCellGrid(htmlWithoutAlt);
+  assert.ok(gridWithoutAlt);
+  assert.equal(gridWithoutAlt[0][0].value, "[Image]");
+});
+
 test("clipboard HTML parses Google Sheets-style data attributes", () => {
   const html = `<!DOCTYPE html><html><body><table>
     <tr>
