@@ -5,7 +5,11 @@
 
 # Note: if you run this script directly (`bash scripts/agent-init.sh`), it cannot modify the
 # environment of your current shell. We still run, but emit a warning so it's harder to miss.
-if [ "${0##*/}" = "agent-init.sh" ]; then
+if [ -n "${BASH_VERSION:-}" ]; then
+  if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    echo "warning: scripts/agent-init.sh is meant to be sourced ('. scripts/agent-init.sh'); executing it won't update your current shell" >&2
+  fi
+elif [ "${0##*/}" = "agent-init.sh" ]; then
   echo "warning: scripts/agent-init.sh is meant to be sourced ('. scripts/agent-init.sh'); executing it won't update your current shell" >&2
 fi
 
