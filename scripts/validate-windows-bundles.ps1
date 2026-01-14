@@ -1183,7 +1183,8 @@ try {
       $files = @(Get-ChildItem -LiteralPath $tmpRoot -Recurse -File -ErrorAction SilentlyContinue)
       $missing = @()
       foreach ($req in @("LICENSE", "NOTICE")) {
-        $found = $files | Where-Object { $_.Name -ieq $req } | Select-Object -First 1
+        # Allow extensions (e.g. LICENSE.txt) as long as the base name matches.
+        $found = $files | Where-Object { $_.Name -ieq $req -or $_.BaseName -ieq $req } | Select-Object -First 1
         if (-not $found) {
           $missing += $req
         }
