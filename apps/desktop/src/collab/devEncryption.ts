@@ -115,9 +115,11 @@ export function createDevEncryptionConfig(opts: {
     // Only provide the key for the configured demo range.
     //
     // This keeps the dev toggle from accidentally granting edit access to cells that
-    // were encrypted with a different key id (e.g. production-managed encryption),
-    // since CollabSession treats any non-null key as sufficient to overwrite an
-    // encrypted cell.
+    // were encrypted with a different key id (e.g. production-managed encryption).
+    //
+    // CollabSession enforces that encrypted cell overwrites require a *matching*
+    // `keyId`, but we still scope the resolver so the dev toggle only affects the
+    // intended range and doesn't accidentally expose keys across unrelated cells.
     keyForCell: (cell: CellAddress) => (cellInRange(cell, range) ? key : null),
     shouldEncryptCell: (cell: CellAddress) => cellInRange(cell, range),
   };
