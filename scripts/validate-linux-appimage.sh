@@ -378,6 +378,7 @@ validate_appimage() {
   local has_spreadsheet_mime=0
   local has_xlsx_mime=0
   local has_xlsx_integration=0
+  local bad_exec_count=0
 
   local desktop_file
   for desktop_file in "${desktop_files[@]}"; do
@@ -401,6 +402,18 @@ validate_appimage() {
     fi
     if printf '%s' "$mime_value" | grep -Eqi "$spreadsheet_mime_regex"; then
       has_spreadsheet_mime=1
+
+      # File associations require a placeholder token (%U/%u/%F/%f) in Exec= so the
+      # OS passes the opened file path/URL into the app.
+      local exec_line
+      exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+      if [ -z "$exec_line" ]; then
+        echo "${SCRIPT_NAME}: error: ${desktop_file#$appdir/} is missing an Exec= entry (required for file associations)" >&2
+        bad_exec_count=$((bad_exec_count + 1))
+      elif ! printf '%s' "$exec_line" | grep -Eq '%[uUfF]'; then
+        echo "${SCRIPT_NAME}: error: ${desktop_file#$appdir/} Exec= does not include a file/URL placeholder (%U/%u/%F/%f): ${exec_line}" >&2
+        bad_exec_count=$((bad_exec_count + 1))
+      fi
     fi
   done
 
@@ -454,6 +467,10 @@ validate_appimage() {
       fi
     done
     die "No .desktop file advertised spreadsheet MIME types for AppImage: $appimage_path"
+  fi
+
+  if [ "$bad_exec_count" -ne 0 ]; then
+    die "One or more .desktop entries had invalid Exec= lines for file association handling"
   fi
 
   if [ "$has_xlsx_mime" -ne 1 ]; then
