@@ -1,4 +1,7 @@
 import type { SnapshotCell } from "../mergeFormattingIntoSnapshot.js";
+import { MAX_INSERT_IMAGE_BYTES } from "../../drawings/insertImageLimits.js";
+
+import { coerceBase64StringWithinLimit } from "./base64.js";
 
 export type ImportedEmbeddedCellImage = {
   worksheet_part: string;
@@ -94,6 +97,8 @@ export function mergeEmbeddedCellImagesIntoSnapshot<
     const id = normalizeString((img as any)?.id);
     const bytesBase64 = typeof (img as any)?.bytesBase64 === "string" ? (img as any).bytesBase64 : "";
     if (!id || !bytesBase64) continue;
+    const normalizedBase64 = coerceBase64StringWithinLimit(bytesBase64, MAX_INSERT_IMAGE_BYTES);
+    if (!normalizedBase64) continue;
     const mimeTypeRaw = (img as any)?.mimeType;
     const mimeType =
       mimeTypeRaw === null || typeof mimeTypeRaw === "string"
@@ -101,7 +106,7 @@ export function mergeEmbeddedCellImagesIntoSnapshot<
         : typeof mimeTypeRaw === "undefined"
           ? undefined
           : null;
-    const entry: SnapshotImageEntry = { id, bytesBase64 };
+    const entry: SnapshotImageEntry = { id, bytesBase64: normalizedBase64 };
     if (mimeTypeRaw !== undefined) entry.mimeType = mimeType;
     imagesById.set(id, entry);
   }
@@ -147,7 +152,12 @@ export function mergeEmbeddedCellImagesIntoSnapshot<
 
     if (!imagesById.has(imageId)) {
       const mimeType = normalizeString(entry.mime_type);
-      const imageEntry: SnapshotImageEntry = { id: imageId, bytesBase64 };
+      const normalizedBase64 = coerceBase64StringWithinLimit(bytesBase64, MAX_INSERT_IMAGE_BYTES);
+      if (!normalizedBase64) {
+        warn(`[formula][desktop] Skipping embedded cell image (imageId=${imageId}) because image bytes are too large.`);
+        continue;
+      }
+      const imageEntry: SnapshotImageEntry = { id: imageId, bytesBase64: normalizedBase64 };
       if (mimeType) imageEntry.mimeType = mimeType;
       imagesById.set(imageId, imageEntry);
     }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
+import { MAX_INSERT_IMAGE_BYTES } from "../../../drawings/insertImageLimits.js";
 import { WorkbookSheetStore } from "../../../sheets/workbookSheetStore.js";
 
 import { buildImportedDrawingLayerSnapshotAdditions } from "../hydrateImportedDrawings.js";
@@ -54,5 +55,27 @@ describe("buildImportedDrawingLayerSnapshotAdditions", () => {
     expect(doc.getImage("image1.png")).not.toBeNull();
     expect(doc.getSheetDrawings("sheet-1").length).toBeGreaterThan(0);
   });
-});
 
+  it("drops images whose bytesBase64 would exceed MAX_INSERT_IMAGE_BYTES", () => {
+    const workbookSheetStore = new WorkbookSheetStore([{ id: "sheet-1", name: "Sheet1", visibility: "visible" }]);
+
+    // Base64 expands bytes by ~4/3. Create a base64 string that implies a decoded payload
+    // larger than MAX_INSERT_IMAGE_BYTES without allocating huge Uint8Arrays.
+    const desiredBytes = MAX_INSERT_IMAGE_BYTES + 1;
+    const minLen = Math.ceil((desiredBytes * 4) / 3);
+    const paddedLen = minLen + ((4 - (minLen % 4)) % 4);
+    const oversizedBase64 = "A".repeat(paddedLen);
+
+    const imported = {
+      drawings: [],
+      images: [
+        { id: "ok.png", bytesBase64: "AQID", mimeType: "image/png" },
+        { id: "too-big.png", bytesBase64: oversizedBase64, mimeType: "image/png" },
+      ],
+    };
+
+    const additions = buildImportedDrawingLayerSnapshotAdditions(imported, workbookSheetStore);
+    expect(additions).not.toBeNull();
+    expect(additions?.images).toEqual([{ id: "ok.png", bytesBase64: "AQID", mimeType: "image/png" }]);
+  });
+});

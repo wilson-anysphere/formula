@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { MAX_INSERT_IMAGE_BYTES } from "../../../drawings/insertImageLimits.js";
 import { mergeEmbeddedCellImagesIntoSnapshot } from "../embeddedCellImages.js";
 
 describe("mergeEmbeddedCellImagesIntoSnapshot", () => {
@@ -41,7 +42,7 @@ describe("mergeEmbeddedCellImagesIntoSnapshot", () => {
       maxCols: 200,
     });
 
-    expect(result.images).toEqual([{ id: "image2.png", bytesBase64: "abc", mimeType: "image/png" }]);
+    expect(result.images).toEqual([{ id: "image2.png", bytesBase64: "abc=", mimeType: "image/png" }]);
     expect(sheet.cells).toEqual([
       {
         row: 0,
@@ -114,6 +115,42 @@ describe("mergeEmbeddedCellImagesIntoSnapshot", () => {
       warn,
     });
 
+    expect(sheet.cells).toEqual([]);
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("skips embedded cell images whose bytes_base64 exceeds MAX_INSERT_IMAGE_BYTES", () => {
+    const warn = vi.fn();
+    const sheet = { id: "Sheet1", name: "Sheet1", cells: [] as any[] };
+
+    const desiredBytes = MAX_INSERT_IMAGE_BYTES + 1;
+    const minLen = Math.ceil((desiredBytes * 4) / 3);
+    const paddedLen = minLen + ((4 - (minLen % 4)) % 4);
+    const oversizedBase64 = "A".repeat(paddedLen);
+
+    const result = mergeEmbeddedCellImagesIntoSnapshot({
+      sheets: [sheet],
+      images: [],
+      embeddedCellImages: [
+        {
+          worksheet_part: "xl/worksheets/sheet1.xml",
+          sheet_name: "Sheet1",
+          row: 0,
+          col: 0,
+          image_id: "image-too-big.png",
+          bytes_base64: oversizedBase64,
+          mime_type: "image/png",
+          alt_text: null,
+        },
+      ],
+      resolveSheetIdByName: (name) => (name === "Sheet1" ? "Sheet1" : null),
+      sheetIdsInOrder: ["Sheet1"],
+      maxRows: 10_000,
+      maxCols: 200,
+      warn,
+    });
+
+    expect(result.images).toEqual([]);
     expect(sheet.cells).toEqual([]);
     expect(warn).toHaveBeenCalled();
   });

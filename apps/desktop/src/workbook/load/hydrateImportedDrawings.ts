@@ -1,5 +1,8 @@
 import { convertModelDrawingObjectToUiDrawingObject } from "../../drawings/modelAdapters";
+import { MAX_INSERT_IMAGE_BYTES } from "../../drawings/insertImageLimits.js";
 import type { WorkbookSheetStore } from "../../sheets/workbookSheetStore";
+
+import { coerceBase64StringWithinLimit } from "./base64.js";
 
 export type ImportedDrawingLayerPayload = {
   drawings?: unknown;
@@ -39,6 +42,9 @@ export function buildImportedDrawingLayerSnapshotAdditions(
           : "";
     if (!bytesBase64) continue;
 
+    const normalizedBase64 = coerceBase64StringWithinLimit(bytesBase64, MAX_INSERT_IMAGE_BYTES);
+    if (!normalizedBase64) continue;
+
     const mimeTypeRaw = Object.prototype.hasOwnProperty.call(e ?? {}, "mimeType")
       ? e.mimeType
       : Object.prototype.hasOwnProperty.call(e ?? {}, "mime_type")
@@ -51,7 +57,7 @@ export function buildImportedDrawingLayerSnapshotAdditions(
           ? mimeTypeRaw
           : null;
 
-    const entry: SnapshotImageEntry = { id, bytesBase64, ...(mimeTypeRaw !== undefined ? { mimeType } : {}) };
+    const entry: SnapshotImageEntry = { id, bytesBase64: normalizedBase64, ...(mimeTypeRaw !== undefined ? { mimeType } : {}) };
     imagesById.set(id, entry);
   }
 
@@ -90,4 +96,3 @@ export function buildImportedDrawingLayerSnapshotAdditions(
   if (images.length === 0 && Object.keys(drawingsBySheet).length === 0) return null;
   return { images, drawingsBySheet };
 }
-
