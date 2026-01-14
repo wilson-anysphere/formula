@@ -180,6 +180,58 @@ fn blank_foreign_keys_in_m2m_flow_to_blank_dimension_member_when_allowed() {
 }
 
 #[test]
+fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys() {
+    // Regression: Tabular's relationship-generated blank member is distinct from a *physical*
+    // BLANK key on the dimension side. Fact rows with BLANK foreign keys should belong to the
+    // virtual blank member, not match a physical Dim row whose key is BLANK.
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    // Physical dimension row whose key is BLANK.
+    dim.push_row(vec![Value::Blank, "PhysicalBlank".into()])
+        .unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();
+    fact.push_row(vec![2.into(), Value::Blank, 7.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total Amount", "SUM(Fact[Amount])").unwrap();
+
+    // The virtual blank member should include fact rows whose FK is BLANK.
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        7.0.into()
+    );
+
+    // Filtering to the *physical* BLANK key row should NOT match those fact rows.
+    let physical_blank = FilterContext::empty()
+        .with_column_equals("Dim", "Attr", "PhysicalBlank".into());
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &physical_blank).unwrap(),
+        Value::Blank
+    );
+}
+
+#[test]
 fn insert_row_updates_m2m_from_index() {
     let mut model = DataModel::new();
 
@@ -638,6 +690,94 @@ fn insert_row_updates_unmatched_fact_rows_for_columnar_m2m_relationships() {
         .unwrap();
 
     // The fact row should move out of the virtual blank member and under the new Dim row.
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        Value::Blank
+    );
+    let new_attr = FilterContext::empty().with_column_equals("Dim", "Attr", "New".into());
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &new_attr).unwrap(),
+        7.0.into()
+    );
+}
+
+#[test]
+fn insert_row_updates_unmatched_fact_rows_for_columnar_m2m_relationships_when_cache_is_sparse() {
+    // Similar to `insert_row_updates_unmatched_fact_rows_for_columnar_m2m_relationships`, but sized
+    // so the relationship's `unmatched_fact_rows` cache stays in the *sparse* representation.
+    //
+    // This exercises the `UnmatchedFactRows::Sparse` update path (retain-based removal).
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let fact_schema = vec![
+        ColumnSchema {
+            name: "Id".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(fact_schema, options);
+
+    // 64 total rows => sparse_to_dense_threshold = 1. With exactly one unmatched row, the cache
+    // remains sparse.
+    for id in 1..=63 {
+        fact.append_row(&[
+            formula_columnar::Value::Number(id as f64),
+            formula_columnar::Value::Number(1.0),
+            formula_columnar::Value::Number(1.0),
+        ]);
+    }
+    // One unmatched FK (999).
+    fact.append_row(&[
+        formula_columnar::Value::Number(64.0),
+        formula_columnar::Value::Number(999.0),
+        formula_columnar::Value::Number(7.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model.add_measure("Total Amount", "SUM(Fact[Amount])").unwrap();
+
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        7.0.into()
+    );
+
+    model
+        .insert_row("Dim", vec![999.into(), "New".into()])
+        .unwrap();
+
     assert_eq!(
         model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
         Value::Blank
