@@ -43,6 +43,29 @@ If you are editing collaboration code, start here and keep this doc in sync with
 
 ---
 
+## Performance regression benchmarks (binder + session)
+
+Collab binder/session code is performance sensitive (it may process **tens of thousands** of cell updates when hydrating a doc, applying a version restore, or merging branches). To help catch accidental **O(N²)** regressions, the repo includes **opt-in** Node-based perf benchmarks:
+
+- Binder-only: [`packages/collab/binder/test/perf/binder-perf.test.js`](../packages/collab/binder/test/perf/binder-perf.test.js)
+  - README: [`packages/collab/binder/test/perf/README.md`](../packages/collab/binder/test/perf/README.md)
+- Session + binder (exercises `bindCollabSessionToDocumentController`): [`packages/collab/session/test/perf/session-binder-perf.test.js`](../packages/collab/session/test/perf/session-binder-perf.test.js)
+  - README: [`packages/collab/session/test/perf/README.md`](../packages/collab/session/test/perf/README.md)
+
+These tests are **skipped by default** and only run when the relevant env var is set:
+
+```bash
+# Binder perf
+FORMULA_RUN_COLLAB_BINDER_PERF=1 NODE_OPTIONS=--expose-gc FORMULA_NODE_TEST_CONCURRENCY=1 pnpm test:node binder-perf
+
+# Session + binder perf
+FORMULA_RUN_COLLAB_SESSION_BINDER_PERF=1 NODE_OPTIONS=--expose-gc FORMULA_NODE_TEST_CONCURRENCY=1 pnpm test:node session-binder-perf
+```
+
+Tip: set `PERF_JSON=1` to emit structured JSON metrics per scenario (useful for CI parsing), and optionally set `PERF_MAX_TOTAL_MS_*` / `PERF_MAX_PEAK_*` env vars to enforce budgets.
+
+There is also a manual GitHub Actions workflow to run these in CI: [`.github/workflows/collab-perf.yml`](../.github/workflows/collab-perf.yml).
+
 ## Yjs workbook schema (roots + conventions)
 
 ### Root types
