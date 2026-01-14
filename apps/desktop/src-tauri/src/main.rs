@@ -2097,17 +2097,29 @@ fn main() {
                         eprintln!("[file-dropped] blocked drop event (missing webview window)");
                         return;
                     };
+                    let url = match webview_window.url() {
+                        Ok(url) => url,
+                        Err(err) => {
+                            eprintln!(
+                                "[file-dropped] blocked drop event: failed to read window URL ({err})"
+                            );
+                            return;
+                        }
+                    };
+                    if !desktop::ipc_origin::is_trusted_app_origin(&url) {
+                        eprintln!(
+                            "[file-dropped] blocked drop event for untrusted origin: {url}"
+                        );
+                        return;
+                    }
                     if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
                         &webview_window,
                         "file-dropped events",
                         desktop::ipc_origin::Verb::Are,
                     ) {
-                        let url = webview_window
-                            .url()
-                            .ok()
-                            .map(|u| u.to_string())
-                            .unwrap_or_else(|| "<unknown>".to_string());
-                        eprintln!("[file-dropped] blocked drop event for untrusted origin: {url} ({err})");
+                        eprintln!(
+                            "[file-dropped] blocked drop event for untrusted origin: {url} ({err})"
+                        );
                         return;
                     }
 
