@@ -17,36 +17,10 @@ let args = normalizeVitestArgs(process.argv.slice(2));
 
 const normalizedArgs = args.map((arg) => {
   if (typeof arg !== "string") return arg;
-  const isDrawingTestPath = (value) =>
-    value.startsWith("src/drawings/__tests__/") || value.startsWith(`src\\drawings\\__tests__\\`);
-
-  // Drawings `.test.ts` suites have wrapper entrypoints under `apps/desktop/src/...` so repo-rooted
-  // invocations work even when running `pnpm -C apps/desktop exec vitest ...`. When running through
-  // this script, preserve the `apps/desktop/` prefix for those paths so Vitest can still discover
-  // the wrapper file (which is included in `vite.config.ts`).
-  if (arg.startsWith(PREFIX_POSIX_DOT)) {
-    const stripped = arg.slice(PREFIX_POSIX_DOT.length);
-    if (isDrawingTestPath(stripped)) return PREFIX_POSIX + stripped;
-    return stripped;
-  }
-  if (arg.startsWith(PREFIX_WIN_DOT)) {
-    const stripped = arg.slice(PREFIX_WIN_DOT.length);
-    if (isDrawingTestPath(stripped)) return PREFIX_WIN + stripped;
-    return stripped;
-  }
-  if (arg.startsWith(PREFIX_POSIX)) {
-    const stripped = arg.slice(PREFIX_POSIX.length);
-    if (isDrawingTestPath(stripped)) return arg;
-    return stripped;
-  }
-  if (arg.startsWith(PREFIX_WIN)) {
-    const stripped = arg.slice(PREFIX_WIN.length);
-    if (isDrawingTestPath(stripped)) return arg;
-    return stripped;
-  }
-
-  // Back-compat: allow callers to pass the package-relative drawings test paths directly.
-  if (isDrawingTestPath(arg)) return PREFIX_POSIX + arg;
+  if (arg.startsWith(PREFIX_POSIX_DOT)) return arg.slice(PREFIX_POSIX_DOT.length);
+  if (arg.startsWith(PREFIX_WIN_DOT)) return arg.slice(PREFIX_WIN_DOT.length);
+  if (arg.startsWith(PREFIX_POSIX)) return arg.slice(PREFIX_POSIX.length);
+  if (arg.startsWith(PREFIX_WIN)) return arg.slice(PREFIX_WIN.length);
   return arg;
 });
 
