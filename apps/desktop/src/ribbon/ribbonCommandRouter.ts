@@ -38,14 +38,6 @@ export interface RibbonCommandRouterDeps {
   showQuickPick: <T>(items: RibbonQuickPickItem<T>[], options?: { placeHolder?: string }) => Promise<T | null>;
   showInputBox: (options: { prompt?: string; value?: string; placeHolder?: string }) => Promise<string | null>;
   notify: (args: { title: string; body: string }) => Promise<void> | void;
-  showDesktopOnlyToast: (message: string) => void;
-
-  // Environment helpers.
-  getTauriBackend: () => unknown | null;
-
-  // File/export wiring (used by `file.*` schema ids).
-  handleSaveAs: () => Promise<void>;
-  handleExportDelimitedText: (args: { delimiter: string; extension: string; mime: string; label: string }) => void;
 
   // Sheet/dialog helpers.
   openOrganizeSheets: () => void;
@@ -221,165 +213,12 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
       handleRibbonCommand(commandId);
       return true;
     },
-    commandOverrides: {
-      // File tab ribbon schema uses `file.*` ids for UI compatibility. Route them to the
-      // canonical `workbench.*` / `view.*` / `pageLayout.*` commands so ribbon, keybindings,
-      // and command palette stay consistent.
-      "file.new.new": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
-      },
-      "file.new.blankWorkbook": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
-      },
-      "file.open.open": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
-      },
-      "file.save.save": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook);
-      },
-      "file.save.saveAs": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
-      },
-      "file.save.saveAs.copy": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
-      },
-      "file.save.saveAs.download": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
-      },
-      "file.save.autoSave": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled);
-        safeFocusGrid(deps.app);
-      },
-      "file.info.manageWorkbook.versions": async () => {
-        await deps.commandRegistry.executeCommand("view.togglePanel.versionHistory");
-      },
-      "file.info.manageWorkbook.branches": async () => {
-        await deps.commandRegistry.executeCommand("view.togglePanel.branchManager");
-      },
-      "file.print.print": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.print);
-      },
-      "file.print.printPreview": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.printPreview);
-      },
-      "file.print.pageSetup": async () => {
-        await deps.commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
-      },
-      "file.print.pageSetup.printTitles": async () => {
-        await deps.commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
-      },
-      "file.print.pageSetup.margins": async () => {
-        await deps.commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
-      },
-      "file.options.close": async () => {
-        await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook);
-      },
-      "file.export.createPdf": async () => {
-        await deps.commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
-      },
-      "file.export.export.pdf": async () => {
-        await deps.commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
-      },
-      "file.export.changeFileType.pdf": async () => {
-        await deps.commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
-      },
-      "file.export.export.csv": async () => {
-        deps.handleExportDelimitedText({ delimiter: ",", extension: "csv", mime: "text/csv", label: "CSV" });
-      },
-      "file.export.changeFileType.csv": async () => {
-        deps.handleExportDelimitedText({ delimiter: ",", extension: "csv", mime: "text/csv", label: "CSV" });
-      },
-      "file.export.changeFileType.tsv": async () => {
-        deps.handleExportDelimitedText({
-          delimiter: "\t",
-          extension: "tsv",
-          mime: "text/tab-separated-values",
-          label: "TSV",
-        });
-      },
-      "file.export.export.xlsx": async () => {
-        if (!deps.getTauriBackend()) {
-          deps.showDesktopOnlyToast("Exporting workbooks is available in the desktop app.");
-          return;
-        }
-        try {
-          await deps.handleSaveAs();
-        } catch (err) {
-          console.error("Failed to save workbook:", err);
-          deps.showToast(`Failed to save workbook: ${String(err)}`, "error");
-        }
-      },
-      "file.export.changeFileType.xlsx": async () => {
-        if (!deps.getTauriBackend()) {
-          deps.showDesktopOnlyToast("Exporting workbooks is available in the desktop app.");
-          return;
-        }
-        try {
-          await deps.handleSaveAs();
-        } catch (err) {
-          console.error("Failed to save workbook:", err);
-          deps.showToast(`Failed to save workbook: ${String(err)}`, "error");
-        }
-      },
-    },
     onBeforeExecuteCommand: async (_commandId, source: CommandContribution["source"]) => {
       if (source.kind !== "extension") return;
       // Match keybinding/command palette behavior: executing an extension command should
       // lazy-load the extension runtime first.
       await deps.getEnsureExtensionsLoadedRef()?.();
       deps.getSyncContributedCommandsRef()?.();
-    },
-    // Toggle-specific wiring for ribbon controls that need special handling beyond dispatching
-    // through the CommandRegistry (e.g. because they need to reconcile the pressed state with
-    // app state or invoke multiple commands).
-    toggleOverrides: {
-      "file.save.autoSave": async (pressed) => {
-        try {
-          await deps.commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled, pressed);
-        } finally {
-          safeFocusGrid(deps.app);
-        }
-      },
-      "view.toggleShowFormulas": async (pressed) => {
-        // Route all ribbon "Show Formulas" toggles through the canonical command so
-        // ribbon, command palette, and keybindings share the same logic/guards.
-        try {
-          if (deps.app.getShowFormulas() !== pressed) {
-            await deps.commandRegistry.executeCommand("view.toggleShowFormulas");
-          }
-        } finally {
-          safeFocusGrid(deps.app);
-        }
-      },
-      "view.togglePerformanceStats": async (pressed) => {
-        try {
-          await deps.commandRegistry.executeCommand("view.togglePerformanceStats", pressed);
-        } finally {
-          safeFocusGrid(deps.app);
-        }
-      },
-      "view.toggleSplitView": async (pressed) => {
-        try {
-          await deps.commandRegistry.executeCommand("view.toggleSplitView", pressed);
-        } finally {
-          safeFocusGrid(deps.app);
-        }
-      },
-      "data.sortFilter.filter": async (pressed) => {
-        try {
-          if (pressed) {
-            await deps.applyAutoFilterFromSelection();
-          } else {
-            deps.clearAutoFilter();
-          }
-        } catch (err) {
-          console.error("Failed to toggle filter:", err);
-          deps.showToast(`Failed to toggle filter: ${String(err)}`, "error");
-          deps.scheduleRibbonSelectionFormatStateUpdate();
-        } finally {
-          safeFocusGrid(deps.app);
-        }
-      },
     },
     onUnknownCommand: handleRibbonCommand,
   });
