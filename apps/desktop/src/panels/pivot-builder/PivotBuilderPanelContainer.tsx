@@ -16,6 +16,7 @@ import { applyPivotCellUpdates } from "../../pivots/applyUpdates.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
+import { parseImageCellValue } from "../../shared/imageCellValue.js";
 import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../../collab/permissionGuards";
 
 type RangeRect = { startRow: number; startCol: number; endRow: number; endCol: number };
@@ -64,6 +65,8 @@ function normalizeHeaderValue(value: unknown): string {
   if (typeof value === "object") {
     const maybeText = (value as any).text;
     if (typeof maybeText === "string") return maybeText;
+    const image = parseImageCellValue(value);
+    if (image) return image.altText ?? "[Image]";
     try {
       return JSON.stringify(value);
     } catch {
