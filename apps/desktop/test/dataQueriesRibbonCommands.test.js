@@ -67,8 +67,11 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
-  // main.ts should register the commands and avoid ribbon-only wiring.
-  assert.match(main, /\bregisterDataQueriesCommands\(/);
+  // main.ts should register the commands and avoid ribbon-only wiring. Registration is
+  // centralized in `registerDesktopCommands` so the desktop shell shares a single command catalog.
+  assert.match(main, /\bregisterDesktopCommands\(/);
+  assert.match(main, /\bdataQueriesHandlers\s*:/);
+  assert.doesNotMatch(main, /\bregisterDataQueriesCommands\(/);
   assert.doesNotMatch(main, /\btoggleOverrides:\s*\{[\s\S]*?["']data\.queriesConnections\.queriesConnections["']\s*:/m);
   for (const id of commandIds.slice(1)) {
     assert.doesNotMatch(

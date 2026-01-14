@@ -14,6 +14,7 @@ import { registerBuiltinFormatFontCommands } from "./registerBuiltinFormatFontCo
 import { registerFormatPainterCommand } from "./formatPainterCommand.js";
 import { registerFormatAlignmentCommands } from "./registerFormatAlignmentCommands.js";
 import { registerFormatFontDropdownCommands } from "./registerFormatFontDropdownCommands.js";
+import { registerDataQueriesCommands } from "./registerDataQueriesCommands.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./registerPageLayoutCommands.js";
 import { registerRibbonMacroCommands, type RibbonMacroCommandHandlers } from "./registerRibbonMacroCommands.js";
@@ -38,6 +39,11 @@ export type FormatPainterCommandHandlers = {
   disarm: () => void;
   onCancel?: (() => void) | null;
 };
+
+export type DataQueriesCommandHandlers = Pick<
+  Parameters<typeof registerDataQueriesCommands>[0],
+  "getPowerQueryService" | "showToast" | "notify" | "now" | "focusAfterExecute"
+>;
 
 export function registerDesktopCommands(params: {
   commandRegistry: CommandRegistry;
@@ -65,6 +71,7 @@ export function registerDesktopCommands(params: {
   workbenchFileHandlers: WorkbenchFileCommandHandlers;
   formatPainter?: FormatPainterCommandHandlers | null;
   ribbonMacroHandlers?: RibbonMacroCommandHandlers | null;
+  dataQueriesHandlers?: DataQueriesCommandHandlers | null;
   pageLayoutHandlers?: PageLayoutCommandHandlers | null;
   /**
    * Optional command palette opener. When provided, `workbench.showCommandPalette` will be
@@ -92,6 +99,7 @@ export function registerDesktopCommands(params: {
     workbenchFileHandlers,
     formatPainter = null,
     ribbonMacroHandlers = null,
+    dataQueriesHandlers = null,
     pageLayoutHandlers = null,
     openCommandPalette = null,
   } = params;
@@ -176,6 +184,23 @@ export function registerDesktopCommands(params: {
 
   if (ribbonMacroHandlers) {
     registerRibbonMacroCommands({ commandRegistry, handlers: ribbonMacroHandlers });
+  }
+
+  if (dataQueriesHandlers) {
+    const focusAfterExecute =
+      dataQueriesHandlers.focusAfterExecute === undefined
+        ? typeof (app as any)?.focus === "function"
+          ? () => (app as any).focus()
+          : null
+        : dataQueriesHandlers.focusAfterExecute;
+
+    registerDataQueriesCommands({
+      commandRegistry,
+      layoutController,
+      refreshRibbonUiState,
+      ...dataQueriesHandlers,
+      focusAfterExecute,
+    });
   }
 
   registerBuiltinFormatFontCommands({

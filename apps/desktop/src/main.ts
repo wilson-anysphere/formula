@@ -161,7 +161,6 @@ import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
 import { PAGE_LAYOUT_COMMANDS } from "./commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { FORMAT_PAINTER_COMMAND_ID } from "./commands/formatPainterCommand.js";
-import { registerDataQueriesCommands } from "./commands/registerDataQueriesCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -7408,6 +7407,12 @@ registerDesktopCommands({
     stopMacroRecorder: () => activeMacroRecorder?.stop(),
     isTauri: () => isTauriInvokeAvailable(),
   },
+  dataQueriesHandlers: {
+    getPowerQueryService: () => powerQueryService,
+    showToast,
+    notify,
+    focusAfterExecute: () => app.focus(),
+  },
   pageLayoutHandlers: {
     openPageSetupDialog: () => handleRibbonPageSetup(),
     updatePageSetup: (patch) => handleRibbonUpdatePageSetup(patch),
@@ -7535,15 +7540,6 @@ registerDesktopCommands({
     },
   },
   openCommandPalette: () => openCommandPalette?.(),
-});
-registerDataQueriesCommands({
-  commandRegistry,
-  layoutController: ribbonLayoutController,
-  getPowerQueryService: () => powerQueryService,
-  showToast,
-  notify,
-  refreshRibbonUiState: scheduleRibbonSelectionFormatStateUpdate,
-  focusAfterExecute: () => app.focus(),
 });
 
 function getTauriInvokeForPrint(): TauriInvoke | null {
