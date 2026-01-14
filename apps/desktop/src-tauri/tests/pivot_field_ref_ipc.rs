@@ -64,6 +64,31 @@ fn ipc_pivot_field_ref_parses_escaped_quote_in_quoted_table_name() {
 }
 
 #[test]
+fn ipc_pivot_field_ref_parses_quoted_table_name_containing_brackets() {
+    // Table names containing `[` must be quoted in DAX; ensure we still parse them over IPC.
+    let ipc: IpcPivotFieldRef = serde_json::from_str("\"'My[Table]'[Col]\"").unwrap();
+    let core: PivotFieldRef = ipc.into();
+    assert_eq!(
+        core,
+        PivotFieldRef::DataModelColumn {
+            table: "My[Table]".to_string(),
+            column: "Col".to_string()
+        }
+    );
+}
+
+#[test]
+fn ipc_pivot_field_ref_treats_invalid_quoted_table_identifiers_as_cache_fields() {
+    // Invalid DAX quoting (unescaped single quote) should not be parsed as a Data Model ref.
+    let ipc: IpcPivotFieldRef = serde_json::from_str("\"'O'Reilly'[Name]\"").unwrap();
+    let core: PivotFieldRef = ipc.into();
+    assert_eq!(
+        core,
+        PivotFieldRef::CacheFieldName("'O'Reilly'[Name]".to_string())
+    );
+}
+
+#[test]
 fn ipc_pivot_field_ref_parses_escaped_bracket_measure_strings() {
     let ipc: IpcPivotFieldRef = serde_json::from_str("\"[A]]B]\"").unwrap();
     let core: PivotFieldRef = ipc.into();
