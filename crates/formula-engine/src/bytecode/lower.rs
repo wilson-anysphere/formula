@@ -8,13 +8,15 @@ use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-/// Excel's maximum row index (0-indexed) used by the bytecode backend.
+/// Excel's maximum row index (0-indexed).
 ///
-/// The bytecode engine currently assumes Excel's fixed worksheet bounds and is gated to
-/// default-sized sheets (see `Engine::try_compile_bytecode`).
+/// The engine expands whole-row/whole-column references (`A:A`, `1:1`, etc.) against the current
+/// sheet dimensions before bytecode lowering (see
+/// `Engine::expand_whole_row_col_refs_for_bytecode`). This constant is therefore only used as a
+/// conservative fallback if such references reach the lowerer directly.
 const EXCEL_MAX_ROW_IDX: i32 = (EXCEL_MAX_ROWS as i32) - 1;
 
-/// Excel's maximum column index (0-indexed) used by the bytecode backend.
+/// Excel's maximum column index (0-indexed).
 const EXCEL_MAX_COL_IDX: i32 = (EXCEL_MAX_COLS as i32) - 1;
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -717,7 +719,7 @@ fn lower_canonical_expr_inner(
             | crate::BinaryOp::Lt
             | crate::BinaryOp::Le
             | crate::BinaryOp::Gt
-             | crate::BinaryOp::Ge => {
+            | crate::BinaryOp::Ge => {
                 let op = match b.op {
                     crate::BinaryOp::Add => BinaryOp::Add,
                     crate::BinaryOp::Sub => BinaryOp::Sub,
@@ -753,7 +755,7 @@ fn lower_canonical_expr_inner(
                         lambda_self_name,
                     )?),
                 })
-             }
+            }
             crate::BinaryOp::Union | crate::BinaryOp::Intersect => {
                 // Reference algebra operators evaluate operands in "reference context" (e.g. `A1`
                 // behaves like a single-cell range).

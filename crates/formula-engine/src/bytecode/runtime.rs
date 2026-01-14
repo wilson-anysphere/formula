@@ -13,11 +13,10 @@ use crate::functions::wildcard::WildcardPattern;
 use crate::locale::ValueLocaleConfig;
 use crate::simd::{self, CmpOp, NumericCriteria};
 use crate::value::{
-    cmp_case_insensitive, format_number_general_with_options, parse_number, ErrorKind as EngineErrorKind,
-    RecordValue, Value as EngineValue,
+    cmp_case_insensitive, format_number_general_with_options, parse_number,
+    ErrorKind as EngineErrorKind, RecordValue, Value as EngineValue,
 };
 use chrono::{DateTime, Datelike, Timelike, Utc};
-use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
@@ -1953,7 +1952,7 @@ pub fn call_function(
         Function::Column => fn_column(args, grid, base),
         Function::Rows => fn_rows(args, base),
         Function::Columns => fn_columns(args, base),
-        Function::Address => fn_address(args),
+        Function::Address => fn_address(args, grid, base),
         Function::Offset => fn_offset(args, grid, base),
         Function::Indirect => fn_indirect(args, grid, base),
         Function::XMatch => fn_xmatch(args, grid, base),
@@ -4873,7 +4872,7 @@ fn fn_columns(args: &[Value], base: CellCoord) -> Value {
     }
 }
 
-fn fn_address(args: &[Value]) -> Value {
+fn fn_address(args: &[Value], grid: &dyn Grid, _base: CellCoord) -> Value {
     if !(2..=5).contains(&args.len()) {
         return Value::Error(ErrorKind::Value);
     }
@@ -4887,10 +4886,14 @@ fn fn_address(args: &[Value]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    if row_num < 1 || row_num > EXCEL_MAX_ROWS as i64 {
+    let (sheet_rows, sheet_cols) = grid.bounds();
+    let sheet_rows = i64::from(sheet_rows);
+    let sheet_cols = i64::from(sheet_cols);
+
+    if row_num < 1 || row_num > sheet_rows {
         return Value::Error(ErrorKind::Value);
     }
-    if col_num < 1 || col_num > EXCEL_MAX_COLS as i64 {
+    if col_num < 1 || col_num > sheet_cols {
         return Value::Error(ErrorKind::Value);
     }
 
@@ -12311,9 +12314,11 @@ mod tests {
             Ref::new(0, 0, true, true), // A1
             Ref::new(1, 1, true, true), // B2
         ));
-        program
-            .instrs
-            .push(crate::bytecode::Instruction::new(crate::bytecode::OpCode::LoadRange, 0, 0));
+        program.instrs.push(crate::bytecode::Instruction::new(
+            crate::bytecode::OpCode::LoadRange,
+            0,
+            0,
+        ));
 
         let mut vm = crate::bytecode::Vm::new();
         let _ = vm.eval(
@@ -12338,10 +12343,8 @@ mod tests {
     #[test]
     fn bytecode_dependency_trace_concat_records_reference() {
         let mut grid = TracingGrid::default();
-        grid.values
-            .insert((0, 0), Value::Text(Arc::from("a")));
-        grid.values
-            .insert((1, 0), Value::Text(Arc::from("b")));
+        grid.values.insert((0, 0), Value::Text(Arc::from("a")));
+        grid.values.insert((1, 0), Value::Text(Arc::from("b")));
 
         let range = RangeRef::new(
             Ref::new(0, 0, true, true), // A1
@@ -12372,14 +12375,8 @@ mod tests {
         grid.values.insert((0, 1), Value::Number(10.0));
         grid.values.insert((1, 1), Value::Number(20.0));
 
-        let crit_range = RangeRef::new(
-            Ref::new(0, 0, true, true),
-            Ref::new(1, 0, true, true),
-        );
-        let sum_range = RangeRef::new(
-            Ref::new(0, 1, true, true),
-            Ref::new(1, 1, true, true),
-        );
+        let crit_range = RangeRef::new(Ref::new(0, 0, true, true), Ref::new(1, 0, true, true));
+        let sum_range = RangeRef::new(Ref::new(0, 1, true, true), Ref::new(1, 1, true, true));
 
         let base = CellCoord::new(0, 0);
         let locale = crate::LocaleConfig::en_us();
@@ -12561,10 +12558,7 @@ mod tests {
         // limit and ensure the bytecode runtime returns #SPILL! without allocating or visiting
         // individual cells.
         let end_row = i32::try_from(MAX_MATERIALIZED_ARRAY_CELLS).expect("limit fits in i32");
-        let range = RangeRef::new(
-            Ref::new(0, 0, true, true),
-            Ref::new(end_row, 0, true, true),
-        );
+        let range = RangeRef::new(Ref::new(0, 0, true, true), Ref::new(end_row, 0, true, true));
 
         let grid = PanicGetGrid {
             bounds: (end_row + 1, 1),
