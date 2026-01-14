@@ -11,6 +11,20 @@ const tauriConf = JSON.parse(readFileSync(join(repoRoot, "apps", "desktop", "src
 const expectedVersion = String(tauriConf?.version ?? "").trim();
 const expectedMainBinary = String(tauriConf?.mainBinaryName ?? "").trim() || "formula-desktop";
 const expectedRpmName = expectedMainBinary;
+const expectedFileAssociationMimeTypes = Array.from(
+  new Set(
+    (tauriConf?.bundle?.fileAssociations ?? [])
+      .flatMap((assoc) => {
+        const raw = assoc?.mimeType;
+        if (Array.isArray(raw)) return raw;
+        if (raw) return [raw];
+        return [];
+      })
+      .map((mt) => String(mt).trim())
+      .filter(Boolean),
+  ),
+);
+const defaultDesktopMimeValue = `${expectedFileAssociationMimeTypes.join(";")};`;
 
 const hasBash = (() => {
   if (process.platform === "win32") return false;
@@ -133,7 +147,7 @@ function writeFakeRpmExtractTools(
   binDir,
   {
     withMimeType = true,
-    mimeTypeLine = "MimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;",
+    mimeTypeLine = `MimeType=${defaultDesktopMimeValue}`,
     withSchemeMime = true,
     execLine = `Exec=${expectedMainBinary} %U`,
   } = {},
@@ -177,6 +191,10 @@ mkdir -p usr/share/applications usr/share/mime/packages
 cat > usr/share/applications/formula.desktop <<'DESKTOP'
 ${desktopLines.join("\n")}
 DESKTOP
+
+mkdir -p usr/share/doc/${expectedRpmName}
+echo "LICENSE stub" > usr/share/doc/${expectedRpmName}/LICENSE
+echo "NOTICE stub" > usr/share/doc/${expectedRpmName}/NOTICE
 
 cat > usr/share/mime/packages/app.formula.desktop.xml <<'XML'
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">

@@ -472,6 +472,17 @@ validate_desktop_mime_associations_extracted() {
   if [ "$has_xlsx_mime" -ne 1 ]; then
     warn "No extracted .desktop file explicitly listed xlsx MIME '${REQUIRED_XLSX_MIME}'. Spreadsheet MIME types were present, but .xlsx double-click integration may be incomplete."
   fi
+
+  # Prefer strict validation against tauri.conf.json so we catch missing MIME types,
+  # scheme handlers, compliance artifacts, and Parquet shared-mime-info wiring in the
+  # built artifact (not just in config).
+  if command -v python3 >/dev/null 2>&1; then
+    note "Static desktop integration validation (verify extracted RPM payload)"
+    if ! python3 "$REPO_ROOT/scripts/ci/verify_linux_desktop_integration.py" --package-root "$tmpdir" --tauri-config "$TAURI_CONF"; then
+      err "Linux desktop integration verification failed for extracted RPM payload. See output above for expected vs observed MIME types."
+      return 1
+    fi
+  fi
 }
 
 find_rpms() {
