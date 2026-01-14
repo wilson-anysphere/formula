@@ -1839,6 +1839,118 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "LEFT",
+    description: "Returns the leftmost characters from a text value.",
+    args: [
+      { name: "text", type: "range" },
+      { name: "num_chars", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "RIGHT",
+    description: "Returns the rightmost characters from a text value.",
+    args: [
+      { name: "text", type: "range" },
+      { name: "num_chars", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "MID",
+    description: "Returns a specific number of characters from a text string, starting at the position you specify.",
+    args: [
+      { name: "text", type: "range" },
+      { name: "start_num", type: "number" },
+      { name: "num_chars", type: "number" },
+    ],
+  },
+  {
+    name: "LEN",
+    description: "Returns the number of characters in a text string.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "TRIM",
+    description: "Removes all spaces from text except for single spaces between words.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "CLEAN",
+    description: "Removes all nonprintable characters from text.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "LOWER",
+    description: "Converts text to lowercase.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "UPPER",
+    description: "Converts text to uppercase.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "PROPER",
+    description: "Capitalizes the first letter in each word of a text value.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
+    name: "SUBSTITUTE",
+    description: "Substitutes new text for old text in a text string.",
+    args: [
+      { name: "text", type: "range" },
+      { name: "old_text", type: "value" },
+      { name: "new_text", type: "value" },
+      { name: "instance_num", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "REPLACE",
+    description: "Replaces part of a text string with a different text string.",
+    args: [
+      { name: "old_text", type: "range" },
+      { name: "start_num", type: "number" },
+      { name: "num_chars", type: "number" },
+      { name: "new_text", type: "value" },
+    ],
+  },
+  {
+    name: "FIND",
+    description: "Finds one text value within another (case-sensitive).",
+    args: [
+      { name: "find_text", type: "value" },
+      { name: "within_text", type: "range" },
+      { name: "start_num", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "SEARCH",
+    description: "Finds one text value within another (case-insensitive) and returns the position.",
+    args: [
+      { name: "find_text", type: "value" },
+      { name: "within_text", type: "range" },
+      { name: "start_num", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "VALUE",
+    description: "Converts a text string that represents a number to a number.",
+    args: [
+      { name: "text", type: "range" },
+    ],
+  },
+  {
     name: "CONCAT",
     description: "Combines the text from multiple ranges and/or strings.",
     args: [

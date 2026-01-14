@@ -65,6 +65,16 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.getFunction("_xlfn.TEXTAFTER"), "Expected _xlfn.TEXTAFTER alias to be present");
   assert.ok(registry.getFunction("TEXTBEFORE"), "Expected TEXTBEFORE to be present");
 
+  // Common text helpers often take ranges/arrays, so we mark their text arguments as range-like.
+  assert.ok(registry.isRangeArg("LEFT", 0), "Expected LEFT text to be a range");
+  assert.ok(registry.getFunction("LEFT")?.args?.[1]?.optional, "Expected LEFT num_chars to be optional");
+  assert.ok(registry.isRangeArg("MID", 0), "Expected MID text to be a range");
+  assert.ok(registry.isRangeArg("LEN", 0), "Expected LEN text to be a range");
+  assert.ok(registry.isRangeArg("TRIM", 0), "Expected TRIM text to be a range");
+  assert.ok(registry.isRangeArg("SUBSTITUTE", 0), "Expected SUBSTITUTE text to be a range");
+  assert.ok(registry.isRangeArg("FIND", 1), "Expected FIND within_text to be a range");
+  assert.ok(registry.isRangeArg("VALUE", 0), "Expected VALUE text to be a range");
+
   // SUBTOTAL(function_num, ref1, [ref2], ...)
   assert.equal(registry.isRangeArg("SUBTOTAL", 0), false, "Expected SUBTOTAL function_num not to be a range");
   assert.ok(registry.isRangeArg("SUBTOTAL", 1), "Expected SUBTOTAL ref1 to be a range");
