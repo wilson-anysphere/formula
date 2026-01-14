@@ -25,6 +25,10 @@ const PIVOT_CACHE_DEF_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition";
 const PIVOT_TABLE_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable";
+const SLICER_CACHE_REL_TYPE: &str =
+    "http://schemas.microsoft.com/office/2007/relationships/slicerCache";
+const TIMELINE_CACHE_DEF_REL_TYPE: &str =
+    "http://schemas.microsoft.com/office/2007/relationships/timelineCacheDefinition";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreservedSheetPivotTables {
@@ -67,6 +71,14 @@ pub struct PreservedPivotParts {
     pub workbook_pivot_caches: Option<Vec<u8>>,
     /// Relationships from `xl/_rels/workbook.xml.rels` required by `<pivotCaches>`.
     pub workbook_pivot_cache_rels: Vec<RelationshipStub>,
+    /// The `<slicerCaches>` subtree from `xl/workbook.xml` (outer XML).
+    pub workbook_slicer_caches: Option<Vec<u8>>,
+    /// Relationships from `xl/_rels/workbook.xml.rels` required by `<slicerCaches>`.
+    pub workbook_slicer_cache_rels: Vec<RelationshipStub>,
+    /// The `<timelineCaches>` subtree from `xl/workbook.xml` (outer XML).
+    pub workbook_timeline_caches: Option<Vec<u8>>,
+    /// Relationships from `xl/_rels/workbook.xml.rels` required by `<timelineCaches>`.
+    pub workbook_timeline_cache_rels: Vec<RelationshipStub>,
     /// Preserved `<pivotTables>` subtrees and `.rels` metadata per worksheet.
     pub sheet_pivot_tables: BTreeMap<String, PreservedSheetPivotTables>,
 }
@@ -134,6 +146,12 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
     let pivot_caches_node = workbook_doc
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "pivotCaches");
+    let slicer_caches_node = workbook_doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "slicerCaches");
+    let timeline_caches_node = workbook_doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "timelineCaches");
 
     let mut workbook_pivot_cache_rids: HashSet<String> = HashSet::new();
     if let Some(node) = pivot_caches_node {
@@ -147,6 +165,36 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
             })
         {
             workbook_pivot_cache_rids.insert(rid.to_string());
+        }
+    }
+
+    let mut workbook_slicer_cache_rids: HashSet<String> = HashSet::new();
+    if let Some(node) = slicer_caches_node {
+        for rid in node
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "slicerCache")
+            .filter_map(|n| {
+                n.attribute((REL_NS, "id"))
+                    .or_else(|| n.attribute("r:id"))
+                    .or_else(|| n.attribute("id"))
+            })
+        {
+            workbook_slicer_cache_rids.insert(rid.to_string());
+        }
+    }
+
+    let mut workbook_timeline_cache_rids: HashSet<String> = HashSet::new();
+    if let Some(node) = timeline_caches_node {
+        for rid in node
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "timelineCache")
+            .filter_map(|n| {
+                n.attribute((REL_NS, "id"))
+                    .or_else(|| n.attribute("r:id"))
+                    .or_else(|| n.attribute("id"))
+            })
+        {
+            workbook_timeline_cache_rids.insert(rid.to_string());
         }
     }
 
@@ -176,6 +224,68 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
             for rid in &workbook_pivot_cache_rids {
                 match rel_map.get(rid) {
                     Some(rel) if rel.type_ == PIVOT_CACHE_DEF_REL_TYPE => {
+                        rels.push(RelationshipStub {
+                            rel_id: rid.clone(),
+                            target: rel.target.clone(),
+                        });
+                    }
+                    _ => {
+                        missing_rel = true;
+                        break;
+                    }
+                }
+            }
+
+            if missing_rel {
+                (None, Vec::new())
+            } else {
+                (
+                    Some(workbook_xml_str.as_bytes()[node.range()].to_vec()),
+                    rels,
+                )
+            }
+        }
+        _ => (None, Vec::new()),
+    };
+
+    let (workbook_slicer_caches, workbook_slicer_cache_rels) = match slicer_caches_node {
+        Some(node) if !workbook_slicer_cache_rids.is_empty() => {
+            let mut rels = Vec::new();
+            let mut missing_rel = false;
+            for rid in &workbook_slicer_cache_rids {
+                match rel_map.get(rid) {
+                    Some(rel) if rel.type_ == SLICER_CACHE_REL_TYPE => {
+                        rels.push(RelationshipStub {
+                            rel_id: rid.clone(),
+                            target: rel.target.clone(),
+                        });
+                    }
+                    _ => {
+                        missing_rel = true;
+                        break;
+                    }
+                }
+            }
+
+            if missing_rel {
+                (None, Vec::new())
+            } else {
+                (
+                    Some(workbook_xml_str.as_bytes()[node.range()].to_vec()),
+                    rels,
+                )
+            }
+        }
+        _ => (None, Vec::new()),
+    };
+
+    let (workbook_timeline_caches, workbook_timeline_cache_rels) = match timeline_caches_node {
+        Some(node) if !workbook_timeline_cache_rids.is_empty() => {
+            let mut rels = Vec::new();
+            let mut missing_rel = false;
+            for rid in &workbook_timeline_cache_rids {
+                match rel_map.get(rid) {
+                    Some(rel) if rel.type_ == TIMELINE_CACHE_DEF_REL_TYPE => {
                         rels.push(RelationshipStub {
                             rel_id: rid.clone(),
                             target: rel.target.clone(),
@@ -315,6 +425,10 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
         workbook_sheets,
         workbook_pivot_caches,
         workbook_pivot_cache_rels,
+        workbook_slicer_caches,
+        workbook_slicer_cache_rels,
+        workbook_timeline_caches,
+        workbook_timeline_cache_rels,
         sheet_pivot_tables,
     })
 }
@@ -323,8 +437,12 @@ impl PreservedPivotParts {
     pub fn is_empty(&self) -> bool {
         self.parts.is_empty()
             && self.workbook_pivot_caches.is_none()
+            && self.workbook_slicer_caches.is_none()
+            && self.workbook_timeline_caches.is_none()
             && self.sheet_pivot_tables.is_empty()
             && self.workbook_pivot_cache_rels.is_empty()
+            && self.workbook_slicer_cache_rels.is_empty()
+            && self.workbook_timeline_cache_rels.is_empty()
     }
 }
 
@@ -362,6 +480,12 @@ impl XlsxPackage {
         let pivot_caches_node = workbook_doc
             .descendants()
             .find(|n| n.is_element() && n.tag_name().name() == "pivotCaches");
+        let slicer_caches_node = workbook_doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "slicerCaches");
+        let timeline_caches_node = workbook_doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "timelineCaches");
 
         let mut workbook_pivot_cache_rids: HashSet<String> = HashSet::new();
         if let Some(node) = pivot_caches_node {
@@ -375,6 +499,36 @@ impl XlsxPackage {
                 })
             {
                 workbook_pivot_cache_rids.insert(rid.to_string());
+            }
+        }
+
+        let mut workbook_slicer_cache_rids: HashSet<String> = HashSet::new();
+        if let Some(node) = slicer_caches_node {
+            for rid in node
+                .descendants()
+                .filter(|n| n.is_element() && n.tag_name().name() == "slicerCache")
+                .filter_map(|n| {
+                    n.attribute((REL_NS, "id"))
+                        .or_else(|| n.attribute("r:id"))
+                        .or_else(|| n.attribute("id"))
+                })
+            {
+                workbook_slicer_cache_rids.insert(rid.to_string());
+            }
+        }
+
+        let mut workbook_timeline_cache_rids: HashSet<String> = HashSet::new();
+        if let Some(node) = timeline_caches_node {
+            for rid in node
+                .descendants()
+                .filter(|n| n.is_element() && n.tag_name().name() == "timelineCache")
+                .filter_map(|n| {
+                    n.attribute((REL_NS, "id"))
+                        .or_else(|| n.attribute("r:id"))
+                        .or_else(|| n.attribute("id"))
+                })
+            {
+                workbook_timeline_cache_rids.insert(rid.to_string());
             }
         }
 
@@ -399,6 +553,62 @@ impl XlsxPackage {
                 for rid in &workbook_pivot_cache_rids {
                     match rel_map.get(rid) {
                         Some(rel) if rel.type_ == PIVOT_CACHE_DEF_REL_TYPE => {
+                            rels.push(RelationshipStub {
+                                rel_id: rid.clone(),
+                                target: rel.target.clone(),
+                            });
+                        }
+                        _ => {
+                            missing_rel = true;
+                            break;
+                        }
+                    }
+                }
+
+                if missing_rel {
+                    (None, Vec::new())
+                } else {
+                    (Some(workbook_xml.as_bytes()[node.range()].to_vec()), rels)
+                }
+            }
+            _ => (None, Vec::new()),
+        };
+
+        let (workbook_slicer_caches, workbook_slicer_cache_rels) = match slicer_caches_node {
+            Some(node) if !workbook_slicer_cache_rids.is_empty() => {
+                let mut rels = Vec::new();
+                let mut missing_rel = false;
+                for rid in &workbook_slicer_cache_rids {
+                    match rel_map.get(rid) {
+                        Some(rel) if rel.type_ == SLICER_CACHE_REL_TYPE => {
+                            rels.push(RelationshipStub {
+                                rel_id: rid.clone(),
+                                target: rel.target.clone(),
+                            });
+                        }
+                        _ => {
+                            missing_rel = true;
+                            break;
+                        }
+                    }
+                }
+
+                if missing_rel {
+                    (None, Vec::new())
+                } else {
+                    (Some(workbook_xml.as_bytes()[node.range()].to_vec()), rels)
+                }
+            }
+            _ => (None, Vec::new()),
+        };
+
+        let (workbook_timeline_caches, workbook_timeline_cache_rels) = match timeline_caches_node {
+            Some(node) if !workbook_timeline_cache_rids.is_empty() => {
+                let mut rels = Vec::new();
+                let mut missing_rel = false;
+                for rid in &workbook_timeline_cache_rids {
+                    match rel_map.get(rid) {
+                        Some(rel) if rel.type_ == TIMELINE_CACHE_DEF_REL_TYPE => {
                             rels.push(RelationshipStub {
                                 rel_id: rid.clone(),
                                 target: rel.target.clone(),
@@ -518,6 +728,10 @@ impl XlsxPackage {
             workbook_sheets,
             workbook_pivot_caches,
             workbook_pivot_cache_rels,
+            workbook_slicer_caches,
+            workbook_slicer_cache_rels,
+            workbook_timeline_caches,
+            workbook_timeline_cache_rels,
             sheet_pivot_tables,
         })
     }
@@ -586,7 +800,7 @@ impl XlsxPackage {
         let workbook_part = "xl/workbook.xml";
         let workbook_rels_part = "xl/_rels/workbook.xml.rels";
 
-        let workbook_rid_map = if !preserved.workbook_pivot_cache_rels.is_empty() {
+        let workbook_pivot_cache_rid_map = if !preserved.workbook_pivot_cache_rels.is_empty() {
             let (updated_workbook_rels, rid_map) = ensure_rels_has_relationships(
                 self.part(workbook_rels_part),
                 workbook_rels_part,
@@ -600,15 +814,77 @@ impl XlsxPackage {
             HashMap::new()
         };
 
+        let workbook_slicer_cache_rid_map = if !preserved.workbook_slicer_cache_rels.is_empty() {
+            let (updated_workbook_rels, rid_map) = ensure_rels_has_relationships(
+                self.part(workbook_rels_part),
+                workbook_rels_part,
+                workbook_part,
+                SLICER_CACHE_REL_TYPE,
+                &preserved.workbook_slicer_cache_rels,
+            )?;
+            self.set_part(workbook_rels_part, updated_workbook_rels);
+            rid_map
+        } else {
+            HashMap::new()
+        };
+
+        let workbook_timeline_cache_rid_map = if !preserved.workbook_timeline_cache_rels.is_empty() {
+            let (updated_workbook_rels, rid_map) = ensure_rels_has_relationships(
+                self.part(workbook_rels_part),
+                workbook_rels_part,
+                workbook_part,
+                TIMELINE_CACHE_DEF_REL_TYPE,
+                &preserved.workbook_timeline_cache_rels,
+            )?;
+            self.set_part(workbook_rels_part, updated_workbook_rels);
+            rid_map
+        } else {
+            HashMap::new()
+        };
+
         if let Some(pivot_caches) = preserved.workbook_pivot_caches.as_deref() {
             if !preserved.workbook_pivot_cache_rels.is_empty() {
                 let rewritten =
-                    rewrite_relationship_ids(pivot_caches, "pivotCaches", &workbook_rid_map)?;
+                    rewrite_relationship_ids(pivot_caches, "pivotCaches", &workbook_pivot_cache_rid_map)?;
                 let workbook_xml = self
                     .part(workbook_part)
                     .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
                 let updated =
                     ensure_workbook_xml_has_pivot_caches(workbook_xml, workbook_part, &rewritten)?;
+                self.set_part(workbook_part, updated);
+            }
+        }
+        if let Some(slicer_caches) = preserved.workbook_slicer_caches.as_deref() {
+            if !preserved.workbook_slicer_cache_rels.is_empty() {
+                let rewritten = rewrite_relationship_ids(
+                    slicer_caches,
+                    "slicerCaches",
+                    &workbook_slicer_cache_rid_map,
+                )?;
+                let workbook_xml = self
+                    .part(workbook_part)
+                    .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
+                let updated =
+                    ensure_workbook_xml_has_slicer_caches(workbook_xml, workbook_part, &rewritten)?;
+                self.set_part(workbook_part, updated);
+            }
+        }
+
+        if let Some(timeline_caches) = preserved.workbook_timeline_caches.as_deref() {
+            if !preserved.workbook_timeline_cache_rels.is_empty() {
+                let rewritten = rewrite_relationship_ids(
+                    timeline_caches,
+                    "timelineCaches",
+                    &workbook_timeline_cache_rid_map,
+                )?;
+                let workbook_xml = self
+                    .part(workbook_part)
+                    .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
+                let updated = ensure_workbook_xml_has_timeline_caches(
+                    workbook_xml,
+                    workbook_part,
+                    &rewritten,
+                )?;
                 self.set_part(workbook_part, updated);
             }
         }
@@ -1205,6 +1481,329 @@ fn parse_pivot_cache_entries(xml: &str) -> Result<Vec<PivotCacheEntry>, ChartExt
     Ok(entries)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CacheRefEntry {
+    rel_id: Option<String>,
+    raw_xml: String,
+}
+
+fn parse_cache_ref_entries(
+    xml: &str,
+    context: &str,
+    container: &str,
+    child: &str,
+) -> Result<Vec<CacheRefEntry>, ChartExtractionError> {
+    // Workbook fragments frequently inherit the SpreadsheetML namespace declaration from an
+    // ancestor element (the `<workbook>` root). If the fragment uses a prefix (e.g. `x:`), declare
+    // it so `roxmltree` can parse the fragment in isolation.
+    let spreadsheet_prefix =
+        detect_prefix_in_fragment(xml, container).or_else(|| detect_prefix_in_fragment(xml, child));
+    let prefix_decl = spreadsheet_prefix
+        .as_deref()
+        .map(|p| format!(" xmlns:{p}=\"{SPREADSHEETML_NS}\""))
+        .unwrap_or_default();
+
+    // Likewise, declare any relationship namespace prefixes used on `*:id="..."` attributes.
+    let mut rel_decls = String::new();
+    for prefix in detect_attr_prefixes(xml, "id") {
+        if prefix == "xmlns" {
+            continue;
+        }
+        if spreadsheet_prefix.as_deref() == Some(prefix.as_str()) {
+            continue;
+        }
+        rel_decls.push_str(&format!(" xmlns:{prefix}=\"{REL_NS}\""));
+    }
+
+    let wrapped = format!(r#"<root{rel_decls}{prefix_decl}>{xml}</root>"#);
+    let doc =
+        Document::parse(&wrapped).map_err(|e| ChartExtractionError::XmlParse(context.to_string(), e))?;
+
+    let container_node = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == container)
+        .ok_or_else(|| {
+            ChartExtractionError::XmlStructure(format!("{context}: missing <{container}>"))
+        })?;
+
+    let mut entries = Vec::new();
+    for node in container_node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == child)
+    {
+        let rel_id = node
+            .attribute((REL_NS, "id"))
+            .or_else(|| node.attribute("r:id"))
+            .or_else(|| node.attribute("id"))
+            .map(|s| s.to_string());
+        let raw_xml = wrapped[node.range()].to_string();
+        entries.push(CacheRefEntry { rel_id, raw_xml });
+    }
+
+    Ok(entries)
+}
+
+fn merge_workbook_cache_refs(
+    workbook_xml: &str,
+    existing_container: roxmltree::Node<'_, '_>,
+    preserved_xml: &str,
+    context: &str,
+    container: &str,
+    child: &str,
+) -> Result<String, ChartExtractionError> {
+    let range = existing_container.range();
+    let existing_section = &workbook_xml[range.clone()];
+    let container_prefix = element_prefix_at(workbook_xml, range.start);
+    let container_tag = crate::xml::prefixed_tag(container_prefix, container);
+    let close_tag = format!("</{container_tag}>");
+
+    let existing_rids: HashSet<String> = existing_container
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == child)
+        .filter_map(|n| {
+            n.attribute((REL_NS, "id"))
+                .or_else(|| n.attribute("r:id"))
+                .or_else(|| n.attribute("id"))
+        })
+        .map(|s| s.to_string())
+        .collect();
+    let existing_count = existing_container
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == child)
+        .count();
+
+    let preserved_entries = parse_cache_ref_entries(preserved_xml, context, container, child)?;
+    let mut to_insert: Vec<CacheRefEntry> = Vec::new();
+    for entry in preserved_entries {
+        match entry.rel_id.as_deref() {
+            Some(rid) if existing_rids.contains(rid) => continue,
+            Some(_) | None => to_insert.push(entry),
+        }
+    }
+
+    if to_insert.is_empty() {
+        return Ok(workbook_xml.to_string());
+    }
+
+    let mut inserted_xml = String::new();
+    for entry in &to_insert {
+        let rewritten = rewrite_spreadsheetml_prefix_in_fragment(
+            &entry.raw_xml,
+            container_prefix,
+            &[child],
+            context,
+        )?;
+        inserted_xml.push_str(&rewritten);
+    }
+
+    let mut new_section = if is_self_closing_element(existing_section) {
+        let (start, trailing_ws) = split_trailing_whitespace(existing_section);
+        let start = start.trim_end();
+        let start = start.strip_suffix("/>").unwrap_or(start);
+        let start = start.trim_end();
+        let mut section = String::new();
+        section.push_str(start);
+        section.push('>');
+        section.push_str(&inserted_xml);
+        section.push_str(&close_tag);
+        section.push_str(trailing_ws);
+        section
+    } else {
+        let close_tag_pos = existing_section.rfind(&close_tag).ok_or_else(|| {
+            ChartExtractionError::XmlStructure(format!(
+                "workbook.xml: missing {close_tag} in <{container}>"
+            ))
+        })?;
+        let mut section =
+            String::with_capacity(existing_section.len().saturating_add(inserted_xml.len()));
+        section.push_str(&existing_section[..close_tag_pos]);
+        section.push_str(&inserted_xml);
+        section.push_str(&existing_section[close_tag_pos..]);
+        section
+    };
+
+    let new_count = existing_count + to_insert.len();
+    new_section = update_pivot_caches_count_attr(&new_section, new_count);
+
+    let mut out = String::with_capacity(workbook_xml.len() + inserted_xml.len());
+    out.push_str(&workbook_xml[..range.start]);
+    out.push_str(&new_section);
+    out.push_str(&workbook_xml[range.end..]);
+    Ok(out)
+}
+
+fn insert_workbook_cache_refs(
+    workbook_xml: &str,
+    workbook_node: &roxmltree::Node<'_, '_>,
+    preserved_xml: &str,
+    context: &str,
+    container: &str,
+    child: &str,
+    prefer_after: &[&str],
+    before: &[&str],
+) -> Result<String, ChartExtractionError> {
+    let workbook_range = workbook_node.range();
+    let root_start = workbook_range.start;
+    let workbook_prefix = element_prefix_at(workbook_xml, root_start);
+    let preserved_xml = rewrite_spreadsheetml_prefix_in_fragment(
+        preserved_xml,
+        workbook_prefix,
+        &[container, child],
+        context,
+    )?;
+
+    let mut insert_idx = None;
+
+    for name in prefer_after {
+        for child_node in workbook_node.children().filter(|n| n.is_element()) {
+            if child_node.tag_name().name() == *name {
+                insert_idx = Some(child_node.range().end);
+                break;
+            }
+        }
+        if insert_idx.is_some() {
+            break;
+        }
+    }
+
+    if insert_idx.is_none() {
+        for child_node in workbook_node.children().filter(|n| n.is_element()) {
+            if before.contains(&child_node.tag_name().name()) {
+                insert_idx = Some(child_node.range().start);
+                break;
+            }
+        }
+    }
+
+    let insert_idx = match insert_idx {
+        Some(idx) => idx,
+        None => {
+            let close_tag_len = crate::xml::prefixed_tag(workbook_prefix, "workbook").len() + 3;
+            workbook_node
+                .range()
+                .end
+                .checked_sub(close_tag_len)
+                .ok_or_else(|| {
+                    ChartExtractionError::XmlStructure(
+                        "workbook.xml: invalid </workbook> close tag".to_string(),
+                    )
+                })?
+        }
+    };
+
+    let mut out = String::with_capacity(workbook_xml.len() + preserved_xml.len());
+    out.push_str(&workbook_xml[..insert_idx]);
+    out.push_str(&preserved_xml);
+    out.push_str(&workbook_xml[insert_idx..]);
+    Ok(out)
+}
+
+fn apply_preserved_workbook_cache_refs_to_workbook_xml_with_part(
+    workbook_xml: &str,
+    part_name: &str,
+    preserved_xml: &str,
+    context: &str,
+    container: &str,
+    child: &str,
+    prefer_after: &[&str],
+    before: &[&str],
+) -> Result<String, ChartExtractionError> {
+    if preserved_xml.trim().is_empty() {
+        return Ok(workbook_xml.to_string());
+    }
+
+    let workbook_xml = expand_self_closing_workbook_root_if_needed(workbook_xml, part_name)?;
+    let workbook_xml = workbook_xml.as_ref();
+
+    let doc = Document::parse(workbook_xml)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let workbook = doc.root_element();
+
+    let mut updated = if let Some(existing) = workbook
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == container)
+    {
+        merge_workbook_cache_refs(workbook_xml, existing, preserved_xml, context, container, child)?
+    } else {
+        insert_workbook_cache_refs(
+            workbook_xml,
+            &workbook,
+            preserved_xml,
+            context,
+            container,
+            child,
+            prefer_after,
+            before,
+        )?
+    };
+
+    if updated == workbook_xml {
+        return Ok(updated);
+    }
+
+    for prefix in detect_attr_prefixes(preserved_xml, "id") {
+        if prefix == "xmlns" {
+            continue;
+        }
+        updated = ensure_workbook_has_namespace_prefix(&updated, part_name, &prefix, REL_NS)?;
+    }
+
+    Ok(updated)
+}
+
+fn apply_preserved_slicer_caches_to_workbook_xml_with_part(
+    workbook_xml: &str,
+    part_name: &str,
+    preserved_slicer_caches_xml: &str,
+) -> Result<String, ChartExtractionError> {
+    let prefer_after = ["pivotCaches", "customWorkbookViews"];
+    let before = [
+        "timelineCaches",
+        "smartTagPr",
+        "smartTagTypes",
+        "webPublishing",
+        "fileRecoveryPr",
+        "webPublishObjects",
+        "extLst",
+    ];
+    apply_preserved_workbook_cache_refs_to_workbook_xml_with_part(
+        workbook_xml,
+        part_name,
+        preserved_slicer_caches_xml,
+        "slicerCaches",
+        "slicerCaches",
+        "slicerCache",
+        &prefer_after,
+        &before,
+    )
+}
+
+fn apply_preserved_timeline_caches_to_workbook_xml_with_part(
+    workbook_xml: &str,
+    part_name: &str,
+    preserved_timeline_caches_xml: &str,
+) -> Result<String, ChartExtractionError> {
+    let prefer_after = ["slicerCaches", "pivotCaches", "customWorkbookViews"];
+    let before = [
+        "smartTagPr",
+        "smartTagTypes",
+        "webPublishing",
+        "fileRecoveryPr",
+        "webPublishObjects",
+        "extLst",
+    ];
+    apply_preserved_workbook_cache_refs_to_workbook_xml_with_part(
+        workbook_xml,
+        part_name,
+        preserved_timeline_caches_xml,
+        "timelineCaches",
+        "timelineCaches",
+        "timelineCache",
+        &prefer_after,
+        &before,
+    )
+}
+
 fn ensure_workbook_has_namespace_prefix(
     workbook_xml: &str,
     part_name: &str,
@@ -1404,6 +2003,42 @@ fn ensure_workbook_xml_has_pivot_caches(
         workbook_xml,
         part_name,
         pivot_caches_str,
+    )?;
+    Ok(updated.into_bytes())
+}
+
+fn ensure_workbook_xml_has_slicer_caches(
+    workbook_xml: &[u8],
+    part_name: &str,
+    slicer_caches_xml: &[u8],
+) -> Result<Vec<u8>, ChartExtractionError> {
+    let workbook_xml = std::str::from_utf8(workbook_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
+    let slicer_caches_str = std::str::from_utf8(slicer_caches_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8("slicerCaches".to_string(), e))?;
+
+    let updated = apply_preserved_slicer_caches_to_workbook_xml_with_part(
+        workbook_xml,
+        part_name,
+        slicer_caches_str,
+    )?;
+    Ok(updated.into_bytes())
+}
+
+fn ensure_workbook_xml_has_timeline_caches(
+    workbook_xml: &[u8],
+    part_name: &str,
+    timeline_caches_xml: &[u8],
+) -> Result<Vec<u8>, ChartExtractionError> {
+    let workbook_xml = std::str::from_utf8(workbook_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
+    let timeline_caches_str = std::str::from_utf8(timeline_caches_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8("timelineCaches".to_string(), e))?;
+
+    let updated = apply_preserved_timeline_caches_to_workbook_xml_with_part(
+        workbook_xml,
+        part_name,
+        timeline_caches_str,
     )?;
     Ok(updated.into_bytes())
 }
