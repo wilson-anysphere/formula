@@ -5399,7 +5399,125 @@ fn patch_worksheet_xml(
         changed_formula_cells,
     )?;
 
-    patch_worksheet_dimension(&patched, insert_dimension, dimension_range, &dimension_ref)
+    let mut out = patch_worksheet_dimension(&patched, insert_dimension, dimension_range, &dimension_ref)?;
+
+    // If conditional formatting was removed from the workbook model, ensure we strip any
+    // corresponding worksheet XML blocks (both Office 2007 `<conditionalFormatting>` and the
+    // x14 extension payload under `<ext uri="{78C0D931-...}">`).
+    //
+    // Note: conditional formatting parsing is best-effort. Only strip conditional formatting when
+    // we can successfully parse it from the original worksheet XML; otherwise preserve it for
+    // high-fidelity round-trip.
+    if sheet.conditional_formatting_rules.is_empty() {
+        let original_xml = std::str::from_utf8(original).map_err(|e| {
+            WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        })?;
+        if original_xml.contains("conditionalFormatting") {
+            if let Ok(parsed) = crate::parse_worksheet_conditional_formatting_streaming(original_xml)
+            {
+                if !parsed.raw_blocks.is_empty() {
+                    out = strip_worksheet_conditional_formatting_blocks(&out)?;
+                }
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+const X14_CF_EXT_URI: &str = "{78C0D931-6437-407d-A8EE-F0AAD7539E65}";
+
+fn strip_worksheet_conditional_formatting_blocks(sheet_xml: &[u8]) -> Result<Vec<u8>, WriteError> {
+    let mut reader = Reader::from_reader(sheet_xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::with_capacity(sheet_xml.len()));
+    let mut buf = Vec::new();
+
+    let mut saw_root = false;
+    // Depth of open elements *within* the worksheet root (root excluded).
+    let mut depth: usize = 0;
+    let mut skip_depth: usize = 0;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            _ if skip_depth > 0 => match event {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::Empty(_) => {}
+                _ => {}
+            },
+            Event::Start(ref e) => {
+                let local = local_name(e.name().into_inner());
+                if !saw_root && local == b"worksheet" {
+                    saw_root = true;
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                } else if saw_root {
+                    if depth == 0 && local == b"conditionalFormatting" {
+                        skip_depth = 1;
+                    } else if local == b"ext" && ext_uri_matches(e, X14_CF_EXT_URI)? {
+                        skip_depth = 1;
+                    } else {
+                        writer.write_event(Event::Start(e.to_owned()))?;
+                        depth = depth.saturating_add(1);
+                    }
+                } else {
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                }
+            }
+            Event::Empty(ref e) => {
+                let local = local_name(e.name().into_inner());
+                if !saw_root && local == b"worksheet" {
+                    saw_root = true;
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                } else if saw_root {
+                    if depth == 0 && local == b"conditionalFormatting" {
+                        // Skip empty conditional formatting blocks.
+                    } else if local == b"ext" && ext_uri_matches(e, X14_CF_EXT_URI)? {
+                        // Skip x14 conditional formatting extension blocks.
+                    } else {
+                        writer.write_event(Event::Empty(e.to_owned()))?;
+                    }
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+            }
+            Event::End(ref e) => {
+                let local = local_name(e.name().into_inner());
+                if saw_root {
+                    if depth == 0 && local == b"worksheet" {
+                        writer.write_event(Event::End(e.to_owned()))?;
+                        saw_root = false;
+                    } else {
+                        depth = depth.saturating_sub(1);
+                        writer.write_event(Event::End(e.to_owned()))?;
+                    }
+                } else {
+                    writer.write_event(Event::End(e.to_owned()))?;
+                }
+            }
+            _ => {
+                writer.write_event(event.to_owned())?;
+            }
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn ext_uri_matches(e: &quick_xml::events::BytesStart<'_>, uri: &str) -> Result<bool, WriteError> {
+    for attr in e.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() != b"uri" {
+            continue;
+        }
+        let value = attr.unescape_value()?.into_owned();
+        return Ok(value.trim().eq_ignore_ascii_case(uri));
+    }
+    Ok(false)
 }
 
 fn patch_worksheet_dimension(
