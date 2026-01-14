@@ -1147,6 +1147,7 @@ export class ContextManager {
     const dlp = normalizeDlpOptions(params.dlp);
     const includeRestrictedContent = dlp?.includeRestrictedContent ?? false;
     const policyAllowsRestrictedContent = Boolean(dlp?.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
+    const restrictedAllowed = includeRestrictedContent && policyAllowsRestrictedContent;
     const classificationRecords =
       dlp?.classificationRecords ?? dlp?.classificationStore?.list?.(dlp.documentId) ?? [];
 
@@ -1287,10 +1288,16 @@ export class ContextManager {
                     } else {
                       safeText = this.redactor(rawText);
                     }
-                    if (!includeRestrictedContent && classifyText(safeText).level === "sensitive") {
+                    if (!restrictedAllowed && classifyText(safeText).level === "sensitive") {
                       safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
                     }
                   }
+                }
+
+                // Defense-in-depth: if the configured redactor is a no-op (or incomplete),
+                // ensure heuristic sensitive patterns never slip through under DLP enforcement.
+                if (!restrictedAllowed && classifyText(safeText).level === "sensitive") {
+                  safeText = "[REDACTED]";
                 }
 
                 return {
@@ -1327,8 +1334,13 @@ export class ContextManager {
             options: { includeRestrictedContent },
           })
         : null;
-    const queryForEmbedding =
-      dlp && queryDecision && queryDecision.decision !== DLP_DECISION.ALLOW ? this.redactor(params.query) : params.query;
+    let queryForEmbedding = params.query;
+    if (dlp && queryDecision && queryDecision.decision !== DLP_DECISION.ALLOW) {
+      queryForEmbedding = this.redactor(params.query);
+      if (!restrictedAllowed && classifyText(queryForEmbedding).level === "sensitive") {
+        queryForEmbedding = "[REDACTED]";
+      }
+    }
     throwIfAborted(signal);
     const hits = await searchWorkbookRag({
       queryText: queryForEmbedding,
@@ -1500,8 +1512,13 @@ export class ContextManager {
 
       // Defense-in-depth: if we're not explicitly including restricted content, never send
       // text that still matches the heuristic sensitive detectors.
-      if (dlp && !includeRestrictedContent && classifyText(outText).level === "sensitive") {
+      if (dlp && !restrictedAllowed && classifyText(outText).level === "sensitive") {
         outText = this.redactor(`${header}\n[REDACTED]`);
+        redacted = true;
+      }
+
+      if (dlp && !restrictedAllowed && classifyText(outText).level === "sensitive") {
+        outText = "[REDACTED]";
         redacted = true;
       }
 
@@ -1534,7 +1551,6 @@ export class ContextManager {
         : params.attachments;
       const attachmentsForPrompt = compactAttachmentsForPrompt(attachmentsForPromptUnsafe);
 
-      const restrictedAllowed = includeRestrictedContent && policyAllowsRestrictedContent;
       const schemaRestrictedDecision = dlp
         ? evaluatePolicy({
             action: DLP_ACTION.AI_CLOUD_PROCESSING,
@@ -1543,8 +1559,7 @@ export class ContextManager {
             options: { includeRestrictedContent },
           })
         : null;
-      const shouldRedactHeuristicSensitiveSchema = schemaRestrictedDecision?.decision === DLP_DECISION.REDACT;
-      const shouldBlockHeuristicSensitiveSchema = schemaRestrictedDecision?.decision === DLP_DECISION.BLOCK;
+      const schemaRestrictedBlocks = schemaRestrictedDecision?.decision === DLP_DECISION.BLOCK;
 
       /**
        * Redact a schema token (table name / header / range title) when DLP requires it.
@@ -1560,7 +1575,11 @@ export class ContextManager {
         if (!dlp) return raw;
         throwIfAborted(signal);
 
-        if (shouldBlockHeuristicSensitiveSchema && classifyText(raw).level === "sensitive") {
+        const heuristic = classifyText(raw);
+        if (heuristic.level !== "sensitive") return raw;
+        if (restrictedAllowed) return raw;
+
+        if (schemaRestrictedBlocks) {
           const decision = schemaRestrictedDecision;
           if (decision) {
             dlp.auditLogger?.log({
@@ -1586,10 +1605,8 @@ export class ContextManager {
           });
         }
 
-        if (!shouldRedactHeuristicSensitiveSchema) return raw;
-
         const redacted = this.redactor(raw);
-        if (!restrictedAllowed && classifyText(redacted).level === "sensitive") return "[REDACTED]";
+        if (classifyText(redacted).level === "sensitive") return "[REDACTED]";
         return redacted;
       };
 
@@ -1657,6 +1674,21 @@ export class ContextManager {
         const sheetName = table?.sheetName ?? "";
         const rect = table?.rect;
         const rangeA1 = table?.rangeA1 ?? "";
+        const safeSheetName = sheetName ? redactSchemaToken(sheetName) : "";
+        let safeRangeA1 = rangeA1;
+        if (safeSheetName && rect && typeof rect === "object") {
+          try {
+            safeRangeA1 = rangeToA1({
+              sheetName: safeSheetName,
+              startRow: rect.r0,
+              startCol: rect.c0,
+              endRow: rect.r1,
+              endCol: rect.c1,
+            });
+          } catch {
+            // Fall back to the precomputed range string if formatting fails.
+          }
+        }
         if (!name || !sheetName || !rect || typeof rect !== "object") continue;
 
         if (dlp) {
@@ -1674,7 +1706,7 @@ export class ContextManager {
               options: { includeRestrictedContent },
             });
             if (recordDecision.decision !== DLP_DECISION.ALLOW) {
-              schemaLines.push(`- Table ${safeName} (range="${rangeA1}"): [REDACTED]`);
+              schemaLines.push(`- Table ${safeName} (range="${safeRangeA1}"): [REDACTED]`);
               continue;
             }
           }
@@ -1695,7 +1727,7 @@ export class ContextManager {
         }
 
         const colSuffix = boundedColCount < colCount ? " | …" : "";
-        schemaLines.push(`- Table ${safeName} (range="${rangeA1}"): ${cols.join(" | ")}${colSuffix}`);
+        schemaLines.push(`- Table ${safeName} (range="${safeRangeA1}"): ${cols.join(" | ")}${colSuffix}`);
       }
 
       // Named ranges can be helpful anchors even without cell samples.
@@ -1704,7 +1736,24 @@ export class ContextManager {
         const nr = schema.namedRanges[i];
         const name = nr?.name ?? "";
         const safeName = redactSchemaToken(name);
-        const rangeA1 = nr?.rangeA1 ?? "";
+        const sheetName = nr?.sheetName ?? "";
+        const rect = nr?.rect;
+        const rangeA1Raw = nr?.rangeA1 ?? "";
+        const safeSheetName = sheetName ? redactSchemaToken(sheetName) : "";
+        let rangeA1 = rangeA1Raw;
+        if (safeSheetName && rect && typeof rect === "object") {
+          try {
+            rangeA1 = rangeToA1({
+              sheetName: safeSheetName,
+              startRow: rect.r0,
+              startCol: rect.c0,
+              endRow: rect.r1,
+              endCol: rect.c1,
+            });
+          } catch {
+            // Use the precomputed range string on failures.
+          }
+        }
         if (!name) continue;
         schemaLines.push(`- Named range ${safeName} (range="${rangeA1}")`);
       }
@@ -1770,7 +1819,8 @@ export class ContextManager {
             const c1 = rect.c1;
             if (!sheetName || ![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) continue;
             if (r1 < r0 || c1 < c0) continue;
-            const rangeA1 = rangeToA1({ sheetName, startRow: r0, startCol: c0, endRow: r1, endCol: c1 });
+            const safeSheetName = redactSchemaToken(sheetName);
+            const rangeA1 = rangeToA1({ sheetName: safeSheetName, startRow: r0, startCol: c0, endRow: r1, endCol: c1 });
 
             // Structured DLP classifications: if this chunk range is disallowed due to explicit
             // document/sheet/range selectors, do not include any derived header/type strings.
@@ -1811,7 +1861,7 @@ export class ContextManager {
           // Best-effort; if the vector store cannot list records, continue without a schema section.
         }
       }
- 
+  
       const workbookSchemaText = schemaLines.length ? this.redactor(`Workbook schema (schema-first):\n${schemaLines.join("\n")}`) : "";
 
       const sections = [

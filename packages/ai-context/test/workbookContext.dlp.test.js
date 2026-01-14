@@ -421,6 +421,98 @@ test("buildWorkbookContext: workbook_summary redacts heuristic-sensitive sheet n
   assert.match(summarySection, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: redacts heuristic-sensitive sheet names (schema + summary) even with a no-op redactor (DLP REDACT)", async () => {
+  const workbook = {
+    id: "wb-dlp-sheetname-email",
+    sheets: [
+      {
+        name: "alice@example.com",
+        cells: [[{ v: "Header" }], [{ v: "Value" }]],
+      },
+    ],
+    tables: [
+      {
+        name: "ExampleTable",
+        sheetName: "alice@example.com",
+        rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
+      },
+    ],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1600,
+    redactor: (t) => t,
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "ignore",
+    topK: 0,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ redactDisallowed: true }),
+    },
+  });
+
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+
+  const joined = embedder.seen.join("\n");
+  assert.doesNotMatch(joined, /alice@example\.com/);
+});
+
+test("buildWorkbookContext: blocks when sheet names are heuristic-sensitive and policy blocks (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-sheetname-email-block",
+    sheets: [
+      {
+        name: "alice@example.com",
+        cells: [[{ v: "Header" }], [{ v: "Value" }]],
+      },
+    ],
+    tables: [
+      {
+        name: "ExampleTable",
+        sheetName: "alice@example.com",
+        rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
+      },
+    ],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1600,
+    redactor: (t) => t,
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  await assert.rejects(
+    () =>
+      cm.buildWorkbookContext({
+        workbook,
+        query: "ignore",
+        topK: 0,
+        dlp: {
+          documentId: workbook.id,
+          policy: makePolicy({ redactDisallowed: false }),
+        },
+      }),
+    (err) => {
+      assert.ok(err instanceof DlpViolationError);
+      return true;
+    },
+  );
+
+  const joined = embedder.seen.join("\n");
+  assert.doesNotMatch(joined, /alice@example\.com/);
+});
+
 test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when blocked", async () => {
   const workbook = makeSensitiveWorkbook();
   const embedder = new CapturingEmbedder({ dimension: 64 });
