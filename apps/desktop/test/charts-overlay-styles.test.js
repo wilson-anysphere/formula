@@ -11,7 +11,7 @@ const desktopRoot = path.resolve(__dirname, "..");
 
 test("SpreadsheetApp overlay canvases use CSS classes (no static inline styles)", async () => {
   const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
-  const text = await readFile(spreadsheetAppPath, "utf8");
+  const text = stripComments(await readFile(spreadsheetAppPath, "utf8"));
 
   const start = text.indexOf('this.gridCanvas = document.createElement("canvas");');
   assert.ok(start !== -1, "expected SpreadsheetApp to create overlay canvases via document.createElement");
@@ -141,7 +141,7 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
 
 test("chart + drawing overlay geometry stays dynamic (inline offsets/sizing)", async () => {
   const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
-  const text = await readFile(spreadsheetAppPath, "utf8");
+  const text = stripComments(await readFile(spreadsheetAppPath, "utf8"));
 
   // Drawings overlay is offset under headers.
   assert.match(text, /drawingCanvas\.style\.left\s*=/);
@@ -154,7 +154,7 @@ test("chart + drawing overlay geometry stays dynamic (inline offsets/sizing)", a
 
 test("shared-grid overlay stacking uses CSS classes (no zIndex inline styles)", async () => {
   const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
-  const text = await readFile(spreadsheetAppPath, "utf8");
+  const text = stripComments(await readFile(spreadsheetAppPath, "utf8"));
 
   assert.match(text, /drawingCanvas\.classList\.add\([\s\S]*?"drawing-layer--shared"[\s\S]*?"grid-canvas--shared-drawings"[\s\S]*?\)/);
   assert.match(text, /chartCanvas\.classList\.add\("grid-canvas--shared-chart"\)/);
@@ -172,7 +172,7 @@ test("shared-grid overlay stacking uses CSS classes (no zIndex inline styles)", 
 
 test("SpreadsheetApp assigns semantic layer classes to grid canvases + overlays", async () => {
   const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
-  const text = await readFile(spreadsheetAppPath, "utf8");
+  const text = stripComments(await readFile(spreadsheetAppPath, "utf8"));
 
   // Canvases/layers should be tagged with role-ish classes so CSS can target them
   // without relying on DOM insertion order.
@@ -188,7 +188,7 @@ test("SpreadsheetApp assigns semantic layer classes to grid canvases + overlays"
 
 test("SecondaryGridView assigns semantic layer classes to shared-grid canvases", async () => {
   const secondaryGridPath = path.join(desktopRoot, "src/grid/splitView/secondaryGridView.ts");
-  const text = await readFile(secondaryGridPath, "utf8");
+  const text = stripComments(await readFile(secondaryGridPath, "utf8"));
 
   assert.match(text, /gridCanvas\.className\s*=\s*"grid-canvas grid-canvas--base"/);
   assert.match(text, /contentCanvas\.className\s*=\s*"grid-canvas grid-canvas--content"/);

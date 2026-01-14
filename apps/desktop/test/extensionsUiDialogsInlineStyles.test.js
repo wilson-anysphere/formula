@@ -48,7 +48,7 @@ test("extension UI dialogs avoid inline style assignments", () => {
     }
   }
   assert.ok(uiPath, "Expected to find extensions/ui.js or extensions/ui.ts");
-  const uiSource = fs.readFileSync(uiPath, "utf8");
+  const uiSource = stripComments(fs.readFileSync(uiPath, "utf8"));
 
   const inputBoxSection = extractSection(
     uiSource,

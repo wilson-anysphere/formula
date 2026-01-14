@@ -23,16 +23,18 @@ function extractSection(source, startMarker, endMarker) {
 
 test("spreadsheet conflict UI overlay uses CSS classes (no static inline styles)", async () => {
   const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
-  const text = await readFile(spreadsheetAppPath, "utf8");
+  const rawText = await readFile(spreadsheetAppPath, "utf8");
+  const text = stripComments(rawText);
 
   const conflictUiSection = extractSection(
-    text,
+    rawText,
     "// Conflicts UI (mounted once; new conflicts stream in via the monitor callbacks).",
     "const presence = this.collabSession.presence;",
   );
+  const conflictUiSectionStripped = stripComments(conflictUiSection);
 
   assert.equal(
-    /\.style\b/.test(conflictUiSection),
+    /\.style\b/.test(conflictUiSectionStripped),
     false,
     "expected conflict overlay block to avoid inline style.*; presentation should be CSS-driven",
   );
@@ -62,11 +64,11 @@ test("spreadsheet conflict UI overlay uses CSS classes (no static inline styles)
   );
 
   // Sanity: ensure the expected CSS classes are applied.
-  assert.match(conflictUiSection, /conflictUiContainer\.classList\.add\("conflict-ui-overlay"\)/);
-  assert.match(conflictUiSection, /toastRoot\.classList\.add\("conflict-ui-toast-root"\)/);
-  assert.match(conflictUiSection, /dialogRoot\.classList\.add\("conflict-ui-dialog-root"\)/);
-  assert.match(conflictUiSection, /structuralToastRoot\.classList\.add\("structural-conflict-ui-toast-root"\)/);
-  assert.match(conflictUiSection, /structuralDialogRoot\.classList\.add\("structural-conflict-ui-dialog-root"\)/);
+  assert.match(conflictUiSectionStripped, /conflictUiContainer\.classList\.add\("conflict-ui-overlay"\)/);
+  assert.match(conflictUiSectionStripped, /toastRoot\.classList\.add\("conflict-ui-toast-root"\)/);
+  assert.match(conflictUiSectionStripped, /dialogRoot\.classList\.add\("conflict-ui-dialog-root"\)/);
+  assert.match(conflictUiSectionStripped, /structuralToastRoot\.classList\.add\("structural-conflict-ui-toast-root"\)/);
+  assert.match(conflictUiSectionStripped, /structuralDialogRoot\.classList\.add\("structural-conflict-ui-dialog-root"\)/);
 });
 
 test("conflict overlay classes are defined in conflicts.css", async () => {

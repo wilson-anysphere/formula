@@ -42,7 +42,7 @@ test("Sort & Filter ribbon commands are registered in CommandRegistry (no exempt
   const desktopCommands = stripComments(fs.readFileSync(desktopCommandsPath, "utf8"));
 
   const autoFilterCommandsPath = path.join(__dirname, "..", "src", "commands", "registerRibbonAutoFilterCommands.ts");
-  const autoFilterCommands = fs.readFileSync(autoFilterCommandsPath, "utf8");
+  const autoFilterCommands = stripComments(fs.readFileSync(autoFilterCommandsPath, "utf8"));
 
   const sortFilterCommandsPath = path.join(__dirname, "..", "src", "commands", "registerSortFilterCommands.ts");
   const sortFilterCommands = stripComments(fs.readFileSync(sortFilterCommandsPath, "utf8"));

@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("renderMacroRunner is class-driven (no inline style assignments)", () => {
   const srcPath = path.join(__dirname, "..", "src", "macros", "dom_ui.ts");
-  const src = fs.readFileSync(srcPath, "utf8");
+  const src = stripComments(fs.readFileSync(srcPath, "utf8"));
 
   const usesInlineStyle =
     // Direct DOM style manipulation (element.style.* / element.style = ... / etc).

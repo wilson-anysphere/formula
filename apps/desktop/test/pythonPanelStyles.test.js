@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("PythonPanel DOM mount uses CSS classes (no inline style.*)", () => {
   const filePath = path.join(__dirname, "..", "src", "panels", "python", "PythonPanel.tsx");
-  const content = fs.readFileSync(filePath, "utf8");
+  const content = stripComments(fs.readFileSync(filePath, "utf8"));
 
   assert.equal(
     /\.style\./.test(content),

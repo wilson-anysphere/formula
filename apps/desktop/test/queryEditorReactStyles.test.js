@@ -20,7 +20,7 @@ test("Query editor React panels avoid inline styles (use query-editor.css classe
   ];
 
   for (const filePath of components) {
-    const src = fs.readFileSync(filePath, "utf8");
+    const src = stripComments(fs.readFileSync(filePath, "utf8"));
     assert.equal(
       /\bstyle\s*=/.test(src),
       false,

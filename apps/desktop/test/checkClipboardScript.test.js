@@ -4,11 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./sourceTextUtils.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("pnpm check:clipboard script builds via cargo_agent and targets the desktop tauri package", () => {
   const scriptPath = path.join(__dirname, "..", "scripts", "check-clipboard.mjs");
-  const src = fs.readFileSync(scriptPath, "utf8");
+  const src = stripComments(fs.readFileSync(scriptPath, "utf8"));
 
   // Must target the workspace package (not the lib crate name).
   assert.match(
@@ -79,4 +81,3 @@ test("pnpm check:clipboard script builds via cargo_agent and targets the desktop
     "expected clipboard smoke-check script to fall back to `cargo` on Windows when bash is unavailable",
   );
 });
-

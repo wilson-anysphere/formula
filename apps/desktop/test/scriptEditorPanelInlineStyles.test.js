@@ -20,7 +20,7 @@ function extractSection(source, startMarker, endMarker) {
 
 test("ScriptEditorPanel avoids static inline styles and uses token-based classes", () => {
   const panelPath = path.join(__dirname, "..", "src", "panels", "script-editor", "ScriptEditorPanel.js");
-  const source = fs.readFileSync(panelPath, "utf8");
+  const source = stripComments(fs.readFileSync(panelPath, "utf8"));
 
   assert.equal(
     /\.style\b/.test(source) || /setAttribute\(\s*["']style["']/.test(source),

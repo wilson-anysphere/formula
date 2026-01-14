@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("PythonPanel is class-driven (no static inline style assignments)", () => {
   const srcPath = path.join(__dirname, "..", "src", "panels", "python", "PythonPanel.tsx");
-  const src = fs.readFileSync(srcPath, "utf8");
+  const src = stripComments(fs.readFileSync(srcPath, "utf8"));
 
   assert.equal(
     /\.style\b/.test(src) || /setAttribute\(\s*["']style["']/.test(src),
@@ -44,7 +44,7 @@ test("PythonPanel is class-driven (no static inline style assignments)", () => {
 
 test("pythonPanelMount is class-driven (no static inline style assignments)", () => {
   const srcPath = path.join(__dirname, "..", "src", "panels", "python", "pythonPanelMount.js");
-  const src = fs.readFileSync(srcPath, "utf8");
+  const src = stripComments(fs.readFileSync(srcPath, "utf8"));
 
   assert.equal(
     /\.style\b/.test(src) || /setAttribute\(\s*["']style["']/.test(src),

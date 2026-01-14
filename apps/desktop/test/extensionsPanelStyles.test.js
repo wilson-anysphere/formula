@@ -11,7 +11,7 @@ const desktopRoot = path.resolve(__dirname, "..");
 
 test("ExtensionsPanel uses CSS classes (no React inline style props)", async () => {
   const panelPath = path.join(desktopRoot, "src", "extensions", "ExtensionsPanel.tsx");
-  const panelSource = await readFile(panelPath, "utf8");
+  const panelSource = stripComments(await readFile(panelPath, "utf8"));
 
   assert.ok(
     !panelSource.includes("style={{"),
@@ -24,7 +24,7 @@ test("ExtensionsPanel uses CSS classes (no React inline style props)", async () 
   assert.match(panelSource, /className\s*=\s*["'][^"']*extensions-panel\b/);
 
   const bodyPath = path.join(desktopRoot, "src", "extensions", "ExtensionPanelBody.tsx");
-  const bodySource = await readFile(bodyPath, "utf8");
+  const bodySource = stripComments(await readFile(bodyPath, "utf8"));
 
   assert.ok(
     !bodySource.includes("style={{"),
