@@ -581,34 +581,6 @@ impl UnmatchedFactRows {
         }
     }
 
-    pub(crate) fn retain(&mut self, mut f: impl FnMut(&usize) -> bool) {
-        match self {
-            UnmatchedFactRows::Sparse(rows) => rows.retain(|row| f(row)),
-            UnmatchedFactRows::Dense { bits, len, count } => {
-                let mut new_count = 0usize;
-                for (word_idx, word) in bits.iter_mut().enumerate() {
-                    let mut w = *word;
-                    let mut new_word = 0u64;
-                    while w != 0 {
-                        let tz = w.trailing_zeros() as usize;
-                        let row = word_idx * 64 + tz;
-                        if row >= *len {
-                            break;
-                        }
-                        let mask = 1u64 << tz;
-                        if f(&row) {
-                            new_word |= mask;
-                            new_count += 1;
-                        }
-                        w &= w - 1;
-                    }
-                    *word = new_word;
-                }
-                *count = new_count;
-            }
-        }
-    }
-
     pub(crate) fn extend_into(&self, out: &mut Vec<usize>) {
         match self {
             UnmatchedFactRows::Sparse(rows) => out.extend(rows.iter().copied()),
