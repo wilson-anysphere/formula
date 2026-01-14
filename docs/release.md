@@ -1482,13 +1482,16 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     # - GitHub "Source code (tar.gz)" archives
     # - Linux `.AppImage.tar.gz` bundles
     app_tgz=""
-    if [[ -f latest.json ]]; then
+    if [[ -f latest.json ]] && command -v jq >/dev/null 2>&1; then
       app_tgz="$(
         jq -r '.platforms["darwin-aarch64"].url // .platforms["darwin-x86_64"].url // empty' latest.json \
           | sed 's|[?#].*$||' \
           | sed 's|.*/||' \
           | head -n 1
       )"
+      if [[ -n "$app_tgz" && ! -f "$app_tgz" ]]; then
+        app_tgz=""
+      fi
     fi
     if [[ -z "$app_tgz" ]]; then
       app_tgz="$(
