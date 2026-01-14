@@ -776,6 +776,285 @@ fn countblank_virtual_blank_row_respects_bidirectional_filter_context_columnar_f
 }
 
 #[test]
+fn countblank_virtual_blank_row_respects_bidirectional_filter_context_columnar_dim() {
+    let model =
+        build_model_blank_row_bidirectional_columnar_dim_with_cardinality(Cardinality::OneToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn countblank_virtual_blank_row_respects_bidirectional_filter_context_columnar_dim_and_fact() {
+    let model =
+        build_model_blank_row_bidirectional_columnar_dim_and_fact_with_cardinality(
+            Cardinality::OneToMany,
+        );
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn countblank_virtual_blank_row_respects_bidirectional_filter_context_many_to_many() {
+    let model = build_model_blank_row_bidirectional_with_cardinality(Cardinality::ManyToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn countblank_virtual_blank_row_respects_bidirectional_filter_context_many_to_many_columnar_fact() {
+    let model =
+        build_model_blank_row_bidirectional_columnar_fact_with_cardinality(Cardinality::ManyToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn countblank_virtual_blank_row_respects_bidirectional_filter_context_many_to_many_columnar_dim() {
+    let model =
+        build_model_blank_row_bidirectional_columnar_dim_with_cardinality(Cardinality::ManyToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn countblank_virtual_blank_row_respects_bidirectional_filter_context_many_to_many_columnar_dim_and_fact(
+) {
+    let model = build_model_blank_row_bidirectional_columnar_dim_and_fact_with_cardinality(
+        Cardinality::ManyToMany,
+    );
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTBLANK(Customers[Region])",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
 fn all_column_virtual_blank_row_respects_bidirectional_filter_context() {
     let model = build_model_blank_row_bidirectional();
     let engine = DaxEngine::new();
@@ -826,6 +1105,285 @@ fn all_column_virtual_blank_row_respects_bidirectional_filter_context() {
 #[test]
 fn all_column_virtual_blank_row_respects_bidirectional_filter_context_columnar_fact() {
     let model = build_model_blank_row_bidirectional_columnar_fact();
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn all_column_virtual_blank_row_respects_bidirectional_filter_context_columnar_dim() {
+    let model =
+        build_model_blank_row_bidirectional_columnar_dim_with_cardinality(Cardinality::OneToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn all_column_virtual_blank_row_respects_bidirectional_filter_context_columnar_dim_and_fact() {
+    let model =
+        build_model_blank_row_bidirectional_columnar_dim_and_fact_with_cardinality(
+            Cardinality::OneToMany,
+        );
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn all_column_virtual_blank_row_respects_bidirectional_filter_context_many_to_many() {
+    let model = build_model_blank_row_bidirectional_with_cardinality(Cardinality::ManyToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn all_column_virtual_blank_row_respects_bidirectional_filter_context_many_to_many_columnar_fact() {
+    let model =
+        build_model_blank_row_bidirectional_columnar_fact_with_cardinality(Cardinality::ManyToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn all_column_virtual_blank_row_respects_bidirectional_filter_context_many_to_many_columnar_dim() {
+    let model =
+        build_model_blank_row_bidirectional_columnar_dim_with_cardinality(Cardinality::ManyToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn all_column_virtual_blank_row_respects_bidirectional_filter_context_many_to_many_columnar_dim_and_fact(
+) {
+    let model = build_model_blank_row_bidirectional_columnar_dim_and_fact_with_cardinality(
+        Cardinality::ManyToMany,
+    );
     let engine = DaxEngine::new();
 
     assert_eq!(
