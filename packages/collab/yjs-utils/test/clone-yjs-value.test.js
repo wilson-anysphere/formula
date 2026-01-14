@@ -61,3 +61,41 @@ test("collab-yjs-utils: cloneYjsValue can clone foreign values into local constr
   assert.ok(a instanceof Y.Array);
   assert.deepEqual(a.toArray(), [1, 2]);
 });
+
+test("collab-yjs-utils: cloneYjsValue can clone unintegrated foreign Y.Text with formatting and embeds", () => {
+  const Ycjs = requireYjsCjs();
+
+  const foreignText = new Ycjs.Text();
+  foreignText.insert(0, "hello");
+  foreignText.format(0, 5, { bold: true });
+  foreignText.insertEmbed(5, { foo: "bar" });
+  const embedded = new Ycjs.Map();
+  embedded.set("x", 1);
+  foreignText.insertEmbed(6, embedded);
+
+  const cloned = cloneYjsValue(foreignText, { Map: Y.Map, Array: Y.Array, Text: Y.Text });
+  assert.ok(cloned instanceof Y.Text);
+
+  const doc = new Y.Doc();
+  const root = doc.getMap("root");
+  root.set("t", cloned);
+
+  const t = root.get("t");
+  assert.ok(t instanceof Y.Text);
+
+  const delta = t.toDelta();
+  const inserted = delta.map((op) => (typeof op.insert === "string" ? op.insert : "")).join("");
+  assert.equal(inserted, "hello");
+  assert.equal(
+    delta.some((op) => typeof op.attributes === "object" && op.attributes && op.attributes.bold === true),
+    true,
+  );
+  assert.equal(
+    delta.some((op) => op && typeof op.insert === "object" && op.insert && op.insert.foo === "bar"),
+    true,
+  );
+
+  const insertedMap = delta.find((op) => op && op.insert && typeof op.insert.get === "function")?.insert;
+  assert.ok(insertedMap, "expected embedded Yjs type to round-trip through toDelta()");
+  assert.equal(insertedMap.get("x"), 1);
+});
