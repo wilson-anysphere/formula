@@ -17,7 +17,7 @@ use formula_model::{sheet_name_eq_case_insensitive, CellRef, Range, Style, EXCEL
 use super::source::coerce_pivot_value_with_number_format;
 use super::{
     Layout, PivotApplyOptions, PivotCache, PivotConfig, PivotEngine, PivotError, PivotResult,
-    PivotValue, ShowAsType,
+    PivotTable, PivotValue, ShowAsType,
 };
 
 /// Stable identifier for a pivot table stored in the engine.
@@ -627,12 +627,30 @@ pub(crate) trait PivotRefreshContext {
 
         Ok(())
     }
+
+    /// Register a pivot table's metadata for `GETPIVOTDATA` (best-effort).
+    fn register_pivot_table(
+        &mut self,
+        _sheet: &str,
+        _destination: Range,
+        _pivot: PivotTable,
+    ) -> Result<(), crate::pivot_registry::PivotRegistryError> {
+        Ok(())
+    }
+
+    /// Unregister a pivot table's metadata for `GETPIVOTDATA` (best-effort).
+    fn unregister_pivot_table(&mut self, _pivot_id: &str) {}
+}
+
+fn pivot_registry_id(id: PivotTableId) -> String {
+    format!("engine-pivot-{id}")
 }
 
 pub(crate) fn refresh_pivot(
     ctx: &mut impl PivotRefreshContext,
     def: &mut PivotTableDefinition,
 ) -> Result<PivotRefreshOutput, PivotRefreshError> {
+    let registry_pivot_id = pivot_registry_id(def.id);
     let (source_sheet, source_range) = match &def.source {
         PivotSource::Range { sheet, range } => {
             let Some(range) = range.as_ref().copied() else {
@@ -658,6 +676,7 @@ pub(crate) fn refresh_pivot(
         if let Some(prev) = def.last_output_range {
             ctx.clear_range(&def.destination.sheet, prev).ok();
         }
+        ctx.unregister_pivot_table(&registry_pivot_id);
         def.last_output_range = None;
         def.needs_refresh = false;
         return Ok(PivotRefreshOutput {
@@ -774,6 +793,22 @@ pub(crate) fn refresh_pivot(
 
     def.last_output_range = Some(output_range);
     def.needs_refresh = false;
+
+    // Register pivot metadata for `GETPIVOTDATA` (best-effort).
+    //
+    // Note: We register after successfully writing output so that if refresh fails part-way through
+    // (e.g. due to an unexpected write error), we don't replace the previous registry entry.
+    ctx.register_pivot_table(
+        &def.destination.sheet,
+        output_range,
+        PivotTable {
+            id: registry_pivot_id,
+            name: def.name.clone(),
+            config: def.config.clone(),
+            cache,
+        },
+    )
+    .ok();
 
     Ok(PivotRefreshOutput {
         output_range: Some(output_range),

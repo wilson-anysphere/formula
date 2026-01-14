@@ -8536,6 +8536,19 @@ impl PivotRefreshContext for Engine {
     ) -> Result<(), EngineError> {
         Engine::set_range_values(self, sheet, range, values, false)
     }
+
+    fn register_pivot_table(
+        &mut self,
+        sheet: &str,
+        destination: Range,
+        pivot: crate::pivot::PivotTable,
+    ) -> Result<(), crate::pivot_registry::PivotRegistryError> {
+        Engine::register_pivot_table(self, sheet, destination, pivot)
+    }
+
+    fn unregister_pivot_table(&mut self, pivot_id: &str) {
+        self.pivot_registry.unregister(pivot_id);
+    }
 }
 
 fn sheet_names_by_id(workbook: &Workbook) -> HashMap<SheetId, String> {

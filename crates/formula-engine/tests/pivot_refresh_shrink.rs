@@ -172,3 +172,40 @@ fn pivot_refresh_failure_does_not_clear_previous_output() {
     // The previous pivot output should remain intact because the refresh never applied.
     assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Text("West".to_string()));
 }
+
+#[test]
+fn pivot_refresh_registers_pivot_for_getpivotdata() {
+    let mut engine = Engine::new();
+    seed_sales_data(&mut engine);
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B3")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: sum_sales_by_region_config(),
+        apply_number_formats: true,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+
+    // Pivot refresh should register metadata for `GETPIVOTDATA` automatically.
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "G1",
+            "=GETPIVOTDATA(\"Sum of Sales\", D1, \"Region\", \"East\")",
+        )
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(100.0));
+}

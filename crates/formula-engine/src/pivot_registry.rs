@@ -274,6 +274,11 @@ impl PivotRegistry {
         self.entries.push(entry);
     }
 
+    /// Remove any registry entries with the given `pivot_id`.
+    pub fn unregister(&mut self, pivot_id: &str) {
+        self.entries.retain(|e| e.pivot_id != pivot_id);
+    }
+
     pub fn find_by_cell(&self, sheet_id: usize, addr: CellAddr) -> Option<&PivotRegistryEntry> {
         // Prefer the most recently registered pivot if ranges overlap.
         self.entries
