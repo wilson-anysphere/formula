@@ -4629,6 +4629,26 @@ pub fn build_autofilter_criteria_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture like [`build_autofilter_criteria_fixture_xls`], but where the
+/// `AUTOFILTER.iEntry` field stores an **absolute worksheet column index** (observed in some
+/// producers) instead of an index relative to the AutoFilter range start.
+///
+/// The sheet is named `FilterCriteriaAbsEntry` and the `_xlnm._FilterDatabase` defined name points
+/// at `$D$1:$F$5` (range start is column D, index 3).
+pub fn build_autofilter_criteria_absolute_entry_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_autofilter_criteria_absolute_entry_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single sheet named `FilterSort` with a
 /// sheet-scoped `_xlnm._FilterDatabase` defined name referencing `$A$1:$C$5`, plus a BIFF8 `SORT`
 /// record describing an AutoFilter sort state.
@@ -15462,6 +15482,93 @@ fn build_autofilter_criteria_workbook_stream() -> Vec<u8> {
     let doper1 = autofilter_doper_number(AUTOFILTER_OP_GREATER_THAN, 10.0);
     let doper2 = autofilter_doper_number(AUTOFILTER_OP_LESS_THAN, 20.0);
     let autofilter = autofilter_record(2, true, &doper1, &doper2);
+    push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_autofilter_criteria_absolute_entry_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "FilterCriteriaAbsEntry");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // `_xlnm._FilterDatabase` (built-in name id 0x0D) scoped to the sheet (`itab=1`).
+    // Range: $D$1:$F$5.
+    let filter_db_rgce = ptg_area(0, 4, 3, 5);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x0D, &filter_db_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 5) cols [3, 6) so D1:F5 exists.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&5u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&3u16.to_le_bytes()); // first col (D)
+    dims.extend_from_slice(&6u16.to_le_bytes()); // last col + 1 (F)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // D1: seed calamine's range (use a General NUMBER cell).
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 3, xf_general, 1.0),
+    );
+
+    // AUTOFILTERINFO: cEntries = 3 (D..F).
+    push_record(&mut sheet, RECORD_AUTOFILTERINFO, &3u16.to_le_bytes());
+    // FILTERMODE: present (no payload) to indicate an active filter.
+    push_record(&mut sheet, RECORD_FILTERMODE, &[]);
+
+    // AUTOFILTER records: encode iEntry as an *absolute* worksheet column index.
+    // Column D (col=3): equals "Alice".
+    let doper1 = autofilter_doper_string(AUTOFILTER_OP_EQUAL, "Alice");
+    let doper2 = autofilter_doper_none();
+    let autofilter = autofilter_record(3, false, &doper1, &doper2);
+    push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
+
+    // Column F (col=5): numeric comparison > 1.
+    let doper1 = autofilter_doper_number(AUTOFILTER_OP_GREATER_THAN, 1.0);
+    let doper2 = autofilter_doper_none();
+    let autofilter = autofilter_record(5, false, &doper1, &doper2);
     push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
