@@ -86,7 +86,7 @@ describeWasm("DocumentController range-run formatting → worker RPC → CELL() 
     (globalThis as any).self = previousSelf;
   });
 
-  it('propagates large-range formatting (rangeRunDeltas) so CELL("protect") reflects range-run formatting', async () => {
+  it('propagates large-range formatting (rangeRunDeltas) so CELL("protect"/"prefix"/"format") reflect range-run formatting', async () => {
     const wasmModuleUrl = new URL("./fixtures/formulaWasmNodeWrapper.mjs", import.meta.url).href;
     await loadWorkerModule();
 
@@ -120,18 +120,28 @@ describeWasm("DocumentController range-run formatting → worker RPC → CELL() 
       doc.setCellValue("Sheet1", "A1", "x");
       // Keep the formula cell out of the formatted rectangle so only the referenced cell's format changes.
       doc.setCellFormula("Sheet1", "AA1", 'CELL("protect",A1)');
+      doc.setCellFormula("Sheet1", "AB1", 'CELL("prefix",A1)');
+      doc.setCellFormula("Sheet1", "AC1", 'CELL("format",A1)');
 
       await engineHydrateFromDocument(syncTarget, doc);
 
       let cell = await engine.getCell("AA1", "Sheet1");
       expect(cell.value).toBe(1);
+      cell = await engine.getCell("AB1", "Sheet1");
+      expect(cell.value).toBe("");
+      cell = await engine.getCell("AC1", "Sheet1");
+      expect(cell.value).toBe("G");
 
       // Apply a large-formatting patch so DocumentController uses compressed range-run formatting.
       let payload: any = null;
       const unsub = doc.on("change", (p: any) => {
         payload = p;
       });
-      doc.setRangeFormat("Sheet1", "A1:Z2000", { protection: { locked: false } });
+      doc.setRangeFormat("Sheet1", "A1:Z2000", {
+        protection: { locked: false },
+        alignment: { horizontal: "left" },
+        numberFormat: "0.00",
+      });
       unsub();
 
       expect(payload?.recalc).toBe(false);
@@ -142,6 +152,10 @@ describeWasm("DocumentController range-run formatting → worker RPC → CELL() 
 
       cell = await engine.getCell("AA1", "Sheet1");
       expect(cell.value).toBe(0);
+      cell = await engine.getCell("AB1", "Sheet1");
+      expect(cell.value).toBe("'");
+      cell = await engine.getCell("AC1", "Sheet1");
+      expect(cell.value).toBe("F2");
 
       // Clear formatting back to default by passing `null` (DocumentController semantics: clear style).
       payload = null;
@@ -159,6 +173,10 @@ describeWasm("DocumentController range-run formatting → worker RPC → CELL() 
 
       cell = await engine.getCell("AA1", "Sheet1");
       expect(cell.value).toBe(1);
+      cell = await engine.getCell("AB1", "Sheet1");
+      expect(cell.value).toBe("");
+      cell = await engine.getCell("AC1", "Sheet1");
+      expect(cell.value).toBe("G");
     } finally {
       engine.terminate();
     }
