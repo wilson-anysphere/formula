@@ -130,18 +130,23 @@ def _append_step_summary(markdown: str) -> None:
         f.write("\n")
 
 
-def _append_error_summary(message: str) -> None:
+def _append_error_summary(message: str, *, hints: list[str] | None = None) -> None:
     """
     Best-effort: if running in GitHub Actions, surface failures in the step summary.
     """
-    md = "\n".join(
-        [
-            "## Desktop size report",
-            "",
-            f"**ERROR:** {message}",
-            "",
-        ]
-    )
+    lines = [
+        "## Desktop size report",
+        "",
+        f"**ERROR:** {message}",
+        "",
+    ]
+    if hints:
+        lines.append("**Hint:**")
+        lines.append("")
+        for hint in hints:
+            lines.append(f"- {hint}")
+        lines.append("")
+    md = "\n".join(lines)
     _append_step_summary(md)
 
 
@@ -291,12 +296,24 @@ def main() -> int:
     if not binary_path.is_file():
         msg = f"binary not found: {binary_path}"
         print(f"desktop-size: ERROR {msg}", file=sys.stderr)
-        _append_error_summary(msg)
+        _append_error_summary(
+            msg,
+            hints=[
+                "Build the desktop binary: `cargo build -p formula-desktop-tauri --features desktop --release --locked`",
+                "Or pass `--binary <path>` (default: `target/release/formula-desktop[.exe]`)",
+            ],
+        )
         return 2
     if not dist_path.is_dir():
         msg = f"dist directory not found: {dist_path}"
         print(f"desktop-size: ERROR {msg}", file=sys.stderr)
-        _append_error_summary(msg)
+        _append_error_summary(
+            msg,
+            hints=[
+                "Build desktop renderer assets: `pnpm build:desktop`",
+                "Or pass `--dist <path>` (default: `apps/desktop/dist`)",
+            ],
+        )
         return 2
 
     binary = SizedPath(path=binary_path, size_bytes=binary_path.stat().st_size)
