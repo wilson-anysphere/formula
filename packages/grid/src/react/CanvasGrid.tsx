@@ -1044,6 +1044,15 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const dragViewportPointScratch = { x: 0, y: 0 };
     const hoverViewportPointScratch = { x: 0, y: 0 };
     const pickCellScratch = { row: 0, col: 0 };
+    const fillHandlePointerCellScratch = { row: 0, col: 0 };
+
+    // Cache the last picked cell during pointer-driven selection / fill-handle drags so we can
+    // skip redundant work (and allocations) when high-frequency pointermove events stay within
+    // the same cell.
+    let lastDragPickedRow = Number.NaN;
+    let lastDragPickedCol = Number.NaN;
+    let lastFillHandlePointerRow = Number.NaN;
+    let lastFillHandlePointerCol = Number.NaN;
 
     const getViewportPoint = (event: { clientX: number; clientY: number }, out?: { x: number; y: number }) => {
       const origin = selectionCanvasViewportOriginRef.current;
@@ -1174,19 +1183,25 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const dataStartCol = headerCols >= colCount ? 0 : headerCols;
 
       // Clamp pointerCell into the data region so fill handle drags can't extend selection into headers.
-      const pointerCell = {
-        row: clamp(picked.row, dataStartRow, rowCount - 1),
-        col: clamp(picked.col, dataStartCol, colCount - 1)
-      };
-      const preview = computeFillPreview(state.source, pointerCell);
+      const pointerRow = clamp(picked.row, dataStartRow, rowCount - 1);
+      const pointerCol = clamp(picked.col, dataStartCol, colCount - 1);
+      if (pointerRow === lastFillHandlePointerRow && pointerCol === lastFillHandlePointerCol) return;
+      lastFillHandlePointerRow = pointerRow;
+      lastFillHandlePointerCol = pointerCol;
+
+      fillHandlePointerCellScratch.row = pointerRow;
+      fillHandlePointerCellScratch.col = pointerCol;
+      const preview = computeFillPreview(state.source, fillHandlePointerCellScratch);
       const target = preview?.unionRange ?? state.source;
       const previewTarget = preview?.targetRange ?? null;
       if (rangesEqual(target, state.target)) return;
 
-      fillHandleStateRef.current = { ...state, target, previewTarget };
+      const prevPreviewTarget = state.previewTarget;
+      state.target = target;
+      state.previewTarget = previewTarget;
       renderer.setFillPreviewRange(target);
       onFillHandleChangeRef.current?.({ source: state.source, target });
-      if (!rangesEqualNullable(previewTarget, state.previewTarget)) {
+      if (!rangesEqualNullable(previewTarget, prevPreviewTarget)) {
         onFillPreviewChangeRef.current?.(previewTarget);
       }
     };
@@ -1196,6 +1211,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       if (!renderer) return;
       const anchor = selectionAnchorRef.current;
       if (!anchor) return;
+      if (picked.row === lastDragPickedRow && picked.col === lastDragPickedCol) return;
+      lastDragPickedRow = picked.row;
+      lastDragPickedCol = picked.col;
 
       const range: CellRange = {
         startRow: Math.min(anchor.row, picked.row),
@@ -1515,6 +1533,16 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           dragModeRef.current = "fillHandle";
           const mode: FillMode = event.altKey ? "formulas" : event.metaKey || event.ctrlKey ? "copy" : "series";
           fillHandleStateRef.current = { source, target: source, mode, previewTarget: null };
+
+          // Seed the fill-handle pointer-cell cache with the selection corner so a "still" drag
+          // (high-frequency pointermoves within the same cell) doesn't recompute previews.
+          const { rowCount, colCount } = renderer.scroll.getCounts();
+          const headerRows = headerRowsRef.current;
+          const headerCols = headerColsRef.current;
+          const dataStartRow = headerRows >= rowCount ? 0 : headerRows;
+          const dataStartCol = headerCols >= colCount ? 0 : headerCols;
+          lastFillHandlePointerRow = clamp(source.endRow - 1, dataStartRow, Math.max(0, rowCount - 1));
+          lastFillHandlePointerCol = clamp(source.endCol - 1, dataStartCol, Math.max(0, colCount - 1));
           selectionCanvas.setPointerCapture?.(event.pointerId);
 
           containerRef.current?.focus({ preventScroll: true });
@@ -1539,6 +1567,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         selectionCanvas.setPointerCapture?.(event.pointerId);
 
         selectionAnchorRef.current = picked;
+        lastDragPickedRow = picked.row;
+        lastDragPickedCol = picked.col;
         const range: CellRange = {
           startRow: picked.row,
           endRow: picked.row + 1,
@@ -1677,6 +1707,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       selectionPointerIdRef.current = event.pointerId;
       selectionCanvas.setPointerCapture?.(event.pointerId);
+      lastDragPickedRow = picked.row;
+      lastDragPickedCol = picked.col;
 
       if (isAdditive) {
         selectionAnchorRef.current = picked;

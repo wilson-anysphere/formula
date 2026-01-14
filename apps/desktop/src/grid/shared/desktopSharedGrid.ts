@@ -125,6 +125,11 @@ export class DesktopSharedGrid {
   private readonly dragViewportPointScratch = { x: 0, y: 0 };
   private readonly hoverViewportPointScratch = { x: 0, y: 0 };
   private readonly pickCellScratch = { row: 0, col: 0 };
+  private readonly fillHandlePointerCellScratch = { row: 0, col: 0 };
+  private lastDragPickedRow: number | null = null;
+  private lastDragPickedCol: number | null = null;
+  private lastFillHandlePointerRow: number | null = null;
+  private lastFillHandlePointerCol: number | null = null;
   private autoScrollFrame: number | null = null;
 
   private dragMode: "selection" | "fillHandle" | null = null;
@@ -410,6 +415,10 @@ export class DesktopSharedGrid {
     this.dragMode = null;
     this.fillHandleState = null;
     this.lastPointerViewport = null;
+    this.lastDragPickedRow = null;
+    this.lastDragPickedCol = null;
+    this.lastFillHandlePointerRow = null;
+    this.lastFillHandlePointerCol = null;
     this.selectionAnchor = null;
     this.clearViewportOrigin();
     this.stopAutoScroll();
@@ -468,6 +477,10 @@ export class DesktopSharedGrid {
     this.selectionPointerId = null;
     this.selectionAnchor = null;
     this.lastPointerViewport = null;
+    this.lastDragPickedRow = null;
+    this.lastDragPickedCol = null;
+    this.lastFillHandlePointerRow = null;
+    this.lastFillHandlePointerCol = null;
     this.transientRange = null;
     this.clearViewportOrigin();
     this.stopAutoScroll();
@@ -1240,6 +1253,9 @@ export class DesktopSharedGrid {
     const renderer = this.renderer;
     const anchor = this.selectionAnchor;
     if (!anchor) return;
+    if (this.lastDragPickedRow === picked.row && this.lastDragPickedCol === picked.col) return;
+    this.lastDragPickedRow = picked.row;
+    this.lastDragPickedCol = picked.col;
 
     const range: CellRange = {
       startRow: Math.min(anchor.row, picked.row),
@@ -1282,24 +1298,32 @@ export class DesktopSharedGrid {
     const dataStartCol = this.headerCols >= colCount ? 0 : this.headerCols;
 
     // Clamp pointerCell into the data region so fill handle drags can't extend selection into headers.
-    const pointerCell = {
-      row: clamp(picked.row, dataStartRow, rowCount - 1),
-      col: clamp(picked.col, dataStartCol, colCount - 1)
-    };
+    const pointerRow = clamp(picked.row, dataStartRow, rowCount - 1);
+    const pointerCol = clamp(picked.col, dataStartCol, colCount - 1);
+    if (pointerRow === this.lastFillHandlePointerRow && pointerCol === this.lastFillHandlePointerCol) {
+      return;
+    }
+    this.lastFillHandlePointerRow = pointerRow;
+    this.lastFillHandlePointerCol = pointerCol;
+
+    const pointerCell = this.fillHandlePointerCellScratch;
+    pointerCell.row = pointerRow;
+    pointerCell.col = pointerCol;
     const preview = computeFillPreview(state.source, pointerCell);
     const unionRange = preview?.unionRange ?? state.source;
     const previewTarget = preview?.targetRange ?? null;
 
-    const endCell = {
-      row: clamp(picked.row, unionRange.startRow, unionRange.endRow - 1),
-      col: clamp(picked.col, unionRange.startCol, unionRange.endCol - 1)
-    };
+    const endRow = clamp(picked.row, unionRange.startRow, unionRange.endRow - 1);
+    const endCol = clamp(picked.col, unionRange.startCol, unionRange.endCol - 1);
 
-    if (rangesEqual(unionRange, state.target) && endCell.row === state.endCell.row && endCell.col === state.endCell.col) {
+    if (rangesEqual(unionRange, state.target) && endRow === state.endCell.row && endCol === state.endCell.col) {
       return;
     }
 
-    this.fillHandleState = { ...state, target: unionRange, previewTarget, endCell };
+    state.target = unionRange;
+    state.previewTarget = previewTarget;
+    state.endCell.row = endRow;
+    state.endCell.col = endCol;
     this.renderer.setFillPreviewRange(unionRange);
   }
 
@@ -1532,6 +1556,13 @@ export class DesktopSharedGrid {
               previewTarget: null,
               endCell: { row: source.endRow - 1, col: source.endCol - 1 }
             };
+            // Seed the fill-handle pointer-cell cache with the selection corner so high-frequency
+            // pointermoves within the same cell don't recompute previews.
+            const { rowCount, colCount } = renderer.scroll.getCounts();
+            const dataStartRow = this.headerRows >= rowCount ? 0 : this.headerRows;
+            const dataStartCol = this.headerCols >= colCount ? 0 : this.headerCols;
+            this.lastFillHandlePointerRow = clamp(source.endRow - 1, dataStartRow, Math.max(0, rowCount - 1));
+            this.lastFillHandlePointerCol = clamp(source.endCol - 1, dataStartCol, Math.max(0, colCount - 1));
             selectionCanvas.setPointerCapture?.(event.pointerId);
 
             // Focus the container so keyboard shortcuts (e.g. Escape) still work while dragging.
@@ -1563,6 +1594,8 @@ export class DesktopSharedGrid {
         selectionCanvas.setPointerCapture?.(event.pointerId);
 
         this.selectionAnchor = picked;
+        this.lastDragPickedRow = picked.row;
+        this.lastDragPickedCol = picked.col;
         const range: CellRange = { startRow: picked.row, endRow: picked.row + 1, startCol: picked.col, endCol: picked.col + 1 };
         this.transientRange = range;
         renderer.setRangeSelection(range);
@@ -1703,6 +1736,8 @@ export class DesktopSharedGrid {
       this.selectionPointerId = event.pointerId;
       this.dragMode = "selection";
       selectionCanvas.setPointerCapture?.(event.pointerId);
+      this.lastDragPickedRow = picked.row;
+      this.lastDragPickedCol = picked.col;
 
       if (isAdditive) {
         this.selectionAnchor = picked;
@@ -1811,6 +1846,10 @@ export class DesktopSharedGrid {
       this.selectionPointerId = null;
       this.selectionAnchor = null;
       this.lastPointerViewport = null;
+      this.lastDragPickedRow = null;
+      this.lastDragPickedCol = null;
+      this.lastFillHandlePointerRow = null;
+      this.lastFillHandlePointerCol = null;
       this.clearViewportOrigin();
       this.stopAutoScroll();
 
