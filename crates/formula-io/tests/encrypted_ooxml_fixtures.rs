@@ -129,9 +129,9 @@ fn parse_standard_encryption_info(
     let minor = read_u16_le(encryption_info, &mut pos, "EncryptionVersionInfo.minor")?;
     let version_flags = read_u32_le(encryption_info, &mut pos, "EncryptionVersionInfo.flags")?;
 
-    if (major, minor) != (3, 2) {
+    if minor != 2 || !matches!(major, 2 | 3 | 4) {
         return Err(format!(
-            "expected Standard EncryptionInfo version 3.2, got {major}.{minor}"
+            "expected Standard EncryptionInfo version *.2 with major=2/3/4, got {major}.{minor}"
         ));
     }
 

@@ -106,6 +106,56 @@ fn cli_prints_standard_version() {
 }
 
 #[test]
+fn cli_prints_standard_version_major_2() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("standard.xlsx");
+
+    let bytes = make_ooxml_encrypted_container(2, 2, 0xAABBCCDD, b"");
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg(&path)
+        .output()
+        .expect("run cli");
+    assert!(
+        out.status.success(),
+        "expected success exit status, got {:?}",
+        out.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.trim_end(),
+        "Standard (2.2) flags=0xaabbccdd",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn cli_prints_standard_version_major_4() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("standard.xlsx");
+
+    let bytes = make_ooxml_encrypted_container(4, 2, 0xAABBCCDD, b"");
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let out = Command::new(ooxml_encryption_info_bin())
+        .arg(&path)
+        .output()
+        .expect("run cli");
+    assert!(
+        out.status.success(),
+        "expected success exit status, got {:?}",
+        out.status.code()
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.trim_end(),
+        "Standard (4.2) flags=0xaabbccdd",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
 fn cli_prints_agile_version_and_root_tag() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("agile.xlsx");
