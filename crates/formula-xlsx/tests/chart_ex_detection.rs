@@ -20,6 +20,7 @@ fn detects_chart_ex_parts_and_parses_kind() {
         "box-whisker",
         "pareto",
         "map",
+        "map-chartdata",
     ] {
         let bytes = load_fixture(fixture_name);
         let pkg = XlsxPackage::from_bytes(&bytes).expect("parse package");
