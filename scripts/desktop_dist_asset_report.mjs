@@ -250,7 +250,12 @@ async function scanDistDir(dir) {
     }
   }
 
-  files.sort((a, b) => b.sizeBytes - a.sizeBytes);
+  // Sort deterministically (stable across platforms/filesystems).
+  files.sort((a, b) => {
+    const bySize = b.sizeBytes - a.sizeBytes;
+    if (bySize !== 0) return bySize;
+    return a.relPath.localeCompare(b.relPath);
+  });
   return { files, totalBytes };
 }
 
@@ -401,7 +406,11 @@ function computeGroupTotals(files, groupDepth) {
 
   return Array.from(groups.entries())
     .map(([group, value]) => ({ group, files: value.files, bytes: value.bytes }))
-    .sort((a, b) => b.bytes - a.bytes);
+    .sort((a, b) => {
+      const byBytes = b.bytes - a.bytes;
+      if (byBytes !== 0) return byBytes;
+      return a.group.localeCompare(b.group);
+    });
 }
 
 /**
@@ -462,7 +471,11 @@ function computeTypeTotals(files) {
 
   return Array.from(types.entries())
     .map(([type, value]) => ({ type, files: value.files, bytes: value.bytes }))
-    .sort((a, b) => b.bytes - a.bytes);
+    .sort((a, b) => {
+      const byBytes = b.bytes - a.bytes;
+      if (byBytes !== 0) return byBytes;
+      return a.type.localeCompare(b.type);
+    });
 }
 
 /**
