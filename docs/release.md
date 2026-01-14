@@ -1229,9 +1229,11 @@ wired to the correct **updater-consumed** artifacts:
         - `GH_TOKEN=... gh release download vX.Y.Z --repo OWNER/REPO --pattern 'latest.json*'`
       - `curl -L -o latest.json https://github.com/OWNER/REPO/releases/download/vX.Y.Z/latest.json`
       - `curl -L -o latest.json.sig https://github.com/OWNER/REPO/releases/download/vX.Y.Z/latest.json.sig`
-   - Inspect:
-      - `jq '.platforms | keys' latest.json`
-      - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
+    - Inspect:
+       - `jq '.platforms | keys' latest.json`
+       - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
+       - (Recommended) confirm each platform entry has a non-empty `signature` string:
+         - `jq -r '.platforms | to_entries[] | select((.value.signature // "") == "") | .key' latest.json`
 3. Confirm each `platforms[*].url` points at the expected **updater** asset type (not a manual-only installer):
    - macOS: updater payload archive (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (**not** `.dmg`)
    - Windows: `*.msi` (CI expects the manifest to reference the MSI; the `.exe` is for manual install)
@@ -1241,6 +1243,7 @@ wired to the correct **updater-consumed** artifacts:
      - Windows: `windows-x86_64` and `windows-aarch64` should point at **different** `.msi` files whose filenames include an arch token (e.g. `x64`/`x86_64`/`amd64` vs `arm64`/`aarch64`).
      - Linux: `linux-x86_64` and `linux-aarch64` should point at **different** `.AppImage` files whose filenames include an arch token (e.g. `x86_64`/`amd64` vs `arm64`/`aarch64`).
 4. Confirm each URL filename matches an actual Release asset (no broken/missing assets).
+   - This repo also expects detached signature assets (`<asset>.sig`) to be uploaded alongside each updater payload.
 5. (Optional) Verify the manifest signature locally:
    - `node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig`
    - Note: this uses the updater public key embedded in `apps/desktop/src-tauri/tauri.conf.json`.
