@@ -206,6 +206,39 @@ fn parse_legend(
     })
 }
 
+fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
+    let mut hints = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    for node in doc.descendants().filter(|n| n.is_element()) {
+        if let Some(layout_id) = attribute_case_insensitive(node, "layoutId") {
+            let hint = format!("layoutId={layout_id}");
+            if seen.insert(hint.clone()) {
+                hints.push(hint);
+            }
+        }
+        if let Some(chart_type) = attribute_case_insensitive(node, "chartType") {
+            let hint = format!("chartType={chart_type}");
+            if seen.insert(hint.clone()) {
+                hints.push(hint);
+            }
+        }
+
+        let tag = node.tag_name().name();
+        if tag.len() > 5
+            && tag.to_ascii_lowercase().ends_with("chart")
+            && !tag.eq_ignore_ascii_case("chart")
+        {
+            let hint = format!("element={tag}");
+            if seen.insert(hint.clone()) {
+                hints.push(hint);
+            }
+        }
+    }
+
+    hints
+}
+
 fn detect_chart_kind(
     doc: &Document<'_>,
     _root_ns: &str,

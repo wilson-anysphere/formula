@@ -250,7 +250,6 @@ fn xlsb_export_preserves_defined_names_and_ptgname_formulas() {
             shared_string_index: None,
             new_style: None,
             clear_formula: false,
-            clear_formula: false,
         }],
     )
     .expect("patch sheet");
