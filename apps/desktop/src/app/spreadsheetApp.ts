@@ -19824,6 +19824,14 @@ export class SpreadsheetApp {
 
   private invalidateComputedValues(changes: unknown): void {
     if (!Array.isArray(changes)) return;
+    const sheetTokenToId = new Map<string, string>();
+    const resolveSheetToken = (token: string): string => {
+      const cached = sheetTokenToId.get(token);
+      if (cached) return cached;
+      const resolved = this.resolveSheetIdByName(token) ?? token;
+      sheetTokenToId.set(token, resolved);
+      return resolved;
+    };
     const coordScratch = { row: 0, col: 0 };
     let lastSheetId: string | null = null;
     let lastSheetCache: Map<number, SpreadsheetValue> | null = null;
@@ -19831,9 +19839,8 @@ export class SpreadsheetApp {
     for (const change of changes) {
       const ref = change as EngineCellRef;
 
-      let sheetId = typeof ref.sheet === "string" ? ref.sheet : undefined;
-      if (!sheetId && typeof ref.sheetId === "string") sheetId = ref.sheetId;
-      if (!sheetId) sheetId = this.sheetId;
+      const sheetToken = typeof ref.sheet === "string" ? ref.sheet : typeof ref.sheetId === "string" ? ref.sheetId : null;
+      let sheetId = sheetToken ? resolveSheetToken(sheetToken) : this.sheetId;
 
       let address = typeof ref.address === "string" ? ref.address : undefined;
 
@@ -19876,6 +19883,14 @@ export class SpreadsheetApp {
   private applyComputedChanges(changes: unknown): void {
     if (!Array.isArray(changes)) return;
     let updated = false;
+    const sheetTokenToId = new Map<string, string>();
+    const resolveSheetToken = (token: string): string => {
+      const cached = sheetTokenToId.get(token);
+      if (cached) return cached;
+      const resolved = this.resolveSheetIdByName(token) ?? token;
+      sheetTokenToId.set(token, resolved);
+      return resolved;
+    };
     const sheetCount = (this.document as any)?.model?.sheets?.size;
     const shouldInvalidate = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
     const chartDeltas: Array<{ sheetId: string; row: number; col: number }> | null =
@@ -19894,9 +19909,8 @@ export class SpreadsheetApp {
     for (const change of changes) {
       const ref = change as EngineCellRef;
 
-      let sheetId = typeof ref.sheet === "string" ? ref.sheet : undefined;
-      if (!sheetId && typeof ref.sheetId === "string") sheetId = ref.sheetId;
-      if (!sheetId) sheetId = this.sheetId;
+      const sheetToken = typeof ref.sheet === "string" ? ref.sheet : typeof ref.sheetId === "string" ? ref.sheetId : null;
+      let sheetId = sheetToken ? resolveSheetToken(sheetToken) : this.sheetId;
 
       let address = typeof ref.address === "string" ? ref.address : undefined;
 
