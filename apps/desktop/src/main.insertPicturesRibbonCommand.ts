@@ -12,13 +12,21 @@ export type InsertPicturesRibbonCommandApp = Pick<SpreadsheetApp, "insertPicture
 export async function handleInsertPicturesRibbonCommand(commandId: string, app: InsertPicturesRibbonCommandApp): Promise<boolean> {
   if (commandId === "insert.illustrations.pictures.thisDevice" || commandId === "insert.illustrations.pictures") {
     try {
+      // Match SpreadsheetApp guards: don't open a native/file picker while the user is actively editing.
+      // Ribbon buttons should be disabled while editing, but keep this as a defensive check so
+      // command palette / programmatic execution doesn't unexpectedly steal focus.
+      //
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const appAny = app as any;
+      if (typeof appAny?.isEditing === "function" && appAny.isEditing() === true) {
+        return true;
+      }
+
       // Picture insertion mutates the workbook (sheet drawings + embedded image bytes). Block it in
       // collab read-only sessions (viewer/commenter) so the local UI doesn't diverge from the shared
       // document state.
       //
       // Guard early so we don't open a file picker only to reject the insertion after selection.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const appAny = app as any;
       if (typeof appAny?.isReadOnly === "function" && appAny.isReadOnly() === true) {
         try {
           showToast("Read-only: you don't have permission to insert pictures.", "warning");

@@ -486,6 +486,9 @@ export function registerDesktopCommands(params: {
       commandId,
       title,
       async () => {
+        // Match other insert commands: don't open a file picker while the spreadsheet is in edit mode
+        // (including split-view secondary editor state when the host provides `isEditing`).
+        if (isEditingFn()) return;
         if (typeof options.run === "function") {
           await options.run();
           return;

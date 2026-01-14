@@ -171,6 +171,7 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
       case "insert.illustrations.pictures.stockImages":
       case "insert.illustrations.pictures.onlinePictures":
       case "insert.illustrations.onlinePictures":
+        if (deps.isSpreadsheetEditing()) return;
         void handleInsertPicturesRibbonCommand(commandId, deps.app);
         return;
 
