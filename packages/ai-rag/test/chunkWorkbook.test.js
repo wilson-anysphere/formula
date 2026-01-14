@@ -230,3 +230,51 @@ test("chunkWorkbook encodes id parts to avoid delimiter-in-name collisions", () 
   const ids = new Set(tableChunks.map((c) => c.id));
   assert.equal(ids.size, 2, "expected distinct ids for colliding names");
 });
+
+test("chunkWorkbook: does not call toString on non-string sparse cell-map keys", () => {
+  let calls = 0;
+  const badKey = {
+    toString() {
+      calls += 1;
+      return "0,0";
+    },
+  };
+
+  const map = new Map();
+  map.set(badKey, { v: "SHOULD_NOT_BE_READ" });
+  map.set("0,0", { v: "A" });
+  map.set("0,1", { v: "B" });
+
+  const workbook = {
+    id: "wb1",
+    sheets: [{ name: "Sheet1", cells: map }],
+    tables: [],
+    namedRanges: [],
+  };
+
+  const chunks = chunkWorkbook(workbook);
+  assert.equal(calls, 0);
+  assert.ok(chunks.some((c) => c.kind === "dataRegion"), "expected a dataRegion chunk");
+});
+
+test("chunkWorkbook: does not call toString on non-string formula values", () => {
+  const secret = "TopSecretFormula";
+  let calls = 0;
+  const formula = {
+    toString() {
+      calls += 1;
+      return secret;
+    },
+  };
+
+  const workbook = {
+    id: "wb1",
+    sheets: [{ name: "Sheet1", cells: [[{ f: formula }], [{ f: formula }]] }],
+    tables: [],
+    namedRanges: [],
+  };
+
+  const chunks = chunkWorkbook(workbook);
+  assert.equal(calls, 0);
+  assert.ok(chunks.some((c) => c.kind === "formulaRegion"), "expected a formulaRegion chunk");
+});

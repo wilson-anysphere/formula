@@ -44,8 +44,21 @@ const FORMULA_STRING_RE = /^\s*=\s*\S/;
 
 function hasNonEmptyFormulaText(formula) {
   if (formula == null) return false;
-  const text = typeof formula === "string" ? formula : String(formula);
-  return NON_EMPTY_FORMULA_RE.test(text);
+  if (typeof formula === "string") return NON_EMPTY_FORMULA_RE.test(formula);
+  // Avoid calling `String(...)` on arbitrary objects: custom `toString()` implementations can throw
+  // or leak sensitive strings. For region detection we only need to know whether the formula slot
+  // is non-empty, not its rendered content.
+  if (typeof formula === "number") return Number.isFinite(formula);
+  if (
+    typeof formula === "boolean" ||
+    typeof formula === "bigint" ||
+    typeof formula === "symbol" ||
+    typeof formula === "function"
+  ) {
+    return true;
+  }
+  if (typeof formula === "object") return true;
+  return false;
 }
 
 /**
@@ -53,8 +66,21 @@ function hasNonEmptyFormulaText(formula) {
  */
 function hasNonEmptyTrimmedText(value) {
   if (value == null) return false;
-  const text = typeof value === "string" ? value : String(value);
-  return NON_WHITESPACE_RE.test(text);
+  if (typeof value === "string") return NON_WHITESPACE_RE.test(value);
+  // Avoid calling `String(...)` on arbitrary objects: custom `toString()` implementations can throw
+  // or leak sensitive strings. For region detection we only need to know whether the value slot is
+  // non-empty, not its rendered content.
+  if (typeof value === "number") return Number.isFinite(value);
+  if (
+    typeof value === "boolean" ||
+    typeof value === "bigint" ||
+    typeof value === "symbol" ||
+    typeof value === "function"
+  ) {
+    return true;
+  }
+  if (typeof value === "object") return true;
+  return false;
 }
 
 function isNonEmptyCell(cell) {
@@ -478,7 +504,11 @@ function detectRegions(sheet, predicate, opts) {
 
     for (const [key, raw] of map.entries()) {
       throwIfAborted(signal);
-      const rawKey = String(key);
+      // Sparse cell maps should use string keys like "row,col" or "row:col". Avoid calling
+      // `String(key)` on arbitrary objects: custom `toString()` implementations can leak
+      // sensitive strings or throw while indexing.
+      if (typeof key !== "string") continue;
+      const rawKey = key;
       const commaIdx = rawKey.indexOf(",");
       const colonIdx = commaIdx >= 0 ? -1 : rawKey.indexOf(":");
       const idx = commaIdx >= 0 ? commaIdx : colonIdx;
@@ -774,20 +804,27 @@ function chunkWorkbook(workbook, options = {}) {
     if (!sheetName) continue;
     const sheet = sheets.get(sheetName);
     if (!sheet) continue;
+    const tableNameRaw = table?.name;
+    const tableName =
+      typeof tableNameRaw === "string"
+        ? tableNameRaw
+        : typeof tableNameRaw === "number" || typeof tableNameRaw === "boolean" || typeof tableNameRaw === "bigint"
+          ? String(tableNameRaw)
+          : "";
     const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(sheetName)}::table::${encodeIdPart(table?.name ?? "")}`;
     chunks.push({
       id,
       workbookId: workbook.id,
       sheetName,
       kind: "table",
-      title: table?.name ?? "",
+      title: tableName,
       rect: table.rect,
       cells: extractCells(sheet, table.rect, {
         maxRows: extractMaxRows,
         maxCols: extractMaxCols,
         signal,
       }),
-      meta: { tableName: table?.name ?? "" },
+      meta: { tableName },
     });
     occupied.push({ sheetName, rect: table.rect });
   }
@@ -798,20 +835,27 @@ function chunkWorkbook(workbook, options = {}) {
     if (!sheetName) continue;
     const sheet = sheets.get(sheetName);
     if (!sheet) continue;
+    const rangeNameRaw = nr?.name;
+    const rangeName =
+      typeof rangeNameRaw === "string"
+        ? rangeNameRaw
+        : typeof rangeNameRaw === "number" || typeof rangeNameRaw === "boolean" || typeof rangeNameRaw === "bigint"
+          ? String(rangeNameRaw)
+          : "";
     const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(sheetName)}::namedRange::${encodeIdPart(nr?.name ?? "")}`;
     chunks.push({
       id,
       workbookId: workbook.id,
       sheetName,
       kind: "namedRange",
-      title: nr?.name ?? "",
+      title: rangeName,
       rect: nr.rect,
       cells: extractCells(sheet, nr.rect, {
         maxRows: extractMaxRows,
         maxCols: extractMaxCols,
         signal,
       }),
-      meta: { namedRange: nr?.name ?? "" },
+      meta: { namedRange: rangeName },
     });
     occupied.push({ sheetName, rect: nr.rect });
   }

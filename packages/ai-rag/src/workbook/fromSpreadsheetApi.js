@@ -78,17 +78,20 @@ export function workbookFromSpreadsheetApi(params) {
       if (!Number.isInteger(row) || row < 0) continue;
       if (!Number.isInteger(col) || col < 0) continue;
       const cell = entry?.cell ?? {};
-      const formula = cell.formula ?? null;
+      // Avoid calling `String(...)` on arbitrary objects: spreadsheet backends should return
+      // formula strings, but malformed inputs can include objects with custom `toString()` hooks.
+      const formulaRaw = cell.formula ?? null;
+      const formula = typeof formulaRaw === "string" ? formulaRaw : null;
       // DLP-safe default / opt-in behavior:
       // - Many SpreadsheetApi backends do not evaluate formulas, so `value` is commonly null.
       // - When backends *do* provide cached formula results, callers should opt in to indexing
       //   those computed values (they can be an inference channel when dependencies are not traced).
-      const hasFormula = formula != null && String(formula).trim() !== "";
+      const hasFormula = typeof formula === "string" && formula.trim() !== "";
       const value = hasFormula && !includeFormulaValues ? null : (cell.value ?? null);
       // `SpreadsheetApi.listNonEmptyCells` may include formatting-only cells. These should
       // be dropped from the ai-rag workbook to avoid bloating sparse cell maps.
-      if ((value == null || value === "") && (formula == null || String(formula).trim() === "")) continue;
-      cells.set(`${row},${col}`, { value, formula });
+      if ((value == null || value === "") && !hasFormula) continue;
+      cells.set(`${row},${col}`, { value, formula: hasFormula ? formula : null });
     }
     return { name: sheetName, cells };
   });
