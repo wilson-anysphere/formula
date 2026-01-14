@@ -1162,10 +1162,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 let order = self.resolver.external_sheet_order(workbook)?;
                 let start_idx = order
                     .iter()
-                    .position(|s| cmp_case_insensitive(s, start) == Ordering::Equal)?;
+                    .position(|s| formula_model::sheet_name_eq_case_insensitive(s, start))?;
                 let end_idx = order
                     .iter()
-                    .position(|s| cmp_case_insensitive(s, end) == Ordering::Equal)?;
+                    .position(|s| formula_model::sheet_name_eq_case_insensitive(s, end))?;
                 let (start_idx, end_idx) = if start_idx <= end_idx {
                     (start_idx, end_idx)
                 } else {

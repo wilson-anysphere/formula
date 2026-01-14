@@ -352,6 +352,38 @@ fn external_3d_sheet_span_matches_endpoints_case_insensitively() {
 }
 
 #[test]
+fn external_3d_sheet_span_matches_endpoints_nfkc_case_insensitively() {
+    let provider = Arc::new(TestExternalProvider::default());
+
+    // U+212A KELVIN SIGN (K) is compatibility-equivalent (NFKC) to ASCII 'K'.
+    // Excel applies NFKC + case-insensitive matching when resolving sheet names.
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Kelvin".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+    for (sheet, value) in [("Kelvin", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        provider.set(
+            &format!("[Book.xlsx]{sheet}"),
+            CellAddr { row: 0, col: 0 },
+            value,
+        );
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Kelvin:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+}
+
+#[test]
 fn external_3d_sheet_span_with_missing_endpoint_is_ref_error() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set_sheet_order(
