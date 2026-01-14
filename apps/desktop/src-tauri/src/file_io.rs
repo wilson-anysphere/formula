@@ -5174,6 +5174,34 @@ mod tests {
     }
 
     #[test]
+    fn read_workbook_blocking_opens_password_protected_xls_cryptoapi_boundary_fixture_with_password() {
+        // This is a real Excel-generated workbook that uses the legacy FILEPASS CryptoAPI layout and
+        // crosses the 1024-byte RC4 re-key boundary.
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/encrypted/encrypted.xls"
+        );
+        let path = std::path::Path::new(fixture);
+
+        let workbook = read_workbook_blocking_with_password(path, Some("password"))
+            .expect("open encrypted boundary .xls");
+        let sheet = workbook
+            .sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("Sheet1 should exist");
+
+        // See `fixtures/encrypted/README.md` for provenance and expected contents.
+        let cell_a400 = sheet.get_cell(399, 0);
+        assert_eq!(cell_a400.computed_value, CellScalar::Number(399.0));
+        let cell_b400 = sheet.get_cell(399, 1);
+        assert_eq!(
+            cell_b400.computed_value,
+            CellScalar::Text("RC4_BOUNDARY_OK".to_string())
+        );
+    }
+
+    #[test]
     fn encrypt_package_to_ole_bytes_rejects_empty_password() {
         let err =
             encrypt_package_to_ole_bytes(b"PK", "").expect_err("expected empty password to fail");
