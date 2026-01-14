@@ -2023,6 +2023,23 @@ test("Argument value suggestions use catalog arg_types (RANDBETWEEN suggests num
   );
 });
 
+test("Numeric argument suggestions work with a unary '-' prefix", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=RANDBETWEEN(-";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANDBETWEEN(-1"),
+    `Expected RANDBETWEEN to suggest -1 after '-', got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test('DATEDIF unit suggests "d", "m", "y", "ym", "yd"', async () => {
   const engine = new TabCompletionEngine();
 

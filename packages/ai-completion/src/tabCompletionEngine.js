@@ -959,13 +959,20 @@ export class TabCompletionEngine {
       //   TAKE(..., -<tab>) should suggest -1 (by inserting "1" after the typed "-"),
       //   but should not suggest the positive "1" option (it would evaluate to -1).
       if (argType === "number") {
+        const hasSemanticDisplayText =
+          typeof entry?.displayText === "string" &&
+          entry.displayText.length > 0 &&
+          // If the displayText doesn't add any meaning beyond the raw literal,
+          // it's safe to treat it like a generic numeric suggestion.
+          entry.displayText !== rawReplacement;
         const minusCount = countChar(groupPrefix, "-");
         const hasOddMinusPrefix = minusCount % 2 === 1;
         const isNegative = typeof rawReplacement === "string" && rawReplacement.startsWith("-");
 
         // If the user has started a negative unary expression (odd number of leading `-`),
-        // avoid suggesting positive-only literals which would evaluate to negative values.
-        if (hasOddMinusPrefix && !isNegative) return;
+        // avoid suggesting positive-only literals *when they carry semantic meaning* (enums),
+        // because they'd evaluate to the negative value and the hint label would be wrong.
+        if (hasOddMinusPrefix && !isNegative && hasSemanticDisplayText) return;
 
         // If both the typed prefix and the literal are negative, drop one leading '-' from the
         // literal so we don't produce `--1` (which would flip the sign).
