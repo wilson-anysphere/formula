@@ -3,7 +3,7 @@
 //! These are gated behind the `encrypted-workbooks` feature because decryption is optional.
 #![cfg(all(feature = "encrypted-workbooks", not(target_arch = "wasm32")))]
 
-use std::io::{Cursor, Write as _};
+use std::io::{Cursor, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use ms_offcrypto_writer::Ecma376AgileWriter;
@@ -44,6 +44,67 @@ fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
     cursor.into_inner()
 }
 
+fn strip_data_integrity_from_encryption_info(encryption_info: &[u8]) -> Vec<u8> {
+    assert!(
+        encryption_info.len() >= 8,
+        "EncryptionInfo must include 8-byte header"
+    );
+    let header = &encryption_info[..8];
+    let xml_bytes = &encryption_info[8..];
+    let xml = std::str::from_utf8(xml_bytes).expect("EncryptionInfo XML should be UTF-8");
+    let mut stripped = xml.to_string();
+
+    // Remove the first `<dataIntegrity .../>` (self-closing) or `<dataIntegrity>...</dataIntegrity>`
+    // element when present. This is only used to synthesize fixtures missing the element.
+    if let Some(start) = stripped.find("<dataIntegrity") {
+        if let Some(end_rel) = stripped[start..].find("/>") {
+            stripped.replace_range(start..start + end_rel + 2, "");
+        } else if let Some(end_rel) = stripped[start..].find("</dataIntegrity>") {
+            stripped.replace_range(start..start + end_rel + "</dataIntegrity>".len(), "");
+        }
+    }
+
+    let mut out = Vec::new();
+    out.extend_from_slice(header);
+    out.extend_from_slice(stripped.as_bytes());
+    out
+}
+
+fn strip_data_integrity_from_encrypted_cfb(encrypted_cfb: &[u8]) -> Vec<u8> {
+    let mut ole = cfb::CompoundFile::open(Cursor::new(encrypted_cfb)).expect("parse cfb");
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .expect("open EncryptionInfo stream")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo");
+    let mut encrypted_package = Vec::new();
+    ole.open_stream("EncryptedPackage")
+        .expect("open EncryptedPackage stream")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage");
+
+    let encryption_info = strip_data_integrity_from_encryption_info(&encryption_info);
+    assert!(
+        !std::str::from_utf8(&encryption_info[8..])
+            .expect("utf-8")
+            .contains("dataIntegrity"),
+        "expected synthesized EncryptionInfo to omit <dataIntegrity>"
+    );
+
+    // Rebuild the OLE container with the modified EncryptionInfo, preserving ciphertext.
+    let cursor = Cursor::new(Vec::new());
+    let mut out = cfb::CompoundFile::create(cursor).expect("create cfb");
+    out.create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo stream")
+        .write_all(&encryption_info)
+        .expect("write EncryptionInfo");
+    out.create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage stream")
+        .write_all(&encrypted_package)
+        .expect("write EncryptedPackage");
+    out.into_inner().into_inner()
+}
+
 fn xlsb_fixture_bytes() -> Vec<u8> {
     let path = Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -79,6 +140,35 @@ fn open_workbook_with_password_decrypts_agile_encrypted_package() {
 
     // Correct password => decrypted ZIP is routed into the lazy/streaming OPC package wrapper
     // (`Workbook::Xlsx` / `XlsxLazyPackage`).
+    let wb = open_workbook_with_password(&path, Some(password)).expect("open decrypted workbook");
+    match wb {
+        Workbook::Xlsx(package) => {
+            let workbook_xml = package
+                .read_part("xl/workbook.xml")
+                .expect("read xl/workbook.xml")
+                .expect("xl/workbook.xml missing in zip");
+            let workbook_xml_str =
+                std::str::from_utf8(&workbook_xml).expect("xl/workbook.xml must be valid UTF-8");
+            assert!(
+                workbook_xml_str.contains("Sheet1"),
+                "expected xl/workbook.xml to mention Sheet1, got:\n{workbook_xml_str}"
+            );
+        }
+        other => panic!("expected Workbook::Xlsx, got {other:?}"),
+    }
+}
+
+#[test]
+fn open_workbook_with_password_decrypts_agile_encrypted_package_without_data_integrity() {
+    let password = "correct horse battery staple";
+    let plain_xlsx = build_tiny_xlsx();
+    let encrypted_cfb = encrypt_zip_with_password(&plain_xlsx, password);
+    let encrypted_cfb = strip_data_integrity_from_encrypted_cfb(&encrypted_cfb);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("encrypted-no-integrity.xlsx");
+    std::fs::write(&path, &encrypted_cfb).expect("write encrypted file");
+
     let wb = open_workbook_with_password(&path, Some(password)).expect("open decrypted workbook");
     match wb {
         Workbook::Xlsx(package) => {
