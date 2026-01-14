@@ -188,7 +188,10 @@ Expansion rules:
   * The engine currently treats the workbook identifier as an **opaque string** (no case folding,
     no path normalization beyond the path-qualified ref canonicalization described below). Hosts
     should normalize/match it as needed.
-* The returned sheet names must be **plain sheet names** (no `[workbook]` prefix).
+* The returned sheet names must be **plain sheet display names**:
+  * No `[workbook]` prefix.
+  * No formula quoting (e.g. return `Sheet 1`, not `'Sheet 1'`).
+  * Each sheet should appear **exactly once** (Excel sheet names are case-insensitive).
 * Endpoint matching (`Sheet1` / `Sheet3`) is **case-insensitive**.
 * The returned sheet names are used **verbatim** (including case) when constructing per-sheet keys
   for `get` calls.
