@@ -242,5 +242,44 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
     root.remove();
     formulaBarHost.remove();
   });
-});
 
+  it("supports commas in structured reference column names when `]` is escaped (Table3[Total]],USD])", () => {
+    const root = createRoot();
+    const formulaBarHost = document.createElement("div");
+    document.body.appendChild(formulaBarHost);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar: formulaBarHost });
+
+    const doc = app.getDocument();
+    // Header row at A1, data rows at A2:A4.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Total],USD");
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 1);
+    doc.setCellValue("Sheet1", { row: 2, col: 0 }, 2);
+    doc.setCellValue("Sheet1", { row: 3, col: 0 }, 3);
+
+    app.getSearchWorkbook().addTable({
+      name: "Table3",
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 3,
+      endCol: 0,
+      columns: ["Total],USD"],
+    });
+
+    const evalPreview = (expr: string) => (app as any).evaluateFormulaBarArgumentPreview(expr);
+
+    // `]` inside column names is escaped via doubling: `Total],USD` -> `Total]],USD`.
+    expect(evalPreview("SUM(Table3[Total]],USD])")).toBe(6);
+
+    app.destroy();
+    root.remove();
+    formulaBarHost.remove();
+  });
+});
