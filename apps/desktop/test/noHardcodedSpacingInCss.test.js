@@ -48,11 +48,15 @@ test("desktop UI CSS keeps layout spacing on the --space-* scale (no raw px in p
 
   const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
   const spacingProp = /^(?:gap|row-gap|column-gap|padding(?:-[a-z]+)*|margin(?:-[a-z]+)*)$/i;
+  const cssVarRef = /\bvar\(\s*(--[-\w]+)\b/g;
   const pxUnit = /([+-]?(?:\d+(?:\.\d+)?|\.\d+))px(?![A-Za-z0-9_])/gi;
 
   for (const file of files) {
     const css = fs.readFileSync(file, "utf8");
     const stripped = stripCssNonSemanticText(css);
+
+    /** @type {Set<string>} */
+    const spacingVarRefs = new Set();
 
     let decl;
     while ((decl = cssDeclaration.exec(stripped))) {
@@ -61,6 +65,40 @@ test("desktop UI CSS keeps layout spacing on the --space-* scale (no raw px in p
 
       const value = decl?.groups?.value ?? "";
       // `decl[0]` ends with the captured group, so this points at the first character of the value.
+      const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
+
+      // Capture any CSS custom properties referenced by spacing declarations so we can also
+      // prevent hardcoded units from being hidden behind a local variable.
+      let varMatch;
+      while ((varMatch = cssVarRef.exec(value))) {
+        spacingVarRefs.add(varMatch[1]);
+      }
+      cssVarRef.lastIndex = 0;
+
+      let unitMatch;
+      while ((unitMatch = pxUnit.exec(value))) {
+        const numeric = unitMatch[1] ?? "";
+        const n = Number(numeric);
+        if (!Number.isFinite(n)) continue;
+        if (n === 0) continue;
+
+        const absIndex = valueStart + (unitMatch.index ?? 0);
+        const line = getLineNumber(stripped, absIndex);
+        violations.push(`${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: ${prop}: ${value.trim()}`);
+      }
+
+      pxUnit.lastIndex = 0;
+    }
+
+    // Second pass: if this file defines any custom properties that are used by spacing declarations,
+    // ensure those variables also stay token-based (no hardcoded px).
+    cssDeclaration.lastIndex = 0;
+    while ((decl = cssDeclaration.exec(stripped))) {
+      const prop = decl?.groups?.prop ?? "";
+      if (!prop.startsWith("--")) continue;
+      if (!spacingVarRefs.has(prop)) continue;
+
+      const value = decl?.groups?.value ?? "";
       const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
 
       let unitMatch;
