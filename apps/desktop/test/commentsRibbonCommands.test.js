@@ -49,15 +49,17 @@ test("Desktop main.ts syncs Comments pressed state + dispatches via CommandRegis
     "Expected main.ts to sync ribbon pressed state from app.isCommentsPanelVisible()",
   );
 
-  // Ribbon command activation should execute the builtin commands (so invocation is recorded
-  // by command palette recents tracking and shares the same path as keybindings).
-  assert.match(
+  // Comments commands are registered as builtin commands, and are dispatched via
+  // `createRibbonActionsFromCommands` (so they share the same execution path as command palette / keybindings).
+  assert.doesNotMatch(
     main,
-    new RegExp(
-      `if\\s*\\(commandId\\s*===\\s*["']comments\\.togglePanel["']\\s*\\|\\|\\s*commandId\\s*===\\s*["']comments\\.addComment["']\\)\\s*\\{[\\s\\S]*?executeBuiltinCommand\\(commandId\\);`,
-      "m",
-    ),
-    "Expected ribbon onCommand handler to execute comments.* via executeBuiltinCommand(commandId)",
+    /\bcase\s+["']comments\.togglePanel["']:/,
+    "Expected main.ts to not handle comments.togglePanel via switch case",
+  );
+  assert.doesNotMatch(
+    main,
+    /\bcase\s+["']comments\.addComment["']:/,
+    "Expected main.ts to not handle comments.addComment via switch case",
   );
 
   // Guardrail: the legacy review.comments.* ids should not be handled in main.ts anymore.

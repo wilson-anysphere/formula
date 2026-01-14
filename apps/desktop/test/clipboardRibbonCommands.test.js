@@ -42,6 +42,9 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
+  const builtinsPath = path.join(__dirname, "..", "src", "commands", "registerBuiltinCommands.ts");
+  const builtins = fs.readFileSync(builtinsPath, "utf8");
+
   // Ensure legacy ribbon-only IDs are no longer handled explicitly.
   assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.cut["']:/);
   assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.copy["']:/);
@@ -49,7 +52,27 @@ test("Desktop main.ts routes clipboard ribbon commands through the CommandRegist
   assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.pasteSpecial["']:/);
   assert.doesNotMatch(main, /\bcase\s+["']home\.clipboard\.pasteSpecial\.dialog["']:/);
 
-  // Clipboard command IDs should be routed through the registry execution pipeline.
-  assert.match(main, /\bcommandId\.startsWith\(\s*["']clipboard\./);
-  assert.match(main, /\bexecuteBuiltinCommand\(\s*commandId\s*\)/);
+  // Clipboard command IDs should be registered as built-in commands (so Ribbon + command palette + keybindings
+  // share the same execution/guardrails).
+  for (const id of [
+    "clipboard.cut",
+    "clipboard.copy",
+    "clipboard.paste",
+    "clipboard.pasteSpecial",
+    "clipboard.pasteSpecial.values",
+    "clipboard.pasteSpecial.formulas",
+    "clipboard.pasteSpecial.formats",
+    "clipboard.pasteSpecial.transpose",
+  ]) {
+    assert.match(
+      builtins,
+      new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
+      `Expected registerBuiltinCommands.ts to register ${id}`,
+    );
+    assert.doesNotMatch(
+      main,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+    );
+  }
 });

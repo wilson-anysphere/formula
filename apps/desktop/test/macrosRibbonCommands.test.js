@@ -50,8 +50,7 @@ test("Desktop main.ts wires macro ribbon commands to Macros/Script Editor/VBA pa
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
-  // Ribbon dispatch should delegate these macro command ids through CommandRegistry so they can
-  // also be used by the command palette / keybindings.
+  // Ribbon dispatch should delegate through CommandRegistry (shared by ribbon, command palette, and keybindings).
   assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
   assert.match(main, /\bregisterRibbonMacroCommands\(/);
 
