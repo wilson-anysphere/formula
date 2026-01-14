@@ -11902,6 +11902,13 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         (idx != usize::MAX).then_some(idx)
     }
 
+    fn external_sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+        self.snapshot
+            .external_value_provider
+            .as_ref()
+            .and_then(|provider| provider.sheet_order(workbook))
+    }
+
     fn get_value_on_sheet(
         &self,
         sheet: &bytecode::SheetId,

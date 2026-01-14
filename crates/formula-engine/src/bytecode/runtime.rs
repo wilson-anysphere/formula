@@ -6,6 +6,7 @@ use super::value::{
 };
 use crate::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
+use crate::eval::split_external_sheet_key;
 use crate::eval::MAX_MATERIALIZED_ARRAY_CELLS;
 use crate::functions::lookup;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
@@ -122,6 +123,43 @@ fn subtract_resolved_range(a: ResolvedRange, b: ResolvedRange) -> Vec<ResolvedRa
     out
 }
 
+fn cmp_sheet_ids_in_tab_order(grid: &dyn Grid, a: &SheetId, b: &SheetId) -> Ordering {
+    match (a, b) {
+        (SheetId::Local(a_id), SheetId::Local(b_id)) => {
+            let a_idx = grid.sheet_order_index(*a_id).unwrap_or(*a_id);
+            let b_idx = grid.sheet_order_index(*b_id).unwrap_or(*b_id);
+            a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
+        }
+        (SheetId::Local(_), SheetId::External(_)) => Ordering::Less,
+        (SheetId::External(_), SheetId::Local(_)) => Ordering::Greater,
+        (SheetId::External(a_key), SheetId::External(b_key)) => {
+            // Preserve external-workbook tab order when available.
+            match (split_external_sheet_key(a_key), split_external_sheet_key(b_key)) {
+                (Some((a_wb, a_sheet)), Some((b_wb, b_sheet))) if a_wb == b_wb => {
+                    match grid.external_sheet_order(a_wb) {
+                        Some(order) => {
+                            let a_idx = order.iter().position(|s| {
+                                formula_model::sheet_name_eq_case_insensitive(s, a_sheet)
+                            });
+                            let b_idx = order.iter().position(|s| {
+                                formula_model::sheet_name_eq_case_insensitive(s, b_sheet)
+                            });
+                            match (a_idx, b_idx) {
+                                (Some(a_idx), Some(b_idx)) => {
+                                    a_idx.cmp(&b_idx).then_with(|| a_key.cmp(b_key))
+                                }
+                                _ => a_key.cmp(b_key),
+                            }
+                        }
+                        None => a_key.cmp(b_key),
+                    }
+                }
+                _ => a_key.cmp(b_key),
+            }
+        }
+    }
+}
+
 /// Convert a [`MultiRangeRef`] into a sequence of disjoint rectangular areas.
 ///
 /// Excel reference unions behave like set union: overlapping cells should only be visited once.
@@ -143,16 +181,7 @@ fn multirange_unique_areas(r: &MultiRangeRef, grid: &dyn Grid, base: CellCoord) 
         })
         .collect();
     areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
-        match (&a_area.sheet, &b_area.sheet) {
-            (SheetId::Local(a_id), SheetId::Local(b_id)) => {
-                let a_idx = grid.sheet_order_index(*a_id).unwrap_or(*a_id);
-                let b_idx = grid.sheet_order_index(*b_id).unwrap_or(*b_id);
-                a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
-            }
-            (SheetId::Local(_), SheetId::External(_)) => Ordering::Less,
-            (SheetId::External(_), SheetId::Local(_)) => Ordering::Greater,
-            (SheetId::External(a_key), SheetId::External(b_key)) => a_key.cmp(b_key),
-        }
+        cmp_sheet_ids_in_tab_order(grid, &a_area.sheet, &b_area.sheet)
             .then_with(|| a_range.row_start.cmp(&b_range.row_start))
             .then_with(|| a_range.col_start.cmp(&b_range.col_start))
             .then_with(|| a_range.row_end.cmp(&b_range.row_end))
@@ -4156,16 +4185,7 @@ fn and_multi_range(
         })
         .collect();
     areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
-        match (&a_area.sheet, &b_area.sheet) {
-            (SheetId::Local(a_id), SheetId::Local(b_id)) => {
-                let a_idx = grid.sheet_order_index(*a_id).unwrap_or(*a_id);
-                let b_idx = grid.sheet_order_index(*b_id).unwrap_or(*b_id);
-                a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
-            }
-            (SheetId::Local(_), SheetId::External(_)) => Ordering::Less,
-            (SheetId::External(_), SheetId::Local(_)) => Ordering::Greater,
-            (SheetId::External(a_key), SheetId::External(b_key)) => a_key.cmp(b_key),
-        }
+        cmp_sheet_ids_in_tab_order(grid, &a_area.sheet, &b_area.sheet)
             .then_with(|| a_range.row_start.cmp(&b_range.row_start))
             .then_with(|| a_range.col_start.cmp(&b_range.col_start))
             .then_with(|| a_range.row_end.cmp(&b_range.row_end))
@@ -4294,16 +4314,7 @@ fn or_multi_range(
         })
         .collect();
     areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
-        match (&a_area.sheet, &b_area.sheet) {
-            (SheetId::Local(a_id), SheetId::Local(b_id)) => {
-                let a_idx = grid.sheet_order_index(*a_id).unwrap_or(*a_id);
-                let b_idx = grid.sheet_order_index(*b_id).unwrap_or(*b_id);
-                a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
-            }
-            (SheetId::Local(_), SheetId::External(_)) => Ordering::Less,
-            (SheetId::External(_), SheetId::Local(_)) => Ordering::Greater,
-            (SheetId::External(a_key), SheetId::External(b_key)) => a_key.cmp(b_key),
-        }
+        cmp_sheet_ids_in_tab_order(grid, &a_area.sheet, &b_area.sheet)
             .then_with(|| a_range.row_start.cmp(&b_range.row_start))
             .then_with(|| a_range.col_start.cmp(&b_range.col_start))
             .then_with(|| a_range.row_end.cmp(&b_range.row_end))
@@ -5806,16 +5817,7 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     })
                     .collect();
                 areas.sort_by(|(a_area, a_range), (b_area, b_range)| {
-                    match (&a_area.sheet, &b_area.sheet) {
-                        (SheetId::Local(a_id), SheetId::Local(b_id)) => {
-                            let a_idx = grid.sheet_order_index(*a_id).unwrap_or(*a_id);
-                            let b_idx = grid.sheet_order_index(*b_id).unwrap_or(*b_id);
-                            a_idx.cmp(&b_idx).then_with(|| a_id.cmp(b_id))
-                        }
-                        (SheetId::Local(_), SheetId::External(_)) => Ordering::Less,
-                        (SheetId::External(_), SheetId::Local(_)) => Ordering::Greater,
-                        (SheetId::External(a_key), SheetId::External(b_key)) => a_key.cmp(b_key),
-                    }
+                    cmp_sheet_ids_in_tab_order(grid, &a_area.sheet, &b_area.sheet)
                         .then_with(|| a_range.row_start.cmp(&b_range.row_start))
                         .then_with(|| a_range.col_start.cmp(&b_range.col_start))
                         .then_with(|| a_range.row_end.cmp(&b_range.row_end))

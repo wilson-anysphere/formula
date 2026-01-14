@@ -23,6 +23,19 @@ pub trait Grid: Sync {
         Some(sheet_id)
     }
 
+    /// Return the sheet tab order for an external workbook.
+    ///
+    /// This is used to order multi-area references that span multiple external sheets (e.g. unions
+    /// like `([Book.xlsx]Sheet2!A1,[Book.xlsx]Sheet10!A1)`) in a way that matches Excel semantics
+    /// for 3D references: order is defined by workbook tab order, not by lexicographic sheet name.
+    ///
+    /// Returning `None` indicates the sheet order is unavailable, in which case the bytecode
+    /// runtime falls back to lexicographic ordering for external sheet keys.
+    #[inline]
+    fn external_sheet_order(&self, _workbook: &str) -> Option<Vec<String>> {
+        None
+    }
+
     /// Get a value from a specific sheet.
     ///
     /// Bytecode formulas that don't use explicit sheet-qualified references can ignore the sheet

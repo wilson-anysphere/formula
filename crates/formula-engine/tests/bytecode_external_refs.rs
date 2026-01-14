@@ -229,6 +229,53 @@ fn bytecode_sum_over_external_range_compiles_and_uses_reference_semantics() {
 }
 
 #[test]
+fn bytecode_sum_over_external_reference_union_uses_provider_tab_order_for_error_precedence() {
+    // When bytecode evaluates a multi-area reference union spanning external sheets, the
+    // deterministic area ordering should follow the external workbook tab order (when supplied by
+    // the provider), not lexicographic sheet name order.
+    struct Provider;
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+            if addr != (CellAddr { row: 0, col: 0 }) {
+                return None;
+            }
+            match sheet {
+                "[Book.xlsx]Sheet2" => Some(Value::Error(ErrorKind::Ref)),
+                "[Book.xlsx]Sheet10" => Some(Value::Error(ErrorKind::Div0)),
+                _ => None,
+            }
+        }
+
+        fn sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+            (workbook == "Book.xlsx").then(|| vec!["Sheet2".to_string(), "Sheet10".to_string()])
+        }
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(Arc::new(Provider)));
+    engine.set_bytecode_enabled(true);
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=SUM(([Book.xlsx]Sheet2!A1,[Book.xlsx]Sheet10!A1))",
+        )
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected union over external refs to compile to bytecode (stats={:?}, report={:?})",
+        engine.bytecode_compile_stats(),
+        engine.bytecode_compile_report(32)
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Ref));
+}
+
+#[test]
 fn bytecode_degenerate_external_3d_sheet_range_matches_endpoints_nfkc_case_insensitively() {
     struct NfkcProvider;
 
