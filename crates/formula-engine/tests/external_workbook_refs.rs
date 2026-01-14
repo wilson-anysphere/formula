@@ -382,6 +382,8 @@ fn precedents_include_dynamic_external_precedents_from_indirect() {
     engine
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
+    // Ensure we compile to bytecode (no AST fallback) so we cover dynamic external precedent
+    // tracking in the bytecode backend as well.
     assert!(
         engine.bytecode_compile_report(10).is_empty(),
         "{:?}",
