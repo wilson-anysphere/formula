@@ -74,13 +74,22 @@ fn locale_parsing_es_es_statistical_and_forecasting_spellings_match_excel() {
         ("FORECAST", "PRONOSTICO"),
         ("FORECAST.LINEAR", "PRONOSTICO.LINEAL"),
         ("FORECAST.ETS", "PRONOSTICO.ETS"),
+        ("FORECAST.ETS.CONFINT", "PRONOSTICO.ETS.INT.CONFIANZA"),
         // Statistical distributions + tests
         ("CHISQ.DIST", "DISTR.CHI.CUAD.N"),
+        ("CHISQ.INV", "INV.CHI.CUAD.N"),
+        ("CHISQ.TEST", "PRUEBA.CHI.CUAD.N"),
         ("F.DIST", "DISTR.F.N"),
+        ("F.INV.RT", "INV.F.DER.N"),
+        ("GAMMA.DIST", "DISTR.GAMMA.N"),
+        ("LOGNORM.DIST", "DISTR.LOGNORM.N"),
+        ("NEGBINOM.DIST", "DISTR.BINOM.NEG.N"),
+        ("POISSON.DIST", "DISTR.POISSON.N"),
         ("T.DIST.2T", "DISTR.T.2C.N"),
         ("Z.TEST", "PRUEBA.Z.N"),
         // Bond/coupon functions (commonly missing when Excel treats them as _xludf)
         ("COUPDAYBS", "DIAS.CUPON.INI"),
+        ("COUPDAYS", "DIAS.CUPON"),
         ("COUPPCD", "FECHA.CUPON.ANT"),
         // Other common regression candidates
         ("INTERCEPT", "INTERSECCION.EJE"),
