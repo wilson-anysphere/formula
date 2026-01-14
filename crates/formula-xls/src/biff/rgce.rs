@@ -3321,7 +3321,20 @@ fn format_namex_ref(
             Ok(quote_sheet_name_if_needed(&token))
         }
         // Add-in/UDF/library. Best-effort: use the extern name itself.
-        _ => Ok(extern_name.clone()),
+        _ => {
+            // BIFF8 uses a special SUPBOOK marker (`\u{0002}`) for add-ins and encodes both add-in
+            // functions and other extern names via `PtgNameX`.
+            //
+            // Function extern names are handled above (`is_function=true`) and should render
+            // unqualified (Excel's canonical `MyUdf(args...)` form). For *non*-function extern
+            // names, include a stable qualifier so the decoded formula text remains unambiguous
+            // and parseable by `formula-engine`.
+            if sb.virt_path.trim_end_matches('\0') == "\u{0002}" {
+                let token = format!("[AddIn]{extern_name}");
+                return Ok(quote_sheet_name_if_needed(&token));
+            }
+            Ok(extern_name.clone())
+        }
     }
 }
 
@@ -6726,6 +6739,48 @@ mod tests {
             "warnings={:?}",
             decoded.warnings
         );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_namex_addin_non_function_name_with_stable_qualifier() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0002}".to_string(),
+                kind: SupBookKind::Other,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: vec!["MyAddinConst".to_string()],
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // PtgNameX (ixti=1, iname=1). With no ExternSheet table, the decoder treats `ixti` as the
+        // SUPBOOK index, so this refers to the add-in SUPBOOK at index 1.
+        let rgce = [0x39, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'[AddIn]MyAddinConst'");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
         assert_parseable(&decoded.text);
     }
 
