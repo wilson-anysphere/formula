@@ -214,6 +214,41 @@ class CompatGateTierPresetTests(unittest.TestCase):
         self.assertIn("cmp", cmd)
 
 
+class CompatGatePrivacyModeTests(unittest.TestCase):
+    def _load_compat_gate(self):
+        compat_gate_py = Path(__file__).resolve().parents[1] / "compat_gate.py"
+        self.assertTrue(compat_gate_py.is_file(), f"compat_gate.py not found at {compat_gate_py}")
+
+        spec = importlib.util.spec_from_file_location("excel_oracle_compat_gate_privacy", compat_gate_py)
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    def test_build_compare_cmd_passes_privacy_mode_flag(self) -> None:
+        compat_gate = self._load_compat_gate()
+
+        cmd = compat_gate._build_compare_cmd(
+            cases_path=Path("cases.json"),
+            expected_path=Path("expected.json"),
+            actual_path=Path("actual.json"),
+            report_path=Path("report.json"),
+            max_cases=0,
+            include_tags=[],
+            exclude_tags=[],
+            max_mismatch_rate=0.0,
+            abs_tol=1e-9,
+            rel_tol=1e-9,
+            tag_abs_tol=[],
+            tag_rel_tol=[],
+            privacy_mode="private",
+        )
+        self.assertIn("--privacy-mode", cmd)
+        self.assertIn("private", cmd)
+
+
 class CompatGateDryRunTests(unittest.TestCase):
     def _load_compat_gate(self):
         compat_gate_py = Path(__file__).resolve().parents[1] / "compat_gate.py"

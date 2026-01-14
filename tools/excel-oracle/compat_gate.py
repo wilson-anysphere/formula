@@ -111,6 +111,9 @@ _TIER_TO_INCLUDE_TAGS: dict[str, list[str]] = {
     "full": [],
 }
 
+_PRIVACY_PUBLIC = "public"
+_PRIVACY_PRIVATE = "private"
+
 
 def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -390,6 +393,7 @@ def _build_compare_cmd(
     rel_tol: float,
     tag_abs_tol: list[str],
     tag_rel_tol: list[str],
+    privacy_mode: str = _PRIVACY_PUBLIC,
 ) -> list[str]:
     cmd = [
         sys.executable,
@@ -409,6 +413,8 @@ def _build_compare_cmd(
         "--rel-tol",
         str(rel_tol),
     ]
+    if privacy_mode != _PRIVACY_PUBLIC:
+        cmd += ["--privacy-mode", privacy_mode]
     for raw in tag_abs_tol:
         tol = raw.strip()
         if tol:
@@ -525,6 +531,16 @@ def main() -> int:
         help=(
             "Fail if the expected dataset is a synthetic baseline (contains source.syntheticSource). "
             "Useful in CI when you expect a real Excel-generated dataset to be present."
+        ),
+    )
+    p.add_argument(
+        "--privacy-mode",
+        choices=[_PRIVACY_PUBLIC, _PRIVACY_PRIVATE],
+        default=_PRIVACY_PUBLIC,
+        help=(
+            "Control redaction of outputs. When set to `private`, compare.py will hash absolute "
+            "filesystem paths embedded in the mismatch report (useful when running on self-hosted "
+            "runners that might expose usernames/mount points)."
         ),
     )
     args = p.parse_args()
@@ -678,6 +694,7 @@ def main() -> int:
         rel_tol=args.rel_tol,
         tag_abs_tol=tag_abs_tol,
         tag_rel_tol=tag_rel_tol,
+        privacy_mode=args.privacy_mode,
     )
 
     if args.dry_run:
