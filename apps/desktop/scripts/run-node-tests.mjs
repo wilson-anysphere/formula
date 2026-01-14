@@ -101,6 +101,25 @@ if (tsLoaderArgs.length > 0) {
   baseNodeArgs.push(...resolveNodeLoaderArgs(loaderUrl));
 }
 
+// Node's test runner defaults to process isolation, which can spawn many Node processes.
+// In extremely constrained environments (like some agent sandboxes) we can hit OS thread
+// limits due to the ESM loader hook worker that Node creates for each isolated process.
+//
+// When third-party deps are missing (`hasDeps === false`), these node:test runs are already
+// best-effort guardrails. Prefer running without isolation in that mode so the suite is
+// more resilient to low thread limits.
+//
+// Allow overriding via `FORMULA_NODE_TEST_ISOLATION` (e.g. "process", "none").
+const requestedIsolation = typeof process.env.FORMULA_NODE_TEST_ISOLATION === "string" ? process.env.FORMULA_NODE_TEST_ISOLATION.trim() : "";
+const allowedFlags =
+  process.allowedNodeEnvironmentFlags && typeof process.allowedNodeEnvironmentFlags.has === "function"
+    ? process.allowedNodeEnvironmentFlags
+    : new Set();
+if (allowedFlags.has("--test-isolation")) {
+  const isolation = requestedIsolation || (hasDeps ? "" : "none");
+  if (isolation) baseNodeArgs.push(`--test-isolation=${isolation}`);
+}
+
 // Keep node:test parallelism conservative; some suites start background services and
 // in CI/agent environments we can hit process/thread limits if too many test files
 // run in parallel. Allow opting into higher parallelism via FORMULA_NODE_TEST_CONCURRENCY.
