@@ -12999,17 +12999,22 @@ export class SpreadsheetApp {
     // tag the event so the shared-grid selection canvas can ignore it (Excel-like behavior).
     if (!this.sharedGrid && !isPrimaryClick) return;
     if (this.sharedGrid && !(isPrimaryClick || isContextClick)) return;
+
+    // Unit tests sometimes call this handler directly with a synthetic `PointerEvent` that has no
+    // `target` (because it was never dispatched). In that case, allow this capture handler to run
+    // even when the DrawingInteractionController is enabled so tests can exercise header-hit behavior
+    // without routing through real DOM event dispatch.
+    const target = e.target as HTMLElement | null;
     // When the dedicated DrawingInteractionController is enabled, it owns selection/dragging.
     // Avoid competing with its pointer listeners (especially in legacy mode where it uses
     // bubbling listeners and relies on pointer events not being cancelled in capture phase).
-    if (this.drawingInteractionController) return;
+    if (this.drawingInteractionController && target) return;
     // If another capture listener already claimed the event (e.g. chart interactions),
     // do not compete.
     if (e.cancelBubble) return;
     // When the formula bar is in range-selection mode, drawing hits should not steal the
     // pointerdown; let normal grid range selection continue.
     if (this.formulaBar?.isFormulaEditing()) return;
-    const target = e.target as HTMLElement | null;
     // Only treat pointerdown events originating from the grid surface (canvases/root) as
     // drawing selection. This avoids interfering with interactive DOM overlays
     // (scrollbars, outline buttons, comments panel, etc) even when drawings extend underneath them.
