@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripPythonComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "check-windows-webview2-installer.py");
 
@@ -36,7 +38,7 @@ const pythonExe = detectPythonExecutable();
 const hasPython = Boolean(pythonExe);
 
 test("check-windows-webview2-installer bounds fallback src-tauri discovery (perf guardrail)", () => {
-  const src = readFileSync(scriptPath, "utf8");
+  const src = stripPythonComments(readFileSync(scriptPath, "utf8"));
   assert.ok(
     src.includes("max_depth = 8") && src.includes("if depth >= max_depth"),
     "Expected check-windows-webview2-installer.py to bound os.walk repo discovery with max_depth.",
