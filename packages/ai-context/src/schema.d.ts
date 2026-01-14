@@ -16,6 +16,10 @@ export interface TableSchema {
 export interface NamedRangeSchema {
   name: string;
   range: string;
+  /**
+   * Allow host-specific fields (e.g. internal ids) without tripping TS excess-property checks.
+   */
+  [key: string]: unknown;
 }
 
 export interface DataRegionSchema {
@@ -51,7 +55,7 @@ export function extractSheetSchema(sheet: {
    * sample), `origin` lets schema extraction produce correct absolute A1 ranges.
    */
   origin?: { row: number; col: number };
-  namedRanges?: Array<NamedRangeSchema & { [key: string]: unknown }>;
+  namedRanges?: NamedRangeSchema[];
   tables?: Array<{ name: string; range: string; [key: string]: unknown }>;
 }, options?: {
   signal?: AbortSignal;
