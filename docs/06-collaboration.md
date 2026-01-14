@@ -343,6 +343,7 @@ Desktop encryption commands (Command Palette):
 
 - `collab.encryptSelectedRange` — encrypt the current selection and generate a shareable key string.
   - If the entered `keyId` already exists in the local key store, the desktop UI will reuse it (it does not silently overwrite key bytes).
+  - If the key store is unavailable and the UI cannot verify whether the key id already exists, it warns in the confirmation prompt before generating a new key.
   - If the `keyId` is already used by an existing encrypted range but the key is not imported, the UI refuses to generate a new key for that id (import the key first or choose a different id).
 - `collab.removeEncryptedRange` — remove encrypted range *metadata* overlapping the current selection.
   - Note: removing a range does **not** decrypt cells that already have an `enc` payload.
@@ -351,8 +352,11 @@ Desktop encryption commands (Command Palette):
   - Resolves legacy ranges stored with a sheet display name (instead of a stable `sheetId`) when possible, and avoids sheet id/name ambiguity.
 - `collab.exportEncryptionKey` — export the key for the active cell’s encrypted range.
   - Prefers the `keyId` embedded in an existing encrypted cell payload (if present), otherwise falls back to policy metadata.
+  - If the key bytes are missing locally, it prompts to import the key first.
 - `collab.importEncryptionKey` — import a shared key string into the local key store.
   - If the key id already exists with different bytes, the UI prompts before overwriting.
+  - If the UI cannot verify whether the key id already exists (key store unavailable), it prompts before importing.
+  - After importing, the desktop app best-effort rehydrates the collab binder so already-encrypted cells can decrypt.
 
 Notes:
 
