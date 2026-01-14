@@ -1138,8 +1138,7 @@ fn sheet_xml(
 
         let mut row_attrs = format!(r#" r="{}""#, row_number);
         if let Some(height) = row_props.and_then(|props| props.height) {
-            let ht = trim_float(height as f64);
-            row_attrs.push_str(&format!(r#" ht="{ht}" customHeight="1""#));
+            row_attrs.push_str(&format!(r#" ht="{height}" customHeight="1""#));
         }
         if let Some(style_id) = row_style_id {
             let xf_index = style_to_xf.get(&style_id).copied().unwrap_or(0);
