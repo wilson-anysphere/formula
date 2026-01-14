@@ -188,6 +188,31 @@ def _redact_error_details_in_obj(obj: Any, *, privacy_mode: str) -> Any:
     return obj
 
 
+def _redact_string_values_in_obj(obj: Any, *, privacy_mode: str) -> Any:
+    """Recursively redact string values (t="s") that look like absolute paths/URIs.
+
+    Excel-oracle mismatches include the expected/actual result values. When a case result is a
+    string, it may contain a local filesystem path or a URI (for example, workbook content that
+    embeds a hyperlink). In privacy mode, hash path/URI-like strings to avoid leaking local
+    usernames/mount points or corporate domains in CI artifacts.
+    """
+
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return obj
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        is_string_value = obj.get("t") == "s"
+        for k, v in obj.items():
+            if is_string_value and k == "v" and isinstance(v, str) and v:
+                out[k] = _redact_text(v, privacy_mode=privacy_mode) or v
+            else:
+                out[k] = _redact_string_values_in_obj(v, privacy_mode=privacy_mode)
+        return out
+    if isinstance(obj, list):
+        return [_redact_string_values_in_obj(v, privacy_mode=privacy_mode) for v in obj]
+    return obj
+
+
 def _index_results(
     results: Iterable[dict[str, Any]], *, label: str
 ) -> dict[str, dict[str, Any]]:
@@ -215,7 +240,10 @@ def _pretty_input(cell_input: dict[str, Any], *, privacy_mode: str) -> dict[str,
             "cell": cell_input.get("cell"),
             "formula": _redact_formula(cell_input.get("formula"), privacy_mode=privacy_mode),
         }
-    return {"cell": cell_input.get("cell"), "value": cell_input.get("value")}
+    value = cell_input.get("value")
+    if isinstance(value, str):
+        value = _redact_text(value, privacy_mode=privacy_mode) or value
+    return {"cell": cell_input.get("cell"), "value": value}
 
 
 def _maybe_nonempty_str(value: Any) -> str | None:
@@ -919,6 +947,7 @@ def main() -> int:
         "mismatches": mismatches,
     }
     report = _redact_error_details_in_obj(report, privacy_mode=args.privacy_mode)
+    report = _redact_string_values_in_obj(report, privacy_mode=args.privacy_mode)
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     with report_path.open("w", encoding="utf-8", newline="\n") as f:
