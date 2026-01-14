@@ -113,6 +113,22 @@ describe("suggestQueryNextSteps", () => {
     expect(ops).toEqual([{ type: "addColumn", name: "Flag2", formula: "[Region] == 'East' ? 1 : 0" }]);
   });
 
+  it("drops addColumn formulas that reference '_' (value formulas)", async () => {
+    chatMock.mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: JSON.stringify([
+          { type: "addColumn", name: "Bad", formula: "_" },
+          { type: "addColumn", name: "Ok", formula: "[Region]" },
+        ]),
+      },
+    });
+
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const ops = await suggestQueryNextSteps("add", { query: baseQuery(), preview });
+    expect(ops).toEqual([{ type: "addColumn", name: "Ok", formula: "[Region]" }]);
+  });
+
   it("drops renameColumn suggestions that would collide with an existing column name", async () => {
     chatMock.mockResolvedValue({
       message: {

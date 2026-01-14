@@ -279,7 +279,10 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
         // This prevents the model from suggesting M language (if/then/else),
         // unsupported function calls, or typos in column references.
         const table = new DataTable(Array.from(allowedColumns).map((col) => ({ name: col, type: "any" })), []);
-        compileRowFormula(table, trimmedFormula);
+        const fn = compileRowFormula(table, trimmedFormula);
+        // Catch formulas that compile but would always throw at runtime (e.g. `_`
+        // value references, which are only valid for value formulas).
+        fn(new Array(table.columnCount).fill(null));
       } catch {
         return null;
       }
