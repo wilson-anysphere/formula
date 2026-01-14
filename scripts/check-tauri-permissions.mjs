@@ -340,6 +340,11 @@ function main() {
     lines.push("To list them manually:");
     lines.push("  cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls");
     lines.push("");
+    lines.push("To re-run this check locally:");
+    lines.push("  node scripts/check-tauri-permissions.mjs");
+    lines.push("  # or");
+    lines.push("  pnpm -C apps/desktop check:tauri-permissions");
+    lines.push("");
 
     process.stderr.write(`${lines.join("\n")}\n`);
     process.exit(1);
