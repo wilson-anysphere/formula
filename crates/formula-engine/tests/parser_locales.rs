@@ -134,3 +134,25 @@ fn lex_de_de_accepts_canonical_leading_decimal() {
     assert!(matches!(tokens[0].kind, TokenKind::Number(ref n) if n == ".5"));
     assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
 }
+
+#[test]
+fn lex_fr_fr_accepts_canonical_leading_decimal() {
+    let locale = LocaleConfig::fr_fr();
+    let mut opts = ParseOptions::default();
+    opts.locale = locale;
+    let tokens = lex(".5", &opts).unwrap();
+
+    assert!(matches!(tokens[0].kind, TokenKind::Number(ref n) if n == ".5"));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}
+
+#[test]
+fn lex_es_es_accepts_canonical_leading_decimal() {
+    let locale = LocaleConfig::es_es();
+    let mut opts = ParseOptions::default();
+    opts.locale = locale;
+    let tokens = lex(".5", &opts).unwrap();
+
+    assert!(matches!(tokens[0].kind, TokenKind::Number(ref n) if n == ".5"));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}

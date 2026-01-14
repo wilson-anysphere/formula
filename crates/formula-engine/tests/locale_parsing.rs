@@ -44,6 +44,17 @@ fn canonicalize_accepts_canonical_leading_decimal_in_de_de() {
 }
 
 #[test]
+fn canonicalize_accepts_canonical_leading_decimal_in_fr_fr_and_es_es() {
+    for (src, loc) in [
+        ("=SOMME(.5;1)", &locale::FR_FR),
+        ("=SUMA(.5;1)", &locale::ES_ES),
+    ] {
+        let canonical = locale::canonicalize_formula(src, loc).unwrap();
+        assert_eq!(canonical, "=SUM(.5,1)");
+    }
+}
+
+#[test]
 fn canonicalize_and_localize_array_literals_for_de_de() {
     let localized = "=SUMME({1\\2;3\\4})";
     let canonical = locale::canonicalize_formula(localized, &locale::DE_DE).unwrap();
