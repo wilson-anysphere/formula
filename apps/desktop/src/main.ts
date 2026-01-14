@@ -8326,6 +8326,10 @@ function sanitizeFilename(raw: string): string {
 
 function handleExportDelimitedText(args: { delimiter: string; extension: string; mime: string; label: string }): void {
   try {
+    // Ensure exports reflect the latest user input. If a cell edit is in progress, it may not yet
+    // have been committed into the DocumentController.
+    commitAllPendingEditsForCommand();
+
     const sheetId = app.getCurrentSheetId();
     const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
     const doc = app.getDocument();
