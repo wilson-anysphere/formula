@@ -362,8 +362,14 @@ export interface GoalSeekRequest {
   sheet?: string;
   tolerance?: number;
   maxIterations?: number;
+  /**
+   * Optional finite differencing step size. If omitted, the engine chooses a value based on the
+   * current input.
+   */
   derivativeStep?: number;
+  /** Minimum absolute derivative before falling back to bisection. */
   minDerivative?: number;
+  /** Maximum number of bracket expansion attempts when falling back to bisection. */
   maxBracketExpansions?: number;
   /**
    * Legacy option kept for API compatibility.
@@ -373,6 +379,13 @@ export interface GoalSeekRequest {
   recalcMode?: GoalSeekRecalcMode;
 }
 
+export type GoalSeekStatus =
+  | "Converged"
+  | "MaxIterationsReached"
+  | "NoBracketFound"
+  | "NumericalFailure"
+  | (string & {});
+
 export interface GoalSeekResult {
   /**
    * Goal seek solver status.
@@ -380,7 +393,7 @@ export interface GoalSeekResult {
    * Known values match the Rust `GoalSeekStatus` enum. Treat this as best-effort and be prepared
    * for additional statuses in future engine versions.
    */
-  status: "Converged" | "MaxIterationsReached" | "NoBracketFound" | "NumericalFailure" | (string & {});
+  status: GoalSeekStatus;
   solution: number;
   iterations: number;
   finalOutput: number;

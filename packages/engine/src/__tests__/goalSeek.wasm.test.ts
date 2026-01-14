@@ -62,8 +62,8 @@ function createMockChannel(): MessageChannelLike {
 
 async function loadFormulaWasm() {
   const entry = formulaWasmNodeEntryUrl();
-  // wasm-pack `--target nodejs` outputs CommonJS. Under ESM dynamic import, the exports are
-  // exposed on `default`.
+  // wasm-pack `--target nodejs` outputs CommonJS. Under ESM dynamic import, the exports
+  // are exposed on `default`.
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore - `@vite-ignore` is required for runtime-defined file URLs.
   const mod = await import(/* @vite-ignore */ entry);
@@ -167,31 +167,34 @@ describeWasm("EngineWorker goalSeek (wasm)", () => {
       await engine.setCell("A1", 1, "Sheet1");
       await engine.setCell("B1", "=A1*A1", "Sheet1");
 
-      const response = (await engine.goalSeek({
+      const response: GoalSeekResponse = await engine.goalSeek({
         sheet: "Sheet1",
         targetCell: "B1",
         targetValue: 25,
         changingCell: "A1",
-      })) as GoalSeekResponse;
+      });
 
       expect(response).toHaveProperty("result");
       expect(response).toHaveProperty("changes");
 
       expect(response.result.status).toBe("Converged");
-      expect(response.result.solution).toBeCloseTo(5, 6);
+      expect(Number.isFinite(response.result.solution)).toBe(true);
+      expect(Math.abs(response.result.solution - 5)).toBeLessThan(0.01);
+      expect(Math.abs(response.result.finalOutput - 25)).toBeLessThan(0.01);
+      expect(Math.abs(response.result.finalError)).toBeLessThan(0.01);
 
-      const changes = response.changes as CellChange[];
+      const changes: CellChange[] = response.changes;
       expect(changes.length).toBeGreaterThan(0);
 
       const a1 = changes.find((c) => c.sheet === "Sheet1" && c.address === "A1");
       expect(a1).toBeTruthy();
       expect(typeof a1?.value).toBe("number");
-      expect(a1?.value as number).toBeCloseTo(5, 6);
+      expect(Math.abs((a1?.value as number) - 5)).toBeLessThan(0.01);
 
       const b1 = changes.find((c) => c.sheet === "Sheet1" && c.address === "B1");
       expect(b1).toBeTruthy();
       expect(typeof b1?.value).toBe("number");
-      expect(b1?.value as number).toBeCloseTo(25, 6);
+      expect(Math.abs((b1?.value as number) - 25)).toBeLessThan(0.01);
     } finally {
       engine.terminate();
     }

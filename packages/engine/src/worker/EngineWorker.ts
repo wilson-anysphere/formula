@@ -627,8 +627,9 @@ export class EngineWorker {
 
   async goalSeek(request: GoalSeekRequest, options?: RpcOptions): Promise<GoalSeekResponse> {
     await this.flush();
-    // `serde_wasm_bindgen` does not accept `undefined` values inside structs; prune optional keys
-    // so callers can pass `{ foo?: undefined }` without breaking deserialization.
+    // `serde_wasm_bindgen` treats `{ foo: undefined }` as an error for `Option<T>` fields.
+    // Strip undefined optional tuning keys so callers can pass `GoalSeekRequest` objects
+    // constructed from partially-filled UI state.
     const normalized = pruneUndefinedShallow(request);
     return (await this.invoke("goalSeek", normalized, options)) as GoalSeekResponse;
   }

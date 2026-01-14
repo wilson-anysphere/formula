@@ -99,6 +99,7 @@ async function setupWorker(options: { wasmModuleUrl: string }) {
     wasmModuleUrl: options.wasmModuleUrl,
   };
   workerGlobal.dispatchMessage(init);
+
   await waitForMessage(channel.port1, (msg) => msg.type === "ready");
   return { port: channel.port1, dispose: () => channel.port1.close() };
 }
