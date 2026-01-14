@@ -28,6 +28,17 @@ fn encodes_and_decodes_sheet_qualified_ref() {
 }
 
 #[test]
+fn encodes_and_decodes_sheet_qualified_reordered_area_and_preserves_absolute_flags() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded =
+        encode_rgce_with_context("=Sheet2!B$1:$A2", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "Sheet2!$A$1:B2");
+}
+
+#[test]
 fn encodes_and_decodes_sheet_range_ref_in_function() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
