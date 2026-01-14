@@ -324,13 +324,13 @@ test("core UI does not hardcode colors outside tokens.css", () => {
 
   for (const file of files) {
     const content = fs.readFileSync(file, "utf8");
-    const hex = content.match(hexColor);
-    const rgb = content.match(rgbColor);
     const ext = path.extname(file);
+    const stripped = ext === ".css" ? stripCssNonSemanticText(content) : stripJsComments(content);
+    const hex = stripped.match(hexColor);
+    const rgb = stripped.match(rgbColor);
     /** @type {string | null} */
     let named = null;
     if (ext === ".css") {
-      const stripped = stripCssNonSemanticText(content);
       for (const decl of stripped.matchAll(cssDeclaration)) {
         const prop = decl?.groups?.prop?.toLowerCase() ?? "";
         const value = decl?.groups?.value ?? "";
@@ -345,7 +345,6 @@ test("core UI does not hardcode colors outside tokens.css", () => {
         }
       }
     } else {
-      const stripped = stripJsComments(content);
       const match =
         jsStyleColor.exec(stripped) ??
         domStyleColor.exec(stripped) ??
