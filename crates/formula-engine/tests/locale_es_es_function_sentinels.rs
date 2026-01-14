@@ -129,14 +129,18 @@ fn locale_parsing_es_es_statistical_and_forecasting_spellings_match_excel() {
         ("CHISQ.TEST", "PRUEBA.CHI.CUAD.N"),
         ("F.DIST", "DISTR.F.N"),
         ("F.DIST.RT", "DISTR.F.DER.N"),
+        ("F.TEST", "PRUEBA.F.N"),
         ("F.INV", "INV.F.N"),
         ("F.INV.RT", "INV.F.DER.N"),
+        ("FTEST", "PRUEBA.F"),
         ("FINV", "INV.F"),
         ("GAMMA.DIST", "DISTR.GAMMA.N"),
         ("GAMMA.INV", "INV.GAMMA.N"),
         ("LOGNORM.DIST", "DISTR.LOGNORM.N"),
         ("LOGNORM.INV", "INV.LOGNORM.N"),
+        ("LOGINV", "INV.LOGNORM"),
         ("NEGBINOM.DIST", "DISTR.BINOM.NEG.N"),
+        ("POISSON", "DISTR.POISSON"),
         ("POISSON.DIST", "DISTR.POISSON.N"),
         ("T.DIST.2T", "DISTR.T.2C.N"),
         ("T.DIST.RT", "DISTR.T.DER.N"),
@@ -154,6 +158,8 @@ fn locale_parsing_es_es_statistical_and_forecasting_spellings_match_excel() {
         ("IPMT", "PAGOINT"),
         ("MIRR", "TIRM"),
         ("MINVERSE", "MINVERSA"),
+        // Legacy distribution spellings
+        ("WEIBULL", "DISTR.WEIBULL"),
     ];
 
     for (canonical, localized) in mappings {
