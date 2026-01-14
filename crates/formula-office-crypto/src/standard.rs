@@ -298,7 +298,6 @@ pub(crate) fn verify_password_standard(
                 Err(OfficeCryptoError::InvalidPassword) => {
                     // Compatibility fallback: some producers appear to use the RC4-style key
                     // truncation derivation even when AlgID indicates AES.
-                    //
                     // This derivation can only produce `digest_len` bytes of key material. If the
                     // requested AES key length is larger (e.g. AES-256 with SHA-1), skip the
                     // fallback and report an invalid password instead of surfacing a confusing
@@ -324,16 +323,11 @@ pub(crate) fn verify_password_standard(
                     let key0_rc4 = match deriver_rc4.derive_key_for_block(0) {
                         Ok(key) => key,
                         Err(OfficeCryptoError::UnsupportedEncryption(_)) => {
-                            return Err(OfficeCryptoError::InvalidPassword)
+                            return Err(OfficeCryptoError::InvalidPassword);
                         }
                         Err(e) => return Err(e),
                     };
-                    verify_password_standard_with_key(
-                        header,
-                        verifier,
-                        hash_alg,
-                        key0_rc4.as_slice(),
-                    )
+                    verify_password_standard_with_key(header, verifier, hash_alg, key0_rc4.as_slice())
                 }
                 Err(other) => Err(other),
             }
@@ -599,7 +593,6 @@ pub(crate) fn decrypt_standard_encrypted_package(
                         if key_len > hash_alg.digest_len() {
                             return Err(OfficeCryptoError::InvalidPassword);
                         }
-
                         let deriver_rc4 = StandardKeyDeriver::new(
                             hash_alg,
                             info.header.key_bits,
@@ -610,7 +603,7 @@ pub(crate) fn decrypt_standard_encrypted_package(
                         let key0_rc4 = match deriver_rc4.derive_key_for_block(0) {
                             Ok(key) => key,
                             Err(OfficeCryptoError::UnsupportedEncryption(_)) => {
-                                return Err(OfficeCryptoError::InvalidPassword)
+                                return Err(OfficeCryptoError::InvalidPassword);
                             }
                             Err(e) => return Err(e),
                         };

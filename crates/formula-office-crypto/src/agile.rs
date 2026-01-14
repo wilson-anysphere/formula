@@ -589,9 +589,10 @@ pub(crate) fn decrypt_agile_encrypted_package(
         // MS-OFFCRYPTO describes `dataIntegrity` as an HMAC over the **EncryptedPackage stream bytes**
         // (length prefix + ciphertext). This matches Excel and the `ms-offcrypto-writer` crate.
         //
-        // However, in the wild there are at least two compatibility variants:
+        // However, in the wild there are at least three compatibility variants:
         // - HMAC over the ciphertext bytes only (excluding the 8-byte size prefix)
         // - HMAC over the decrypted package bytes (plaintext ZIP)
+        // - HMAC over (8-byte size prefix + plaintext ZIP)
         //
         // For robustness, accept any of these targets, preferring the spec'd EncryptedPackage stream.
         let computed_hmac_stream_full =
@@ -613,8 +614,23 @@ pub(crate) fn decrypt_agile_encrypted_package(
                         OfficeCryptoError::InvalidFormat("HMAC output shorter than hashSize".to_string())
                     })?;
                 if !ct_eq(expected_hmac, computed_hmac_plaintext) {
+                    let computed_hmac_header_plus_plaintext_full = compute_hmac_two(
+                        info.key_data.hash_algorithm,
+                        hmac_key_plain,
+                        &encrypted_package[..8],
+                        &out,
+                    );
+                    let computed_hmac_header_plus_plaintext = computed_hmac_header_plus_plaintext_full
+                        .get(..hash_size)
+                        .ok_or_else(|| {
+                            OfficeCryptoError::InvalidFormat(
+                                "HMAC output shorter than hashSize".to_string(),
+                            )
+                        })?;
+                    if !ct_eq(expected_hmac, computed_hmac_header_plus_plaintext) {
                     last_err = Some(OfficeCryptoError::IntegrityCheckFailed);
                     continue;
+                    }
                 }
             }
         }
@@ -855,6 +871,44 @@ fn compute_hmac(hash_alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
             let mut mac: Hmac<Sha512> =
                 Hmac::new_from_slice(key).expect("HMAC accepts any key size");
             mac.update(data);
+            mac.finalize().into_bytes().to_vec()
+        }
+    }
+}
+
+fn compute_hmac_two(hash_alg: HashAlgorithm, key: &[u8], a: &[u8], b: &[u8]) -> Vec<u8> {
+    match hash_alg {
+        HashAlgorithm::Md5 => {
+            let mut mac: Hmac<Md5> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(a);
+            mac.update(b);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha1 => {
+            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(a);
+            mac.update(b);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha256 => {
+            let mut mac: Hmac<Sha256> =
+                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(a);
+            mac.update(b);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha384 => {
+            let mut mac: Hmac<Sha384> =
+                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(a);
+            mac.update(b);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha512 => {
+            let mut mac: Hmac<Sha512> =
+                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(a);
+            mac.update(b);
             mac.finalize().into_bytes().to_vec()
         }
     }
