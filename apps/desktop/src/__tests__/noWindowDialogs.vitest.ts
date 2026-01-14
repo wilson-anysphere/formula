@@ -44,9 +44,16 @@ async function collectSourceFiles(dir: string): Promise<string[]> {
 }
 
 function findViolationsInFileContent(content: string, relPath: string): string[] {
-  // Fast-path: if the file never mentions any of the dialog API names, none of the banned
-  // patterns can match. Avoid running the heavier comment-stripping scan in that case.
-  if (!content.includes("confirm") && !content.includes("alert") && !content.includes("prompt")) return [];
+  // Fast-path: the banned patterns require:
+  // - a global root (`window` / `globalThis` / `self`), and
+  // - one of the dialog API names (`confirm` / `alert` / `prompt`).
+  //
+  // Avoid running the heavier comment-stripping scan for files that cannot possibly match.
+  //
+  // Use word boundaries so we don't scan files with unrelated substrings like `windowing` or
+  // `confirmation`.
+  if (!/\b(?:confirm|alert|prompt)\b/.test(content)) return [];
+  if (!/\b(?:window|globalThis|self)\b/.test(content)) return [];
 
   // Strip comments so commented-out `window.alert(...)` wiring cannot satisfy or fail assertions.
   const stripped = stripComments(content);
