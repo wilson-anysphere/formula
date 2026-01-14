@@ -716,7 +716,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               }
               {
                 const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
-                const styleId = params.styleId == null ? undefined : params.styleId;
+                // Backward compatibility: older WASM builds used a numeric `styleId` where `0`
+                // clears the override. Newer builds accept `Option<u32>` and treat both `0` and
+                // `null`/`undefined` as clear. Always forwarding a number keeps both working.
+                const styleId = params.styleId == null ? 0 : params.styleId;
                 (wb as any).setRowStyleId(sheet, params.row, styleId);
               }
               result = null;
@@ -727,7 +730,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               }
               {
                 const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
-                const styleId = params.styleId == null ? undefined : params.styleId;
+                const styleId = params.styleId == null ? 0 : params.styleId;
                 (wb as any).setColStyleId(sheet, params.col, styleId);
               }
               result = null;
@@ -740,7 +743,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               }
               {
                 const sheet = typeof params.sheet === "string" && params.sheet.trim() !== "" ? params.sheet : "Sheet1";
-                const styleId = params.styleId == null ? undefined : params.styleId;
+                const styleId = params.styleId == null ? 0 : params.styleId;
                 (wb as any).setSheetDefaultStyleId(sheet, styleId);
               }
               result = null;
