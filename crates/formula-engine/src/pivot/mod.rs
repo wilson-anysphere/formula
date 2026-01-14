@@ -3227,42 +3227,38 @@ impl FieldIndices {
         source: &S,
         cfg: &PivotConfig,
     ) -> Result<Self, PivotError> {
+        let resolve_field_index = |field: &PivotFieldRef| -> Result<usize, PivotError> {
+            // Most pivots are cache-backed; try the cache-field name / legacy string form first.
+            let field_name = pivot_field_ref_name(field);
+            if let Some(idx) = source.field_index(field_name.as_ref()) {
+                return Ok(idx);
+            }
+
+            // Best-effort fallback: try the `Display` rendering (used by some Data Model producers).
+            let label = field.to_string();
+            source
+                .field_index(&label)
+                .ok_or_else(|| PivotError::MissingField(label))
+        };
+
         let mut row_indices = Vec::new();
         for f in &cfg.row_fields {
-            let field_name = pivot_field_ref_name(&f.source_field);
-            row_indices.push(
-                source
-                    .field_index(field_name.as_ref())
-                    .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
-            );
+            row_indices.push(resolve_field_index(&f.source_field)?);
         }
 
         let mut col_indices = Vec::new();
         for f in &cfg.column_fields {
-            let field_name = pivot_field_ref_name(&f.source_field);
-            col_indices.push(
-                source
-                    .field_index(field_name.as_ref())
-                    .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
-            );
+            col_indices.push(resolve_field_index(&f.source_field)?);
         }
 
         let mut value_indices = Vec::new();
         for f in &cfg.value_fields {
-            let field_name = pivot_field_ref_name(&f.source_field);
-            value_indices.push(
-                source
-                    .field_index(field_name.as_ref())
-                    .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?,
-            );
+            value_indices.push(resolve_field_index(&f.source_field)?);
         }
 
         let mut filter_indices = Vec::new();
         for f in &cfg.filter_fields {
-            let field_name = pivot_field_ref_name(&f.source_field);
-            let idx = source
-                .field_index(field_name.as_ref())
-                .ok_or_else(|| PivotError::MissingField(f.source_field.to_string()))?;
+            let idx = resolve_field_index(&f.source_field)?;
             filter_indices.push((idx, f.allowed.clone()));
         }
 
