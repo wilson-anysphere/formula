@@ -22,8 +22,17 @@ export class DocumentController {
     frozenCols: number;
     colWidths?: Record<string, number>;
     rowHeights?: Record<string, number>;
+    mergedRanges?: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }>;
   };
   setFrozen(sheetId: string, frozenRows: number, frozenCols: number, options?: unknown): void;
+  setMergedRanges(
+    sheetId: string,
+    mergedRanges: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> | null | undefined,
+    options?: unknown,
+  ): void;
+
+  getSheetDrawings(sheetId: string): any[];
+  setSheetDrawings(sheetId: string, drawings: any[] | null | undefined, options?: unknown): void;
 
   getCell(sheetId: string, coord: unknown): any;
   getCellFormatStyleIds(sheetId: string, coord: unknown): [number, number, number, number, number];
@@ -45,6 +54,7 @@ export class DocumentController {
 
   applyExternalDeltas(deltas: any[], options?: unknown): void;
   applyExternalSheetViewDeltas(deltas: any[], options?: unknown): void;
+  applyExternalDrawingDeltas(deltas: any[], options?: unknown): void;
   applyExternalFormatDeltas(deltas: any[], options?: unknown): void;
   applyExternalRangeRunDeltas(deltas: any[], options?: unknown): void;
 }
