@@ -1239,6 +1239,9 @@ fn pivot_columnar_group_by(
     let table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+    if table_ref.columnar_table().is_none() {
+        return Ok(None);
+    }
 
     let mut group_idxs = Vec::with_capacity(group_by.len());
     for col in group_by {
@@ -1330,6 +1333,9 @@ fn pivot_columnar_groups_with_measure_eval(
     let table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+    if table_ref.columnar_table().is_none() {
+        return Ok(None);
+    }
 
     let mut group_idxs = Vec::with_capacity(group_by.len());
     for col in group_by {
@@ -1422,6 +1428,9 @@ fn pivot_columnar_star_schema_group_by(
     let table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+    if table_ref.columnar_table().is_none() {
+        return Ok(None);
+    }
 
     let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
     for &idx in filter.relationship_overrides() {
@@ -1913,6 +1922,7 @@ fn pivot_planned_row_group_by(
     let state_template: Vec<AggState> = agg_specs.iter().map(AggState::new).collect();
     let base_table_key = normalize_ident(base_table);
 
+    let base_table_key = normalize_ident(base_table);
     let row_sets = (!filter.is_empty())
         .then(|| crate::engine::resolve_row_sets(model, filter))
         .transpose()?;
