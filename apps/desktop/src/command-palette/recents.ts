@@ -159,6 +159,26 @@ export function installCommandRecentsTracker(
     ? Math.max(0, Math.floor(options.maxEntries ?? DEFAULT_COMMAND_RECENTS_MAX_ENTRIES))
     : DEFAULT_COMMAND_RECENTS_MAX_ENTRIES;
 
+  // Some commands are registered purely for ribbon/schema compatibility and are intentionally
+  // hidden from the command palette via `when: "false"`. Do not record them as recents: they
+  // would never be shown in the palette and can crowd out meaningful entries in storage.
+  const maybeGetCommand = (() => {
+    const registry: any = commandRegistry;
+    if (!registry || typeof registry.getCommand !== "function") return null;
+    return (commandId: string): { when?: string | null } | null => {
+      try {
+        return registry.getCommand(commandId) ?? null;
+      } catch {
+        return null;
+      }
+    };
+  })();
+  const isAlwaysHiddenFromPalette = (commandId: string): boolean => {
+    if (!maybeGetCommand) return false;
+    const when = maybeGetCommand(commandId)?.when;
+    return typeof when === "string" && when.trim() === "false";
+  };
+
   // Best-effort, one-time migration from the legacy recents key.
   // We only migrate when the new key has no entries yet, so it is idempotent.
   try {
@@ -166,8 +186,8 @@ export function installCommandRecentsTracker(
 
     // If the ignore list changes over time (e.g. we start ignoring clipboard commands),
     // drop ignored entries eagerly so the "RECENT" group stays useful immediately after update.
-    if (ignore.size > 0 && existing.length > 0) {
-      const filtered = existing.filter((entry) => !ignore.has(entry.commandId));
+    if (existing.length > 0) {
+      const filtered = existing.filter((entry) => !ignore.has(entry.commandId) && !isAlwaysHiddenFromPalette(entry.commandId));
       if (filtered.length !== existing.length) {
         writeCommandRecents(storage, filtered, { storageKey });
         existing = filtered;
@@ -183,7 +203,7 @@ export function installCommandRecentsTracker(
 
     if (existing.length === 0) {
       const legacyIds = safeParseLegacyRecents(storage.getItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY)).filter(
-        (id) => !ignore.has(id),
+        (id) => !ignore.has(id) && !isAlwaysHiddenFromPalette(id),
       );
       if (legacyIds.length > 0) {
         const nowMs = now();
@@ -205,6 +225,7 @@ export function installCommandRecentsTracker(
     const commandId = String(evt.commandId ?? "").trim();
     if (!commandId) return;
     if (ignore.has(commandId)) return;
+    if (isAlwaysHiddenFromPalette(commandId)) return;
     // Only record successful executions. `CommandRegistry` emits either `{ result }` or `{ error }`.
     // Use result presence, not `evt.error == null`, so `throw undefined` doesn't count as success.
     if (!("result" in evt)) return;

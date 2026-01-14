@@ -1387,13 +1387,7 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "formulas.formulaAuditing.tracePrecedents",
     t("command.audit.tracePrecedents"),
-    () => {
-      if (app.isEditing()) return;
-      if (getTextEditingTarget()) return;
-      app.clearAuditing();
-      app.toggleAuditingPrecedents();
-      app.focus();
-    },
+    () => commandRegistry.executeCommand("audit.tracePrecedents"),
     {
       category: t("commandCategory.audit"),
       icon: null,
@@ -1427,13 +1421,7 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "formulas.formulaAuditing.traceDependents",
     t("command.audit.traceDependents"),
-    () => {
-      if (app.isEditing()) return;
-      if (getTextEditingTarget()) return;
-      app.clearAuditing();
-      app.toggleAuditingDependents();
-      app.focus();
-    },
+    () => commandRegistry.executeCommand("audit.traceDependents"),
     {
       category: t("commandCategory.audit"),
       icon: null,
@@ -2124,15 +2112,7 @@ export function registerBuiltinCommands(params: {
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.system",
       t("command.view.theme.system"),
-      () => {
-        try {
-          themeController.setThemePreference("system");
-        } catch {
-          // Best-effort only.
-        }
-        refresh();
-        focusApp();
-      },
+      () => commandRegistry.executeCommand("view.theme.system"),
       {
         category: categoryView,
         icon: null,
@@ -2147,15 +2127,7 @@ export function registerBuiltinCommands(params: {
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.light",
       t("command.view.theme.light"),
-      () => {
-        try {
-          themeController.setThemePreference("light");
-        } catch {
-          // Best-effort only.
-        }
-        refresh();
-        focusApp();
-      },
+      () => commandRegistry.executeCommand("view.theme.light"),
       {
         category: categoryView,
         icon: null,
@@ -2169,15 +2141,7 @@ export function registerBuiltinCommands(params: {
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.dark",
       t("command.view.theme.dark"),
-      () => {
-        try {
-          themeController.setThemePreference("dark");
-        } catch {
-          // Best-effort only.
-        }
-        refresh();
-        focusApp();
-      },
+      () => commandRegistry.executeCommand("view.theme.dark"),
       {
         category: categoryView,
         icon: null,
@@ -2191,15 +2155,7 @@ export function registerBuiltinCommands(params: {
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme.highContrast",
       t("command.view.theme.highContrast"),
-      () => {
-        try {
-          themeController.setThemePreference("high-contrast");
-        } catch {
-          // Best-effort only.
-        }
-        refresh();
-        focusApp();
-      },
+      () => commandRegistry.executeCommand("view.theme.highContrast"),
       {
         category: categoryView,
         icon: null,

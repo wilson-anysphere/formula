@@ -54,27 +54,37 @@ export function registerSortFilterCommands(params: {
   registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.sortAtoZ, "Sort A to Z", "ascending");
   registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.sortZtoA, "Sort Z to A", "descending");
 
-  const registerCustomSortCommand = (commandId: string, options: { when?: string | null } = {}): void => {
+  const registerCustomSortCommand = (
+    commandId: string,
+    options: { when?: string | null; delegateTo?: string | null } = {},
+  ): void => {
+    const delegateTo = options.delegateTo ?? null;
     commandRegistry.registerBuiltinCommand(
       commandId,
       "Custom Sort…",
-      () => {
-        if (isEditingActive()) return;
-        openCustomSortDialog({
-          isEditing: isEditingActive,
-          getDocument: () => app.getDocument(),
-          getSheetId: () => app.getCurrentSheetId(),
-          getSelectionRanges: () => app.getSelectionRanges(),
-          getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
-          focusGrid: () => app.focus(),
-        });
-      },
+      delegateTo
+        ? () => commandRegistry.executeCommand(delegateTo)
+        : () => {
+            if (isEditingActive()) return;
+            openCustomSortDialog({
+              isEditing: isEditingActive,
+              getDocument: () => app.getDocument(),
+              getSheetId: () => app.getCurrentSheetId(),
+              getSelectionRanges: () => app.getSelectionRanges(),
+              getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
+              focusGrid: () => app.focus(),
+            });
+          },
       { category, icon: null, keywords: ["sort", "custom sort"], when: options.when ?? null },
     );
   };
 
   // Home uses a ribbon-scoped id for UI parity; hide it from the command palette to avoid
   // duplicate "Custom Sort…" entries (Data tab id is treated as canonical).
-  registerCustomSortCommand(SORT_FILTER_RIBBON_COMMANDS.homeCustomSort, { when: "false" });
+  registerCustomSortCommand(SORT_FILTER_RIBBON_COMMANDS.homeCustomSort, {
+    when: "false",
+    // Ensure command-palette recents tracking lands on the canonical command id.
+    delegateTo: SORT_FILTER_RIBBON_COMMANDS.dataCustomSort,
+  });
   registerCustomSortCommand(SORT_FILTER_RIBBON_COMMANDS.dataCustomSort);
 }

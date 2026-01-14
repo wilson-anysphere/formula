@@ -168,15 +168,20 @@ export function registerPageLayoutCommands(params: { commandRegistry: CommandReg
   });
 
   // Ribbon schema currently includes a second "Set Print Area" id under the Page Setup dropdown.
-  commandRegistry.registerBuiltinCommand(PAGE_LAYOUT_COMMANDS.printArea.set, "Set Print Area", () => handlers.setPrintArea(), {
-    category,
-    icon: null,
-    description: "Set the print area to the current selection",
-    keywords: ["print area", "page setup", "print"],
-    // Hide this ribbon alias from context-aware UI surfaces (command palette, etc) to avoid
-    // duplicate "Set Print Area" entries (`pageLayout.printArea.setPrintArea` is the canonical command).
-    when: "false",
-  });
+  commandRegistry.registerBuiltinCommand(
+    PAGE_LAYOUT_COMMANDS.printArea.set,
+    "Set Print Area",
+    () => commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.printArea.setPrintArea),
+    {
+      category,
+      icon: null,
+      description: "Set the print area to the current selection",
+      keywords: ["print area", "page setup", "print"],
+      // Hide this ribbon alias from context-aware UI surfaces (command palette, etc) to avoid
+      // duplicate "Set Print Area" entries (`pageLayout.printArea.setPrintArea` is the canonical command).
+      when: "false",
+    },
+  );
 
   commandRegistry.registerBuiltinCommand(
     PAGE_LAYOUT_COMMANDS.printArea.clearPrintArea,
@@ -191,15 +196,20 @@ export function registerPageLayoutCommands(params: { commandRegistry: CommandReg
   );
 
   // Ribbon schema currently includes a second "Clear Print Area" id under the Page Setup dropdown.
-  commandRegistry.registerBuiltinCommand(PAGE_LAYOUT_COMMANDS.printArea.clear, "Clear Print Area", () => handlers.clearPrintArea(), {
-    category,
-    icon: null,
-    description: "Clear the sheet print area",
-    keywords: ["print area", "clear", "page setup", "print"],
-    // Hide this ribbon alias from context-aware UI surfaces (command palette, etc) to avoid
-    // duplicate "Clear Print Area" entries (`pageLayout.printArea.clearPrintArea` is the canonical command).
-    when: "false",
-  });
+  commandRegistry.registerBuiltinCommand(
+    PAGE_LAYOUT_COMMANDS.printArea.clear,
+    "Clear Print Area",
+    () => commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.printArea.clearPrintArea),
+    {
+      category,
+      icon: null,
+      description: "Clear the sheet print area",
+      keywords: ["print area", "clear", "page setup", "print"],
+      // Hide this ribbon alias from context-aware UI surfaces (command palette, etc) to avoid
+      // duplicate "Clear Print Area" entries (`pageLayout.printArea.clearPrintArea` is the canonical command).
+      when: "false",
+    },
+  );
 
   commandRegistry.registerBuiltinCommand(PAGE_LAYOUT_COMMANDS.printArea.addTo, "Add to Print Area", () => handlers.addToPrintArea(), {
     category,

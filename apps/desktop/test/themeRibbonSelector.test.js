@@ -71,25 +71,23 @@ test("Desktop theme switching commands are wired via registerDesktopCommands/reg
   const commands = fs.readFileSync(commandsPath, "utf8");
 
   const expectations = [
-    { commandId: "view.appearance.theme.system", preference: "system" },
-    { commandId: "view.appearance.theme.light", preference: "light" },
-    { commandId: "view.appearance.theme.dark", preference: "dark" },
-    { commandId: "view.appearance.theme.highContrast", preference: "high-contrast" },
+    { commandId: "view.appearance.theme.system", canonicalId: "view.theme.system" },
+    { commandId: "view.appearance.theme.light", canonicalId: "view.theme.light" },
+    { commandId: "view.appearance.theme.dark", canonicalId: "view.theme.dark" },
+    { commandId: "view.appearance.theme.highContrast", canonicalId: "view.theme.highContrast" },
   ];
 
-  for (const { commandId, preference } of expectations) {
+  for (const { commandId, canonicalId } of expectations) {
     const pattern = new RegExp(
-      `commandRegistry\\.registerBuiltinCommand\\([\\s\\S]*?["']${escapeRegExp(
-        commandId,
-      )}["'][\\s\\S]*?themeController\\.setThemePreference\\(["']${escapeRegExp(
-        preference,
-      )}["']\\)[\\s\\S]*?\\brefresh\\(\\)[\\s\\S]*?\\bfocusApp\\(\\)`,
+      `commandRegistry\\.registerBuiltinCommand\\([\\s\\S]*?["']${escapeRegExp(commandId)}["'][\\s\\S]*?` +
+        `commandRegistry\\.executeCommand\\(["']${escapeRegExp(canonicalId)}["']\\)[\\s\\S]*?` +
+        `\\bwhen:\\s*["']false["']`,
       "m",
     );
     assert.match(
       commands,
       pattern,
-      `Expected registerBuiltinCommands.ts to handle ${commandId} (setThemePreference("${preference}"), refresh, focusApp)`,
+      `Expected registerBuiltinCommands.ts to handle ${commandId} by delegating to ${canonicalId} and hiding it from the command palette`,
     );
   }
 });

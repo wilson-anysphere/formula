@@ -67,29 +67,54 @@ test("Formulas → Formula Auditing ribbon commands are registered in CommandReg
     );
   }
 
-  // Ensure the built-in command implementations call into SpreadsheetApp with Excel-like behavior.
+  // Ribbon ids for Trace Precedents/Dependents are registered for schema compatibility but are
+  // hidden aliases. Delegate them to the canonical audit commands so command-palette recents
+  // tracking lands on the palette-visible ids.
   assert.match(
     builtins,
     new RegExp(
-      `\\bregisterBuiltinCommand\\([\\s\\S]*?["']formulas\\.formulaAuditing\\.tracePrecedents["'][\\s\\S]*?\\(\\)\\s*=>\\s*\\{` +
-        `[\\s\\S]*?app\\.clearAuditing\\(\\);` +
-        `[\\s\\S]*?app\\.toggleAuditingPrecedents\\(\\);` +
-        `[\\s\\S]*?app\\.focus\\(\\);`,
+      `\\bregisterBuiltinCommand\\([\\s\\S]*?["']formulas\\.formulaAuditing\\.tracePrecedents["'][\\s\\S]*?` +
+        `commandRegistry\\.executeCommand\\(["']audit\\.tracePrecedents["']\\)[\\s\\S]*?` +
+        `\\bwhen:\\s*["']false["']`,
       "m",
     ),
-    "Expected tracePrecedents command to clear + toggle precedents + focus SpreadsheetApp",
+    "Expected formulas.formulaAuditing.tracePrecedents to delegate to audit.tracePrecedents and be hidden from the command palette",
   );
 
   assert.match(
     builtins,
     new RegExp(
-      `\\bregisterBuiltinCommand\\([\\s\\S]*?["']formulas\\.formulaAuditing\\.traceDependents["'][\\s\\S]*?\\(\\)\\s*=>\\s*\\{` +
+      `\\bregisterBuiltinCommand\\([\\s\\S]*?["']formulas\\.formulaAuditing\\.traceDependents["'][\\s\\S]*?` +
+        `commandRegistry\\.executeCommand\\(["']audit\\.traceDependents["']\\)[\\s\\S]*?` +
+        `\\bwhen:\\s*["']false["']`,
+      "m",
+    ),
+    "Expected formulas.formulaAuditing.traceDependents to delegate to audit.traceDependents and be hidden from the command palette",
+  );
+
+  // Ensure the canonical audit commands call into SpreadsheetApp with Excel-like behavior.
+  assert.match(
+    builtins,
+    new RegExp(
+      `\\bregisterBuiltinCommand\\([\\s\\S]*?["']audit\\.tracePrecedents["'][\\s\\S]*?\\(\\)\\s*=>\\s*\\{` +
+        `[\\s\\S]*?app\\.clearAuditing\\(\\);` +
+        `[\\s\\S]*?app\\.toggleAuditingPrecedents\\(\\);` +
+        `[\\s\\S]*?app\\.focus\\(\\);`,
+      "m",
+    ),
+    "Expected audit.tracePrecedents to clear + toggle precedents + focus SpreadsheetApp",
+  );
+
+  assert.match(
+    builtins,
+    new RegExp(
+      `\\bregisterBuiltinCommand\\([\\s\\S]*?["']audit\\.traceDependents["'][\\s\\S]*?\\(\\)\\s*=>\\s*\\{` +
         `[\\s\\S]*?app\\.clearAuditing\\(\\);` +
         `[\\s\\S]*?app\\.toggleAuditingDependents\\(\\);` +
         `[\\s\\S]*?app\\.focus\\(\\);`,
       "m",
     ),
-    "Expected traceDependents command to clear + toggle dependents + focus SpreadsheetApp",
+    "Expected audit.traceDependents to clear + toggle dependents + focus SpreadsheetApp",
   );
 
   assert.match(

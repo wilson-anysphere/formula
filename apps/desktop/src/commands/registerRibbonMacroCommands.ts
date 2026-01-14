@@ -197,12 +197,31 @@ export function registerRibbonMacroCommands(params: {
       commandId === "developer.code.useRelativeReferences"
         ? "false"
         : null;
-    commandRegistry.registerBuiltinCommand(commandId, titleForCommand(commandId), () => runCommand(commandId), {
+    const delegateTo =
+      // Developer-tab commands are aliases of View-tab macro commands. Delegate execution so
+      // command-palette recents tracking lands on the canonical (palette-visible) ids.
+      commandId === "developer.code.macros.run"
+        ? "view.macros.viewMacros.run"
+        : commandId === "developer.code.macros.edit"
+          ? "view.macros.viewMacros.edit"
+          : commandId === "developer.code.recordMacro"
+            ? "view.macros.recordMacro"
+            : commandId === "developer.code.recordMacro.stop"
+              ? "view.macros.recordMacro.stop"
+              : commandId === "developer.code.useRelativeReferences"
+                ? "view.macros.useRelativeReferences"
+                : null;
+    commandRegistry.registerBuiltinCommand(
+      commandId,
+      titleForCommand(commandId),
+      () => (delegateTo ? commandRegistry.executeCommand(delegateTo) : runCommand(commandId)),
+      {
       category,
       icon: null,
       description: null,
       keywords: ["macros", "vba", "script"],
       when,
-    });
+      },
+    );
   }
 }
