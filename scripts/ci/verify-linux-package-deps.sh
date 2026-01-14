@@ -47,6 +47,7 @@ require_cmd cpio
 
 TAURI_CONF_PATH="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
 EXPECTED_DESKTOP_VERSION=""
+EXPECTED_PACKAGE_NAME=""
 if [[ -f "${TAURI_CONF_PATH}" ]]; then
   if command -v python3 >/dev/null 2>&1; then
     EXPECTED_DESKTOP_VERSION="$(
@@ -58,6 +59,15 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 print((conf.get("version") or "").strip())
 PY
     )"
+    EXPECTED_PACKAGE_NAME="$(
+      python3 - "$TAURI_CONF_PATH" <<'PY' 2>/dev/null || true
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+print((conf.get("mainBinaryName") or "").strip())
+PY
+    )"
   fi
 
   if [[ -z "${EXPECTED_DESKTOP_VERSION}" ]]; then
@@ -66,10 +76,17 @@ PY
       sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "${TAURI_CONF_PATH}" | head -n 1
     )"
   fi
+
+  if [[ -z "${EXPECTED_PACKAGE_NAME}" ]]; then
+    EXPECTED_PACKAGE_NAME="$(
+      sed -nE 's/^[[:space:]]*"mainBinaryName"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "${TAURI_CONF_PATH}" | head -n 1
+    )"
+  fi
 fi
 if [[ -z "${EXPECTED_DESKTOP_VERSION}" ]]; then
   fail "Unable to determine expected desktop version from ${TAURI_CONF_PATH}"
 fi
+: "${EXPECTED_PACKAGE_NAME:=formula-desktop}"
 
 target_dirs=()
 
@@ -350,6 +367,22 @@ for deb in "${debs[@]}"; do
 done
 
 for rpm_path in "${rpms[@]}"; do
+  rpm_version="$(rpm -qp --queryformat '%{VERSION}\n' "$rpm_path" 2>/dev/null | head -n 1 | tr -d '\r' || true)"
+  if [[ -z "$rpm_version" ]]; then
+    fail "$rpm_path: could not read RPM %{VERSION} via rpm -qp --queryformat"
+  fi
+  if [[ "$rpm_version" != "$EXPECTED_DESKTOP_VERSION" ]]; then
+    fail "$rpm_path: version mismatch (RPM %{VERSION}). Expected ${EXPECTED_DESKTOP_VERSION}, found ${rpm_version}"
+  fi
+
+  rpm_name="$(rpm -qp --queryformat '%{NAME}\n' "$rpm_path" 2>/dev/null | head -n 1 | tr -d '\r' || true)"
+  if [[ -z "$rpm_name" ]]; then
+    fail "$rpm_path: could not read RPM %{NAME} via rpm -qp --queryformat"
+  fi
+  if [[ "$rpm_name" != "$EXPECTED_PACKAGE_NAME" ]]; then
+    fail "$rpm_path: name mismatch (RPM %{NAME}). Expected ${EXPECTED_PACKAGE_NAME}, found ${rpm_name}"
+  fi
+
   echo "::group::verify-linux-package-deps: rpm -qpR $(basename "$rpm_path")"
   requires="$(rpm -qpR "$rpm_path")"
   echo "$requires"
