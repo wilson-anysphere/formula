@@ -24,6 +24,17 @@ fn decrypts_agile_fixture_xlsx() {
 }
 
 #[test]
+fn decrypts_agile_fixture_xlsm() {
+    let encrypted = std::fs::read(fixture("agile-basic.xlsm")).expect("read encrypted fixture");
+    let expected =
+        std::fs::read(fixture("plaintext-basic.xlsm")).expect("read expected decrypted bytes");
+
+    let decrypted = decrypt_agile_ooxml_from_bytes(encrypted, "password").expect("decrypt fixture");
+    assert!(decrypted.starts_with(b"PK"));
+    assert_eq!(decrypted, expected);
+}
+
+#[test]
 fn decrypts_agile_fixture_empty_password_xlsx() {
     let encrypted =
         std::fs::read(fixture("agile-empty-password.xlsx")).expect("read encrypted fixture");
