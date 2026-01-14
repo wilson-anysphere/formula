@@ -138,10 +138,11 @@ Notes:
     - per-OS artifacts: `desktop-perf-<os>`
     - cross-OS merged artifact: `desktop-perf-platform-matrix` (`desktop-perf-platform-matrix.json`)
     - includes best-effort WebView runtime metadata (WebKitGTK / WKWebView / WebView2 version) to help attribute regressions to runner image updates
-
+ 
   For on-demand PR runs (same-repo PRs only), maintainers can apply the `desktop-perf-matrix` / `run-desktop-perf` label to trigger:
   - `.github/workflows/desktop-perf-platform-matrix-pr.yml`
     - runs the same matrix on the PR head SHA and posts a summary comment to the PR
+    - optional gating: set the GitHub Actions variable `FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX=1` (and tune the existing startup/memory target variables)
 
 ### Idle memory benchmark (desktop process RSS)
 
