@@ -31,7 +31,7 @@ function cellFingerprint(cell) {
   if (normalized === null) return null;
 
   return stableStringify({
-    enc: normalized.enc ?? null,
+    enc: normalized.enc,
     value: normalized.value ?? null,
     formula: normalizeFormula(normalized.formula) ?? null,
     format: normalized.format ?? null
