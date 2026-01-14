@@ -1963,6 +1963,252 @@ mod tests {
     }
 
     #[test]
+    fn diff_workbooks_respects_ignore_path_in_rules() {
+        let expected = make_zip(&[
+            (
+                "xl/workbook.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" dyDescent="1"/>"#,
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" dyDescent="1"/>"#,
+            ),
+        ]);
+        let actual = make_zip(&[
+            (
+                "xl/workbook.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" dyDescent="2"/>"#,
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" dyDescent="2"/>"#,
+            ),
+        ]);
+
+        let args = Args {
+            input: PathBuf::new(),
+            format: WorkbookFormat::Xlsx,
+            password: None,
+            ignore_parts: Vec::new(),
+            ignore_globs: Vec::new(),
+            ignore_paths: Vec::new(),
+            ignore_paths_in: Vec::new(),
+            ignore_paths_kind: Vec::new(),
+            ignore_paths_kind_in: Vec::new(),
+            ignore_presets: Vec::new(),
+            strict_calc_chain: false,
+            diff_limit: 10,
+            fail_on: RoundTripFailOn::Critical,
+            recalc: false,
+            render_smoke: false,
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert!(
+            details.counts.total > 0,
+            "expected at least one diff without ignore-path-in"
+        );
+
+        let args = Args {
+            ignore_paths_in: vec!["xl/workbook.xml:dyDescent".to_string()],
+            ..args
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert!(
+            details
+                .top_differences
+                .iter()
+                .all(|d| d.part != "xl/workbook.xml"),
+            "expected workbook.xml diffs to be suppressed, got {:#?}",
+            details.top_differences
+        );
+        assert!(
+            details
+                .top_differences
+                .iter()
+                .any(|d| d.part == "xl/worksheets/sheet1.xml"),
+            "expected sheet1.xml diffs to remain, got {:#?}",
+            details.top_differences
+        );
+        assert_eq!(
+            details.ignore_paths,
+            vec!["xl/workbook.xml:dyDescent".to_string()]
+        );
+    }
+
+    #[test]
+    fn diff_workbooks_respects_ignore_path_kind_rules() {
+        let expected = make_zip(&[(
+            "xl/worksheets/sheet1.xml",
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+        )]);
+        let actual = make_zip(&[(
+            "xl/worksheets/sheet1.xml",
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30" foo="bar"/>
+</worksheet>"#,
+        )]);
+
+        let args = Args {
+            input: PathBuf::new(),
+            format: WorkbookFormat::Xlsx,
+            password: None,
+            ignore_parts: Vec::new(),
+            ignore_globs: Vec::new(),
+            ignore_paths: Vec::new(),
+            ignore_paths_in: Vec::new(),
+            ignore_paths_kind: Vec::new(),
+            ignore_paths_kind_in: Vec::new(),
+            ignore_presets: Vec::new(),
+            strict_calc_chain: false,
+            diff_limit: 10,
+            fail_on: RoundTripFailOn::Critical,
+            recalc: false,
+            render_smoke: false,
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert!(
+            details
+                .top_differences
+                .iter()
+                .any(|d| d.kind == "attribute_changed"),
+            "expected a dyDescent attribute_changed diff, got {:#?}",
+            details.top_differences
+        );
+        assert!(
+            details
+                .top_differences
+                .iter()
+                .any(|d| d.kind == "attribute_added"),
+            "expected a foo attribute_added diff, got {:#?}",
+            details.top_differences
+        );
+
+        let args = Args {
+            ignore_paths_kind: vec!["attribute_changed:dyDescent".to_string()],
+            ..args
+        };
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert_eq!(details.counts.total, 1);
+        assert_eq!(details.top_differences.len(), 1);
+        let diff = &details.top_differences[0];
+        assert_eq!(diff.part, "xl/worksheets/sheet1.xml");
+        assert_eq!(diff.kind, "attribute_added");
+        assert!(
+            diff.path.contains("@foo"),
+            "expected diff path to include '@foo', got {}",
+            diff.path
+        );
+        assert_eq!(
+            details.ignore_paths,
+            vec!["attribute_changed:dyDescent".to_string()]
+        );
+    }
+
+    #[test]
+    fn diff_workbooks_respects_ignore_path_kind_in_rules() {
+        let expected = make_zip(&[
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+            ),
+            (
+                "xl/worksheets/sheet2.xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>
+</worksheet>"#,
+            ),
+        ]);
+        let actual = make_zip(&[
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30" foo="bar"/>
+</worksheet>"#,
+            ),
+            (
+                "xl/worksheets/sheet2.xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.30" foo="bar"/>
+</worksheet>"#,
+            ),
+        ]);
+
+        let args = Args {
+            input: PathBuf::new(),
+            format: WorkbookFormat::Xlsx,
+            password: None,
+            ignore_parts: Vec::new(),
+            ignore_globs: Vec::new(),
+            ignore_paths: Vec::new(),
+            ignore_paths_in: Vec::new(),
+            ignore_paths_kind: Vec::new(),
+            ignore_paths_kind_in: Vec::new(),
+            ignore_presets: Vec::new(),
+            strict_calc_chain: false,
+            diff_limit: 10,
+            fail_on: RoundTripFailOn::Critical,
+            recalc: false,
+            render_smoke: false,
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert_eq!(details.counts.total, 4);
+
+        let args = Args {
+            ignore_paths_kind_in: vec![
+                "xl/worksheets/sheet1.xml:attribute_changed:dyDescent".to_string(),
+            ],
+            ..args
+        };
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+
+        assert_eq!(details.counts.total, 3);
+        assert!(
+            !details
+                .top_differences
+                .iter()
+                .any(|d| d.part == "xl/worksheets/sheet1.xml" && d.kind == "attribute_changed"),
+            "expected sheet1 attribute_changed diffs to be suppressed, got {:#?}",
+            details.top_differences
+        );
+        assert!(
+            details
+                .top_differences
+                .iter()
+                .any(|d| d.part == "xl/worksheets/sheet2.xml" && d.kind == "attribute_changed"),
+            "expected sheet2 attribute_changed diffs to remain, got {:#?}",
+            details.top_differences
+        );
+        assert_eq!(
+            details.ignore_paths,
+            vec!["xl/worksheets/sheet1.xml:attribute_changed:dyDescent".to_string()]
+        );
+    }
+
+    #[test]
     fn skips_encrypted_workbooks_without_password_and_decrypts_with_password() {
         let password = "secret";
         let encrypted_bytes = encrypt_ooxml_agile(&plain_xlsx_bytes(), password);
