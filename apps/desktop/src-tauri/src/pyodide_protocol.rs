@@ -173,14 +173,13 @@ fn get_response(
         match resolve_request_path(cache_root, &request) {
             Ok(p) => p.to_string_lossy().to_string(),
             Err(err) => {
-                let mut resp = Response::builder()
+                return Response::builder()
                     .status(StatusCode::FORBIDDEN)
                     .header(CONTENT_TYPE, "text/plain")
                     .header("Access-Control-Allow-Origin", window_origin)
                     .header("Cross-Origin-Resource-Policy", "cross-origin")
                     .body(err.into_bytes())
                     .unwrap();
-                return resp;
             }
         }
     } else {
@@ -208,4 +207,3 @@ fn get_response(
 
     builder.body(core_resp.body).unwrap()
 }
-
