@@ -29,7 +29,9 @@ use desktop::oauth_redirect_ipc::OauthRedirectState;
 #[cfg(target_os = "macos")]
 use desktop::opened_urls;
 use desktop::process_metrics;
-use desktop::resource_limits::{MAX_FILE_DROPPED_PATH_BYTES, MAX_FILE_DROPPED_PATHS};
+use desktop::resource_limits::{
+    MAX_FILE_DROPPED_PATH_BYTES, MAX_FILE_DROPPED_PATHS, MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES,
+};
 use desktop::state::{AppState, CellUpdateData, SharedAppState};
 use desktop::tray_status::{self, TrayStatusState};
 use desktop::updater;
@@ -54,7 +56,6 @@ use url::Url;
 use uuid::Uuid;
 
 const WORKBOOK_ID: &str = "local-workbook";
-const XLSX_VBA_SIGNATURE_MAX_BYTES: u64 = 32 * 1024 * 1024;
 
 /// Minimal HTML used by `--startup-bench`.
 ///
@@ -715,7 +716,7 @@ fn macros_trusted_for_before_close(
             formula_xlsx::read_part_from_reader_limited(
                 std::io::Cursor::new(origin),
                 "xl/vbaProjectSignature.bin",
-                XLSX_VBA_SIGNATURE_MAX_BYTES,
+                MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES as u64,
             )
             .ok()
             .flatten()

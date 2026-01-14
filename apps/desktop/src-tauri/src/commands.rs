@@ -6291,7 +6291,7 @@ fn build_macro_security_status(
                 formula_xlsx::read_part_from_reader_limited(
                     std::io::Cursor::new(origin),
                     "xl/vbaProjectSignature.bin",
-                    32 * 1024 * 1024,
+                    crate::resource_limits::MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES as u64,
                 )
                 .ok()
                 .flatten()
@@ -10167,6 +10167,41 @@ mod tests {
             build_macro_security_status(&mut workbook, None, &trust_store).expect("macro status");
         let sig = status.signature.expect("signature info present");
         assert_eq!(sig.status, MacroSignatureStatus::SignedParseError);
+    }
+
+    #[test]
+    fn macro_security_status_drops_oversized_vba_project_signature_part_from_origin_bytes() {
+        let oversized_len = crate::resource_limits::MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES + 1;
+        let oversized_part = vec![0u8; oversized_len];
+
+        // The signature part itself doesn't have to be valid; we just want to ensure we don't
+        // allocate/parse it when it exceeds our configured max.
+        let origin_zip = {
+            let cursor = std::io::Cursor::new(Vec::new());
+            let mut zip = zip::ZipWriter::new(cursor);
+            let options = zip::write::FileOptions::<()>::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("xl/vbaProjectSignature.bin", options)
+                .expect("start signature part");
+            zip.write_all(&oversized_part)
+                .expect("write signature part bytes");
+            zip.finish().expect("finish zip").into_inner()
+        };
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.vba_project_bin = Some(vec![1, 2, 3]);
+        workbook.vba_project_signature_bin = None;
+        workbook.origin_xlsx_bytes = Some(std::sync::Arc::<[u8]>::from(origin_zip));
+
+        let trust_store = crate::macro_trust::MacroTrustStore::new_ephemeral();
+        let status =
+            build_macro_security_status(&mut workbook, None, &trust_store).expect("macro status");
+        let sig = status.signature.expect("signature info present");
+        assert_eq!(
+            sig.status,
+            MacroSignatureStatus::Unsigned,
+            "expected oversized signature part to be dropped (treated as absent)"
+        );
     }
 
     #[test]
