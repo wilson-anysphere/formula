@@ -265,6 +265,7 @@ describe("ImageBitmapCache", () => {
     // `getOrRequest()` run (observed on newer Node versions).
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
 
     expect(onReady).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
@@ -318,6 +319,7 @@ describe("ImageBitmapCache", () => {
 
     resolveDecode(bitmap);
     // Flush the internal decode completion handlers (see note above).
+    await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
 
