@@ -51,6 +51,12 @@ test("desktop UI scripts should not override core design tokens", () => {
   // calls so we don't trigger on other string usages like `getPropertyValue("--space-4")`.
   const tokenOp =
     /\.style\.(?<op>setProperty|removeProperty)\(\s*(["'`])\s*(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)|bg-[\w-]+|text-[\w-]+|border[\w-]*|accent[\w-]*|selection-[\w-]+|titlebar-[\w-]+|sheet-tab-[\w-]+|chart-[\w-]+|tooltip-[\w-]+|cmdk-[\w-]+|shadow-[\w-]+|formula-[\w-]+|grid-header-[\w-]+|grid-line|panel-(?:bg|border|shadow)|dialog-(?:bg|border|shadow|backdrop)|link|error[\w-]*|warning[\w-]*|success[\w-]*))\s*\2/gi;
+  // Also guard against scripts overriding core tokens via style strings (cssText / setAttribute("style")).
+  // These APIs are less common, but they can still override CSS variables at runtime.
+  const tokenAssignmentInStyleString =
+    /(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)|bg-[\w-]+|text-[\w-]+|border[\w-]*|accent[\w-]*|selection-[\w-]+|titlebar-[\w-]+|sheet-tab-[\w-]+|chart-[\w-]+|tooltip-[\w-]+|cmdk-[\w-]+|shadow-[\w-]+|formula-[\w-]+|grid-header-[\w-]+|grid-line|panel-(?:bg|border|shadow)|dialog-(?:bg|border|shadow|backdrop)|link|error[\w-]*|warning[\w-]*|success[\w-]*))\s*:/gi;
+  const cssTextAssignment = /\.style\.cssText\s*=\s*(["'`])\s*(?<value>[^"'`]*?)\1/gi;
+  const setAttributeStyle = /\bsetAttribute\(\s*(["'])style\1\s*,\s*(["'`])\s*(?<value>[^"'`]*?)\2/gi;
 
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
@@ -70,6 +76,31 @@ test("desktop UI scripts should not override core design tokens", () => {
       violations.push(`${rel}:L${line}: ${op}(${prop}, ...)`);
     }
     tokenOp.lastIndex = 0;
+
+    for (const { re, kind } of [
+      { re: cssTextAssignment, kind: "style.cssText" },
+      { re: setAttributeStyle, kind: "setAttribute(style)" },
+    ]) {
+      re.lastIndex = 0;
+      while ((match = re.exec(stripped))) {
+        const value = match.groups?.value ?? "";
+        if (!value) continue;
+
+        tokenAssignmentInStyleString.lastIndex = 0;
+        let tokenMatch;
+        while ((tokenMatch = tokenAssignmentInStyleString.exec(value))) {
+          const prop = tokenMatch.groups?.prop ?? "";
+          const matchStart = match.index ?? 0;
+          const matchText = match[0] ?? "";
+          const valueOffset = matchText.indexOf(value);
+          const absIndex = matchStart + (valueOffset >= 0 ? valueOffset : 0) + (tokenMatch.index ?? 0);
+          const line = getLineNumber(stripped, absIndex);
+          violations.push(`${rel}:L${line}: ${kind} defines ${prop}`);
+        }
+        tokenAssignmentInStyleString.lastIndex = 0;
+      }
+      re.lastIndex = 0;
+    }
   }
 
   assert.deepEqual(
