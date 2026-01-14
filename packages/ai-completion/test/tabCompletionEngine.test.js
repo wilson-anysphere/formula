@@ -2833,6 +2833,26 @@ test("Numeric argument suggestions work with a unary '-' prefix", async () => {
   );
 });
 
+test("MATCH match_type can suggest a left-cell reference when the prefix matches", async () => {
+  const engine = new TabCompletionEngine();
+
+  // match_type (3rd arg) has enum suggestions, but users should still be able to complete a
+  // cell ref if they start typing a matching prefix.
+  const currentInput = "=MATCH(A1:A10, A1, B";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in C1 so the left-cell heuristic suggests B1.
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=MATCH(A1:A10, A1, B1"),
+    `Expected MATCH to suggest B1 for match_type, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Value argument left-cell reference preserves the typed prefix (pure insertion)", async () => {
   const engine = new TabCompletionEngine();
 

@@ -1293,6 +1293,23 @@ export class TabCompletionEngine {
     if (argType === "number") {
       const enumEntries = getEnumEntries();
       if (enumEntries?.length) {
+        // If the user starts typing a cell reference prefix (e.g. "B"), allow them to
+        // complete the left-cell reference even when an enum exists for this arg.
+        // This keeps the default enum UX for empty prefixes, but makes it possible
+        // to use cell-referenced numeric flags when desired.
+        if (cellRef.col > 0 && typedPrefix) {
+          const leftA1 = `${columnIndexToLetter(cellRef.col - 1)}${cellRef.row + 1}`;
+          if (startsWithIgnoreCase(leftA1, typedPrefix) && typedPrefix.length < leftA1.length) {
+            const completed = completeIdentifier(leftA1, typedPrefix);
+            suggestions.push({
+              text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${completed}`),
+              displayText: completed,
+              type: "function_arg",
+              confidence: 0.41,
+            });
+          }
+        }
+
         for (const entry of enumEntries) addReplacement(entry);
         const out = dedupeSuggestions(suggestions);
         if (out.length > 0) return out;
