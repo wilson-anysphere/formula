@@ -401,10 +401,14 @@ Implementation note: Excel-default Standard/CryptoAPI AES uses **AES-ECB** (no I
 fields, and typically AES-ECB for `EncryptedPackage`. Some third-party producers emit a segmented
 AES-CBC variant for `EncryptedPackage` (and/or vary key derivation). In this repo:
 
-- `crates/formula-offcrypto` supports multiple Standard/CryptoAPI variants, including ECB vs segmented
-  CBC `EncryptedPackage` decryption (auto-detected by ZIP signature).
-- `crates/formula-office-crypto` is intentionally more permissive and attempts additional variants
-  for compatibility.
+- `crates/formula-offcrypto` implements the **baseline** Standard/CryptoAPI behavior:
+  - AES `EncryptedPackage` decrypt is **ECB** (no IV)
+  - RC4 `EncryptedPackage` decrypt uses 0x200-byte blocks (per MS-OFFCRYPTO)
+- `crates/formula-io` includes Standard AES `EncryptedPackage` **scheme probing** (ECB + a handful of
+  AES-CBC fallbacks for non-Excel producers) and validates candidates by ZIP parsing to avoid false
+  positives. See `crates/formula-io/src/encrypted_ooxml.rs::StandardAesScheme`.
+- `crates/formula-office-crypto` is intentionally more permissive and attempts additional Standard
+  key-derivation variants for compatibility.
 
 ### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-ECB vs segmented AES-CBC)
 
