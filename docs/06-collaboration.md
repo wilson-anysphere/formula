@@ -1172,8 +1172,9 @@ What it migrates:
 Migration behavior (implementation-backed):
 
 - Runs **after initial hydration**, queued in a microtask:
-  - after local persistence load completes (if `options.persistence` / legacy `options.offline` is enabled), and/or
-  - after the provider reports initial `sync=true` (if a provider is enabled).
+  - after local persistence load completes (if `options.persistence` / legacy `options.offline` is enabled)
+  - after the provider reports initial `sync=true` (if a provider is enabled)
+  - if both local persistence *and* a provider are enabled, it waits for **both** to complete so migration does not run against a partially hydrated document.
 - Gated by comment permissions: migration is skipped when `session.canComment()` is false (e.g. viewer role) so read-only clients do not generate Yjs updates. If permissions are later updated to allow comments, migration is retried.
 - Uses `migrateCommentsArrayToMap(doc, { origin: "comments-migrate" })`, which:
   - renames the legacy root to `comments_legacy*` (so old content remains accessible), and
