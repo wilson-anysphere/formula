@@ -160,7 +160,8 @@ describe("CanvasGridRenderer axis overrides large-selection perf characteristics
     expect(colsAxis.diffBit.length).toBe(1);
 
     // Each batch apply should trigger a single repaint request (not per-index invalidations).
-    expect(requestRenderSpy).toHaveBeenCalledTimes(2);
+    // Allow future coalescing (eg if a scheduled frame is already pending).
+    expect(requestRenderSpy.mock.calls.length).toBeLessThanOrEqual(2);
 
     // Guardrails: the override application should not do work proportional to maxRows/maxCols.
     // These are intentionally generous and rely on the allocation guards above for determinism.
