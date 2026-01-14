@@ -800,9 +800,11 @@ export class DrawingOverlay {
     }
     completed = true;
     } finally {
-      if (completed && this.shapeTextCache.size > 0) {
-        // Prune cached shape text layouts for shapes that no longer exist.
-        //
+      // Prune cached shape text layouts for shapes that no longer exist.
+      //
+      // Only the latest render pass should mutate shared caches; older async renders
+      // can finish out-of-order and must not evict newer cache entries.
+      if (completed && seq === this.renderSeq && this.shapeTextCache.size > 0) {
         // `shapeTextCache` is keyed by drawing id and can otherwise grow unbounded across
         // delete/undo/redo sessions. We only do the (allocating) prune when it's likely stale.
         const liveShapeCount = drawObjects
