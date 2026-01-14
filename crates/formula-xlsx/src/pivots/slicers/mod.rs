@@ -2322,6 +2322,52 @@ mod timeline_selection_write_tests {
     }
 
     #[test]
+    fn timeline_selection_inserts_with_prefix_when_root_is_prefixed() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x15:timelineCacheDefinition xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"/>"#;
+
+        let selection = TimelineSelectionState {
+            start: Some("2024-05-01".to_string()),
+            end: Some("2024-05-31".to_string()),
+        };
+
+        let updated =
+            patch_timeline_selection_xml(xml, &selection, DateSystem::V1900).expect("patch xml");
+        let updated_str = std::str::from_utf8(&updated).expect("utf8");
+        assert!(
+            updated_str.contains("x15:selection"),
+            "expected inserted selection to reuse root prefix: {updated_str}"
+        );
+    }
+
+    #[test]
+    fn timeline_selection_updates_numeric_serials_using_workbook_date_system() {
+        // When a timeline persists selection endpoints as numeric serials, keep that representation
+        // when patching so Excel continues to interpret it correctly.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">
+  <selection startDate="1" endDate="2"/>
+</timelineCacheDefinition>"#;
+
+        // In the 1904 system, serial 0 = 1904-01-01.
+        let selection = TimelineSelectionState {
+            start: Some("1904-01-04".to_string()),
+            end: Some("1904-01-05".to_string()),
+        };
+
+        let updated =
+            patch_timeline_selection_xml(xml, &selection, DateSystem::V1904).expect("patch xml");
+        let parsed = parse_timeline_selection(&updated, DateSystem::V1904.to_engine_date_system())
+            .expect("parse selection");
+        assert_eq!(parsed.start.as_deref(), Some("1904-01-04"));
+        assert_eq!(parsed.end.as_deref(), Some("1904-01-05"));
+
+        let updated_str = std::str::from_utf8(&updated).expect("utf8");
+        assert!(updated_str.contains("startDate=\"3\""), "{updated_str}");
+        assert!(updated_str.contains("endDate=\"4\""), "{updated_str}");
+    }
+
+    #[test]
     fn set_timeline_selection_round_trips_via_pivot_slicer_parts() {
         let timeline_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <timeline xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"
