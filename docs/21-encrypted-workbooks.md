@@ -524,6 +524,7 @@ back into a generic “encrypted workbook” error:
   `Unsupported*` variants → **Unsupported encryption scheme**
 
 - `formula_offcrypto::OffcryptoError::InvalidPassword` → **Invalid password**
+- `formula_offcrypto::OffcryptoError::UnsupportedKeyEncryptor { .. }` → **Unsupported encryption scheme** (no password key-encryptor present)
 - `formula_offcrypto::OffcryptoError::UnsupportedVersion { .. }` and `UnsupportedAlgorithm(..)` → **Unsupported encryption scheme**
 - `formula_offcrypto::OffcryptoError::InvalidEncryptionInfo { .. }` / `Truncated { .. }` → **Corrupt encrypted wrapper**
 
