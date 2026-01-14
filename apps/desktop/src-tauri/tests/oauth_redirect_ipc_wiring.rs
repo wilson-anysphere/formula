@@ -8,20 +8,32 @@
 //! system WebView toolchain on Linux). These are intentionally source-level tests so they run in
 //! headless CI without that feature.
 
-fn slice_between<'a>(
-    src: &'a str,
-    start_marker: &str,
-    end_marker: &str,
-    context: &str,
-) -> &'a str {
-    let start = src
-        .find(start_marker)
-        .unwrap_or_else(|| panic!("{context}: failed to find start marker `{start_marker}`"));
-    let end = src[start..]
-        .find(end_marker)
+fn extract_brace_block<'a>(source: &'a str, anchor: &str, context: &str) -> &'a str {
+    let start = source
+        .find(anchor)
+        .unwrap_or_else(|| panic!("{context}: missing anchor {anchor:?}"));
+
+    let brace_start = source[start..]
+        .find('{')
         .map(|idx| start + idx)
-        .unwrap_or_else(|| panic!("{context}: failed to find end marker `{end_marker}`"));
-    &src[start..end]
+        .unwrap_or_else(|| panic!("{context}: missing '{{' after anchor {anchor:?}"));
+
+    let bytes = source.as_bytes();
+    let mut depth: i32 = 0;
+    for i in brace_start..bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &source[brace_start..=i];
+                }
+            }
+            _ => {}
+        }
+    }
+
+    panic!("{context}: unbalanced braces after anchor {anchor:?}");
 }
 
 #[test]
@@ -43,20 +55,11 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
     );
 
     // --- 1) Ensure there is an `oauth-redirect-ready` listener registered.
-    let listener_start = main_rs
-        .find("listen(OAUTH_REDIRECT_READY_EVENT")
-        .expect(
-            "desktop main.rs must listen for OAUTH_REDIRECT_READY_EVENT (oauth-redirect-ready) so \
-             queued OAuth redirect deep links aren't dropped on cold start",
-        );
-    let listener_after = &main_rs[listener_start..];
-    let listener_end = listener_after
-        .find("});")
-        .map(|idx| idx + 3)
-        .expect(
-            "failed to locate end of OAUTH_REDIRECT_READY_EVENT listener (expected `});` after window.listen(...))",
-        );
-    let listener_body = &listener_after[..listener_end];
+    let listener_body = extract_brace_block(
+        main_rs,
+        "listen(OAUTH_REDIRECT_READY_EVENT",
+        "oauth redirect ready listener wiring",
+    );
 
     // --- 2) Ensure the listener flips readiness exactly once, drains pending URLs, and emits.
     //
@@ -139,10 +142,9 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
     );
 
     // --- 3) Ensure `handle_oauth_redirect_request` queues when not ready.
-    let handler_body = slice_between(
+    let handler_body = extract_brace_block(
         main_rs,
         "fn handle_oauth_redirect_request",
-        "fn extract_open_file_paths",
         "oauth redirect handler wiring",
     );
 
