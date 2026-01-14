@@ -728,21 +728,13 @@ impl Engine {
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
             return false;
         };
-        if new_index >= self.workbook.sheet_order.len() {
-            return false;
-        }
-        let Some(current) = self.workbook.sheet_order.iter().position(|&id| id == sheet_id) else {
-            return false;
-        };
-        if current == new_index {
-            return true;
-        }
-
         let before_order = self.workbook.sheet_order.clone();
         if !self.workbook.reorder_sheet(sheet_id, new_index) {
             return false;
         }
-
+        if self.workbook.sheet_order == before_order {
+            return true;
+        }
         if self.rebuild_graph().is_err() {
             // Reordering should not introduce new parse errors (formulas are unchanged), but if
             // rebuilding fails for any reason, restore the previous order and best-effort rebuild
