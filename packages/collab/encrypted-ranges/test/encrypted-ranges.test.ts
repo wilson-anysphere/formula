@@ -210,4 +210,34 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe("k1");
     expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 1 })).toBe(false);
   });
+
+  it("manager can mutate legacy map schema by normalizing to the canonical array schema", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Map<Y.Map<unknown>>();
+    const r = new Y.Map<unknown>();
+    r.set("sheetId", "s1");
+    r.set("startRow", 0);
+    r.set("startCol", 0);
+    r.set("endRow", 0);
+    r.set("endCol", 0);
+    r.set("keyId", "k1");
+
+    doc.transact(() => {
+      ranges.set("range-1", r);
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const mgr = new EncryptedRangeManager({ doc });
+    expect(mgr.list().map((e) => e.id)).toEqual(["range-1"]);
+
+    // Update should work even though the original value omitted `id` (fallback is the map key).
+    mgr.update("range-1", { endCol: 1 });
+    expect(mgr.list().find((e) => e.id === "range-1")?.endCol).toBe(1);
+
+    mgr.remove("range-1");
+    expect(mgr.list()).toHaveLength(0);
+  });
 });
