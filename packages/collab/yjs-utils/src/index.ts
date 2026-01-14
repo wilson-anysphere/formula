@@ -252,21 +252,7 @@ export function replaceForeignRootType<T>(params: { doc: Y.Doc; name: string; ex
   // Fix: patch the prototype of known Content* objects based on their `getRef()`
   // so `content.constructor` matches the local Content* constructors.
   if (t instanceof Y.Text) {
-    const protosByRef = getYTextContentPrototypesByRef();
-    for (let n = t._start ?? null; n !== null; n = n.right) {
-      const content = n?.content;
-      if (!content || typeof content !== "object" || typeof content.getRef !== "function") continue;
-      const ref = content.getRef();
-      if (typeof ref !== "number") continue;
-      const proto = protosByRef.get(ref);
-      if (!proto) continue;
-      if (Object.getPrototypeOf(content) === proto) continue;
-      try {
-        Object.setPrototypeOf(content, proto);
-      } catch {
-        // Ignore: non-extensible content objects (unexpected).
-      }
-    }
+    patchYTextContentPrototypes(t);
   }
   return t as T;
 }
@@ -403,7 +389,15 @@ export function getTextRoot(doc: Y.Doc, name: string): Y.Text {
 
   const text = getYText(existing);
   if (text) {
-    return text instanceof Y.Text ? (text as Y.Text) : (replaceForeignRootType({ doc, name, existing: text, create: () => new Y.Text() }) as any);
+    const out = text instanceof Y.Text ? (text as Y.Text) : (replaceForeignRootType({ doc, name, existing: text, create: () => new Y.Text() }) as any);
+    // Even when the root type is local, applying updates via a different Yjs module
+    // instance can introduce foreign `Item.content` constructors. Y.Text methods use
+    // constructor equality checks, so patch content prototypes to keep toString/toDelta
+    // stable.
+    if (doc instanceof Y.Doc && out instanceof Y.Text) {
+      patchYTextContentPrototypes(out);
+    }
+    return out;
   }
 
   const map = getYMap(existing);
@@ -417,18 +411,15 @@ export function getTextRoot(doc: Y.Doc, name: string): Y.Text {
   }
 
   if (existing instanceof Y.AbstractType && (existing as any).constructor === Y.AbstractType) {
-    // Yjs' built-in `doc.getText(name)` conversion logic is sufficient for same-module
-    // placeholders, but fails in mixed-module environments (ESM doc + CJS applyUpdate).
-    // In that case, the placeholder's Item.content objects come from the foreign module
-    // instance, so the resulting local Y.Text may treat them as "unknown" and report
-    // an empty string via `toString()`.
-    //
-    // Reuse the `replaceForeignRootType` path so we can patch Content* prototypes for
-    // the local module instance (see Y.Text special case inside that helper).
-    if (doc instanceof Y.Doc) {
-      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Text() }) as any;
+    const out = doc.getText(name);
+    // Even when the placeholder was created by this module instance, its internal
+    // Item/content structs can come from a different Yjs module instance (e.g. CJS
+    // applyUpdate). Patch content prototypes so `toString()` / `toDelta()` remain
+    // stable.
+    if (doc instanceof Y.Doc && out instanceof Y.Text) {
+      patchYTextContentPrototypes(out);
     }
-    return doc.getText(name);
+    return out;
   }
 
   if (isYAbstractType(existing)) {
@@ -439,6 +430,25 @@ export function getTextRoot(doc: Y.Doc, name: string): Y.Text {
   }
 
   throw new Error(`Unsupported Yjs root type for "${name}": ${existing?.constructor?.name ?? typeof existing}`);
+}
+
+function patchYTextContentPrototypes(text: any): void {
+  if (!(text instanceof Y.Text)) return;
+  const protosByRef = getYTextContentPrototypesByRef();
+  for (let n = (text as any)?._start ?? null; n !== null; n = n.right) {
+    const content = n?.content;
+    if (!content || typeof content !== "object" || typeof content.getRef !== "function") continue;
+    const ref = content.getRef();
+    if (typeof ref !== "number") continue;
+    const proto = protosByRef.get(ref);
+    if (!proto) continue;
+    if (Object.getPrototypeOf(content) === proto) continue;
+    try {
+      Object.setPrototypeOf(content, proto);
+    } catch {
+      // Ignore: non-extensible content objects (unexpected).
+    }
+  }
 }
 
 /**
@@ -547,6 +557,10 @@ export function cloneYjsValue(value: any, constructors: { Map?: new () => any; A
     // (integrating it into a temporary doc), replay the queued operations by intercepting
     // method calls, then apply them to the clone.
     if ((text as any)?.doc != null) {
+      // If a local Y.Text has foreign content constructors (e.g. updates applied by a
+      // different Yjs module instance), `toDelta()` can return empty results. Patch
+      // content prototypes before reading.
+      if (text instanceof Y.Text) patchYTextContentPrototypes(text);
       out.applyDelta(cloneDelta(text.toDelta()));
       return out;
     }

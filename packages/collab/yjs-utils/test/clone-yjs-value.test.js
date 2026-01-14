@@ -99,3 +99,36 @@ test("collab-yjs-utils: cloneYjsValue can clone unintegrated foreign Y.Text with
   assert.ok(insertedMap, "expected embedded Yjs type to round-trip through toDelta()");
   assert.equal(insertedMap.get("x"), 1);
 });
+
+test("collab-yjs-utils: cloneYjsValue patches local Y.Text content prototypes before toDelta()", () => {
+  const doc = new Y.Doc();
+  const title = doc.getText("title");
+  title.insert(0, "hello");
+
+  const item = /** @type {any} */ (title)._start;
+  assert.ok(item, "expected internal Item struct");
+  const content = item.content;
+  assert.ok(content, "expected Item.content");
+  assert.equal(typeof content.getRef, "function", "expected content.getRef to exist");
+
+  const ref = content.getRef();
+  assert.equal(typeof ref, "number", "expected content.getRef() to return a numeric ref id");
+
+  const originalProto = Object.getPrototypeOf(content);
+  const foreignProto = { getRef: () => ref };
+  Object.setPrototypeOf(content, foreignProto);
+  assert.equal(Object.getPrototypeOf(content), foreignProto);
+
+  const cloned = cloneYjsValue(title, { Map: Y.Map, Array: Y.Array, Text: Y.Text });
+  assert.ok(cloned instanceof Y.Text);
+
+  // cloneYjsValue should repair the prototype so future reads behave normally.
+  assert.equal(Object.getPrototypeOf(content), originalProto);
+
+  const doc2 = new Y.Doc();
+  const root = doc2.getMap("root");
+  root.set("t", cloned);
+  const t = root.get("t");
+  assert.ok(t instanceof Y.Text);
+  assert.equal(t.toString(), "hello");
+});

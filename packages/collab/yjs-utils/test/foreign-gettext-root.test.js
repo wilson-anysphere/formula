@@ -129,3 +129,28 @@ test("collab-yjs-utils: getTextRoot preserves foreign embedded Yjs types when no
   assert.ok(insertedMap, "expected embedded Yjs type to round-trip through toDelta()");
   assert.equal(insertedMap.get("x"), 1);
 });
+
+test("collab-yjs-utils: getTextRoot patches local Y.Text content prototypes based on getRef ids", () => {
+  const doc = new Y.Doc();
+  const title = doc.getText("title");
+  title.insert(0, "hello");
+
+  const item = /** @type {any} */ (title)._start;
+  assert.ok(item, "expected internal Item struct");
+  const content = item.content;
+  assert.ok(content, "expected Item.content");
+  assert.equal(typeof content.getRef, "function", "expected content.getRef to exist");
+
+  const ref = content.getRef();
+  assert.equal(typeof ref, "number", "expected content.getRef() to return a numeric ref id");
+
+  const originalProto = Object.getPrototypeOf(content);
+  const foreignProto = { getRef: () => ref };
+  Object.setPrototypeOf(content, foreignProto);
+  assert.equal(Object.getPrototypeOf(content), foreignProto);
+
+  const normalized = getTextRoot(doc, "title");
+  assert.ok(normalized instanceof Y.Text);
+  assert.equal(normalized.toString(), "hello");
+  assert.equal(Object.getPrototypeOf(content), originalProto);
+});
