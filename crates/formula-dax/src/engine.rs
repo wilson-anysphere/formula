@@ -305,6 +305,13 @@ impl RowContext {
         self.row_for_level(table, 0)
     }
 
+    fn row_for_outermost(&self, table: &str) -> Option<usize> {
+        self.stack.iter().find_map(|frame| match frame {
+            RowContextFrame::Physical { table: t, row, .. } if t == table => Some(*row),
+            _ => None,
+        })
+    }
+
     fn virtual_binding(&self, table: &str, column: &str) -> Option<&Value> {
         for frame in self.stack.iter().rev() {
             let RowContextFrame::Virtual { bindings } = frame else {
@@ -1358,20 +1365,7 @@ impl DaxEngine {
                     1
                 };
 
-                let Some((row, visible_cols)) = row_ctx
-                    .stack
-                    .iter()
-                    .rev()
-                    .filter_map(|frame| match frame {
-                        RowContextFrame::Physical {
-                            table: t,
-                            row,
-                            visible_cols,
-                        } if t == table => Some((*row, visible_cols.as_deref())),
-                        _ => None,
-                    })
-                    .nth(level_from_inner)
-                else {
+                let Some(row) = row_ctx.row_for_level(table, level_from_inner) else {
                     let available = row_ctx
                         .stack
                         .iter()
@@ -1388,21 +1382,17 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })?;
-                if let Some(visible_cols) = visible_cols {
-                    if !visible_cols.contains(&idx) {
-                        return Err(DaxError::Eval(format!(
-                            "column {table}[{column}] is not available in the current row context"
-                        )));
-                    }
-                }
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                Ok(table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
+                let value =
+                    table_ref
+                        .value(row, column)
+                        .ok_or_else(|| DaxError::UnknownColumn {
+                            table: table.clone(),
+                            column: column.clone(),
+                        })?;
+                Ok(value)
             }
             "EARLIEST" => {
                 let [arg] = args else {
@@ -1414,16 +1404,7 @@ impl DaxEngine {
                     ));
                 };
 
-                let Some((row, visible_cols)) =
-                    row_ctx.stack.iter().find_map(|frame| match frame {
-                        RowContextFrame::Physical {
-                            table: t,
-                            row,
-                            visible_cols,
-                        } if t == table => Some((*row, visible_cols.as_deref())),
-                        _ => None,
-                    })
-                else {
+                let Some(row) = row_ctx.row_for_outermost(table) else {
                     return Err(DaxError::Eval(format!(
                         "EARLIEST requires row context for {table}[{column}]"
                     )));
@@ -1432,21 +1413,17 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-                let idx = table_ref.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })?;
-                if let Some(visible_cols) = visible_cols {
-                    if !visible_cols.contains(&idx) {
-                        return Err(DaxError::Eval(format!(
-                            "column {table}[{column}] is not available in the current row context"
-                        )));
-                    }
-                }
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                Ok(table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
+                let value =
+                    table_ref
+                        .value(row, column)
+                        .ok_or_else(|| DaxError::UnknownColumn {
+                            table: table.clone(),
+                            column: column.clone(),
+                        })?;
+                Ok(value)
             }
             other => Err(DaxError::Eval(format!("unsupported function {other}"))),
         }
@@ -4739,7 +4716,13 @@ fn maybe_trace_resolve_row_sets(
 
     let mut table_counts: Vec<(&str, usize, usize)> = sets
         .iter()
-        .map(|(name, allowed)| (name.as_str(), allowed.count_ones(), allowed.len()))
+        .map(|(name, allowed)| {
+            (
+                name.as_str(),
+                allowed.count_ones(),
+                allowed.len(),
+            )
+        })
         .collect();
     table_counts.sort_by_key(|(name, _, _)| *name);
     let table_counts = table_counts
@@ -4803,32 +4786,29 @@ fn propagate_filter(
             // compute the visible key set. For columnar fact tables, iterating `to_index` can be
             // expensive (especially when the `to_table` is also large); prefer extracting distinct
             // visible values directly from the `to_table` backend when possible.
-            let mut allowed_keys: Vec<Value> = if relationship.from_index.is_some() {
+            let allowed_keys: Vec<Value> = if relationship.from_index.is_some() {
                 relationship
                     .to_index
                     .iter()
-                    // Fact rows whose FK is BLANK always belong to the relationship-generated
-                    // blank member, even if a physical BLANK key exists on the dimension side.
-                    // Therefore, do not treat BLANK as a matchable key during propagation.
-                    .filter(|(key, _)| !key.is_blank())
                     .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key.clone()))
                     .collect()
             } else {
                 let to_table = model
                     .table(to_table_name)
                     .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
-                let to_idx = relationship.to_idx;
 
                 let all_visible = to_set.all_true();
 
                 if all_visible {
                     to_table
-                        .distinct_values_filtered(to_idx, None)
+                        .distinct_values_filtered(relationship.to_idx, None)
                         .unwrap_or_else(|| {
                             let mut seen = HashSet::new();
                             let mut out = Vec::new();
                             for row in 0..to_table.row_count() {
-                                let v = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
+                                let v = to_table
+                                    .value_by_idx(row, relationship.to_idx)
+                                    .unwrap_or(Value::Blank);
                                 if seen.insert(v.clone()) {
                                     out.push(v);
                                 }
@@ -4836,47 +4816,32 @@ fn propagate_filter(
                             out
                         })
                 } else {
-                    let visible_count = to_set.count_ones();
-                    if visible_count == 0 {
+                    let visible_rows: Vec<usize> = to_set.iter_ones().collect();
+
+                    if visible_rows.is_empty() {
                         Vec::new()
                     } else {
-                        // `distinct_values_filtered` takes a row index list. For large row sets, that
-                        // list can be prohibitively expensive (8 bytes/row). Prefer scanning the
-                        // allowed `BitVec` directly once it would be cheaper than materializing row
-                        // indices (same heuristic as `UnmatchedFactRowsBuilder`).
-                        let sparse_to_dense_threshold = to_table.row_count() / 64;
-                        if visible_count > sparse_to_dense_threshold {
-                            let mut seen = HashSet::new();
-                            let mut out = Vec::new();
-                            for row in to_set.iter_ones() {
-                                let v = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
-                                if seen.insert(v.clone()) {
-                                    out.push(v);
-                                }
-                            }
-                            out
-                        } else {
-                            let visible_rows: Vec<usize> = to_set.iter_ones().collect();
-                            to_table
-                                .distinct_values_filtered(to_idx, Some(visible_rows.as_slice()))
-                                .unwrap_or_else(|| {
-                                    let mut seen = HashSet::new();
-                                    let mut out = Vec::new();
-                                    for &row in &visible_rows {
-                                        let v = to_table
-                                            .value_by_idx(row, to_idx)
-                                            .unwrap_or(Value::Blank);
-                                        if seen.insert(v.clone()) {
-                                            out.push(v);
-                                        }
+                        to_table
+                            .distinct_values_filtered(
+                                relationship.to_idx,
+                                Some(visible_rows.as_slice()),
+                            )
+                            .unwrap_or_else(|| {
+                                let mut seen = HashSet::new();
+                                let mut out = Vec::new();
+                                for &row in &visible_rows {
+                                    let v = to_table
+                                        .value_by_idx(row, relationship.to_idx)
+                                        .unwrap_or(Value::Blank);
+                                    if seen.insert(v.clone()) {
+                                        out.push(v);
                                     }
-                                    out
-                                })
-                        }
+                                }
+                                out
+                            })
                     }
                 }
             };
-            allowed_keys.retain(|v| !v.is_blank());
             let from_set = sets
                 .get(from_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;

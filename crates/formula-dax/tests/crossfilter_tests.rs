@@ -145,3 +145,60 @@ fn crossfilter_oneway_leftfiltersright_propagates_only_from_left_to_right() {
         4.into()
     );
 }
+
+#[test]
+fn crossfilter_oneway_rightfiltersleft_propagates_only_from_right_to_left() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    // With the default single-direction relationship (Customers -> Orders), a fact-side filter does
+    // not shrink the Customers table.
+    let fact_filter = FilterContext::empty().with_column_equals("Orders", "Amount", 20.0.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(Customers)",
+                &fact_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    // `ONEWAY_RIGHTFILTERSLEFT` uses the argument order to set direction (right filters left). With
+    // Customers on the left and Orders on the right, this forces Orders -> Customers propagation.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Customers), CROSSFILTER(Customers[CustomerId], Orders[CustomerId], ONEWAY_RIGHTFILTERSLEFT))",
+                &fact_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    // Conversely, a Customers filter should no longer propagate to Orders when the relationship is
+    // set to only filter from right -> left (Orders -> Customers here).
+    let customer_filter =
+        FilterContext::empty().with_column_equals("Customers", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(&model, "COUNTROWS(Orders)", &customer_filter, &RowContext::default())
+            .unwrap(),
+        2.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(COUNTROWS(Orders), CROSSFILTER(Customers[CustomerId], Orders[CustomerId], ONEWAY_RIGHTFILTERSLEFT))",
+                &customer_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        4.into()
+    );
+}
