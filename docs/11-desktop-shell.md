@@ -148,6 +148,10 @@ Notes:
     - uploads the same artifact set as the scheduled workflow (per-OS `desktop-perf-<os>` + merged `desktop-perf-platform-matrix`)
     - optional gating: set the GitHub Actions variable `FORMULA_ENFORCE_DESKTOP_PLATFORM_MATRIX` to a truthy value (`1`, `true`, `yes`, `on`) (and tune the existing startup/memory target variables)
 
+  For long-running **idle memory** history on main (Linux only), see:
+  - `.github/workflows/desktop-memory-perf.yml`
+    - publishes `desktop.memory.idle_rss_mb.p95` to the benchmark-action `gh-pages` history (non-gating)
+
 ### Idle memory benchmark (desktop process RSS)
 
 To measure idle memory for the desktop app (after TTI, with an empty workbook), run:
