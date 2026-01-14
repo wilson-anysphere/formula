@@ -251,6 +251,16 @@ pub enum HashAlgorithm {
 }
 
 impl HashAlgorithm {
+    /// Canonical OOXML/MS-OFFCRYPTO algorithm name (e.g. `SHA512`).
+    pub fn as_ooxml_name(&self) -> &'static str {
+        match self {
+            HashAlgorithm::Sha1 => "SHA1",
+            HashAlgorithm::Sha256 => "SHA256",
+            HashAlgorithm::Sha384 => "SHA384",
+            HashAlgorithm::Sha512 => "SHA512",
+        }
+    }
+
     fn parse_offcrypto_name(name: &str) -> Result<Self, OffcryptoError> {
         match name.trim().to_ascii_uppercase().as_str() {
             "SHA1" | "SHA-1" => Ok(HashAlgorithm::Sha1),
@@ -332,6 +342,12 @@ impl HashAlgorithm {
         let mut out = vec![0u8; self.digest_len()];
         self.digest_into(data, &mut out);
         out
+    }
+}
+
+impl fmt::Display for HashAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_ooxml_name())
     }
 }
 
@@ -690,7 +706,7 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
 ///
 /// This helper is intended for callers that only implement ECMA-376 Standard encryption.
 /// If the provided `EncryptionInfo` stream describes Agile encryption, this returns
-/// [`OffcryptoError::UnsupportedEncryptionType`] (even if the password is correct).
+/// [`OffcryptoError::UnsupportedEncryption`] (even if the password is correct).
 ///
 /// Inputs are the raw `EncryptionInfo` and `EncryptedPackage` *stream bytes* extracted from the
 /// OLE/CFB wrapper.
@@ -1654,6 +1670,16 @@ pub enum StandardAlgId {
 }
 
 impl StandardAlgId {
+    /// Canonical display name for known AES variants (e.g. `AES-256`).
+    pub fn as_display_name(&self) -> Option<&'static str> {
+        match self {
+            StandardAlgId::Aes128 => Some("AES-128"),
+            StandardAlgId::Aes192 => Some("AES-192"),
+            StandardAlgId::Aes256 => Some("AES-256"),
+            StandardAlgId::Unknown(_) => None,
+        }
+    }
+
     fn from_raw(raw: u32) -> Self {
         match raw {
             // CryptoAPI constants:
@@ -1662,6 +1688,17 @@ impl StandardAlgId {
             0x0000_660F => Self::Aes192,
             0x0000_6610 => Self::Aes256,
             other => Self::Unknown(other),
+        }
+    }
+}
+
+impl fmt::Display for StandardAlgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StandardAlgId::Aes128 | StandardAlgId::Aes192 | StandardAlgId::Aes256 => {
+                f.write_str(self.as_display_name().expect("known AES variant"))
+            }
+            StandardAlgId::Unknown(raw) => write!(f, "0x{raw:08X}"),
         }
     }
 }
@@ -2026,6 +2063,30 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
         stream
             .read_to_end(&mut encryption_info)
             .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to read `EncryptionInfo`: {e}")))?;
+    }
+
+    // `EncryptionInfo` parsing for Agile (4.4) expects a full XML payload. For this
+    // Standard-only decryptor we can short-circuit purely from the version header so that:
+    // - detection does not depend on parsing the XML
+    // - synthetic/minimal fixtures can validate behavior without embedding full XML
+    let version = EncryptionVersionInfo::parse(&encryption_info)?;
+    if (version.major, version.minor) == (4, 4) {
+        return Err(OffcryptoError::UnsupportedEncryption {
+            encryption_type: EncryptionType::Agile,
+        });
+    }
+    if version.minor == 3 && matches!(version.major, 3 | 4) {
+        // MS-OFFCRYPTO "Extensible" encryption: known scheme, but not supported by this Standard
+        // decryptor.
+        return Err(OffcryptoError::UnsupportedEncryption {
+            encryption_type: EncryptionType::Extensible,
+        });
+    }
+    if version.minor != 2 || !matches!(version.major, 2 | 3 | 4) {
+        return Err(OffcryptoError::UnsupportedVersion {
+            major: version.major,
+            minor: version.minor,
+        });
     }
 
     let (header, verifier) = match parse_encryption_info(&encryption_info)? {
@@ -3202,5 +3263,12 @@ mod tests {
                 max: 10
             }
         );
+    }
+
+    #[test]
+    fn display_helpers_use_canonical_names() {
+        assert_eq!(HashAlgorithm::Sha512.to_string(), "SHA512");
+        assert_eq!(StandardAlgId::Aes256.to_string(), "AES-256");
+        assert_eq!(StandardAlgId::Unknown(0xDEAD_BEEF).to_string(), "0xDEADBEEF");
     }
 }
