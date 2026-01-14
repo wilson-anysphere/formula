@@ -320,6 +320,8 @@ async function main(): Promise<void> {
       `- first render target: ${firstRenderTargetMs}ms (only for kind=full; override via --first-render-target-ms)\n` +
       `- webviewLoaded target: ${webviewLoadedTargetMs}ms (override via --webview-loaded-target-ms)\n` +
       `- tti target: ${ttiTargetMs}ms (override via --tti-target-ms)\n` +
+      "- targets env (full): FORMULA_DESKTOP_{COLD,WARM}_{WINDOW_VISIBLE,FIRST_RENDER,TTI}_TARGET_MS + FORMULA_DESKTOP_WEBVIEW_LOADED_TARGET_MS\n" +
+      "- targets env (shell overrides): FORMULA_DESKTOP_SHELL_{COLD,WARM}_{WINDOW_VISIBLE,TTI}_TARGET_MS + FORMULA_DESKTOP_SHELL_WEBVIEW_LOADED_TARGET_MS\n" +
       `- home: target/perf-home (repo-local; override with FORMULA_PERF_HOME)\n` +
       (enforce
         ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=0 to disable)\n"
