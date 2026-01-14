@@ -316,14 +316,25 @@ pub fn parse_dax_column_ref(input: &str) -> Option<(String, String)> {
     }
 
     // Quick reject: must contain `[` and end with `]`.
-    let open = s.find('[')?;
-    if !s.ends_with(']') {
+    if !s.contains('[') || !s.ends_with(']') {
         return None;
     }
 
-    let (raw_table, rest) = s.split_at(open);
-    let raw_table = raw_table.trim();
-    let rest = rest.trim_start();
+    let (table, rest) = if s.starts_with('\'') {
+        // Table names that contain `[` can only be represented using quotes. Use a prefix parser
+        // so we don't accidentally split on a `[` inside the quoted identifier.
+        let (table, rest) = parse_dax_quoted_identifier_prefix(s)?;
+        (table, rest.trim_start())
+    } else {
+        // Unquoted table refs can only contain identifier-like characters, so splitting on the
+        // first `[` is safe here.
+        let open = s.find('[')?;
+        let (raw_table, rest) = s.split_at(open);
+        (raw_table.trim().to_string(), rest.trim_start())
+    };
+    if table.is_empty() {
+        return None;
+    }
     if !rest.starts_with('[') {
         return None;
     }
@@ -339,20 +350,6 @@ pub fn parse_dax_column_ref(input: &str) -> Option<(String, String)> {
         return None;
     }
     let column = unescape_dax_bracket_identifier(column);
-
-    let table = if raw_table.starts_with('\'') {
-        let table = parse_dax_quoted_identifier(raw_table)?;
-        if table.is_empty() {
-            return None;
-        }
-        table
-    } else {
-        let t = raw_table.trim();
-        if t.is_empty() {
-            return None;
-        }
-        t.to_string()
-    };
 
     Some((table, column))
 }
@@ -375,8 +372,8 @@ pub fn parse_dax_measure_ref(input: &str) -> Option<String> {
     Some(unescape_dax_bracket_identifier(inner))
 }
 
-fn parse_dax_quoted_identifier(raw: &str) -> Option<String> {
-    let raw = raw.trim();
+fn parse_dax_quoted_identifier_prefix(raw: &str) -> Option<(String, &str)> {
+    let raw = raw.trim_start();
     let mut chars = raw.chars();
     if chars.next()? != '\'' {
         return None;
@@ -395,11 +392,8 @@ fn parse_dax_quoted_identifier(raw: &str) -> Option<String> {
                 continue;
             }
 
-            // Closing quote; ensure the rest is only whitespace.
-            if raw[i + 1..].trim().is_empty() {
-                return Some(out);
-            }
-            return None;
+            // Closing quote; return the rest of the input after the quoted identifier.
+            return Some((out, &raw[i + 1..]));
         }
 
         // ASCII fast-path; fall back to char iteration for non-ASCII (rare in table names).

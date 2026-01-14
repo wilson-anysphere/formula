@@ -393,6 +393,10 @@ fn dax_column_ref_parser_handles_basic_and_quoted_tables() {
         parse_dax_column_ref("'O''Reilly'[Col]"),
         Some(("O'Reilly".to_string(), "Col".to_string()))
     );
+    assert_eq!(
+        parse_dax_column_ref("'My[Table]'[Col]"),
+        Some(("My[Table]".to_string(), "Col".to_string()))
+    );
 
     // Invalid shapes.
     assert_eq!(parse_dax_column_ref(""), None);
