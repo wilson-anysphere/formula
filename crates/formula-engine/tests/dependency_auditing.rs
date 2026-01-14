@@ -62,6 +62,33 @@ fn precedents_and_dependents_queries_work() {
 }
 
 #[test]
+fn precedents_for_filled_formulas_resolve_against_formula_cell() {
+    let mut engine = Engine::new();
+
+    // Simulate a fill-down pattern where each row references cells in the same row.
+    engine
+        .set_cell_formula("Sheet1", "C1", "=A1+B1")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=A2+B2")
+        .unwrap();
+
+    assert_eq!(
+        engine.precedents("Sheet1", "C2").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 1, col: 0 }, // A2
+            },
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 1, col: 1 }, // B2
+            },
+        ]
+    );
+}
+
+#[test]
 fn dirty_dependency_path_explains_why_cell_is_dirty() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
