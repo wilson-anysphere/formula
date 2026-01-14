@@ -6,8 +6,8 @@
 */
 
 .command-palette-overlay {
-  --command-palette-overlay-padding: 16px;
-  --command-palette-overlay-padding-top: max(env(safe-area-inset-top), clamp(16px, 10vh, 80px));
+  --command-palette-overlay-padding: var(--space-6);
+  --command-palette-overlay-padding-top: max(env(safe-area-inset-top), clamp(var(--space-6), 10vh, calc(var(--space-6) * 5)));
   --command-palette-overlay-padding-bottom: max(env(safe-area-inset-bottom), var(--command-palette-overlay-padding));
   --command-palette-overlay-padding-inline-start: max(env(safe-area-inset-left), var(--command-palette-overlay-padding));
   --command-palette-overlay-padding-inline-end: max(env(safe-area-inset-right), var(--command-palette-overlay-padding));
