@@ -148,9 +148,17 @@ jobs:
         run: pnpm build:desktop
 
       - name: Build desktop binary (release, desktop feature)
+        shell: bash
         run: |
+          set -euo pipefail
+          # The desktop shell crate was historically named `formula-desktop-tauri`;
+          # it has since been renamed to `desktop` in some branches. Build whichever exists.
+          pkg="desktop"
+          if cargo metadata --no-deps --format-version=1 | grep -q '"name":"formula-desktop-tauri"'; then
+            pkg="formula-desktop-tauri"
+          fi
           bash scripts/cargo_agent.sh build \
-            -p formula-desktop-tauri \
+            -p "${pkg}" \
             --features desktop \
             --bin formula-desktop \
             --release \
