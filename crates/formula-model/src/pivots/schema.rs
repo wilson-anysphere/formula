@@ -226,11 +226,6 @@ impl fmt::Display for PivotFieldRef {
 }
 
 fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return true;
-    }
-
     // DAX identifiers (when unquoted) follow a limited "identifier" grammar. Everything else
     // (spaces, punctuation, leading digits, etc.) must be wrapped in single quotes.
     //
