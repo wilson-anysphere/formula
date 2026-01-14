@@ -684,13 +684,29 @@ export class DrawingInteractionController {
     try {
       const onCommit = this.callbacks.onInteractionCommit;
       const afterObj = finalObjects.find((obj) => obj.id === active.id);
+      let committed = false;
       if (typeof onCommit === "function" && startObj && afterObj) {
-        onCommit({ kind, id: active.id, before: startObj, after: afterObj, objects: finalObjects });
-      } else {
-        this.callbacks.commitObjects?.(finalObjects);
+        try {
+          onCommit({ kind, id: active.id, before: startObj, after: afterObj, objects: finalObjects });
+          committed = true;
+        } catch {
+          // Best-effort: do not crash interaction cleanup if the commit hook throws.
+          committed = false;
+        }
+      }
+      if (!committed) {
+        try {
+          this.callbacks.commitObjects?.(finalObjects);
+        } catch {
+          // Best-effort: persistence hooks should not break interaction cleanup.
+        }
       }
     } finally {
-      this.callbacks.endBatch?.();
+      try {
+        this.callbacks.endBatch?.();
+      } catch {
+        // Best-effort: never throw from cleanup.
+      }
     }
   };
 
