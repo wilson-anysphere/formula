@@ -95,6 +95,7 @@ jobs:
             scripts/ci/check-workflow-step-name-colons.test.js \
             scripts/ci/check-pnpm-version-pins.test.js \
             scripts/ci/check-wasm-pack-version-pins.test.js \
+            scripts/ci/check-tauri-cli-version-pins.test.js \
             scripts/__tests__/release-workflow-windows-bundle-validation.test.js \
             scripts/__tests__/release-workflow-macos-updater-archive.test.js \
             scripts/__tests__/release-workflow-macos-updater-archive-sigs.test.js \
