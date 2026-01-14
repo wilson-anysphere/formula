@@ -296,12 +296,20 @@ export function branchStateFromYjsDoc(doc) {
     if (view == null && rawView === undefined) {
       const frozenRows = readYMapOrObject(entry, "frozenRows");
       const frozenCols = readYMapOrObject(entry, "frozenCols");
+      const backgroundImageId = readYMapOrObject(entry, "backgroundImageId") ?? readYMapOrObject(entry, "background_image_id");
       const colWidths = readYMapOrObject(entry, "colWidths");
       const rowHeights = readYMapOrObject(entry, "rowHeights");
-      if (frozenRows !== undefined || frozenCols !== undefined || colWidths !== undefined || rowHeights !== undefined) {
+      if (
+        frozenRows !== undefined ||
+        frozenCols !== undefined ||
+        backgroundImageId !== undefined ||
+        colWidths !== undefined ||
+        rowHeights !== undefined
+      ) {
         view = {
           frozenRows: yjsValueToJson(frozenRows) ?? 0,
           frozenCols: yjsValueToJson(frozenCols) ?? 0,
+          ...(backgroundImageId !== undefined ? { backgroundImageId: yjsValueToJson(backgroundImageId) } : {}),
           ...(colWidths !== undefined ? { colWidths: yjsValueToJson(colWidths) } : {}),
           ...(rowHeights !== undefined ? { rowHeights: yjsValueToJson(rowHeights) } : {}),
         };
@@ -622,6 +630,8 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
                 key === "view" ||
                 key === "frozenRows" ||
                 key === "frozenCols" ||
+                key === "backgroundImageId" ||
+                key === "background_image_id" ||
                 key === "colWidths" ||
                 key === "rowHeights"
               ) {

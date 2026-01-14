@@ -52,6 +52,15 @@
  *   frozenRows: number,
  *   frozenCols: number,
  *   /**
+ *    * Optional worksheet background image id (tiled behind the grid).
+ *    *
+ *    * Stored as an opaque identifier; image bytes are managed separately.
+ *    *
+ *    * When present with a `null` value, this represents an explicit "clear background"
+ *    * operation (used so semantic merges can distinguish omission from clears).
+ *    *\/
+ *   backgroundImageId?: string | null,
+ *   /**
  *    * Sparse column width overrides (base units, zoom=1), keyed by 0-based column index.
  *    *\/
  *   colWidths?: Record<string, number>,

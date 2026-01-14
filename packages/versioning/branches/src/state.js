@@ -40,6 +40,7 @@ function normalizeFrozenCount(value) {
  * @returns {{
  *   frozenRows: number,
  *   frozenCols: number,
+ *   backgroundImageId?: string | null,
  *   colWidths?: Record<string, number>,
  *   rowHeights?: Record<string, number>,
  *   defaultFormat?: Record<string, any>,
@@ -51,6 +52,21 @@ function normalizeFrozenCount(value) {
 function normalizeSheetView(value) {
   const frozenRows = normalizeFrozenCount(isRecord(value) ? value.frozenRows : undefined);
   const frozenCols = normalizeFrozenCount(isRecord(value) ? value.frozenCols : undefined);
+
+  const hasBackgroundImageId =
+    isRecord(value) &&
+    (Object.prototype.hasOwnProperty.call(value, "backgroundImageId") ||
+      Object.prototype.hasOwnProperty.call(value, "background_image_id"));
+  const backgroundImageIdRaw = isRecord(value) ? value.backgroundImageId ?? value.background_image_id : undefined;
+  /** @type {string | null} */
+  let backgroundImageId = null;
+  if (typeof backgroundImageIdRaw === "string") {
+    const trimmed = backgroundImageIdRaw.trim();
+    if (trimmed) backgroundImageId = trimmed;
+  } else if (backgroundImageIdRaw === null) {
+    // Preserve explicit clears so semantic merges can distinguish "omitted" from "cleared".
+    backgroundImageId = null;
+  }
 
   const normalizeFormatObject = (raw) => {
     if (!isRecord(raw)) return null;
@@ -203,6 +219,7 @@ function normalizeSheetView(value) {
   return {
     frozenRows,
     frozenCols,
+    ...(hasBackgroundImageId ? { backgroundImageId } : {}),
     ...(colWidths ? { colWidths } : {}),
     ...(rowHeights ? { rowHeights } : {}),
     ...(defaultFormat ? { defaultFormat } : {}),

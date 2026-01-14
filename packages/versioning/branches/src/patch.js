@@ -275,11 +275,23 @@ export function applyPatch(state, patch) {
         }
         if (isRecord(meta.view)) {
           nextMeta.view = structuredClone(meta.view);
-        } else if ("frozenRows" in meta || "frozenCols" in meta) {
+        } else if (
+          "frozenRows" in meta ||
+          "frozenCols" in meta ||
+          "backgroundImageId" in meta ||
+          "background_image_id" in meta
+        ) {
           // Back-compat: some older patches may have stored view fields directly on the sheet meta.
+          const bg =
+            typeof meta.backgroundImageId === "string" || meta.backgroundImageId === null
+              ? meta.backgroundImageId
+              : typeof meta.background_image_id === "string" || meta.background_image_id === null
+                ? meta.background_image_id
+                : undefined;
           nextMeta.view = structuredClone({
             frozenRows: meta.frozenRows ?? 0,
             frozenCols: meta.frozenCols ?? 0,
+            ...(bg !== undefined ? { backgroundImageId: bg } : {}),
           });
         }
         out.sheets.metaById[sheetId] = nextMeta;

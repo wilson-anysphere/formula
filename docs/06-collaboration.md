@@ -469,6 +469,7 @@ Each entry in `doc.getArray("sheets")` is a `Y.Map` with (at least):
 type SheetViewState = {
   frozenRows: number;
   frozenCols: number;
+  backgroundImageId?: string;
   colWidths?: Record<string, number>;
   rowHeights?: Record<string, number>;
 };

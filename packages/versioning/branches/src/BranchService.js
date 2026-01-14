@@ -125,7 +125,14 @@ function shouldPreserveSchemaV1SheetView(value, sheetId) {
     // If a key exists but is invalid, assume the caller doesn't support view and preserve.
     return true;
   }
-  if ("frozenRows" in meta || "frozenCols" in meta) return false;
+  if (
+    "frozenRows" in meta ||
+    "frozenCols" in meta ||
+    "backgroundImageId" in meta ||
+    "background_image_id" in meta
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -445,6 +452,15 @@ export class BranchService {
 
         if (!("colWidths" in rawView) && currentView.colWidths !== undefined) {
           mergedView.colWidths = structuredClone(currentView.colWidths);
+          didOverlay = true;
+        }
+
+        if (
+          !("backgroundImageId" in rawView) &&
+          !("background_image_id" in rawView) &&
+          currentView.backgroundImageId !== undefined
+        ) {
+          mergedView.backgroundImageId = structuredClone(currentView.backgroundImageId);
           didOverlay = true;
         }
 

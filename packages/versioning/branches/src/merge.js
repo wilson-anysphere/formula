@@ -169,6 +169,7 @@ function mergeSheetView(baseView, oursView, theirsView) {
   const keys = [
     "frozenRows",
     "frozenCols",
+    "backgroundImageId",
     "colWidths",
     "rowHeights",
     "defaultFormat",
