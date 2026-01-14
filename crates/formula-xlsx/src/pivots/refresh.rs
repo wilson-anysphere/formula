@@ -379,7 +379,7 @@ fn resolve_defined_name_reference(
                         b"name" => dn_name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
                             local_sheet_id =
-                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                                attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         _ => {}
                     }
@@ -408,7 +408,7 @@ fn resolve_defined_name_reference(
                         b"name" => dn_name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
                             local_sheet_id =
-                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                                attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         _ => {}
                     }
@@ -891,7 +891,7 @@ fn parse_num_fmt_attrs(
     for attr in e.attributes().with_checks(false) {
         let attr = attr?;
         match local_name(attr.key.as_ref()) {
-            b"numFmtId" => id = attr.unescape_value()?.into_owned().parse::<u16>().ok(),
+            b"numFmtId" => id = attr.unescape_value()?.trim().parse::<u16>().ok(),
             b"formatCode" => code = Some(attr.unescape_value()?.into_owned()),
             _ => {}
         }
@@ -2278,6 +2278,11 @@ mod tests {
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
 </Relationships>"#;
 
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+
         let cursor = Cursor::new(Vec::new());
         let mut zip = zip::ZipWriter::new(cursor);
         let options = zip::write::FileOptions::<()>::default()
@@ -2289,6 +2294,9 @@ mod tests {
         zip.start_file("xl/_rels/workbook.xml.rels", options)
             .unwrap();
         zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
 
         let bytes = zip.finish().unwrap().into_inner();
         let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");

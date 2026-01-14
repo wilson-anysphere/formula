@@ -4644,7 +4644,7 @@ fn patch_workbook_xml(
                     let value = match attr.key.as_ref() {
                         b"activeTab" => active_tab_idx.to_string(),
                         b"firstSheet" => {
-                            let old = attr.unescape_value()?.into_owned().parse::<usize>().ok();
+                            let old = attr.unescape_value()?.trim().parse::<usize>().ok();
                             old.and_then(|idx| {
                                 old_sheet_index_to_new_index
                                     .get(idx)
@@ -4800,7 +4800,7 @@ fn patch_workbook_xml(
                     let value = match attr.key.as_ref() {
                         b"activeTab" => active_tab_idx.to_string(),
                         b"firstSheet" => {
-                            let old = attr.unescape_value()?.into_owned().parse::<usize>().ok();
+                            let old = attr.unescape_value()?.trim().parse::<usize>().ok();
                             old.and_then(|idx| {
                                 old_sheet_index_to_new_index
                                     .get(idx)
@@ -5210,7 +5210,7 @@ fn patch_workbook_xml(
                 for attr in e.attributes().with_checks(false) {
                     let attr = attr?;
                     if attr.key.as_ref() == b"localSheetId" {
-                        local_sheet_id = attr.unescape_value()?.into_owned().parse::<usize>().ok();
+                        local_sheet_id = attr.unescape_value()?.trim().parse::<usize>().ok();
                         break;
                     }
                 }
@@ -5250,7 +5250,7 @@ fn patch_workbook_xml(
                 for attr in e.attributes().with_checks(false) {
                     let attr = attr?;
                     if attr.key.as_ref() == b"localSheetId" {
-                        local_sheet_id = attr.unescape_value()?.into_owned().parse::<usize>().ok();
+                        local_sheet_id = attr.unescape_value()?.trim().parse::<usize>().ok();
                         break;
                     }
                 }

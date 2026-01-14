@@ -1443,7 +1443,7 @@ fn row_num_from_attrs(e: &BytesStart<'_>) -> Result<u32, WriteError> {
     for attr in e.attributes() {
         let attr = attr?;
         if attr.key.as_ref() == b"r" {
-            return Ok(attr.unescape_value()?.into_owned().parse().unwrap_or(0));
+            return Ok(attr.unescape_value()?.trim().parse().unwrap_or(0));
         }
     }
     Ok(0)
@@ -1521,7 +1521,7 @@ fn cell_ref_from_cell_events(
         let attr = attr?;
         if attr.key.as_ref() == b"r" {
             let a1 = attr.unescape_value()?.into_owned();
-            if let Ok(cell_ref) = CellRef::from_a1(&a1) {
+            if let Ok(cell_ref) = CellRef::from_a1(a1.trim()) {
                 return Ok(Some((cell_ref, cell_ref.col + 1)));
             }
             return Ok(None);
@@ -1606,7 +1606,7 @@ fn parse_cell_semantics(
     for attr in start.attributes() {
         let attr = attr?;
         match attr.key.as_ref() {
-            b"s" => style_xf = attr.unescape_value()?.into_owned().parse().unwrap_or(0),
+            b"s" => style_xf = attr.unescape_value()?.trim().parse().unwrap_or(0),
             b"t" => cell_type = Some(attr.unescape_value()?.into_owned()),
             _ => {}
         }
