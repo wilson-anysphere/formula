@@ -273,7 +273,7 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     root.remove();
   });
 
-  it("copies PNG bytes even when mimeType metadata is incorrect (does not invoke createImageBitmap)", async () => {
+  it("copies PNG bytes even when mimeType metadata is incorrect", async () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -305,6 +305,8 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     };
     app.getDocument().setSheetDrawings(sheetId, [drawing]);
     app.selectDrawing(drawing.id);
+    await app.whenIdle();
+    const bitmapCallsBeforeCopy = createImageBitmapMock.mock.calls.length;
 
     // The drawings overlay may attempt best-effort decoding when `createImageBitmap` is available.
     // This test specifically asserts that the clipboard copy path does not invoke `createImageBitmap`
@@ -315,7 +317,7 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     app.copy();
     await app.whenIdle();
     expect(write).toHaveBeenCalledWith({ text: "", imagePng: pngBytes });
-    expect(createImageBitmapMock).not.toHaveBeenCalled();
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(bitmapCallsBeforeCopy);
 
     app.destroy();
     root.remove();
