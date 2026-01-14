@@ -2318,8 +2318,23 @@ export class SpreadsheetApp {
       // metadata so collaborators eventually converge on the actual bytes.
       this.imageBytesBinder = bindImageBytesToCollabSession({
         session: this.collabSession,
-        // Use a dedicated adapter for hydration so remote bytes don't create local undo history.
-        images: new DocumentImageStore(this.document, persistedDrawingImages, { mode: "external", source: "collab" }),
+        // Use the drawings image store directly so hydrated bytes are treated as "out-of-band"
+        // (IndexedDB + in-memory cache), matching the existing non-collab semantics where drawing
+        // image bytes are intentionally excluded from DocumentController snapshots.
+        //
+        // Note: because this does not update DocumentController's workbook image store, we explicitly
+        // invalidate + re-render the overlay so placeholders upgrade when bytes arrive.
+        images: {
+          get: (id: string) => this.drawingImages.get(id),
+          set: (entry: ImageEntry) => {
+            this.drawingImages.set(entry);
+            const overlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
+            overlay?.invalidateImage(entry.id);
+            this.scheduleDrawingsRender("collab:image-bytes");
+          },
+          getAsync: this.drawingImages.getAsync?.bind(this.drawingImages),
+          setAsync: this.drawingImages.setAsync?.bind(this.drawingImages),
+        },
         origin: this.collabBinderOrigin ?? undefined,
       });
     }
