@@ -156,4 +156,3 @@ jobs:
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /mise\.toml/i);
 });
-

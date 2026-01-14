@@ -71,4 +71,3 @@ name = "b"
   assert.match(proc.stderr, /failed to parse TOML/i);
   assert.match(proc.stderr, /bad\.toml/);
 });
-

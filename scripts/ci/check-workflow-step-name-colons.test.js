@@ -86,4 +86,3 @@ jobs:
 `);
   assert.equal(proc.status, 0, proc.stderr);
 });
-

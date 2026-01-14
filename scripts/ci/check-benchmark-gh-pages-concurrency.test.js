@@ -12,6 +12,8 @@ const scriptPath = path.join(repoRoot, "scripts", "ci", "check-benchmark-gh-page
 const bashProbe = spawnSync("bash", ["--version"], { encoding: "utf8" });
 const hasBash = !bashProbe.error && bashProbe.status === 0;
 
+const canRun = hasBash;
+
 /**
  * @param {string} yaml
  * @returns {ReturnType<typeof spawnSync>}
@@ -48,7 +50,7 @@ function runDir(files) {
   return proc;
 }
 
-test("passes when benchmark-action does not auto-push", { skip: !hasBash }, () => {
+test("passes when benchmark-action does not auto-push", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   pr:
@@ -65,7 +67,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("passes when auto-push is explicitly disabled via expression", { skip: !hasBash }, () => {
+test("passes when auto-push is explicitly disabled via expression", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   pr:
@@ -78,7 +80,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("fails when benchmark-action auto-pushes without shared concurrency", { skip: !hasBash }, () => {
+test("fails when benchmark-action auto-pushes without shared concurrency", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   publish:
@@ -92,7 +94,7 @@ jobs:
   assert.match(proc.stderr, /serialize pushes/i);
 });
 
-test("passes when benchmark-action auto-pushes with shared concurrency", { skip: !hasBash }, () => {
+test("passes when benchmark-action auto-pushes with shared concurrency", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   publish:
@@ -108,7 +110,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("fails when concurrency group exists but is attached to a different job", { skip: !hasBash }, () => {
+test("fails when concurrency group exists but is attached to a different job", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   other:
@@ -128,7 +130,7 @@ jobs:
   assert.notEqual(proc.status, 0);
 });
 
-test("passes when concurrency group is quoted", { skip: !hasBash }, () => {
+test("passes when concurrency group is quoted", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   publish:
@@ -144,7 +146,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("passes when workflow-level concurrency serializes publishes", { skip: !hasBash }, () => {
+test("passes when workflow-level concurrency serializes publishes", { skip: !canRun }, () => {
   const proc = runYaml(`
 concurrency:
   group: benchmark-gh-pages-publish
@@ -160,7 +162,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("passes when workflow-level concurrency uses inline mapping form", { skip: !hasBash }, () => {
+test("passes when workflow-level concurrency uses inline mapping form", { skip: !canRun }, () => {
   const proc = runYaml(`
 concurrency: { group: benchmark-gh-pages-publish, cancel-in-progress: false }
 jobs:
@@ -174,7 +176,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("passes when job-level concurrency uses scalar form", { skip: !hasBash }, () => {
+test("passes when job-level concurrency uses scalar form", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   publish:
@@ -188,7 +190,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("passes when job-level concurrency uses inline mapping form", { skip: !hasBash }, () => {
+test("passes when job-level concurrency uses inline mapping form", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   publish:
@@ -202,7 +204,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("requires concurrency when auto-push is a truthy expression", { skip: !hasBash }, () => {
+test("requires concurrency when auto-push is a truthy expression", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   publish:
@@ -215,7 +217,7 @@ jobs:
   assert.notEqual(proc.status, 0);
 });
 
-test("detects auto-push inside with inline mapping", { skip: !hasBash }, () => {
+test("detects auto-push inside with inline mapping", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   publish:
@@ -227,7 +229,7 @@ jobs:
   assert.notEqual(proc.status, 0);
 });
 
-test("passes when with inline mapping auto-push is disabled", { skip: !hasBash }, () => {
+test("passes when with inline mapping auto-push is disabled", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   publish:
@@ -239,7 +241,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("ignores auto-push occurrences inside YAML block scalars", { skip: !hasBash }, () => {
+test("ignores auto-push occurrences inside YAML block scalars", { skip: !canRun }, () => {
   const proc = runYaml(`
 jobs:
   publish:
@@ -255,7 +257,7 @@ jobs:
   assert.equal(proc.status, 0, proc.stderr);
 });
 
-test("directory scan fails if any workflow auto-pushes without concurrency", { skip: !hasBash }, () => {
+test("directory scan fails if any workflow auto-pushes without concurrency", { skip: !canRun }, () => {
   const proc = runDir({
     "ok.yml": `
 jobs:
