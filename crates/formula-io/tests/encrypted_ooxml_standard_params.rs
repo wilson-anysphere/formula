@@ -135,6 +135,7 @@ fn standard_encryption_info_parameters_are_pinned() {
     for rel in [
         "standard.xlsx",
         "standard-large.xlsx",
+        "standard-basic.xlsm",
         "standard-4.2.xlsx",
         "standard-unicode.xlsx",
     ] {
