@@ -1,6 +1,4 @@
-import { getTauriEventApiOrNull } from "../tauri/api.js";
-
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+import { getTauriEventApiOrNull, getTauriInvokeOrNull } from "../tauri/api.js";
 
 export type PyodideDownloadProgress = {
   kind: "checking" | "downloadStart" | "downloadProgress" | "downloadComplete" | "ready";
@@ -20,16 +18,6 @@ function safeGetGlobal(name: string): unknown {
     return (globalThis as any)[name];
   } catch {
     return undefined;
-  }
-}
-
-function getTauriInvokeOrNull(): TauriInvoke | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-    return typeof invoke === "function" ? invoke : null;
-  } catch {
-    return null;
   }
 }
 
@@ -145,4 +133,3 @@ export async function ensurePyodideIndexURL(options: {
   // Web builds: fall back to PyodideRuntime's default CDN behavior.
   return resolved ?? normalizePyodideIndexURL(safeGetGlobal("__pyodideIndexURL"));
 }
-
