@@ -446,6 +446,12 @@ fn eval_filter_f64(table: &ColumnarTable, col: usize, op: CmpOp, rhs: f64) -> Re
             });
         };
 
+        if c.validity.as_ref().is_some_and(|v| v.count_ones() == 0) {
+            // All-null chunk: comparisons evaluate to false.
+            out.extend_constant(false, chunk_rows);
+            continue;
+        }
+
         for i in 0..chunk_rows {
             if c.validity.as_ref().is_some_and(|v| !v.get(i)) {
                 out.push(false);
@@ -552,7 +558,13 @@ fn eval_filter_bool(
             });
         };
 
-        if c.validity.is_none() {
+        if c.validity.as_ref().is_some_and(|v| v.count_ones() == 0) {
+            // All-null chunk: comparisons evaluate to false.
+            out.extend_constant(false, chunk_rows);
+            continue;
+        }
+
+        if c.validity.is_none() || c.validity.as_ref().is_some_and(|v| v.all_true()) {
             // Byte-wise fast path for non-null boolean chunks.
             let invert = match op {
                 CmpOp::Eq => !rhs,
@@ -694,9 +706,15 @@ fn eval_filter_string(
             });
         };
 
+        if c.validity.as_ref().is_some_and(|v| v.count_ones() == 0) {
+            // All-null chunk: comparisons evaluate to false.
+            out.extend_constant(false, chunk_rows);
+            continue;
+        }
+
         // When the chunk has no nulls and uses RLE indices we can preserve some compression
         // benefits by emitting whole runs at once.
-        if c.validity.is_none() {
+        if c.validity.is_none() || c.validity.as_ref().is_some_and(|v| v.all_true()) {
             if let Some(t) = target {
                 match &c.indices {
                     U32SequenceEncoding::Rle(rle) => {
