@@ -107,10 +107,43 @@ fn looks_like_measure_ref(source_field: &str) -> bool {
     source_field.starts_with('[') && source_field.ends_with(']')
 }
 
+fn normalize_measure_ref(source_field: &str) -> String {
+    let source_field = source_field.trim();
+    if crate::parser::parse(source_field).is_ok() {
+        return source_field.to_string();
+    }
+
+    let inner = source_field
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(source_field);
+    let escaped = crate::ident::escape_dax_bracket_identifier(inner);
+    format!("[{escaped}]")
+}
+
+fn escape_unparsed_column_ref(source_field: &str) -> String {
+    let source_field = source_field.trim();
+    let Some(open_bracket) = source_field.rfind('[') else {
+        return source_field.to_string();
+    };
+    if !source_field.ends_with(']') || open_bracket + 1 >= source_field.len() {
+        return source_field.to_string();
+    }
+
+    let prefix = &source_field[..=open_bracket];
+    let inner = &source_field[open_bracket + 1..source_field.len() - 1];
+    let escaped = crate::ident::escape_dax_bracket_identifier(inner);
+    format!("{prefix}{escaped}]")
+}
+
 fn normalize_column_ref(base_table: &str, source_field: &str) -> String {
     let source_field = source_field.trim();
     if source_field.contains('[') && source_field.ends_with(']') && !source_field.starts_with('[') {
-        source_field.to_string()
+        if crate::parser::parse(source_field).is_ok() {
+            source_field.to_string()
+        } else {
+            escape_unparsed_column_ref(source_field)
+        }
     } else {
         let escaped = crate::ident::escape_dax_bracket_identifier(source_field);
         format!("{base_table}[{escaped}]")
@@ -172,7 +205,8 @@ fn measure_from_value_field(
 ) -> DaxResult<PivotMeasure> {
     let source = source_field.trim();
     if looks_like_measure_ref(source) {
-        return PivotMeasure::new(name.to_string(), source.to_string());
+        let normalized = normalize_measure_ref(source);
+        return PivotMeasure::new(name.to_string(), normalized);
     }
 
     let column_ref = normalize_column_ref(base_table, source);
@@ -2772,6 +2806,30 @@ mod tests {
 
         let measures = measures_from_value_fields("Fact", &value_fields).unwrap();
         assert_eq!(measures[0].expression, "SUM(Fact[Amount]]USD])");
+    }
+
+    #[test]
+    fn measures_from_value_fields_escapes_brackets_in_qualified_column_refs() {
+        let value_fields = vec![ValueFieldSpec {
+            source_field: "'Orders'[Amount]USD]".into(),
+            name: "Sum of Orders Amount]USD".into(),
+            aggregation: ValueFieldAggregation::Sum,
+        }];
+
+        let measures = measures_from_value_fields("Fact", &value_fields).unwrap();
+        assert_eq!(measures[0].expression, "SUM('Orders'[Amount]]USD])");
+    }
+
+    #[test]
+    fn measures_from_value_fields_escapes_brackets_in_measure_refs() {
+        let value_fields = vec![ValueFieldSpec {
+            source_field: "[Total]USD]".into(),
+            name: "Total]USD".into(),
+            aggregation: ValueFieldAggregation::Sum,
+        }];
+
+        let measures = measures_from_value_fields("Fact", &value_fields).unwrap();
+        assert_eq!(measures[0].expression, "[Total]]USD]");
     }
 
     #[test]
