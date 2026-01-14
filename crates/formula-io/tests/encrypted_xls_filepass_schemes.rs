@@ -34,3 +34,15 @@ fn detects_rc4_standard_filepass_scheme() {
     );
 }
 
+#[test]
+fn detects_rc4_cryptoapi_legacy_filepass_scheme() {
+    let path = encrypted_xls_fixture_path("biff8_rc4_cryptoapi_legacy_pw_open_empty_password.xls");
+    let info = detect_workbook_encryption(&path).expect("detect encryption");
+    assert_eq!(
+        info,
+        WorkbookEncryption::LegacyXlsFilePass {
+            scheme: Some(LegacyXlsFilePassScheme::Rc4CryptoApi),
+        },
+        "expected RC4 CryptoAPI FILEPASS for legacy layout, got {info:?}"
+    );
+}

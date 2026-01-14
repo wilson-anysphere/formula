@@ -327,6 +327,9 @@ pub enum OoxmlEncryptedPackageScheme {
 /// - `wEncryptionType = 0x0000` => XOR
 /// - `wEncryptionType = 0x0001, wEncryptionSubType = 0x0001` => RC4 ("standard")
 /// - `wEncryptionType = 0x0001, wEncryptionSubType = 0x0002` => RC4 CryptoAPI
+/// - Some older BIFF8 CryptoAPI files use a legacy `FILEPASS` layout where the second field is
+///   `wEncryptionInfo = 0x0004` rather than `wEncryptionSubType = 0x0002`; those are also treated as
+///   RC4 CryptoAPI.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum LegacyXlsFilePassScheme {
     Xor,
@@ -3741,6 +3744,7 @@ fn ole_workbook_filepass_scheme<R: std::io::Read + std::io::Write + std::io::See
             // BIFF8 FILEPASS starts with:
             // - wEncryptionType (u16)
             // - wEncryptionSubType (u16) when wEncryptionType == 0x0001 (RC4)
+            //   (or legacy `wEncryptionInfo=0x0004` for older CryptoAPI RC4 layouts)
             if payload.len() < 2 {
                 return Some(None);
             }
@@ -3754,7 +3758,7 @@ fn ole_workbook_filepass_scheme<R: std::io::Read + std::io::Write + std::io::See
                         let sub_type = u16::from_le_bytes([payload[2], payload[3]]);
                         match sub_type {
                             0x0001 => Some(LegacyXlsFilePassScheme::Rc4),
-                            0x0002 => Some(LegacyXlsFilePassScheme::Rc4CryptoApi),
+                            0x0002 | 0x0004 => Some(LegacyXlsFilePassScheme::Rc4CryptoApi),
                             _ => Some(LegacyXlsFilePassScheme::Unknown),
                         }
                     }
