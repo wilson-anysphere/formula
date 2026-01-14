@@ -10,6 +10,8 @@ use quick_xml::{Reader, Writer};
 
 use crate::XlsxError;
 
+use super::{normalize_cf_priorities, patch_cf_rule_priority};
+
 const X14_CONDITIONAL_FORMATTING_EXT_URI: &str = "{78C0D931-6437-407d-A8EE-F0AAD7539E65}";
 const NS_X14: &str = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
 const NS_XM: &str = "http://schemas.microsoft.com/office/excel/2006/main";
@@ -106,6 +108,8 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
     };
     let rules: &[CfRule] = rules.as_ref();
 
+    let priorities = normalize_cf_priorities(rules);
+
     let needs_base_cf = !rules.is_empty();
     let needs_x14 = rules.iter().any(|r| r.schema == CfRuleSchema::X14);
 
@@ -144,10 +148,15 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
                 writer.write_event(Event::Start(e.to_owned()))?;
 
                 if needs_base_cf {
-                    write_conditional_formatting_blocks(&mut writer, rules, worksheet_prefix.as_deref())?;
+                    write_conditional_formatting_blocks(
+                        &mut writer,
+                        rules,
+                        &priorities,
+                        worksheet_prefix.as_deref(),
+                    )?;
                 }
                 if needs_x14 {
-                    write_extlst_with_x14(&mut writer, rules, worksheet_prefix.as_deref())?;
+                    write_extlst_with_x14(&mut writer, rules, &priorities, worksheet_prefix.as_deref())?;
                 }
 
                 writer.write_event(Event::End(BytesEnd::new(worksheet_tag.as_str())))?;
@@ -187,6 +196,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
                     write_conditional_formatting_blocks(
                         &mut writer,
                         rules,
+                        &priorities,
                         worksheet_prefix.as_deref(),
                     )?;
                     inserted_cf = true;
@@ -207,6 +217,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
                     write_conditional_formatting_blocks(
                         &mut writer,
                         rules,
+                        &priorities,
                         worksheet_prefix.as_deref(),
                     )?;
                     inserted_cf = true;
@@ -221,6 +232,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
                     write_conditional_formatting_blocks(
                         &mut writer,
                         rules,
+                        &priorities,
                         worksheet_prefix.as_deref(),
                     )?;
                     inserted_cf = true;
@@ -229,7 +241,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
                 if needs_x14 {
                     let extlst_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                     writer.write_event(Event::Start(e.to_owned()))?;
-                    write_x14_ext_entry(&mut writer, rules, worksheet_prefix.as_deref())?;
+                    write_x14_ext_entry(&mut writer, rules, &priorities, worksheet_prefix.as_deref())?;
                     writer.write_event(Event::End(BytesEnd::new(extlst_tag.as_str())))?;
                 } else {
                     writer.write_event(Event::Empty(e.to_owned()))?;
@@ -245,6 +257,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
                 write_conditional_formatting_blocks(
                     &mut writer,
                     rules,
+                    &priorities,
                     worksheet_prefix.as_deref(),
                 )?;
                 inserted_cf = true;
@@ -255,7 +268,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
             {
                 if is_x14_cf_ext_entry(e)? {
                     if needs_x14 && !wrote_x14_ext {
-                        write_x14_ext_entry(&mut writer, rules, worksheet_prefix.as_deref())?;
+                        write_x14_ext_entry(&mut writer, rules, &priorities, worksheet_prefix.as_deref())?;
                         wrote_x14_ext = true;
                     }
                     if matches!(event, Event::Start(_)) {
@@ -267,7 +280,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
             }
             Event::End(ref e) if in_extlst && e.local_name().as_ref() == b"extLst" => {
                 if needs_x14 && !wrote_x14_ext {
-                    write_x14_ext_entry(&mut writer, rules, worksheet_prefix.as_deref())?;
+                    write_x14_ext_entry(&mut writer, rules, &priorities, worksheet_prefix.as_deref())?;
                     wrote_x14_ext = true;
                 }
                 in_extlst = false;
@@ -279,6 +292,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
                     write_conditional_formatting_blocks(
                         &mut writer,
                         rules,
+                        &priorities,
                         worksheet_prefix.as_deref(),
                     )?;
                     inserted_cf = true;
@@ -286,7 +300,7 @@ pub fn update_worksheet_conditional_formatting_xml_with_seed(
 
                 // If no extLst exists and we have x14 rules, append a new extLst at the end.
                 if needs_x14 && !saw_extlst {
-                    write_extlst_with_x14(&mut writer, rules, worksheet_prefix.as_deref())?;
+                    write_extlst_with_x14(&mut writer, rules, &priorities, worksheet_prefix.as_deref())?;
                 }
 
                 in_worksheet = false;
@@ -329,11 +343,12 @@ fn is_x14_cf_ext_entry(e: &BytesStart<'_>) -> Result<bool, XlsxError> {
 fn write_extlst_with_x14<W: std::io::Write>(
     writer: &mut Writer<W>,
     rules: &[CfRule],
+    priorities: &[u32],
     prefix: Option<&str>,
 ) -> Result<(), XlsxError> {
     let extlst_tag = crate::xml::prefixed_tag(prefix, "extLst");
     writer.write_event(Event::Start(BytesStart::new(extlst_tag.as_str())))?;
-    write_x14_ext_entry(writer, rules, prefix)?;
+    write_x14_ext_entry(writer, rules, priorities, prefix)?;
     writer.write_event(Event::End(BytesEnd::new(extlst_tag.as_str())))?;
     Ok(())
 }
@@ -341,6 +356,7 @@ fn write_extlst_with_x14<W: std::io::Write>(
 fn write_x14_ext_entry<W: std::io::Write>(
     writer: &mut Writer<W>,
     rules: &[CfRule],
+    priorities: &[u32],
     prefix: Option<&str>,
 ) -> Result<(), XlsxError> {
     let ext_tag = crate::xml::prefixed_tag(prefix, "ext");
@@ -352,15 +368,15 @@ fn write_x14_ext_entry<W: std::io::Write>(
     writer.write_event(Event::Start(BytesStart::new("x14:conditionalFormattings")))?;
 
     // Group x14 rules by sqref.
-    let mut groups: Vec<(String, Vec<&CfRule>)> = Vec::new();
+    let mut groups: Vec<(String, Vec<(usize, &CfRule)>)> = Vec::new();
     let mut idx_by_sqref: HashMap<String, usize> = HashMap::new();
-    for rule in rules.iter().filter(|r| r.schema == CfRuleSchema::X14) {
+    for (rule_idx, rule) in rules.iter().enumerate().filter(|(_, r)| r.schema == CfRuleSchema::X14) {
         let sqref = format_sqref(&rule.applies_to);
         let idx = *idx_by_sqref.entry(sqref.clone()).or_insert_with(|| {
             groups.push((sqref.clone(), Vec::new()));
             groups.len() - 1
         });
-        groups[idx].1.push(rule);
+        groups[idx].1.push((rule_idx, rule));
     }
 
     for (sqref, group_rules) in groups {
@@ -368,8 +384,9 @@ fn write_x14_ext_entry<W: std::io::Write>(
         cf_start.push_attribute(("xmlns:xm", NS_XM));
         writer.write_event(Event::Start(cf_start))?;
 
-        for rule in group_rules {
-            write_x14_cf_rule(writer, rule)?;
+        for (rule_idx, rule) in group_rules {
+            let priority = priorities.get(rule_idx).copied().unwrap_or(1);
+            write_x14_cf_rule(writer, rule, priority)?;
         }
 
         // `<xm:sqref>` comes last in the block.
@@ -385,9 +402,13 @@ fn write_x14_ext_entry<W: std::io::Write>(
     Ok(())
 }
 
-fn write_x14_cf_rule<W: std::io::Write>(writer: &mut Writer<W>, rule: &CfRule) -> Result<(), XlsxError> {
+fn write_x14_cf_rule<W: std::io::Write>(
+    writer: &mut Writer<W>,
+    rule: &CfRule,
+    priority: u32,
+) -> Result<(), XlsxError> {
     match &rule.kind {
-        CfRuleKind::DataBar(db) => write_x14_data_bar_rule(writer, rule, db),
+        CfRuleKind::DataBar(db) => write_x14_data_bar_rule(writer, rule, priority, db),
         // Best-effort: non-dataBar rules currently have no x14 payload in `formula_model`.
         _ => Ok(()),
     }
@@ -396,10 +417,12 @@ fn write_x14_cf_rule<W: std::io::Write>(writer: &mut Writer<W>, rule: &CfRule) -
 fn write_x14_data_bar_rule<W: std::io::Write>(
     writer: &mut Writer<W>,
     rule: &CfRule,
+    priority: u32,
     db: &DataBarRule,
 ) -> Result<(), XlsxError> {
     let mut start = BytesStart::new("x14:cfRule");
     start.push_attribute(("type", "dataBar"));
+    start.push_attribute(("priority", priority.to_string().as_str()));
     if let Some(id) = rule.id.as_deref() {
         start.push_attribute(("id", id));
     }
@@ -449,6 +472,7 @@ fn write_x14_data_bar_rule<W: std::io::Write>(
 fn write_conditional_formatting_blocks<W: std::io::Write>(
     writer: &mut Writer<W>,
     rules: &[CfRule],
+    priorities: &[u32],
     prefix: Option<&str>,
 ) -> Result<(), XlsxError> {
     if rules.is_empty() {
@@ -457,23 +481,24 @@ fn write_conditional_formatting_blocks<W: std::io::Write>(
 
     let cf_tag = crate::xml::prefixed_tag(prefix, "conditionalFormatting");
 
-    let mut groups: Vec<(String, Vec<&CfRule>)> = Vec::new();
+    let mut groups: Vec<(String, Vec<(usize, &CfRule)>)> = Vec::new();
     let mut idx_by_sqref: HashMap<String, usize> = HashMap::new();
-    for rule in rules {
+    for (rule_idx, rule) in rules.iter().enumerate() {
         let sqref = format_sqref(&rule.applies_to);
         let idx = *idx_by_sqref.entry(sqref.clone()).or_insert_with(|| {
             groups.push((sqref.clone(), Vec::new()));
             groups.len() - 1
         });
-        groups[idx].1.push(rule);
+        groups[idx].1.push((rule_idx, rule));
     }
 
     for (sqref, group_rules) in groups {
         let mut start = BytesStart::new(cf_tag.as_str());
         start.push_attribute(("sqref", sqref.as_str()));
         writer.write_event(Event::Start(start))?;
-        for rule in group_rules {
-            write_cf_rule(writer, rule, prefix)?;
+        for (rule_idx, rule) in group_rules {
+            let priority = priorities.get(rule_idx).copied().unwrap_or(1);
+            write_cf_rule(writer, rule, priority, prefix)?;
         }
         writer.write_event(Event::End(BytesEnd::new(cf_tag.as_str())))?;
     }
@@ -484,6 +509,7 @@ fn write_conditional_formatting_blocks<W: std::io::Write>(
 fn write_cf_rule<W: std::io::Write>(
     writer: &mut Writer<W>,
     rule: &CfRule,
+    priority: u32,
     prefix: Option<&str>,
 ) -> Result<(), XlsxError> {
     let cf_rule_tag = crate::xml::prefixed_tag(prefix, "cfRule");
@@ -492,7 +518,7 @@ fn write_cf_rule<W: std::io::Write>(
         CfRuleKind::CellIs { operator, formulas } => {
             let mut start = BytesStart::new(cf_rule_tag.as_str());
             start.push_attribute(("type", "cellIs"));
-            start.push_attribute(("priority", rule.priority.to_string().as_str()));
+            start.push_attribute(("priority", priority.to_string().as_str()));
             start.push_attribute(("operator", cell_is_operator_to_ooxml(*operator)));
             if let Some(dxf) = rule.dxf_id {
                 start.push_attribute(("dxfId", dxf.to_string().as_str()));
@@ -516,7 +542,7 @@ fn write_cf_rule<W: std::io::Write>(
         CfRuleKind::Expression { formula } => {
             let mut start = BytesStart::new(cf_rule_tag.as_str());
             start.push_attribute(("type", "expression"));
-            start.push_attribute(("priority", rule.priority.to_string().as_str()));
+            start.push_attribute(("priority", priority.to_string().as_str()));
             if let Some(dxf) = rule.dxf_id {
                 start.push_attribute(("dxfId", dxf.to_string().as_str()));
             }
@@ -537,7 +563,7 @@ fn write_cf_rule<W: std::io::Write>(
         CfRuleKind::DataBar(db) => {
             let mut start = BytesStart::new(cf_rule_tag.as_str());
             start.push_attribute(("type", "dataBar"));
-            start.push_attribute(("priority", rule.priority.to_string().as_str()));
+            start.push_attribute(("priority", priority.to_string().as_str()));
             if let Some(dxf) = rule.dxf_id {
                 start.push_attribute(("dxfId", dxf.to_string().as_str()));
             }
@@ -566,7 +592,7 @@ fn write_cf_rule<W: std::io::Write>(
         CfRuleKind::ColorScale(ColorScaleRule { cfvos, colors }) => {
             let mut start = BytesStart::new(cf_rule_tag.as_str());
             start.push_attribute(("type", "colorScale"));
-            start.push_attribute(("priority", rule.priority.to_string().as_str()));
+            start.push_attribute(("priority", priority.to_string().as_str()));
             if let Some(dxf) = rule.dxf_id {
                 start.push_attribute(("dxfId", dxf.to_string().as_str()));
             }
@@ -601,7 +627,7 @@ fn write_cf_rule<W: std::io::Write>(
         }) => {
             let mut start = BytesStart::new(cf_rule_tag.as_str());
             start.push_attribute(("type", "iconSet"));
-            start.push_attribute(("priority", rule.priority.to_string().as_str()));
+            start.push_attribute(("priority", priority.to_string().as_str()));
             if let Some(dxf) = rule.dxf_id {
                 start.push_attribute(("dxfId", dxf.to_string().as_str()));
             }
@@ -635,7 +661,7 @@ fn write_cf_rule<W: std::io::Write>(
         CfRuleKind::TopBottom(rule_tb) => {
             let mut start = BytesStart::new(cf_rule_tag.as_str());
             start.push_attribute(("type", "top10"));
-            start.push_attribute(("priority", rule.priority.to_string().as_str()));
+            start.push_attribute(("priority", priority.to_string().as_str()));
             start.push_attribute(("rank", rule_tb.rank.to_string().as_str()));
             if rule_tb.percent {
                 start.push_attribute(("percent", "1"));
@@ -657,7 +683,7 @@ fn write_cf_rule<W: std::io::Write>(
         CfRuleKind::UniqueDuplicate(UniqueDuplicateRule { unique }) => {
             let mut start = BytesStart::new(cf_rule_tag.as_str());
             start.push_attribute(("type", if *unique { "uniqueValues" } else { "duplicateValues" }));
-            start.push_attribute(("priority", rule.priority.to_string().as_str()));
+            start.push_attribute(("priority", priority.to_string().as_str()));
             if let Some(dxf) = rule.dxf_id {
                 start.push_attribute(("dxfId", dxf.to_string().as_str()));
             }
@@ -674,7 +700,8 @@ fn write_cf_rule<W: std::io::Write>(
             //
             // Note: this assumes the fragment uses the correct element prefixing
             // for the target worksheet.
-            let mut frag_reader = Reader::from_str(raw_xml);
+            let patched = patch_cf_rule_priority(raw_xml, priority);
+            let mut frag_reader = Reader::from_str(&patched);
             frag_reader.config_mut().trim_text(false);
             let mut frag_buf = Vec::new();
             loop {

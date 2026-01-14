@@ -5403,9 +5403,13 @@ fn render_conditional_formatting(sheet: &Worksheet, local_to_global_dxf: Option<
         return String::new();
     }
 
+    let priorities =
+        crate::conditional_formatting::normalize_cf_priorities(&sheet.conditional_formatting_rules);
+
     let mut out = String::new();
-    for rule in &sheet.conditional_formatting_rules {
-        let Some(cf_rule_xml) = render_cf_rule(rule, local_to_global_dxf) else {
+    for (idx, rule) in sheet.conditional_formatting_rules.iter().enumerate() {
+        let priority = priorities.get(idx).copied().unwrap_or(1);
+        let Some(cf_rule_xml) = render_cf_rule(rule, priority, local_to_global_dxf) else {
             continue;
         };
 
@@ -5429,7 +5433,7 @@ fn render_conditional_formatting(sheet: &Worksheet, local_to_global_dxf: Option<
     out
 }
 
-fn render_cf_rule(rule: &CfRule, local_to_global_dxf: Option<&[u32]>) -> Option<String> {
+fn render_cf_rule(rule: &CfRule, priority: u32, local_to_global_dxf: Option<&[u32]>) -> Option<String> {
     let mut attrs = String::new();
 
     if let Some(id) = rule.id.as_deref() {
@@ -5438,7 +5442,7 @@ fn render_cf_rule(rule: &CfRule, local_to_global_dxf: Option<&[u32]>) -> Option<
         attrs.push('"');
     }
 
-    attrs.push_str(&format!(r#" priority="{}""#, rule.priority));
+    attrs.push_str(&format!(r#" priority="{}""#, priority));
 
     if rule.stop_if_true {
         attrs.push_str(r#" stopIfTrue="1""#);

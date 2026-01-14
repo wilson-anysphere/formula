@@ -5,6 +5,8 @@ use formula_model::{
     DataBarRule, IconSet, IconSetRule, Range, TopBottomKind, TopBottomRule, UniqueDuplicateRule,
 };
 
+use super::{normalize_cf_priorities, patch_cf_rule_priority};
+
 const X14_NS: &str = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
 const XM_NS: &str = "http://schemas.microsoft.com/office/excel/2006/main";
 const X14_CONDITIONAL_FORMATTING_URI: &str = "{78C0D931-6437-407d-A8EE-F0AAD7539E65}";
@@ -22,45 +24,48 @@ pub fn write_conditional_formatting_xml(rules: &[CfRule]) -> String {
         return String::new();
     }
 
+    let priorities = normalize_cf_priorities(rules);
+
     // Group base conditional formatting rules by `sqref` (SpreadsheetML requires
     // `<conditionalFormatting sqref="...">` containers).
-    let mut groups: BTreeMap<String, Vec<&CfRule>> = BTreeMap::new();
-    for rule in rules {
+    let mut groups: BTreeMap<String, Vec<(usize, &CfRule)>> = BTreeMap::new();
+    for (idx, rule) in rules.iter().enumerate() {
         groups
             .entry(sqref_for_ranges(&rule.applies_to))
             .or_default()
-            .push(rule);
+            .push((idx, rule));
     }
 
     let mut out = String::new();
 
     for (sqref, mut group) in groups {
-        group.sort_by_key(|r| r.priority);
+        group.sort_by_key(|(idx, _)| priorities[*idx]);
         out.push_str(r#"<conditionalFormatting sqref=""#);
         out.push_str(&escape_xml(&sqref));
         out.push_str(r#"">"#);
-        for rule in group {
-            out.push_str(&write_base_cf_rule(rule));
+        for (idx, rule) in group {
+            out.push_str(&write_base_cf_rule(rule, priorities[idx]));
         }
         out.push_str("</conditionalFormatting>");
     }
 
-    if let Some(ext_lst) = write_x14_ext_lst(rules) {
+    if let Some(ext_lst) = write_x14_ext_lst(rules, &priorities) {
         out.push_str(&ext_lst);
     }
 
     out
 }
 
-fn write_base_cf_rule(rule: &CfRule) -> String {
+fn write_base_cf_rule(rule: &CfRule, priority: u32) -> String {
     if let CfRuleKind::Unsupported { raw_xml, .. } = &rule.kind {
-        // Best-effort: pass through the original raw rule XML.
-        return raw_xml.clone();
+        // Best-effort: preserve the original cfRule XML, but ensure `priority` matches the
+        // normalized value so the worksheet remains valid.
+        return patch_cf_rule_priority(raw_xml, priority);
     }
 
     let mut attrs = String::new();
     attrs.push_str(r#" priority=""#);
-    attrs.push_str(&escape_xml(&rule.priority.to_string()));
+    attrs.push_str(&escape_xml(&priority.to_string()));
     attrs.push('"');
 
     if let Some(dxf_id) = rule.dxf_id {
@@ -221,8 +226,12 @@ fn write_base_unique_duplicate(rule: &UniqueDuplicateRule, base_attrs: &str) -> 
     s
 }
 
-fn write_x14_ext_lst(rules: &[CfRule]) -> Option<String> {
-    let x14_rules: Vec<&CfRule> = rules.iter().filter(|r| r.schema == CfRuleSchema::X14).collect();
+fn write_x14_ext_lst(rules: &[CfRule], priorities: &[u32]) -> Option<String> {
+    let x14_rules: Vec<(usize, &CfRule)> = rules
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.schema == CfRuleSchema::X14)
+        .collect();
     if x14_rules.is_empty() {
         return None;
     }
@@ -236,11 +245,11 @@ fn write_x14_ext_lst(rules: &[CfRule]) -> Option<String> {
     s.push_str(r#"">"#);
     s.push_str("<x14:conditionalFormattings>");
 
-    for rule in x14_rules {
+    for (idx, rule) in x14_rules {
         s.push_str(r#"<x14:conditionalFormatting xmlns:xm=""#);
         s.push_str(XM_NS);
         s.push_str(r#"">"#);
-        s.push_str(&write_x14_cf_rule(rule));
+        s.push_str(&write_x14_cf_rule(rule, priorities.get(idx).copied().unwrap_or(1)));
         s.push_str("<xm:sqref>");
         s.push_str(&escape_xml(&sqref_for_ranges(&rule.applies_to)));
         s.push_str("</xm:sqref>");
@@ -253,11 +262,14 @@ fn write_x14_ext_lst(rules: &[CfRule]) -> Option<String> {
     Some(s)
 }
 
-fn write_x14_cf_rule(rule: &CfRule) -> String {
+fn write_x14_cf_rule(rule: &CfRule, priority: u32) -> String {
     match &rule.kind {
         CfRuleKind::DataBar(db) => {
             let mut s = String::new();
             s.push_str(r#"<x14:cfRule type="dataBar""#);
+            s.push_str(r#" priority=""#);
+            s.push_str(&escape_xml(&priority.to_string()));
+            s.push('"');
             if let Some(id) = &rule.id {
                 s.push_str(r#" id=""#);
                 s.push_str(&escape_xml(id));
