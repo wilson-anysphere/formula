@@ -138,6 +138,12 @@ fn asc_and_dbcs_convert_under_cp932() {
     // Less common voiced katakana.
     assert_eq!(sheet.eval(r#"=ASC("ヷ")"#), Value::Text("ﾜﾞ".to_string()));
     assert_eq!(sheet.eval(r#"=DBCS("ﾜﾞ")"#), Value::Text("ヷ".to_string()));
+    assert_eq!(sheet.eval(r#"=ASC("ヸ")"#), Value::Text("ｲﾞ".to_string()));
+    assert_eq!(sheet.eval(r#"=DBCS("ｲﾞ")"#), Value::Text("ヸ".to_string()));
+    assert_eq!(sheet.eval(r#"=ASC("ヹ")"#), Value::Text("ｴﾞ".to_string()));
+    assert_eq!(sheet.eval(r#"=DBCS("ｴﾞ")"#), Value::Text("ヹ".to_string()));
+    assert_eq!(sheet.eval(r#"=ASC("ヺ")"#), Value::Text("ｦﾞ".to_string()));
+    assert_eq!(sheet.eval(r#"=DBCS("ｦﾞ")"#), Value::Text("ヺ".to_string()));
 
     // Fullwidth compatibility symbols (U+FFE0..U+FFE6).
     assert_eq!(

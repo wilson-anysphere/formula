@@ -614,6 +614,8 @@ fn fullwidth_katakana_to_halfwidth(ch: char) -> Option<&'static str> {
 
         // Less common voiced katakana supported by Unicode.
         'ヷ' => "\u{FF9C}\u{FF9E}", // ﾜﾞ
+        'ヸ' => "\u{FF72}\u{FF9E}", // ｲﾞ
+        'ヹ' => "\u{FF74}\u{FF9E}", // ｴﾞ
         'ヺ' => "\u{FF66}\u{FF9E}", // ｦﾞ
 
         // Spacing marks.
@@ -742,6 +744,8 @@ fn compose_halfwidth_katakana(base: char, mark: char) -> Option<char> {
         ('\u{FF8E}', HALFWIDTH_DAKUTEN) => 'ボ',
         ('\u{FF73}', HALFWIDTH_DAKUTEN) => 'ヴ', // ｳﾞ
         ('\u{FF9C}', HALFWIDTH_DAKUTEN) => 'ヷ', // ﾜﾞ
+        ('\u{FF72}', HALFWIDTH_DAKUTEN) => 'ヸ', // ｲﾞ
+        ('\u{FF74}', HALFWIDTH_DAKUTEN) => 'ヹ', // ｴﾞ
         ('\u{FF66}', HALFWIDTH_DAKUTEN) => 'ヺ', // ｦﾞ
 
         // Handakuten.
