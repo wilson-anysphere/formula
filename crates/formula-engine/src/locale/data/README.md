@@ -54,6 +54,12 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/extract-function-tra
   -OutPath crates/formula-engine/src/locale/data/sources/de-DE.json
 ```
 
+Notes / caveats:
+
+- The extracted spellings reflect the **active Excel UI language** (Office language packs + Excel
+  display language settings). The script prints the detected Excel UI locale and warns if it does
+  not match `-LocaleId`.
+
 For debugging, you can also pass:
 
 - `-Visible` to watch Excel work
