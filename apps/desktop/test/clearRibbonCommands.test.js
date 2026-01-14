@@ -81,6 +81,8 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
   const builtins = fs.readFileSync(builtinsPath, "utf8");
   const dropdownPath = path.join(__dirname, "..", "src", "commands", "registerFormatFontDropdownCommands.ts");
   const dropdown = fs.readFileSync(dropdownPath, "utf8");
+  const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
+  const disabling = fs.readFileSync(disablingPath, "utf8");
 
   // Clear Contents is an editing command (used by Delete key + ribbon), so it should be registered as `edit.clearContents`.
   assert.match(
@@ -130,4 +132,20 @@ test("Clear commands are registered under canonical ids (no legacy routing helpe
   // Ensure the old bespoke routing module isn't reintroduced.
   assert.doesNotMatch(main, /\bhomeEditingClearCommandRouting\b/);
   assert.doesNotMatch(main, /\bresolveHomeEditingClearCommandTarget\b/);
+
+  // Unimplemented Clear Comments / Clear Hyperlinks should remain disabled by default.
+  // Guardrail: they must not be added to the CommandRegistry exemption list.
+  const exemptionsStart = disabling.indexOf("export const COMMAND_REGISTRY_EXEMPT_IDS");
+  assert.ok(exemptionsStart >= 0, "Expected ribbonCommandRegistryDisabling.ts to define COMMAND_REGISTRY_EXEMPT_IDS");
+  const exemptionsEnd = disabling.indexOf("]);", exemptionsStart);
+  assert.ok(exemptionsEnd >= 0, "Expected to find end of COMMAND_REGISTRY_EXEMPT_IDS set");
+  const exemptionsBlock = disabling.slice(exemptionsStart, exemptionsEnd);
+  const notExemptIds = ["home.editing.clear.clearComments", "home.editing.clear.clearHyperlinks", "format.clearAll", "format.clearFormats", "edit.clearContents"];
+  for (const id of notExemptIds) {
+    assert.doesNotMatch(
+      exemptionsBlock,
+      new RegExp(`["']${escapeRegExp(id)}["']`),
+      `Expected ${id} to not be in COMMAND_REGISTRY_EXEMPT_IDS`,
+    );
+  }
 });
