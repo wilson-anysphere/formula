@@ -351,7 +351,6 @@ impl Default for SubtotalPosition {
         Self::Automatic
     }
 }
-
 /// Whether to render grand totals for rows and/or columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]

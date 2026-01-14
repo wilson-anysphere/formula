@@ -269,71 +269,76 @@ fn data_model_round_trip_columnar_calculated_columns() {
 
     // Verify the calculated column definitions were persisted in the dedicated SQLite table (not
     // inferred on load).
-    let conn = Connection::open(path).expect("open sqlite directly");
+    //
+    // Use a short-lived standalone connection to avoid holding locks while we reopen via
+    // `Storage::open_path` below.
     let workbook_id_str = workbook.id.to_string();
-    let mut calc_stmt = conn
-        .prepare(
-            r#"
-            SELECT table_name, name, expression
-            FROM data_model_calculated_columns
-            WHERE workbook_id = ?1
-            ORDER BY id
-            "#,
-        )
-        .expect("prepare calculated columns query");
-    let mut calc_rows: Vec<(String, String, String)> = calc_stmt
-        .query_map(params![&workbook_id_str], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
-        .expect("query calculated columns")
-        .map(|row| row.expect("row"))
-        .collect();
-    calc_rows.sort();
-    let mut expected_calc_rows = vec![
-        (
-            "FactSales".to_string(),
-            "Double Amount".to_string(),
-            "[Amount] * 2".to_string(),
-        ),
-        (
-            "FactSales".to_string(),
-            "Category From Dim".to_string(),
-            "RELATED(DimProduct[Category])".to_string(),
-        ),
-    ];
-    expected_calc_rows.sort();
-    assert_eq!(calc_rows, expected_calc_rows);
+    {
+        let conn = Connection::open(path).expect("open sqlite directly");
+        let mut calc_stmt = conn
+            .prepare(
+                r#"
+                SELECT table_name, name, expression
+                FROM data_model_calculated_columns
+                WHERE workbook_id = ?1
+                ORDER BY id
+                "#,
+            )
+            .expect("prepare calculated columns query");
+        let mut calc_rows: Vec<(String, String, String)> = calc_stmt
+            .query_map(params![&workbook_id_str], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .expect("query calculated columns")
+            .map(|row| row.expect("row"))
+            .collect();
+        calc_rows.sort();
+        let mut expected_calc_rows = vec![
+            (
+                "FactSales".to_string(),
+                "Double Amount".to_string(),
+                "[Amount] * 2".to_string(),
+            ),
+            (
+                "FactSales".to_string(),
+                "Category From Dim".to_string(),
+                "RELATED(DimProduct[Category])".to_string(),
+            ),
+        ];
+        expected_calc_rows.sort();
+        assert_eq!(calc_rows, expected_calc_rows);
 
-    // Verify the calculated column values were persisted as physical column chunks.
-    let mut chunk_stmt = conn
-        .prepare(
-            r#"
-            SELECT c.name, COUNT(ch.id)
-            FROM data_model_tables t
-            JOIN data_model_columns c ON c.table_id = t.id
-            JOIN data_model_chunks ch ON ch.column_id = c.id
-            WHERE t.workbook_id = ?1
-              AND t.name = 'FactSales'
-              AND c.name IN ('Double Amount', 'Category From Dim')
-            GROUP BY c.name
-            ORDER BY c.name
-            "#,
-        )
-        .expect("prepare chunk query");
-    let chunk_counts: Vec<(String, i64)> = chunk_stmt
-        .query_map(params![&workbook_id_str], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })
-        .expect("query chunk counts")
-        .map(|row| row.expect("row"))
-        .collect();
-    assert_eq!(chunk_counts.len(), 2, "expected chunk rows for both columns");
-    for (name, count) in chunk_counts {
-        assert!(count > 0, "expected at least one persisted chunk for {name}");
+        // Verify the calculated column values were persisted as physical column chunks.
+        let mut chunk_stmt = conn
+            .prepare(
+                r#"
+                SELECT c.name, COUNT(ch.id)
+                FROM data_model_tables t
+                JOIN data_model_columns c ON c.table_id = t.id
+                JOIN data_model_chunks ch ON ch.column_id = c.id
+                WHERE t.workbook_id = ?1
+                  AND t.name = 'FactSales'
+                  AND c.name IN ('Double Amount', 'Category From Dim')
+                GROUP BY c.name
+                ORDER BY c.name
+                "#,
+            )
+            .expect("prepare chunk query");
+        let chunk_counts: Vec<(String, i64)> = chunk_stmt
+            .query_map(params![&workbook_id_str], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .expect("query chunk counts")
+            .map(|row| row.expect("row"))
+            .collect();
+        assert_eq!(chunk_counts.len(), 2, "expected chunk rows for both columns");
+        for (name, count) in chunk_counts {
+            assert!(count > 0, "expected at least one persisted chunk for {name}");
+        }
     }
 
     let storage2 = Storage::open_path(path).expect("reopen storage");
