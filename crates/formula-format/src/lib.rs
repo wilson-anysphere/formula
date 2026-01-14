@@ -496,8 +496,9 @@ fn section_has_unescaped_parentheses(pattern: &str) -> bool {
     let mut in_brackets = false;
     let mut has_open = false;
     let mut has_close = false;
+    let mut chars = pattern.chars();
 
-    for ch in pattern.chars() {
+    while let Some(ch) = chars.next() {
         if escape {
             escape = false;
             continue;
@@ -521,6 +522,12 @@ fn section_has_unescaped_parentheses(pattern: &str) -> bool {
             '"' => in_quotes = true,
             '\\' => escape = true,
             '[' => in_brackets = true,
+            // Layout tokens `_X` and `*X` consume the following character. When scanning for
+            // negative-parentheses semantics, ignore the operand character even if it's a
+            // parenthesis.
+            '_' | '*' => {
+                let _ = chars.next();
+            }
             '(' => has_open = true,
             ')' => has_close = true,
             _ => {}
