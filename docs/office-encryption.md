@@ -29,14 +29,15 @@ Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook glo
 ### Summary table
 | Format | Scheme | Marker | Implemented crypto | Notes / entry points |
 |---|---|---|---|---|
-| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer); ✅ open in `formula-io` behind `encrypted-workbooks` (Agile `.xlsx`/`.xlsm` only) | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
 | OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES)** | `EncryptionInfo` **3.2** (minor=2; major ∈ {2,3,4} in the wild) | ✅ decrypt (library), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + standard key derivation + verifier; stricter alg gating), `crates/formula-io/src/offcrypto/encrypted_package.rs` (decrypt `EncryptedPackage` given key+salt), `docs/offcrypto-standard-encryptedpackage.md` |
 | Legacy `.xls` (BIFF8) | **FILEPASS RC4 CryptoAPI** | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
-Important: `formula-io`’s public open APIs currently **detect** encryption and surface dedicated
-errors (OOXML: `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption`; legacy `.xls`:
-`EncryptedWorkbook`), but do not yet decrypt encrypted OOXML workbooks end-to-end. The crypto code
-above exists to enable that future integration.
+Important: `formula-io`’s public open APIs **detect** encryption and surface dedicated errors
+(OOXML: `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption`; legacy `.xls`:
+`EncryptedWorkbook`). By default they do not decrypt encrypted OOXML workbooks end-to-end, but with
+the `formula-io` crate feature **`encrypted-workbooks`** enabled they can decrypt and open Agile (4.4)
+encrypted `.xlsx`/`.xlsm` in memory. Standard encryption is not yet opened end-to-end via `formula-io`.
 
 ## Supported schemes / parameter subsets
 
@@ -213,10 +214,12 @@ Implementation status:
   failure.
 - `crates/formula-office-crypto` validates `dataIntegrity` and returns `IntegrityCheckFailed` on
   failure.
+- `formula-io`’s `encrypted-workbooks` feature uses the `formula-xlsx` Agile decryptor (and therefore
+  validates `dataIntegrity` when opening encrypted `.xlsx`/`.xlsm` with a password).
 - `crates/formula-offcrypto` parses `encryptedHmacKey`/`encryptedHmacValue` for completeness but does
   not currently validate them.
-- If/when we wire Agile decryption into `formula-io`, we should strongly consider enabling HMAC
-  verification by default to distinguish wrong passwords from “ZIP happened to parse”.
+- HMAC verification is strongly recommended when possible to distinguish wrong passwords from “ZIP
+  happened to parse”.
 
 ### Standard (CryptoAPI): password KDF + verifier (ECMA-376)
 
