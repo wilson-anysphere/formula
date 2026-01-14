@@ -904,6 +904,34 @@ dedupe_lines() {
   python3 -c $'import sys\nseen=set()\nfor line in sys.stdin.read().splitlines():\n    if not line:\n        continue\n    if line in seen:\n        continue\n    seen.add(line)\n    print(line)\n'
 }
 
+prefer_universal_artifacts() {
+  # If both universal and single-arch artifacts are present, prefer the universal ones.
+  #
+  # Tauri's universal build flow can leave intermediate arch-specific bundle outputs in the same
+  # Cargo target directory. We only validate the "real" release artifacts (universal-apple-darwin)
+  # to avoid failing the release job on those intermediate outputs.
+  local kind="$1"
+  shift
+  local paths=("$@")
+  local universal=()
+  local p
+  for p in "${paths[@]}"; do
+    case "$p" in
+      */universal-apple-darwin/*) universal+=("$p") ;;
+    esac
+  done
+
+  if [ "${#universal[@]}" -gt 0 ]; then
+    if [ "${#universal[@]}" -lt "${#paths[@]}" ]; then
+      echo "bundle: discovered ${#paths[@]} ${kind} artifact(s); preferring ${#universal[@]} under universal-apple-darwin" >&2
+    fi
+    printf '%s\n' "${universal[@]}"
+    return 0
+  fi
+
+  printf '%s\n' "${paths[@]}"
+}
+
 main() {
   local dmgs=()
   local app_tars=()
@@ -991,6 +1019,26 @@ main() {
       while IFS= read -r line; do
         [ -n "$line" ] && app_tars+=("$line")
       done <<<"$deduped_app_tars"
+    fi
+
+    # If both universal and arch-specific artifacts are present (common when the universal build
+    # flow leaves intermediate outputs around), validate only the universal artifacts.
+    if [ "${#dmgs[@]}" -gt 1 ]; then
+      local preferred_dmgs
+      preferred_dmgs="$(prefer_universal_artifacts "DMG" "${dmgs[@]}")"
+      dmgs=()
+      while IFS= read -r line; do
+        [ -n "$line" ] && dmgs+=("$line")
+      done <<<"$preferred_dmgs"
+    fi
+
+    if [ "${#app_tars[@]}" -gt 1 ]; then
+      local preferred_tars
+      preferred_tars="$(prefer_universal_artifacts "updater archive" "${app_tars[@]}")"
+      app_tars=()
+      while IFS= read -r line; do
+        [ -n "$line" ] && app_tars+=("$line")
+      done <<<"$preferred_tars"
     fi
   fi
 

@@ -49,7 +49,7 @@ function writeFakeTool(binDir, name, content) {
   chmodSync(toolPath, 0o755);
 }
 
-function writeFakeMacOsTooling(binDir, { mountPoint, devEntry, lipoArchs }) {
+function writeFakeMacOsTooling(binDir, { mountPoint, devEntry, lipoArchs, attachLogPath } = {}) {
   writeFakeTool(
     binDir,
     "uname",
@@ -70,7 +70,11 @@ function writeFakeMacOsTooling(binDir, { mountPoint, devEntry, lipoArchs }) {
   writeFakeTool(
     binDir,
     "hdiutil",
-    `#!/usr/bin/env bash\nset -euo pipefail\ncmd=\"${"$"}{1:-}\"\nshift || true\ncase \"${"$"}cmd\" in\n  attach)\n    # Print plist to stdout; validate-macos-bundle.sh captures it.\n    cat <<'PLIST'\n${plist}PLIST\n    ;;\n  detach)\n    # Accept any detach invocation.\n    exit 0\n    ;;\n  *)\n    echo \"fake hdiutil: unsupported command: ${"$"}cmd\" >&2\n    exit 2\n    ;;\nesac\n`,
+    `#!/usr/bin/env bash\nset -euo pipefail\ncmd=\"${"$"}{1:-}\"\nshift || true\ncase \"${"$"}cmd\" in\n  attach)\n    ${
+      attachLogPath
+        ? `log_file=${JSON.stringify(attachLogPath)}\n    dmg=\"\"\n    for arg in \"$@\"; do\n      dmg=\"$arg\"\n    done\n    echo \"$dmg\" >> \"$log_file\"\n\n    `
+        : ""
+    }# Print plist to stdout; validate-macos-bundle.sh captures it.\n    cat <<'PLIST'\n${plist}PLIST\n    ;;\n  detach)\n    # Accept any detach invocation.\n    exit 0\n    ;;\n  *)\n    echo \"fake hdiutil: unsupported command: ${"$"}cmd\" >&2\n    exit 2\n    ;;\nesac\n`,
   );
 
   writeFakeTool(
@@ -104,6 +108,20 @@ function writeComplianceResources(contentsDir, { includeLicense = true, includeN
 
 function runValidator({ dmgPath, binDir, env = {} }) {
   const proc = spawnSync("bash", [join(repoRoot, "scripts", "validate-macos-bundle.sh"), "--dmg", dmgPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ...env,
+      PATH: `${binDir}:${process.env.PATH}`,
+    },
+  });
+  if (proc.error) throw proc.error;
+  return proc;
+}
+
+function runValidatorAuto({ binDir, env = {} }) {
+  const proc = spawnSync("bash", [join(repoRoot, "scripts", "validate-macos-bundle.sh")], {
     cwd: repoRoot,
     encoding: "utf8",
     env: {
@@ -150,6 +168,69 @@ test(
 
     const proc = runValidator({ dmgPath, binDir });
     assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
+  "validate-macos-bundle artifact discovery prefers universal-apple-darwin DMGs",
+  { skip: !hasBash },
+  () => {
+    assert.ok(expectedIdentifier, "tauri.conf.json identifier must be non-empty for this test");
+    assert.ok(expectedVersion, "tauri.conf.json version must be non-empty for this test");
+
+    const tmp = mkdtempSync(join(tmpdir(), "formula-macos-bundle-test-"));
+    const binDir = join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+
+    const mountPoint = join(tmp, "mnt");
+    const devEntry = "/dev/disk99s1";
+    const attachLogPath = join(tmp, "hdiutil-attach.log");
+    mkdirSync(mountPoint, { recursive: true });
+    writeFakeMacOsTooling(binDir, { mountPoint, devEntry, attachLogPath });
+
+    const appRoot = join(mountPoint, "Formula.app", "Contents");
+    const macosDir = join(appRoot, "MacOS");
+    mkdirSync(macosDir, { recursive: true });
+    writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
+    chmodSync(join(macosDir, "formula-desktop"), 0o755);
+
+    writeInfoPlist(join(appRoot, "Info.plist"), {
+      identifier: expectedIdentifier,
+      version: expectedVersion,
+    });
+    writeComplianceResources(appRoot);
+
+    const cargoTargetDir = join(tmp, "cargo-target");
+    const universalDmgPath = join(
+      cargoTargetDir,
+      "universal-apple-darwin",
+      "release",
+      "bundle",
+      "dmg",
+      "Formula.dmg",
+    );
+    const x86DmgPath = join(
+      cargoTargetDir,
+      "x86_64-apple-darwin",
+      "release",
+      "bundle",
+      "dmg",
+      "Formula.dmg",
+    );
+    mkdirSync(dirname(universalDmgPath), { recursive: true });
+    mkdirSync(dirname(x86DmgPath), { recursive: true });
+    writeFileSync(universalDmgPath, "not-a-real-dmg", { encoding: "utf8" });
+    writeFileSync(x86DmgPath, "not-a-real-dmg", { encoding: "utf8" });
+
+    const proc = runValidatorAuto({ binDir, env: { CARGO_TARGET_DIR: cargoTargetDir } });
+    assert.equal(proc.status, 0, proc.stderr);
+
+    const attached = readFileSync(attachLogPath, "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    assert.deepEqual(attached, [universalDmgPath]);
   },
 );
 
