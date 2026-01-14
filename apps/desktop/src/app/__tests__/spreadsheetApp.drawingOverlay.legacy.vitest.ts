@@ -300,9 +300,9 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
   });
 
   it("does not throw when chart selection overlay render throws", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
     const priorCanvasCharts = process.env.CANVAS_CHARTS;
     const priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
-    const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     process.env.CANVAS_CHARTS = "0";
     delete process.env.USE_CANVAS_CHARTS;
@@ -343,9 +343,9 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
   });
 
   it("does not emit an unhandled rejection when chart selection overlay render returns a rejected promise", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
     const priorCanvasCharts = process.env.CANVAS_CHARTS;
     const priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
-    const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     process.env.CANVAS_CHARTS = "0";
     delete process.env.USE_CANVAS_CHARTS;

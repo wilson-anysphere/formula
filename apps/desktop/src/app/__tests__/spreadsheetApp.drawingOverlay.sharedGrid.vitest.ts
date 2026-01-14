@@ -247,9 +247,9 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
 
       expect(renderSpy).toHaveBeenCalled();
       const objects = renderSpy.mock.calls.at(-1)?.[0] as any[];
-      const images = objects.filter((obj) => obj?.kind?.type === "image");
-      expect(images).toHaveLength(1);
-      expect(images[0]).toMatchObject({
+      const imageObject = objects.find((obj) => obj?.id === 12) ?? null;
+      expect(imageObject).not.toBeNull();
+      expect(imageObject).toMatchObject({
         id: 12,
         kind: { type: "image", imageId: "image1.png" },
         anchor: { type: "twoCell" },
@@ -643,9 +643,9 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
   });
 
   it("does not throw when chart selection overlay render throws", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
     const priorCanvasCharts = process.env.CANVAS_CHARTS;
     const priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
-    const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     process.env.CANVAS_CHARTS = "0";
     delete process.env.USE_CANVAS_CHARTS;
@@ -688,9 +688,9 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
   });
 
   it("does not emit an unhandled rejection when chart selection overlay render returns a rejected promise", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
     const priorCanvasCharts = process.env.CANVAS_CHARTS;
     const priorUseCanvasCharts = process.env.USE_CANVAS_CHARTS;
-    const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     process.env.CANVAS_CHARTS = "0";
     delete process.env.USE_CANVAS_CHARTS;

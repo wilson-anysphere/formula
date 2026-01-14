@@ -138,7 +138,11 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
 
   it("clips drawings to frozen-pane quadrants (Excel object pane behavior)", async () => {
     const prior = process.env.DESKTOP_GRID_MODE;
+    const priorCanvasCharts = process.env.CANVAS_CHARTS;
     process.env.DESKTOP_GRID_MODE = "shared";
+    // Disable canvas charts so the demo ChartStore chart does not add extra draw objects
+    // (and additional nested clip() calls) to this drawing-overlay unit test.
+    process.env.CANVAS_CHARTS = "0";
     try {
       const root = createRoot();
       const status = {
@@ -285,6 +289,8 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
     } finally {
       if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
       else process.env.DESKTOP_GRID_MODE = prior;
+      if (priorCanvasCharts === undefined) delete process.env.CANVAS_CHARTS;
+      else process.env.CANVAS_CHARTS = priorCanvasCharts;
     }
   });
 });
