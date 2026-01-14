@@ -5,6 +5,7 @@ import {
   buildDesktopStartupProfileRoot,
   buildBenchmarkResultFromValues,
   formatPerfPath,
+  mean,
   parseStartupLine,
   repoRoot,
   resolveDesktopStartupArgv,
@@ -267,6 +268,10 @@ describe('desktopStartupUtil sleep', () => {
 describe('desktopStartupUtil benchmark re-exports', () => {
   it('re-exports runBenchmark', () => {
     expect(typeof runBenchmark).toBe('function');
+  });
+
+  it('re-exports basic stats helpers', () => {
+    expect(typeof mean).toBe('function');
   });
 });
 

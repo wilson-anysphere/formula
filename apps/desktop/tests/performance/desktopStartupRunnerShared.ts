@@ -331,8 +331,6 @@ export function shouldUseXvfb(): boolean {
   return false;
 }
 
-export { mean, median, percentile, stdDev, buildBenchmarkResultFromValues } from './benchmark.ts';
-
 export function parseStartupLine(line: string): StartupMetrics | null {
   // Example:
   // [startup] window_visible_ms=123 webview_loaded_ms=234 first_render_ms=345 tti_ms=456
