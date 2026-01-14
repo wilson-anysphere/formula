@@ -183,3 +183,23 @@ fn calculated_column_dependencies_resolve_unicode_identifiers_case_insensitively
     assert_eq!(t.value(1, "Maß2").unwrap(), Value::from(11.0));
     assert_eq!(t.value(1, "Quad").unwrap(), Value::from(22.0));
 }
+
+#[test]
+fn add_calculated_column_resolves_unicode_identifiers_case_insensitively() {
+    let mut model = DataModel::new();
+
+    let mut t = Table::new("Straße", vec!["Maß"]);
+    t.push_row(vec![1.into()]).unwrap();
+    t.push_row(vec![2.into()]).unwrap();
+    model.add_table(t).unwrap();
+
+    // Refer to the table via ASCII-only spelling and refer to the source column via `[MASS]`.
+    model
+        .add_calculated_column("STRASSE", "Maß2", "[MASS] + 1")
+        .unwrap();
+
+    let t = model.table("strasse").unwrap();
+    assert_eq!(t.row_count(), 2);
+    assert_eq!(t.value(0, "Maß2").unwrap(), Value::from(2.0));
+    assert_eq!(t.value(1, "MASS2").unwrap(), Value::from(3.0));
+}
