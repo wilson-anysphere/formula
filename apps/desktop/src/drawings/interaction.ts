@@ -1438,14 +1438,14 @@ export function resizeAnchor(
       return {
         ...anchor,
         from: nextFrom,
-        size: { cx: pxToEmu(widthPx / z), cy: pxToEmu(heightPx / z) },
+        size: { cx: Math.round(pxToEmu(widthPx / z)), cy: Math.round(pxToEmu(heightPx / z)) },
       };
     }
     case "absolute": {
       return {
         ...anchor,
-        pos: { xEmu: pxToEmu((left - originA1x) / z), yEmu: pxToEmu((top - originA1y) / z) },
-        size: { cx: pxToEmu(widthPx / z), cy: pxToEmu(heightPx / z) },
+        pos: { xEmu: Math.round(pxToEmu((left - originA1x) / z)), yEmu: Math.round(pxToEmu((top - originA1y) / z)) },
+        size: { cx: Math.round(pxToEmu(widthPx / z)), cy: Math.round(pxToEmu(heightPx / z)) },
       };
     }
     case "twoCell": {
@@ -1575,7 +1575,7 @@ export function shiftAnchorPoint(
   return {
     ...point,
     cell: { row, col },
-    offset: { xEmu: pxToEmu(xPx), yEmu: pxToEmu(yPx) },
+    offset: { xEmu: Math.round(pxToEmu(xPx)), yEmu: Math.round(pxToEmu(yPx)) },
   };
 }
 
