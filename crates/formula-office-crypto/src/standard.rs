@@ -697,4 +697,56 @@ pub(crate) mod tests {
             verify_password_standard(&header, &verifier, wrong_password).expect_err("wrong password");
         assert!(matches!(err, OfficeCryptoError::InvalidPassword));
     }
-}
+
+    #[test]
+    fn cryptderivekey_expansion_is_exercised_for_aes256_md5() {
+        let password = "correct horse battery staple";
+        let wrong_password = "not the password";
+        let salt: [u8; 16] = [0x24u8; 16];
+        let verifier_plain: [u8; 16] = *b"formula-std-md5!";
+
+        let key_bits = 256u32;
+        let hash_alg = HashAlgorithm::Md5;
+        let key_ref = derive_key_ref(hash_alg, key_bits, &salt, password, 0);
+        let deriver = StandardKeyDeriver::new(hash_alg, key_bits, &salt, password);
+        let key0 = deriver.derive_key_for_block(0).expect("derive key");
+        assert_eq!(key0.as_slice(), key_ref.as_slice());
+        assert_eq!(key_ref.len(), 32);
+        assert!(
+            key_ref.len() > hash_alg.digest_len(),
+            "AES-256+MD5 should require CryptDeriveKey expansion"
+        );
+
+        // Encrypt verifier and verifierHash with AES-CBC, IV=0. Pad the verifier hash ciphertext to
+        // 2 blocks to ensure we only compare the first `verifierHashSize` bytes after decryption.
+        let iv = [0u8; 16];
+        let encrypted_verifier =
+            aes_cbc_encrypt(&key_ref, &iv, &verifier_plain).expect("encrypt verifier");
+
+        let verifier_hash = hash_alg.digest(&verifier_plain);
+        let mut verifier_hash_padded = verifier_hash.clone();
+        verifier_hash_padded.resize(32, 0);
+        let encrypted_verifier_hash =
+            aes_cbc_encrypt(&key_ref, &iv, &verifier_hash_padded).expect("encrypt verifier hash");
+
+        let header = EncryptionHeader {
+            alg_id: CALG_AES_256,
+            alg_id_hash: 0x0000_8003u32, // CALG_MD5
+            key_bits,
+            provider_type: 0,
+            csp_name: String::new(),
+        };
+        let verifier = EncryptionVerifier {
+            salt: salt.to_vec(),
+            encrypted_verifier,
+            verifier_hash_size: verifier_hash.len() as u32,
+            encrypted_verifier_hash,
+        };
+
+        verify_password_standard(&header, &verifier, password)
+            .expect("correct password should verify");
+        let err =
+            verify_password_standard(&header, &verifier, wrong_password).expect_err("wrong password");
+        assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+    }
+} 
