@@ -261,6 +261,9 @@ export function workbookStateFromYjsDoc(doc) {
   // workbook extraction O(#sheets * #cells) for large workbooks. Instead we scan `cells`
   // exactly once, group entries by sheet, then apply layered formats per sheet using only
   // the already-grouped cell maps (total ~O(#cells + #sheets)).
+  // Track sheet ids that should appear in `cellsBySheet`:
+  // - sheet ids from the `sheets` metadata root (even if the sheet has no cells)
+  // - sheet ids observed in the `cells` root (even if the sheet metadata is missing)
   const sheetIds = new Set(sheets.map((s) => s.id));
   const cellsMap = getMapRoot(doc, "cells");
 
@@ -269,7 +272,6 @@ export function workbookStateFromYjsDoc(doc) {
   cellsMap.forEach((cellData, rawKey) => {
     const parsed = parseSpreadsheetCellKey(rawKey);
     if (!parsed?.sheetId) return;
-    sheetIds.add(parsed.sheetId);
     let cells = groupedCells.get(parsed.sheetId);
     if (!cells) {
       cells = new Map();
@@ -277,6 +279,11 @@ export function workbookStateFromYjsDoc(doc) {
     }
     mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData);
   });
+  // Avoid `sheetIds.add(...)` for every cell key (which can be millions of entries);
+  // groupedCells already keys by sheet id, so add each sheet id once.
+  for (const sheetId of groupedCells.keys()) {
+    sheetIds.add(sheetId);
+  }
 
   /** @type {Map<string, { cells: Map<string, any> }>} */
   const cellsBySheet = new Map();
