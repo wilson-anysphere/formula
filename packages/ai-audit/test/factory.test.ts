@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 
 import { createDefaultAIAuditStore } from "../src/factory.js";
 import { createDefaultAIAuditStore as createDefaultAIAuditStoreNode } from "../src/factory.node.js";
@@ -6,6 +7,9 @@ import { BoundedAIAuditStore } from "../src/bounded-store.js";
 import { IndexedDbAIAuditStore } from "../src/indexeddb-store.js";
 import { LocalStorageAIAuditStore } from "../src/local-storage-store.js";
 import { MemoryAIAuditStore } from "../src/memory-store.js";
+import { InMemoryBinaryStorage } from "../src/storage.js";
+import { SqliteAIAuditStore } from "../src/sqlite-store.js";
+import type { AIAuditEntry } from "../src/types.js";
 
 import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 
@@ -226,5 +230,40 @@ describe("createDefaultAIAuditStore", () => {
     await expect(createDefaultAIAuditStore({ prefer: "sqlite" })).rejects.toThrow(
       'createDefaultAIAuditStore(prefer: "sqlite") is not available in the default/browser entrypoint. Import SqliteAIAuditStore from "@formula/ai-audit/sqlite" instead.'
     );
+  });
+
+  it('node entrypoint: prefer "sqlite" returns SqliteAIAuditStore and applies retention', async () => {
+    const storage = new InMemoryBinaryStorage();
+    const store = await createDefaultAIAuditStoreNode({
+      prefer: "sqlite",
+      sqlite_storage: storage,
+      max_entries: 1,
+      bounded: false
+    });
+
+    expect(store).toBeInstanceOf(SqliteAIAuditStore);
+
+    const base = Date.now();
+    const e1: AIAuditEntry = {
+      id: randomUUID(),
+      timestamp_ms: base,
+      session_id: "session-sqlite",
+      mode: "chat",
+      input: { prompt: "older" },
+      model: "unit-test-model",
+      tool_calls: []
+    };
+    const e2: AIAuditEntry = {
+      ...e1,
+      id: randomUUID(),
+      timestamp_ms: base + 1,
+      input: { prompt: "newer" }
+    };
+
+    await store.logEntry(e1);
+    await store.logEntry(e2);
+
+    const entries = await store.listEntries({ session_id: e1.session_id });
+    expect(entries.map((e) => e.id)).toEqual([e2.id]);
   });
 });
