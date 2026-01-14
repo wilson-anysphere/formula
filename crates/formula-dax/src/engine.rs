@@ -4635,13 +4635,73 @@ fn propagate_filter(
             }
 
             // Collect the set of relationship keys that are visible on the `to_table` side under
-            // the current filter context. For many-to-many relationships, a key can correspond to
-            // multiple `to_table` rows, hence the use of `RowSet::any_allowed`.
-            let allowed_keys: Vec<Value> = relationship
-                .to_index
-                .iter()
-                .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key.clone()))
-                .collect();
+            // the current filter context.
+            //
+            // For many-to-many relationships, a key can correspond to multiple `to_table` rows. For
+            // in-memory fact tables, we already have `to_index` materialized, so we can use it to
+            // compute the visible key set. For columnar fact tables, iterating `to_index` can be
+            // expensive (especially when the `to_table` is also large); prefer extracting distinct
+            // visible values directly from the `to_table` backend when possible.
+            let allowed_keys: Vec<Value> = if relationship.from_index.is_some() {
+                relationship
+                    .to_index
+                    .iter()
+                    .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key.clone()))
+                    .collect()
+            } else {
+                let to_table = model
+                    .table(to_table_name)
+                    .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
+
+                let all_visible = to_set.iter().all(|allowed| *allowed);
+
+                if all_visible {
+                    to_table
+                        .distinct_values_filtered(relationship.to_idx, None)
+                        .unwrap_or_else(|| {
+                            let mut seen = HashSet::new();
+                            let mut out = Vec::new();
+                            for row in 0..to_table.row_count() {
+                                let v = to_table
+                                    .value_by_idx(row, relationship.to_idx)
+                                    .unwrap_or(Value::Blank);
+                                if seen.insert(v.clone()) {
+                                    out.push(v);
+                                }
+                            }
+                            out
+                        })
+                } else {
+                    let visible_rows: Vec<usize> = to_set
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, allowed)| allowed.then_some(idx))
+                        .collect();
+
+                    if visible_rows.is_empty() {
+                        Vec::new()
+                    } else {
+                        to_table
+                            .distinct_values_filtered(
+                                relationship.to_idx,
+                                Some(visible_rows.as_slice()),
+                            )
+                            .unwrap_or_else(|| {
+                                let mut seen = HashSet::new();
+                                let mut out = Vec::new();
+                                for &row in &visible_rows {
+                                    let v = to_table
+                                        .value_by_idx(row, relationship.to_idx)
+                                        .unwrap_or(Value::Blank);
+                                    if seen.insert(v.clone()) {
+                                        out.push(v);
+                                    }
+                                }
+                                out
+                            })
+                    }
+                }
+            };
             let from_set = sets
                 .get(from_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;

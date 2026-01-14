@@ -857,10 +857,9 @@ impl DataModel {
                     .get(rel_info.to_idx)
                     .cloned()
                     .unwrap_or(Value::Blank);
+                let key_existed = rel_info.to_index.contains_key(&key);
                 // Keys on the "to" side must be unique for 1:* and 1:1 relationships.
-                if rel.cardinality != Cardinality::ManyToMany
-                    && rel_info.to_index.contains_key(&key)
-                {
+                if rel.cardinality != Cardinality::ManyToMany && key_existed {
                     self.tables
                         .get_mut(table)
                         .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
@@ -871,7 +870,7 @@ impl DataModel {
                         value: key,
                     });
                 }
-                to_index_updates.push((rel_idx, key));
+                to_index_updates.push((rel_idx, key, key_existed));
             }
 
             if rel.from_table == table {
@@ -921,7 +920,7 @@ impl DataModel {
             }
         }
 
-        for (rel_idx, key) in to_index_updates {
+        for (rel_idx, key, key_existed) in to_index_updates {
             // Keep a copy for any downstream bookkeeping (e.g. updating cached unmatched fact
             // rows for columnar relationships).
             let key_for_updates = key.clone();
@@ -944,19 +943,74 @@ impl DataModel {
             // If this relationship tracks unmatched fact rows (columnar from-table), inserting a
             // new dimension key can "resolve" some of those rows. Remove any fact rows whose FK now
             // matches the inserted key so they no longer belong to the virtual blank member.
-            if !key_for_updates.is_blank() {
-                let from_table = self.relationships[rel_idx].rel.from_table.clone();
-                let from_idx = self.relationships[rel_idx].from_idx;
-                if let Some(unmatched) = self.relationships[rel_idx].unmatched_fact_rows.as_mut() {
-                    if let Some(from_table_ref) = self.tables.get(&from_table) {
-                        unmatched.retain(|&row| {
+            // Facts whose FK is BLANK always belong to the virtual blank member, even if a
+            // physical BLANK key exists on the dimension side.
+            if key_existed || key_for_updates.is_blank() {
+                continue;
+            }
+
+            let rel_info = self
+                .relationships
+                .get_mut(rel_idx)
+                .expect("relationship index from updates");
+            let Some(unmatched) = rel_info.unmatched_fact_rows.as_mut() else {
+                continue;
+            };
+
+            let from_table_name = rel_info.rel.from_table.clone();
+            let from_idx = rel_info.from_idx;
+            let from_table_ref = self
+                .tables
+                .get(&from_table_name)
+                .ok_or_else(|| DaxError::UnknownTable(from_table_name.clone()))?;
+
+            match unmatched {
+                UnmatchedFactRows::Sparse(rows) => {
+                    // When the unmatched set is sparse, scanning it is cheaper than finding all
+                    // matches and removing them.
+                    let key = &key_for_updates;
+                    rows.retain(|&row| {
+                        let v = from_table_ref
+                            .value_by_idx(row, from_idx)
+                            .unwrap_or(Value::Blank);
+                        v.is_blank() || &v != key
+                    });
+                }
+                UnmatchedFactRows::Dense { bits, len, count } => {
+                    let key = &key_for_updates;
+                    let clear_row = |row: usize, bits: &mut [u64], len: usize, count: &mut usize| {
+                        if row >= len {
+                            return;
+                        }
+                        let word = row / 64;
+                        let bit = row % 64;
+                        let mask = 1u64 << bit;
+                        if (bits[word] & mask) != 0 {
+                            bits[word] &= !mask;
+                            *count = count.saturating_sub(1);
+                        }
+                    };
+
+                    if let Some(rows) = from_table_ref.filter_eq(from_idx, key) {
+                        for row in rows {
+                            clear_row(row, bits, *len, count);
+                        }
+                    } else {
+                        // Fallback: scan and compare.
+                        for row in 0..from_table_ref.row_count() {
                             let v = from_table_ref
                                 .value_by_idx(row, from_idx)
                                 .unwrap_or(Value::Blank);
-                            v.is_blank() || v != key_for_updates
-                        });
+                            if &v == key {
+                                clear_row(row, bits, *len, count);
+                            }
+                        }
                     }
                 }
+            }
+
+            if unmatched.is_empty() {
+                rel_info.unmatched_fact_rows = None;
             }
         }
 
@@ -1966,6 +2020,7 @@ impl DataModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FilterContext;
     use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions};
     use std::time::Instant;
 
@@ -2046,6 +2101,89 @@ mod tests {
         println!(
             "relationship_large_columnar_does_not_explode_memory: built relationship over {rows} fact rows in {:?}",
             elapsed
+        );
+    }
+
+    #[test]
+    fn relationship_large_columnar_many_to_many_does_not_explode_memory() {
+        if std::env::var_os("FORMULA_DAX_REL_BENCH").is_none() {
+            return;
+        }
+
+        let mut model = DataModel::new();
+
+        // Small in-memory dimension table with duplicate keys (valid for many-to-many).
+        let mut dim = Table::new("Dim", vec!["Id"]);
+        for i in 0..100i64 {
+            dim.push_row(vec![i.into()]).unwrap();
+            dim.push_row(vec![i.into()]).unwrap();
+        }
+        model.add_table(dim).unwrap();
+
+        // Large columnar fact table. Most keys are unmatched to stress virtual blank member
+        // handling without building a `from_index`.
+        let rows = 1_000_000usize;
+        let schema = vec![
+            ColumnSchema {
+                name: "Id".to_string(),
+                column_type: ColumnType::Number,
+            },
+            ColumnSchema {
+                name: "Amount".to_string(),
+                column_type: ColumnType::Number,
+            },
+        ];
+        let options = TableOptions {
+            page_size_rows: 65_536,
+            cache: PageCacheConfig { max_entries: 8 },
+        };
+        let mut fact = ColumnarTableBuilder::new(schema, options);
+        for i in 0..rows {
+            fact.append_row(&[
+                // Make all keys unmatched.
+                formula_columnar::Value::Number((1_000_000usize + i) as f64),
+                formula_columnar::Value::Number(1.0),
+            ]);
+        }
+        model
+            .add_table(Table::from_columnar("Fact", fact.finalize()))
+            .unwrap();
+
+        let start = Instant::now();
+        model
+            .add_relationship(Relationship {
+                name: "Fact_Dim".into(),
+                from_table: "Fact".into(),
+                from_column: "Id".into(),
+                to_table: "Dim".into(),
+                to_column: "Id".into(),
+                cardinality: Cardinality::ManyToMany,
+                cross_filter_direction: CrossFilterDirection::Single,
+                is_active: true,
+                enforce_referential_integrity: false,
+            })
+            .unwrap();
+        let rel_elapsed = start.elapsed();
+
+        assert_eq!(model.relationships.len(), 1);
+        let rel = &model.relationships[0];
+        assert!(
+            rel.from_index.is_none(),
+            "columnar fact tables should not build RelationshipInfo::from_index for many-to-many relationships"
+        );
+
+        model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+
+        // Selecting BLANK on the dimension side should return all unmatched fact rows.
+        let filter = FilterContext::empty().with_column_equals("Dim", "Id", Value::Blank);
+        let start = Instant::now();
+        let value = model.evaluate_measure("Total", &filter).unwrap();
+        let eval_elapsed = start.elapsed();
+        assert_eq!(value, Value::from(rows as f64));
+
+        println!(
+            "relationship_large_columnar_many_to_many_does_not_explode_memory: built relationship over {rows} fact rows in {:?}, evaluated in {:?}",
+            rel_elapsed, eval_elapsed
         );
     }
 
