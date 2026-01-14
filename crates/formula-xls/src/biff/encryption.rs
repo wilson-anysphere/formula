@@ -448,11 +448,12 @@ fn apply_xor_obfuscation_in_place(
 
     let mut offset = encrypted_start;
     while offset < workbook_stream.len() {
-        let remaining = workbook_stream.len() - offset;
+        let remaining = workbook_stream.len().saturating_sub(offset);
         if remaining < 4 {
-            return Err(DecryptError::InvalidFilePass(
-                "truncated BIFF record header while decrypting XOR stream".to_string(),
-            ));
+            // Some writers may include trailing padding bytes after the final EOF record. Those
+            // bytes are not part of any record payload and should be ignored rather than treated
+            // as a truncated record header.
+            break;
         }
 
         let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
@@ -989,10 +990,10 @@ fn decrypt_biff8_rc4_standard(
     // Decrypt record payloads after FILEPASS.
     let mut offset = encrypted_start;
     while offset < workbook_stream.len() {
-        let remaining = workbook_stream.len() - offset;
+        let remaining = workbook_stream.len().saturating_sub(offset);
         if remaining < 4 {
-            // Some writers include trailing padding bytes after the final record. Those bytes are
-            // not part of any record header/payload and should be ignored.
+            // Some writers include trailing padding bytes after the final EOF record. Those bytes
+            // are not part of any record header/payload and should be ignored.
             break;
         }
 
@@ -2358,6 +2359,81 @@ mod tests {
         let mut buf = encrypted.clone();
         let err = decrypt_workbook_stream(&mut buf, wrong_password).expect_err("wrong password");
         assert_eq!(err, DecryptError::WrongPassword);
+    }
+
+    #[test]
+    fn xor_decrypt_tolerates_trailing_padding_bytes_after_eof() {
+        let password = "pw";
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+
+        // BIFF8 XOR FILEPASS placeholder: type + key + verifier.
+        let filepass_placeholder = [0u8; 6];
+
+        let mut plain = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_placeholder),
+            record(RECORD_DUMMY, &dummy_payload(32, 0x10)),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut encrypted = plain.clone();
+        encrypt_workbook_stream_for_test(&mut encrypted, password).expect("encrypt");
+
+        // FILEPASS is plaintext and populated by the encryption helper; patch the expected plaintext.
+        let range = filepass_payload_range(&plain);
+        plain[range.clone()].copy_from_slice(&encrypted[range]);
+
+        let padding = [0xAAu8, 0xBB, 0xCC];
+        for len in 1..=3 {
+            let mut plain_padded = plain.clone();
+            plain_padded.extend_from_slice(&padding[..len]);
+
+            let mut encrypted_padded = encrypted.clone();
+            encrypted_padded.extend_from_slice(&padding[..len]);
+
+            decrypt_workbook_stream(&mut encrypted_padded, password).expect("decrypt");
+            assert_eq!(encrypted_padded, plain_padded);
+        }
+    }
+
+    #[test]
+    fn rc4_standard_decrypt_tolerates_trailing_padding_bytes_after_eof() {
+        let password = "pw";
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+
+        // BIFF8 RC4 FILEPASS placeholder (Standard Encryption / major=1, minor=2 => 128-bit key).
+        let mut filepass_placeholder = vec![0u8; 6 + 16 + 16 + 16];
+        filepass_placeholder[0..2].copy_from_slice(&BIFF8_ENCRYPTION_TYPE_RC4.to_le_bytes());
+        filepass_placeholder[2..4].copy_from_slice(&1u16.to_le_bytes()); // major
+        filepass_placeholder[4..6].copy_from_slice(&2u16.to_le_bytes()); // minor (128-bit)
+
+        let mut plain = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_placeholder),
+            record(RECORD_DUMMY, &dummy_payload(32, 0x20)),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut encrypted = plain.clone();
+        encrypt_workbook_stream_for_test(&mut encrypted, password).expect("encrypt");
+
+        // FILEPASS is plaintext and populated by the encryption helper; patch the expected plaintext.
+        let range = filepass_payload_range(&plain);
+        plain[range.clone()].copy_from_slice(&encrypted[range]);
+
+        let padding = [0x01u8, 0x02, 0x03];
+        for len in 1..=3 {
+            let mut plain_padded = plain.clone();
+            plain_padded.extend_from_slice(&padding[..len]);
+
+            let mut encrypted_padded = encrypted.clone();
+            encrypted_padded.extend_from_slice(&padding[..len]);
+
+            decrypt_workbook_stream(&mut encrypted_padded, password).expect("decrypt");
+            assert_eq!(encrypted_padded, plain_padded);
+        }
     }
 }
 
