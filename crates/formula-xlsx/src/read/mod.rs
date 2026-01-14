@@ -709,17 +709,28 @@ fn load_sheet_drawings_from_archive<R: Read + Seek>(
     let mut rels_by_id: HashMap<String, crate::openxml::Relationship> =
         HashMap::with_capacity(relationships.len());
     for rel in relationships {
-        rels_by_id.insert(rel.id.clone(), rel);
+        let rel_id = rel.id.trim();
+        if rel_id.is_empty() {
+            continue;
+        }
+        // Be tolerant of whitespace around `Id` (seen in some synthetic fixtures).
+        if !rels_by_id.contains_key(rel_id) {
+            rels_by_id.insert(rel_id.to_string(), rel);
+        }
     }
 
     let mut objects = Vec::new();
     let mut seen_drawing_parts: HashSet<String> = HashSet::new();
 
     for rel_id in drawing_rel_ids {
-        let Some(rel) = rels_by_id.get(&rel_id) else {
+        let rel_id = rel_id.trim();
+        if rel_id.is_empty() {
+            continue;
+        }
+        let Some(rel) = rels_by_id.get(rel_id) else {
             continue;
         };
-        if rel.type_uri != REL_TYPE_DRAWING {
+        if rel.type_uri.trim() != REL_TYPE_DRAWING {
             continue;
         }
         if rel
@@ -774,17 +785,28 @@ fn load_sheet_drawings_from_parts(
     let mut rels_by_id: HashMap<String, crate::openxml::Relationship> =
         HashMap::with_capacity(relationships.len());
     for rel in relationships {
-        rels_by_id.insert(rel.id.clone(), rel);
+        let rel_id = rel.id.trim();
+        if rel_id.is_empty() {
+            continue;
+        }
+        // Be tolerant of whitespace around `Id` (seen in some synthetic fixtures).
+        if !rels_by_id.contains_key(rel_id) {
+            rels_by_id.insert(rel_id.to_string(), rel);
+        }
     }
 
     let mut objects = Vec::new();
     let mut seen_drawing_parts: HashSet<String> = HashSet::new();
 
     for rel_id in drawing_rel_ids {
-        let Some(rel) = rels_by_id.get(&rel_id) else {
+        let rel_id = rel_id.trim();
+        if rel_id.is_empty() {
+            continue;
+        }
+        let Some(rel) = rels_by_id.get(rel_id) else {
             continue;
         };
-        if rel.type_uri != REL_TYPE_DRAWING {
+        if rel.type_uri.trim() != REL_TYPE_DRAWING {
             continue;
         }
         if rel
@@ -3900,7 +3922,11 @@ fn parse_sheet_drawing_part_ids(xml: &[u8]) -> Result<Vec<String>, ReadError> {
                 for attr in e.attributes() {
                     let attr = attr?;
                     if crate::openxml::local_name(attr.key.as_ref()) == b"id" {
-                        out.push(attr.unescape_value()?.into_owned());
+                        let rel_id = attr.unescape_value()?.into_owned();
+                        let rel_id = rel_id.trim();
+                        if !rel_id.is_empty() {
+                            out.push(rel_id.to_string());
+                        }
                     }
                 }
             }
