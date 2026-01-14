@@ -378,7 +378,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                  },
                  // Non-exempt id to prove the baseline is still working.
                  { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
-               ],
+                ],
               },
            ],
          },
