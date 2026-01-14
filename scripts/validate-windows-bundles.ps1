@@ -613,6 +613,7 @@ try {
       if ([string]::IsNullOrWhiteSpace($v)) { continue }
       # Normalize common user input like "formula://" to just the scheme name.
       $v = $v.TrimEnd("/").TrimEnd(":")
+      $v = $v.ToLowerInvariant()
       $schemes += $v
     }
     if ($schemes.Count -eq 0) {
@@ -1215,8 +1216,17 @@ try {
   }
  
   $urlSpec = Get-ExpectedUrlProtocolSpec -RepoRoot $repoRoot
-  $requiredScheme = ($urlSpec.Schemes | Select-Object -First 1)
-  if ([string]::IsNullOrWhiteSpace($requiredScheme)) {
+  $requiredScheme = ""
+  $candidateSchemes = @()
+  if ($null -ne $urlSpec -and ($urlSpec.PSObject.Properties.Name -contains "Schemes")) {
+    $candidateSchemes = @($urlSpec.Schemes | Where-Object { $_ } | ForEach-Object { $_.ToString().Trim().TrimEnd("/").TrimEnd(":").ToLowerInvariant() } | Where-Object { $_ })
+  }
+  # Prefer `formula` if it exists in the config (stable external deep link scheme).
+  if ($candidateSchemes -contains "formula") {
+    $requiredScheme = "formula"
+  } elseif ($candidateSchemes.Count -gt 0) {
+    $requiredScheme = ($candidateSchemes | Select-Object -First 1)
+  } else {
     $requiredScheme = "formula"
   }
   $requiredScheme = $requiredScheme.Trim().TrimEnd("/").TrimEnd(":")
