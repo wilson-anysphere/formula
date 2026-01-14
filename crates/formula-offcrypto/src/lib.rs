@@ -17,7 +17,6 @@ pub mod standard;
 
 use core::fmt;
 use std::io::{Cursor, Read, Seek};
-use std::sync::Arc;
 
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
@@ -428,33 +427,6 @@ pub struct EncryptedPackageHeader {
     pub original_size: u64,
 }
 
-/// Wrapper for `office-crypto` decryption errors.
-///
-/// We keep the upstream error value for debugging (`source()`), but define `PartialEq`/`Eq` in terms
-/// of the rendered error message so `OffcryptoError` can remain comparable in tests.
-#[derive(Debug, Clone)]
-pub struct OfficeCryptoError(Arc<office_crypto::DecryptError>);
-
-impl OfficeCryptoError {
-    fn new(err: office_crypto::DecryptError) -> Self {
-        Self(Arc::new(err))
-    }
-}
-
-impl PartialEq for OfficeCryptoError {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.to_string() == other.0.to_string()
-    }
-}
-
-impl Eq for OfficeCryptoError {}
-
-impl fmt::Display for OfficeCryptoError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 /// Errors returned by this crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OffcryptoError {
@@ -518,8 +490,6 @@ pub enum OffcryptoError {
     InvalidPassword,
     /// Agile `spinCount` is larger than allowed by the configured decryption limits.
     SpinCountTooLarge { spin_count: u32, max: u32 },
-    /// Error returned by the upstream `office-crypto` decryptor.
-    OfficeCrypto(OfficeCryptoError),
 }
 
 impl fmt::Display for OffcryptoError {
@@ -610,23 +580,13 @@ impl fmt::Display for OffcryptoError {
             OffcryptoError::SpinCountTooLarge { spin_count, max } => {
                 write!(f, "Agile spinCount too large: {spin_count} (max {max})")
             }
-            OffcryptoError::OfficeCrypto(err) => write!(f, "office-crypto decrypt error: {err}"),
         }
     }
 }
 
 impl std::error::Error for OffcryptoError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            OffcryptoError::OfficeCrypto(err) => Some(err.0.as_ref()),
-            _ => None,
-        }
-    }
-}
-
-impl From<office_crypto::DecryptError> for OffcryptoError {
-    fn from(err: office_crypto::DecryptError) -> Self {
-        OffcryptoError::OfficeCrypto(OfficeCryptoError::new(err))
+        None
     }
 }
 
@@ -2951,42 +2911,23 @@ pub fn agile_secret_key_with_options(
 
 /// Decrypt a Standard-encrypted OOXML package (e.g. `.docx`, `.xlsx`) from a raw OLE/CFB wrapper.
 ///
-/// This is a thin wrapper around the upstream [`office-crypto`](https://crates.io/crates/office-crypto)
-/// decryptor, constrained to MS-OFFCRYPTO Standard (CryptoAPI) `EncryptionInfo` version **3.2**.
+/// This performs native MS-OFFCRYPTO Standard (CryptoAPI / AES) password verification and
+/// decryption and returns the decrypted OOXML ZIP bytes.
 ///
-/// The decrypted output is expected to be a ZIP/OPC package (starts with `PK`).
+/// Standard encryption is identified by `EncryptionInfo.versionMinor == 2` (real-world files vary
+/// `versionMajor` across 2/3/4).
+///
+/// The decrypted output is expected to be a ZIP/OPC package (starts with `PK`); if the decrypted
+/// bytes do not look like a ZIP, this returns [`OffcryptoError::InvalidPassword`] to avoid
+/// reporting garbage bytes as a successful decrypt.
 pub fn decrypt_standard_ooxml_from_bytes(
     raw_ole: Vec<u8>,
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
-    // 1) Ensure this is a Standard (CryptoAPI) EncryptionInfo 3.2 file before invoking the
-    // upstream decryptor (which also supports Agile).
-    let encryption_info = read_ole_stream(&raw_ole, "EncryptionInfo")?;
-    let version = EncryptionVersionInfo::parse(&encryption_info)?;
-    if (version.major, version.minor) != (3, 2) {
-        let encryption_type = match (version.major, version.minor) {
-            (4, 4) => EncryptionType::Agile,
-            (3 | 4, 3) => EncryptionType::Extensible,
-            _ => EncryptionType::Standard,
-        };
-        return Err(OffcryptoError::UnsupportedEncryption { encryption_type });
-    }
-
-    // Ensure the `EncryptedPackage` stream exists before delegating to `office-crypto`, so we can
-    // return a stable `OffcryptoError` for missing streams.
-    ensure_ole_stream_exists(&raw_ole, "EncryptedPackage")?;
-
-    // 2) Decrypt.
-    let decrypted = office_crypto::decrypt_from_bytes(raw_ole, password)?;
-
-    // 3) Sanity check: decrypted OOXML packages are ZIP/OPC containers.
+    let decrypted = decrypt_from_bytes(&raw_ole, password)?;
     if !decrypted.starts_with(b"PK") {
-        // `office-crypto` does not currently return an explicit "wrong password" error for
-        // Standard encryption. Treat a non-ZIP result as a password failure to avoid
-        // misreporting garbage bytes as a successful decrypt.
         return Err(OffcryptoError::InvalidPassword);
     }
-
     Ok(decrypted)
 }
 
@@ -3120,23 +3061,6 @@ fn open_stream_best_effort<F: Seek>(
         std::io::ErrorKind::NotFound,
         format!("stream not found: `{want}`"),
     ))
-}
-
-fn ensure_ole_stream_exists(raw_ole: &[u8], stream: &'static str) -> Result<(), OffcryptoError> {
-    let cursor = Cursor::new(raw_ole);
-    let mut ole = cfb::CompoundFile::open(cursor).map_err(|e| {
-        OffcryptoError::InvalidStructure(format!("failed to open OLE compound file: {e}"))
-    })?;
-
-    match open_stream_best_effort(&mut ole, stream) {
-        Ok(_) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(OffcryptoError::InvalidStructure(format!(
-            "missing `{stream}` stream"
-        ))),
-        Err(err) => Err(OffcryptoError::InvalidStructure(format!(
-            "failed to open `{stream}`: {err}"
-        ))),
-    }
 }
 
 #[cfg(test)]
