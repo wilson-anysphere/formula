@@ -165,11 +165,18 @@ export const dataTab: RibbonTabDefinition = {
           iconId: "help",
           kind: "dropdown",
           size: "large",
+          testId: "ribbon-what-if-analysis",
           menuItems: [
-            { id: "data.forecast.whatIfAnalysis.scenarioManager", label: "Scenario Manager…", ariaLabel: "Scenario Manager", iconId: "settings" },
-            { id: "data.forecast.whatIfAnalysis.goalSeek", label: "Goal Seek…", ariaLabel: "Goal Seek", iconId: "find" },
-            { id: "data.forecast.whatIfAnalysis.monteCarlo", label: "Monte Carlo…", ariaLabel: "Monte Carlo", iconId: "chart" },
-            { id: "data.forecast.whatIfAnalysis.dataTable", label: "Data Table…", ariaLabel: "Data Table", iconId: "gridlines" },
+            {
+              id: "data.forecast.whatIfAnalysis.scenarioManager",
+              label: "Scenario Manager…",
+              ariaLabel: "Scenario Manager",
+              iconId: "settings",
+              testId: "ribbon-scenario-manager",
+            },
+            { id: "data.forecast.whatIfAnalysis.goalSeek", label: "Goal Seek…", ariaLabel: "Goal Seek", iconId: "find", testId: "ribbon-goal-seek" },
+            { id: "data.forecast.whatIfAnalysis.monteCarlo", label: "Monte Carlo…", ariaLabel: "Monte Carlo", iconId: "chart", testId: "ribbon-monte-carlo" },
+            { id: "data.forecast.whatIfAnalysis.dataTable", label: "Data Table…", ariaLabel: "Data Table", iconId: "gridlines", testId: "ribbon-data-table" },
           ],
         },
         {

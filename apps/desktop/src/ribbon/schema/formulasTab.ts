@@ -70,7 +70,7 @@ export const formulasTab: RibbonTabDefinition = {
       id: "formulas.solutions",
       label: "Solutions",
       buttons: [
-        { id: "formulas.solutions.solver", label: "Solver", ariaLabel: "Solver", iconId: "puzzle", kind: "dropdown", size: "large" },
+        { id: "formulas.solutions.solver", label: "Solver", ariaLabel: "Solver", iconId: "puzzle", kind: "dropdown", size: "large", testId: "ribbon-solver" },
         { id: "formulas.solutions.analysisToolPak", label: "Analysis ToolPak", ariaLabel: "Analysis ToolPak", iconId: "settings", kind: "dropdown" },
       ],
     },
