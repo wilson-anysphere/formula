@@ -110,7 +110,7 @@ fn run() -> Result<(), String> {
 
 fn usage(program: &OsString) -> String {
     format!(
-        "usage: {} [--password <pw>] [--alg [md5|sha256]] <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
+        "usage: {} --input <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb> [--alg [md5|sha256]] [--password <password>|--password-file <path>]",
         program.to_string_lossy()
     )
 }
@@ -122,6 +122,7 @@ fn parse_args(
     let mut args = args.peekable();
     let mut input: Option<PathBuf> = None;
     let mut password: Option<String> = None;
+    let mut password_file: Option<PathBuf> = None;
     let mut alg: Option<Alg> = None;
 
     while let Some(arg) = args.next() {
@@ -131,20 +132,33 @@ fn parse_args(
             return Err(usage(program));
         }
 
-        if arg_str == "--password" {
-            let Some(value) = args.next() else {
-                return Err(format!("missing value for --password\n{}", usage(program)));
-            };
-            let value = value
-                .to_str()
-                .ok_or_else(|| "--password value must be valid UTF-8".to_owned())?
-                .to_owned();
-            password = Some(value);
+        if arg_str == "--input" {
+            let value = args.next().ok_or_else(|| usage(program))?;
+            input = Some(PathBuf::from(value));
+            continue;
+        }
+        if let Some(rest) = arg_str.strip_prefix("--input=") {
+            input = Some(PathBuf::from(rest));
             continue;
         }
 
+        if arg_str == "--password" {
+            let value = args.next().ok_or_else(|| usage(program))?;
+            password = Some(value.to_string_lossy().into_owned());
+            continue;
+        }
         if let Some(rest) = arg_str.strip_prefix("--password=") {
-            password = Some(rest.to_owned());
+            password = Some(rest.to_string());
+            continue;
+        }
+
+        if arg_str == "--password-file" {
+            let value = args.next().ok_or_else(|| usage(program))?;
+            password_file = Some(PathBuf::from(value));
+            continue;
+        }
+        if let Some(rest) = arg_str.strip_prefix("--password-file=") {
+            password_file = Some(PathBuf::from(rest));
             continue;
         }
 
@@ -194,9 +208,26 @@ fn parse_args(
         return Err(usage(program));
     }
 
+    if password.is_some() && password_file.is_some() {
+        return Err(format!(
+            "use only one of --password or --password-file\n{}",
+            usage(program)
+        ));
+    }
+
+    let password = match password_file {
+        Some(path) => {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("failed to read password file {}: {e}", path.display()))?;
+            Some(text.trim_end_matches(['\r', '\n']).to_string())
+        }
+        None => password,
+    };
+
     let Some(input) = input else {
         return Err(usage(program));
     };
+
     Ok((input, password, alg))
 }
 
