@@ -23,6 +23,23 @@ export const RIBBON_DISABLED_BY_ID_WHILE_EDITING: Record<string, true> = {
   "home.styles.cellStyles.numberFormat": true,
   "home.styles.cellStyles.newStyle": true,
 
+  // --- Insert / Objects ------------------------------------------------------
+  "view.insertPivotTable": true,
+  "insert.tables.pivotTable.fromTableRange": true,
+  "insert.illustrations.pictures": true,
+  "insert.illustrations.pictures.thisDevice": true,
+  "insert.illustrations.pictures.stockImages": true,
+  "insert.illustrations.pictures.onlinePictures": true,
+  "insert.illustrations.onlinePictures": true,
+
+  // --- What-If Analysis / Solver ---------------------------------------------
+  "data.forecast.whatIfAnalysis": true,
+  "data.forecast.whatIfAnalysis.scenarioManager": true,
+  "data.forecast.whatIfAnalysis.goalSeek": true,
+  "data.forecast.whatIfAnalysis.monteCarlo": true,
+  "data.forecast.whatIfAnalysis.dataTable": true,
+  "formulas.solutions.solver": true,
+
   // --- Sheet structure -------------------------------------------------------
   "home.cells.format": true,
   "home.cells.format.rowHeight": true,
