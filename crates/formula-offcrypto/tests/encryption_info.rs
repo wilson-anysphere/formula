@@ -41,7 +41,7 @@ fn build_standard_encryption_info_with_version(
     // EncryptionHeader (8 DWORDs + cspName)
     let mut header = Vec::new();
     header.extend_from_slice(&header_flags.to_le_bytes()); // flags
-    header.extend_from_slice(&(csp_name.len() as u32).to_le_bytes()); // sizeExtra
+    header.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
     header.extend_from_slice(&alg_id.to_le_bytes()); // algId
     header.extend_from_slice(&alg_id_hash.to_le_bytes()); // algIdHash
     header.extend_from_slice(&key_size_bits.to_le_bytes()); // keySize
@@ -121,7 +121,7 @@ fn parse_synthetic_standard_encryption_info() {
         header,
         StandardEncryptionHeader {
             flags: StandardEncryptionHeaderFlags::from_raw(header_flags),
-            size_extra: csp_name.len() as u32,
+            size_extra: 0,
             alg_id: CALG_AES_128,
             alg_id_hash: CALG_SHA1,
             key_size_bits: 128,
@@ -141,6 +141,53 @@ fn parse_synthetic_standard_encryption_info() {
             encrypted_verifier_hash: vec![0xBB; 32],
         }
     );
+}
+
+#[test]
+fn standard_header_size_extra_is_skipped_for_csp_name_and_verifier() {
+    // Use an odd sizeExtra to ensure the parser does not require `headerSize - 32` to be even.
+    let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI;
+    let size_extra = 1u32;
+    let header_extra = [0xFFu8];
+    let csp_name_bytes = utf16le_bytes("CSP", false); // no terminator
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&3u16.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&0xAABBCCDDu32.to_le_bytes());
+
+    let mut header = Vec::new();
+    header.extend_from_slice(&header_flags.to_le_bytes()); // flags
+    header.extend_from_slice(&size_extra.to_le_bytes()); // sizeExtra
+    header.extend_from_slice(&CALG_RC4.to_le_bytes()); // algId
+    header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash
+    header.extend_from_slice(&0u32.to_le_bytes()); // keySize=0 => 40-bit for RC4
+    header.extend_from_slice(&0u32.to_le_bytes()); // providerType
+    header.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+    header.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+    header.extend_from_slice(&csp_name_bytes);
+    header.extend_from_slice(&header_extra);
+
+    bytes.extend_from_slice(&(header.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&header);
+
+    // EncryptionVerifier.
+    bytes.extend_from_slice(&16u32.to_le_bytes()); // saltSize
+    bytes.extend(1u8..=16); // salt bytes
+    bytes.extend_from_slice(&[0xAA; 16]); // encryptedVerifier
+    bytes.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize (SHA-1)
+    bytes.extend_from_slice(&[0xBB; 20]); // encryptedVerifierHash
+
+    let info = parse_encryption_info(&bytes).expect("parse");
+    let EncryptionInfo::Standard { header, verifier, .. } = info else {
+        panic!("expected standard");
+    };
+    assert_eq!(header.size_extra, size_extra);
+    assert_eq!(header.csp_name, "CSP");
+    assert_eq!(verifier.salt, (1u8..=16).collect::<Vec<_>>());
+    assert_eq!(verifier.encrypted_verifier, [0xAA; 16]);
+    assert_eq!(verifier.verifier_hash_size, 20);
+    assert_eq!(verifier.encrypted_verifier_hash, vec![0xBB; 20]);
 }
 
 #[test]

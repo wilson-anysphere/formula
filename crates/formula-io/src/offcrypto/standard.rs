@@ -384,6 +384,14 @@ fn validate_parsed_standard_encryption_info(
 }
 
 fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OffcryptoError> {
+    // `EncryptionHeader` fixed-size fields are 8 DWORDs (32 bytes), followed by:
+    // - a UTF-16LE CSPName field of length `(headerSize - 32 - sizeExtra)`, and
+    // - `sizeExtra` algorithm-specific bytes at the end of the header.
+    //
+    // `headerSize` is the total byte length of the `EncryptionHeader` blob (provided by the
+    // parent `EncryptionInfo` stream). Here, `bytes.len()` is exactly that size.
+    const FIXED_LEN: usize = 8 * 4;
+
     let mut r = Reader::new(bytes);
 
     let flags_raw = r.read_u32_le("EncryptionHeader.flags")?;
@@ -425,23 +433,29 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OffcryptoEr
         return Err(OffcryptoError::UnsupportedExternalEncryption);
     }
 
-    let csp_name_bytes = r.read_bytes(r.remaining(), "EncryptionHeader.CSPName")?;
-    if csp_name_bytes.len() % 2 != 0 {
-        return Err(OffcryptoError::InvalidCspNameLength {
-            len: csp_name_bytes.len(),
+    let header_size = bytes.len();
+    let size_extra_usize = size_extra as usize;
+    if header_size < FIXED_LEN + size_extra_usize {
+        return Err(OffcryptoError::InvalidHeaderSize {
+            header_size: header_size as u32,
+            min_size: FIXED_LEN + size_extra_usize,
         });
     }
-    let mut utf16: Vec<u16> = csp_name_bytes
+
+    let csp_name_bytes_len = header_size - FIXED_LEN - size_extra_usize;
+    let csp_name_bytes = r.read_bytes(csp_name_bytes_len, "EncryptionHeader.CSPName")?;
+    if csp_name_bytes.len() % 2 != 0 {
+        return Err(OffcryptoError::InvalidCspNameLength {
+            len: csp_name_bytes_len,
+        });
+    }
+    // Skip the trailing algorithm-specific bytes (not currently interpreted).
+    let _header_extra = r.read_bytes(size_extra_usize, "EncryptionHeader.headerExtra")?;
+
+    let utf16: Vec<u16> = csp_name_bytes
         .chunks_exact(2)
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect();
-    if let Some(nul_pos) = utf16.iter().position(|c| *c == 0) {
-        utf16.truncate(nul_pos);
-    } else {
-        while utf16.last() == Some(&0) {
-            utf16.pop();
-        }
-    }
     let csp_name = String::from_utf16(&utf16).map_err(|_| OffcryptoError::InvalidCspNameUtf16)?;
 
     Ok(EncryptionHeader {
@@ -935,6 +949,87 @@ mod tests {
             encrypted_verifier_hash: vec![0x33u8; 20],
         };
         build_standard_encryption_info_bytes(&header, &verifier)
+    }
+
+    #[test]
+    fn parse_standard_parses_csp_name_and_skips_size_extra_bytes() {
+        // Build a synthetic Standard EncryptionInfo buffer with a non-zero sizeExtra and confirm:
+        // - CSPName is derived from headerSize - 32 - sizeExtra bytes
+        // - verifier fields are parsed starting *after* the extra bytes
+        let flags = EncryptionHeaderFlags::F_CRYPTOAPI;
+        let size_extra = 3u32; // intentionally odd to ensure we do not require headerSize-32 to be even
+
+        let csp_name = "Test CSP\0";
+        let csp_name_bytes = utf16le_bytes(csp_name);
+        let header_extra = vec![0xAA, 0xBB, 0xCC];
+
+        let mut header_bytes = Vec::new();
+        header_bytes.extend_from_slice(&flags.to_le_bytes()); // Flags
+        header_bytes.extend_from_slice(&size_extra.to_le_bytes()); // SizeExtra
+        header_bytes.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgId
+        header_bytes.extend_from_slice(&CALG_SHA1.to_le_bytes()); // AlgIdHash
+        header_bytes.extend_from_slice(&40u32.to_le_bytes()); // KeySize (bits)
+        header_bytes.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
+        header_bytes.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+        header_bytes.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+        header_bytes.extend_from_slice(&csp_name_bytes);
+        header_bytes.extend_from_slice(&header_extra);
+
+        // EncryptionVerifier (distinctive bytes so we can detect misalignment).
+        let salt: Vec<u8> = (0u8..16).collect();
+        let encrypted_verifier = [0x10u8; 16];
+        let verifier_hash_size = 20u32;
+        let encrypted_verifier_hash = vec![0xEE; 20];
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&STANDARD_MAJOR_VERSION.to_le_bytes());
+        out.extend_from_slice(&STANDARD_MINOR_VERSION.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // EncryptionInfo.Flags (ignored)
+        out.extend_from_slice(&(header_bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&header_bytes);
+        out.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+        out.extend_from_slice(&salt);
+        out.extend_from_slice(&encrypted_verifier);
+        out.extend_from_slice(&verifier_hash_size.to_le_bytes());
+        out.extend_from_slice(&encrypted_verifier_hash);
+
+        let parsed = parse_encryption_info_standard(&out).expect("parse");
+        assert_eq!(parsed.header.size_extra, size_extra);
+        assert_eq!(parsed.header.csp_name, csp_name);
+        assert_eq!(parsed.verifier.salt, salt);
+        assert_eq!(parsed.verifier.encrypted_verifier, encrypted_verifier);
+        assert_eq!(parsed.verifier.verifier_hash_size, verifier_hash_size);
+        assert_eq!(parsed.verifier.encrypted_verifier_hash, encrypted_verifier_hash);
+    }
+
+    #[test]
+    fn parse_standard_rejects_odd_csp_name_byte_length() {
+        // headerSize=35 => CSPName byte length = 3 (odd) when sizeExtra=0.
+        let header_size = 35u32;
+        let mut out = Vec::new();
+        out.extend_from_slice(&STANDARD_MAJOR_VERSION.to_le_bytes());
+        out.extend_from_slice(&STANDARD_MINOR_VERSION.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // EncryptionInfo.Flags (ignored)
+        out.extend_from_slice(&header_size.to_le_bytes());
+
+        // EncryptionHeader fixed fields.
+        out.extend_from_slice(&EncryptionHeaderFlags::F_CRYPTOAPI.to_le_bytes()); // Flags
+        out.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
+        out.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgId
+        out.extend_from_slice(&CALG_SHA1.to_le_bytes()); // AlgIdHash
+        out.extend_from_slice(&40u32.to_le_bytes()); // KeySize
+        out.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+
+        // 3 bytes of CSPName (invalid UTF-16LE length).
+        out.extend_from_slice(&[0x41, 0x00, 0x42]);
+
+        let err = parse_encryption_info_standard(&out).expect_err("expected error");
+        assert!(
+            matches!(err, OffcryptoError::InvalidCspNameLength { len: 3 }),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]

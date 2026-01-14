@@ -742,18 +742,28 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
     let reserved1 = hr.read_u32_le("EncryptionHeader.reserved1")?;
     let reserved2 = hr.read_u32_le("EncryptionHeader.reserved2")?;
 
-    if size_extra as usize > MAX_STANDARD_CSPNAME_BYTES {
+    // `header_size` is the total `EncryptionHeader` blob length. `sizeExtra` describes trailing
+    // algorithm-specific bytes at the end of that blob, so the CSPName byte length is:
+    //   header_size - 32 - sizeExtra
+    //
+    // This avoids requiring `header_size - 32` to be even (sizeExtra may be odd), and ensures we do
+    // not accidentally decode trailing algorithm-specific bytes as part of the UTF-16LE CSPName.
+    let size_extra_usize = size_extra as usize;
+    if header_bytes.len() < MIN_STANDARD_HEADER_SIZE + size_extra_usize {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionHeader.sizeExtra does not fit into declared header_size",
+        });
+    }
+    let csp_name_bytes_len = header_bytes.len() - MIN_STANDARD_HEADER_SIZE - size_extra_usize;
+    if csp_name_bytes_len > MAX_STANDARD_CSPNAME_BYTES {
         return Err(OffcryptoError::SizeLimitExceeded {
-            context: "EncryptionHeader.sizeExtra",
+            context: "EncryptionHeader.cspName",
             limit: MAX_STANDARD_CSPNAME_BYTES,
         });
     }
-    if (size_extra as usize) > hr.remaining().len() {
-        return Err(OffcryptoError::Truncated {
-            context: "EncryptionHeader.cspName",
-        });
-    }
-    let csp_name_bytes = hr.take(size_extra as usize, "EncryptionHeader.cspName")?;
+    let csp_name_bytes = hr.take(csp_name_bytes_len, "EncryptionHeader.cspName")?;
+    let csp_name = decode_csp_name_utf16le(csp_name_bytes)?;
+    let _header_extra = hr.take(size_extra_usize, "EncryptionHeader.headerExtra")?;
     let mut header = StandardEncryptionHeader {
         flags,
         size_extra,
@@ -763,7 +773,7 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
         provider_type,
         reserved1,
         reserved2,
-        csp_name: decode_csp_name_utf16le(csp_name_bytes)?,
+        csp_name,
     };
 
     // Algorithm/parameter validation.
