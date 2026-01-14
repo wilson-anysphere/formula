@@ -709,6 +709,9 @@ jobs:
           tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
 
+      - name: Verify desktop binary is stripped (no symbols)
+        run: python scripts/verify_desktop_binary_stripped.py
+
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
         # Run against the already-built Tauri artifacts from the previous step.
         # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
