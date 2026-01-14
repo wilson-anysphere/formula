@@ -8533,6 +8533,16 @@ function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (ne
 }
 
 async function handleRibbonPageSetup(): Promise<void> {
+  if (isSpreadsheetEditing()) {
+    app.focus();
+    return;
+  }
+  if (app.isReadOnly?.() === true) {
+    showToast("Read-only: you don't have permission to edit page setup.", "warning");
+    app.focus();
+    return;
+  }
+
   const invoke = getTauriInvokeForPrint();
   if (!invoke) return;
 
@@ -8560,6 +8570,16 @@ async function handleRibbonPageSetup(): Promise<void> {
 }
 
 async function handleRibbonUpdatePageSetup(patch: (current: PageSetup) => PageSetup): Promise<void> {
+  if (isSpreadsheetEditing()) {
+    app.focus();
+    return;
+  }
+  if (app.isReadOnly?.() === true) {
+    showToast("Read-only: you don't have permission to edit page setup.", "warning");
+    app.focus();
+    return;
+  }
+
   const invoke = getTauriInvokeForPrint();
   if (!invoke) return;
 
@@ -8577,6 +8597,16 @@ async function handleRibbonUpdatePageSetup(patch: (current: PageSetup) => PageSe
 }
 
 async function handleRibbonSetPrintArea(): Promise<void> {
+  if (isSpreadsheetEditing()) {
+    app.focus();
+    return;
+  }
+  if (app.isReadOnly?.() === true) {
+    showToast("Read-only: you don't have permission to set a print area.", "warning");
+    app.focus();
+    return;
+  }
+
   const invoke = getTauriInvokeForPrint();
   if (!invoke) return;
 
@@ -8602,6 +8632,16 @@ async function handleRibbonSetPrintArea(): Promise<void> {
 }
 
 async function handleRibbonClearPrintArea(): Promise<void> {
+  if (isSpreadsheetEditing()) {
+    app.focus();
+    return;
+  }
+  if (app.isReadOnly?.() === true) {
+    showToast("Read-only: you don't have permission to clear the print area.", "warning");
+    app.focus();
+    return;
+  }
+
   const invoke = getTauriInvokeForPrint();
   if (!invoke) return;
 
@@ -8616,6 +8656,16 @@ async function handleRibbonClearPrintArea(): Promise<void> {
 }
 
 async function handleRibbonAddToPrintArea(): Promise<void> {
+  if (isSpreadsheetEditing()) {
+    app.focus();
+    return;
+  }
+  if (app.isReadOnly?.() === true) {
+    showToast("Read-only: you don't have permission to edit the print area.", "warning");
+    app.focus();
+    return;
+  }
+
   const invoke = getTauriInvokeForPrint();
   if (!invoke) return;
 

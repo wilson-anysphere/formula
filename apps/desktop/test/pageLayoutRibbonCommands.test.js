@@ -106,4 +106,22 @@ test("Desktop main.ts does not special-case Page Layout ribbon actions in the ri
       `Expected main.ts to route pageLayoutHandlers.${key} through ${fn}`,
     );
   }
+
+  // Page layout commands are disabled in edit-mode + read-only sessions in the ribbon. Ensure
+  // the underlying handlers also guard those states so CommandRegistry surfaces (command palette,
+  // keybindings) can't bypass the ribbon UI disabling.
+  const guardedFns = [
+    "handleRibbonPageSetup",
+    "handleRibbonUpdatePageSetup",
+    "handleRibbonSetPrintArea",
+    "handleRibbonClearPrintArea",
+    "handleRibbonAddToPrintArea",
+  ];
+  for (const fn of guardedFns) {
+    const start = main.indexOf(`function ${fn}`);
+    assert.notEqual(start, -1, `Expected main.ts to define ${fn}`);
+    const slice = main.slice(start, start + 500);
+    assert.match(slice, /\bisSpreadsheetEditing\b/, `Expected ${fn} to guard edit mode via isSpreadsheetEditing()`);
+    assert.match(slice, /\bapp\.isReadOnly\b/, `Expected ${fn} to guard read-only mode via app.isReadOnly()`);
+  }
 });
