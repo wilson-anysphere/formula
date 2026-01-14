@@ -15,7 +15,7 @@ use desktop::commands;
 use desktop::ed25519_verifier;
 use desktop::ipc_limits::{
     LimitedString, MAX_IPC_NOTIFICATION_BODY_BYTES, MAX_IPC_NOTIFICATION_TITLE_BYTES,
-    MAX_IPC_URL_BYTES, MAX_OAUTH_REDIRECT_URI_BYTES,
+    MAX_OAUTH_REDIRECT_URI_BYTES,
 };
 use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
 use desktop::macros::{workbook_before_close_timeout_ms, MacroExecutionOptions};
