@@ -22,7 +22,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 
 def _format_set(items: Iterable[str]) -> str:
@@ -155,7 +155,9 @@ def load_expected_identifier(tauri_config_path: Path) -> str:
     return ""
 
 
-def verify_compliance_artifacts(package_root: Path, package_name: str) -> None:
+def verify_compliance_artifacts(
+    package_root: Path, package_name: str, tauri_config_path: Optional[Path] = None
+) -> None:
     doc_dir = package_root / "usr" / "share" / "doc" / package_name
     missing: list[Path] = []
     for filename in ("LICENSE", "NOTICE"):
@@ -168,8 +170,9 @@ def verify_compliance_artifacts(package_root: Path, package_name: str) -> None:
             "[linux] ERROR: missing LICENSE/NOTICE compliance artifacts in package doc directory.\n"
             f"Expected under: {doc_dir}\n"
             f"Missing:\n{formatted}\n"
-            "Hint: ensure apps/desktop/src-tauri/tauri.conf.json includes bundle.resources and "
-            "bundle.linux.(deb|rpm).files mappings for /usr/share/doc/<package>/."
+            "Hint: ensure tauri.conf.json includes bundle.resources and "
+            "bundle.linux.(deb|rpm).files mappings for /usr/share/doc/<package>/. "
+            + (f"(Config: {tauri_config_path})" if tauri_config_path else "")
         )
 
 
@@ -222,7 +225,10 @@ def load_expected_extension_mime_pairs(tauri_config_path: Path) -> list[tuple[st
 
 
 def verify_shared_mime_definition(
-    package_root: Path, identifier: str, expected_pairs: list[tuple[str, str]]
+    package_root: Path,
+    identifier: str,
+    expected_pairs: list[tuple[str, str]],
+    tauri_config_path: Optional[Path] = None,
 ) -> None:
     """
     Parquet is not consistently defined in shared-mime-info across distros.
@@ -237,8 +243,9 @@ def verify_shared_mime_definition(
         raise SystemExit(
             "[linux] ERROR: Parquet file association configured but no shared-mime-info packages dir found.\n"
             f"Expected: {mime_packages_dir}\n"
-            "Hint: install a MIME definition under usr/share/mime/packages (e.g. apps/desktop/src-tauri/mime/...) "
-            "and map it into Linux packages via bundle.linux.(deb|rpm|appimage).files in tauri.conf.json."
+            "Hint: install a MIME definition under usr/share/mime/packages and map it into Linux "
+            "packages via bundle.linux.(deb|rpm|appimage).files in tauri.conf.json. "
+            + (f"(Config: {tauri_config_path})" if tauri_config_path else "")
         )
 
     identifier = identifier.strip()
@@ -262,12 +269,16 @@ def verify_shared_mime_definition(
     if not expected_xml.is_file():
         packaged = sorted(mime_packages_dir.glob("*.xml"))
         formatted = "\n".join(f"- {p}" for p in packaged) if packaged else "(no *.xml files found)"
+        expected_source = (
+            (tauri_config_path.parent / "mime" / f"{identifier}.xml") if tauri_config_path else None
+        )
         raise SystemExit(
             "[linux] ERROR: Parquet file association configured but expected shared-mime-info definition file is missing.\n"
             f"Expected: {expected_xml}\n"
             f"Found:\n{formatted}\n"
-            "Hint: keep apps/desktop/src-tauri/mime/<identifier>.xml packaged via tauri.conf.json bundle.linux.*.files "
-            "(where <identifier> comes from tauri.conf.json identifier)."
+            "Hint: ensure the shared-mime-info XML definition is packaged via tauri.conf.json "
+            "bundle.linux.*.files (where <identifier> comes from tauri.conf.json identifier). "
+            + (f"Expected source file: {expected_source}" if expected_source else "")
         )
 
     try:
@@ -629,13 +640,15 @@ def main() -> int:
         return 1
 
     # Finally, validate that the built package ships OSS/compliance artifacts.
-    verify_compliance_artifacts(args.package_root, expected_doc_pkg)
+    verify_compliance_artifacts(args.package_root, expected_doc_pkg, args.tauri_config)
 
     # Parquet file association requires a shared-mime-info definition on many distros. While validating
     # that definition file, we also ensure it includes glob mappings for all configured file
     # associations so the system can resolve extensions to the MIME types advertised in `.desktop`.
     if "application/vnd.apache.parquet" in expected_mime_types:
-        verify_shared_mime_definition(args.package_root, expected_identifier, expected_extension_pairs)
+        verify_shared_mime_definition(
+            args.package_root, expected_identifier, expected_extension_pairs, args.tauri_config
+        )
 
     return 0
 
