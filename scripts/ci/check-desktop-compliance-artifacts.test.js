@@ -15,7 +15,7 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function run(config, { writeLicense = true, writeNotice = true } = {}) {
+function run(config, { writeLicense = true, writeNotice = true, mimeXmlContent } = {}) {
   const tmpdir = mkdtempSync(path.join(os.tmpdir(), "formula-desktop-compliance-"));
   const confPath = path.join(tmpdir, "tauri.conf.json");
   // The validator resolves paths relative to the tauri.conf.json location. Create
@@ -29,7 +29,7 @@ function run(config, { writeLicense = true, writeNotice = true } = {}) {
   const identifier =
     typeof config?.identifier === "string" && config.identifier.trim() ? config.identifier.trim() : "app.formula.desktop";
   const mimeBasename = `${identifier}.xml`;
-  const mimeXml = [
+  const defaultMimeXml = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
     '  <mime-type type="application/vnd.apache.parquet">',
@@ -38,6 +38,7 @@ function run(config, { writeLicense = true, writeNotice = true } = {}) {
     "</mime-info>",
     "",
   ].join("\n");
+  const mimeXml = typeof mimeXmlContent === "string" ? mimeXmlContent : defaultMimeXml;
   mkdirSync(path.join(tmpdir, "mime"), { recursive: true });
   writeFileSync(path.join(tmpdir, "mime", mimeBasename), mimeXml, "utf8");
   // Some configs may reference the MIME definition file at repo root (basename-only); create
@@ -427,4 +428,47 @@ test("fails when LICENSE source file does not exist", () => {
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /missing source file/i);
   assert.match(proc.stderr, /LICENSE/i);
+});
+
+test("fails when Parquet shared-mime-info definition file lacks expected content", () => {
+  const mimeDest = `usr/share/mime/packages/${testIdentifier}.xml`;
+  const mimeSrc = `mime/${testIdentifier}.xml`;
+  const proc = run(
+    {
+      identifier: testIdentifier,
+      mainBinaryName: "formula-desktop",
+      bundle: {
+        resources: ["LICENSE", "NOTICE"],
+        fileAssociations: [{ ext: ["parquet"], mimeType: "application/vnd.apache.parquet" }],
+        linux: {
+          deb: {
+            depends: ["shared-mime-info"],
+            files: {
+              [mimeDest]: mimeSrc,
+              "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+              "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+            },
+          },
+          rpm: {
+            depends: ["shared-mime-info"],
+            files: {
+              [mimeDest]: mimeSrc,
+              "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+              "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+            },
+          },
+          appimage: {
+            files: {
+              [mimeDest]: mimeSrc,
+              "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+              "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
+            },
+          },
+        },
+      },
+    },
+    { mimeXmlContent: "<mime-info />\n" },
+  );
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /shared-mime-info definition file is missing expected content/i);
 });

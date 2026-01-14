@@ -301,3 +301,80 @@ test(
     assert.match(proc.stderr, /glob \*\.parquet/i);
   },
 );
+
+test(
+  "verify_linux_desktop_integration fails when Parquet association is configured but MIME XML filename does not match tauri identifier",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const configPath = writeConfigWithAssociations(tmp, {
+      fileAssociations: [
+        {
+          ext: ["xlsx"],
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
+        {
+          ext: ["parquet"],
+          mimeType: "application/vnd.apache.parquet",
+        },
+      ],
+    });
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.apache.parquet;x-scheme-handler/formula;",
+    });
+
+    // Package a valid Parquet shared-mime-info definition, but under the wrong filename.
+    // The verifier should enforce the identifier-derived filename: <identifier>.xml.
+    writeParquetMimeDefinition(pkgRoot, { filename: "other.xml" });
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /\/usr\/share\/mime\/packages\/app\.formula\.desktop\.xml/i);
+    assert.match(proc.stderr, /other\.xml/i);
+  },
+);
+
+test(
+  "verify_linux_desktop_integration fails when Parquet association is configured but tauri identifier is missing",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const configPath = path.join(tmp, "tauri.conf.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          // Intentionally omit `identifier`.
+          mainBinaryName: "formula-desktop",
+          bundle: {
+            fileAssociations: [
+              {
+                ext: ["xlsx"],
+                mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              },
+              {
+                ext: ["parquet"],
+                mimeType: "application/vnd.apache.parquet",
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.apache.parquet;x-scheme-handler/formula;",
+    });
+    // Ensure the shared-mime-info packages dir exists so the verifier reaches the identifier check.
+    writeParquetMimeDefinition(pkgRoot);
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /identifier is missing/i);
+  },
+);
