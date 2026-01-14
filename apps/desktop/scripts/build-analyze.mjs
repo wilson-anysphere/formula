@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -92,7 +93,40 @@ async function main() {
   if (pyodideCode !== 0) process.exit(pyodideCode);
 
   const viteCode = await run("vite", ["build", ...args.viteArgs], { env });
-  process.exit(viteCode);
+  if (viteCode !== 0) process.exit(viteCode);
+
+  const distDir = path.join(desktopDir, "dist");
+  const expected = ["bundle-stats.html", "bundle-stats.json"];
+  if (env.VITE_BUNDLE_ANALYZE_SOURCEMAP === "1") {
+    expected.push("bundle-stats-sourcemap.html");
+  }
+
+  /** @type {string[]} */
+  const missing = [];
+  for (const file of expected) {
+    const absPath = path.join(distDir, file);
+    if (!existsSync(absPath)) {
+      missing.push(file);
+      continue;
+    }
+    try {
+      if (statSync(absPath).size === 0) missing.push(file);
+    } catch {
+      missing.push(file);
+    }
+  }
+
+  if (missing.length > 0) {
+    console.error("[build:analyze] Expected bundle analysis report files were not generated:");
+    for (const file of missing) console.error(`- ${path.join("dist", file)}`);
+    console.error("");
+    console.error(
+      "[build:analyze] This usually means rollup-plugin-visualizer failed to load. Ensure dependencies are installed (pnpm install).",
+    );
+    process.exit(1);
+  }
+
+  process.exit(0);
 }
 
 main().catch((err) => {
