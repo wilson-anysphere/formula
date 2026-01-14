@@ -10,6 +10,16 @@
 //! crate also exposes a syntax-only lexer/parser that produces a normalized AST via
 //! [`parse_formula`] and [`parser::parse_formula_partial`].
 //!
+//! ## External workbook references
+//!
+//! The engine supports Excel-style external workbook references (e.g. `=[Book.xlsx]Sheet1!A1`) via
+//! a host-provided [`ExternalValueProvider`]. Hosts attach a provider with
+//! [`Engine::set_external_value_provider`].
+//!
+//! See [`ExternalValueProvider`] for the canonical external sheet-key format (`"[workbook]sheet"`),
+//! external 3D span expansion rules (`"[workbook]Sheet1:Sheet3"`), and the required
+//! [`ExternalValueProvider::sheet_order`] implementation for evaluating external 3D spans.
+//!
 //! Performance is a feature (see `docs/16-performance-targets.md`). This crate exposes a
 //! small benchmark harness via [`run_benchmarks`] so CI can detect regressions in the core
 //! parsing/evaluation/recalc paths as the engine evolves.
