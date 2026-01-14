@@ -360,6 +360,28 @@ test("validate-linux-deb fails when extracted .desktop lacks URL scheme handler 
   assert.match(proc.stderr, /x-scheme-handler\/formula/i);
 });
 
+test("validate-linux-deb fails when extracted .desktop lacks Parquet MIME type (application/vnd.apache.parquet)", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeDpkgDebTool(binDir);
+
+  writeFileSync(join(tmp, "Formula.deb"), "not-a-real-deb", { encoding: "utf8" });
+  const dependsFile = writeDefaultDependsFile(tmp);
+  const contentsFile = writeDefaultContentsFile(tmp);
+
+  const mimeTypesNoParquet = expectedFileAssociationMimeTypes.filter((mt) => mt !== "application/vnd.apache.parquet");
+  const proc = runValidator({
+    cwd: tmp,
+    debArg: "Formula.deb",
+    dependsFile,
+    contentsFile,
+    desktopMimeValue: `${mimeTypesNoParquet.join(";")};x-scheme-handler/formula;`,
+  });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /application\/vnd\.apache\.parquet/i);
+});
+
 test("validate-linux-deb fails when extracted .desktop Exec= does not reference the expected binary", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-deb-test-"));
   const binDir = join(tmp, "bin");
