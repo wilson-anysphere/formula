@@ -92,12 +92,10 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   // Insert/delete cells (not whole sheets). Handled directly by `main.ts` via a dialog-style quick pick.
   "home.cells.insert.insertCells",
   "home.cells.delete.deleteCells",
-  // Home → Cells structural edits are handled directly by `main.ts` (not CommandRegistry).
-  "home.cells.insert.insertCells",
+  // Structural sheet row/col/sheet operations are handled directly by `main.ts` (not CommandRegistry).
   "home.cells.insert.insertSheetRows",
   "home.cells.insert.insertSheetColumns",
   "home.cells.insert.insertSheet",
-  "home.cells.delete.deleteCells",
   "home.cells.delete.deleteSheetRows",
   "home.cells.delete.deleteSheetColumns",
   "home.cells.delete.deleteSheet",
@@ -121,16 +119,15 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   // Data → Sort & Filter (same implementations as Home tab).
   "data.sortFilter.sort.customSort",
 
-  // Home → Styles
+  // --- Home → Styles ----------------------------------------------------------
+  // Cell Styles are currently handled via `main.ts` (not CommandRegistry yet). Only the
+  // Good/Bad/Neutral submenu is implemented today.
   "home.styles.cellStyles.goodBadNeutral",
   "home.styles.formatAsTable",
   "home.styles.formatAsTable.light",
   "home.styles.formatAsTable.medium",
   "home.styles.formatAsTable.dark",
   "home.styles.formatAsTable.newStyle",
-  // Cell Styles are currently handled via `main.ts` (not CommandRegistry yet). Only the
-  // Good/Bad/Neutral submenu is implemented today.
-  "home.styles.cellStyles.goodBadNeutral",
 
   // --- Formula auditing -------------------------------------------------------
   "formulas.formulaAuditing.tracePrecedents",
