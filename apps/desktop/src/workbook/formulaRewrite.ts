@@ -35,8 +35,16 @@ export function rewriteSheetNamesInFormula(
       const parsed = parseQuotedSheetSpec(formula, i);
       if (parsed) {
         const { nextIndex, sheetSpec } = parsed;
-        const rewritten =
-          rewriteSheetSpec(sheetSpec, oldName, newName) ?? quoteSheetSpec(sheetSpec);
+        // Do not rewrite references that include an explicit workbook prefix (e.g. `'[Book.xlsx]Sheet1'!A1`).
+        // Those refer to an external workbook and should not change when renaming a sheet in the
+        // current workbook (match Rust backend semantics).
+        if (splitWorkbookPrefix(sheetSpec).workbookPrefix != null) {
+          out.push(formula.slice(i, nextIndex)); // includes trailing `!`
+          i = nextIndex;
+          continue;
+        }
+
+        const rewritten = rewriteSheetSpec(sheetSpec, oldName, newName) ?? quoteSheetSpec(sheetSpec);
         out.push(rewritten, "!");
         i = nextIndex;
         continue;
@@ -46,6 +54,11 @@ export function rewriteSheetNamesInFormula(
     const parsedUnquoted = parseUnquotedSheetSpec(formula, i);
     if (parsedUnquoted) {
       const { nextIndex, sheetSpec } = parsedUnquoted;
+      if (splitWorkbookPrefix(sheetSpec).workbookPrefix != null) {
+        out.push(formula.slice(i, nextIndex)); // includes trailing `!`
+        i = nextIndex;
+        continue;
+      }
       out.push(rewriteSheetSpec(sheetSpec, oldName, newName) ?? sheetSpec, "!");
       i = nextIndex;
       continue;

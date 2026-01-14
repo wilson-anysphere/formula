@@ -130,15 +130,16 @@ describe("sheetFormulaRewrite", () => {
       expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=Data!A1+1");
     });
 
-    it("rewrites external workbook refs with escaped brackets in the workbook name", () => {
+    it("does not rewrite external workbook refs (including escaped brackets in workbook names)", () => {
       // Regression: workbook names can escape `]` by doubling to `]]` inside the `[Book.xlsx]` prefix.
-      // Our sheet spec parser must not stop at the first `]` (it may be part of an escape sequence).
+      // Our sheet spec parser must not stop at the first `]` (it may be part of an escape sequence),
+      // and sheet renames in the current workbook should not affect external workbook references.
       const doc = new DocumentController();
       doc.setCellFormula("S1", { row: 0, col: 0 }, "=[Book]]Name.xlsx]Sheet1!A1+1");
 
       rewriteDocumentFormulasForSheetRename(doc, "Sheet1", "Renamed");
 
-      expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("='[Book]]Name.xlsx]Renamed'!A1+1");
+      expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=[Book]]Name.xlsx]Sheet1!A1+1");
     });
   });
 
