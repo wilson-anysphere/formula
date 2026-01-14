@@ -157,6 +157,7 @@ import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/in
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
+import { HOME_STYLES_COMMAND_IDS } from "./commands/registerHomeStylesCommands.js";
 import {
   FORMAT_FONT_NAME_PRESET_COMMAND_IDS,
   FORMAT_FONT_SIZE_PRESET_COMMAND_IDS,
@@ -2376,22 +2377,17 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "format.openFormatCells": true,
             "home.number.moreFormats.custom": true,
             "format.clearFormats": true,
-            // Style commands should follow the same read-only formatting-defaults gating.
-            "home.styles.formatAsTable": true,
-            "home.styles.formatAsTable.light": true,
-            "home.styles.formatAsTable.medium": true,
-            "home.styles.formatAsTable.dark": true,
-            "home.styles.formatAsTable.newStyle": true,
-            "home.styles.cellStyles": true,
-            "home.styles.cellStyles.goodBadNeutral": true,
-            "home.styles.cellStyles.dataModel": true,
-            "home.styles.cellStyles.titlesHeadings": true,
-            "home.styles.cellStyles.numberFormat": true,
-            "home.styles.cellStyles.newStyle": true,
-            "home.styles.conditionalFormatting": true,
-            "home.styles.conditionalFormatting.highlightCellsRules": true,
-            "home.styles.conditionalFormatting.topBottomRules": true,
-            "home.styles.conditionalFormatting.dataBars": true,
+             // Style commands should follow the same read-only formatting-defaults gating.
+             "home.styles.formatAsTable": true,
+             [HOME_STYLES_COMMAND_IDS.formatAsTable.light]: true,
+             [HOME_STYLES_COMMAND_IDS.formatAsTable.medium]: true,
+             [HOME_STYLES_COMMAND_IDS.formatAsTable.dark]: true,
+             "home.styles.cellStyles": true,
+             [HOME_STYLES_COMMAND_IDS.cellStyles.goodBadNeutral]: true,
+             "home.styles.conditionalFormatting": true,
+             "home.styles.conditionalFormatting.highlightCellsRules": true,
+             "home.styles.conditionalFormatting.topBottomRules": true,
+             "home.styles.conditionalFormatting.dataBars": true,
             "home.styles.conditionalFormatting.colorScales": true,
             "home.styles.conditionalFormatting.iconSets": true,
             "home.styles.conditionalFormatting.manageRules": true,
