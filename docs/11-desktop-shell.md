@@ -93,9 +93,10 @@ Notes:
   ```
   This runs the desktop binary with `--startup-bench`, which loads a minimal page and exits after reporting
   `[startup] ...` timings.
-
+ 
   Note: in `--startup-bench` mode, `first_render_ms` is a best-effort **first frame** proxy for the minimal document
-  (not the full grid render time).
+  (not the full grid render time). The standalone startup runner treats this as an **optional** metric and may skip
+  reporting p50/p95 if too few runs report a value.
 
   Tuning knobs:
   - `FORMULA_DESKTOP_STARTUP_MODE=cold|warm` (default: `cold`)
