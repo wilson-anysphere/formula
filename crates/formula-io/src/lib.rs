@@ -1265,7 +1265,6 @@ pub fn open_workbook_model_with_password(
     password: Option<&str>,
 ) -> Result<formula_model::Workbook, Error> {
     let path = path.as_ref();
-
     // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
     // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
     // decryption support.
@@ -1596,6 +1595,139 @@ fn read_stream_bytes_case_insensitive<R: std::io::Read + std::io::Write + std::i
 }
 
 #[cfg(feature = "encrypted-workbooks")]
+fn decode_utf16le_z_lossy(bytes: &[u8]) -> Result<String, formula_offcrypto::OffcryptoError> {
+    if bytes.is_empty() {
+        return Ok(String::new());
+    }
+    if bytes.len() % 2 != 0 {
+        return Err(formula_offcrypto::OffcryptoError::InvalidCspNameUtf16);
+    }
+
+    let mut units: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
+    for chunk in bytes.chunks_exact(2) {
+        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+    let end = units.iter().position(|u| *u == 0).unwrap_or(units.len());
+    String::from_utf16(&units[..end]).map_err(|_| formula_offcrypto::OffcryptoError::InvalidCspNameUtf16)
+}
+
+/// Parse a Standard (CryptoAPI) `EncryptionInfo` stream while being tolerant of missing/incorrect
+/// header flags.
+///
+/// Some real-world producers omit `fCryptoAPI` / `fAES` even though the rest of the header matches
+/// the Standard/CryptoAPI schema. `formula-offcrypto` intentionally rejects those for AES to avoid
+/// false positives when parsing arbitrary bytes, but for Formula's workbook open path we already
+/// know we're inside an OOXML-encrypted OLE container (`EncryptionInfo` + `EncryptedPackage`
+/// streams), so we can safely fall back to a lenient parser.
+#[cfg(feature = "encrypted-workbooks")]
+fn parse_standard_encryption_info_lenient(
+    encryption_info: &[u8],
+) -> Result<formula_offcrypto::StandardEncryptionInfo, formula_offcrypto::OffcryptoError> {
+    fn read_u16_le(
+        bytes: &[u8],
+        pos: &mut usize,
+        context: &'static str,
+    ) -> Result<u16, formula_offcrypto::OffcryptoError> {
+        let end = pos.saturating_add(2);
+        let slice = bytes
+            .get(*pos..end)
+            .ok_or(formula_offcrypto::OffcryptoError::Truncated { context })?;
+        *pos = end;
+        Ok(u16::from_le_bytes([slice[0], slice[1]]))
+    }
+
+    fn read_u32_le(
+        bytes: &[u8],
+        pos: &mut usize,
+        context: &'static str,
+    ) -> Result<u32, formula_offcrypto::OffcryptoError> {
+        let end = pos.saturating_add(4);
+        let slice = bytes
+            .get(*pos..end)
+            .ok_or(formula_offcrypto::OffcryptoError::Truncated { context })?;
+        *pos = end;
+        Ok(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
+    }
+
+    let mut pos = 0usize;
+    let major = read_u16_le(encryption_info, &mut pos, "EncryptionVersionInfo.major")?;
+    let minor = read_u16_le(encryption_info, &mut pos, "EncryptionVersionInfo.minor")?;
+    let _version_flags = read_u32_le(encryption_info, &mut pos, "EncryptionVersionInfo.flags")?;
+
+    // Standard encryption uses `versionMinor == 2` with major typically 2/3/4.
+    if minor != 2 || !matches!(major, 2 | 3 | 4) {
+        return Err(formula_offcrypto::OffcryptoError::UnsupportedVersion { major, minor });
+    }
+
+    let header_size = read_u32_le(encryption_info, &mut pos, "EncryptionInfo.header_size")? as usize;
+    const MIN_STANDARD_HEADER_SIZE: usize = 8 * 4;
+    const MAX_STANDARD_HEADER_SIZE: usize = 1024 * 1024;
+    if header_size < MIN_STANDARD_HEADER_SIZE || header_size > MAX_STANDARD_HEADER_SIZE {
+        return Err(formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionInfo.header_size is out of bounds",
+        });
+    }
+
+    let header_bytes = encryption_info
+        .get(pos..pos + header_size)
+        .ok_or(formula_offcrypto::OffcryptoError::Truncated {
+            context: "EncryptionHeader",
+        })?;
+    pos += header_size;
+
+    let mut hpos = 0usize;
+    let raw_flags = read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.flags")?;
+    let flags = formula_offcrypto::StandardEncryptionHeaderFlags::from_raw(raw_flags);
+    if flags.f_external {
+        return Err(formula_offcrypto::OffcryptoError::UnsupportedExternalEncryption);
+    }
+
+    let header = formula_offcrypto::StandardEncryptionHeader {
+        flags,
+        size_extra: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.sizeExtra")?,
+        alg_id: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.algId")?,
+        alg_id_hash: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.algIdHash")?,
+        key_size_bits: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.keySize")?,
+        provider_type: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.providerType")?,
+        reserved1: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.reserved1")?,
+        reserved2: read_u32_le(header_bytes, &mut hpos, "EncryptionHeader.reserved2")?,
+        csp_name: decode_utf16le_z_lossy(&header_bytes[hpos..])?,
+    };
+
+    let salt_size = read_u32_le(encryption_info, &mut pos, "EncryptionVerifier.saltSize")? as usize;
+    let salt = encryption_info
+        .get(pos..pos + salt_size)
+        .ok_or(formula_offcrypto::OffcryptoError::Truncated {
+            context: "EncryptionVerifier.salt",
+        })?
+        .to_vec();
+    pos += salt_size;
+
+    let encrypted_verifier_bytes = encryption_info
+        .get(pos..pos + 16)
+        .ok_or(formula_offcrypto::OffcryptoError::Truncated {
+            context: "EncryptionVerifier.encryptedVerifier",
+        })?;
+    let mut encrypted_verifier = [0u8; 16];
+    encrypted_verifier.copy_from_slice(encrypted_verifier_bytes);
+    pos += 16;
+
+    let verifier_hash_size =
+        read_u32_le(encryption_info, &mut pos, "EncryptionVerifier.verifierHashSize")?;
+    let encrypted_verifier_hash = encryption_info.get(pos..).unwrap_or_default().to_vec();
+
+    Ok(formula_offcrypto::StandardEncryptionInfo {
+        header,
+        verifier: formula_offcrypto::StandardEncryptionVerifier {
+            salt,
+            encrypted_verifier,
+            verifier_hash_size,
+            encrypted_verifier_hash,
+        },
+    })
+}
+
+#[cfg(feature = "encrypted-workbooks")]
 fn try_decrypt_ooxml_encrypted_package_from_path(
     path: &Path,
     password: Option<&str>,
@@ -1794,26 +1926,31 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
         let decrypt_with_offcrypto = || -> Result<Vec<u8>, formula_offcrypto::OffcryptoError> {
             use sha1::{Digest as _, Sha1};
 
-            let parsed = formula_offcrypto::parse_encryption_info(&encryption_info)?;
-            let (header, verifier) = match parsed {
-                formula_offcrypto::EncryptionInfo::Standard {
+            let info = match formula_offcrypto::parse_encryption_info(&encryption_info) {
+                Ok(formula_offcrypto::EncryptionInfo::Standard {
                     header, verifier, ..
-                } => (header, verifier),
-                // Mismatched schema: treat as unsupported for this decryptor.
-                formula_offcrypto::EncryptionInfo::Agile { .. } => {
+                }) => formula_offcrypto::StandardEncryptionInfo { header, verifier },
+                Ok(formula_offcrypto::EncryptionInfo::Agile { .. }) => {
+                    // Mismatched schema: treat as unsupported for this decryptor.
                     return Err(formula_offcrypto::OffcryptoError::UnsupportedEncryption {
                         encryption_type: formula_offcrypto::EncryptionType::Agile,
-                    })
+                    });
                 }
-                formula_offcrypto::EncryptionInfo::Unsupported { version } => {
+                Ok(formula_offcrypto::EncryptionInfo::Unsupported { version }) => {
                     return Err(formula_offcrypto::OffcryptoError::UnsupportedVersion {
                         major: version.major,
                         minor: version.minor,
-                    })
+                    });
                 }
+                // Some producers omit Standard header flags (notably `fCryptoAPI`/`fAES`) even
+                // though the rest of the header follows the CryptoAPI schema. Fall back to a
+                // lenient parser so we can still decrypt such workbooks.
+                Err(formula_offcrypto::OffcryptoError::UnsupportedNonCryptoApiStandardEncryption)
+                | Err(formula_offcrypto::OffcryptoError::InvalidFlags { .. }) => {
+                    parse_standard_encryption_info_lenient(&encryption_info)?
+                }
+                Err(err) => return Err(err),
             };
-
-            let info = formula_offcrypto::StandardEncryptionInfo { header, verifier };
 
             // Standard/CryptoAPI RC4 (CALG_RC4) uses a different key derivation than Standard AES.
             const CALG_RC4: u32 = 0x0000_6801;

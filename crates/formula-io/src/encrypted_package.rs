@@ -82,11 +82,7 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
         //
         // The ciphertext length must be at least `ceil(orig_size / 16) * 16` bytes for AES-CBC.
         let expected_min_ciphertext_len = expected_min_ciphertext_len(orig_size)?;
-        //
-        // Allow truncated multi-segment streams so callers can still read any fully-present leading
-        // segments and surface errors lazily via `pending_error`. Only fail fast when even the
-        // first segment is incomplete.
-        if ciphertext_len < expected_min_ciphertext_len && ciphertext_len < SEGMENT_PLAINTEXT_LEN {
+        if ciphertext_len < expected_min_ciphertext_len {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
