@@ -18,6 +18,7 @@ import type {
   FormulaToken,
   PivotCalculationResult,
   PivotConfig,
+  PivotFieldItems,
   PivotSchema,
   WorkbookInfoDto,
   RewriteFormulaForCopyDeltaRequest,
@@ -165,6 +166,32 @@ export interface EngineClient {
    * Additive API: older WASM builds may not export `getPivotSchema`.
    */
   getPivotSchema?(sheet: string, sourceRangeA1: string, sampleSize?: number, options?: RpcOptions): Promise<PivotSchema>;
+
+  /**
+   * Return the unique pivot item values for a given field (worksheet/range-backed pivots).
+   *
+   * Additive API: older WASM builds may not export `getPivotFieldItems`.
+   */
+  getPivotFieldItems?(
+    sheet: string,
+    sourceRangeA1: string,
+    field: string,
+    options?: RpcOptions
+  ): Promise<PivotFieldItems>;
+
+  /**
+   * Paged variant of `getPivotFieldItems` for large cardinality fields.
+   *
+   * Additive API: older WASM builds may not export `getPivotFieldItemsPaged`.
+   */
+  getPivotFieldItemsPaged?(
+    sheet: string,
+    sourceRangeA1: string,
+    field: string,
+    offset: number,
+    limit: number,
+    options?: RpcOptions
+  ): Promise<PivotFieldItems>;
 
   /**
    * Calculate a pivot table from a source range and return the list of worksheet writes needed to

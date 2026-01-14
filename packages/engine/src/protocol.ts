@@ -348,6 +348,8 @@ export interface PivotCalculationResult {
   writes: CellChange[];
 }
 
+export type PivotFieldItems = PivotValue[];
+
 // What-If / Goal Seek
 export type GoalSeekRecalcMode = "singleThreaded" | "multiThreaded";
 
@@ -595,6 +597,8 @@ export type RpcMethod =
   | "applyOperation"
   | "goalSeek"
   | "getPivotSchema"
+  | "getPivotFieldItems"
+  | "getPivotFieldItemsPaged"
   | "calculatePivot"
   | "setSheetDimensions"
   | "getSheetDimensions"

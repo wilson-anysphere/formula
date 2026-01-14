@@ -13,6 +13,7 @@ export type {
   PivotCalculationResult,
   PivotConfig,
   PivotField,
+  PivotFieldItems,
   PivotFieldRef,
   PivotFieldType,
   PivotGrandTotals,

@@ -18,6 +18,7 @@ import type {
   InitMessage,
   PivotCalculationResult,
   PivotConfig,
+  PivotFieldItems,
   PivotSchema,
   WorkbookInfoDto,
   WorkbookStyleDto,
@@ -415,6 +416,27 @@ export class EngineWorker {
   ): Promise<PivotSchema> {
     await this.flush();
     return (await this.invoke("getPivotSchema", { sheet, sourceRangeA1, sampleSize }, options)) as PivotSchema;
+  }
+
+  async getPivotFieldItems(sheet: string, sourceRangeA1: string, field: string, options?: RpcOptions): Promise<PivotFieldItems> {
+    await this.flush();
+    return (await this.invoke("getPivotFieldItems", { sheet, sourceRangeA1, field }, options)) as PivotFieldItems;
+  }
+
+  async getPivotFieldItemsPaged(
+    sheet: string,
+    sourceRangeA1: string,
+    field: string,
+    offset: number,
+    limit: number,
+    options?: RpcOptions
+  ): Promise<PivotFieldItems> {
+    await this.flush();
+    return (await this.invoke(
+      "getPivotFieldItemsPaged",
+      { sheet, sourceRangeA1, field, offset, limit },
+      options
+    )) as PivotFieldItems;
   }
 
   async calculatePivot(

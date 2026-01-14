@@ -18,6 +18,14 @@ type WasmWorkbookInstance = {
   getCellRich?: (address: string, sheet?: string) => unknown;
   goalSeek?: (request: unknown) => unknown;
   getPivotSchema?: (sheet: string, sourceRangeA1: string, sampleSize?: number) => unknown;
+  getPivotFieldItems?: (sheet: string, sourceRangeA1: string, field: string) => unknown;
+  getPivotFieldItemsPaged?: (
+    sheet: string,
+    sourceRangeA1: string,
+    field: string,
+    offset: number,
+    limit: number
+  ) => unknown;
   calculatePivot?: (
     sheet: string,
     sourceRangeA1: string,
@@ -724,6 +732,24 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 throw new Error("getPivotSchema: WasmWorkbook.getPivotSchema is not available in this WASM build");
               }
               result = cloneToPlainData((wb as any).getPivotSchema(params.sheet, params.sourceRangeA1, params.sampleSize));
+              break;
+            case "getPivotFieldItems":
+              if (typeof (wb as any).getPivotFieldItems !== "function") {
+                throw new Error(
+                  "getPivotFieldItems: WasmWorkbook.getPivotFieldItems is not available in this WASM build"
+                );
+              }
+              result = cloneToPlainData((wb as any).getPivotFieldItems(params.sheet, params.sourceRangeA1, params.field));
+              break;
+            case "getPivotFieldItemsPaged":
+              if (typeof (wb as any).getPivotFieldItemsPaged !== "function") {
+                throw new Error(
+                  "getPivotFieldItemsPaged: WasmWorkbook.getPivotFieldItemsPaged is not available in this WASM build"
+                );
+              }
+              result = cloneToPlainData(
+                (wb as any).getPivotFieldItemsPaged(params.sheet, params.sourceRangeA1, params.field, params.offset, params.limit)
+              );
               break;
             case "calculatePivot":
               if (typeof (wb as any).calculatePivot !== "function") {
