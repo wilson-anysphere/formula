@@ -251,7 +251,7 @@ Important: **masking is not confidentiality**. Masking is a UX/access-control me
 
 - `session.setPermissions({ role, rangeRestrictions, userId })`
 - `session.getPermissions()`
-- `session.onPermissionsChanged((permissions) => { ... })` (returns `unsubscribe()`)
+- `session.onPermissionsChanged((permissions) => { ... })` (calls immediately; returns `unsubscribe()`)
 - `session.canReadCell({ sheetId, row, col })`
 - `session.canEditCell({ sheetId, row, col })`
 - Convenience role helpers: `session.getRole()`, `session.isReadOnly()`, `session.canComment()`, `session.canShare()`
