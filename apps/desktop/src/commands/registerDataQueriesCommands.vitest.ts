@@ -49,6 +49,7 @@ describe("registerDataQueriesCommands", () => {
       notify: () => {},
     });
 
+    expect(commandRegistry.getCommand(DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections)).toBeDefined();
     expect(getPanelPlacement(layoutController.layout, PanelIds.DATA_QUERIES).kind).toBe("closed");
 
     await commandRegistry.executeCommand(DATA_QUERIES_RIBBON_COMMANDS.toggleQueriesConnections, true);
