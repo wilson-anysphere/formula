@@ -6,7 +6,7 @@ use crate::editing::rewrite::{
     StructuralEdit,
 };
 use crate::pivot::PivotTable;
-use formula_model::pivots::{parse_dax_column_ref, parse_dax_measure_ref};
+use formula_model::pivots::{parse_dax_column_ref, parse_dax_measure_ref, PivotFieldRef};
 use formula_model::{CellRef, Range};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -113,9 +113,8 @@ impl PivotRegistryEntry {
                 .or_insert(f.name.clone());
         }
 
-        let resolve_cache_field = |field: &formula_model::pivots::PivotFieldRef,
-                                   key: &str|
-         -> Result<(usize, String), PivotRegistryError> {
+        let resolve_cache_field =
+            |field: &PivotFieldRef, key: &str| -> Result<(usize, String), PivotRegistryError> {
             // Fast path: direct lookup by the canonical key.
             if let Some(idx) = cache_field_indices.get(key).copied() {
                 let name = pivot
