@@ -5381,8 +5381,11 @@ impl Engine {
                 if pivot_registry_before.is_none() {
                     pivot_registry_before = Some(self.pivot_registry.clone());
                 }
-                self.pivot_registry
-                    .apply_structural_edit_with_sheet_id(sheet_id, &edit, &sheet_names);
+                self.pivot_registry.apply_structural_edit_with_sheet_id(
+                    sheet_id,
+                    &edit,
+                    &sheet_names,
+                );
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
@@ -5409,8 +5412,11 @@ impl Engine {
                 if pivot_registry_before.is_none() {
                     pivot_registry_before = Some(self.pivot_registry.clone());
                 }
-                self.pivot_registry
-                    .apply_structural_edit_with_sheet_id(sheet_id, &edit, &sheet_names);
+                self.pivot_registry.apply_structural_edit_with_sheet_id(
+                    sheet_id,
+                    &edit,
+                    &sheet_names,
+                );
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
@@ -5438,8 +5444,11 @@ impl Engine {
                 if pivot_registry_before.is_none() {
                     pivot_registry_before = Some(self.pivot_registry.clone());
                 }
-                self.pivot_registry
-                    .apply_structural_edit_with_sheet_id(sheet_id, &edit, &sheet_names);
+                self.pivot_registry.apply_structural_edit_with_sheet_id(
+                    sheet_id,
+                    &edit,
+                    &sheet_names,
+                );
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
@@ -5467,8 +5476,11 @@ impl Engine {
                 if pivot_registry_before.is_none() {
                     pivot_registry_before = Some(self.pivot_registry.clone());
                 }
-                self.pivot_registry
-                    .apply_structural_edit_with_sheet_id(sheet_id, &edit, &sheet_names);
+                self.pivot_registry.apply_structural_edit_with_sheet_id(
+                    sheet_id,
+                    &edit,
+                    &sheet_names,
+                );
                 formula_rewrites.extend(rewrite_all_formulas_structural(
                     &mut self.workbook,
                     &sheet_names,
@@ -5503,8 +5515,11 @@ impl Engine {
                 if pivot_registry_before.is_none() {
                     pivot_registry_before = Some(self.pivot_registry.clone());
                 }
-                self.pivot_registry
-                    .apply_range_map_edit_with_sheet_id(sheet_id, &edit, &sheet_names);
+                self.pivot_registry.apply_range_map_edit_with_sheet_id(
+                    sheet_id,
+                    &edit,
+                    &sheet_names,
+                );
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -5539,8 +5554,11 @@ impl Engine {
                 if pivot_registry_before.is_none() {
                     pivot_registry_before = Some(self.pivot_registry.clone());
                 }
-                self.pivot_registry
-                    .apply_range_map_edit_with_sheet_id(sheet_id, &edit, &sheet_names);
+                self.pivot_registry.apply_range_map_edit_with_sheet_id(
+                    sheet_id,
+                    &edit,
+                    &sheet_names,
+                );
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -5581,8 +5599,11 @@ impl Engine {
                 if pivot_registry_before.is_none() {
                     pivot_registry_before = Some(self.pivot_registry.clone());
                 }
-                self.pivot_registry
-                    .apply_range_map_edit_with_sheet_id(sheet_id, &edit, &sheet_names);
+                self.pivot_registry.apply_range_map_edit_with_sheet_id(
+                    sheet_id,
+                    &edit,
+                    &sheet_names,
+                );
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -5623,8 +5644,11 @@ impl Engine {
                 if pivot_registry_before.is_none() {
                     pivot_registry_before = Some(self.pivot_registry.clone());
                 }
-                self.pivot_registry
-                    .apply_range_map_edit_with_sheet_id(sheet_id, &edit, &sheet_names);
+                self.pivot_registry.apply_range_map_edit_with_sheet_id(
+                    sheet_id,
+                    &edit,
+                    &sheet_names,
+                );
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
@@ -5672,8 +5696,11 @@ impl Engine {
                 if pivot_registry_before.is_none() {
                     pivot_registry_before = Some(self.pivot_registry.clone());
                 }
-                self.pivot_registry
-                    .apply_range_map_edit_with_sheet_id(sheet_id, &edit, &sheet_names);
+                self.pivot_registry.apply_range_map_edit_with_sheet_id(
+                    sheet_id,
+                    &edit,
+                    &sheet_names,
+                );
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
                     &mut self.workbook,
                     &sheet_names,
