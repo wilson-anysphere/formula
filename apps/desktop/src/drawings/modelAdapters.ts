@@ -129,33 +129,37 @@ function normalizeEnumTag(tag: string): string {
 }
 
 function readNumber(value: unknown, context: string): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "bigint") return Number(value);
-  if (typeof value === "string" && value.trim().length > 0) {
-    const n = Number(value);
+  const unwrapped = unwrapSingletonId(value);
+  if (typeof unwrapped === "number" && Number.isFinite(unwrapped)) return unwrapped;
+  if (typeof unwrapped === "bigint") return Number(unwrapped);
+  if (typeof unwrapped === "string" && unwrapped.trim().length > 0) {
+    const n = Number(unwrapped);
     if (Number.isFinite(n)) return n;
   }
   throw new Error(`${context} must be a number`);
 }
 
 function readOptionalNumber(value: unknown): number | undefined {
-  if (value == null) return undefined;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "bigint") return Number(value);
-  if (typeof value === "string" && value.trim().length > 0) {
-    const n = Number(value);
+  const unwrapped = unwrapSingletonId(value);
+  if (unwrapped == null) return undefined;
+  if (typeof unwrapped === "number" && Number.isFinite(unwrapped)) return unwrapped;
+  if (typeof unwrapped === "bigint") return Number(unwrapped);
+  if (typeof unwrapped === "string" && unwrapped.trim().length > 0) {
+    const n = Number(unwrapped);
     return Number.isFinite(n) ? n : undefined;
   }
   return undefined;
 }
 
 function readString(value: unknown, context: string): string {
-  if (typeof value === "string") return value;
+  const unwrapped = unwrapSingletonId(value);
+  if (typeof unwrapped === "string") return unwrapped;
   throw new Error(`${context} must be a string`);
 }
 
 function readOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
+  const unwrapped = unwrapSingletonId(value);
+  return typeof unwrapped === "string" ? unwrapped : undefined;
 }
 
 function decodeXmlEntities(value: string): string {
