@@ -1470,7 +1470,7 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     ```bash
     # Option A: from the updater tarball (`*.app.tar.gz`).
     app_tgz="$(ls *.app.tar.gz 2>/dev/null | head -n 1 || true)"
-    test -n "$app_tgz" || { echo "No macOS updater tarball found (*.app.tar.gz)" >&2; exit 1; }
+     test -n "$app_tgz" || { echo "No macOS updater tarball found (*.app.tar.gz)" >&2; exit 1; }
      tar -xzf "$app_tgz"
      lipo -info "Formula.app/Contents/MacOS/formula-desktop"
 

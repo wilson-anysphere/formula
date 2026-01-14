@@ -31,8 +31,8 @@ actual” diff, and this document should be updated alongside the validators.
 
 ### macOS universal note
 
-We build a **single** universal macOS updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz` /
-`*.tgz`), but **tauri-action writes it under both arch keys**:
+We build a **single** universal macOS updater tarball (`*.app.tar.gz`), but **tauri-action writes it
+under both arch keys**:
 
 - `darwin-x86_64` → updater tarball (same archive)
 - `darwin-aarch64` → updater tarball (same archive)
@@ -68,7 +68,7 @@ The table below documents what each platform key should point to in `latest.json
 
 | OS / Arch | Build target (Tauri `--target`) | `latest.json` platform key(s) | Updater asset type (`platforms[key].url`) |
 | --- | --- | --- | --- |
-| macOS universal (Intel + Apple Silicon) | `universal-apple-darwin` | `darwin-x86_64` **and** `darwin-aarch64` | updater tarball (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`) (**not** the `.dmg`) |
+| macOS universal (Intel + Apple Silicon) | `universal-apple-darwin` | `darwin-x86_64` **and** `darwin-aarch64` | updater tarball (`*.app.tar.gz`) (**not** the `.dmg`) |
 | Windows x64 | `x86_64-pc-windows-msvc` | `windows-x86_64` | `*.msi` (Windows Installer; updater runs this) |
 | Windows ARM64 | `aarch64-pc-windows-msvc` | `windows-aarch64` | `*.msi` (Windows Installer; updater runs this) |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `linux-x86_64` | `*.AppImage` (self-updatable; **not** `.deb`/`.rpm`) |
