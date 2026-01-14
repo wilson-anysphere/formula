@@ -45,6 +45,21 @@ fn contains_utf8_or_utf16_bytes(haystack: &[u8], needle: &str) -> bool {
     contains_bytes(haystack, &utf16be)
 }
 
+const AGILE_FIXTURES: &[(&str, &str)] = &[
+    ("agile.xlsx", "plaintext.xlsx"),
+    ("agile-empty-password.xlsx", "plaintext.xlsx"),
+    ("agile-unicode.xlsx", "plaintext.xlsx"),
+    ("agile-large.xlsx", "plaintext-large.xlsx"),
+    ("agile-basic.xlsm", "plaintext-basic.xlsm"),
+];
+
+const STANDARD_FIXTURES: &[(&str, &str)] = &[
+    ("standard.xlsx", "plaintext.xlsx"),
+    ("standard-rc4.xlsx", "plaintext.xlsx"),
+    ("standard-large.xlsx", "plaintext-large.xlsx"),
+    ("standard-basic.xlsm", "plaintext-basic.xlsm"),
+];
+
 fn read_encryption_info_header(path: &Path) -> (u16, u16, u32) {
     let file = std::fs::File::open(path).expect("open fixture file");
     let mut ole = cfb::CompoundFile::open(file).expect("open cfb (OLE) container");
@@ -70,33 +85,83 @@ fn read_encryption_info_header(path: &Path) -> (u16, u16, u32) {
 fn read_stream_bytes(path: &Path, name: &str) -> Vec<u8> {
     let file = std::fs::File::open(path).expect("open fixture file");
     let mut ole = cfb::CompoundFile::open(file).expect("open cfb (OLE) container");
-    let mut stream = open_stream_case_tolerant(&mut ole, name).unwrap_or_else(|_| {
-        panic!("{name} stream missing in {}", path.display());
-    });
+    let mut stream = open_stream_case_tolerant(&mut ole, name)
+        .unwrap_or_else(|_| panic!("{name} stream missing in {}", path.display()));
     let mut out = Vec::new();
-    stream
-        .read_to_end(&mut out)
-        .expect("read stream bytes");
+    stream.read_to_end(&mut out).expect("read stream bytes");
     out
+}
+
+fn assert_agile_encryption_info_contains_encryption_xml(path: &Path) {
+    let bytes = read_stream_bytes(path, "EncryptionInfo");
+    assert!(
+        bytes.len() >= 8,
+        "EncryptionInfo stream too short in {} (len={})",
+        path.display(),
+        bytes.len()
+    );
+
+    // bytes[0..4] == version 4.4
+    let major = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let minor = u16::from_le_bytes([bytes[2], bytes[3]]);
+    assert_eq!(
+        (major, minor),
+        (4, 4),
+        "Agile-encrypted OOXML should have EncryptionInfo version 4.4 ({})",
+        path.display()
+    );
+
+    // bytes[8..] should contain `<encryption` (allowing length prefixes, BOM, UTF-16, etc).
+    assert!(
+        contains_utf8_or_utf16_bytes(&bytes[8..], "<encryption"),
+        "expected EncryptionInfo to contain `<encryption` (UTF-8/UTF-16) after the 8-byte version header ({})",
+        path.display()
+    );
+
+    // Best-effort: if we can find the UTF-8 `<encryption` root, parse the XML and validate the
+    // expected namespace root element.
+    let after_header = &bytes[8..];
+    let marker = b"<encryption";
+    if let Some(marker_pos) = after_header
+        .windows(marker.len())
+        .position(|window| window == marker)
+    {
+        let mut xml_bytes: &[u8] = &after_header[marker_pos..];
+
+        // Trim trailing whitespace/NULs.
+        while let Some((&b, rest)) = xml_bytes.split_last() {
+            if b == 0 || b.is_ascii_whitespace() {
+                xml_bytes = rest;
+                continue;
+            }
+            break;
+        }
+
+        if let Ok(xml_str) = std::str::from_utf8(xml_bytes) {
+            let doc = roxmltree::Document::parse(xml_str).unwrap_or_else(|err| {
+                panic!(
+                    "Agile EncryptionInfo XML should parse as XML ({}): {err}",
+                    path.display()
+                )
+            });
+
+            let root = doc.root_element();
+            assert_eq!(
+                (root.tag_name().namespace(), root.tag_name().name()),
+                (
+                    Some("http://schemas.microsoft.com/office/2006/encryption"),
+                    "encryption"
+                ),
+                "Agile EncryptionInfo XML should have the expected `<encryption>` root element ({})",
+                path.display()
+            );
+        }
+    }
 }
 
 #[test]
 fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
-    let agile_fixtures = [
-        ("agile.xlsx", "plaintext.xlsx"),
-        ("agile-empty-password.xlsx", "plaintext.xlsx"),
-        ("agile-unicode.xlsx", "plaintext.xlsx"),
-        ("agile-large.xlsx", "plaintext-large.xlsx"),
-        ("agile-basic.xlsm", "plaintext-basic.xlsm"),
-    ];
-    let standard_fixtures = [
-        ("standard.xlsx", "plaintext.xlsx"),
-        ("standard-rc4.xlsx", "plaintext.xlsx"),
-        ("standard-large.xlsx", "plaintext-large.xlsx"),
-        ("standard-basic.xlsm", "plaintext-basic.xlsm"),
-    ];
-
-    for (name, _) in agile_fixtures {
+    for (name, _) in AGILE_FIXTURES {
         let path = fixture_path(name);
         let (major, minor, _flags) = read_encryption_info_header(&path);
         assert_eq!(
@@ -106,7 +171,7 @@ fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
         );
     }
 
-    for (name, _) in standard_fixtures {
+    for (name, _) in STANDARD_FIXTURES {
         let path = fixture_path(name);
         let (major, minor, _flags) = read_encryption_info_header(&path);
         assert!(
@@ -114,12 +179,11 @@ fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
             "Standard-encrypted OOXML should have EncryptionInfo version *.2 with major=2/3/4 ({name}); got {major}.{minor}"
         );
     }
+}
 
-    // --- Additional fixture sanity checks (real-world structure). ---
-
-    // 1) EncryptedPackage begins with an 8-byte little-endian u64 package size prefix matching the
-    // corresponding plaintext workbook byte length.
-    for (name, plaintext_name) in agile_fixtures.iter().chain(standard_fixtures.iter()) {
+#[test]
+fn encrypted_ooxml_fixtures_have_encryptedpackage_size_prefix_matching_plaintext_fixture_size() {
+    for (name, plaintext_name) in AGILE_FIXTURES.iter().chain(STANDARD_FIXTURES.iter()) {
         let encrypted_path = fixture_path(name);
         let plaintext_path = fixture_path(plaintext_name);
         let plaintext_len = std::fs::metadata(&plaintext_path)
@@ -142,25 +206,19 @@ fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
             "{name} EncryptedPackage plaintext size prefix mismatch (expected {plaintext_len}, got {declared_plaintext_len})"
         );
     }
+}
 
-    // 2) Agile EncryptionInfo should contain the `<encryption` root tag bytes (best-effort search).
-    for (name, _) in agile_fixtures {
+#[test]
+fn agile_encrypted_ooxml_fixtures_contain_encryptioninfo_xml_descriptor() {
+    for (name, _) in AGILE_FIXTURES {
         let path = fixture_path(name);
-        let info = read_stream_bytes(&path, "EncryptionInfo");
-        assert!(
-            info.len() >= 8,
-            "{name} EncryptionInfo stream is too short ({} bytes)",
-            info.len()
-        );
-        assert!(
-            contains_utf8_or_utf16_bytes(&info[8..], "<encryption"),
-            "expected {name} EncryptionInfo to contain `<encryption` (UTF-8/UTF-16) after the 8-byte version header"
-        );
+        assert_agile_encryption_info_contains_encryption_xml(&path);
     }
+}
 
-    // 3) Standard EncryptionInfo is binary and should not look like Agile XML near the start
-    // (heuristic).
-    for (name, _) in standard_fixtures {
+#[test]
+fn standard_encrypted_ooxml_fixtures_do_not_contain_agile_xml_near_start() {
+    for (name, _) in STANDARD_FIXTURES {
         let path = fixture_path(name);
         let info = read_stream_bytes(&path, "EncryptionInfo");
         assert!(
@@ -168,6 +226,8 @@ fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
             "{name} EncryptionInfo stream is too short ({} bytes)",
             info.len()
         );
+
+        // Standard EncryptionInfo is binary; it should not look like Agile XML near the start.
         let preview_len = info.len().saturating_sub(8).min(512);
         assert!(
             !contains_utf8_or_utf16_bytes(&info[8..8 + preview_len], "<encryption"),
