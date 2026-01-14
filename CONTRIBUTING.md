@@ -24,6 +24,22 @@ pnpm install
 pnpm dev:web
 ```
 
+### Desktop perf (startup, memory, size)
+
+To measure desktop shell performance locally (Tauri binary + real WebView), run from the repo root:
+
+```bash
+pnpm perf:desktop-startup
+pnpm perf:desktop-memory
+pnpm perf:desktop-size
+```
+
+These commands use an isolated, repo-local HOME (`target/perf-home`) so they don't touch your real user profile.
+For details (metrics, tuning knobs, and CI gating env vars), see:
+
+- [`docs/11-desktop-shell.md`](./docs/11-desktop-shell.md)
+- [`docs/16-performance-targets.md`](./docs/16-performance-targets.md)
+
 ## Repository principles
 
 - **Desktop-first, web-kept-green:** The desktop app (Tauri) is the primary target, but the web build must stay buildable in CI.
