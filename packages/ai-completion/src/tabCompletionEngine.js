@@ -768,7 +768,12 @@ export class TabCompletionEngine {
     // If the user typed trailing whitespace (e.g. "TRUE " or "0 "), avoid emitting
     // completions that would need to delete it. The formula bar tab-complete UI
     // only supports pure insertions at the caret.
-    if (typedArgText.length > 0 && /\s$/.test(typedArgText)) return [];
+    //
+    // Note: for string literals, trailing whitespace can be meaningful inside an
+    // unterminated quoted string (e.g. typing `" ` to accept a `" "` enum value).
+    // In that case we still allow suggestions because they can be represented as
+    // pure insertions at the caret.
+    if (typedArgText.length > 0 && /\s$/.test(typedArgText) && !isInUnclosedDoubleQuotedString(typedArgText)) return [];
 
     // Preserve the user-typed prefix exactly so suggestions are representable as
     // pure insertions at the caret (ghost text).
@@ -1996,6 +2001,35 @@ async function safeProviderCall(fn) {
 function startsWithIgnoreCase(text, prefix) {
   if (!prefix) return true;
   return text.toLowerCase().startsWith(prefix.toLowerCase());
+}
+
+/**
+ * Returns true when the cursor is currently inside an unterminated Excel
+ * double-quoted string literal.
+ *
+ * Example: `"foo`  -> true
+ *          `"foo"` -> false
+ *          `" "`   -> false
+ *          `" `    -> true (space inside literal)
+ *
+ * @param {string} text
+ */
+function isInUnclosedDoubleQuotedString(text) {
+  if (typeof text !== "string" || text.length === 0) return false;
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch !== '"') continue;
+
+    // Excel escapes quotes inside string literals via doubled quotes: "".
+    if (inString && text[i + 1] === '"') {
+      i += 1;
+      continue;
+    }
+
+    inString = !inString;
+  }
+  return inString;
 }
 
 function ratioBoost(prefix, full) {

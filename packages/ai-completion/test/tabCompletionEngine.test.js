@@ -1928,6 +1928,25 @@ test('NUMBERVALUE group_separator suggests ",", ".", and " "', async () => {
   }
 });
 
+test('NUMBERVALUE group_separator completes a quoted space when typing "\" \"', async () => {
+  const engine = new TabCompletionEngine();
+
+  // Trailing whitespace here is *inside* an unterminated string literal, so it should
+  // still allow pure-insertion completions like `" "` -> `" "`.
+  const currentInput = '=NUMBERVALUE("1.234,56", ",", " ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=NUMBERVALUE("1.234,56", ",", " "'),
+    `Expected NUMBERVALUE to complete a quoted space, got: ${suggestions.map((s) => JSON.stringify(s.text)).join(", ")}`
+  );
+});
+
 test('TEXT format_text suggests common format strings', async () => {
   const engine = new TabCompletionEngine();
 
