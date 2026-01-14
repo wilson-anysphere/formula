@@ -598,13 +598,6 @@ impl<'a> Reader<'a> {
         let b = self.take(4, context)?;
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
-
-    fn read_u64_le(&mut self, context: &'static str) -> Result<u64, OffcryptoError> {
-        let b = self.take(8, context)?;
-        Ok(u64::from_le_bytes([
-            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-        ]))
-    }
 }
 
 fn decode_csp_name_utf16le(bytes: &[u8]) -> Result<String, OffcryptoError> {
@@ -1819,7 +1812,24 @@ pub fn parse_encrypted_package_header(
     bytes: &[u8],
 ) -> Result<EncryptedPackageHeader, OffcryptoError> {
     let mut r = Reader::new(bytes);
-    let original_size = r.read_u64_le("EncryptedPackageHeader.original_size")?;
+    let size_bytes = r.take(8, "EncryptedPackageHeader.original_size")?;
+    let len_lo = u32::from_le_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]])
+        as u64;
+    let len_hi = u32::from_le_bytes([size_bytes[4], size_bytes[5], size_bytes[6], size_bytes[7]])
+        as u64;
+    let original_size_u64 = len_lo | (len_hi << 32);
+
+    let ciphertext_len = r.remaining().len() as u64;
+    // While MS-OFFCRYPTO describes `original_size` as a `u64le`, some producers/libraries treat it
+    // as `u32 totalSize` + `u32 reserved` (often 0). When the high DWORD is non-zero but the
+    // combined 64-bit value is not plausible for the available ciphertext, fall back to the low
+    // DWORD for compatibility.
+    let original_size =
+        if len_hi != 0 && original_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
+            len_lo
+        } else {
+            original_size_u64
+        };
     Ok(EncryptedPackageHeader { original_size })
 }
 
@@ -2204,11 +2214,22 @@ pub fn decrypt_encrypted_package_ecb(
         )));
     }
 
-    let total_size = u64::from_le_bytes(
-        encrypted_package[..8]
-            .try_into()
-            .expect("slice length checked above"),
-    );
+    let size_bytes: [u8; 8] = encrypted_package[..8]
+        .try_into()
+        .expect("slice length checked above");
+    let len_lo =
+        u32::from_le_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]]) as u64;
+    let len_hi =
+        u32::from_le_bytes([size_bytes[4], size_bytes[5], size_bytes[6], size_bytes[7]]) as u64;
+    let total_size_u64 = len_lo | (len_hi << 32);
+    let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
+    // Compatibility: treat a non-zero high DWORD as "reserved" when the resulting 64-bit value is
+    // not plausible for the available ciphertext.
+    let total_size = if len_hi != 0 && total_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
+        len_lo
+    } else {
+        total_size_u64
+    };
     let original_size = usize::try_from(total_size).map_err(|_| {
         OffcryptoError::EncryptedPackageSizeOverflow { total_size }
     })?;

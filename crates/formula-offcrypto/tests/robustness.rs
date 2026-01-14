@@ -160,6 +160,19 @@ fn encrypted_package_shorter_than_8_bytes_errors() {
 }
 
 #[test]
+fn encrypted_package_header_falls_back_to_low_dword_when_high_dword_is_reserved() {
+    // Some producers treat the 8-byte size prefix as (u32 totalSize, u32 reserved). Ensure we
+    // tolerate a non-zero "reserved" high DWORD when it is not plausible for the ciphertext.
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&1234u32.to_le_bytes()); // size (low DWORD)
+    encrypted_package.extend_from_slice(&1u32.to_le_bytes()); // reserved (high DWORD)
+    encrypted_package.extend_from_slice(&[0u8; 2048]); // ciphertext (enough to cover low DWORD)
+
+    let header = parse_encrypted_package_header(&encrypted_package).expect("parse header");
+    assert_eq!(header.original_size, 1234);
+}
+
+#[test]
 fn standard_encrypted_package_ciphertext_not_multiple_of_16_errors() {
     // Ciphertext length after the 8-byte original-size prefix must be block-aligned.
     let mut encrypted_package = 0u64.to_le_bytes().to_vec();

@@ -63,7 +63,22 @@ where
     F: FnMut(u32, &[u8], &mut [u8]) -> Result<(), OffcryptoError>,
 {
     let mut reader = Reader::new(encrypted_package);
-    let total_size = reader.read_u64_le("EncryptedPackageHeader.original_size")?;
+    let size_bytes = reader.take(8, "EncryptedPackageHeader.original_size")?;
+    let len_lo = u32::from_le_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]])
+        as u64;
+    let len_hi = u32::from_le_bytes([size_bytes[4], size_bytes[5], size_bytes[6], size_bytes[7]])
+        as u64;
+    let total_size_u64 = len_lo | (len_hi << 32);
+    let ciphertext_len_u64 = reader.remaining().len() as u64;
+    // MS-OFFCRYPTO describes `original_size` as a `u64le`, but some producers/libraries treat it as
+    // `u32 totalSize` + `u32 reserved` (often 0). When the high DWORD is non-zero but the combined
+    // 64-bit value is not plausible for the available ciphertext, fall back to the low DWORD.
+    let total_size =
+        if len_hi != 0 && total_size_u64 > ciphertext_len_u64 && len_lo <= ciphertext_len_u64 {
+            len_lo
+        } else {
+            total_size_u64
+        };
     if let Some(max) = options.limits.max_output_size {
         if total_size > max {
             return Err(OffcryptoError::OutputTooLarge { total_size, max });
@@ -159,7 +174,18 @@ pub fn agile_decrypt_package(
             .map_err(|_| OffcryptoError::Truncated {
                 context: "EncryptedPackageHeader.original_size",
             })?;
-    let total_size = u64::from_le_bytes(size_bytes);
+    let len_lo = u32::from_le_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]])
+        as u64;
+    let len_hi = u32::from_le_bytes([size_bytes[4], size_bytes[5], size_bytes[6], size_bytes[7]])
+        as u64;
+    let total_size_u64 = len_lo | (len_hi << 32);
+    let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
+    let total_size =
+        if len_hi != 0 && total_size_u64 > ciphertext_len && len_lo <= ciphertext_len {
+            len_lo
+        } else {
+            total_size_u64
+        };
     let plausible_max = (encrypted_package.len() as u64).saturating_mul(2);
     if total_size > plausible_max {
         return Err(OffcryptoError::EncryptedPackageSizeOverflow { total_size });
@@ -333,12 +359,24 @@ fn detect_standard_scheme(
 ) -> Result<Option<StandardEncryptedPackageScheme>, OffcryptoError> {
     // Only decrypt the first segment for detection (avoids allocating the full output twice).
     let mut reader = Reader::new(encrypted_package);
-    let total_size = reader.read_u64_le("EncryptedPackageHeader.original_size")?;
-    let plaintext_len = std::cmp::min(total_size, ENCRYPTED_PACKAGE_SEGMENT_LEN as u64) as usize;
-    let ciphertext_len = padded_aes_len(plaintext_len);
+    let size_bytes = reader.take(8, "EncryptedPackageHeader.original_size")?;
+    let len_lo = u32::from_le_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]])
+        as u64;
+    let len_hi = u32::from_le_bytes([size_bytes[4], size_bytes[5], size_bytes[6], size_bytes[7]])
+        as u64;
+    let total_size_u64 = len_lo | (len_hi << 32);
 
     // Enforce basic framing invariants up front.
     let ciphertext_total = reader.remaining();
+    let ciphertext_total_len = ciphertext_total.len() as u64;
+    let total_size =
+        if len_hi != 0 && total_size_u64 > ciphertext_total_len && len_lo <= ciphertext_total_len {
+            len_lo
+        } else {
+            total_size_u64
+        };
+    let plaintext_len = std::cmp::min(total_size, ENCRYPTED_PACKAGE_SEGMENT_LEN as u64) as usize;
+    let ciphertext_len = padded_aes_len(plaintext_len);
     if ciphertext_total.len() % AES_BLOCK_LEN != 0 {
         return Err(OffcryptoError::InvalidCiphertextLength {
             len: ciphertext_total.len(),
@@ -474,6 +512,26 @@ mod tests {
         let total_size: u64 = 10;
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&total_size.to_le_bytes());
+        bytes.extend_from_slice(b"0123456789");
+        // Pad to AES block size to match `EncryptedPackage` padding rules.
+        bytes.extend_from_slice(&[0u8; 6]);
+
+        let out = decrypt_encrypted_package(bytes.as_slice(), |_idx, ct, pt| {
+            pt.copy_from_slice(ct);
+            Ok(())
+        })
+        .expect("decrypt");
+
+        assert_eq!(out, b"0123456789");
+    }
+
+    #[test]
+    fn decrypt_encrypted_package_falls_back_to_low_dword_when_high_dword_is_reserved() {
+        // Some producers treat the 8-byte size prefix as (u32 totalSize, u32 reserved). Ensure we
+        // tolerate a non-zero "reserved" high DWORD.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&10u32.to_le_bytes()); // size (low DWORD)
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // reserved (high DWORD)
         bytes.extend_from_slice(b"0123456789");
         // Pad to AES block size to match `EncryptedPackage` padding rules.
         bytes.extend_from_slice(&[0u8; 6]);
