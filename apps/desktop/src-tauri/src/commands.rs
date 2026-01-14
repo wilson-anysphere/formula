@@ -1561,6 +1561,18 @@ where
                             {
                                 let mut row = Vec::new();
                                 while row.len() < MAX_DIM {
+                                    // Avoid deserializing an element beyond the total cell limit.
+                                    // This is important even when `T` itself is bounded, since we'd
+                                    // rather fail fast without allocating/validating another item.
+                                    if *self.total_cells >= MAX_CELLS {
+                                        if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                                            return Err(de::Error::custom(format!(
+                                                "range values payload is too large (max {MAX_CELLS} cells)"
+                                            )));
+                                        }
+                                        return Ok(row);
+                                    }
+
                                     match seq.next_element::<T>()? {
                                         Some(cell) => {
                                             *self.total_cells = self.total_cells.saturating_add(1);
