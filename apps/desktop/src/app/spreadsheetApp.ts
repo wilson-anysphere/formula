@@ -1192,6 +1192,13 @@ export class SpreadsheetApp {
    * a chart plots `B1` where `B1` is a formula referencing `A1`).
    */
   private readonly chartHasFormulaCells = new Map<string, boolean>();
+  private readonly chartRangeRectsCache = new Map<
+    string,
+    {
+      signature: string;
+      ranges: Array<{ sheetId: string; startRow: number; endRow: number; startCol: number; endCol: number }>;
+    }
+  >();
   private readonly chartOverlayImages: ImageStore = { get: () => undefined, set: () => {} };
   private chartOverlayGeom: DrawingGridGeometry | null = null;
   private chartSelectionOverlay: DrawingOverlay | null = null;
@@ -3402,6 +3409,7 @@ export class SpreadsheetApp {
     this.chartModels.clear();
     this.dirtyChartIds.clear();
     this.chartHasFormulaCells.clear();
+    this.chartRangeRectsCache.clear();
     this.conflictUiContainer = null;
     this.root.replaceChildren();
   }
@@ -3596,7 +3604,16 @@ export class SpreadsheetApp {
     type RangeRect = { chartId: string; startRow: number; endRow: number; startCol: number; endCol: number };
     const rangesBySheet = new Map<string, RangeRect[]>();
 
-    for (const chart of charts) {
+    const getChartRanges = (chart: ChartRecord): Array<{ sheetId: string; startRow: number; endRow: number; startCol: number; endCol: number }> => {
+      let signature = "";
+      for (const ser of chart.series ?? []) {
+        signature += `|${ser.categories ?? ""}|${ser.values ?? ""}|${ser.xValues ?? ""}|${ser.yValues ?? ""}`;
+      }
+
+      const cached = this.chartRangeRectsCache.get(chart.id);
+      if (cached && cached.signature === signature) return cached.ranges;
+
+      const ranges: Array<{ sheetId: string; startRow: number; endRow: number; startCol: number; endCol: number }> = [];
       for (const ser of chart.series ?? []) {
         const refs = [ser.categories, ser.values, ser.xValues, ser.yValues];
         for (const rangeRef of refs) {
@@ -3605,20 +3622,29 @@ export class SpreadsheetApp {
           if (!parsed) continue;
           const resolvedSheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : chart.sheetId;
           if (!resolvedSheetId) continue;
-
-          let list = rangesBySheet.get(resolvedSheetId);
-          if (!list) {
-            list = [];
-            rangesBySheet.set(resolvedSheetId, list);
-          }
-          list.push({
-            chartId: chart.id,
+          ranges.push({
+            sheetId: resolvedSheetId,
             startRow: parsed.startRow,
             endRow: parsed.endRow,
             startCol: parsed.startCol,
             endCol: parsed.endCol,
           });
         }
+      }
+
+      this.chartRangeRectsCache.set(chart.id, { signature, ranges });
+      return ranges;
+    };
+
+    for (const chart of charts) {
+      const ranges = getChartRanges(chart);
+      for (const range of ranges) {
+        let list = rangesBySheet.get(range.sheetId);
+        if (!list) {
+          list = [];
+          rangesBySheet.set(range.sheetId, list);
+        }
+        list.push({ chartId: chart.id, startRow: range.startRow, endRow: range.endRow, startCol: range.startCol, endCol: range.endCol });
       }
     }
 
@@ -10282,6 +10308,10 @@ export class SpreadsheetApp {
     for (const id of this.chartHasFormulaCells.keys()) {
       if (keep.has(id)) continue;
       this.chartHasFormulaCells.delete(id);
+    }
+    for (const id of this.chartRangeRectsCache.keys()) {
+      if (keep.has(id)) continue;
+      this.chartRangeRectsCache.delete(id);
     }
 
     if (this.selectedChartId != null && !keep.has(this.selectedChartId)) {
