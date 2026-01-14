@@ -2119,31 +2119,13 @@ export class FormulaBarView {
 
     if (canFastUpdateActiveReference) {
       if (this.#lastActiveReferenceIndex !== activeReferenceIndex) {
-        if (this.#referenceElsByIndex == null && coloredReferences.length > 0) {
-          this.#rebuildReferenceElementsByIndex();
-        }
-        const refEls = this.#referenceElsByIndex;
         const prev = this.#lastActiveReferenceIndex;
         const next = activeReferenceIndex;
         if (prev != null) {
-          const prevEls = refEls?.get(prev);
-          if (prevEls) {
-            prevEls.forEach((el) => el.classList.remove("formula-bar-reference--active"));
-          } else {
-            this.#highlightEl
-              .querySelectorAll(`[data-ref-index="${prev}"]`)
-              .forEach((el) => el.classList.remove("formula-bar-reference--active"));
-          }
+          this.#referenceElementsForIndex(prev).forEach((el) => el.classList.remove("formula-bar-reference--active"));
         }
         if (next != null) {
-          const nextEls = refEls?.get(next);
-          if (nextEls) {
-            nextEls.forEach((el) => el.classList.add("formula-bar-reference--active"));
-          } else {
-            this.#highlightEl
-              .querySelectorAll(`[data-ref-index="${next}"]`)
-              .forEach((el) => el.classList.add("formula-bar-reference--active"));
-          }
+          this.#referenceElementsForIndex(next).forEach((el) => el.classList.add("formula-bar-reference--active"));
         }
         this.#lastActiveReferenceIndex = next;
         // We updated class attributes without rebuilding the HTML string; invalidate the
@@ -2397,18 +2379,15 @@ export class FormulaBarView {
     this.#adjustHeight();
   }
 
-  #rebuildReferenceElementsByIndex(): void {
-    const map = new Map<number, HTMLElement[]>();
-    this.#highlightEl.querySelectorAll<HTMLElement>("[data-ref-index]").forEach((el) => {
-      const raw = el.dataset.refIndex;
-      if (!raw) return;
-      const idx = Number(raw);
-      if (!Number.isFinite(idx)) return;
-      const list = map.get(idx);
-      if (list) list.push(el);
-      else map.set(idx, [el]);
-    });
-    this.#referenceElsByIndex = map;
+  #referenceElementsForIndex(idx: number): HTMLElement[] {
+    if (this.#referenceElsByIndex == null) {
+      this.#referenceElsByIndex = new Map();
+    }
+    const cached = this.#referenceElsByIndex.get(idx);
+    if (cached) return cached;
+    const found = Array.from(this.#highlightEl.querySelectorAll<HTMLElement>(`[data-ref-index="${idx}"]`));
+    this.#referenceElsByIndex.set(idx, found);
+    return found;
   }
 
   #clearArgumentPreviewState(): void {
