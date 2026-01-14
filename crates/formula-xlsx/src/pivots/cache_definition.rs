@@ -90,6 +90,9 @@ impl PivotCacheDefinition {
     /// - If `value` is not [`PivotCacheValue::Index`], it is returned unchanged (no allocation).
     /// - If the index is out of range, the cache field is missing, or the cache field has no
     ///   `shared_items`, this returns [`PivotCacheValue::Missing`].
+    ///
+    /// If you need to resolve an entire record at once (based on value position), see
+    /// [`Self::resolve_record_values`].
     #[inline]
     pub fn resolve_record_value(
         &self,

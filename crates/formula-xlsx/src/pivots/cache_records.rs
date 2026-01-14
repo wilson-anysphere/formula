@@ -29,7 +29,8 @@ pub enum PivotCacheValue {
     ///
     /// Excel can store record values as indices into a per-field `<sharedItems>` table in the
     /// pivot cache definition. Use [`crate::pivots::PivotCacheDefinition::resolve_record_value`]
-    /// to turn this into the corresponding typed value.
+    /// (or [`crate::pivots::PivotCacheDefinition::resolve_record_values`] for whole records) to
+    /// turn this into the corresponding typed value.
     Index(u32),
 }
 
@@ -96,7 +97,8 @@ impl<'a> PivotCacheRecordsReader<'a> {
     ///
     /// Note: record values may include [`PivotCacheValue::Index`] entries, which need to be
     /// resolved against the corresponding cache definition's `<sharedItems>` table using
-    /// [`crate::pivots::PivotCacheDefinition::resolve_record_value`].
+    /// [`crate::pivots::PivotCacheDefinition::resolve_record_value`] (or
+    /// [`crate::pivots::PivotCacheDefinition::resolve_record_values`]).
     pub fn next_record(&mut self) -> Option<Vec<PivotCacheValue>> {
         if self.done {
             return None;
