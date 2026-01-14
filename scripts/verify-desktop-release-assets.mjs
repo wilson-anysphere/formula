@@ -521,6 +521,8 @@ function usage() {
       "  --include-sigs     Include .sig assets in SHA256SUMS (use with --all-assets to match CI)",
       "  --dry-run          Validate manifest/assets only (skip bundle hashing)",
       "  --verify-assets    Download updater assets referenced in latest.json and verify their signatures (slow)",
+      "  --check-supply-chain   Check for SBOM/provenance assets on the release (warn if missing)",
+      "  --require-supply-chain Fail if SBOM/provenance assets are missing (implies --check-supply-chain)",
       "",
       "Expectations (optional; off by default):",
       "  --expectations <file>      Load expected targets from a JSON file",
@@ -550,7 +552,7 @@ function usage() {
  * @param {string[]} argv
  */
 function parseArgs(argv) {
-  /** @type {{ tag?: string; repo?: string; out?: string; dryRun: boolean; verifyAssets: boolean; help: boolean; allowWindowsMsi: boolean; allowWindowsExe: boolean; expectationsFile?: string; expectedTargets: string[]; includeSigs: boolean; allAssets: boolean }} */
+  /** @type {{ tag?: string; repo?: string; out?: string; dryRun: boolean; verifyAssets: boolean; help: boolean; allowWindowsMsi: boolean; allowWindowsExe: boolean; expectationsFile?: string; expectedTargets: string[]; includeSigs: boolean; allAssets: boolean; checkSupplyChain: boolean; requireSupplyChain: boolean }} */
   const parsed = {
     dryRun: false,
     verifyAssets: false,
@@ -562,6 +564,8 @@ function parseArgs(argv) {
     expectedTargets: [],
     includeSigs: false,
     allAssets: false,
+    checkSupplyChain: false,
+    requireSupplyChain: false,
   };
 
   const takeValue = (i, flag) => {
@@ -591,6 +595,15 @@ function parseArgs(argv) {
     }
     if (arg === "--verify-assets") {
       parsed.verifyAssets = true;
+      continue;
+    }
+    if (arg === "--check-supply-chain") {
+      parsed.checkSupplyChain = true;
+      continue;
+    }
+    if (arg === "--require-supply-chain") {
+      parsed.requireSupplyChain = true;
+      parsed.checkSupplyChain = true;
       continue;
     }
     if (arg === "--include-sigs") {
@@ -1535,6 +1548,36 @@ async function main() {
 
   if (lastError) {
     throw lastError;
+  }
+
+  if (args.checkSupplyChain) {
+    const inActions = process.env.GITHUB_ACTIONS === "true";
+    const warn = (message) => {
+      if (inActions) {
+        console.log(`::warning::${message}`);
+      } else {
+        console.warn(`warning: ${message}`);
+      }
+    };
+
+    const sbomName = "sbom.spdx.json";
+    const sbomPresent = assetsByName.has(sbomName);
+    const provenanceBundles = assetNames.filter((name) => /^provenance-.*\.intoto\.jsonl$/.test(name));
+
+    if (!sbomPresent) {
+      warn(`SBOM asset ${sbomName} not found on the release.`);
+    }
+    if (provenanceBundles.length === 0) {
+      warn(`No provenance-*.intoto.jsonl attestation bundles found on the release.`);
+    }
+
+    if (args.requireSupplyChain && (!sbomPresent || provenanceBundles.length === 0)) {
+      throw new ActionableError("Supply-chain asset check failed.", [
+        `SBOM present: ${sbomPresent ? "yes" : "no"}`,
+        `Provenance bundles present: ${provenanceBundles.length}`,
+        `Assets present (${assetNames.length}): ${assetNames.join(", ")}`,
+      ]);
+    }
   }
 
   if (args.verifyAssets) {

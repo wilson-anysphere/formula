@@ -55,6 +55,8 @@ Verifier options (forwarded to scripts/verify-desktop-release-assets.mjs; option
   --out <path>             Output path for SHA256SUMS.txt (default: ./SHA256SUMS.txt)
   --all-assets             Hash all release assets (still excludes .sig by default)
   --include-sigs           Include .sig assets in SHA256SUMS (use with --all-assets to match CI)
+  --check-supply-chain     Check for SBOM/provenance assets on the release (warn if missing)
+  --require-supply-chain   Fail if SBOM/provenance assets are missing
   --allow-windows-msi      Deprecated/no-op (Windows updater uses raw .msi by default in this repo)
   --allow-windows-exe      Allow raw .exe in latest.json Windows entries (defaults to disallowed)
 
@@ -102,6 +104,14 @@ function parseArgs(argv) {
     }
     if (arg === "--verify-assets") {
       out.verifyAssets = true;
+      continue;
+    }
+    if (arg === "--check-supply-chain") {
+      out.checkSupplyChain = true;
+      continue;
+    }
+    if (arg === "--require-supply-chain") {
+      out.requireSupplyChain = true;
       continue;
     }
     if (arg === "--all-assets") {
@@ -707,6 +717,8 @@ async function main() {
         repo,
         ...(args.dryRun === true ? ["--dry-run"] : []),
         ...(args.verifyAssets === true ? ["--verify-assets"] : []),
+        ...(args.checkSupplyChain === true ? ["--check-supply-chain"] : []),
+        ...(args.requireSupplyChain === true ? ["--require-supply-chain"] : []),
         ...(typeof args.out === "string" && args.out.trim().length > 0 ? ["--out", args.out.trim()] : []),
         ...(args.allAssets === true ? ["--all-assets"] : []),
         ...(args.includeSigs === true ? ["--include-sigs"] : []),
