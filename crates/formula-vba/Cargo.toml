@@ -33,4 +33,4 @@ openssl = "0.10"
 
 [dev-dependencies]
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
-office-crypto = "0.2"
+formula-office-crypto = { path = "../formula-office-crypto" }

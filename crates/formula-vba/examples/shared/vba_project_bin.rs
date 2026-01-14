@@ -1,10 +1,8 @@
-use std::io::{Cursor, Read, Seek};
+use std::io::Cursor;
 use std::path::Path;
 
 #[path = "zip_util.rs"]
 mod zip_util;
-
-const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
 /// Load `xl/vbaProject.bin` bytes from a workbook path.
 ///
@@ -28,18 +26,23 @@ pub(crate) fn load_vba_project_bin(
         None => {}
     }
 
-    // If the file is an encrypted OOXML wrapper (OLE + EncryptionInfo/EncryptedPackage), require a
-    // password and decrypt.
-    if looks_like_encrypted_ooxml(path)? {
+    // Not a zip workbook; it could be:
+    // - an Office-encrypted OOXML wrapper (OLE container holding EncryptionInfo + EncryptedPackage), or
+    // - a raw `vbaProject.bin` OLE container (or other binary input).
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+
+    if formula_office_crypto::is_encrypted_ooxml_ole(&bytes) {
         let password =
             password.ok_or_else(|| "password required for encrypted workbook".to_owned())?;
 
-        let decrypted = office_crypto::decrypt_from_file(path, password).map_err(|e| {
-            format!(
-                "failed to decrypt encrypted workbook {}: {e}",
-                path.display()
-            )
-        })?;
+        let decrypted = formula_office_crypto::decrypt_encrypted_package_ole(&bytes, password)
+            .map_err(|e| {
+                format!(
+                    "failed to decrypt encrypted workbook {}: {e}",
+                    path.display()
+                )
+            })?;
 
         let bytes = extract_vba_project_bin_from_zip_bytes(&decrypted).map_err(|e| {
             format!(
@@ -57,9 +60,6 @@ pub(crate) fn load_vba_project_bin(
         ));
     }
 
-    // Not a zip workbook; treat as a raw vbaProject.bin OLE file.
-    let bytes =
-        std::fs::read(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
     Ok((bytes, path.display().to_string()))
 }
 
@@ -96,42 +96,4 @@ fn extract_vba_project_bin_from_zip_bytes(zip_bytes: &[u8]) -> Result<Vec<u8>, S
         return Err("zip does not contain xl/vbaProject.bin".to_owned());
     };
     Ok(buf)
-}
-
-fn looks_like_encrypted_ooxml(path: &Path) -> Result<bool, String> {
-    use std::io::SeekFrom;
-
-    let mut file =
-        std::fs::File::open(path).map_err(|e| format!("failed to open {}: {e}", path.display()))?;
-
-    let mut magic = [0u8; 8];
-    match file.read_exact(&mut magic) {
-        Ok(()) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
-        Err(err) => return Err(format!("failed to read {}: {err}", path.display())),
-    }
-    if magic != OLE_MAGIC {
-        return Ok(false);
-    }
-
-    file.seek(SeekFrom::Start(0))
-        .map_err(|e| format!("failed to rewind {}: {e}", path.display()))?;
-
-    let mut ole = match cfb::CompoundFile::open(file) {
-        Ok(ole) => ole,
-        Err(_) => return Ok(false),
-    };
-
-    Ok(stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage"))
-}
-
-fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
-    ole: &mut cfb::CompoundFile<R>,
-    name: &str,
-) -> bool {
-    if ole.open_stream(name).is_ok() {
-        return true;
-    }
-    let with_leading_slash = format!("/{name}");
-    ole.open_stream(&with_leading_slash).is_ok()
 }
