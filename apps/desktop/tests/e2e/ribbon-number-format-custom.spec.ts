@@ -40,10 +40,10 @@ test.describe("Ribbon: Home → Number → More → Custom…", () => {
       await ribbon.getByRole("tab", { name: "Home" }).click();
 
       // Open the Home → Number → More dropdown.
-      await ribbon.getByRole("button", { name: /more number formats/i }).click();
+      await ribbon.locator('[data-command-id="home.number.moreFormats"]').click();
 
       // Click the Custom… menu item.
-      await ribbon.getByRole("menuitem", { name: /custom number format/i }).click();
+      await page.locator('[role="menuitem"][data-command-id="home.number.moreFormats.custom"]').click();
 
       // Expect an input prompt (showInputBox).
       const dialog = page.getByTestId("input-box");
@@ -63,8 +63,8 @@ test.describe("Ribbon: Home → Number → More → Custom…", () => {
 
       // Re-open the prompt to verify it pre-fills with the newly-applied format and that "General"
       // clears the custom number format.
-      await ribbon.getByRole("button", { name: /more number formats/i }).click();
-      await ribbon.getByRole("menuitem", { name: /custom number format/i }).click();
+      await ribbon.locator('[data-command-id="home.number.moreFormats"]').click();
+      await page.locator('[role="menuitem"][data-command-id="home.number.moreFormats.custom"]').click();
       await expect(dialog).toBeVisible();
       await expect(field).toHaveValue("#,##0");
 
