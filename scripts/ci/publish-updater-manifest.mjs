@@ -49,6 +49,68 @@ function normalizeVersion(version) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function sortObjectKeysDeep(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortObjectKeysDeep);
+  }
+  if (!isPlainObject(value)) return value;
+
+  const out = {};
+  for (const key of Object.keys(value).sort((a, b) => a.localeCompare(b))) {
+    out[key] = sortObjectKeysDeep(value[key]);
+  }
+  return out;
+}
+
+/**
+ * Normalizes a platform entry object so we:
+ * - trim url/signature (copy/paste hygiene)
+ * - preserve any additional keys (forward compatibility with future Tauri manifest formats)
+ * - produce deterministic key ordering for JSON output
+ *
+ * @param {unknown} entry
+ */
+function normalizePlatformEntry(entry) {
+  if (!isPlainObject(entry)) {
+    throw new Error("platform entry is not an object");
+  }
+
+  const url = typeof entry.url === "string" ? entry.url.trim() : "";
+  const signature = typeof entry.signature === "string" ? entry.signature.trim() : "";
+  if (!url) throw new Error("platform entry missing url");
+  if (!signature) throw new Error("platform entry missing signature");
+
+  /** @type {Record<string, unknown>} */
+  const extra = {};
+  for (const [key, value] of Object.entries(entry)) {
+    if (key === "url" || key === "signature") continue;
+    extra[key] = sortObjectKeysDeep(value);
+  }
+
+  const extraSortedKeys = Object.keys(extra).sort((a, b) => a.localeCompare(b));
+  /** @type {Record<string, unknown>} */
+  const extraSorted = {};
+  for (const key of extraSortedKeys) extraSorted[key] = extra[key];
+
+  return {
+    url,
+    signature,
+    ...extraSorted,
+  };
+}
+
+/**
  * Returns the decoded bytes if the input looks like a base64 string, otherwise `null`.
  * Supports base64url and unpadded base64.
  * @param {string} value
@@ -300,7 +362,7 @@ async function main() {
     fatal(`No manifest JSON files found under: ${manifestsDir}`);
   }
 
-  /** @type {Record<string, { url: string; signature: string }>} */
+  /** @type {Record<string, any>} */
   const mergedPlatforms = {};
 
   // Use the first manifest (deterministically: lexicographic file order) as the source of
@@ -338,25 +400,30 @@ async function main() {
     }
 
     for (const [target, entry] of Object.entries(platforms)) {
-      const url = typeof entry?.url === "string" ? entry.url.trim() : "";
-      const signature = typeof entry?.signature === "string" ? entry.signature.trim() : "";
-      if (!url) throw new Error(`Manifest ${file} missing ${target}.url`);
-      if (!signature) throw new Error(`Manifest ${file} missing ${target}.signature`);
+      let normalizedEntry;
+      try {
+        normalizedEntry = normalizePlatformEntry(entry);
+      } catch (err) {
+        throw new Error(
+          `Manifest ${file} missing/invalid ${target} platform entry (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
 
       const existing = mergedPlatforms[target];
       if (existing) {
-        if (existing.url !== url || existing.signature !== signature) {
+        // Compare using stable key ordering so we don't depend on JSON key order in the input files.
+        if (JSON.stringify(sortObjectKeysDeep(existing)) !== JSON.stringify(sortObjectKeysDeep(normalizedEntry))) {
           throw new Error(
             `Conflicting platform entry for ${target} across manifests.\n` +
               `- existing: ${JSON.stringify(existing)}\n` +
-              `- new:      ${JSON.stringify({ url, signature })}\n` +
+              `- new:      ${JSON.stringify(normalizedEntry)}\n` +
               `Source file: ${file}`,
           );
         }
         continue;
       }
 
-      mergedPlatforms[target] = { url, signature };
+      mergedPlatforms[target] = normalizedEntry;
     }
   }
 
