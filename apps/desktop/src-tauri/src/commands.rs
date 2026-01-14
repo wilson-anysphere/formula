@@ -276,7 +276,7 @@ pub struct ImportedEmbeddedCellImageInfo {
     pub alt_text: Option<String>,
 }
 
-/// Worksheet background image extracted from an opened XLSX package.
+/// JSON payload for worksheet background images imported from an XLSX package.
 ///
 /// Excel stores tiled worksheet background images as `<picture r:id="..."/>` inside the worksheet
 /// XML, with the relationship pointing at an image part in `xl/media/...`.
@@ -286,11 +286,10 @@ pub struct ImportedSheetBackgroundImageInfo {
     pub sheet_name: String,
     /// ZIP entry name for the worksheet XML (e.g. `xl/worksheets/sheet1.xml`).
     pub worksheet_part: String,
-    /// Workbook-scoped image id used by the UI image store (recommended: filename only).
+    /// Workbook-scoped image id used by the UI image store.
     pub image_id: String,
-    /// Base64-encoded image bytes.
+    /// Base64-encoded raw image bytes.
     pub bytes_base64: String,
-    /// Best-effort MIME type inferred from the image file extension.
     pub mime_type: String,
 }
 
@@ -1624,6 +1623,7 @@ where
 /// validating/processing pivots). These IPC-only mirror types apply conservative size limits at
 /// deserialization time and are converted to the core `PivotConfig` after validation.
 pub type PivotText = LimitedString<{ crate::resource_limits::MAX_PIVOT_TEXT_BYTES }>;
+
 /// IPC-friendly mirror of `formula_engine::pivot::PivotKeyPart` with resource limits applied.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
@@ -3614,6 +3614,321 @@ pub fn list_tables(state: State<'_, SharedAppState>) -> Result<Vec<TableInfo>, S
     Ok(tables)
 }
 
+#[cfg(any(feature = "desktop", test))]
+fn worksheet_background_picture_rel_id(worksheet_xml: &[u8]) -> Option<String> {
+    // Background images in SpreadsheetML use a simple `<picture r:id="rId1"/>` element under
+    // `<worksheet>`. Avoid pulling in an additional XML dependency in the Tauri crate by using a
+    // small start-tag scanner that:
+    // - Locates the first `<picture ...>` start tag
+    // - Extracts the first attribute whose local name is `id` (e.g. `r:id`)
+    //
+    // This is intentionally best-effort and tolerant of prefixes/whitespace.
+    let bytes = worksheet_xml;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        if i + 1 >= bytes.len() {
+            break;
+        }
+
+        // Skip closing tags, processing instructions, and declarations/comments.
+        match bytes[i + 1] {
+            b'/' | b'?' | b'!' => {
+                i += 2;
+                continue;
+            }
+            _ => {}
+        }
+
+        let mut j = i + 1;
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        let name_start = j;
+        while j < bytes.len()
+            && !bytes[j].is_ascii_whitespace()
+            && bytes[j] != b'>'
+            && bytes[j] != b'/'
+        {
+            j += 1;
+        }
+        if name_start == j {
+            i += 1;
+            continue;
+        }
+
+        let tag_name = &bytes[name_start..j];
+        if !formula_xlsx::openxml::local_name(tag_name).eq_ignore_ascii_case(b"picture") {
+            i = j;
+            continue;
+        }
+
+        // Parse attributes until the end of the start tag.
+        let mut k = j;
+        while k < bytes.len() {
+            while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                k += 1;
+            }
+            if k >= bytes.len() {
+                break;
+            }
+
+            match bytes[k] {
+                b'>' => break,
+                b'/' => {
+                    // Handle `/>` and tolerate `/ >`.
+                    k += 1;
+                    continue;
+                }
+                _ => {}
+            }
+
+            let attr_start = k;
+            while k < bytes.len()
+                && !bytes[k].is_ascii_whitespace()
+                && bytes[k] != b'='
+                && bytes[k] != b'>'
+                && bytes[k] != b'/'
+            {
+                k += 1;
+            }
+            if attr_start == k {
+                k += 1;
+                continue;
+            }
+            let attr_name = &bytes[attr_start..k];
+
+            while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                k += 1;
+            }
+            if k >= bytes.len() || bytes[k] != b'=' {
+                continue;
+            }
+            k += 1;
+            while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                k += 1;
+            }
+            if k >= bytes.len() {
+                break;
+            }
+
+            let quote = bytes[k];
+            let (value_start, value_end, next_k) = if quote == b'"' || quote == b'\'' {
+                let value_start = k + 1;
+                let mut end = value_start;
+                while end < bytes.len() && bytes[end] != quote {
+                    end += 1;
+                }
+                let next_k = if end < bytes.len() { end + 1 } else { end };
+                (value_start, end, next_k)
+            } else {
+                let value_start = k;
+                let mut end = value_start;
+                while end < bytes.len()
+                    && !bytes[end].is_ascii_whitespace()
+                    && bytes[end] != b'>'
+                    && bytes[end] != b'/'
+                {
+                    end += 1;
+                }
+                (value_start, end, end)
+            };
+
+            if formula_xlsx::openxml::local_name(attr_name).eq_ignore_ascii_case(b"id") {
+                if let Ok(v) = std::str::from_utf8(&bytes[value_start..value_end]) {
+                    let trimmed = v.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+
+            k = next_k;
+        }
+
+        // Stop after the first `<picture>` element. If it has no relationship id, treat it as
+        // absent (best-effort).
+        return None;
+    }
+    None
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn extract_imported_sheet_background_images_from_xlsx_bytes(
+    xlsx_bytes: &[u8],
+) -> Vec<ImportedSheetBackgroundImageInfo> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use std::collections::HashMap;
+
+    use crate::resource_limits::{
+        MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES, MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES,
+    };
+
+    let pkg = match formula_xlsx::XlsxPackage::from_bytes(xlsx_bytes) {
+        Ok(pkg) => pkg,
+        Err(_) => return Vec::new(),
+    };
+
+    let worksheets = match pkg.worksheet_parts() {
+        Ok(parts) => parts,
+        Err(_) => match formula_xlsx::worksheet_parts_from_reader(std::io::Cursor::new(xlsx_bytes)) {
+            Ok(parts) => parts,
+            Err(_) => return Vec::new(),
+        },
+    };
+
+    // Cache base64 payloads for shared image parts so multiple worksheets that reference the same
+    // background image don't repeatedly re-encode bytes.
+    let mut cached_by_target: HashMap<String, (String, String, usize)> = HashMap::new();
+    let mut total_bytes = 0usize;
+    let mut out = Vec::new();
+    for sheet in worksheets {
+        let worksheet_part = sheet.worksheet_part.clone();
+        let Some(sheet_xml) = pkg.part(&worksheet_part) else {
+            continue;
+        };
+
+        let Some(rel_id) = worksheet_background_picture_rel_id(sheet_xml) else {
+            continue;
+        };
+
+        let Ok(Some(target_part)) = formula_xlsx::openxml::resolve_relationship_target(
+            &pkg,
+            &worksheet_part,
+            &rel_id,
+        ) else {
+            continue;
+        };
+
+        // Prefer a filename-only image id so it can be shared with other in-app image sources
+        // (drawing images, embedded cell images, etc).
+        let image_id = target_part
+            .rsplit('/')
+            .next()
+            .unwrap_or(target_part.as_str())
+            .to_string();
+        if image_id.trim().is_empty() {
+            continue;
+        }
+
+        // Reuse cached base64 if we've already loaded this target part.
+        if let Some((bytes_base64, mime_type, byte_len)) =
+            cached_by_target.get(&target_part).cloned()
+        {
+            if total_bytes.saturating_add(byte_len) > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES
+            {
+                continue;
+            }
+            total_bytes = total_bytes.saturating_add(byte_len);
+            out.push(ImportedSheetBackgroundImageInfo {
+                sheet_name: sheet.name.clone(),
+                worksheet_part,
+                image_id,
+                bytes_base64,
+                mime_type,
+            });
+            continue;
+        }
+
+        let Some(image_bytes) = pkg.part(&target_part) else {
+            continue;
+        };
+
+        let byte_len = image_bytes.len();
+        if byte_len == 0 {
+            continue;
+        }
+        if byte_len > MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES {
+            continue;
+        }
+        if total_bytes.saturating_add(byte_len) > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES {
+            continue;
+        }
+        total_bytes = total_bytes.saturating_add(byte_len);
+
+        let bytes_base64 = STANDARD.encode(image_bytes);
+        let mime_type = mime_guess::from_path(&image_id)
+            .first_or_octet_stream()
+            .essence_str()
+            .to_string();
+
+        cached_by_target.insert(
+            target_part.clone(),
+            (bytes_base64.clone(), mime_type.clone(), byte_len),
+        );
+
+        out.push(ImportedSheetBackgroundImageInfo {
+            sheet_name: sheet.name,
+            worksheet_part,
+            image_id,
+            bytes_base64,
+            mime_type,
+        });
+    }
+
+    out
+}
+
+/// Extract worksheet background images from the opened XLSX package (when available).
+///
+/// Background images are stored as `<worksheet><picture r:id="..."/></worksheet>` and reference
+/// an image part (e.g. `xl/media/image1.png`) via the worksheet relationships file.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn list_imported_sheet_background_images(
+    window: tauri::WebviewWindow,
+    state: State<'_, SharedAppState>,
+) -> Result<Vec<ImportedSheetBackgroundImageInfo>, String> {
+    ipc_origin::ensure_main_window_and_stable_origin(
+        &window,
+        "imported sheet background image extraction",
+        ipc_origin::Verb::Are,
+    )?;
+
+    let (origin_bytes, preserved_payloads) = {
+        let state = state.inner().lock().unwrap();
+        let Ok(workbook) = state.get_workbook() else {
+            return Ok(Vec::new());
+        };
+        let origin_bytes = workbook.origin_xlsx_bytes.clone();
+        let preserved_payloads = if origin_bytes.is_none() {
+            sheet_background_image_payloads_from_preserved_parts(&workbook)
+        } else {
+            Vec::new()
+        };
+        (origin_bytes, preserved_payloads)
+    };
+
+    // Fallback: when we don't retain the full origin XLSX bytes (large workbooks or explicitly
+    // dropped origin bytes), use preserved drawing parts to still surface worksheet backgrounds.
+    if origin_bytes.is_none() {
+        if preserved_payloads.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        return tauri::async_runtime::spawn_blocking(move || {
+            Ok::<_, String>(imported_sheet_background_images_from_preserved_payloads(
+                preserved_payloads,
+            ))
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    let origin_bytes = origin_bytes.expect("checked origin_bytes above");
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // Best-effort: background image parsing should never prevent workbook interactions.
+        Ok::<_, String>(extract_imported_sheet_background_images_from_xlsx_bytes(
+            origin_bytes.as_ref(),
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 /// Extract chart drawing objects (anchors + optional parsed models) from the opened XLSX package.
 ///
 /// The frontend uses this to populate the drawings layer (`drawingsBySheet`) so imported
@@ -3807,221 +4122,6 @@ pub async fn list_imported_embedded_cell_images(
                 bytes_base64: STANDARD.encode(&image.image_bytes),
                 mime_type: infer_mime_type(&image_id),
                 alt_text: image.alt_text,
-            });
-        }
-
-        Ok::<_, String>(out)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Extract worksheet background images (`<picture r:id="...">`) from the opened XLSX package.
-///
-/// Best-effort: failures should never prevent workbook interactions.
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub async fn list_imported_sheet_background_images(
-    window: tauri::WebviewWindow,
-    state: State<'_, SharedAppState>,
-) -> Result<Vec<ImportedSheetBackgroundImageInfo>, String> {
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "imported sheet background image extraction",
-        ipc_origin::Verb::Are,
-    )?;
-
-    let (origin_bytes, preserved_payloads) = {
-        let state = state.inner().lock().unwrap();
-        let Ok(workbook) = state.get_workbook() else {
-            return Ok(Vec::new());
-        };
-        let origin_bytes = workbook.origin_xlsx_bytes.clone();
-        let preserved_payloads = if origin_bytes.is_none() {
-            sheet_background_image_payloads_from_preserved_parts(&workbook)
-        } else {
-            Vec::new()
-        };
-        (origin_bytes, preserved_payloads)
-    };
-
-    // Fallback: when we don't retain the full origin XLSX bytes (large workbooks or explicitly
-    // dropped origin bytes), use preserved drawing parts to still surface worksheet backgrounds.
-    if origin_bytes.is_none() {
-        if preserved_payloads.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        return tauri::async_runtime::spawn_blocking(move || {
-            Ok::<_, String>(imported_sheet_background_images_from_preserved_payloads(
-                preserved_payloads,
-            ))
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-    }
-
-    let origin_bytes = origin_bytes.expect("checked origin_bytes above");
-
-    tauri::async_runtime::spawn_blocking(move || {
-        use base64::{engine::general_purpose::STANDARD, Engine as _};
-        use quick_xml::events::Event;
-        use quick_xml::Reader as XmlReader;
-        use std::collections::HashMap;
-        use std::io::Cursor;
-
-        use crate::resource_limits::{
-            MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES,
-            MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES,
-        };
-
-        fn extract_picture_rel_id(xml: &[u8]) -> Option<String> {
-            let mut reader = XmlReader::from_reader(Cursor::new(xml));
-            reader.config_mut().trim_text(true);
-            let mut buf = Vec::new();
-
-            loop {
-                match reader.read_event_into(&mut buf) {
-                    Ok(Event::Start(start)) | Ok(Event::Empty(start)) => {
-                        if formula_xlsx::openxml::local_name(start.name().as_ref())
-                            .eq_ignore_ascii_case(b"picture")
-                        {
-                            for attr in start.attributes().with_checks(false) {
-                                let attr = match attr {
-                                    Ok(attr) => attr,
-                                    Err(_) => continue,
-                                };
-                                let key = formula_xlsx::openxml::local_name(attr.key.as_ref());
-                                if !key.eq_ignore_ascii_case(b"id") {
-                                    continue;
-                                }
-                                let value = match attr.unescape_value() {
-                                    Ok(v) => v.into_owned(),
-                                    Err(_) => continue,
-                                };
-                                let trimmed = value.trim();
-                                if trimmed.is_empty() {
-                                    return None;
-                                }
-                                return Some(trimmed.to_string());
-                            }
-                            return None;
-                        }
-                    }
-                    Ok(Event::Eof) => break,
-                    Err(_) => return None,
-                    _ => {}
-                }
-                buf.clear();
-            }
-
-            None
-        }
-
-        // Best-effort: XLSX parsing should never prevent workbook interactions.
-        let pkg = match formula_xlsx::XlsxPackage::from_bytes(origin_bytes.as_ref()) {
-            Ok(pkg) => pkg,
-            Err(_) => return Ok::<_, String>(Vec::new()),
-        };
-
-        let sheets = match pkg.worksheet_parts() {
-            Ok(parts) => parts,
-            Err(_) => return Ok::<_, String>(Vec::new()),
-        };
-
-        // Cache base64 payloads for shared image parts so multiple worksheets that reference the
-        // same background image don't repeatedly re-encode bytes.
-        let mut cached_by_target: HashMap<String, (String, String, usize)> = HashMap::new();
-        let mut total_bytes = 0usize;
-        let mut out = Vec::new();
-
-        for sheet in sheets {
-            let worksheet_part = sheet.worksheet_part.clone();
-            let xml_bytes = match pkg.part(&worksheet_part) {
-                Some(bytes) => bytes,
-                None => continue,
-            };
-
-            let Some(rel_id) = extract_picture_rel_id(xml_bytes) else {
-                continue;
-            };
-
-            let target_part = match formula_xlsx::openxml::resolve_relationship_target(
-                &pkg,
-                &worksheet_part,
-                &rel_id,
-            ) {
-                Ok(Some(target)) => target,
-                _ => continue,
-            };
-
-            // Resolve the UI image id (filename only) so we can share it with other in-app image
-            // sources (drawings, in-cell images, etc).
-            let image_id = target_part
-                .rsplit('/')
-                .next()
-                .unwrap_or(target_part.as_str())
-                .to_string();
-            if image_id.trim().is_empty() {
-                continue;
-            }
-
-            // Reuse cached base64 if we've already loaded this target part.
-            if let Some((bytes_base64, mime_type, byte_len)) =
-                cached_by_target.get(&target_part).cloned()
-            {
-                if total_bytes.saturating_add(byte_len)
-                    > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES
-                {
-                    continue;
-                }
-                total_bytes = total_bytes.saturating_add(byte_len);
-                out.push(ImportedSheetBackgroundImageInfo {
-                    sheet_name: sheet.name.clone(),
-                    worksheet_part,
-                    image_id,
-                    bytes_base64,
-                    mime_type,
-                });
-                continue;
-            }
-
-            let bytes = match pkg.part(&target_part) {
-                Some(bytes) => bytes,
-                None => continue,
-            };
-
-            let byte_len = bytes.len();
-            if byte_len == 0 {
-                continue;
-            }
-            if byte_len > MAX_IMPORTED_SHEET_BACKGROUND_IMAGE_BYTES {
-                continue;
-            }
-            if total_bytes.saturating_add(byte_len)
-                > MAX_IMPORTED_SHEET_BACKGROUND_IMAGES_TOTAL_BYTES
-            {
-                continue;
-            }
-            total_bytes = total_bytes.saturating_add(byte_len);
-
-            let bytes_base64 = STANDARD.encode(bytes);
-            let mime_type = mime_guess::from_path(&image_id)
-                .first_or_octet_stream()
-                .essence_str()
-                .to_string();
-
-            cached_by_target.insert(
-                target_part.clone(),
-                (bytes_base64.clone(), mime_type.clone(), byte_len),
-            );
-
-            out.push(ImportedSheetBackgroundImageInfo {
-                sheet_name: sheet.name,
-                worksheet_part,
-                image_id,
-                bytes_base64,
-                mime_type,
             });
         }
 
@@ -10383,6 +10483,62 @@ export default async function main(ctx) {
             "",
             "expected Sheet1!A1 to remain empty"
         );
+    }
+
+    #[test]
+    fn extract_imported_sheet_background_images_from_xlsx_bytes_finds_picture_relationship() {
+        use std::io::Cursor;
+        use zip::write::FileOptions;
+        use zip::ZipWriter;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <picture r:id="rId2"/>
+</worksheet>"#;
+
+        let sheet_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#;
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml).unwrap();
+        zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+        zip.write_all(workbook_rels).unwrap();
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(sheet_xml).unwrap();
+        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options).unwrap();
+        zip.write_all(sheet_rels).unwrap();
+        zip.start_file("xl/media/image1.png", options).unwrap();
+        zip.write_all(b"png-bytes").unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+
+        let extracted = extract_imported_sheet_background_images_from_xlsx_bytes(&bytes);
+        assert_eq!(extracted.len(), 1);
+        assert_eq!(extracted[0].sheet_name, "Sheet1");
+        assert_eq!(extracted[0].worksheet_part, "xl/worksheets/sheet1.xml");
+        assert_eq!(extracted[0].image_id, "image1.png");
+        assert_eq!(extracted[0].mime_type, "image/png");
+        assert_eq!(extracted[0].bytes_base64, STANDARD.encode(b"png-bytes"));
     }
 
     #[cfg(feature = "desktop")]

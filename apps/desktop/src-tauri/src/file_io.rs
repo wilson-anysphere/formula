@@ -4003,7 +4003,7 @@ mod tests {
                 2,
                 None,
                 Some("=CELL(\"width\",A1)".to_string()),
-        )
+            )
             .expect("set CELL(width) formula for A1");
         let c1 = state.get_cell(&sheet_id, 0, 2).expect("read C1");
         match c1.value {
