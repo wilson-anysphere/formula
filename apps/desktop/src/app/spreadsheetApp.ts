@@ -19912,7 +19912,7 @@ export class SpreadsheetApp {
 
     const existingDrawings = (() => {
       try {
-        const raw = (this.document as any).getSheetDrawings?.(this.sheetId);
+        const raw = (this.document as any).getSheetDrawings?.(sheetId);
         return Array.isArray(raw) ? raw : [];
       } catch {
         return [];
