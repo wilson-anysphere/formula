@@ -677,9 +677,13 @@ export class DrawingInteractionController {
 
   private getHitTestIndex(objects: readonly DrawingObject[], zoom: number): HitTestIndex {
     const z = sanitizeZoom(zoom);
-    if (this.hitTestIndex && this.hitTestIndexObjects === objects && this.hitTestIndexZoom === z) {
-      return this.hitTestIndex;
-    }
+    const cached = this.hitTestIndex;
+    // Use an epsilon comparison to avoid rebuilding the index for tiny floating-point
+    // differences in zoom (e.g. when zoom comes from a scaled scroll/renderer state).
+    //
+    // This keeps the cache behavior aligned with `hitTestDrawings`' zoom-mismatch fallback
+    // threshold (1e-6) so we don't accidentally fall back to O(N) scans.
+    if (cached && this.hitTestIndexObjects === objects && Math.abs(this.hitTestIndexZoom - z) < 1e-6) return cached;
     const built = buildHitTestIndex(objects, this.geom, { zoom: z });
     this.hitTestIndex = built;
     this.hitTestIndexObjects = objects;
