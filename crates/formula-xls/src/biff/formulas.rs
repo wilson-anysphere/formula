@@ -206,7 +206,7 @@ fn adjust_row_col(row0: u16, col_field: u16, delta_row: i64, delta_col: i64) -> 
     Some((new_row_u16, new_col_u16))
 }
 
-fn materialize_biff8_rgce(
+pub(crate) fn materialize_biff8_rgce(
     base: &[u8],
     base_row: u32,
     base_col: u32,

@@ -260,7 +260,7 @@ proptest! {
                     assert!(range.start.col <= range.end.col);
                 }
 
-                // Manual page breaks.
+                // Manual page breaks parser.
                 let _ = sheet::parse_biff_sheet_manual_page_breaks(&buf, 0)
                     .expect("offset 0 should always be in-bounds");
 

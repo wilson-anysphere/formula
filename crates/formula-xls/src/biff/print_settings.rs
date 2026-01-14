@@ -7,12 +7,12 @@ use super::records;
 // - SETUP: 2.4.257
 // - LEFTMARGIN/RIGHTMARGIN/TOPMARGIN/BOTTOMMARGIN: 2.4.132/2.4.214/2.4.326/2.4.38
 // - HORIZONTALPAGEBREAKS/VERTICALPAGEBREAKS: 2.4.122/2.4.355
+// - WSBOOL: 2.4.376
 const RECORD_SETUP: u16 = 0x00A1;
 const RECORD_LEFTMARGIN: u16 = 0x0026;
 const RECORD_RIGHTMARGIN: u16 = 0x0027;
 const RECORD_TOPMARGIN: u16 = 0x0028;
 const RECORD_BOTTOMMARGIN: u16 = 0x0029;
-// WSBOOL [MS-XLS 2.4.376] stores miscellaneous sheet flags, including fFitToPage.
 const RECORD_WSBOOL: u16 = 0x0081;
 
 // SETUP grbit flags.
@@ -51,6 +51,11 @@ pub(crate) fn parse_biff_sheet_print_settings(
 
     let mut page_setup = PageSetup::default();
     let mut saw_any_record = false;
+
+    // WSBOOL.fFitToPage controls whether SETUP's iFitWidth/iFitHeight apply.
+    // Keep the raw SETUP scaling fields around and compute scaling at the end so record order
+    // doesn't matter and "last wins" semantics are respected.
+    let mut setup_scale: Option<u16> = None;
     let mut setup_fit_width: Option<u16> = None;
     let mut setup_fit_height: Option<u16> = None;
     let mut wsbool_fit_to_page: Option<bool> = None;
@@ -74,9 +79,11 @@ pub(crate) fn parse_biff_sheet_print_settings(
         match record.record_id {
             RECORD_SETUP => {
                 saw_any_record = true;
-                setup_fit_width = parse_u16_at(data, 6);
-                setup_fit_height = parse_u16_at(data, 8);
-                parse_setup_record(&mut page_setup, data, record.offset, &mut out.warnings)
+                let (scale, fit_width, fit_height) =
+                    parse_setup_record(&mut page_setup, data, record.offset, &mut out.warnings);
+                setup_scale = scale;
+                setup_fit_width = fit_width;
+                setup_fit_height = fit_height;
             }
             RECORD_LEFTMARGIN => parse_margin_record(
                 &mut page_setup.margins.left,
@@ -107,21 +114,18 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 &mut out.warnings,
             ),
             RECORD_WSBOOL => {
+                // WSBOOL [MS-XLS 2.4.376]
+                // fFitToPage: bit8 (mask 0x0100)
                 if data.len() < 2 {
                     out.warnings.push(format!(
                         "truncated WSBOOL record at offset {} (len={}, expected >=2)",
                         record.offset,
                         data.len()
                     ));
-                } else {
-                    let grbit = u16::from_le_bytes([data[0], data[1]]);
-                    let fit_to_page = (grbit & 0x0100) != 0;
-                    wsbool_fit_to_page = Some(fit_to_page);
-                    if fit_to_page {
-                        // Only treat WSBOOL as a print-settings signal when fFitToPage is set.
-                        saw_any_record = true;
-                    }
+                    continue;
                 }
+                let grbit = u16::from_le_bytes([data[0], data[1]]);
+                wsbool_fit_to_page = Some((grbit & 0x0100) != 0);
             }
             records::RECORD_EOF => break,
             _ => {}
@@ -135,14 +139,24 @@ pub(crate) fn parse_biff_sheet_print_settings(
         }
     }
 
-    if saw_any_record {
-        if wsbool_fit_to_page == Some(true) {
-            // Some `.xls` writers omit the SETUP record even when fit-to-page is enabled.
-            // Preserve the scaling intent: FitTo {0,0} means "as many pages as needed".
-            page_setup.scaling = Scaling::FitTo {
-                width: setup_fit_width.unwrap_or(0),
-                height: setup_fit_height.unwrap_or(0),
-            };
+    let fit_to_page = wsbool_fit_to_page.unwrap_or_else(|| {
+        setup_fit_width.unwrap_or(0) != 0 || setup_fit_height.unwrap_or(0) != 0
+    });
+    if saw_any_record || fit_to_page {
+        if fit_to_page {
+            if let (Some(width), Some(height)) = (setup_fit_width, setup_fit_height) {
+                page_setup.scaling = Scaling::FitTo { width, height };
+            } else {
+                // Some `.xls` writers omit SETUP even when fit-to-page is enabled; preserve
+                // the mode as best-effort.
+                page_setup.scaling = Scaling::FitTo {
+                    width: 0,
+                    height: 0,
+                };
+            }
+        } else {
+            let scale = setup_scale.unwrap_or(100);
+            page_setup.scaling = Scaling::Percent(if scale == 0 { 100 } else { scale });
         }
         out.page_setup = Some(page_setup);
     }
@@ -174,7 +188,12 @@ fn parse_f64_at(data: &[u8], offset: usize) -> Option<f64> {
     ]))
 }
 
-fn parse_setup_record(page_setup: &mut PageSetup, data: &[u8], offset: usize, warnings: &mut Vec<String>) {
+fn parse_setup_record(
+    page_setup: &mut PageSetup,
+    data: &[u8],
+    offset: usize,
+    warnings: &mut Vec<String>,
+) -> (Option<u16>, Option<u16>, Option<u16>) {
     // BIFF8 SETUP record is 34 bytes:
     // [iPaperSize:u16][iScale:u16][iPageStart:u16][iFitWidth:u16][iFitHeight:u16]
     // [grbit:u16][iRes:u16][iVRes:u16][numHdr:f64][numFtr:f64][iCopies:u16]
@@ -216,17 +235,6 @@ fn parse_setup_record(page_setup: &mut PageSetup, data: &[u8], offset: usize, wa
         };
     }
 
-    // Scaling: if the fit-to fields are present and non-zero, prefer FitTo; otherwise use scale.
-    //
-    // Excel uses 0 for "unset"/"as many pages as needed" in the FitTo fields. When FitTo mode is
-    // not active, many producers emit 0 for both width/height.
-    let scaling = match (fit_width, fit_height, scale) {
-        (Some(w), Some(h), _) if w != 0 || h != 0 => Scaling::FitTo { width: w, height: h },
-        (_, _, Some(pct)) if pct != 0 => Scaling::Percent(pct),
-        _ => Scaling::Percent(100),
-    };
-    page_setup.scaling = scaling;
-
     if let Some(v) = header_margin {
         if v.is_finite() {
             page_setup.margins.header = v;
@@ -245,6 +253,8 @@ fn parse_setup_record(page_setup: &mut PageSetup, data: &[u8], offset: usize, wa
             ));
         }
     }
+
+    (scale, fit_width, fit_height)
 }
 
 fn parse_margin_record(

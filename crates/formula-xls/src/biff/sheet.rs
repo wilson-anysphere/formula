@@ -344,7 +344,6 @@ pub(crate) struct BiffSheetProtection {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BiffSheetPrintSettings {
     pub(crate) page_setup: PageSetup,
-    pub(crate) manual_page_breaks: ManualPageBreaks,
     pub(crate) warnings: Vec<String>,
 }
 

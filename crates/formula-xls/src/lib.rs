@@ -1546,10 +1546,13 @@ fn import_xls_path_with_biff_reader(
                                 // Best-effort fallback only: do not override formulas that were
                                 // already resolved by calamine (normal SHRFMLA/ARRAY handling).
                                 //
-                                // Note: BIFF fallback decoding will render unresolved `PtgExp`
-                                // tokens as `#UNKNOWN!`. Treat that placeholder as "not resolved"
-                                // so we can still populate a recovered formula.
-                                if matches!(sheet.formula(anchor), Some(existing) if existing != "#UNKNOWN!") {
+                                // Calamine can return the `#UNKNOWN!` error sentinel for `PtgExp`
+                                // formulas it cannot resolve; treat that as "unresolved" so we can
+                                // replace it with a recovered materialized formula when possible.
+                                if sheet
+                                    .formula(anchor)
+                                    .is_some_and(|f| f != ErrorValue::Unknown.as_str())
+                                {
                                     continue;
                                 }
                                 if let Some(normalized) = normalize_formula_text(&formula_text) {
@@ -3548,15 +3551,30 @@ fn import_biff8_shared_formulas(
                         continue;
                     };
                     let data = record.data.as_ref();
-                    if data.len() < 8 {
+                    // SHRFMLA [MS-XLS 2.4.277] begins with a range reference and is followed by a
+                    // `cUse` field and a `cce` + `rgce` formula payload. However, some producers omit
+                    // `cUse`; treat both layouts as best-effort.
+                    //
+                    // Layout A (common): RefU (6) + cUse (2) + cce (2) + rgce
+                    // Layout B (seen in the wild/tests): RefU (6) + cce (2) + rgce
+                    // Layout C (common): Ref8 (8) + cUse (2) + cce (2) + rgce
+                    let parse_rgce = |cce_off: usize, rgce_off: usize| -> Option<&[u8]> {
+                        if data.len() < cce_off + 2 {
+                            return None;
+                        }
+                        let cce =
+                            u16::from_le_bytes([data[cce_off], data[cce_off + 1]]) as usize;
+                        if cce == 0 {
+                            return None;
+                        }
+                        data.get(rgce_off..rgce_off + cce)
+                    };
+                    let rgce = parse_rgce(8, 10)
+                        .or_else(|| parse_rgce(6, 8))
+                        .or_else(|| parse_rgce(10, 12));
+                    let Some(rgce) = rgce else {
                         continue;
-                    }
-                    // [rwFirst: u16][rwLast: u16][colFirst: u8][colLast: u8][cce: u16][rgce bytes]
-                    let cce = u16::from_le_bytes([data[6], data[7]]) as usize;
-                    if cce == 0 || data.len() < 8 + cce {
-                        continue;
-                    }
-                    let rgce = &data[8..8 + cce];
+                    };
                     shared_by_anchor.insert((anchor_row, anchor_col), rgce.to_vec());
                 }
                 biff::records::RECORD_EOF => break,
@@ -3572,11 +3590,12 @@ fn import_biff8_shared_formulas(
             let cell_ref = CellRef::new(row as u32, col as u32);
             let anchor_cell = sheet.merged_regions.resolve_cell(cell_ref);
 
-            // Best-effort shared-formula recovery should not clobber formulas already surfaced by
-            // calamine / BIFF decoding. However, unresolved `PtgExp` tokens are rendered as
-            // `#UNKNOWN!` by the rgce decoder; treat that placeholder as "not resolved" so we can
-            // still materialize the shared formula from SHRFMLA.
-            if matches!(sheet.formula(anchor_cell), Some(existing) if existing != "#UNKNOWN!") {
+            // Best-effort: allow overriding an existing `#UNKNOWN!` formula (usually the result of
+            // decoding a PtgExp token stream without resolving its backing SHRFMLA definition).
+            if sheet
+                .formula(anchor_cell)
+                .is_some_and(|f| f != ErrorValue::Unknown.as_str())
+            {
                 continue;
             }
 
@@ -3584,8 +3603,20 @@ fn import_biff8_shared_formulas(
                 continue;
             };
 
+            let materialized = if row == anchor_row && col == anchor_col {
+                None
+            } else {
+                biff::formulas::materialize_biff8_rgce(
+                    shared_rgce,
+                    anchor_row as u32,
+                    anchor_col as u32,
+                    row as u32,
+                    col as u32,
+                )
+            };
+
             let decoded = biff::rgce::decode_biff8_rgce_with_base(
-                shared_rgce,
+                materialized.as_deref().unwrap_or(shared_rgce),
                 &ctx,
                 Some(biff::rgce::CellCoord::new(row as u32, col as u32)),
             );

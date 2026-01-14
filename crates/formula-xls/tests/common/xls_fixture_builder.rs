@@ -987,7 +987,8 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // WINDOW2 is required by some consumers; keep defaults.
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
 
-    // WSBOOL controls scaling mode. Enable fit-to-page so SETUP.iFit* fields are respected.
+    // WSBOOL controls scaling mode (`fFitToPage`); enable fit-to-page so `SETUP.iFitWidth/Height`
+    // apply.
     let wsbool: u16 = 0x0C01 | WSBOOL_OPTION_FIT_TO_PAGE;
     push_record(&mut sheet, RECORD_WSBOOL, &wsbool.to_le_bytes());
 
@@ -996,9 +997,6 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_RIGHTMARGIN, &1.2f64.to_le_bytes());
     push_record(&mut sheet, RECORD_TOPMARGIN, &1.3f64.to_le_bytes());
     push_record(&mut sheet, RECORD_BOTTOMMARGIN, &1.4f64.to_le_bytes());
-
-    // Enable fit-to-page scaling so `SETUP.iFitWidth/iFitHeight` apply.
-    push_record(&mut sheet, RECORD_WSBOOL, &WSBOOL_OPTION_FIT_TO_PAGE.to_le_bytes());
 
     // Page setup: Landscape + A4 + Fit to 2 pages wide by 3 tall + non-default header/footer
     // margins.
@@ -1015,8 +1013,6 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
             0.6,  // footer margin
         ),
     );
-    // Enable fit-to-page scaling (WSBOOL.fFitToPage=1).
-    push_record(&mut sheet, RECORD_WSBOOL, &0x0100u16.to_le_bytes());
 
     // Manual page breaks.
     // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
@@ -1091,7 +1087,8 @@ fn setup_record(
     out.extend_from_slice(&fit_width.to_le_bytes()); // iFitWidth
     out.extend_from_slice(&fit_height.to_le_bytes()); // iFitHeight
     let mut grbit = 0u16;
-    // SETUP.grbit fPortrait (0x0002): when set, the sheet is in portrait mode; when clear, landscape.
+    // BIFF8 SETUP.grbit bit1 is `fPortrait` (0x0002): 0=landscape, 1=portrait.
+    // Keep the fixture builder API ergonomic by accepting `landscape: bool`.
     if !landscape {
         grbit |= 0x0002;
     }
@@ -6620,17 +6617,21 @@ fn build_page_setup_sheet_stream(xf_cell: u16, cfg: PageSetupFixtureSheet) -> Ve
     );
 
     // Manual page breaks.
+    // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
+    // The importer converts these to the model’s “after which break occurs” form by subtracting 1.
+    let row_break_row = cfg.row_break_after.saturating_add(1);
+    let col_break_col = cfg.col_break_after.saturating_add(1);
     push_record(
         &mut sheet,
         RECORD_HPAGEBREAKS,
         // BIFF8 stores the 0-based index of the first row *after* the break.
-        &hpagebreaks_record(&[cfg.row_break_after.saturating_add(1)]),
+        &hpagebreaks_record(&[row_break_row]),
     );
     push_record(
         &mut sheet,
         RECORD_VPAGEBREAKS,
         // BIFF8 stores the 0-based index of the first column *after* the break.
-        &vpagebreaks_record(&[cfg.col_break_after.saturating_add(1)]),
+        &vpagebreaks_record(&[col_break_col]),
     );
 
     // A1: a single cell so calamine returns a non-empty range.
@@ -7592,11 +7593,14 @@ fn build_shared_ref3d_shrfmla_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     // Shared formula anchor: A1 formula token stream is PtgExp(A1), followed by SHRFMLA
     // containing the shared rgce.
+    //
+    // Set FORMULA.grbit.fShrFmla (0x0008) so parsers recognize the shared-formula membership.
+    let grbit_shared: u16 = 0x0008;
     let ptgexp = ptg_exp(0, 0);
     push_record(
         &mut sheet,
         RECORD_FORMULA,
-        &formula_cell(0, 0, xf_cell, 0.0, &ptgexp),
+        &formula_cell_with_grbit(0, 0, xf_cell, 0.0, grbit_shared, &ptgexp),
     );
 
     // Shared rgce: reference Sheet0!A1 via ixti=0, and encode A1 as relative (no '$') so the
@@ -7613,7 +7617,7 @@ fn build_shared_ref3d_shrfmla_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(
         &mut sheet,
         RECORD_FORMULA,
-        &formula_cell(1, 0, xf_cell, 0.0, &ptgexp),
+        &formula_cell_with_grbit(1, 0, xf_cell, 0.0, grbit_shared, &ptgexp),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
@@ -10548,12 +10552,27 @@ fn formula_cell(row: u16, col: u16, xf: u16, cached_result: f64, rgce: &[u8]) ->
     // FORMULA record payload (BIFF8) [MS-XLS 2.4.127].
     //
     // This is a minimal encoding sufficient for calamine to surface the formula text.
+    formula_cell_with_grbit(row, col, xf, cached_result, 0, rgce)
+}
+
+fn formula_cell_with_grbit(
+    row: u16,
+    col: u16,
+    xf: u16,
+    cached_result: f64,
+    grbit: u16,
+    rgce: &[u8],
+) -> Vec<u8> {
+    // FORMULA record payload (BIFF8) [MS-XLS 2.4.127].
+    //
+    // This is a minimal encoding sufficient for calamine to surface the formula text, while
+    // allowing callers to specify the raw `grbit` flags (e.g. shared formulas).
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&row.to_le_bytes());
     out.extend_from_slice(&col.to_le_bytes());
     out.extend_from_slice(&xf.to_le_bytes());
     out.extend_from_slice(&cached_result.to_le_bytes()); // cached formula result (IEEE f64)
-    out.extend_from_slice(&0u16.to_le_bytes()); // grbit
+    out.extend_from_slice(&grbit.to_le_bytes()); // grbit
     out.extend_from_slice(&0u32.to_le_bytes()); // chn
     out.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
     out.extend_from_slice(rgce);
@@ -10569,13 +10588,14 @@ fn shrfmla_record(
 ) -> Vec<u8> {
     // SHRFMLA record payload (BIFF8) [MS-XLS 2.4.277].
     //
-    // Minimal layout (RefU + cce + rgce):
-    //   [rwFirst: u16][rwLast: u16][colFirst: u8][colLast: u8][cce: u16][rgce bytes]
+    // Layout (RefU + cUse + cce + rgce):
+    //   [rwFirst: u16][rwLast: u16][colFirst: u8][colLast: u8][cUse: u16][cce: u16][rgce bytes]
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&rw_first.to_le_bytes());
     out.extend_from_slice(&rw_last.to_le_bytes());
     out.push(col_first);
     out.push(col_last);
+    out.extend_from_slice(&0u16.to_le_bytes()); // cUse
     out.extend_from_slice(&(rgce.len() as u16).to_le_bytes());
     out.extend_from_slice(rgce);
     out

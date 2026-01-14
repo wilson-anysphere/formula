@@ -45,10 +45,6 @@ pub(crate) use sheet::{
 };
 pub(crate) use sort::parse_biff_sheet_sort_state;
 
-// Only re-export helpers that are currently used in unit tests under `biff/fuzz_tests.rs`.
-#[cfg(test)]
-pub(crate) use sheet::parse_biff_sheet_manual_page_breaks;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BiffVersion {
     Biff5,
