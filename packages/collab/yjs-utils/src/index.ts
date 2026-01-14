@@ -706,7 +706,13 @@ function isPlainObject(value: unknown): value is Record<string, any> {
  */
 export function yjsValueToJson(value: any): any {
   const text = getYText(value);
-  if (text) return text.toString();
+  if (text) {
+    // A local Y.Text root can contain foreign Content* objects after applying updates
+    // through a different Yjs module instance (ESM doc + CJS applyUpdate). Patch
+    // content prototypes so `toString()` doesn't silently return an empty string.
+    if (text instanceof Y.Text) patchYTextContentPrototypes(text);
+    return text.toString();
+  }
 
   if (value && typeof value === "object") {
     const yArr = getYArray(value);

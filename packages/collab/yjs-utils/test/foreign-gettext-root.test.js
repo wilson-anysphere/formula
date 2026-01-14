@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import * as Y from "yjs";
 
-import { getTextRoot } from "@formula/collab-yjs-utils";
+import { getTextRoot, yjsValueToJson } from "@formula/collab-yjs-utils";
 import { requireYjsCjs } from "./require-yjs-cjs.js";
 
 test("collab-yjs-utils: getTextRoot normalizes foreign roots created via CJS getText into an ESM Doc", () => {
@@ -152,5 +152,28 @@ test("collab-yjs-utils: getTextRoot patches local Y.Text content prototypes base
   const normalized = getTextRoot(doc, "title");
   assert.ok(normalized instanceof Y.Text);
   assert.equal(normalized.toString(), "hello");
+  assert.equal(Object.getPrototypeOf(content), originalProto);
+});
+
+test("collab-yjs-utils: yjsValueToJson patches local Y.Text content prototypes based on getRef ids", () => {
+  const doc = new Y.Doc();
+  const title = doc.getText("title");
+  title.insert(0, "hello");
+
+  const item = /** @type {any} */ (title)._start;
+  assert.ok(item, "expected internal Item struct");
+  const content = item.content;
+  assert.ok(content, "expected Item.content");
+  assert.equal(typeof content.getRef, "function", "expected content.getRef to exist");
+
+  const ref = content.getRef();
+  assert.equal(typeof ref, "number", "expected content.getRef() to return a numeric ref id");
+
+  const originalProto = Object.getPrototypeOf(content);
+  const foreignProto = { getRef: () => ref };
+  Object.setPrototypeOf(content, foreignProto);
+  assert.equal(Object.getPrototypeOf(content), foreignProto);
+
+  assert.equal(yjsValueToJson(title), "hello");
   assert.equal(Object.getPrototypeOf(content), originalProto);
 });
