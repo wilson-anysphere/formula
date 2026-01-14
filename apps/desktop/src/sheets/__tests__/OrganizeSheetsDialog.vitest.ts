@@ -31,13 +31,18 @@ beforeEach(() => {
 
 afterEach(() => {
   // Best-effort cleanup: close any dialogs so React roots unmount.
-  for (const dialog of Array.from(document.querySelectorAll("dialog"))) {
-    try {
-      (dialog as any).close?.();
-    } catch {
-      dialog.remove();
+  //
+  // Wrap in `act` to avoid React 18 warnings about untracked state updates triggered
+  // by `root.unmount()` in the dialog close handler.
+  act(() => {
+    for (const dialog of Array.from(document.querySelectorAll("dialog"))) {
+      try {
+        (dialog as any).close?.();
+      } catch {
+        dialog.remove();
+      }
     }
-  }
+  });
   document.body.innerHTML = "";
   delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
   vi.restoreAllMocks();
