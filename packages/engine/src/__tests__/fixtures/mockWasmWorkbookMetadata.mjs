@@ -26,7 +26,16 @@ export class WasmWorkbook {
   getCell(address, sheet) {
     return { sheet: sheet ?? "Sheet1", address, input: null, value: null };
   }
-  getRange(_range, _sheet) {
+  getCellRich(address, sheet) {
+    recordCall("getCellRich", address, sheet);
+    return { sheet: sheet ?? "Sheet1", address, input: null, value: null };
+  }
+  getRange(range, sheet) {
+    recordCall("getRange", range, sheet);
+    return [];
+  }
+  getRangeCompact(range, sheet) {
+    recordCall("getRangeCompact", range, sheet);
     return [];
   }
   setCell(_address, _value, _sheet) {}

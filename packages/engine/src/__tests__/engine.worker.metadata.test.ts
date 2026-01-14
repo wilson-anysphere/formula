@@ -810,6 +810,52 @@ describe("engine.worker workbook metadata RPCs", () => {
     }
   });
 
+  it("trims sheet names for sheet-optional read RPCs", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      let resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "getRange",
+        params: { sheet: "  Sheet2  ", range: "A1:A1" }
+      });
+      expect(resp.ok).toBe(true);
+      expect((resp as RpcResponseOk).result).toEqual([]);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "getRangeCompact",
+        params: { sheet: "  Sheet2  ", range: "A1:A1" }
+      });
+      expect(resp.ok).toBe(true);
+      expect((resp as RpcResponseOk).result).toEqual([]);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 3,
+        method: "getCellRich",
+        params: { sheet: "  Sheet2  ", address: "A1" }
+      });
+      expect(resp.ok).toBe(true);
+      expect((resp as RpcResponseOk).result).toEqual({ sheet: "Sheet2", address: "A1", input: null, value: null });
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["getRange", "A1:A1", "Sheet2"],
+        ["getRangeCompact", "A1:A1", "Sheet2"],
+        ["getCellRich", "A1", "Sheet2"]
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
   it("trims whitespace in sheet names for applyOperation", async () => {
     (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
