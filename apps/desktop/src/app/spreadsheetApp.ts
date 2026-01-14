@@ -14898,6 +14898,14 @@ export class SpreadsheetApp {
       fontSizePx,
       color: defaultTextColor,
     };
+    const plainRichTextScratch: {
+      text: string;
+      runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }>;
+    } = { text: "" };
+    const underlineRunScratch = { start: 0, end: 0, style: { underline: true } };
+    const underlineRunsScratch = [underlineRunScratch];
+    const commentIndicatorBoundsScratch = { x: 0, y: 0, width: this.cellWidth, height: this.cellHeight };
+    const commentIndicatorStyleScratch = { color: commentIndicatorColor };
 
     const renderCellRegion = (options: {
       clipX: number;
@@ -14956,11 +14964,15 @@ export class SpreadsheetApp {
 
           if (state.formula != null) {
             if (this.showFormulas) {
-              rich = { text: state.formula, runs: [] };
+              plainRichTextScratch.text = state.formula;
+              plainRichTextScratch.runs = undefined;
+              rich = plainRichTextScratch;
             } else {
               const computed = this.getCellComputedValue(coordScratch);
               if (computed != null) {
-                rich = { text: this.formatCellValueForDisplay(coordScratch, computed), runs: [] };
+                plainRichTextScratch.text = this.formatCellValueForDisplay(coordScratch, computed);
+                plainRichTextScratch.runs = undefined;
+                rich = plainRichTextScratch;
                 if (typeof computed === "string" && computed.startsWith("#")) {
                   color = errorTextColor;
                 }
@@ -14968,21 +14980,22 @@ export class SpreadsheetApp {
             }
           } else if (isRichTextValue(state.value)) {
             rich = state.value;
-            } else if (state.value != null) {
-              rich = { text: this.formatCellValueForDisplay(coordScratch, state.value as any), runs: [] };
-            }
+          } else if (state.value != null) {
+            plainRichTextScratch.text = this.formatCellValueForDisplay(coordScratch, state.value as any);
+            plainRichTextScratch.runs = undefined;
+            rich = plainRichTextScratch;
+          }
 
-            // Apply default hyperlink styling for URL-like strings when the underlying cell value is not
-            // already rich text (rich text runs may carry explicit formatting).
-            if (rich && typeof rich.text === "string" && looksLikeExternalHyperlink(rich.text) && !isRichTextValue(state.value)) {
-              color = linkTextColor;
-              // `renderRichText` draws underlines based on run style.
-              if (Array.isArray(rich.runs) && rich.runs.length === 0) {
-                rich.runs = [{ start: 0, end: rich.text.length, style: { underline: true } }];
-              }
-            }
+          // Apply default hyperlink styling for URL-like strings when the underlying cell value is not
+          // already rich text (rich text runs may carry explicit formatting).
+          if (rich && typeof rich.text === "string" && looksLikeExternalHyperlink(rich.text) && !isRichTextValue(state.value)) {
+            color = linkTextColor;
+            // `renderRichText` draws underlines based on run style.
+            underlineRunScratch.end = rich.text.length;
+            plainRichTextScratch.runs = underlineRunsScratch;
+          }
 
-            if (!rich || rich.text === "") continue;
+          if (!rich || rich.text === "") continue;
 
           richTextRectScratch.x = startX + visualCol * this.cellWidth;
           richTextRectScratch.y = startY + visualRow * this.cellHeight;
@@ -14992,8 +15005,6 @@ export class SpreadsheetApp {
       }
 
       // Comment indicators.
-      const commentIndicatorBounds = { x: 0, y: 0, width: this.cellWidth, height: this.cellHeight };
-      const commentIndicatorStyle = { color: commentIndicatorColor };
       for (let visualRow = 0; visualRow < rows.length; visualRow++) {
         const row = rows[visualRow]!;
         for (let visualCol = 0; visualCol < cols.length; visualCol++) {
@@ -15001,10 +15012,10 @@ export class SpreadsheetApp {
           const meta = this.commentMetaByCoord.get(row * COMMENT_COORD_COL_STRIDE + col);
           if (!meta) continue;
           const resolved = meta.resolved ?? false;
-          commentIndicatorBounds.x = startX + visualCol * this.cellWidth;
-          commentIndicatorBounds.y = startY + visualRow * this.cellHeight;
-          commentIndicatorStyle.color = resolved ? commentIndicatorResolvedColor : commentIndicatorColor;
-          drawCommentIndicator(ctx, commentIndicatorBounds, commentIndicatorStyle, false);
+          commentIndicatorBoundsScratch.x = startX + visualCol * this.cellWidth;
+          commentIndicatorBoundsScratch.y = startY + visualRow * this.cellHeight;
+          commentIndicatorStyleScratch.color = resolved ? commentIndicatorResolvedColor : commentIndicatorColor;
+          drawCommentIndicator(ctx, commentIndicatorBoundsScratch, commentIndicatorStyleScratch, false);
         }
       }
 
