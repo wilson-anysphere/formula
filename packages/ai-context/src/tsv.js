@@ -91,9 +91,15 @@ function formatValueForTsv(value) {
 
     if (value instanceof Date) {
       try {
-        return value.toISOString();
+        // Avoid calling per-instance overrides (e.g. `date.toISOString = () => "secret"`).
+        return Date.prototype.toISOString.call(value);
       } catch {
-        // Fall back to the generic object path below.
+        // Invalid dates throw in `toISOString()`; fall back to a stable, non-throwing string form.
+        try {
+          return Date.prototype.toString.call(value);
+        } catch {
+          return "";
+        }
       }
     }
 

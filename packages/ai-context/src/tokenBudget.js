@@ -73,7 +73,20 @@ function stabilizeJson(value, stack = new WeakSet()) {
   stack.add(value);
 
   try {
-    if (value instanceof Date) return value.toISOString();
+    if (value instanceof Date) {
+      // Avoid calling per-instance overrides (e.g. `date.toISOString = () => "secret"`), which can
+      // leak sensitive strings into prompt context even when higher-level DLP redaction is enabled.
+      try {
+        return Date.prototype.toISOString.call(value);
+      } catch {
+        // Invalid dates throw in `toISOString()`; fall back to a stable, non-throwing string form.
+        try {
+          return Date.prototype.toString.call(value);
+        } catch {
+          return "";
+        }
+      }
+    }
 
     if (value instanceof Map) {
       const entries = Array.from(value.entries()).map(([k, v], index) => {

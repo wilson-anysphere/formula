@@ -219,6 +219,46 @@ test("buildContext: heuristic DLP detects Symbol.toPrimitive cell values and pre
   assert.match(out.promptContext, /## dlp/i);
 });
 
+test("buildContext: heuristic DLP does not leak Date.toISOString overrides (no-op redactor)", async () => {
+  const embedder = new CapturingEmbedder();
+  const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, ragIndex, redactor: (text) => text });
+
+  const sneakyDate = new Date("2024-01-01T00:00:00.000Z");
+  // Some hosts (or malicious input) can attach custom methods to otherwise-safe values.
+  // TSV + JSON formatting should never call these overrides in a way that leaks the secret.
+  sneakyDate.toISOString = () => "alice@example.com";
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      // Needs at least 2 connected non-empty cells for region detection.
+      values: [[sneakyDate, "Hello"]],
+    },
+    query: "anything",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Internal",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      },
+      classificationRecords: [],
+    },
+  });
+
+  assert.doesNotMatch(embedder.seen.join("\n"), /alice@example\.com/);
+  assert.doesNotMatch(out.promptContext, /alice@example\.com/);
+});
+
 test("buildContext: structured DLP also redacts non-heuristic sheet-name tokens in queries before embedding (no-op redactor)", async () => {
   const embedder = new CapturingEmbedder();
   const ragIndex = new RagIndex({ embedder, store: new InMemoryVectorStore() });
