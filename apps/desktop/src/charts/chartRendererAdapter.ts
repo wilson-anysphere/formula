@@ -39,6 +39,13 @@ type Surface = {
   modelRef: ChartModel | null;
   dataRef: Partial<ResolvedChartData> | undefined;
   themeSig: string;
+  /**
+   * Theme key derived from the root `data-theme` attribute.
+   *
+   * Charts often use CSS variables for colors, so when the app theme flips (light/dark/high-contrast)
+   * cached chart surfaces must be re-rendered even if the chart model/revision is unchanged.
+   */
+  themeKey: string;
 };
 
 type ParsedVar = { name: string; fallback: string | null };
@@ -126,6 +133,15 @@ function getContextScale(ctx: CanvasRenderingContext2D): number {
   return 1;
 }
 
+function getThemeKey(): string {
+  if (typeof document === "undefined") return "";
+  try {
+    return document.documentElement?.getAttribute("data-theme") ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function themeSignature(patch: Partial<ChartTheme> | undefined): string {
   if (!patch) return "";
   const entries: string[] = [];
@@ -169,6 +185,7 @@ export class ChartRendererAdapter implements ChartRenderer {
   constructor(private readonly store: ChartStore) {}
 
   renderToCanvas(ctx: CanvasRenderingContext2D, chartId: string, rect: Rect): void {
+    const themeKey = getThemeKey();
     const scale = getContextScale(ctx);
     const widthPx = Math.max(1, Math.round(rect.width * scale));
     const heightPx = Math.max(1, Math.round(rect.height * scale));
@@ -179,7 +196,7 @@ export class ChartRendererAdapter implements ChartRenderer {
     const revision = typeof revisionRaw === "number" && Number.isFinite(revisionRaw) ? revisionRaw : null;
 
     if (revision != null) {
-      const needsRender = surface.revision !== revision;
+      const needsRender = surface.revision !== revision || surface.themeKey !== themeKey;
       if (needsRender) {
         const model = this.store.getChartModel(chartId);
         if (!model) throw new Error(`Chart not found: ${chartId}`);
@@ -203,6 +220,7 @@ export class ChartRendererAdapter implements ChartRenderer {
         surface.modelRef = model;
         surface.dataRef = liveData;
         surface.themeSig = themeSignature(themePatch);
+        surface.themeKey = themeKey;
       }
     } else {
       // Back-compat: for stores without revisions, use identity/small signatures so charts
@@ -217,7 +235,8 @@ export class ChartRendererAdapter implements ChartRenderer {
         Number.isNaN(surface.revision) ||
         surface.modelRef !== model ||
         surface.dataRef !== liveData ||
-        surface.themeSig !== sig;
+        surface.themeSig !== sig ||
+        surface.themeKey !== themeKey;
 
       if (needsRender) {
         const data = resolveChartData(model, liveData);
@@ -236,6 +255,7 @@ export class ChartRendererAdapter implements ChartRenderer {
         surface.modelRef = model;
         surface.dataRef = liveData;
         surface.themeSig = sig;
+        surface.themeKey = themeKey;
       }
     }
     ctx.drawImage(surface.canvas as any, rect.x, rect.y, rect.width, rect.height);
@@ -276,12 +296,22 @@ export class ChartRendererAdapter implements ChartRenderer {
         existing.modelRef = null;
         existing.dataRef = undefined;
         existing.themeSig = "";
+        existing.themeKey = "";
       }
       return existing;
     }
 
     const created = createCanvasSurface(width, height);
-    const surface: Surface = { ...created, width, height, revision: Number.NaN, modelRef: null, dataRef: undefined, themeSig: "" };
+    const surface: Surface = {
+      ...created,
+      width,
+      height,
+      revision: Number.NaN,
+      modelRef: null,
+      dataRef: undefined,
+      themeSig: "",
+      themeKey: "",
+    };
     this.surfaces.set(chartId, surface);
     return surface;
   }

@@ -3746,8 +3746,17 @@ export class SpreadsheetApp {
       const renderContent = renderMode === "full";
       this.pendingRenderMode = "full";
       this.renderGrid();
-      if (this.useCanvasCharts && renderContent) {
-        this.invalidateCanvasChartsForActiveSheet();
+      if (this.useCanvasCharts && this.dirtyChartIds.size > 0) {
+        // In canvas-charts mode, we rely on ChartCanvasStoreAdapter revisions to avoid
+        // regenerating chart surfaces on every scroll. However, SpreadsheetApp also
+        // suppresses the debounced chart-content refresh when a full refresh is already
+        // pending (see `scheduleChartContentRefresh`). Flush dirty chart invalidations
+        // here so the pending refresh still updates visible charts without forcing a
+        // full invalidation of every chart on the sheet.
+        for (const id of this.dirtyChartIds) {
+          this.chartCanvasStoreAdapter.invalidate(id);
+        }
+        this.dirtyChartIds.clear();
       }
       this.renderDrawings();
       if (!this.useCanvasCharts) {
