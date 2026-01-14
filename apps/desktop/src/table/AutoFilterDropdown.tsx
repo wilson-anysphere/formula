@@ -84,6 +84,12 @@ export function AutoFilterDropdown({
     });
   };
 
+  const applySelection = () => {
+    // Preserve the current display order (and avoid returning stale values that are not in the list).
+    onApply(values.filter((v) => selected.has(v)));
+    onClose();
+  };
+
   return (
     <div className="formula-table-filter-dropdown">
       <div className="formula-table-filter-dropdown__search">
@@ -93,6 +99,12 @@ export function AutoFilterDropdown({
           aria-label={t("filterDropdown.search.ariaLabel")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              applySelection();
+            }
+          }}
           autoFocus
         />
       </div>
@@ -129,11 +141,7 @@ export function AutoFilterDropdown({
         <button
           className="formula-sort-filter__button formula-sort-filter__button--primary"
           type="button"
-          onClick={() => {
-            // Preserve the current display order (and avoid returning stale values that are not in the list).
-            onApply(values.filter((v) => selected.has(v)));
-            onClose();
-          }}
+          onClick={applySelection}
         >
           {t("filterDropdown.apply")}
         </button>
