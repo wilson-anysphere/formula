@@ -7,6 +7,14 @@ description = "WASM bindings for the Formula spreadsheet engine."
 repository = "https://github.com/wilson-anysphere/formula"
 publish = false
 
+[package.metadata.wasm-pack.profile.release]
+# wasm-opt validates WebAssembly modules with a conservative feature set by default.
+# Our Rust/LLVM toolchain emits bulk-memory ops (`memory.copy`/`memory.fill`) and
+# non-trapping float-to-int conversions (`i32.trunc_sat_*`) for performance. Enable
+# those features so `pnpm build:wasm` works in environments where wasm-pack vendors
+# wasm-opt (Binaryen) without `--all-features`.
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
