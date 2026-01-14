@@ -23,40 +23,59 @@ fn strip_leading_equals(formula: &str) -> &str {
 }
 
 fn parse_kind(val: &str) -> Option<DataValidationKind> {
-    match val {
-        "whole" => Some(DataValidationKind::Whole),
-        "decimal" => Some(DataValidationKind::Decimal),
-        "list" => Some(DataValidationKind::List),
-        "date" => Some(DataValidationKind::Date),
-        "time" => Some(DataValidationKind::Time),
-        "textLength" => Some(DataValidationKind::TextLength),
-        "custom" => Some(DataValidationKind::Custom),
+    if val.eq_ignore_ascii_case("whole") {
+        Some(DataValidationKind::Whole)
+    } else if val.eq_ignore_ascii_case("decimal") {
+        Some(DataValidationKind::Decimal)
+    } else if val.eq_ignore_ascii_case("list") {
+        Some(DataValidationKind::List)
+    } else if val.eq_ignore_ascii_case("date") {
+        Some(DataValidationKind::Date)
+    } else if val.eq_ignore_ascii_case("time") {
+        Some(DataValidationKind::Time)
+    } else if val.eq_ignore_ascii_case("textLength") {
+        Some(DataValidationKind::TextLength)
+    } else if val.eq_ignore_ascii_case("custom") {
+        Some(DataValidationKind::Custom)
+    } else if val.eq_ignore_ascii_case("none") {
         // Some producers use `none` for a disabled validation; ignore it.
-        "none" => None,
-        _ => None,
+        None
+    } else {
+        None
     }
 }
 
 fn parse_operator(val: &str) -> Option<DataValidationOperator> {
-    match val {
-        "between" => Some(DataValidationOperator::Between),
-        "notBetween" => Some(DataValidationOperator::NotBetween),
-        "equal" => Some(DataValidationOperator::Equal),
-        "notEqual" => Some(DataValidationOperator::NotEqual),
-        "greaterThan" => Some(DataValidationOperator::GreaterThan),
-        "greaterThanOrEqual" => Some(DataValidationOperator::GreaterThanOrEqual),
-        "lessThan" => Some(DataValidationOperator::LessThan),
-        "lessThanOrEqual" => Some(DataValidationOperator::LessThanOrEqual),
-        _ => None,
+    if val.eq_ignore_ascii_case("between") {
+        Some(DataValidationOperator::Between)
+    } else if val.eq_ignore_ascii_case("notBetween") {
+        Some(DataValidationOperator::NotBetween)
+    } else if val.eq_ignore_ascii_case("equal") {
+        Some(DataValidationOperator::Equal)
+    } else if val.eq_ignore_ascii_case("notEqual") {
+        Some(DataValidationOperator::NotEqual)
+    } else if val.eq_ignore_ascii_case("greaterThan") {
+        Some(DataValidationOperator::GreaterThan)
+    } else if val.eq_ignore_ascii_case("greaterThanOrEqual") {
+        Some(DataValidationOperator::GreaterThanOrEqual)
+    } else if val.eq_ignore_ascii_case("lessThan") {
+        Some(DataValidationOperator::LessThan)
+    } else if val.eq_ignore_ascii_case("lessThanOrEqual") {
+        Some(DataValidationOperator::LessThanOrEqual)
+    } else {
+        None
     }
 }
 
 fn parse_error_style(val: &str) -> Option<DataValidationErrorStyle> {
-    match val {
-        "stop" => Some(DataValidationErrorStyle::Stop),
-        "warning" => Some(DataValidationErrorStyle::Warning),
-        "information" => Some(DataValidationErrorStyle::Information),
-        _ => None,
+    if val.eq_ignore_ascii_case("stop") {
+        Some(DataValidationErrorStyle::Stop)
+    } else if val.eq_ignore_ascii_case("warning") {
+        Some(DataValidationErrorStyle::Warning)
+    } else if val.eq_ignore_ascii_case("information") {
+        Some(DataValidationErrorStyle::Information)
+    } else {
+        None
     }
 }
 
@@ -94,7 +113,7 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                 let mut show_input_message = false;
                 let mut show_error_message = false;
                 // Model semantics: `show_drop_down=true` means show the in-cell dropdown arrow.
-                let mut show_drop_down = true;
+                let mut show_drop_down: Option<bool> = None;
                 let mut ranges: Vec<Range> = Vec::new();
 
                 let mut prompt_title: Option<String> = None;
@@ -106,16 +125,17 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
 
                 for attr in e.attributes() {
                     let attr = attr?;
+                    let key = crate::openxml::local_name(attr.key.as_ref());
                     let val = attr.unescape_value()?.into_owned();
-                    match attr.key.as_ref() {
-                        b"type" => kind = parse_kind(&val),
-                        b"operator" => operator = parse_operator(&val),
+                    match key {
+                        b"type" => kind = parse_kind(val.trim()),
+                        b"operator" => operator = parse_operator(val.trim()),
                         b"allowBlank" => allow_blank = parse_xml_bool(&val),
                         b"showInputMessage" => show_input_message = parse_xml_bool(&val),
                         b"showErrorMessage" => show_error_message = parse_xml_bool(&val),
                         b"showDropDown" => {
                             // OOXML `showDropDown` is inverted ("hide the dropdown").
-                            show_drop_down = !parse_xml_bool(&val)
+                            show_drop_down = Some(!parse_xml_bool(&val))
                         }
                         b"sqref" => {
                             ranges =
@@ -123,7 +143,7 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                         }
                         b"promptTitle" => prompt_title = Some(val),
                         b"prompt" => prompt = Some(val),
-                        b"errorStyle" => error_style = parse_error_style(&val),
+                        b"errorStyle" => error_style = parse_error_style(val.trim()),
                         b"errorTitle" => error_title = Some(val),
                         b"error" => error = Some(val),
                         _ => {}
@@ -134,6 +154,14 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                     // Skip unsupported/disabled validations (`type="none"` or unknown).
                     buf.clear();
                     continue;
+                };
+
+                // Only list validations have an in-cell dropdown affordance. When the OOXML
+                // attribute is omitted, Excel shows the arrow by default.
+                let show_drop_down = if kind == DataValidationKind::List {
+                    show_drop_down.unwrap_or(true)
+                } else {
+                    false
                 };
 
                 let input_message = if prompt_title.is_some() || prompt.is_some() {
@@ -179,7 +207,7 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                 let mut allow_blank = false;
                 let mut show_input_message = false;
                 let mut show_error_message = false;
-                let mut show_drop_down = true;
+                let mut show_drop_down: Option<bool> = None;
                 let mut ranges: Vec<Range> = Vec::new();
 
                 let mut prompt_title: Option<String> = None;
@@ -191,21 +219,22 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
 
                 for attr in e.attributes() {
                     let attr = attr?;
+                    let key = crate::openxml::local_name(attr.key.as_ref());
                     let val = attr.unescape_value()?.into_owned();
-                    match attr.key.as_ref() {
-                        b"type" => kind = parse_kind(&val),
-                        b"operator" => operator = parse_operator(&val),
+                    match key {
+                        b"type" => kind = parse_kind(val.trim()),
+                        b"operator" => operator = parse_operator(val.trim()),
                         b"allowBlank" => allow_blank = parse_xml_bool(&val),
                         b"showInputMessage" => show_input_message = parse_xml_bool(&val),
                         b"showErrorMessage" => show_error_message = parse_xml_bool(&val),
-                        b"showDropDown" => show_drop_down = !parse_xml_bool(&val),
+                        b"showDropDown" => show_drop_down = Some(!parse_xml_bool(&val)),
                         b"sqref" => {
                             ranges =
                                 parse_sqref(&val).map_err(|e| XlsxError::Invalid(e.to_string()))?
                         }
                         b"promptTitle" => prompt_title = Some(val),
                         b"prompt" => prompt = Some(val),
-                        b"errorStyle" => error_style = parse_error_style(&val),
+                        b"errorStyle" => error_style = parse_error_style(val.trim()),
                         b"errorTitle" => error_title = Some(val),
                         b"error" => error = Some(val),
                         _ => {}
@@ -215,6 +244,12 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                 let Some(kind) = kind else {
                     buf.clear();
                     continue;
+                };
+
+                let show_drop_down = if kind == DataValidationKind::List {
+                    show_drop_down.unwrap_or(true)
+                } else {
+                    false
                 };
 
                 let input_message = if prompt_title.is_some() || prompt.is_some() {
@@ -268,9 +303,8 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                 }
             }
             Event::Empty(e) if e.local_name().as_ref() == b"formula2" => {
-                if let Some(cur) = current.as_mut() {
-                    cur.validation.formula2 = Some(String::new());
-                }
+                drop(e);
+                // Treat `<formula2/>` as absent (matches streaming worksheet reader).
             }
             Event::Text(e) => {
                 let Some(target) = in_formula else {
@@ -330,7 +364,11 @@ pub(crate) fn read_data_validations_from_worksheet_xml(
                         strip_leading_equals(&cur.validation.formula1).to_string();
                     if let Some(f2) = cur.validation.formula2.as_deref() {
                         let normalized = strip_leading_equals(f2).to_string();
-                        cur.validation.formula2 = Some(normalized);
+                        if normalized.is_empty() {
+                            cur.validation.formula2 = None;
+                        } else {
+                            cur.validation.formula2 = Some(normalized);
+                        }
                     }
                     out.push(ParsedDataValidation {
                         ranges: cur.ranges,

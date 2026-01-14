@@ -1779,7 +1779,11 @@ fn normalize_data_validation(
 ) -> DataValidationKey {
     let ranges = normalize_dv_ranges(ranges);
     let formula1 = normalize_dv_formula(&validation.formula1);
-    let formula2 = validation.formula2.as_deref().map(normalize_dv_formula);
+    let formula2 = validation
+        .formula2
+        .as_deref()
+        .map(normalize_dv_formula)
+        .filter(|f| !f.is_empty());
     let show_drop_down = if validation.kind == DataValidationKind::List {
         validation.show_drop_down
     } else {
