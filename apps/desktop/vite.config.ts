@@ -251,6 +251,9 @@ export default defineConfig({
       // `*.vitest.ts` entrypoints.
       "src/grid/shared/**/*.test.ts",
       "src/grid/auditing-overlays/__tests__/**/*.test.ts",
+      // Small sheet/address helpers also use `.test.ts`; include them so they run under the
+      // desktop-scoped Vitest config.
+      "src/sheet/**/*.test.ts",
       "src/layout/__tests__/**/*.test.ts",
       "src/ai/tools/**/*.test.ts",
       "src/ai/dlp/__tests__/**/*.test.ts",
