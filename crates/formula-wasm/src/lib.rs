@@ -110,7 +110,9 @@ fn js_err(message: impl ToString) -> JsValue {
 
 const OFFICE_CRYPTO_ERROR_PREFIX: &str = "OFFICE_CRYPTO_ERROR:";
 
-fn office_crypto_err(err: formula_office_crypto::OfficeCryptoError) -> JsValue {
+fn office_crypto_kind_and_message(
+    err: &formula_office_crypto::OfficeCryptoError,
+) -> (&'static str, String) {
     // The TS worker RPC surface currently transports errors as strings only. Encode Office
     // encryption errors as a tagged JSON payload so callers can distinguish common cases
     // programmatically (password required vs invalid password vs unsupported encryption).
@@ -140,11 +142,30 @@ fn office_crypto_err(err: formula_office_crypto::OfficeCryptoError) -> JsValue {
         }
         _ => err.to_string(),
     };
+    (kind, message)
+}
+
+fn office_crypto_err(err: formula_office_crypto::OfficeCryptoError) -> JsValue {
+    let (kind, message) = office_crypto_kind_and_message(&err);
     let payload = serde_json::json!({
         "kind": kind,
         "message": message,
     });
     JsValue::from_str(&format!("{OFFICE_CRYPTO_ERROR_PREFIX}{payload}"))
+}
+
+#[cfg(test)]
+mod office_crypto_err_tests {
+    use super::*;
+
+    #[test]
+    fn integrity_check_failed_is_invalid_password() {
+        let (kind, message) = office_crypto_kind_and_message(
+            &formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed,
+        );
+        assert_eq!(kind, "InvalidPassword");
+        assert_eq!(message, "invalid password");
+    }
 }
 
 fn js_value_to_object(value: &JsValue) -> Option<Object> {
