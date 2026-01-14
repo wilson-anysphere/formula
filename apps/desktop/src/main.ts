@@ -8944,14 +8944,6 @@ const ribbonCommandHandlersCtx = {
   },
 };
 
-// Register a minimal set of ribbon AutoFilter MVP commands so they can be invoked via keybindings
-// (Excel: Ctrl+Shift+L) and the command palette.
-commandRegistry.registerBuiltinCommand(
-  "data.sortFilter.filter",
-  "Filter",
-  () => ribbonCommandHandlersCtx.toggleAutoFilter?.(),
-  { category: t("commandCategory.data"), icon: null, keywords: ["filter", "auto filter"] },
-);
 // --- Ribbon: AutoFilter MVP ----------------------------------------------------
 //
 // Excel's AutoFilter is normally driven by header dropdowns inside the grid. For an MVP we wire the
@@ -9449,9 +9441,6 @@ function handleRibbonCommand(commandId: string): void {
     case "home.cells.format":
       // This command is a dropdown with menu items; the top-level command is not expected
       // to fire when the menu is present. Keep this as a fallback.
-      return;
-    case "home.cells.format.organizeSheets":
-      openOrganizeSheets();
       return;
     default:
       if (commandId.startsWith("file.")) {
