@@ -88,8 +88,10 @@ test(
       if (duration.includes("var(")) return; // older jsdom may not resolve custom properties here
       const parts = duration.split(",").map((p) => p.trim());
       for (const part of parts) {
+        const numeric = Number.parseFloat(part);
+        assert.ok(Number.isFinite(numeric), `Expected ${label} transition-duration to be numeric (got: ${duration})`);
         assert.ok(
-          part === "0s" || part === "0ms",
+          numeric === 0,
           `Expected ${label} transition-duration to collapse to 0ms under reduced motion (got: ${duration})`,
         );
       }
