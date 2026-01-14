@@ -14417,6 +14417,144 @@ pub fn build_shared_formula_ptgarea_row_oob_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+fn build_shared_formula_ptgref_col_oob_shrfmla_only_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet = build_shared_formula_ptgref_col_oob_shrfmla_only_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedRefColOOB_ShrFmlaOnly", &sheet, 1252)
+}
+
+fn build_shared_formula_ptgarea_col_oob_shrfmla_only_workbook_stream() -> Vec<u8> {
+    let xf_cell = 16u16;
+    let sheet = build_shared_formula_ptgarea_col_oob_shrfmla_only_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedAreaColOOB_ShrFmlaOnly", &sheet, 1252)
+}
+
+fn build_shared_formula_ptgref_col_oob_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula definition stored only in SHRFMLA for range A1:B1 (no FORMULA records).
+    //
+    // The shared rgce uses a PtgRef with the col-relative flag set and an in-bounds column index at
+    // the BIFF8 14-bit max (0x3FFF => XFD). Filling right by 1 column produces an out-of-bounds
+    // reference (XFE), which Excel represents as `#REF!`.
+    //
+    // Expected decoded formulas:
+    // - A1: `XFD1+1`
+    // - B1: `#REF!+1`
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 3) => A1:C1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col (A)
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1 (A..C)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide one numeric cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 2, xf_cell, 1.0)); // C1
+
+    // Shared formula rgce: XFD1 + 1, encoded using PtgRef with row/col-relative flags.
+    let rgce_shared: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x24); // PtgRef
+        v.extend_from_slice(&0u16.to_le_bytes()); // row = 0 (row 1)
+        let col_field = pack_biff8_col_flags(0x3FFF, true, true); // col=XFD + rowRel + colRel
+        v.extend_from_slice(&col_field.to_le_bytes());
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla_record(0, 0, 0, 1, &rgce_shared));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_formula_ptgarea_col_oob_shrfmla_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula definition stored only in SHRFMLA for range A1:B1 (no FORMULA records).
+    //
+    // The shared rgce uses a PtgArea with col-relative flags set and an endpoint at the BIFF8
+    // 14-bit max column (0x3FFF => XFD). Filling right by 1 column shifts the second endpoint to
+    // XFE, which is out-of-bounds and should materialize as `#REF!`.
+    //
+    // Expected decoded formulas:
+    // - A1: `SUM(XFC1:XFD1)+1`
+    // - B1: `SUM(#REF!)+1`
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 3) => A1:C1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col (A)
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1 (A..C)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide one numeric cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 2, xf_cell, 1.0)); // C1
+
+    // Shared formula rgce: SUM(XFC1:XFD1) + 1, encoded using PtgArea with row/col-relative flags.
+    let col_first = pack_biff8_col_flags(0x3FFE, true, true); // XFC
+    let col_last = pack_biff8_col_flags(0x3FFF, true, true); // XFD
+    let rgce_shared: Vec<u8> = {
+        let mut v = Vec::new();
+        v.extend_from_slice(&ptg_area(0, 0, col_first, col_last));
+        v.push(0x22); // PtgFuncVar
+        v.push(1); // argc=1
+        v.extend_from_slice(&0x0004u16.to_le_bytes()); // SUM
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla_record(0, 0, 0, 1, &rgce_shared));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+/// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose `PtgRef` shifts
+/// out-of-bounds in the column direction during materialization.
+pub fn build_shared_formula_ptgref_col_oob_shrfmla_only_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgref_col_oob_shrfmla_only_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a SHRFMLA-only shared formula whose `PtgArea` shifts
+/// out-of-bounds in the column direction during materialization.
+pub fn build_shared_formula_ptgarea_col_oob_shrfmla_only_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_ptgarea_col_oob_shrfmla_only_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture where a sheet name is invalid and will be sanitized by the
 /// importer, and a **shared formula** (SHRFMLA + PtgExp) references a *sheet-scoped* defined name
 /// via `PtgName`.
