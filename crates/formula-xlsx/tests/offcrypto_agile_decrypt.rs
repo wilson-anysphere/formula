@@ -75,7 +75,20 @@ fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
 
 fn extract_stream_bytes(cfb_bytes: &[u8], stream_name: &str) -> Vec<u8> {
     let mut ole = CompoundFile::open(Cursor::new(cfb_bytes)).expect("open cfb");
-    let mut stream = ole.open_stream(stream_name).expect("open stream");
+    // `cfb` stream names can be addressed with or without a leading `/` depending on context.
+    // Be tolerant so these tests work with both shapes (and match Formula's best-effort stream
+    // resolution in production code).
+    let mut stream = match ole.open_stream(stream_name) {
+        Ok(stream) => stream,
+        Err(_) => {
+            let alternate = if let Some(name) = stream_name.strip_prefix('/') {
+                name.to_string()
+            } else {
+                format!("/{stream_name}")
+            };
+            ole.open_stream(&alternate).expect("open stream")
+        }
+    };
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).expect("read stream");
     buf
