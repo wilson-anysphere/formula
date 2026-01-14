@@ -855,8 +855,6 @@ export class DrawingOverlay {
         }
 
         if (obj.kind.type === "image") {
-          if (screenRectScratch.width <= 0 || screenRectScratch.height <= 0) continue;
-
           const imageId = obj.kind.imageId;
           const entry = this.images.get(imageId);
 
