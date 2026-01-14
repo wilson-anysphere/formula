@@ -34,9 +34,13 @@ function clampCursor(input: string, cursorPosition: number): number {
   return cursorPosition;
 }
 
-function toAsciiUpperCase(str: string): string {
-  // Mirror Rust's `to_ascii_uppercase` to keep comparisons stable for non-ASCII identifiers.
-  return str.replace(/[a-z]/g, (ch) => ch.toUpperCase());
+function casefoldIdent(ident: string): string {
+  // Mirror Rust's locale behavior (`casefold_ident` / `casefold`):
+  // - ASCII identifiers: ASCII uppercase (Excel-style case-insensitive)
+  // - Non-ASCII identifiers: Unicode-aware uppercasing (`ä` -> `Ä`, `ß` -> `SS`, ...)
+  //
+  // JS `toUpperCase()` performs Unicode uppercasing and is stable enough for our use here.
+  return String(ident ?? "").toUpperCase();
 }
 
 type FunctionTranslationMap = Map<string, string>;
@@ -48,8 +52,8 @@ function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationMap {
     if (!line || line.startsWith("#")) continue;
     const [canonical, localized] = line.split("\t");
     if (!canonical || !localized) continue;
-    const canonUpper = toAsciiUpperCase(canonical.trim());
-    const locUpper = toAsciiUpperCase(localized.trim());
+    const canonUpper = casefoldIdent(canonical.trim());
+    const locUpper = casefoldIdent(localized.trim());
     // Only store translations that differ; identity entries can fall back to `to_ascii_uppercase`.
     if (canonUpper && locUpper && canonUpper !== locUpper) {
       map.set(locUpper, canonUpper);
@@ -89,13 +93,13 @@ function canonicalizeFunctionNameForLocale(name: string, localeId: string): stri
   if (!raw) return raw;
 
   const localeMap = FUNCTION_TRANSLATIONS_BY_LOCALE[localeId];
-  if (!localeMap) return toAsciiUpperCase(raw);
+  if (!localeMap) return casefoldIdent(raw);
 
   // Mirror `formula_engine::locale::registry::FormulaLocale::canonical_function_name`.
   const PREFIX = "_xlfn.";
   const hasPrefix = raw.length >= PREFIX.length && raw.slice(0, PREFIX.length).toLowerCase() === PREFIX;
   const base = hasPrefix ? raw.slice(PREFIX.length) : raw;
-  const upper = toAsciiUpperCase(base);
+  const upper = casefoldIdent(base);
   const mapped = localeMap.get(upper) ?? upper;
   return hasPrefix ? `${PREFIX}${mapped}` : mapped;
 }

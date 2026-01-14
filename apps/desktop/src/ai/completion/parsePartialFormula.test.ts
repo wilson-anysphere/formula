@@ -72,6 +72,31 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     expect(result.expectingRange).toBe(true);
   });
 
+  it("canonicalizes localized function names case-insensitively (zählenwenn -> COUNTIF)", async () => {
+    setLocale("de-DE");
+
+    const engine = {
+      parseFormulaPartial: async () => {
+        // Intentionally lowercase to ensure we match Rust's Unicode-aware case folding.
+        return { context: { function: { name: "zählenwenn", argIndex: 0 } } };
+      },
+    };
+
+    const parser = createLocaleAwarePartialFormulaParser({
+      getEngineClient: () => engine,
+      timeoutMs: 1000,
+    });
+    const fnRegistry = new FunctionRegistry();
+
+    const input = "=zählenwenn(A";
+    const result = await parser(input, input.length, fnRegistry);
+
+    expect(result.isFormula).toBe(true);
+    expect(result.inFunctionCall).toBe(true);
+    expect(result.functionName).toBe("COUNTIF");
+    expect(result.expectingRange).toBe(true);
+  });
+
   it("canonicalizes localized function names even when falling back to the JS parser", async () => {
     setLocale("de-DE");
 
