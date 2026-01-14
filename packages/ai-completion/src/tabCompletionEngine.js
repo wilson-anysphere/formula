@@ -1372,6 +1372,18 @@ const SMALL_K_ENUM_1_2_3 = [
   { replacement: "3", displayText: "3 (3rd smallest)", confidence: 0.64 },
 ];
 
+const ROW_COUNT_ENUM_1_2_3 = [
+  { replacement: "1", displayText: "1 (1 row)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (2 rows)", confidence: 0.65 },
+  { replacement: "3", displayText: "3 (3 rows)", confidence: 0.64 },
+];
+
+const COLUMN_COUNT_ENUM_1_2_3 = [
+  { replacement: "1", displayText: "1 (1 column)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (2 columns)", confidence: 0.65 },
+  { replacement: "3", displayText: "3 (3 columns)", confidence: 0.64 },
+];
+
 /**
  * Function-specific enumerations for commonly misunderstood "flag" arguments.
  * These are curated because the function catalog only carries coarse arg types.
@@ -1461,6 +1473,32 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "1", displayText: "1 (drop first column(s))", confidence: 0.6 },
       { replacement: "-1", displayText: "-1 (drop last column(s))", confidence: 0.59 },
     ],
+  },
+  EXPAND: {
+    // rows
+    1: ROW_COUNT_ENUM_1_2_3,
+    // columns
+    2: COLUMN_COUNT_ENUM_1_2_3,
+  },
+  MAKEARRAY: {
+    // rows
+    0: ROW_COUNT_ENUM_1_2_3,
+    // columns
+    1: COLUMN_COUNT_ENUM_1_2_3,
+  },
+  SEQUENCE: {
+    // rows
+    0: ROW_COUNT_ENUM_1_2_3,
+    // columns
+    1: COLUMN_COUNT_ENUM_1_2_3,
+  },
+  WRAPROWS: {
+    // wrap_count (output columns)
+    1: COLUMN_COUNT_ENUM_1_2_3,
+  },
+  WRAPCOLS: {
+    // wrap_count (output rows)
+    1: ROW_COUNT_ENUM_1_2_3,
   },
   CHOOSE: {
     // index_num
@@ -1961,6 +1999,10 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     ],
   },
   RANDARRAY: {
+    // rows
+    0: ROW_COUNT_ENUM_1_2_3,
+    // columns
+    1: COLUMN_COUNT_ENUM_1_2_3,
     // whole_number
     4: [
       { replacement: "TRUE", displayText: "TRUE (whole numbers)", confidence: 0.66 },

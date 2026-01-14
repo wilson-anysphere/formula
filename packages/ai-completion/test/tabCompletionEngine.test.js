@@ -2839,6 +2839,44 @@ test("SORTBY repeating sort_order suggests 1 and -1", async () => {
   );
 });
 
+test("Positive count args suggest 1, 2, 3 (no 0)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const cases = [
+    { name: "SEQUENCE rows", currentInput: "=SEQUENCE(" },
+    { name: "SEQUENCE columns", currentInput: "=SEQUENCE(5, " },
+    { name: "MAKEARRAY rows", currentInput: "=MAKEARRAY(" },
+    { name: "MAKEARRAY columns", currentInput: "=MAKEARRAY(5, " },
+    { name: "RANDARRAY rows", currentInput: "=RANDARRAY(" },
+    { name: "RANDARRAY columns", currentInput: "=RANDARRAY(5, " },
+    { name: "EXPAND rows", currentInput: "=EXPAND(A1:A10, " },
+    { name: "EXPAND columns", currentInput: "=EXPAND(A1:A10, 5, " },
+    { name: "WRAPROWS wrap_count", currentInput: "=WRAPROWS(A1:A10, " },
+    { name: "WRAPCOLS wrap_count", currentInput: "=WRAPCOLS(A1:A10, " },
+  ];
+
+  for (const { name, currentInput } of cases) {
+    const suggestions = await engine.getSuggestions({
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    });
+
+    for (const v of ["1", "2", "3"]) {
+      assert.ok(
+        suggestions.some((s) => s.text === `${currentInput}${v}`),
+        `Expected ${name} to suggest ${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+      );
+    }
+
+    assert.ok(
+      !suggestions.some((s) => s.text === `${currentInput}0`),
+      `Did not expect ${name} to suggest 0, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("TAKE rows suggests 1 and -1", async () => {
   const engine = new TabCompletionEngine();
 
