@@ -258,6 +258,11 @@ struct Sheet {
     cells: HashMap<CellAddr, Cell>,
     tables: Vec<Table>,
     names: HashMap<String, DefinedName>,
+    /// Optional default style id for the entire worksheet.
+    ///
+    /// This is the lowest-precedence style layer in Excel's formatting chain:
+    /// sheet < col < row < (range-run) < cell.
+    default_style_id: Option<u32>,
     /// Logical row count for the worksheet grid.
     ///
     /// Defaults to Excel's row limit, but can grow beyond Excel to support very large sheets. The
@@ -279,6 +284,7 @@ impl Default for Sheet {
             cells: HashMap::new(),
             tables: Vec::new(),
             names: HashMap::new(),
+            default_style_id: None,
             // Default to Excel-compatible sheet bounds.
             row_count: EXCEL_MAX_ROWS,
             col_count: EXCEL_MAX_COLS,
@@ -408,7 +414,6 @@ impl Workbook {
     fn sheet_ids_in_order(&self) -> &[SheetId] {
         &self.sheet_order
     }
-
     #[cfg(test)]
     fn set_sheet_order(&mut self, new_order: Vec<SheetId>) {
         // Keep invariants explicit: sheet order is a permutation of the currently-live sheets.
@@ -1042,6 +1047,15 @@ impl Engine {
         }
     }
 
+    /// Set the default style id for an entire worksheet.
+    pub fn set_sheet_default_style_id(&mut self, sheet: &str, style_id: Option<u32>) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        let Some(sheet_state) = self.workbook.sheets.get_mut(sheet_id) else {
+            return;
+        };
+        sheet_state.default_style_id = style_id;
+    }
+
     /// Set workbook file metadata (directory + filename).
     ///
     /// This is used by worksheet/workbook information functions like `CELL("filename")` and
@@ -1116,6 +1130,7 @@ impl Engine {
             sheet_state.cells.clear();
             sheet_state.tables.clear();
             sheet_state.names.clear();
+            sheet_state.default_style_id = None;
             sheet_state.row_properties.clear();
             sheet_state.col_properties.clear();
         }
@@ -8820,6 +8835,7 @@ struct Snapshot {
     sheet_names_by_id: Vec<Option<String>>,
     sheet_order: Vec<SheetId>,
     sheet_dimensions: Vec<(u32, u32)>,
+    sheet_default_style_ids: Vec<Option<u32>>,
     values: HashMap<CellKey, Value>,
     phonetics: HashMap<CellKey, String>,
     style_ids: HashMap<CellKey, u32>,
@@ -8870,6 +8886,18 @@ impl Snapshot {
                     (s.row_count, s.col_count)
                 } else {
                     (0, 0)
+                }
+            })
+            .collect();
+        let sheet_default_style_ids = workbook
+            .sheets
+            .iter()
+            .enumerate()
+            .map(|(sheet_id, s)| {
+                if workbook.sheet_exists(sheet_id) {
+                    s.default_style_id
+                } else {
+                    None
                 }
             })
             .collect();
@@ -8998,6 +9026,7 @@ impl Snapshot {
             workbook_directory,
             workbook_filename,
             sheet_dimensions,
+            sheet_default_style_ids,
             values,
             phonetics,
             style_ids,
@@ -9122,6 +9151,16 @@ impl crate::eval::ValueResolver for Snapshot {
 
     fn style_table(&self) -> Option<&StyleTable> {
         Some(&self.styles)
+    }
+
+    fn sheet_default_style_id(&self, sheet_id: usize) -> Option<u32> {
+        if !self.sheet_exists(sheet_id) {
+            return None;
+        }
+        self.sheet_default_style_ids
+            .get(sheet_id)
+            .copied()
+            .flatten()
     }
 
     fn cell_style_id(&self, sheet_id: usize, addr: CellAddr) -> u32 {

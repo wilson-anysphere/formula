@@ -240,6 +240,11 @@ pub trait ValueResolver {
         None
     }
 
+    /// Return the default style id for an entire worksheet, if present.
+    fn sheet_default_style_id(&self, _sheet_id: usize) -> Option<u32> {
+        None
+    }
+
     /// Return the style id for a specific cell.
     ///
     /// Style id `0` is always the default (empty) style.
@@ -1862,6 +1867,13 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn style_table(&self) -> Option<&formula_model::StyleTable> {
         self.resolver.style_table()
+    }
+
+    fn sheet_default_style_id(&self, sheet_id: &FnSheetId) -> Option<u32> {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.sheet_default_style_id(*id),
+            FnSheetId::External(_) => None,
+        }
     }
 
     fn cell_style_id(&self, sheet_id: &FnSheetId, addr: CellAddr) -> u32 {

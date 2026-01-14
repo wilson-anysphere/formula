@@ -185,6 +185,10 @@ fn effective_style_id(ctx: &dyn FunctionContext, sheet_id: &SheetId, addr: CellA
         }
     }
 
+    if let Some(style_id) = ctx.sheet_default_style_id(sheet_id) {
+        return style_id;
+    }
+
     0
 }
 
@@ -378,19 +382,36 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
         CellInfoType::Protect => {
             // `CELL("protect")` consults cell protection metadata but should avoid recording an
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
-            let _cell_ref = record_explicit_cell(ctx);
+            let cell_ref = record_explicit_cell(ctx);
 
-            // Excel's default cell style is locked, so return 1 ("locked").
-            Value::Number(1.0)
+            // Excel returns 1 for locked cells, 0 for unlocked.
+            let locked = ctx
+                .style_table()
+                .and_then(|styles| styles.get(effective_style_id(ctx, &cell_ref.sheet_id, addr)))
+                .and_then(|style| style.protection.as_ref())
+                .map(|protection| protection.locked)
+                .unwrap_or(true);
+            Value::Number(if locked { 1.0 } else { 0.0 })
         }
         CellInfoType::Prefix => {
             // `CELL("prefix")` consults alignment/prefix metadata but should avoid recording an
             // implicit self-reference when `reference` is omitted (to prevent dynamic-deps cycles).
-            let _cell_ref = record_explicit_cell(ctx);
+            let cell_ref = record_explicit_cell(ctx);
+            let style = ctx
+                .style_table()
+                .and_then(|styles| styles.get(effective_style_id(ctx, &cell_ref.sheet_id, addr)));
 
-            // This engine does not currently track per-cell alignment/prefix formatting, so return
-            // the empty string.
-            Value::Text(String::new())
+            let prefix = match style
+                .and_then(|style| style.alignment.as_ref())
+                .and_then(|align| align.horizontal)
+            {
+                Some(formula_model::HorizontalAlignment::Left) => "'",
+                Some(formula_model::HorizontalAlignment::Center) => "^",
+                Some(formula_model::HorizontalAlignment::Right) => "\"",
+                Some(formula_model::HorizontalAlignment::Fill) => "\\",
+                _ => "",
+            };
+            Value::Text(prefix.to_string())
         }
         CellInfoType::Filename => {
             // Excel returns "" until the workbook has a known filename (i.e. it has been saved).

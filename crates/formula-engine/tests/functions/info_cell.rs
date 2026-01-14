@@ -183,6 +183,48 @@ fn cell_width_reflects_column_width_metadata() {
 }
 
 #[test]
+fn cell_sheet_default_style_affects_format_prefix_and_protect() {
+    use formula_engine::Engine;
+    use formula_model::{Alignment, HorizontalAlignment, Protection};
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+
+    let sheet_style = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        alignment: Some(Alignment {
+            horizontal: Some(HorizontalAlignment::Left),
+            ..Default::default()
+        }),
+        protection: Some(Protection {
+            locked: false,
+            hidden: false,
+        }),
+        ..Default::default()
+    });
+    engine.set_sheet_default_style_id("Sheet1", Some(sheet_style));
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"prefix\",A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"protect\",A1)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("F2".to_string())
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Text("'".to_string()));
+    assert_number(&engine.get_cell_value("Sheet1", "B3"), 0.0);
+}
+
+#[test]
 fn info_recalc_defaults_to_manual_and_unknown_keys() {
     let mut sheet = TestSheet::new();
 

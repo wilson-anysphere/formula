@@ -304,6 +304,11 @@ pub trait FunctionContext {
         None
     }
 
+    /// Return the default style id for an entire worksheet, if present.
+    fn sheet_default_style_id(&self, _sheet_id: &SheetId) -> Option<u32> {
+        None
+    }
+
     /// Return the style id for a specific cell.
     ///
     /// Style id `0` is always the default (empty) style.
