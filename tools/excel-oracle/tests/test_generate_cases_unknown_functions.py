@@ -35,9 +35,10 @@ class GenerateCasesUnknownFunctionValidationTests(unittest.TestCase):
         # (=NO_SUCH_FUNCTION(1)), so validation must allow that.
         module._validate_against_function_catalog(payload)
 
-        # Inject a typo-like unknown function name; this should be rejected with a clear error.
-        bad_payload = dict(payload)
-        bad_payload["cases"] = list(payload.get("cases", [])) + [
+        # Inject a typo-like unknown function name in the *case formula*; this should be rejected
+        # with a clear error.
+        bad_payload_case = dict(payload)
+        bad_payload_case["cases"] = list(payload.get("cases", [])) + [
             {
                 "formula": "=SUMM(1,2)",
                 "outputCell": "C1",
@@ -48,7 +49,26 @@ class GenerateCasesUnknownFunctionValidationTests(unittest.TestCase):
         ]
 
         with self.assertRaises(SystemExit) as ctx:
-            module._validate_against_function_catalog(bad_payload)
+            module._validate_against_function_catalog(bad_payload_case)
+        msg = str(ctx.exception)
+        self.assertIn("not present in shared/functionCatalog.json", msg)
+        self.assertIn("SUMM", msg)
+
+        # Also reject unknown function names in *input cell formulas* (these do not affect
+        # coverage, but still must be validated so typos don't slip in).
+        bad_payload_input = dict(payload)
+        bad_payload_input["cases"] = list(payload.get("cases", [])) + [
+            {
+                "formula": "=1+1",
+                "outputCell": "C1",
+                "inputs": [{"cell": "A1", "formula": "=SUMM(1,2)"}],
+                "tags": ["unit-test"],
+                "id": "unit_test_bad_input_formula",
+            }
+        ]
+
+        with self.assertRaises(SystemExit) as ctx:
+            module._validate_against_function_catalog(bad_payload_input)
         msg = str(ctx.exception)
         self.assertIn("not present in shared/functionCatalog.json", msg)
         self.assertIn("SUMM", msg)
@@ -56,4 +76,3 @@ class GenerateCasesUnknownFunctionValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

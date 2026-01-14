@@ -33,9 +33,10 @@ class GenerateCasesVolatileValidationTests(unittest.TestCase):
         payload = module.generate_cases()
         module._validate_against_function_catalog(payload)
 
-        # Inject a volatile function formula; this should be rejected unless allow_volatile=True.
-        bad_payload = dict(payload)
-        bad_payload["cases"] = list(payload.get("cases", [])) + [
+        # Inject a volatile function in the *case formula*; this should be rejected unless
+        # allow_volatile=True.
+        bad_payload_case = dict(payload)
+        bad_payload_case["cases"] = list(payload.get("cases", [])) + [
             {
                 "formula": "=RAND()",
                 "outputCell": "C1",
@@ -46,15 +47,33 @@ class GenerateCasesVolatileValidationTests(unittest.TestCase):
         ]
 
         with self.assertRaises(SystemExit) as ctx:
-            module._validate_against_function_catalog(bad_payload)
+            module._validate_against_function_catalog(bad_payload_case)
         msg = str(ctx.exception)
         self.assertIn("must not include volatile functions", msg)
         self.assertIn("RAND", msg)
 
         # Explicit override should allow volatile functions.
-        module._validate_against_function_catalog(bad_payload, allow_volatile=True)
+        module._validate_against_function_catalog(bad_payload_case, allow_volatile=True)
+
+        # Also reject volatile functions in input cell formulas.
+        bad_payload_input = dict(payload)
+        bad_payload_input["cases"] = list(payload.get("cases", [])) + [
+            {
+                "formula": "=1+1",
+                "outputCell": "C1",
+                "inputs": [{"cell": "A1", "formula": "=RAND()"}],
+                "tags": ["unit-test"],
+                "id": "unit_test_volatile_input_case",
+            }
+        ]
+        with self.assertRaises(SystemExit) as ctx:
+            module._validate_against_function_catalog(bad_payload_input)
+        msg = str(ctx.exception)
+        self.assertIn("must not include volatile functions", msg)
+        self.assertIn("RAND", msg)
+
+        module._validate_against_function_catalog(bad_payload_input, allow_volatile=True)
 
 
 if __name__ == "__main__":
     unittest.main()
-
