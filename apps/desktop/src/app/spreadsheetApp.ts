@@ -15908,17 +15908,17 @@ export class SpreadsheetApp {
     const imageFiles = droppedFiles.filter((file) => isImageFile(file));
     if (imageFiles.length === 0) return;
 
+    const placeAt = this.pickCellAtClientPoint(e.clientX, e.clientY) ?? this.getActiveCell();
+
     if (this.isEditing()) return;
 
     if (this.isReadOnly()) {
-      const cell = this.selection.active;
       showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        { sheetId: this.sheetId, row: placeAt.row, col: placeAt.col, rejectionKind: "cell", rejectionReason: "permission" },
       ]);
       return;
     }
 
-    const placeAt = this.pickCellAtClientPoint(e.clientX, e.clientY) ?? this.getActiveCell();
     void Promise.resolve(this.insertPicturesFromFiles(imageFiles, { placeAt })).catch((err) => {
       // Avoid unhandled promise rejections in event handlers; show an error toast when possible.
       console.error("Failed to insert picture:", err);
