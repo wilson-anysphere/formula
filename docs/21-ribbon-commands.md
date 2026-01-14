@@ -142,7 +142,12 @@ const ribbonActions = createRibbonActions({
 mountRibbon(ribbonReactRoot, ribbonActions);
 ```
 
-Prefer:
+`Ribbon` invokes:
+
+- `onCommand(commandId)` for normal buttons + dropdown menu items
+- `onToggle(commandId, pressed)` for toggle buttons (the **next** pressed state)
+
+Prefer wiring those activations through `CommandRegistry`:
 
 - `commandRegistry.executeCommand(commandId)`
 
