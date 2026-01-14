@@ -1463,12 +1463,19 @@ export class ContextManager {
       }
     }
 
+    const shouldDropAllAttachmentData =
+      Boolean(dlp) && dlpStructuredDecision?.decision === DLP_DECISION.REDACT;
+
     const attachmentDataRaw = buildRangeAttachmentSectionText(
       { sheet: sheetForContext, attachments: params.attachments },
       {
         maxRows: 30,
         maxAttachments: 3,
-        sheetNameForOutput: shouldRedactStructuredSheetNameToken ? "[REDACTED]" : undefined,
+        // Under structured DLP redaction, treat attachment range references as disallowed metadata
+        // tokens too (they can contain non-heuristic secrets like sheet names). Ensure the
+        // attachment_data section cannot leak those identifiers even when the configured redactor
+        // is a no-op.
+        sheetNameForOutput: shouldDropAllAttachmentData || shouldRedactStructuredSheetNameToken ? "[REDACTED]" : undefined,
         signal,
       },
     );
@@ -1483,8 +1490,6 @@ export class ContextManager {
           policyAllowsRestrictedContent,
         })
       : params.attachments;
-    const shouldDropAllAttachmentData =
-      Boolean(dlp) && dlpStructuredDecision?.decision === DLP_DECISION.REDACT;
     const attachmentsForPromptRaw = compactAttachmentsForPrompt(attachmentsForPromptUnsafe, {
       dropAllData: shouldDropAllAttachmentData,
     });

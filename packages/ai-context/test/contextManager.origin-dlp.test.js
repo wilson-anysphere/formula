@@ -413,6 +413,45 @@ test("buildContext: structured DLP REDACT also redacts non-heuristic sheet names
   assert.doesNotMatch(JSON.stringify(out.retrieved), /TopSecret/);
 });
 
+test("buildContext: structured DLP REDACT also redacts sheet names in attachment_data range previews (no-op redactor)", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "TopSecretSheet",
+      values: [["Hello"], ["World"]],
+    },
+    query: "ignore",
+    attachments: [{ type: "range", reference: "A1:A2" }],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "TopSecretSheet",
+      policy: makePolicy(),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc-1",
+            sheetId: "TopSecretSheet",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  const attachmentDataSection =
+    out.promptContext.match(/## attachment_data\n([\s\S]*?)(?:\n\n## [^\n]+\n|$)/i)?.[1] ?? "";
+
+  assert.match(out.promptContext, /## attachment_data/i);
+  assert.doesNotMatch(attachmentDataSection, /TopSecretSheet/);
+  assert.match(attachmentDataSection, /\[REDACTED\]/);
+});
+
 test("buildContext: attachment-only sensitive patterns can trigger DLP REDACT (even when sheet window is public)", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,
