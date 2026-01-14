@@ -347,7 +347,9 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           if (cancelled) return;
           setManager(getExtensionHostManager());
         }
-      })();
+      })().catch(() => {
+        // Best-effort: avoid unhandled rejections from effect cleanup/bookkeeping.
+      });
       return () => {
         cancelled = true;
       };
@@ -422,7 +424,9 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           if (cancelled) return;
           setBridge(getExtensionPanelBridge());
         }
-      })();
+      })().catch(() => {
+        // Best-effort: avoid unhandled rejections from effect cleanup/bookkeeping.
+      });
       return () => {
         cancelled = true;
       };
@@ -471,7 +475,16 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     // Re-assert the sizing/flex class in case the mount implementation overwrote it.
     instance.container.classList.add("panel-body__container");
     body.appendChild(instance.container);
-    void instance.refresh?.();
+    try {
+      const result = instance.refresh?.();
+      if (typeof (result as any)?.then === "function") {
+        void Promise.resolve(result).catch(() => {
+          // Best-effort: panel refresh should not surface as an unhandled rejection.
+        });
+      }
+    } catch {
+      // Best-effort: ignore refresh failures.
+    }
   }
 
   function makeBodyFillAvailableHeight(body: HTMLDivElement) {
@@ -639,7 +652,9 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
             console.error("[formula][desktop] Failed to load marketplace panel:", err);
             container.textContent = `Failed to load marketplace: ${String((err as any)?.message ?? err)}`;
           }
-        })();
+        })().catch(() => {
+          // Best-effort: avoid unhandled rejections from panel bootstrapping.
+        });
 
         return {
           container,
@@ -677,7 +692,9 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
             console.error("[formula][desktop] Failed to load python panel:", err);
             container.textContent = `Failed to load Python: ${String((err as any)?.message ?? err)}`;
           }
-        })();
+        })().catch(() => {
+          // Best-effort: avoid unhandled rejections from panel bootstrapping.
+        });
 
         return {
           container,
@@ -731,7 +748,9 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
             console.error("[formula][desktop] Failed to load audit panel:", err);
             container.textContent = `Failed to load audit panel: ${String((err as any)?.message ?? err)}`;
           }
-        })();
+        })().catch(() => {
+          // Best-effort: avoid unhandled rejections from panel bootstrapping.
+        });
 
         return {
           container,

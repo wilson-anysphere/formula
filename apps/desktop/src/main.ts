@@ -10071,7 +10071,9 @@ sheetSwitcherEl.addEventListener("change", () => {
 
     app.activateSheet(next);
     restoreFocusAfterSheetNavigation();
-  })();
+  })().catch(() => {
+    // Best-effort: avoid unhandled rejections from the async sheet switcher handler.
+  });
 });
 
 async function hideTauriWindow(): Promise<void> {
