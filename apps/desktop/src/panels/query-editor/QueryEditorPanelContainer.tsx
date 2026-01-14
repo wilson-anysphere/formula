@@ -110,7 +110,8 @@ function loadSelectedQueryId(workbookId: string): string | null {
   if (!storage) return null;
   try {
     const raw = storage.getItem(selectedQueryKey(workbookId));
-    return typeof raw === "string" && raw.trim() ? raw : null;
+    const trimmed = typeof raw === "string" ? raw.trim() : "";
+    return trimmed ? trimmed : null;
   } catch {
     return null;
   }
@@ -120,7 +121,8 @@ function saveSelectedQueryId(workbookId: string, queryId: string): void {
   const storage = getLocalStorageOrNull();
   if (!storage) return;
   try {
-    storage.setItem(selectedQueryKey(workbookId), queryId);
+    const trimmed = String(queryId ?? "").trim();
+    storage.setItem(selectedQueryKey(workbookId), trimmed);
   } catch {
     // ignore
   }
@@ -342,9 +344,10 @@ export function QueryEditorPanelContainer(props: Props) {
       if (detail?.panelId !== PanelIds.QUERY_EDITOR) return;
       const requested = detail?.queryId;
       if (typeof requested !== "string" || !requested.trim()) return;
-      setActiveQueryId(requested);
-      saveSelectedQueryId(workbookId, requested);
-      const next = serviceRef.current?.getQuery?.(requested) ?? queries.find((q) => q.id === requested);
+      const queryId = requested.trim();
+      setActiveQueryId(queryId);
+      saveSelectedQueryId(workbookId, queryId);
+      const next = serviceRef.current?.getQuery?.(queryId) ?? queries.find((q) => q.id === queryId);
       if (next) setQuery(next);
     };
     window.addEventListener("formula:open-panel", handler as any);
