@@ -112,6 +112,46 @@ impl ExternalValueProvider for ProviderWithoutSheetOrder {
     }
 }
 
+#[derive(Default)]
+struct ProviderWithWorkbookSheetNamesOnly {
+    values: Mutex<HashMap<(String, CellAddr), Value>>,
+    sheet_names: Mutex<HashMap<String, Arc<[String]>>>,
+}
+
+impl ProviderWithWorkbookSheetNamesOnly {
+    fn set(&self, sheet: &str, addr: CellAddr, value: impl Into<Value>) {
+        self.values
+            .lock()
+            .expect("lock poisoned")
+            .insert((sheet.to_string(), addr), value.into());
+    }
+
+    fn set_sheet_names(&self, workbook: &str, names: impl Into<Vec<String>>) {
+        self.sheet_names
+            .lock()
+            .expect("lock poisoned")
+            .insert(workbook.to_string(), Arc::from(names.into()));
+    }
+}
+
+impl ExternalValueProvider for ProviderWithWorkbookSheetNamesOnly {
+    fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
+        self.values
+            .lock()
+            .expect("lock poisoned")
+            .get(&(sheet.to_string(), addr))
+            .cloned()
+    }
+
+    fn workbook_sheet_names(&self, workbook: &str) -> Option<Arc<[String]>> {
+        self.sheet_names
+            .lock()
+            .expect("lock poisoned")
+            .get(workbook)
+            .cloned()
+    }
+}
+
 #[test]
 fn external_cell_ref_resolves_via_provider() {
     let provider = Arc::new(TestExternalProvider::default());
@@ -1416,6 +1456,43 @@ fn sheet_returns_external_sheet_index_when_provider_exposes_sheet_order() {
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+}
+
+#[test]
+fn external_workbook_sheet_names_api_drives_sheet_and_span_expansion() {
+    // Ensure hosts can implement only `ExternalValueProvider::workbook_sheet_names` (Arc-based)
+    // and still get correct Excel semantics for:
+    // - SHEET(...) external sheet index mapping
+    // - external workbook 3D span expansion
+    let provider = Arc::new(ProviderWithWorkbookSheetNamesOnly::default());
+    provider.set_sheet_names(
+        "Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+    for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        provider.set(
+            &format!("[Book.xlsx]{sheet}"),
+            CellAddr { row: 0, col: 0 },
+            value,
+        );
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SHEET([Book.xlsx]Sheet2!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=SUM([Book.xlsx]Sheet1:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(6.0));
 }
 
 #[test]
