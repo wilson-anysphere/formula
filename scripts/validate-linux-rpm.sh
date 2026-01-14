@@ -338,9 +338,11 @@ validate_desktop_mime_associations_extracted() {
   local has_spreadsheet_mime=0
   local has_xlsx_mime=0
   local has_xlsx_integration=0
+  local has_parquet_mime=0
   local has_scheme_mime=0
   local bad_exec_count=0
   local required_scheme_mime="x-scheme-handler/formula"
+  local required_parquet_mime="application/vnd.apache.parquet"
 
   for desktop_file in "${desktop_files[@]}"; do
     local mime_line
@@ -353,6 +355,10 @@ validate_desktop_mime_associations_extracted() {
 
     local mime_value
     mime_value="$(printf '%s' "$mime_line" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//")"
+
+    if printf '%s' "$mime_value" | grep -Fqi "$required_parquet_mime"; then
+      has_parquet_mime=1
+    fi
 
     if printf '%s' "$mime_value" | grep -Fqi "$REQUIRED_XLSX_MIME"; then
       has_xlsx_mime=1
@@ -407,6 +413,26 @@ validate_desktop_mime_associations_extracted() {
   if [ "$has_xlsx_integration" -ne 1 ]; then
     err "No extracted .desktop MimeType= entry advertised xlsx support (file associations missing)."
     err "Expected MimeType= to include substring 'xlsx' or MIME '${REQUIRED_XLSX_MIME}'."
+    err "MimeType entries found:"
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#${tmpdir}/}"
+      local lines
+      lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" || true)"
+      if [ -n "$lines" ]; then
+        while IFS= read -r l; do
+          echo "  - ${rel}: ${l}" >&2
+        done <<<"$lines"
+      else
+        echo "  - ${rel}: (no MimeType= entry)" >&2
+      fi
+    done
+    return 1
+  fi
+
+  if [ "$has_parquet_mime" -ne 1 ]; then
+    err "No extracted .desktop MimeType= entry advertised Parquet support (file associations missing)."
+    err "Expected MimeType= to include '${required_parquet_mime}'."
     err "MimeType entries found:"
     for desktop_file in "${desktop_files[@]}"; do
       local rel
@@ -765,6 +791,7 @@ validate_container() {
   container_cmd+=$'required_xlsx_mime="'"${REQUIRED_XLSX_MIME}"$'"\n'
   container_cmd+=$'spreadsheet_mime_regex="'"${SPREADSHEET_MIME_REGEX}"$'"\n'
   container_cmd+=$'required_scheme_mime="x-scheme-handler/formula"\n'
+  container_cmd+=$'required_parquet_mime="application/vnd.apache.parquet"\n'
   container_cmd+=$'desktop_files=(/usr/share/applications/*.desktop)\n'
   container_cmd+=$'if [ ! -e "${desktop_files[0]}" ]; then\n'
   container_cmd+=$'  echo "No .desktop files found under /usr/share/applications after RPM install." >&2\n'
@@ -798,6 +825,7 @@ validate_container() {
   container_cmd+=$'has_spreadsheet_mime=0\n'
   container_cmd+=$'has_xlsx_mime=0\n'
   container_cmd+=$'has_xlsx_integration=0\n'
+  container_cmd+=$'has_parquet_mime=0\n'
   container_cmd+=$'has_scheme_mime=0\n'
   container_cmd+=$'bad_exec_count=0\n'
   container_cmd+=$'for f in "${desktop_files[@]}"; do\n'
@@ -807,6 +835,9 @@ validate_container() {
   container_cmd+=$'  fi\n'
   container_cmd+=$'  has_any_mimetype=1\n'
   container_cmd+=$'  mime_value="$(printf "%s" "${mime_line}" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//")"\n'
+  container_cmd+=$'  if printf "%s" "${mime_value}" | grep -Fqi "${required_parquet_mime}"; then\n'
+  container_cmd+=$'    has_parquet_mime=1\n'
+  container_cmd+=$'  fi\n'
   container_cmd+=$'  if printf "%s" "${mime_value}" | grep -Fqi "${required_xlsx_mime}"; then\n'
   container_cmd+=$'    has_xlsx_mime=1\n'
   container_cmd+=$'    has_xlsx_integration=1\n'
@@ -848,6 +879,19 @@ validate_container() {
   container_cmd+=$'if [ "${has_xlsx_integration}" -ne 1 ]; then\n'
   container_cmd+=$'  echo "No installed .desktop MimeType= entry advertised xlsx support (file associations missing)." >&2\n'
   container_cmd+=$'  echo "Expected MimeType= to include substring xlsx or MIME ${required_xlsx_mime}." >&2\n'
+  container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
+  container_cmd+=$'    lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" || true)"\n'
+  container_cmd+=$'    if [ -n "${lines}" ]; then\n'
+  container_cmd+=$'      while IFS= read -r l; do echo "  - ${f}: ${l}" >&2; done <<<"${lines}"\n'
+  container_cmd+=$'    else\n'
+  container_cmd+=$'      echo "  - ${f}: (no MimeType= entry)" >&2\n'
+  container_cmd+=$'    fi\n'
+  container_cmd+=$'  done\n'
+  container_cmd+=$'  exit 1\n'
+  container_cmd+=$'fi\n'
+  container_cmd+=$'if [ "${has_parquet_mime}" -ne 1 ]; then\n'
+  container_cmd+=$'  echo "No installed .desktop MimeType= entry advertised Parquet support (file associations missing)." >&2\n'
+  container_cmd+=$'  echo "Expected MimeType= to include ${required_parquet_mime}." >&2\n'
   container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
   container_cmd+=$'    lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" || true)"\n'
   container_cmd+=$'    if [ -n "${lines}" ]; then\n'

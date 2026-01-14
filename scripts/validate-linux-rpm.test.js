@@ -149,6 +149,7 @@ function writeFakeRpmExtractTools(
     withMimeType = true,
     mimeTypeLine = `MimeType=${defaultDesktopMimeValue}`,
     withSchemeMime = true,
+    withParquetMime = true,
     execLine = `Exec=${expectedMainBinary} %U`,
   } = {},
 ) {
@@ -165,9 +166,15 @@ exit 0
   let effectiveMimeTypeLine = mimeTypeLine;
   if (
     withMimeType &&
-    withSchemeMime &&
-    !effectiveMimeTypeLine.toLowerCase().includes("x-scheme-handler/")
+    withParquetMime &&
+    !effectiveMimeTypeLine.toLowerCase().includes("application/vnd.apache.parquet")
   ) {
+    if (!effectiveMimeTypeLine.trim().endsWith(";")) {
+      effectiveMimeTypeLine = `${effectiveMimeTypeLine};`;
+    }
+    effectiveMimeTypeLine = `${effectiveMimeTypeLine}application/vnd.apache.parquet;`;
+  }
+  if (withMimeType && withSchemeMime && !effectiveMimeTypeLine.toLowerCase().includes("x-scheme-handler/")) {
     if (!effectiveMimeTypeLine.trim().endsWith(";")) {
       effectiveMimeTypeLine = `${effectiveMimeTypeLine};`;
     }
@@ -637,6 +644,34 @@ test("validate-linux-rpm fails when extracted .desktop Exec= lacks a file placeh
   const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile, fakeRequiresFile: requiresFile });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /placeholder/i);
+});
+
+test("validate-linux-rpm fails when extracted .desktop lacks Parquet MIME type (application/vnd.apache.parquet)", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFakeRpmExtractTools(binDir, { withParquetMime: false });
+
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  const requiresFile = writeDefaultRequiresFile(tmp);
+  writeFileSync(
+    listFile,
+    [
+      `/usr/bin/${expectedMainBinary}`,
+      "/usr/share/applications/formula.desktop",
+      "/usr/share/mime/packages/app.formula.desktop.xml",
+      `/usr/share/doc/${expectedRpmName}/LICENSE`,
+      `/usr/share/doc/${expectedRpmName}/NOTICE`,
+    ].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = runValidator({ cwd: tmp, rpmArg: "Formula.rpm", fakeListFile: listFile, fakeRequiresFile: requiresFile });
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Parquet support/i);
 });
 
 test("validate-linux-rpm fails when extracted .desktop lacks URL scheme handler (x-scheme-handler/formula)", { skip: !hasBash }, () => {
