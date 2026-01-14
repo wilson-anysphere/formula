@@ -4,6 +4,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DocumentController } from "../../document/documentController.js";
+import { pxToEmu } from "../../drawings/overlay";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 let priorGridMode: string | undefined;
@@ -242,6 +244,55 @@ describe("SpreadsheetApp pictures/drawings sheet switching", () => {
     expect(sheet1After.sheetId).toBe("Sheet1");
     expect(sheet1After.drawings).toHaveLength(1);
     expect(sheet1After.selectedId).toBe(null);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("clears drawing selection when restoreDocumentState changes the active sheet", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    const doc: any = app.getDocument();
+
+    // Seed a drawing on Sheet1 and select it.
+    doc.setSheetDrawings("Sheet1", [
+      {
+        id: 123,
+        kind: { type: "shape", label: "Box" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(120), cy: pxToEmu(60) } },
+        zOrder: 0,
+      },
+    ]);
+    app.selectDrawingById(123);
+
+    expect(app.getDrawingsDebugState().sheetId).toBe("Sheet1");
+    expect(app.getDrawingsDebugState().selectedId).toBe(123);
+
+    // Restore a snapshot that only contains Sheet2 (and also contains a drawing with the same id).
+    // Even if the id exists on the new sheet, selection should be cleared when the active sheet changes.
+    const snapshotDoc = new DocumentController();
+    snapshotDoc.setSheetDrawings("Sheet2", [
+      {
+        id: 123,
+        kind: { type: "shape", label: "Box2" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(80), cy: pxToEmu(40) } },
+        zOrder: 0,
+      },
+    ]);
+    const snapshot = snapshotDoc.encodeState();
+    await app.restoreDocumentState(snapshot);
+
+    const state = app.getDrawingsDebugState();
+    expect(state.sheetId).toBe("Sheet2");
+    expect(state.drawings).toHaveLength(1);
+    expect(state.drawings[0]!.id).toBe(123);
+    expect(state.selectedId).toBe(null);
 
     app.destroy();
     root.remove();

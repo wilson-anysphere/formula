@@ -6172,6 +6172,23 @@ export class SpreadsheetApp {
   async restoreDocumentState(snapshot: Uint8Array): Promise<void> {
     this.wasmSyncSuspended = true;
     try {
+      // Replacing the workbook state can invalidate any in-progress drawing gestures (drag/resize)
+      // and the selected drawing. Cancel interactions up front so we don't attempt to commit/cancel
+      // against a document that is about to be replaced.
+      //
+      // Note: `drawingsInteraction` is a backwards-compat alias of `drawingInteractionController`,
+      // but keep the null-safe calls for resilience in older/partially-stubbed test harnesses.
+      this.chartDrawingInteraction?.reset({ clearSelection: true });
+      this.drawingsInteraction?.reset({ clearSelection: true });
+      this.drawingInteractionController?.reset({ clearSelection: true });
+
+      const prevSelectedDrawingId = this.selectedDrawingId;
+      if (prevSelectedDrawingId != null) {
+        this.selectedDrawingId = null;
+        this.drawingOverlay.setSelectedId(null);
+        this.dispatchDrawingSelectionChanged();
+      }
+
       // Ensure any in-flight sync operations finish before we replace the workbook.
       await this.wasmSyncPromise;
       this.clearComputedValuesByCoord();
@@ -6193,6 +6210,15 @@ export class SpreadsheetApp {
       let sheetChanged = false;
       const sheetIds = this.document.getSheetIds();
       if (sheetIds.length > 0 && !sheetIds.includes(this.sheetId)) {
+        // Switching sheets as part of a restore should behave like a normal sheet change:
+        // drawings are sheet-scoped, so clear any prior selection and invalidate caches before
+        // swapping `sheetId`.
+        this.drawingInteractionController?.reset({ clearSelection: true });
+        this.selectedDrawingId = null;
+        this.drawingOverlay.setSelectedId(null);
+        this.drawingObjectsCache = null;
+        this.invalidateDrawingHitTestIndexCaches();
+
         this.sheetId = sheetIds[0];
         sheetChanged = true;
         this.reindexCommentCells();
