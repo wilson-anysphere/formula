@@ -1221,6 +1221,39 @@ fn calculate_compound_boolean_filters_can_reference_multiple_columns_on_one_tabl
 }
 
 #[test]
+fn calculate_compound_boolean_filters_respect_operator_precedence_and_parentheses() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Precedence (default)",
+            "CALCULATE(SUM(Orders[Amount]), Orders[CustomerId] = 1 || Orders[CustomerId] = 2 && Orders[Amount] = 5)",
+        )
+        .unwrap();
+    model
+        .add_measure(
+            "Precedence (parenthesized)",
+            "CALCULATE(SUM(Orders[Amount]), (Orders[CustomerId] = 1 || Orders[CustomerId] = 2) && Orders[Amount] = 5)",
+        )
+        .unwrap();
+
+    // `&&` binds tighter than `||`.
+    assert_eq!(
+        model
+            .evaluate_measure("Precedence (default)", &FilterContext::empty())
+            .unwrap(),
+        35.0.into()
+    );
+
+    // Parentheses override default precedence.
+    assert_eq!(
+        model
+            .evaluate_measure("Precedence (parenthesized)", &FilterContext::empty())
+            .unwrap(),
+        5.0.into()
+    );
+}
+
+#[test]
 fn calculate_supports_compound_boolean_or_filters() {
     let mut model = build_model();
     model
