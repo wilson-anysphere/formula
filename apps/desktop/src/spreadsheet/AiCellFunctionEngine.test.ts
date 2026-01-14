@@ -976,6 +976,41 @@ describe("AiCellFunctionEngine", () => {
     expect(JSON.stringify(input)).not.toContain("user@example.com");
   });
 
+  it("heuristically redacts referenced API keys even without structured classifications", async () => {
+    globalThis.localStorage?.clear();
+
+    const workbookId = "dlp-heuristic-api-key";
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    // Stripe-like secret key (matches ai-context API_KEY_RE).
+    const apiKey = "sk_live_1234567890abcdef12345678";
+    const getCellValue = (addr: string) => (addr === "A1" ? apiKey : null);
+
+    const pending = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    expect(llmClient.chat).toHaveBeenCalledTimes(1);
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).not.toContain(apiKey);
+
+    const resolved = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(resolved).toBe("ok");
+  });
+
   it("DLP redacts inputs before sending to the LLM", async () => {
     const workbookId = "dlp-redact-workbook";
     const llmClient = {
