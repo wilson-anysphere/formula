@@ -1,5 +1,8 @@
-use formula_engine::{Engine, ErrorKind, Value};
+use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
+use formula_engine::eval::CellAddr;
 use formula_model::Range;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 #[test]
 fn get_range_values_includes_blanks_for_unset_cells() {
@@ -79,4 +82,42 @@ fn get_range_values_includes_spilled_array_outputs() {
             vec![Value::Number(3.0), Value::Number(4.0)],
         ]
     );
+}
+
+#[test]
+fn get_range_values_queries_external_provider_for_missing_cells() {
+    struct Provider {
+        calls: AtomicUsize,
+    }
+
+    impl ExternalValueProvider for Provider {
+        fn get(&self, _sheet: &str, addr: CellAddr) -> Option<Value> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if addr.row == 1 && addr.col == 1 {
+                Some(Value::Number(9.0))
+            } else {
+                None
+            }
+        }
+    }
+
+    let provider = Arc::new(Provider {
+        calls: AtomicUsize::new(0),
+    });
+
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Sheet1");
+    engine.set_external_value_provider(Some(provider.clone()));
+
+    let range = Range::from_a1("A1:B2").unwrap();
+    let values = engine.get_range_values("Sheet1", range).unwrap();
+
+    assert_eq!(
+        values,
+        vec![
+            vec![Value::Blank, Value::Blank],
+            vec![Value::Blank, Value::Number(9.0)],
+        ]
+    );
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 4);
 }
