@@ -217,6 +217,30 @@ fn filter_or_and_not_combinators() {
 }
 
 #[test]
+fn filter_not_comparison_does_not_match_nulls() {
+    let schema = vec![ColumnSchema {
+        name: "n".to_owned(),
+        column_type: ColumnType::Number,
+    }];
+    let mut builder = ColumnarTableBuilder::new(schema, options());
+    builder.append_row(&[Value::Number(1.0)]);
+    builder.append_row(&[Value::Number(2.0)]);
+    builder.append_row(&[Value::Null]);
+    let table = builder.finalize();
+
+    let expr = FilterExpr::Cmp {
+        col: 0,
+        op: CmpOp::Eq,
+        value: FilterValue::Number(1.0),
+    };
+    let not_expr = FilterExpr::Not(Box::new(expr));
+    let mask = table.filter_mask(&not_expr).unwrap();
+
+    // NOT (n = 1.0) should behave like (n != 1.0) and exclude NULL.
+    assert_eq!(mask_to_bools(&mask), vec![false, true, false]);
+}
+
+#[test]
 fn filter_number_canonicalizes_negative_zero_and_nans_for_equality() {
     let schema = vec![ColumnSchema {
         name: "n".to_owned(),

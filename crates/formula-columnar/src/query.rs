@@ -365,7 +365,11 @@ impl FilterExpr {
 /// - Comparisons treat NULL as "unknown" and therefore evaluate to `false` for filtering.
 /// - `IS NULL` / `IS NOT NULL` explicitly test the encoded validity bits.
 pub fn filter_mask(table: &ColumnarTable, expr: &FilterExpr) -> Result<BitVec, QueryError> {
-    eval_filter_expr(table, expr)
+    if expr_contains_not(expr) {
+        Ok(eval_filter_expr_tri(table, expr)?.true_mask)
+    } else {
+        eval_filter_expr(table, expr)
+    }
 }
 
 /// Evaluate a filter expression and return the matching row indices.
@@ -408,6 +412,108 @@ pub fn filter_table(table: &ColumnarTable, mask: &BitVec) -> Result<ColumnarTabl
     }
 
     Ok(builder.finalize())
+}
+
+fn expr_contains_not(expr: &FilterExpr) -> bool {
+    match expr {
+        FilterExpr::Not(_) => true,
+        FilterExpr::And(left, right) | FilterExpr::Or(left, right) => {
+            expr_contains_not(left) || expr_contains_not(right)
+        }
+        FilterExpr::Cmp { .. }
+        | FilterExpr::CmpStringCI { .. }
+        | FilterExpr::IsNull { .. }
+        | FilterExpr::IsNotNull { .. } => false,
+    }
+}
+
+#[derive(Clone)]
+struct TriMask {
+    true_mask: BitVec,
+    unknown_mask: BitVec,
+}
+
+impl TriMask {
+    fn false_mask(&self) -> BitVec {
+        let mut out = self.true_mask.clone();
+        out.or_inplace(&self.unknown_mask);
+        out.not_inplace();
+        out
+    }
+}
+
+fn eval_filter_expr_tri(table: &ColumnarTable, expr: &FilterExpr) -> Result<TriMask, QueryError> {
+    match expr {
+        FilterExpr::And(left, right) => {
+            let left = eval_filter_expr_tri(table, left)?;
+            let right = eval_filter_expr_tri(table, right)?;
+
+            let mut true_mask = left.true_mask.clone();
+            true_mask.and_inplace(&right.true_mask);
+
+            let mut false_mask = left.false_mask();
+            false_mask.or_inplace(&right.false_mask());
+
+            let mut unknown_mask = true_mask.clone();
+            unknown_mask.or_inplace(&false_mask);
+            unknown_mask.not_inplace();
+
+            Ok(TriMask {
+                true_mask,
+                unknown_mask,
+            })
+        }
+        FilterExpr::Or(left, right) => {
+            let left = eval_filter_expr_tri(table, left)?;
+            let right = eval_filter_expr_tri(table, right)?;
+
+            let mut true_mask = left.true_mask.clone();
+            true_mask.or_inplace(&right.true_mask);
+
+            let mut false_mask = left.false_mask();
+            false_mask.and_inplace(&right.false_mask());
+
+            let mut unknown_mask = true_mask.clone();
+            unknown_mask.or_inplace(&false_mask);
+            unknown_mask.not_inplace();
+
+            Ok(TriMask {
+                true_mask,
+                unknown_mask,
+            })
+        }
+        FilterExpr::Not(inner) => {
+            let inner = eval_filter_expr_tri(table, inner)?;
+            Ok(TriMask {
+                true_mask: inner.false_mask(),
+                unknown_mask: inner.unknown_mask,
+            })
+        }
+        FilterExpr::Cmp { col, op, value } => {
+            let true_mask = eval_filter_cmp(table, *col, *op, value)?;
+            let unknown_mask = eval_filter_is_null(table, *col, true)?;
+            Ok(TriMask {
+                true_mask,
+                unknown_mask,
+            })
+        }
+        FilterExpr::CmpStringCI { col, op, value } => {
+            let true_mask = eval_filter_string_ci(table, *col, *op, value.as_ref())?;
+            let unknown_mask = eval_filter_is_null(table, *col, true)?;
+            Ok(TriMask {
+                true_mask,
+                unknown_mask,
+            })
+        }
+        FilterExpr::IsNull { col } => Ok(TriMask {
+            true_mask: eval_filter_is_null(table, *col, true)?,
+            unknown_mask: BitVec::with_len_all_false(table.row_count()),
+        }),
+        FilterExpr::IsNotNull { col } => Ok(TriMask {
+            true_mask: eval_filter_is_null(table, *col, false)?,
+            unknown_mask: BitVec::with_len_all_false(table.row_count()),
+        }),
+    }
 }
 
 fn eval_filter_expr(table: &ColumnarTable, expr: &FilterExpr) -> Result<BitVec, QueryError> {
