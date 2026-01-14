@@ -565,6 +565,11 @@ async function main() {
           : path.join(repoRoot, process.env.FORMULA_TAURI_CONF_PATH),
       )
     : defaultTauriConfigPath;
+  const tauriConfigDisplayPath = (() => {
+    const rel = path.relative(repoRoot, tauriConfigPath);
+    if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) return rel;
+    return tauriConfigPath;
+  })();
   /** @type {string} */
   let pubkeyValue = "";
   try {
@@ -595,7 +600,7 @@ async function main() {
   if (!ok) {
     throw new Error(
       `Generated latest.json.sig does not verify latest.json with the configured updater public key. ` +
-        `This typically means TAURI_PRIVATE_KEY does not correspond to apps/desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey.`,
+        `This typically means TAURI_PRIVATE_KEY does not correspond to ${tauriConfigDisplayPath} → plugins.updater.pubkey.`,
     );
   }
   const latestSigText = `${signatureBytes.toString("base64")}\n`;
