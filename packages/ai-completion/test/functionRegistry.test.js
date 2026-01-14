@@ -168,6 +168,7 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.getFunction("DEC2BIN")?.args?.[1]?.optional, "Expected DEC2BIN places to be optional");
   assert.ok(registry.isRangeArg("DEC2HEX", 0), "Expected DEC2HEX decimal_number to be a range");
   assert.ok(registry.isRangeArg("DEC2OCT", 0), "Expected DEC2OCT decimal_number to be a range");
+  assert.equal(registry.getArgType("CONVERT", 0), "value", "Expected CONVERT number to be value-like");
   assert.equal(registry.getArgType("CONVERT", 1), "string", "Expected CONVERT from_unit to be string-like");
   assert.ok(registry.isRangeArg("BIN2DEC", 0), "Expected BIN2DEC binary_number to be a range");
   assert.ok(registry.isRangeArg("HEX2DEC", 0), "Expected HEX2DEC hex_number to be a range");
@@ -178,6 +179,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.getFunction("ROMAN")?.args?.[1]?.optional, "Expected ROMAN form to be optional");
   assert.ok(registry.isRangeArg("ASC", 0), "Expected ASC text to be a range");
   assert.ok(registry.isRangeArg("PHONETIC", 0), "Expected PHONETIC reference to be a range");
+  assert.equal(registry.getArgType("COMPLEX", 0), "value", "Expected COMPLEX real_num to be value-like");
+  assert.equal(registry.getArgType("COMPLEX", 1), "value", "Expected COMPLEX i_num to be value-like");
   assert.equal(registry.getArgType("COMPLEX", 2), "string", "Expected COMPLEX suffix to be string-like");
   assert.ok(registry.isRangeArg("IMABS", 0), "Expected IMABS inumber to be a range");
   assert.ok(registry.isRangeArg("IMDIV", 1), "Expected IMDIV inumber2 to be a range");
@@ -461,10 +464,15 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("INFO", 0), "string", "Expected INFO type_text to be a string");
   assert.equal(registry.getArgType("INDIRECT", 0), "string", "Expected INDIRECT ref_text to be a string");
   assert.equal(registry.getArgType("ADDRESS", 4), "string", "Expected ADDRESS sheet_text to be a string");
+  assert.equal(registry.getArgType("ADDRESS", 0), "value", "Expected ADDRESS row_num to be value-like");
+  assert.equal(registry.getArgType("ADDRESS", 1), "value", "Expected ADDRESS column_num to be value-like");
   assert.equal(registry.getArgType("NUMBERVALUE", 1), "string", "Expected NUMBERVALUE decimal_separator to be a string");
   assert.equal(registry.getArgType("NUMBERVALUE", 2), "string", "Expected NUMBERVALUE group_separator to be a string");
   assert.ok(registry.isRangeArg("NUMBERVALUE", 0), "Expected NUMBERVALUE text to be a range");
   assert.equal(registry.getArgType("IMAGE", 0), "string", "Expected IMAGE source to be a string");
+  assert.equal(registry.getArgType("IMAGE", 2), "number", "Expected IMAGE sizing to be numeric");
+  assert.equal(registry.getArgType("IMAGE", 3), "value", "Expected IMAGE height to be value-like");
+  assert.equal(registry.getArgType("IMAGE", 4), "value", "Expected IMAGE width to be value-like");
   assert.ok(registry.isRangeArg("TEXT", 0), "Expected TEXT value to be a range");
 
   // Date/time helpers with more descriptive arg naming

@@ -4797,6 +4797,40 @@ test("PRICE rate suggests a left-cell reference (value-like arg)", async () => {
   );
 });
 
+test("ADDRESS row_num suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ADDRESS(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 1 }, // B1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=ADDRESS(A1"),
+    `Expected ADDRESS to suggest A1 for row_num, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("IMAGE height suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=IMAGE("https://example.com/cat.png", "cat", 1, ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 1 }, // B1
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=IMAGE("https://example.com/cat.png", "cat", 1, A1'),
+    `Expected IMAGE to suggest A1 for height, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("PMT type suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 

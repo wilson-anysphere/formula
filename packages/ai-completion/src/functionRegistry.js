@@ -3528,7 +3528,7 @@ const CURATED_FUNCTIONS = [
     name: "CONVERT",
     description: "Converts a number from one measurement system to another.",
     args: [
-      { name: "number", type: "number" },
+      { name: "number", type: "value" },
       { name: "from_unit", type: "string" },
       { name: "to_unit", type: "string" },
     ],
@@ -3579,8 +3579,8 @@ const CURATED_FUNCTIONS = [
     name: "COMPLEX",
     description: "Converts real and imaginary coefficients into a complex number.",
     args: [
-      { name: "real_num", type: "number" },
-      { name: "i_num", type: "number" },
+      { name: "real_num", type: "value" },
+      { name: "i_num", type: "value" },
       { name: "suffix", type: "string", optional: true },
     ],
   },
@@ -4080,8 +4080,8 @@ const CURATED_FUNCTIONS = [
     name: "ADDRESS",
     description: "Creates a cell reference as text, given specified row and column numbers.",
     args: [
-      { name: "row_num", type: "number" },
-      { name: "column_num", type: "number" },
+      { name: "row_num", type: "value" },
+      { name: "column_num", type: "value" },
       { name: "abs_num", type: "number", optional: true },
       { name: "a1", type: "boolean", optional: true },
       { name: "sheet_text", type: "string", optional: true },
@@ -4109,8 +4109,8 @@ const CURATED_FUNCTIONS = [
       { name: "source", type: "string" },
       { name: "alt_text", type: "string", optional: true },
       { name: "sizing", type: "number", optional: true },
-      { name: "height", type: "number", optional: true },
-      { name: "width", type: "number", optional: true },
+      { name: "height", type: "value", optional: true },
+      { name: "width", type: "value", optional: true },
     ],
   },
   {
