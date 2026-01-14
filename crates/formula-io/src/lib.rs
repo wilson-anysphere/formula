@@ -1377,20 +1377,22 @@ fn open_workbook_from_decrypted_ooxml_zip_bytes(
     path: &Path,
     decrypted_bytes: Vec<u8>,
 ) -> Result<Workbook, Error> {
-    match sniff_ooxml_zip_workbook_kind(&decrypted_bytes) {
-        Some(WorkbookFormat::Xlsb) => Err(Error::UnsupportedEncryptedWorkbookKind {
-            path: path.to_path_buf(),
-            kind: "xlsb",
-        }),
-        _ => {
-            let package = xlsx::XlsxLazyPackage::from_vec(decrypted_bytes).map_err(|source| {
-                Error::OpenXlsx {
-                    path: path.to_path_buf(),
-                    source,
-                }
-            })?;
-            Ok(Workbook::Xlsx(package))
-        }
+    if zip_contains_workbook_bin(&decrypted_bytes) {
+        let wb = xlsb::XlsbWorkbook::open_from_vec(decrypted_bytes).map_err(|source| {
+            Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+        Ok(Workbook::Xlsb(wb))
+    } else {
+        let package = xlsx::XlsxLazyPackage::from_vec(decrypted_bytes).map_err(|source| {
+            Error::OpenXlsx {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+        Ok(Workbook::Xlsx(package))
     }
 }
 
