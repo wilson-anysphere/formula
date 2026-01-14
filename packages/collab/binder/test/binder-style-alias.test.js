@@ -167,3 +167,61 @@ test("binder preserves legacy `style` across duplicate key encodings even when t
     return cell.value === "###" && cell.styleId !== 0 && format?.font?.bold === true;
   });
 });
+
+test("binder rehydrate applies decrypted value + decrypted format when an encryption key becomes available (encryptFormat)", async (t) => {
+  const ydoc = new Y.Doc({ guid: "binder-rehydrate-encryptFormat-doc" });
+  const dc = new DocumentControllerStub();
+
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyId = "k1";
+  let hasKey = false;
+
+  const binder = bindYjsToDocumentController({
+    ydoc,
+    documentController: dc,
+    encryption: {
+      encryptFormat: true,
+      keyForCell: (cell) => {
+        if (!hasKey) return null;
+        if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+          return { keyId, keyBytes };
+        }
+        return null;
+      },
+    },
+  });
+
+  t.after(() => {
+    binder.destroy();
+    ydoc.destroy();
+  });
+
+  const enc = await encryptCellPlaintext({
+    plaintext: { value: "top-secret", formula: null, format: { font: { bold: true } } },
+    key: { keyId, keyBytes },
+    context: { docId: ydoc.guid, sheetId: "Sheet1", row: 0, col: 0 },
+  });
+
+  const cells = ydoc.getMap("cells");
+  ydoc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("enc", enc);
+    cells.set("Sheet1:0:0", cell);
+  });
+
+  await waitForCondition(() => {
+    const cell = dc.getCell("Sheet1", { row: 0, col: 0 });
+    return cell.value === "###" && cell.formula == null && cell.styleId === 0;
+  });
+
+  // Simulate importing an encryption key locally: keyForCell starts returning the key,
+  // but there is no Yjs mutation. Binder must rehydrate to reveal the cell.
+  hasKey = true;
+  binder.rehydrate();
+
+  await waitForCondition(() => {
+    const cell = dc.getCell("Sheet1", { row: 0, col: 0 });
+    const format = dc.styleTable.get(cell.styleId);
+    return cell.value === "top-secret" && cell.formula == null && cell.styleId !== 0 && format?.font?.bold === true;
+  });
+});
