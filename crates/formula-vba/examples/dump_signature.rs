@@ -9,8 +9,11 @@ use formula_vba::{
 
 #[path = "shared/vba_project_bin.rs"]
 mod vba_project_bin;
+#[path = "shared/broken_pipe.rs"]
+mod broken_pipe;
 
 fn main() -> ExitCode {
+    broken_pipe::install();
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

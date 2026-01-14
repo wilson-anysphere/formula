@@ -6,6 +6,8 @@ use formula_vba::{project_normalized_data_v3_transcript, v3_content_normalized_d
 
 #[path = "shared/vba_project_bin.rs"]
 mod vba_project_bin;
+#[path = "shared/broken_pipe.rs"]
+mod broken_pipe;
 
 const DEFAULT_HEAD_BYTES: usize = 64;
 
@@ -16,6 +18,7 @@ enum Alg {
 }
 
 fn main() -> ExitCode {
+    broken_pipe::install();
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
