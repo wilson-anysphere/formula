@@ -10448,8 +10448,19 @@ export class SpreadsheetApp {
     const maxZOrder = existingObjects.reduce((max, obj) => Math.max(max, obj.zOrder), -1);
 
     const docAny = this.document as any;
-    const drawingsGetter = typeof docAny.getSheetDrawings === "function" ? docAny.getSheetDrawings : null;
     const canInsertDrawing = typeof docAny.insertDrawing === "function";
+    const canSetSheetDrawings =
+      typeof docAny.setSheetDrawings === "function" && typeof docAny.getSheetDrawings === "function";
+
+    if (!canInsertDrawing && !canSetSheetDrawings) {
+      try {
+        showToast("Picture insertion is not supported in this build.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      focusIfStillOnSheet();
+      return;
+    }
 
     try {
       const readFileBytes = async (file: File): Promise<Uint8Array> => {
@@ -10581,7 +10592,7 @@ export class SpreadsheetApp {
         } catch (err) {
           console.warn("Insert image: failed to persist drawing into document", err);
         }
-      } else if (typeof docAny.setSheetDrawings === "function" && typeof docAny.getSheetDrawings === "function") {
+      } else if (canSetSheetDrawings) {
         try {
           const baseDrawings = (() => {
             try {
