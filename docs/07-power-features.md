@@ -991,6 +991,8 @@ WASM binding validation rules (current `formula-wasm` implementation):
 - `tolerance` (optional) must be a finite number and `> 0`.
 - `maxIterations` (optional) must be an integer `> 0` and not exceed `usize::MAX`.
 - `recalcMode` (optional) must be `"singleThreaded"` or `"multiThreaded"`.
+  - Note: on wasm, `"multiThreaded"` currently falls back to single-threaded recalc (see `Engine::recalculate_multi_threaded`).
+  - Note: even if the solve status is `"NumericalFailure"`, `goalSeek` will still return normally as long as the final `solution` is finite; if the computed solution is non-finite, the binding throws `"goalSeek produced a non-finite solution"`.
 
 WASM binding side effects / integration notes:
 
@@ -1187,6 +1189,13 @@ export interface MonteCarloRequest {
 
   // Optional; on wasm builds "multiThreaded" falls back to single-threaded recalc.
   recalcMode?: RecalcMode;
+
+  /**
+   * Optional progress callback; report-only (cannot cancel).
+   *
+   * The Rust engine reports progress roughly every 1% (and always on the last iteration).
+   */
+  onProgress?: (p: SimulationProgress) => void;
 }
 
 // Proposed future entrypoint:
