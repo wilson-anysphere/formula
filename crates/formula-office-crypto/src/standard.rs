@@ -1425,4 +1425,36 @@ pub(crate) mod tests {
             .unwrap_err();
         assert!(matches!(err, OfficeCryptoError::InvalidFormat(_)));
     }
+
+    #[test]
+    fn decrypt_standard_rc4_rejects_size_larger_than_ciphertext() {
+        // Regression test: ciphertext truncation should be rejected as InvalidFormat (not
+        // InvalidPassword), and should happen before running the expensive password KDF.
+        let info = StandardEncryptionInfo {
+            version_major: 0,
+            version_minor: 0,
+            flags: 0,
+            header: EncryptionHeader {
+                alg_id: CALG_RC4,
+                alg_id_hash: 0x0000_8004u32, // CALG_SHA1
+                key_bits: 40,
+                provider_type: 0,
+                csp_name: String::new(),
+            },
+            verifier: EncryptionVerifier {
+                salt: vec![0u8; 16],
+                encrypted_verifier: vec![0u8; 16],
+                verifier_hash_size: 20,
+                encrypted_verifier_hash: vec![0u8; 20],
+            },
+        };
+
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&100u64.to_le_bytes());
+        encrypted_package.extend_from_slice(&[0u8; 16]);
+
+        let err = super::decrypt_standard_encrypted_package(&info, &encrypted_package, "Password")
+            .unwrap_err();
+        assert!(matches!(err, OfficeCryptoError::InvalidFormat(_)));
+    }
 }
