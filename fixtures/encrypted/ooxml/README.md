@@ -28,7 +28,7 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
   - Decrypts to `plaintext.xlsx` with password `password`
 - `standard.xlsx` – Standard encrypted OOXML.
    - `EncryptionInfo` header version **Major 3 / Minor 2**
-   - `EncryptionInfo` flags: `0x00000024` (`fCryptoAPI | fAES`)
+   - `EncryptionInfo` flags: `fCryptoAPI` + `fAES` (`0x00000024`)
    - ECMA-376/MS-OFFCRYPTO Standard: 50,000 password-hash iterations + AES-ECB
    - Decrypts to `plaintext.xlsx` with password `password`
 - `standard-4.2.xlsx` – Standard encrypted OOXML (Apache POI output).
@@ -57,7 +57,7 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
    - Decrypts to `plaintext-large.xlsx` with password `password`
 - `standard-large.xlsx` – Standard encrypted OOXML.
    - `EncryptionInfo` header version **Major 3 / Minor 2**
-   - `EncryptionInfo` flags: `0x00000024` (`fCryptoAPI | fAES`)
+   - `EncryptionInfo` flags: `fCryptoAPI` + `fAES` (`0x00000024`)
    - Decrypts to `plaintext-large.xlsx` with password `password`
 
 ### Why the `*-large.xlsx` fixtures exist
@@ -78,7 +78,7 @@ therefore more realistic ciphertext sizes + truncation behavior).
   - Decrypts exactly to `plaintext-basic.xlsm` with password `password`
 - `standard-basic.xlsm` – Standard encrypted macro-enabled workbook.
   - `EncryptionInfo` header version **Major 3 / Minor 2**
-  - `EncryptionInfo` flags: `0x00000024` (`fCryptoAPI | fAES`)
+  - `EncryptionInfo` flags: `fCryptoAPI` + `fAES` (`0x00000024`)
   - Decrypts exactly to `plaintext-basic.xlsm` with password `password`
 - `basic-password.xlsm` – Agile encrypted macro-enabled workbook with a minimal VBA project.
   - `EncryptionInfo` header version **Major 4 / Minor 4**

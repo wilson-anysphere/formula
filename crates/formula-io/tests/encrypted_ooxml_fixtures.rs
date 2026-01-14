@@ -231,7 +231,8 @@ fn standard_fixtures_encryption_info_parameters_are_pinned() {
     let common_expected = StandardEncryptionInfoParams {
         version_major: 0, // filled per fixture below
         version_minor: 2,
-        // MS-OFFCRYPTO `EncryptionVersionInfo.flags`: `fCryptoAPI` (0x04) + `fAES` (0x20) = 0x24.
+        // MS-OFFCRYPTO `EncryptionVersionInfo.flags`: `fCryptoAPI` (0x0000_0004) + `fAES`
+        // (0x0000_0020) => 0x0000_0024.
         version_flags: 0x0000_0024,
         alg_id: 0x0000_660E,      // CALG_AES_128
         alg_id_hash: 0x0000_8004, // CALG_SHA1
