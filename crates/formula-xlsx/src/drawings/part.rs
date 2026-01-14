@@ -554,20 +554,33 @@ impl DrawingPart {
             .into_iter()
             .find(|n| is_sp_node(*n))
             {
-                if let Ok((id, sp_xml)) = parse_named_node(&sp, drawing_xml, "cNvPr") {
-                    let size =
-                        extract_size_from_transform(&sp).or_else(|| size_from_anchor(anchor));
-                    objects.push(DrawingObject {
+                let size = extract_size_from_transform(&sp).or_else(|| size_from_anchor(anchor));
+
+                match parse_named_node(&sp, drawing_xml, "cNvPr") {
+                    Ok((id, sp_xml)) => objects.push(DrawingObject {
                         id,
                         kind: DrawingObjectKind::Shape { raw_xml: sp_xml },
                         anchor,
                         z_order: z as i32,
                         size,
                         preserved: anchor_preserved.clone(),
-                    });
-                    continue;
+                    }),
+                    Err(_) => {
+                        // Best-effort: if we can't parse the shape id, preserve the full anchor
+                        // subtree but keep any size information we can extract.
+                        let raw_anchor =
+                            slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+                        objects.push(DrawingObject {
+                            id: DrawingObjectId((z + 1) as u32),
+                            kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                            anchor,
+                            z_order: z as i32,
+                            size,
+                            preserved: anchor_preserved.clone(),
+                        });
+                    }
                 }
-                // Fall back to preserving the full anchor subtree when we can't parse the shape.
+                continue;
             }
 
             if let Some(frame) = crate::drawingml::anchor::element_children_selecting_alternate_content(
@@ -577,40 +590,53 @@ impl DrawingPart {
             .into_iter()
             .find(|n| is_graphic_frame_node(*n))
             {
-                if let Ok((id, frame_xml)) = parse_named_node(&frame, drawing_xml, "cNvPr") {
-                    let chart_node = frame
-                        .descendants()
-                        .find(|n| n.is_element() && n.tag_name().name() == "chart");
+                let size =
+                    extract_size_from_transform(&frame).or_else(|| size_from_anchor(anchor));
 
-                    let graphic_data_is_chart = frame
-                        .descendants()
-                        .find(|n| n.is_element() && n.tag_name().name() == "graphicData")
-                        .and_then(|n| n.attribute("uri"))
-                        .is_some_and(|uri| uri == GRAPHIC_DATA_CHART_URI);
+                match parse_named_node(&frame, drawing_xml, "cNvPr") {
+                    Ok((id, frame_xml)) => {
+                        let chart_node = frame
+                            .descendants()
+                            .find(|n| n.is_element() && n.tag_name().name() == "chart");
 
-                    let size =
-                        extract_size_from_transform(&frame).or_else(|| size_from_anchor(anchor));
+                        let graphic_data_is_chart = frame
+                            .descendants()
+                            .find(|n| n.is_element() && n.tag_name().name() == "graphicData")
+                            .and_then(|n| n.attribute("uri"))
+                            .is_some_and(|uri| uri == GRAPHIC_DATA_CHART_URI);
 
-                    if chart_node.is_some() || graphic_data_is_chart {
-                        if let Some(chart_rel_id) = chart_node
-                            .and_then(|n| {
-                                n.attribute((REL_NS, "id"))
-                                    .or_else(|| n.attribute("r:id"))
-                                    .or_else(|| n.attribute("id"))
-                            })
-                            .map(|s| s.to_string())
-                        {
-                            objects.push(DrawingObject {
-                                id,
-                                kind: DrawingObjectKind::ChartPlaceholder {
-                                    rel_id: chart_rel_id,
-                                    raw_xml: frame_xml,
-                                },
-                                anchor,
-                                z_order: z as i32,
-                                size,
-                                preserved: anchor_preserved.clone(),
-                            });
+                        if chart_node.is_some() || graphic_data_is_chart {
+                            if let Some(chart_rel_id) = chart_node
+                                .and_then(|n| {
+                                    n.attribute((REL_NS, "id"))
+                                        .or_else(|| n.attribute("r:id"))
+                                        .or_else(|| n.attribute("id"))
+                                })
+                                .map(|s| s.to_string())
+                            {
+                                objects.push(DrawingObject {
+                                    id,
+                                    kind: DrawingObjectKind::ChartPlaceholder {
+                                        rel_id: chart_rel_id,
+                                        raw_xml: frame_xml,
+                                    },
+                                    anchor,
+                                    z_order: z as i32,
+                                    size,
+                                    preserved: anchor_preserved.clone(),
+                                });
+                            } else {
+                                let raw_anchor =
+                                    slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+                                objects.push(DrawingObject {
+                                    id,
+                                    kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                                    anchor,
+                                    z_order: z as i32,
+                                    size,
+                                    preserved: anchor_preserved.clone(),
+                                });
+                            }
                         } else {
                             let raw_anchor =
                                 slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
@@ -623,10 +649,14 @@ impl DrawingPart {
                                 preserved: anchor_preserved.clone(),
                             });
                         }
-                    } else {
-                        let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+                    }
+                    Err(_) => {
+                        // Best-effort: preserve malformed/unsupported frames as unknown anchors,
+                        // but keep any size information we can extract.
+                        let raw_anchor =
+                            slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
                         objects.push(DrawingObject {
-                            id,
+                            id: DrawingObjectId((z + 1) as u32),
                             kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
                             anchor,
                             z_order: z as i32,
@@ -634,9 +664,8 @@ impl DrawingPart {
                             preserved: anchor_preserved.clone(),
                         });
                     }
-                    continue;
                 }
-                // Fall back to preserving the full anchor subtree when we can't parse the frame.
+                continue;
             }
 
             // Unknown anchor type: preserve the entire anchor subtree.
