@@ -2310,6 +2310,9 @@ mod fuzz_tests {
     #[cfg(not(fuzzing))]
     const CASES: u32 = 32;
 
+    #[cfg(fuzzing)]
+    const MAX_LEN: usize = 256 * 1024;
+    #[cfg(not(fuzzing))]
     const MAX_LEN: usize = 32 * 1024;
 
     fn invalid_agile_encryption_info(mut tail: Vec<u8>) -> Vec<u8> {

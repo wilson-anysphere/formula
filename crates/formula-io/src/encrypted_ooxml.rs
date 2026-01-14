@@ -101,13 +101,23 @@ pub(crate) fn decrypt_encrypted_package(
         (4, 4) => {
             // The ciphertext begins immediately after the 8-byte plaintext length header.
             let ciphertext = &encrypted_package[8..];
+            if plaintext_len > ciphertext.len() as u64 {
+                return Err(DecryptError::InvalidInfo(format!(
+                    "EncryptedPackage original size {plaintext_len} exceeds ciphertext length {}",
+                    ciphertext.len()
+                )));
+            }
             let cursor = std::io::Cursor::new(ciphertext);
             let mut reader =
                 decrypted_package_reader(cursor, plaintext_len, encryption_info, password)?;
 
             let mut out = Vec::new();
             if let Ok(cap) = usize::try_from(plaintext_len) {
-                out.reserve(cap);
+                out.try_reserve(cap).map_err(|_| {
+                    DecryptError::InvalidInfo(format!(
+                        "decrypted package size {plaintext_len} is too large to allocate"
+                    ))
+                })?;
             }
             reader.read_to_end(&mut out)?;
             Ok(out)
