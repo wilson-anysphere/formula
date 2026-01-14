@@ -12,7 +12,7 @@ pub mod value;
 pub use cache::BytecodeCache;
 pub use compiler::Compiler;
 pub use eval::Vm;
-pub use lower::{lower_canonical_expr, LowerError};
+pub use lower::{lower_canonical_expr, lower_canonical_expr_with_sheet_span, LowerError};
 pub use program::{Instruction, OpCode, Program};
 
 pub use ast::{parse_formula, Expr, ParseError};

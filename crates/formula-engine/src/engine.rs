@@ -233,6 +233,11 @@ impl Default for Sheet {
 struct Workbook {
     sheets: Vec<Sheet>,
     sheet_names: Vec<String>,
+    /// Current sheet tab order expressed as stable sheet ids.
+    ///
+    /// This is intentionally separate from `sheets`/`sheet_names` so sheet ids remain stable when
+    /// users reorder worksheet tabs.
+    sheet_order: Vec<SheetId>,
     sheet_name_to_id: HashMap<String, SheetId>,
     names: HashMap<String, DefinedName>,
     styles: StyleTable,
@@ -255,6 +260,7 @@ impl Workbook {
         let id = self.sheets.len();
         self.sheets.push(Sheet::default());
         self.sheet_names.push(name.to_string());
+        self.sheet_order.push(id);
         self.sheet_name_to_id.insert(key, id);
         id
     }
@@ -262,6 +268,17 @@ impl Workbook {
     fn sheet_id(&self, name: &str) -> Option<SheetId> {
         let key = Self::sheet_key(name);
         self.sheet_name_to_id.get(&key).copied()
+    }
+
+    fn sheet_span_ids(&self, start: SheetId, end: SheetId) -> Option<Vec<SheetId>> {
+        let start_idx = self.sheet_order.iter().position(|&id| id == start)?;
+        let end_idx = self.sheet_order.iter().position(|&id| id == end)?;
+        let (lo, hi) = if start_idx <= end_idx {
+            (start_idx, end_idx)
+        } else {
+            (end_idx, start_idx)
+        };
+        Some(self.sheet_order[lo..=hi].to_vec())
     }
 
     fn get_cell(&self, key: CellKey) -> Option<&Cell> {
@@ -3459,7 +3476,11 @@ impl Engine {
 
         let expr_after_structured = maybe_structured_rewritten.as_ref().unwrap_or(&expr);
 
-        let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
+        let workbook = &self.workbook;
+        let mut resolve_sheet_id = |name: &str| workbook.sheet_id(name);
+        let mut expand_sheet_span = |start_id: SheetId, end_id: SheetId| {
+            workbook.sheet_span_ids(start_id, end_id)
+        };
         let rewritten_names = rewrite_defined_name_constants_for_bytecode(
             expr_after_structured,
             key.sheet,
@@ -3489,11 +3510,12 @@ impl Engine {
             return Err(BytecodeCompileReason::LowerError(lower_error));
         }
 
-        let expr = bytecode::lower_canonical_expr(
+        let expr = bytecode::lower_canonical_expr_with_sheet_span(
             expr_to_lower,
             origin_ast,
             key.sheet,
-            &mut resolve_sheet,
+            &mut resolve_sheet_id,
+            &mut expand_sheet_span,
         )
         .map_err(|e| match e {
             // The lowering layer uses `Unsupported` as a catch-all for expression shapes the
@@ -12468,6 +12490,61 @@ mod tests {
         // Implicit intersection over a 3D span is ambiguous, yielding #VALUE!, and information
         // functions should treat that as a non-number rather than propagating the error.
         assert_eq!(bc_value, Value::Bool(false));
+    }
+
+    #[test]
+    fn bytecode_sheet_span_expansion_respects_tab_order_after_reorder_and_rebuild() {
+        let mut engine = Engine::new();
+        for sheet in ["Sheet1", "Sheet2", "Sheet3", "Sheet4"] {
+            engine.ensure_sheet(sheet);
+        }
+
+        engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+        engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+        engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+        engine.set_cell_value("Sheet4", "A1", 4.0).unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "B1", "=SUM(Sheet1:Sheet3!A1)")
+            .unwrap();
+
+        // Ensure the formula is actually bytecode-compiled.
+        let sheet1_id = engine.workbook.sheet_id("Sheet1").unwrap();
+        let b1 = parse_a1("B1").unwrap();
+        let compiled_b1 = engine.workbook.sheets[sheet1_id]
+            .cells
+            .get(&b1)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula");
+        assert!(
+            matches!(compiled_b1, CompiledFormula::Bytecode(_)),
+            "expected SUM(Sheet1:Sheet3!A1) to compile to bytecode"
+        );
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(6.0));
+
+        // Reorder the tab order so Sheet4 falls within the Sheet1:Sheet3 span.
+        let sheet2_id = engine.workbook.sheet_id("Sheet2").unwrap();
+        let sheet3_id = engine.workbook.sheet_id("Sheet3").unwrap();
+        let sheet4_id = engine.workbook.sheet_id("Sheet4").unwrap();
+        engine.workbook.sheet_order = vec![sheet1_id, sheet4_id, sheet2_id, sheet3_id];
+
+        // Rebuild so the bytecode backend re-lowers 3D spans against the new sheet order.
+        engine.rebuild_graph().unwrap();
+
+        let compiled_b1_after = engine.workbook.sheets[sheet1_id]
+            .cells
+            .get(&b1)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula after rebuild");
+        assert!(
+            matches!(compiled_b1_after, CompiledFormula::Bytecode(_)),
+            "expected SUM(Sheet1:Sheet3!A1) to remain bytecode-compiled after rebuild"
+        );
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(10.0));
     }
 
     #[test]

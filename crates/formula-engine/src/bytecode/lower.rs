@@ -1,6 +1,7 @@
 use super::ast::{BinaryOp, Expr as BytecodeExpr, Function, UnaryOp};
 use super::value::{
-    Array, ErrorKind as BytecodeErrorKind, MultiRangeRef, RangeRef, Ref, SheetRangeRef, Value,
+    Array, ErrorKind as BytecodeErrorKind, MultiRangeRef, RangeRef, Ref, SheetId, SheetRangeRef,
+    Value,
 };
 use crate::value::casefold;
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
@@ -75,8 +76,8 @@ impl RectRef {
 
 fn validate_prefix(
     prefix: &RefPrefix,
-    _current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    _current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
 ) -> Result<(), LowerError> {
     if prefix.workbook.is_some() {
         return Err(LowerError::ExternalReference);
@@ -84,14 +85,14 @@ fn validate_prefix(
     if let Some(sheet) = prefix.sheet.as_ref() {
         match sheet {
             crate::SheetRef::Sheet(name) => {
-                if resolve_sheet(name).is_none() {
+                if resolve_sheet_id(name).is_none() {
                     return Err(LowerError::UnknownSheet);
                 };
             }
             crate::SheetRef::SheetRange { start, end } => {
                 // Sheet-span references are allowed in the bytecode backend (lowered as a
                 // multi-area reference). We still validate that both sheet names resolve.
-                if resolve_sheet(start).is_none() || resolve_sheet(end).is_none() {
+                if resolve_sheet_id(start).is_none() || resolve_sheet_id(end).is_none() {
                     return Err(LowerError::UnknownSheet);
                 }
             }
@@ -103,16 +104,16 @@ fn validate_prefix(
 fn expand_sheet_span(
     start: &str,
     end: &str,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
-) -> Result<Vec<usize>, LowerError> {
-    let Some(a) = resolve_sheet(start) else {
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
+) -> Result<Vec<SheetId>, LowerError> {
+    let Some(a) = resolve_sheet_id(start) else {
         return Err(LowerError::UnknownSheet);
     };
-    let Some(b) = resolve_sheet(end) else {
+    let Some(b) = resolve_sheet_id(end) else {
         return Err(LowerError::UnknownSheet);
     };
-    let (start, end) = if a <= b { (a, b) } else { (b, a) };
-    Ok((start..=end).collect())
+    expand_sheet_span_ids(a, b).ok_or(LowerError::UnknownSheet)
 }
 
 fn lower_coord(coord: &crate::Coord, origin: u32) -> Result<(i32, bool), LowerError> {
@@ -133,13 +134,13 @@ fn lower_coord(coord: &crate::Coord, origin: u32) -> Result<(i32, bool), LowerEr
 fn lower_cell_ref(
     r: &crate::CellRef,
     origin: crate::CellAddr,
-    current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
 ) -> Result<Ref, LowerError> {
     validate_prefix(
         &RefPrefix::from_parts(&r.workbook, &r.sheet),
         current_sheet,
-        resolve_sheet,
+        resolve_sheet_id,
     )?;
     let (row, row_abs) = lower_coord(&r.row, origin.row)?;
     let (col, col_abs) = lower_coord(&r.col, origin.col)?;
@@ -149,20 +150,21 @@ fn lower_cell_ref(
 fn lower_cell_ref_expr(
     r: &crate::CellRef,
     origin: crate::CellAddr,
-    current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
 ) -> Result<BytecodeExpr, LowerError> {
     let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
     if prefix.workbook.is_some() {
         return Err(LowerError::ExternalReference);
     }
 
-    let cell = lower_cell_ref(r, origin, current_sheet, resolve_sheet)?;
+    let cell = lower_cell_ref(r, origin, current_sheet, resolve_sheet_id)?;
 
     match prefix.sheet.as_ref() {
         None => Ok(BytecodeExpr::CellRef(cell)),
         Some(crate::SheetRef::Sheet(name)) => {
-            let Some(sheet_id) = resolve_sheet(name) else {
+            let Some(sheet_id) = resolve_sheet_id(name) else {
                 return Err(LowerError::UnknownSheet);
             };
             if sheet_id == current_sheet {
@@ -176,7 +178,7 @@ fn lower_cell_ref_expr(
             }
         }
         Some(crate::SheetRef::SheetRange { start, end }) => {
-            let sheets = expand_sheet_span(start, end, resolve_sheet)?;
+            let sheets = expand_sheet_span(start, end, resolve_sheet_id, expand_sheet_span_ids)?;
             let range = RangeRef::new(cell, cell);
             let areas: Vec<SheetRangeRef> = sheets
                 .into_iter()
@@ -192,13 +194,13 @@ fn lower_cell_ref_expr(
 fn lower_rect_ref(
     expr: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
 ) -> Result<(RefPrefix, RectRef), LowerError> {
     match expr {
         crate::Expr::CellRef(r) => {
             let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
-            let r = lower_cell_ref(r, origin, current_sheet, resolve_sheet)?;
+            let r = lower_cell_ref(r, origin, current_sheet, resolve_sheet_id)?;
             Ok((
                 prefix,
                 RectRef {
@@ -210,7 +212,7 @@ fn lower_rect_ref(
         }
         crate::Expr::ColRef(r) => {
             let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
-            validate_prefix(&prefix, current_sheet, resolve_sheet)?;
+            validate_prefix(&prefix, current_sheet, resolve_sheet_id)?;
 
             let (col, col_abs) = lower_coord(&r.col, origin.col)?;
             let start = Ref::new(0, col, true, col_abs);
@@ -226,7 +228,7 @@ fn lower_rect_ref(
         }
         crate::Expr::RowRef(r) => {
             let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
-            validate_prefix(&prefix, current_sheet, resolve_sheet)?;
+            validate_prefix(&prefix, current_sheet, resolve_sheet_id)?;
 
             let (row, row_abs) = lower_coord(&r.row, origin.row)?;
             let start = Ref::new(row, 0, row_abs, true);
@@ -261,13 +263,16 @@ fn lower_range_ref(
     left: &crate::Expr,
     right: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
 ) -> Result<BytecodeExpr, LowerError> {
-    let (left_prefix, left_rect) = lower_rect_ref(left, origin, current_sheet, resolve_sheet)?;
-    let (right_prefix, right_rect) = lower_rect_ref(right, origin, current_sheet, resolve_sheet)?;
+    let (left_prefix, left_rect) =
+        lower_rect_ref(left, origin, current_sheet, resolve_sheet_id)?;
+    let (right_prefix, right_rect) =
+        lower_rect_ref(right, origin, current_sheet, resolve_sheet_id)?;
     let merged_prefix = merge_range_prefix(&left_prefix, &right_prefix)?;
-    validate_prefix(&merged_prefix, current_sheet, resolve_sheet)?;
+    validate_prefix(&merged_prefix, current_sheet, resolve_sheet_id)?;
 
     let full_rows = left_rect.spans_full_rows() || right_rect.spans_full_rows();
     let full_cols = left_rect.spans_full_cols() || right_rect.spans_full_cols();
@@ -300,7 +305,7 @@ fn lower_range_ref(
 
     match merged_prefix.sheet.as_ref() {
         Some(crate::SheetRef::Sheet(name)) => {
-            let Some(sheet_id) = resolve_sheet(name) else {
+            let Some(sheet_id) = resolve_sheet_id(name) else {
                 return Err(LowerError::UnknownSheet);
             };
             if sheet_id == current_sheet {
@@ -313,7 +318,7 @@ fn lower_range_ref(
             }
         }
         Some(crate::SheetRef::SheetRange { start, end }) => {
-            let sheets = expand_sheet_span(start, end, resolve_sheet)?;
+            let sheets = expand_sheet_span(start, end, resolve_sheet_id, expand_sheet_span_ids)?;
             let areas: Vec<SheetRangeRef> = sheets
                 .into_iter()
                 .map(|sheet| SheetRangeRef::new(sheet, range))
@@ -439,8 +444,9 @@ fn bare_identifier(expr: &crate::Expr) -> Option<&str> {
 fn lower_canonical_reference_expr(
     expr: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
     scopes: &mut LexicalScopes,
     lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {
@@ -449,7 +455,13 @@ fn lower_canonical_reference_expr(
             // In reference contexts (spill/union/intersect), cell references must preserve
             // reference semantics (as a single-cell range) while still respecting explicit sheet
             // prefixes (`Sheet2!A1`).
-            match lower_cell_ref_expr(r, origin, current_sheet, resolve_sheet)? {
+            match lower_cell_ref_expr(
+                r,
+                origin,
+                current_sheet,
+                resolve_sheet_id,
+                expand_sheet_span_ids,
+            )? {
                 BytecodeExpr::CellRef(cell) => Ok(BytecodeExpr::RangeRef(RangeRef::new(cell, cell))),
                 BytecodeExpr::MultiRangeRef(r) => Ok(BytecodeExpr::MultiRangeRef(r)),
                 other => unreachable!(
@@ -458,7 +470,14 @@ fn lower_canonical_reference_expr(
             }
         }
         crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
-            lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
+            lower_range_ref(
+                &b.left,
+                &b.right,
+                origin,
+                current_sheet,
+                resolve_sheet_id,
+                expand_sheet_span_ids,
+            )
         }
         crate::Expr::Binary(b)
             if matches!(b.op, crate::BinaryOp::Union | crate::BinaryOp::Intersect) =>
@@ -474,7 +493,8 @@ fn lower_canonical_reference_expr(
                     &b.left,
                     origin,
                     current_sheet,
-                    resolve_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -482,7 +502,8 @@ fn lower_canonical_reference_expr(
                     &b.right,
                     origin,
                     current_sheet,
-                    resolve_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -493,7 +514,8 @@ fn lower_canonical_reference_expr(
                 &p.expr,
                 origin,
                 current_sheet,
-                resolve_sheet,
+                resolve_sheet_id,
+                expand_sheet_span_ids,
                 scopes,
                 lambda_self_name,
             )?)),
@@ -503,35 +525,58 @@ fn lower_canonical_reference_expr(
             expr,
             origin,
             current_sheet,
-            resolve_sheet,
+            resolve_sheet_id,
+            expand_sheet_span_ids,
             scopes,
             lambda_self_name,
         ),
     }
 }
 
-pub fn lower_canonical_expr(
+pub fn lower_canonical_expr_with_sheet_span(
     expr: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
 ) -> Result<BytecodeExpr, LowerError> {
     let mut scopes = LexicalScopes::default();
     lower_canonical_expr_inner(
         expr,
         origin,
         current_sheet,
-        resolve_sheet,
+        resolve_sheet_id,
+        expand_sheet_span_ids,
         &mut scopes,
         None,
+    )
+}
+
+pub fn lower_canonical_expr(
+    expr: &crate::Expr,
+    origin: crate::CellAddr,
+    current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+) -> Result<BytecodeExpr, LowerError> {
+    let mut expand_numeric = |a: SheetId, b: SheetId| {
+        let (start, end) = if a <= b { (a, b) } else { (b, a) };
+        Some((start..=end).collect())
+    };
+    lower_canonical_expr_with_sheet_span(
+        expr,
+        origin,
+        current_sheet,
+        resolve_sheet_id,
+        &mut expand_numeric,
     )
 }
 
 fn lower_canonical_expr_inner(
     expr: &crate::Expr,
     origin: crate::CellAddr,
-    current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
     scopes: &mut LexicalScopes,
     lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {
@@ -542,13 +587,19 @@ fn lower_canonical_expr_inner(
         crate::Expr::Error(raw) => Ok(BytecodeExpr::Literal(Value::Error(parse_error_kind(raw)))),
         crate::Expr::Missing => Ok(BytecodeExpr::Literal(Value::Missing)),
         crate::Expr::Array(arr) => Ok(BytecodeExpr::Literal(lower_array_literal(arr)?)),
-        crate::Expr::CellRef(r) => lower_cell_ref_expr(r, origin, current_sheet, resolve_sheet),
+        crate::Expr::CellRef(r) => lower_cell_ref_expr(
+            r,
+            origin,
+            current_sheet,
+            resolve_sheet_id,
+            expand_sheet_span_ids,
+        ),
         crate::Expr::ColRef(_) | crate::Expr::RowRef(_) => {
-            let (prefix, rect) = lower_rect_ref(expr, origin, current_sheet, resolve_sheet)?;
+            let (prefix, rect) = lower_rect_ref(expr, origin, current_sheet, resolve_sheet_id)?;
             let range = RangeRef::new(rect.start, rect.end);
             match prefix.sheet.as_ref() {
                 Some(crate::SheetRef::Sheet(name)) => {
-                    let Some(sheet_id) = resolve_sheet(name) else {
+                    let Some(sheet_id) = resolve_sheet_id(name) else {
                         return Err(LowerError::UnknownSheet);
                     };
                     if sheet_id == current_sheet {
@@ -561,7 +612,8 @@ fn lower_canonical_expr_inner(
                     }
                 }
                 Some(crate::SheetRef::SheetRange { start, end }) => {
-                    let sheets = expand_sheet_span(start, end, resolve_sheet)?;
+                    let sheets =
+                        expand_sheet_span(start, end, resolve_sheet_id, expand_sheet_span_ids)?;
                     let areas: Vec<SheetRangeRef> = sheets
                         .into_iter()
                         .map(|sheet| SheetRangeRef::new(sheet, range))
@@ -575,7 +627,14 @@ fn lower_canonical_expr_inner(
         }
         crate::Expr::Binary(b) => match b.op {
             crate::BinaryOp::Range => {
-                lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
+                lower_range_ref(
+                    &b.left,
+                    &b.right,
+                    origin,
+                    current_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
+                )
             }
             crate::BinaryOp::Concat => {
                 // Flatten `a&b&c` into a single CONCAT_OP call so we avoid intermediate allocations
@@ -589,7 +648,8 @@ fn lower_canonical_expr_inner(
                         expr,
                         origin,
                         current_sheet,
-                        resolve_sheet,
+                        resolve_sheet_id,
+                        expand_sheet_span_ids,
                         scopes,
                         lambda_self_name,
                     )?);
@@ -630,7 +690,8 @@ fn lower_canonical_expr_inner(
                         &b.left,
                         origin,
                         current_sheet,
-                        resolve_sheet,
+                        resolve_sheet_id,
+                        expand_sheet_span_ids,
                         scopes,
                         lambda_self_name,
                     )?),
@@ -638,7 +699,8 @@ fn lower_canonical_expr_inner(
                         &b.right,
                         origin,
                         current_sheet,
-                        resolve_sheet,
+                        resolve_sheet_id,
+                        expand_sheet_span_ids,
                         scopes,
                         lambda_self_name,
                     )?),
@@ -651,7 +713,8 @@ fn lower_canonical_expr_inner(
                     expr,
                     origin,
                     current_sheet,
-                    resolve_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
                     scopes,
                     lambda_self_name,
                 )
@@ -664,7 +727,8 @@ fn lower_canonical_expr_inner(
                     &u.expr,
                     origin,
                     current_sheet,
-                    resolve_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -675,7 +739,8 @@ fn lower_canonical_expr_inner(
                     &u.expr,
                     origin,
                     current_sheet,
-                    resolve_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -686,7 +751,8 @@ fn lower_canonical_expr_inner(
                     &u.expr,
                     origin,
                     current_sheet,
-                    resolve_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -697,7 +763,8 @@ fn lower_canonical_expr_inner(
                 &call.callee,
                 origin,
                 current_sheet,
-                resolve_sheet,
+                resolve_sheet_id,
+                expand_sheet_span_ids,
                 scopes,
                 lambda_self_name,
             )?;
@@ -709,7 +776,8 @@ fn lower_canonical_expr_inner(
                         a,
                         origin,
                         current_sheet,
-                        resolve_sheet,
+                        resolve_sheet_id,
+                        expand_sheet_span_ids,
                         scopes,
                         lambda_self_name,
                     )
@@ -721,12 +789,20 @@ fn lower_canonical_expr_inner(
             })
         }
         crate::Expr::FunctionCall(call) => match call.name.name_upper.as_str() {
-            "LET" => lower_let(call, origin, current_sheet, resolve_sheet, scopes),
+            "LET" => lower_let(
+                call,
+                origin,
+                current_sheet,
+                resolve_sheet_id,
+                expand_sheet_span_ids,
+                scopes,
+            ),
             "LAMBDA" => lower_lambda(
                 call,
                 origin,
                 current_sheet,
-                resolve_sheet,
+                resolve_sheet_id,
+                expand_sheet_span_ids,
                 scopes,
                 lambda_self_name,
             ),
@@ -743,7 +819,8 @@ fn lower_canonical_expr_inner(
                                     a,
                                     origin,
                                     current_sheet,
-                                    resolve_sheet,
+                                    resolve_sheet_id,
+                                    expand_sheet_span_ids,
                                     scopes,
                                     lambda_self_name,
                                 )
@@ -782,7 +859,8 @@ fn lower_canonical_expr_inner(
                                     a,
                                     origin,
                                     current_sheet,
-                                    resolve_sheet,
+                                    resolve_sheet_id,
+                                    expand_sheet_span_ids,
                                     scopes,
                                     lambda_self_name,
                                 )
@@ -795,7 +873,7 @@ fn lower_canonical_expr_inner(
         },
         crate::Expr::NameRef(nref) => {
             let prefix = RefPrefix::from_parts(&nref.workbook, &nref.sheet);
-            validate_prefix(&prefix, current_sheet, resolve_sheet)?;
+            validate_prefix(&prefix, current_sheet, resolve_sheet_id)?;
 
             // Bytecode currently supports only lexical names (LET/LAMBDA bindings), not workbook
             // defined names. Reject non-local name refs so the engine falls back to AST evaluation.
@@ -815,7 +893,8 @@ fn lower_canonical_expr_inner(
                     &p.expr,
                     origin,
                     current_sheet,
-                    resolve_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
                     scopes,
                     lambda_self_name,
                 )?),
@@ -826,7 +905,8 @@ fn lower_canonical_expr_inner(
                     &p.expr,
                     origin,
                     current_sheet,
-                    resolve_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
                     scopes,
                     lambda_self_name,
                 )?,
@@ -839,7 +919,8 @@ fn lower_canonical_expr_inner(
                     &access.base,
                     origin,
                     current_sheet,
-                    resolve_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
                     scopes,
                     lambda_self_name,
                 )?,
@@ -853,8 +934,9 @@ fn lower_canonical_expr_inner(
 fn lower_let(
     call: &crate::FunctionCall,
     origin: crate::CellAddr,
-    current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
     scopes: &mut LexicalScopes,
 ) -> Result<BytecodeExpr, LowerError> {
     scopes.push_scope();
@@ -877,7 +959,8 @@ fn lower_let(
                     arg,
                     origin,
                     current_sheet,
-                    resolve_sheet,
+                    resolve_sheet_id,
+                    expand_sheet_span_ids,
                     scopes,
                     None,
                 )?);
@@ -906,7 +989,8 @@ fn lower_let(
                 &pair[1],
                 origin,
                 current_sheet,
-                resolve_sheet,
+                resolve_sheet_id,
+                expand_sheet_span_ids,
                 scopes,
                 Some(&key),
             )?;
@@ -918,7 +1002,8 @@ fn lower_let(
             &call.args[last],
             origin,
             current_sheet,
-            resolve_sheet,
+            resolve_sheet_id,
+            expand_sheet_span_ids,
             scopes,
             None,
         )?;
@@ -936,8 +1021,9 @@ fn lower_let(
 fn lower_lambda(
     call: &crate::FunctionCall,
     origin: crate::CellAddr,
-    current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    current_sheet: SheetId,
+    resolve_sheet_id: &mut impl FnMut(&str) -> Option<SheetId>,
+    expand_sheet_span_ids: &mut impl FnMut(SheetId, SheetId) -> Option<Vec<SheetId>>,
     scopes: &mut LexicalScopes,
     lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {
@@ -974,7 +1060,8 @@ fn lower_lambda(
             body_expr,
             origin,
             current_sheet,
-            resolve_sheet,
+            resolve_sheet_id,
+            expand_sheet_span_ids,
             scopes,
             None,
         )?;
