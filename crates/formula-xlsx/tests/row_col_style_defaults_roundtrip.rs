@@ -328,6 +328,69 @@ fn noop_roundtrip_preserves_col_default_style_when_xf_index_is_zero_and_unknown_
 }
 
 #[test]
+fn noop_roundtrip_preserves_row_default_style_when_xf_index_is_zero_and_unknown_row_attrs(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Mirror the column test above: for some producers, `cellXfs[0]` is non-default.
+    // Ensure we treat `row s="0"` as a real override and avoid rewriting `<row>` on a no-op save,
+    // preserving unknown row attributes like `spans`.
+    let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1">
+    <font>
+      <sz val="11"/>
+      <color theme="1"/>
+      <name val="Calibri"/>
+      <family val="2"/>
+      <scheme val="minor"/>
+    </font>
+  </fonts>
+  <fills count="2">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+  </fills>
+  <borders count="1">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+  </borders>
+  <cellStyleXfs count="1">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+  </cellStyleXfs>
+  <cellXfs count="2">
+    <xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+  </cellXfs>
+  <cellStyles count="1">
+    <cellStyle name="Normal" xfId="0" builtinId="0"/>
+  </cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>"#;
+
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="2" s="0" customFormat="1" spans="1:1"/>
+  </sheetData>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(sheet_xml, styles_xml);
+    let doc = load_from_bytes(&bytes)?;
+    let out = write::write_to_vec(&doc)?;
+
+    let out_sheet_xml = read_zip_part(&out, "xl/worksheets/sheet1.xml");
+    assert!(
+        out_sheet_xml.contains(r#"s="0" customFormat="1""#),
+        "expected row style xf0 override to be preserved, got:\n{out_sheet_xml}"
+    );
+    assert!(
+        out_sheet_xml.contains(r#"spans="1:1""#),
+        "expected unknown row attribute spans to be preserved, got:\n{out_sheet_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn new_document_emits_row_and_col_default_styles() -> Result<(), Box<dyn std::error::Error>> {
     let mut workbook = Workbook::new();
     let sheet_id = workbook.add_sheet("Sheet1")?;
