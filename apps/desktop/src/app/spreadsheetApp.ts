@@ -1792,9 +1792,14 @@ export class SpreadsheetApp {
       cancelBatch: () => this.document.cancelBatch(),
       onSelectionChange: (selectedId) => {
         this.selectedDrawingId = selectedId;
+        if (selectedId != null && this.selectedChartId != null) {
+          // Drawings and charts share a single selection model; selecting one should clear the other.
+          this.setSelectedChartId(null);
+        }
         // Ensure selection outlines/handles repaint immediately when the interaction
         // controller updates selection (it can stop propagation to the root grid
         // pointer handlers, so we cannot rely on `onPointerDown` to trigger a redraw).
+        this.drawingOverlay.setSelectedId(selectedId);
         this.scheduleDrawingsRender("drawings:selection");
       },
     });
@@ -6539,7 +6544,6 @@ export class SpreadsheetApp {
    * e2e harnesses) can interact with drawing objects without needing direct state access.
    */
   pickDrawingAtClientPoint(clientX: number, clientY: number): number | null {
-    const geom = this.drawingGeom;
     const objects = this.listDrawingObjectsForSheet();
     if (objects.length === 0) return null;
 
@@ -6552,8 +6556,7 @@ export class SpreadsheetApp {
     if (x < 0 || y < 0 || x > canvasRect.width || y > canvasRect.height) return null;
 
     const viewport = this.getDrawingInteractionViewport();
-    const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
-    const index = buildHitTestIndex(objects, geom, { zoom });
+    const index = this.getDrawingHitTestIndex(objects);
     const hit = hitTestDrawings(index, viewport, x, y);
     return hit?.object.id ?? null;
   }
