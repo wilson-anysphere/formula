@@ -61,10 +61,21 @@ const linebreakShimEntry = resolve(repoRoot, "scripts/vitest-shims/linebreak.ts"
 const zodShimEntry = resolve(repoRoot, "scripts/vitest-shims/zod.ts");
 const yWebsocketShimEntry = resolve(repoRoot, "scripts/vitest-shims/y-websocket.ts");
 const graphemeSplitterPackageEntry = resolve(repoRoot, "node_modules/grapheme-splitter");
+const graphemeSplitterTextLayoutEntry = resolve(repoRoot, "packages/text-layout/node_modules/grapheme-splitter");
 const linebreakPackageEntry = resolve(repoRoot, "node_modules/linebreak");
+const linebreakTextLayoutEntry = resolve(repoRoot, "packages/text-layout/node_modules/linebreak");
 const zodPackageEntry = resolve(repoRoot, "node_modules/zod");
+const zodAiToolsEntry = resolve(repoRoot, "packages/ai-tools/node_modules/zod");
 const reactPackageEntry = resolve(repoRoot, "node_modules/react");
+const reactDesktopEntry = resolve(repoRoot, "apps/desktop/node_modules/react");
+const reactWebEntry = resolve(repoRoot, "apps/web/node_modules/react");
+const reactGridEntry = resolve(repoRoot, "packages/grid/node_modules/react");
 const yWebsocketPackageEntry = resolve(repoRoot, "node_modules/y-websocket");
+const yWebsocketCollabSessionEntry = resolve(repoRoot, "packages/collab/session/node_modules/y-websocket");
+
+function anyExists(paths: string[]): boolean {
+  return paths.some((p) => existsSync(p));
+}
 const spreadsheetFrontendEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/index.ts");
 const spreadsheetFrontendA1Entry = resolve(repoRoot, "packages/spreadsheet-frontend/src/a1.ts");
 const spreadsheetFrontendCacheEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/cache.ts");
@@ -115,9 +126,9 @@ export default defineConfig({
       // `@formula/grid`'s primary entrypoint re-exports React components (TSX). In some cached/stale
       // `node_modules` environments, React may be missing; prefer the Node-friendly entrypoint in
       // those cases so non-React desktop tests can still run.
-      ...((existsSync(reactPackageEntry) || hasPnpmDependency("react"))
-         ? [{ find: /^@formula\/grid$/, replacement: gridEntry }]
-         : [{ find: /^@formula\/grid$/, replacement: gridNodeEntry }]),
+      ...((anyExists([reactPackageEntry, reactDesktopEntry, reactWebEntry, reactGridEntry]) || hasPnpmDependency("react"))
+        ? [{ find: /^@formula\/grid$/, replacement: gridEntry }]
+        : [{ find: /^@formula\/grid$/, replacement: gridNodeEntry }]),
       { find: /^@formula\/grid\/node$/, replacement: gridNodeEntry },
       { find: /^@formula\/fill-engine$/, replacement: fillEngineEntry },
       { find: /^@formula\/text-layout$/, replacement: textLayoutEntry },
@@ -144,14 +155,16 @@ export default defineConfig({
       //
       // Prefer the real dependency when it's present; fall back to shims only when the pnpm
       // workspace/cached install is missing the package.
-      ...(!(existsSync(graphemeSplitterPackageEntry) || hasPnpmDependency("grapheme-splitter"))
-         ? [{ find: /^grapheme-splitter$/, replacement: graphemeSplitterShimEntry }]
-         : []),
-      ...(!(existsSync(linebreakPackageEntry) || hasPnpmDependency("linebreak"))
+      ...(!(anyExists([graphemeSplitterPackageEntry, graphemeSplitterTextLayoutEntry]) || hasPnpmDependency("grapheme-splitter"))
+        ? [{ find: /^grapheme-splitter$/, replacement: graphemeSplitterShimEntry }]
+        : []),
+      ...(!(anyExists([linebreakPackageEntry, linebreakTextLayoutEntry]) || hasPnpmDependency("linebreak"))
         ? [{ find: /^linebreak$/, replacement: linebreakShimEntry }]
         : []),
-      ...(!(existsSync(zodPackageEntry) || hasPnpmDependency("zod")) ? [{ find: /^zod$/, replacement: zodShimEntry }] : []),
-      ...(!(existsSync(yWebsocketPackageEntry) || hasPnpmDependency("y-websocket"))
+      ...(!(anyExists([zodPackageEntry, zodAiToolsEntry]) || hasPnpmDependency("zod"))
+        ? [{ find: /^zod$/, replacement: zodShimEntry }]
+        : []),
+      ...(!(anyExists([yWebsocketPackageEntry, yWebsocketCollabSessionEntry]) || hasPnpmDependency("y-websocket"))
         ? [{ find: /^y-websocket$/, replacement: yWebsocketShimEntry }]
         : []),
       // `@formula/engine` is imported by many desktop + shared packages. Alias it directly so Vitest
