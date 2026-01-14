@@ -4770,7 +4770,7 @@ export class SpreadsheetApp {
       if (chart.sheetId !== sheetId) continue;
       if (!this.dirtyChartIds.has(chart.id)) continue;
 
-      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch);
+      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch, frozenRows, frozenCols);
       if (!rect) continue;
 
       const fromRow =
@@ -14403,7 +14403,7 @@ export class SpreadsheetApp {
     for (let i = charts.length - 1; i >= 0; i -= 1) {
       const chart = charts[i]!;
       if (chart.sheetId !== sheetId) continue;
-      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch);
+      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch, frozenRows, frozenCols);
       if (!rect) continue;
       const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
       const fromCol = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
@@ -14843,59 +14843,52 @@ export class SpreadsheetApp {
     const startRectScratch = this.chartCursorScratchRect;
     const startRect = this.chartAnchorToViewportRect(state.startAnchor, startRectScratch, frozenRows, frozenCols);
     if (!startRect) return;
+    const startX = startRect.left;
+    const startY = startRect.top;
+    const startW = startRect.width;
+    const startH = startRect.height;
 
     const minSize = 20;
-    let nextX = 0;
-    let nextY = 0;
-    let nextWidth = 0;
-    let nextHeight = 0;
+    let nextX = startX;
+    let nextY = startY;
+    let nextWidth = startW;
+    let nextHeight = startH;
 
     if (state.mode === "move") {
-      nextX = startRect.left + dx;
-      nextY = startRect.top + dy;
-      nextWidth = startRect.width;
-      nextHeight = startRect.height;
+      nextX = startX + dx;
+      nextY = startY + dy;
     } else {
       const handle = state.resizeHandle ?? "se";
-      let x = startRect.left;
-      let y = startRect.top;
-      let width = startRect.width;
-      let height = startRect.height;
+      let x = startX;
+      let y = startY;
+      let width = startW;
+      let height = startH;
 
       const fromWest = handle === "w" || handle === "nw" || handle === "sw";
       const fromEast = handle === "e" || handle === "ne" || handle === "se";
       const fromNorth = handle === "n" || handle === "ne" || handle === "nw";
       const fromSouth = handle === "s" || handle === "sw" || handle === "se";
 
-      if (fromEast) {
-        width = width + dx;
-      }
+      if (fromEast) width += dx;
       if (fromWest) {
-        x = x + dx;
-        width = width - dx;
+        x += dx;
+        width -= dx;
       }
-
-      if (fromSouth) {
-        height = height + dy;
-      }
+      if (fromSouth) height += dy;
       if (fromNorth) {
-        y = y + dy;
-        height = height - dy;
+        y += dy;
+        height -= dy;
       }
 
       if (width < minSize) {
         const delta = minSize - width;
         width = minSize;
-        if (fromWest) {
-          x -= delta;
-        }
+        if (fromWest) x -= delta;
       }
       if (height < minSize) {
         const delta = minSize - height;
         height = minSize;
-        if (fromNorth) {
-          y -= delta;
-        }
+        if (fromNorth) y -= delta;
       }
 
       nextX = x;
@@ -15122,7 +15115,7 @@ export class SpreadsheetApp {
     for (const chart of charts) {
       if (chart.sheetId !== activeSheetId) continue;
       keep.add(chart.id);
-      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch);
+      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch, frozenRows, frozenCols);
       if (!rect) continue;
       const chartX = rect.left;
       const chartY = rect.top;
