@@ -363,6 +363,10 @@ fn lex_formula_rejects_unknown_locale_id_option() {
         message.contains("Supported locale ids"),
         "expected actionable locale message, got {message:?}"
     );
+    assert!(
+        message.contains("en-US"),
+        "expected supported locale ids list to include en-US, got {message:?}"
+    );
 }
 
 #[wasm_bindgen_test]
@@ -669,6 +673,10 @@ fn parse_formula_partial_rejects_unknown_locale_id_option() {
     assert!(
         message.contains("Supported locale ids"),
         "expected actionable locale message, got {message:?}"
+    );
+    assert!(
+        message.contains("en-US"),
+        "expected supported locale ids list to include en-US, got {message:?}"
     );
 }
 

@@ -451,9 +451,11 @@ describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
     });
 
     try {
-      await expect(engine.lexFormula("=1+2", { localeId: "xx-XX" })).rejects.toThrow(/unknown localeId: xx-XX/);
+      await expect(engine.lexFormula("=1+2", { localeId: "xx-XX" })).rejects.toThrow(
+        /unknown localeId: xx-XX.*Supported locale ids/
+      );
       await expect(engine.parseFormulaPartial("=1+2", undefined, { localeId: "xx-XX" })).rejects.toThrow(
-        /unknown localeId: xx-XX/
+        /unknown localeId: xx-XX.*Supported locale ids/
       );
     } finally {
       engine.terminate();
