@@ -63,6 +63,16 @@ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# `RUSTUP_TOOLCHAIN` overrides `rust-toolchain.toml` (it has higher precedence than the
+# repo-local toolchain file). Some environments set it globally (often to "stable"),
+# which would reintroduce "whatever stable is today" drift for this repo.
+#
+# Clear it so cargo/rustc will respect the pinned toolchain declared in
+# `rust-toolchain.toml`.
+if [[ -n "${RUSTUP_TOOLCHAIN:-}" && -f "${repo_root}/rust-toolchain.toml" ]]; then
+  unset RUSTUP_TOOLCHAIN
+fi
+
 # Use repo-local cargo home by default to avoid lock contention
 DEFAULT_GLOBAL_CARGO_HOME="${HOME:-/root}/.cargo"
 

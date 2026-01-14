@@ -77,6 +77,11 @@ This repo pins Rust via `rust-toolchain.toml` so CI and desktop release builds d
 new stable releases. In environments with `rustup`, `cargo` will automatically download/use the
 pinned version when run from the repo root.
 
+Note: the `RUSTUP_TOOLCHAIN` environment variable has higher precedence than `rust-toolchain.toml`.
+If it is set globally (often to `stable`), it can accidentally bypass the pin. The repo cargo wrapper
+(`scripts/cargo_agent.sh`) clears `RUSTUP_TOOLCHAIN` so agent builds reliably use the pinned
+toolchain.
+
 ### Environment Setup (Optional but Recommended)
 
 ```bash
