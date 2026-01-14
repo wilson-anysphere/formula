@@ -104,6 +104,18 @@ function runValidator(appImagePath) {
   return proc;
 }
 
+test("validate-linux-appimage --help prints usage and exits 0", { skip: !hasBash }, () => {
+  const proc = spawnSync("bash", [join(repoRoot, "scripts", "validate-linux-appimage.sh"), "--help"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env },
+  });
+  if (proc.error) throw proc.error;
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /Usage:/);
+  assert.doesNotMatch(proc.stderr, /command not found/i);
+});
+
 test("validate-linux-appimage accepts a structurally valid AppImage", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
   const appImagePath = join(tmp, "Formula.AppImage");
