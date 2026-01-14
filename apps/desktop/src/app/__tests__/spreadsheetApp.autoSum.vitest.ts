@@ -354,4 +354,39 @@ describe("SpreadsheetApp AutoSum (Alt+=)", () => {
       root.remove();
     },
   );
+
+  it.each(variants)(
+    "treats formula cells with numeric computed values as numeric for range detection ($name)",
+    async ({ run, fn }) => {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.clearRange(sheetId, "A1:E5");
+
+      // A1 is a formula cell whose *computed* value is numeric. AutoSum should use
+      // the computed value when deciding whether it's part of the contiguous numeric block.
+      doc.setCellInput(sheetId, "A1", "=2");
+      doc.setCellValue(sheetId, "A2", 3);
+      await app.whenIdle();
+
+      // Active cell A3: contiguous numeric block above should be A1:A2.
+      app.selectRange({ range: { startRow: 2, endRow: 2, startCol: 0, endCol: 0 } }, { scrollIntoView: false, focus: true });
+
+      run(app);
+
+      expect(status.activeCell.textContent).toBe("A3");
+      expect(doc.getCell(sheetId, "A3").formula).toBe(`=${fn}(A1:A2)`);
+
+      app.destroy();
+      root.remove();
+    },
+  );
 });
