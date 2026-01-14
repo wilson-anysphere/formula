@@ -73,6 +73,13 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isPlainObject(value) {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 // Drawing ids can be authored via remote/shared state (sheet view state). Keep validation strict
 // so version snapshots/restores can't be DoS'd by cloning pathological ids (e.g. multi-megabyte
 // `drawings[*].id` strings or Y.Text values).
@@ -142,7 +149,7 @@ function drawingsValueToJsonSafe(raw) {
       continue;
     }
 
-    if (isRecord(entry)) {
+    if (isPlainObject(entry)) {
       const normalizedId = normalizeDrawingIdValue(entry.id);
       if (normalizedId == null) continue;
 
@@ -187,7 +194,7 @@ function sheetViewValueToJsonSafe(rawView) {
     return out;
   }
 
-  if (isRecord(rawView)) {
+  if (isPlainObject(rawView)) {
     /** @type {Record<string, any>} */
     const out = {};
     const keys = Object.keys(rawView).sort();
@@ -203,7 +210,8 @@ function sheetViewValueToJsonSafe(rawView) {
     return out;
   }
 
-  return yjsValueToJson(rawView);
+  // Unknown/invalid view type. Avoid materializing it (e.g. huge Y.Text); treat as absent.
+  return null;
 }
 
 /**
@@ -238,7 +246,7 @@ function cloneSheetEntryWithSanitizedView(entry, constructors) {
     return out;
   }
 
-  if (isRecord(entry)) {
+  if (isPlainObject(entry)) {
     const keys = Object.keys(entry).sort();
     for (const key of keys) {
       if (key === "view") {

@@ -687,3 +687,32 @@ test("branchStateFromYjsDoc: drops drawings with oversized Y.Text ids without ma
   const state = branchStateFromYjsDoc(doc);
   assert.deepEqual(state.sheets.metaById.Sheet1?.view?.drawings, []);
 });
+
+test("branchStateFromYjsDoc: ignores oversized Y.Text view payloads without materializing strings", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const viewText = new Y.Text();
+    viewText.insert(0, "x".repeat(5000));
+    // If snapshot extraction calls `toString()` on this oversized view payload, this test should fail.
+    viewText.toString = () => {
+      throw new Error("unexpected Y.Text.toString() on oversized sheet view");
+    };
+    sheet.set("view", viewText);
+
+    sheets.push([sheet]);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view, {
+    frozenRows: 0,
+    frozenCols: 0,
+    backgroundImageId: null,
+    mergedRanges: [],
+    drawings: [],
+  });
+});

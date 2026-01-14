@@ -257,6 +257,42 @@ test("createYjsSpreadsheetDocAdapter.encodeState sanitizes oversized drawing ids
   assert.deepEqual(view2.drawings, []);
 });
 
+test("createYjsSpreadsheetDocAdapter.encodeState ignores oversized Y.Text view payloads without materializing strings", (t) => {
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const viewText = new Y.Text();
+    viewText.insert(0, "x".repeat(5000));
+    // If snapshot extraction calls `toString()` on this oversized view payload, this test should fail.
+    viewText.toString = () => {
+      throw new Error("unexpected Y.Text.toString() on oversized sheet view");
+    };
+    sheet.set("view", viewText);
+    sheets.push([sheet]);
+  });
+
+  // Ensure the excluded root exists so encodeState takes the "clone roots" path (instead of
+  // directly encoding the doc).
+  doc.getMap("internal").set("k", "v");
+
+  const adapter = createYjsSpreadsheetDocAdapter(doc, { excludeRoots: ["internal"] });
+  const snapshot = adapter.encodeState();
+
+  const restored = new Y.Doc();
+  t.after(() => restored.destroy());
+  Y.applyUpdate(restored, snapshot);
+
+  const sheet2 = restored.getArray("sheets").get(0);
+  assert.ok(sheet2 instanceof Y.Map);
+  assert.equal(sheet2.get("view"), null);
+});
+
 test("createYjsSpreadsheetDocAdapter.applyState sanitizes oversized drawing ids in sheet view when restoring", (t) => {
   const source = new Y.Doc();
   t.after(() => source.destroy());

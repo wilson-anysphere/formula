@@ -15,7 +15,9 @@ export type CollabSheetsKeyRef = { value: string };
 const MAX_DRAWING_ID_STRING_CHARS = 4096;
 
 function isRecord(value: unknown): value is Record<string, any> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }
 
 function normalizeDrawingIdValue(value: unknown): string | number | null {
@@ -89,6 +91,10 @@ function sanitizeDrawingsValue(value: unknown): any[] | null {
 function sanitizeSheetViewValue(value: unknown): unknown {
   if (value == null) return value;
 
+  // `view` should be a plain JSON-ish object. If it's some other Yjs type (e.g. a
+  // malicious/invalid Y.Text), do not attempt to preserve it.
+  if (getYText(value) || getYArray(value)) return undefined;
+
   const map = getYMap(value);
   if (map) {
     const out: Record<string, any> = {};
@@ -117,7 +123,7 @@ function sanitizeSheetViewValue(value: unknown): unknown {
     return out;
   }
 
-  return value;
+  return undefined;
 }
 
 function coerceCollabSheetField(value: unknown): string | null {

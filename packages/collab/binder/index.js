@@ -981,8 +981,10 @@ export function bindYjsToDocumentController(options) {
         return {};
       }
 
-      // Unknown view type (best-effort; should be rare).
-      return yjsValueToJson(rawView);
+      // Unknown/invalid view type. Treat as empty instead of materializing it:
+      // callers only care about a small subset of keys, and converting arbitrary
+      // values (e.g. huge Y.Text) can be expensive.
+      return {};
     }
 
     const sheetMap = getYMap(sheetEntry);
