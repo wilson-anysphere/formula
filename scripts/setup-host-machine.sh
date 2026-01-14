@@ -130,15 +130,28 @@ echo "✓ Essential packages installed"
 echo ""
 echo "=== Checking Development Tools ==="
 
-# Node.js (>=22 recommended; keep in sync with CI/release workflows)
+# Node.js (keep in sync with CI/release workflows)
 if ! command -v node &> /dev/null; then
   echo "⚠️  Node.js not found. Install via nvm or your preferred method."
 else
   node_version="$(node --version)"
   echo "✓ Node.js: ${node_version}"
   node_major="$(node -p "process.versions.node.split('.')[0]")"
-  if [ "${node_major}" -lt 22 ]; then
-    echo "⚠️  Node.js ${node_version} detected; CI/release workflows run on Node 22. Consider upgrading for maximum parity."
+
+  # Prefer the repo-pinned Node major from `.nvmrc` when available.
+  # Fall back to 22 to preserve historical guidance if `.nvmrc` is missing/unparseable.
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "${script_dir}/.." && pwd)"
+  expected_node_major=""
+  if [ -f "${repo_root}/.nvmrc" ]; then
+    expected_node_major="$(head -n 1 "${repo_root}/.nvmrc" | tr -d '[:space:]' | sed -E 's/^[vV]?([0-9]+).*/\\1/')"
+  fi
+  if ! [[ "${expected_node_major}" =~ ^[0-9]+$ ]]; then
+    expected_node_major="22"
+  fi
+
+  if [ "${node_major}" -lt "${expected_node_major}" ]; then
+    echo "⚠️  Node.js ${node_version} detected; CI/release workflows run on Node ${expected_node_major}. Consider upgrading for maximum parity."
   fi
 fi
 
