@@ -24,6 +24,32 @@ const normalizedArgs = args.map((arg) => {
   return arg;
 });
 
+// Playwright defines `--project` as a variadic option (`--project <name...>`). That means
+// `--project desktop tests/e2e/foo.spec.ts` is parsed as *two* project names ("desktop" and the
+// test file path), which then fails with "Project(s) ... not found".
+//
+// Developers frequently pass a single project and then a file pattern. Rewrite the common
+// `--project <name>` form into `--project=<name>` when it looks like the next token is a file/pattern,
+// so the file argument isn't swallowed as another project.
+const normalizedArgsFixed = [];
+for (let i = 0; i < normalizedArgs.length; i += 1) {
+  const arg = normalizedArgs[i];
+  if (arg === "--project") {
+    const value = normalizedArgs[i + 1];
+    const next = normalizedArgs[i + 2];
+    const nextLooksLikePattern =
+      typeof next === "string" &&
+      !next.startsWith("-") &&
+      (next.includes("/") || next.includes("\\") || /\.[a-z0-9]+$/i.test(next));
+    if (typeof value === "string" && nextLooksLikePattern) {
+      normalizedArgsFixed.push(`--project=${value}`);
+      i += 1;
+      continue;
+    }
+  }
+  normalizedArgsFixed.push(arg);
+}
+
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const localPlaywrightBin = path.join(
   packageRoot,
@@ -33,7 +59,7 @@ const localPlaywrightBin = path.join(
 );
 const playwrightCmd = existsSync(localPlaywrightBin) ? localPlaywrightBin : "playwright";
 
-const child = spawn(playwrightCmd, ["test", ...normalizedArgs], {
+const child = spawn(playwrightCmd, ["test", ...normalizedArgsFixed], {
   cwd: packageRoot,
   stdio: "inherit",
   // On Windows, `.cmd` shims in PATH are easiest to resolve via a shell.
