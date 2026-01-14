@@ -338,6 +338,15 @@ be cached in CI and plotted over time.
 
 Each entry includes a `schema_version` field so downstream tooling can evolve safely as new metrics are added.
 
+Key fields currently emitted include:
+
+- `open_rate`, `round_trip_rate`
+- `calc_rate` / `render_rate` (rates among attempted workbooks)
+- `calc_cell_fidelity` (cell-level calc fidelity across all recalc-checked formula cells)
+- `diff_totals.{critical,warning,info,total}`
+- `size_overhead_p90` (output/input size ratio p90 for successful round-trips)
+- `part_change_ratio_p90` / `part_change_ratio_critical_p90` (privacy-safe churn signal)
+
 To generate a quick Markdown delta between the last two entries:
 
 ```bash
