@@ -84,3 +84,30 @@ test("DocumentControllerWorkbookAdapter surfaces snake_case number_format and re
 
   workbook.dispose();
 });
+
+test("DocumentControllerWorkbookAdapter treats numberFormat='General' as clearing (stores numberFormat: null)", () => {
+  const controller = new DocumentController();
+
+  controller.setCellValue("sheet-1", "A1", 1);
+  const importedStyleId = controller.styleTable.intern({ number_format: "0.00" });
+  controller.setRangeValues("sheet-1", "A1", [[{ value: 1.23, styleId: importedStyleId }]]);
+
+  const sheetNameResolver = {
+    getSheetNameById: (id) => (String(id) === "sheet-1" ? "Budget" : null),
+    getSheetIdByName: (name) => (String(name).trim().toLowerCase() === "budget" ? "sheet-1" : null),
+  };
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { sheetNameResolver });
+  const sheet = workbook.getSheet("Budget");
+
+  sheet.getRange("A1").setFormat({ numberFormat: "General" });
+
+  const cell = controller.getCell("sheet-1", "A1");
+  const style = controller.styleTable.get(cell.styleId);
+  assert.equal(style.numberFormat, null);
+
+  // Scripts should observe "General" as a cleared number format.
+  assert.equal(sheet.getRange("A1").getFormat().numberFormat, undefined);
+
+  workbook.dispose();
+});

@@ -271,6 +271,10 @@ function docStylePatchFromScriptFormat(format) {
       // Handled below.
       continue;
     }
+    if (key === "numberFormat" || key === "number_format") {
+      // Normalized below.
+      continue;
+    }
     out[key] = value;
   }
 
@@ -291,6 +295,23 @@ function docStylePatchFromScriptFormat(format) {
       fillPatch.fgColor = color;
       out.fill = fillPatch;
     }
+  }
+
+  // Number formats: treat empty/"General" as clearing via `numberFormat: null` (Excel semantics).
+  // Prefer the camelCase key when both are present.
+  if (hasOwn(format, "numberFormat") || hasOwn(format, "number_format")) {
+    const raw = hasOwn(format, "numberFormat") ? format.numberFormat : format.number_format;
+    if (raw == null) {
+      out.numberFormat = null;
+    } else if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      out.numberFormat = !trimmed || trimmed.toLowerCase() === "general" ? null : raw;
+    } else if (raw !== undefined) {
+      // Be permissive: scripting callers may provide advanced patches.
+      out.numberFormat = raw;
+    }
+    // Keep the canonical key when writing into DocumentController's style table.
+    delete out.number_format;
   }
 
   return out;
