@@ -324,6 +324,32 @@ export function registerBuiltinCommands(params: {
     (app as any).focus?.();
   };
 
+  const shouldOpenFormattingPrompt = (): boolean => {
+    const selection = typeof (app as any)?.getSelectionRanges === "function" ? (app as any).getSelectionRanges() : [];
+    const limits = getGridLimitsForFormatting();
+    const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
+    if (!decision.allowed) {
+      try {
+        showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return false;
+    }
+
+    const isReadOnly = typeof (app as any)?.isReadOnly === "function" && (app as any).isReadOnly() === true;
+    if (isReadOnly && !decision.allRangesBand) {
+      try {
+        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return false;
+    }
+
+    return true;
+  };
+
   const FONT_SIZE_STEPS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
 
   const activeCellFontSizePt = (): number => {
@@ -1758,6 +1784,7 @@ export function registerBuiltinCommands(params: {
         return null;
       })();
       if (resolvedSize == null) {
+        if (!shouldOpenFormattingPrompt()) return;
         const picked = await showQuickPick(
           FONT_SIZE_STEPS.map((value) => ({ label: String(value), value })),
           { placeHolder: t("command.format.fontSize.set") },
@@ -1817,6 +1844,7 @@ export function registerBuiltinCommands(params: {
     (color?: string | null) => {
       if (typeof document === "undefined") return;
       if (color === undefined) {
+        if (!shouldOpenFormattingPrompt()) return;
         if (!fontColorPicker) fontColorPicker = createHiddenColorInput();
         openColorPicker(fontColorPicker, t("command.format.fontColor"), (doc, sheetId, ranges, argb) =>
           setFontColor(doc, sheetId, ranges, argb),
@@ -1853,6 +1881,7 @@ export function registerBuiltinCommands(params: {
     (color?: string | null) => {
       if (typeof document === "undefined") return;
       if (color === undefined) {
+        if (!shouldOpenFormattingPrompt()) return;
         if (!fillColorPicker) fillColorPicker = createHiddenColorInput();
         openColorPicker(fillColorPicker, t("command.format.fillColor"), (doc, sheetId, ranges, argb) =>
           setFillColor(doc, sheetId, ranges, argb),
