@@ -2196,8 +2196,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
       if (/^[$€£¥]#,##0\\.00$/.test(normalized)) return "Currency";
       if (compact === NUMBER_FORMATS.currency.toLowerCase()) return "Currency";
-      if (compact.includes("m/d/yyyy") || compact.includes("yyyy-mm-dd")) return "Date";
-      if (compact === NUMBER_FORMATS.date.toLowerCase()) return "Date";
+      if (compact.includes("yyyy-mm-dd")) return "Long Date";
+      if (compact.includes("m/d/yyyy")) return "Short Date";
+      if (compact === NUMBER_FORMATS.date.toLowerCase()) return "Short Date";
       if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact)) return "Time";
       if (compact.includes("%")) return "Percent";
       if (compact === "#,##0.00") return "Comma";
