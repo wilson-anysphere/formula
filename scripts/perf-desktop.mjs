@@ -84,6 +84,16 @@ function ensureCleanPerfHome(perfHome) {
     return;
   }
 
+  // Extra guardrails: never allow `rm -rf /` or `rm -rf <repoRoot>` even if users
+  // force-enable unsafe deletion.
+  const rootDir = path.parse(perfHome).root;
+  if (perfHome === rootDir || perfHome === repoRoot) {
+    throw new Error(
+      `[perf-desktop] Refusing to reset unsafe perf home dir: ${perfHome}\n` +
+        `Pick a path under target/ (recommended) or a dedicated temp dir (e.g. /tmp/formula-perf-home).`,
+    );
+  }
+
   const safeRoot = path.resolve(repoRoot, "target");
   const allowUnsafe = isTruthyEnv(process.env.FORMULA_PERF_ALLOW_UNSAFE_CLEAN);
   const safeToDelete = perfHome !== safeRoot && isSubpath(safeRoot, perfHome);
