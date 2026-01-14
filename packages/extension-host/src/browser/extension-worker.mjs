@@ -1174,32 +1174,42 @@ async function activateExtension() {
   }
 }
 
-self.addEventListener("message", async (event) => {
-  const message = event.data;
-  if (!message || typeof message !== "object") return;
+self.addEventListener("message", (event) => {
+  void (async () => {
+    const message = event.data;
+    if (!message || typeof message !== "object") return;
 
-  if (message.type === "init") {
-    init(message);
-    return;
-  }
-
-  if (message.type === "activate") {
-    try {
-      await activateExtension();
-      postMessage({ type: "activate_result", id: message.id });
-    } catch (error) {
-      postMessage({
-        type: "activate_error",
-        id: message.id,
-        error: serializeError(error)
-      });
+    if (message.type === "init") {
+      init(message);
+      return;
     }
-    return;
-  }
 
-  if (handleInternalResponse(message)) {
-    return;
-  }
+    if (message.type === "activate") {
+      try {
+        await activateExtension();
+        postMessage({ type: "activate_result", id: message.id });
+      } catch (error) {
+        postMessage({
+          type: "activate_error",
+          id: message.id,
+          error: serializeError(error)
+        });
+      }
+      return;
+    }
 
-  formulaApi.__handleMessage(message);
+    if (handleInternalResponse(message)) {
+      return;
+    }
+
+    await Promise.resolve(formulaApi.__handleMessage(message));
+  })().catch((error) => {
+    // Message handlers ignore returned promises; swallow errors here so failures
+    // don't become unhandled rejections in the worker.
+    try {
+      console.error("Unhandled extension worker message error:", error);
+    } catch {
+      // ignore logging failures
+    }
+  });
 });

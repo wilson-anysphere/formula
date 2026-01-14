@@ -127,86 +127,137 @@ export class ScriptRuntime {
       let settled = false;
 
       const cleanup = async () => {
-        for (const unsub of unsubscribes) unsub();
-        worker.terminate();
+        for (const unsub of unsubscribes) {
+          try {
+            unsub();
+          } catch {
+            // ignore cleanup failures
+          }
+        }
+        try {
+          worker.terminate();
+        } catch {
+          // ignore termination failures
+        }
       };
 
       const settle = async (result) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
-        if (abortListener) {
-          try {
-            options.signal?.removeEventListener("abort", abortListener);
-          } catch {
-            // ignore
-          }
+        try {
+          clearTimeout(timeout);
+        } catch {
+          // ignore
         }
-        worker.removeEventListener("message", onMessage);
-        worker.removeEventListener("error", onError);
-        await cleanup();
+        try {
+          if (abortListener) {
+            try {
+              options.signal?.removeEventListener("abort", abortListener);
+            } catch {
+              // ignore
+            }
+          }
+        } catch {
+          // ignore
+        }
+        try {
+          worker.removeEventListener("message", onMessage);
+        } catch {
+          // ignore
+        }
+        try {
+          worker.removeEventListener("error", onError);
+        } catch {
+          // ignore
+        }
+        try {
+          await cleanup();
+        } catch {
+          // ignore cleanup failures
+        }
         resolve(result);
       };
 
-      const onMessage = async (event) => {
-        const message = event.data;
-        if (message?.type === "console") {
-          logs.push({ level: message.level, message: message.message });
-          return;
-        }
-
-        if (message?.type === "audit") {
-          audit.push(message.event);
-          try {
-            options.auditSink?.log?.(message.event);
-          } catch {
-            // ignore audit failures
+      const onMessage = (event) => {
+        void (async () => {
+          const message = event.data;
+          if (message?.type === "console") {
+            logs.push({ level: message.level, message: message.message });
+            return;
           }
-          return;
-        }
 
-        if (message?.type === "rpc") {
-          const started = Date.now();
-          try {
-            const result = await this.handleRpc(message.method, message.params);
-            worker.postMessage({ type: "rpcResult", id: message.id, result });
-            const durationMs = Date.now() - started;
-            const entry = {
-              eventType: "scripting.rpc",
-              actor: principal,
-              success: true,
-              metadata: { method: message.method, durationMs },
-            };
-            audit.push(entry);
-            options.auditSink?.log?.(entry);
-          } catch (err) {
-            const serialized = serializeError(err);
-            worker.postMessage({ type: "rpcError", id: message.id, error: serialized });
-            const durationMs = Date.now() - started;
-            const entry = {
-              eventType: "scripting.rpc",
-              actor: principal,
-              success: false,
-              metadata: { method: message.method, durationMs, message: serialized.message },
-            };
-            audit.push(entry);
-            options.auditSink?.log?.(entry);
+          if (message?.type === "audit") {
+            audit.push(message.event);
+            try {
+              options.auditSink?.log?.(message.event);
+            } catch {
+              // ignore audit failures
+            }
+            return;
           }
-          return;
-        }
 
-        if (message?.type === "result") {
-          await settle({ logs, audit });
-          return;
-        }
+          if (message?.type === "rpc") {
+            const started = Date.now();
+            try {
+              const result = await this.handleRpc(message.method, message.params);
+              try {
+                worker.postMessage({ type: "rpcResult", id: message.id, result });
+              } catch {
+                // ignore response post failures (host may be gone)
+              }
+              const durationMs = Date.now() - started;
+              const entry = {
+                eventType: "scripting.rpc",
+                actor: principal,
+                success: true,
+                metadata: { method: message.method, durationMs },
+              };
+              audit.push(entry);
+              try {
+                options.auditSink?.log?.(entry);
+              } catch {
+                // ignore audit failures
+              }
+            } catch (err) {
+              const serialized = serializeError(err);
+              try {
+                worker.postMessage({ type: "rpcError", id: message.id, error: serialized });
+              } catch {
+                // ignore response post failures (host may be gone)
+              }
+              const durationMs = Date.now() - started;
+              const entry = {
+                eventType: "scripting.rpc",
+                actor: principal,
+                success: false,
+                metadata: { method: message.method, durationMs, message: serialized.message },
+              };
+              audit.push(entry);
+              try {
+                options.auditSink?.log?.(entry);
+              } catch {
+                // ignore audit failures
+              }
+            }
+            return;
+          }
 
-        if (message?.type === "error") {
-          await settle({ logs, audit, error: message.error });
-        }
+          if (message?.type === "result") {
+            await settle({ logs, audit });
+            return;
+          }
+
+          if (message?.type === "error") {
+            await settle({ logs, audit, error: message.error });
+          }
+        })().catch((err) => {
+          // Avoid unhandled rejections from message handlers.
+          void settle({ logs, audit, error: serializeError(err) }).catch(() => {});
+        });
       };
 
-      const onError = async (event) => {
-        await settle({ logs, audit, error: serializeError(event.error ?? event.message ?? event) });
+      const onError = (event) => {
+        void settle({ logs, audit, error: serializeError(event.error ?? event.message ?? event) }).catch(() => {});
       };
 
       worker.addEventListener("message", onMessage);
@@ -214,14 +265,26 @@ export class ScriptRuntime {
 
       const onTimeout = () => {
         audit.push({ eventType: "scripting.run.timeout", actor: principal, success: false, metadata: { timeoutMs } });
-        options.auditSink?.log?.({
-          eventType: "scripting.run.timeout",
-          actor: principal,
-          success: false,
-          metadata: { timeoutMs },
-        });
-        worker.postMessage({ type: "cancel" });
-        settle({ logs, audit, error: { name: "SandboxTimeoutError", message: `Script timed out after ${timeoutMs}ms` } });
+        try {
+          options.auditSink?.log?.({
+            eventType: "scripting.run.timeout",
+            actor: principal,
+            success: false,
+            metadata: { timeoutMs },
+          });
+        } catch {
+          // ignore audit failures
+        }
+        try {
+          worker.postMessage({ type: "cancel" });
+        } catch {
+          // ignore cancellation failures
+        }
+        void settle({
+          logs,
+          audit,
+          error: { name: "SandboxTimeoutError", message: `Script timed out after ${timeoutMs}ms` },
+        }).catch(() => {});
       };
 
       const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? setTimeout(onTimeout, timeoutMs) : null;
@@ -230,19 +293,35 @@ export class ScriptRuntime {
       let abortListener = null;
       if (options.signal) {
         if (options.signal.aborted) {
-          worker.postMessage({ type: "cancel" });
-          settle({ logs, audit, error: { name: "AbortError", message: "Script execution cancelled" } });
+          try {
+            worker.postMessage({ type: "cancel" });
+          } catch {
+            // ignore cancellation failures
+          }
+          void settle({ logs, audit, error: { name: "AbortError", message: "Script execution cancelled" } }).catch(
+            () => {},
+          );
         } else {
           abortListener = () => {
             audit.push({ eventType: "scripting.run.cancelled", actor: principal, success: false, metadata: {} });
-            options.auditSink?.log?.({
-              eventType: "scripting.run.cancelled",
-              actor: principal,
-              success: false,
-              metadata: {},
-            });
-            worker.postMessage({ type: "cancel" });
-            settle({ logs, audit, error: { name: "AbortError", message: "Script execution cancelled" } });
+            try {
+              options.auditSink?.log?.({
+                eventType: "scripting.run.cancelled",
+                actor: principal,
+                success: false,
+                metadata: {},
+              });
+            } catch {
+              // ignore audit failures
+            }
+            try {
+              worker.postMessage({ type: "cancel" });
+            } catch {
+              // ignore cancellation failures
+            }
+            void settle({ logs, audit, error: { name: "AbortError", message: "Script execution cancelled" } }).catch(
+              () => {},
+            );
           };
           options.signal.addEventListener("abort", abortListener, { once: true });
         }

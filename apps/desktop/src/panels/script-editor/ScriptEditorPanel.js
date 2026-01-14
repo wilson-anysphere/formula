@@ -176,29 +176,57 @@ export function mountScriptEditorPanel({ workbook, container, monaco, isEditing,
     );
   }
 
-  runButton.addEventListener("click", async () => {
-    const blockedReason = getBlockedReason();
-    if (blockedReason) {
-      updateConsole(blockedReason);
-      syncRunButtonDisabledState();
-      return;
-    }
+  runButton.addEventListener("click", () => {
+    void (async () => {
+      const blockedReason = getBlockedReason();
+      if (blockedReason) {
+        updateConsole(blockedReason);
+        try {
+          syncRunButtonDisabledState();
+        } catch {
+          // ignore UI sync failures
+        }
+        return;
+      }
 
-    isRunning = true;
-    syncRunButtonDisabledState();
-    updateConsole("");
-    try {
-      await ensureMonaco();
-      currentCode = editor ? editor.getValue() : fallbackEditor.value;
-      // Script execution includes worker startup + TypeScript transpilation; use a
-      // slightly more forgiving timeout so the first run doesn't flake under load.
-      const result = await runtime.run(currentCode, { timeoutMs: 20_000 });
-      const logs = result.logs.map((l) => `[${l.level}] ${l.message}`).join("\n");
-      updateConsole(logs + (result.error ? `\n[error] ${result.error.message}` : ""));
-    } finally {
-      isRunning = false;
+      isRunning = true;
       syncRunButtonDisabledState();
-    }
+      updateConsole("");
+      try {
+        await ensureMonaco();
+        currentCode = editor ? editor.getValue() : fallbackEditor.value;
+        // Script execution includes worker startup + TypeScript transpilation; use a
+        // slightly more forgiving timeout so the first run doesn't flake under load.
+        const result = await runtime.run(currentCode, { timeoutMs: 20_000 });
+        const logs = result.logs.map((l) => `[${l.level}] ${l.message}`).join("\n");
+        updateConsole(logs + (result.error ? `\n[error] ${result.error.message}` : ""));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        updateConsole(`[error] ${message}`);
+      } finally {
+        isRunning = false;
+        try {
+          syncRunButtonDisabledState();
+        } catch {
+          // ignore UI sync failures
+        }
+      }
+    })().catch((err) => {
+      // `click` handlers ignore returned promises, so ensure we always attach a
+      // terminal catch to avoid unhandled rejections.
+      try {
+        const message = err instanceof Error ? err.message : String(err);
+        updateConsole(`[error] ${message}`);
+      } catch {
+        // ignore output failures
+      }
+      isRunning = false;
+      try {
+        syncRunButtonDisabledState();
+      } catch {
+        // ignore UI sync failures
+      }
+    });
   });
 
   return {

@@ -368,85 +368,110 @@ async function runWithTimeout(runtime, code, timeoutMs) {
   }
 }
 
-self.onmessage = async (event) => {
-  const msg = event.data;
-  if (!msg || typeof msg.type !== "string") return;
+self.onmessage = (event) => {
+  void (async () => {
+    const msg = event.data;
+    if (!msg || typeof msg.type !== "string") return;
 
-  if (msg.type === "init") {
-    try {
-      const runtime = await loadPyodideOnce({ indexURL: msg.indexURL });
-
-      rpcTimeoutMs = Number.isFinite(msg.rpcTimeoutMs) ? msg.rpcTimeoutMs : rpcTimeoutMs;
-      rpcBufferBytes = Number.isFinite(msg.rpcBufferBytes) ? msg.rpcBufferBytes : rpcBufferBytes;
-
-      if (!msg.formulaFiles || typeof msg.formulaFiles !== "object") {
-        throw new Error("Pyodide init requires `formulaFiles` to install the formula Python API");
-      }
-
-      const rootDir = installFormulaFiles(runtime, msg.formulaFiles);
-      registerFormulaBridge(runtime);
-      await bootstrapFormulaBridge(runtime, rootDir);
-
-      // Apply default sandbox for subsequent executions.
-      applyNetworkSandbox(msg.permissions ?? {});
-      await applyPythonSandbox(runtime, msg.permissions ?? {});
-
-      self.postMessage({ type: "ready" });
-    } catch (err) {
-      self.postMessage({ type: "ready", error: err?.message ?? String(err) });
-    }
-    return;
-  }
-
-  if (msg.type === "execute") {
-    executeQueue = executeQueue.then(async () => {
-      const requestId = msg.requestId;
-      let stdout = "";
-      let stderr = "";
+    if (msg.type === "init") {
       try {
         const runtime = await loadPyodideOnce({ indexURL: msg.indexURL });
 
-        const permissions = msg.permissions ?? {};
-        applyNetworkSandbox(permissions);
-        await applyPythonSandbox(runtime, permissions);
+        rpcTimeoutMs = Number.isFinite(msg.rpcTimeoutMs) ? msg.rpcTimeoutMs : rpcTimeoutMs;
+        rpcBufferBytes = Number.isFinite(msg.rpcBufferBytes) ? msg.rpcBufferBytes : rpcBufferBytes;
 
-        const maxMemoryBytes = msg.maxMemoryBytes;
-        const beforeMem = getWasmMemoryBytes(runtime);
-
-        const { value: result, stdout: capturedStdout, stderr: capturedStderr } = await withCapturedOutput(runtime, () =>
-          runWithTimeout(runtime, msg.code, msg.timeoutMs),
-        );
-        stdout = capturedStdout;
-        stderr = capturedStderr;
-
-        const afterMem = getWasmMemoryBytes(runtime);
-        if (Number.isFinite(maxMemoryBytes) && maxMemoryBytes > 0 && afterMem != null && afterMem > maxMemoryBytes) {
-          throw new Error(`Pyodide memory limit exceeded: ${afterMem} bytes > ${maxMemoryBytes} bytes`);
+        if (!msg.formulaFiles || typeof msg.formulaFiles !== "object") {
+          throw new Error("Pyodide init requires `formulaFiles` to install the formula Python API");
         }
 
-        // If memory grew substantially during the run, still return the result but
-        // include some debugging metadata.
-        self.postMessage({
-          type: "result",
-          requestId,
-          success: true,
-          result,
-          stdout,
-          stderr,
-          memory: { before: beforeMem, after: afterMem },
-        });
+        const rootDir = installFormulaFiles(runtime, msg.formulaFiles);
+        registerFormulaBridge(runtime);
+        await bootstrapFormulaBridge(runtime, rootDir);
+
+        // Apply default sandbox for subsequent executions.
+        applyNetworkSandbox(msg.permissions ?? {});
+        await applyPythonSandbox(runtime, msg.permissions ?? {});
+
+        self.postMessage({ type: "ready" });
       } catch (err) {
-        stdout = err?.stdout ?? stdout;
-        stderr = err?.stderr ?? stderr;
-        self.postMessage({
-          type: "result",
-          requestId,
-          success: false,
-          error: err?.message ?? String(err),
-          stdout,
-          stderr,
-        });
+        self.postMessage({ type: "ready", error: err?.message ?? String(err) });
       }
-    });
-  }
+      return;
+    }
+
+    if (msg.type === "execute") {
+      executeQueue = executeQueue
+        .then(async () => {
+          const requestId = msg.requestId;
+          let stdout = "";
+          let stderr = "";
+          try {
+            const runtime = await loadPyodideOnce({ indexURL: msg.indexURL });
+
+            const permissions = msg.permissions ?? {};
+            applyNetworkSandbox(permissions);
+            await applyPythonSandbox(runtime, permissions);
+
+            const maxMemoryBytes = msg.maxMemoryBytes;
+            const beforeMem = getWasmMemoryBytes(runtime);
+
+            const { value: result, stdout: capturedStdout, stderr: capturedStderr } = await withCapturedOutput(
+              runtime,
+              () => runWithTimeout(runtime, msg.code, msg.timeoutMs),
+            );
+            stdout = capturedStdout;
+            stderr = capturedStderr;
+
+            const afterMem = getWasmMemoryBytes(runtime);
+            if (
+              Number.isFinite(maxMemoryBytes) &&
+              maxMemoryBytes > 0 &&
+              afterMem != null &&
+              afterMem > maxMemoryBytes
+            ) {
+              throw new Error(`Pyodide memory limit exceeded: ${afterMem} bytes > ${maxMemoryBytes} bytes`);
+            }
+
+            // If memory grew substantially during the run, still return the result but
+            // include some debugging metadata.
+            self.postMessage({
+              type: "result",
+              requestId,
+              success: true,
+              result,
+              stdout,
+              stderr,
+              memory: { before: beforeMem, after: afterMem },
+            });
+          } catch (err) {
+            stdout = err?.stdout ?? stdout;
+            stderr = err?.stderr ?? stderr;
+            self.postMessage({
+              type: "result",
+              requestId,
+              success: false,
+              error: err?.message ?? String(err),
+              stdout,
+              stderr,
+            });
+          }
+        })
+        .catch((err) => {
+          // Keep the execution queue alive even if a postMessage/handler bug throws.
+          try {
+            console.error("Unhandled Pyodide worker execution error:", err);
+          } catch {
+            // ignore
+          }
+        });
+    }
+  })().catch((err) => {
+    // `onmessage` handlers ignore returned promises; ensure we always terminate the
+    // promise chain to avoid unhandled rejections.
+    try {
+      console.error("Unhandled Pyodide worker message error:", err);
+    } catch {
+      // ignore
+    }
+  });
 };

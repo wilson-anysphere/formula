@@ -127,66 +127,77 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
     output.textContent = "";
   });
 
-  runButton.addEventListener("click", async () => {
-    if (disposed) return;
+  runButton.addEventListener("click", () => {
+    void (async () => {
+      if (disposed) return;
 
-    // The runtime may reset itself after timeouts/memory errors. Keep our local
-    // initialization flag in sync so users can run again without reloading.
-    if ((runtime as any).initialized !== true) {
-      initialized = false;
-    }
-
-    output.textContent =
-      runtime.getBackendMode() === "mainThread"
-        ? "SharedArrayBuffer unavailable; running Pyodide on main thread (UI may freeze during execution).\n\n"
-        : "";
-    runButton.disabled = true;
-
-    try {
-      const sheetId = getActiveSheetId?.() ?? "Sheet1";
-      bridge.activeSheetId = sheetId;
-      bridge.sheetIds.add(sheetId);
-
-      const permissions = effectivePermissions();
-
-      if (!initialized) {
-        output.textContent += "Preparing Python runtime…\n";
-        const indexURL = await ensurePyodideIndexURL({
-          onProgress: (progress) => {
-            if (progress.kind === "downloadStart" && progress.message) {
-              output.textContent += `${progress.message}\n`;
-            }
-            if (progress.kind === "ready" && progress.message) {
-              output.textContent += `${progress.message}\n`;
-            }
-          },
-        });
-        output.textContent += "Loading Python runtime…\n";
-        await runtime.initialize({ api: bridge, permissions, indexURL });
-        initialized = true;
-        output.textContent += "Ready.\n\n";
+      // The runtime may reset itself after timeouts/memory errors. Keep our local
+      // initialization flag in sync so users can run again without reloading.
+      if ((runtime as any).initialized !== true) {
+        initialized = false;
       }
 
-      const result = await runtime.execute(editor.value, { permissions });
-      if (typeof result?.stdout === "string" && result.stdout.length > 0) {
-        output.textContent += result.stdout;
+      output.textContent =
+        runtime.getBackendMode() === "mainThread"
+          ? "SharedArrayBuffer unavailable; running Pyodide on main thread (UI may freeze during execution).\n\n"
+          : "";
+      runButton.disabled = true;
+
+      try {
+        const sheetId = getActiveSheetId?.() ?? "Sheet1";
+        bridge.activeSheetId = sheetId;
+        bridge.sheetIds.add(sheetId);
+
+        const permissions = effectivePermissions();
+
+        if (!initialized) {
+          output.textContent += "Preparing Python runtime…\n";
+          const indexURL = await ensurePyodideIndexURL({
+            onProgress: (progress) => {
+              if (progress.kind === "downloadStart" && progress.message) {
+                output.textContent += `${progress.message}\n`;
+              }
+              if (progress.kind === "ready" && progress.message) {
+                output.textContent += `${progress.message}\n`;
+              }
+            },
+          });
+          output.textContent += "Loading Python runtime…\n";
+          await runtime.initialize({ api: bridge, permissions, indexURL });
+          initialized = true;
+          output.textContent += "Ready.\n\n";
+        }
+
+        const result = await runtime.execute(editor.value, { permissions });
+        if (typeof result?.stdout === "string" && result.stdout.length > 0) {
+          output.textContent += result.stdout;
+        }
+        if (typeof result?.stderr === "string" && result.stderr.length > 0) {
+          output.textContent += result.stderr;
+        }
+      } catch (err) {
+        const error = err as any;
+        if (typeof error?.stdout === "string" && error.stdout.length > 0) {
+          output.textContent += error.stdout;
+        }
+        if (typeof error?.stderr === "string" && error.stderr.length > 0) {
+          output.textContent += error.stderr;
+        }
+        output.textContent += `Error: ${error instanceof Error ? error.message : String(error)}\n`;
+      } finally {
+        runButton.disabled = false;
+        output.scrollTop = output.scrollHeight;
       }
-      if (typeof result?.stderr === "string" && result.stderr.length > 0) {
-        output.textContent += result.stderr;
+    })().catch((err) => {
+      // Terminal catch to avoid unhandled rejections from click handlers.
+      console.error("Unhandled Python panel error:", err);
+      try {
+        output.textContent += `Error: ${err instanceof Error ? err.message : String(err)}\n`;
+      } catch {
+        // ignore output failures
       }
-    } catch (err) {
-      const error = err as any;
-      if (typeof error?.stdout === "string" && error.stdout.length > 0) {
-        output.textContent += error.stdout;
-      }
-      if (typeof error?.stderr === "string" && error.stderr.length > 0) {
-        output.textContent += error.stderr;
-      }
-      output.textContent += `Error: ${error instanceof Error ? error.message : String(error)}\n`;
-    } finally {
       runButton.disabled = false;
-      output.scrollTop = output.scrollHeight;
-    }
+    });
   });
 
   return () => {

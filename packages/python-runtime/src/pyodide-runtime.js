@@ -203,7 +203,7 @@ export class PyodideRuntime {
       const method = msg.method;
       const params = msg.params;
 
-      (async () => {
+      void (async () => {
         try {
           if (!this.api) {
             throw new Error("PyodideRuntime has no spreadsheet API configured");
@@ -216,7 +216,9 @@ export class PyodideRuntime {
             error: err instanceof Error ? err.message : String(err),
           });
         }
-      })();
+      })().catch(() => {
+        // ignore: message handlers swallow returned promises; avoid unhandled rejections.
+      });
     };
 
     this.worker.addEventListener("message", this._onRpcMessage);

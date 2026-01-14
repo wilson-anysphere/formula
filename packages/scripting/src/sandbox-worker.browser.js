@@ -148,67 +148,77 @@ function installPermissionGuards(permissions) {
   }
 }
 
-self.onmessage = async (event) => {
-  const message = event.data;
-  if (!message || typeof message !== "object") return;
+self.onmessage = (event) => {
+  void (async () => {
+    const message = event.data;
+    if (!message || typeof message !== "object") return;
 
-  if (message.type === "rpcResult") {
-    const pending = pendingRpc.get(message.id);
-    if (pending) {
-      pendingRpc.delete(message.id);
-      pending.resolve(message.result);
-    }
-    return;
-  }
-
-  if (message.type === "rpcError") {
-    const pending = pendingRpc.get(message.id);
-    if (pending) {
-      pendingRpc.delete(message.id);
-      pending.reject(message.error);
-    }
-    return;
-  }
-
-  if (message.type === "event") {
-    try {
-      const dispatch = self.__formulaDispatchEvent;
-      if (typeof dispatch === "function") {
-        dispatch(message.eventType, message.payload);
+    if (message.type === "rpcResult") {
+      const pending = pendingRpc.get(message.id);
+      if (pending) {
+        pendingRpc.delete(message.id);
+        pending.resolve(message.result);
       }
+      return;
+    }
+
+    if (message.type === "rpcError") {
+      const pending = pendingRpc.get(message.id);
+      if (pending) {
+        pendingRpc.delete(message.id);
+        pending.reject(message.error);
+      }
+      return;
+    }
+
+    if (message.type === "event") {
+      try {
+        const dispatch = self.__formulaDispatchEvent;
+        if (typeof dispatch === "function") {
+          dispatch(message.eventType, message.payload);
+        }
+      } catch (err) {
+        self.postMessage({ type: "error", error: serializeError(err) });
+      }
+      return;
+    }
+
+    if (message.type === "cancel") {
+      self.postMessage({ type: "error", error: { name: "AbortError", message: "Script execution cancelled" } });
+      self.close();
+      return;
+    }
+
+    if (message.type !== "run") return;
+
+    try {
+      installConsoleCapture();
+      installPermissionGuards(message.permissions);
+      // Expose host RPC as a capability for the generated bootstrap.
+      self.__hostRpc = hostRpc;
+
+      const { bootstrap, ts, moduleKind, kind } = buildSandboxedScript({
+        code: String(message.code ?? ""),
+        activeSheetName: String(message.activeSheetName),
+        selection: message.selection,
+      });
+
+      const { js } = transpileTypeScript(ts, { moduleKind });
+      const userScript = kind === "module" ? buildModuleRunnerJavaScript({ moduleJs: js }) : js;
+      const fullScript = `${bootstrap}\n${userScript}`;
+      const result = (0, eval)(fullScript);
+      await result;
+      self.postMessage({ type: "result", result: null });
     } catch (err) {
       self.postMessage({ type: "error", error: serializeError(err) });
     }
-    return;
-  }
-
-  if (message.type === "cancel") {
-    self.postMessage({ type: "error", error: { name: "AbortError", message: "Script execution cancelled" } });
-    self.close();
-    return;
-  }
-
-  if (message.type !== "run") return;
-
-  try {
-    installConsoleCapture();
-    installPermissionGuards(message.permissions);
-    // Expose host RPC as a capability for the generated bootstrap.
-    self.__hostRpc = hostRpc;
-
-    const { bootstrap, ts, moduleKind, kind } = buildSandboxedScript({
-      code: String(message.code ?? ""),
-      activeSheetName: String(message.activeSheetName),
-      selection: message.selection,
-    });
-
-    const { js } = transpileTypeScript(ts, { moduleKind });
-    const userScript = kind === "module" ? buildModuleRunnerJavaScript({ moduleJs: js }) : js;
-    const fullScript = `${bootstrap}\n${userScript}`;
-    const result = (0, eval)(fullScript);
-    await result;
-    self.postMessage({ type: "result", result: null });
-  } catch (err) {
-    self.postMessage({ type: "error", error: serializeError(err) });
-  }
+  })().catch((err) => {
+    // `onmessage` handlers ignore returned promises; ensure we always terminate the
+    // promise chain to avoid unhandled rejections.
+    try {
+      self.postMessage({ type: "error", error: serializeError(err) });
+    } catch {
+      // ignore
+    }
+  });
 };
