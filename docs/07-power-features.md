@@ -1203,6 +1203,9 @@ export interface InputDistribution {
 }
 
 // Mirrors Rust: #[serde(tag = "type", rename_all = "snake_case")]
+//
+// Notes:
+// - beta: when `min`/`max` are omitted/null, Rust defaults to the unit interval [0, 1].
 export type Distribution =
   | { type: "normal"; mean: number; stdDev: number }
   | { type: "uniform"; min: number; max: number }
@@ -1312,6 +1315,7 @@ Validation + edge cases (Rust behavior):
   - beta:
     - `"beta alpha and beta must be > 0"`
     - `"beta min must be <= max"` (when both are provided)
+    - When `min`/`max` are omitted/null, Rust defaults to `[0, 1]`.
   - exponential: `"exponential rate must be > 0"`
   - poisson: `"poisson lambda must be >= 0"`
 - Output cells must evaluate to numbers each iteration; otherwise `WhatIfError::NonNumericCell { cell, value }`.
