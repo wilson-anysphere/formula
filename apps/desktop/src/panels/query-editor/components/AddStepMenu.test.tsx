@@ -115,6 +115,31 @@ describe("AddStepMenu", () => {
     });
   });
 
+  it("generates a unique Add Column name using existing query steps (even if preview schema is stale)", async () => {
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const query: Query = {
+      ...baseQuery(),
+      steps: [
+        { id: "s1", name: "Added Custom", operation: { type: "addColumn", name: "Custom", formula: "0" } },
+      ],
+    };
+    const onAddStep = vi.fn();
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={onAddStep} aiContext={{ query, preview }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "Add Column").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onAddStep).toHaveBeenCalledWith({ type: "addColumn", name: "Custom 1", formula: "[Region]" });
+  });
+
   it("disables schema-dependent operations when preview schema is missing", async () => {
     const onAddStep = vi.fn();
     await act(async () => {

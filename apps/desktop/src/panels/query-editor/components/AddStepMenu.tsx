@@ -58,6 +58,23 @@ export function AddStepMenu(props: {
       disabledReason: schemaRequiredDisabled ? schemaRequiredReason : undefined,
     });
 
+    const uniqueName = (base: string, used: Set<string>): string => {
+      let name = base;
+      let suffix = 1;
+      while (used.has(name)) {
+        name = `${base} ${suffix}`;
+        suffix += 1;
+      }
+      return name;
+    };
+    const usedColumnNames = new Set(columnNames);
+    for (const step of props.aiContext.query.steps) {
+      const op = step.operation;
+      if (op.type === "addColumn" && typeof op.name === "string" && op.name.trim()) {
+        usedColumnNames.add(op.name);
+      }
+    }
+
     return [
       {
         id: "rows",
@@ -113,7 +130,13 @@ export function AddStepMenu(props: {
           schemaItem({
             id: "renameColumn",
             label: t("queryEditor.addStep.op.renameColumns"),
-            create: () => ({ type: "renameColumn", oldName: firstColumnName, newName: `${firstColumnName || "Column"} (Renamed)` }),
+            create: () => {
+              const oldName = firstColumnName;
+              const baseNewName = `${oldName || "Column"} (Renamed)`;
+              const used = new Set(columnNames.filter((name) => name !== oldName));
+              const newName = uniqueName(baseNewName, used);
+              return { type: "renameColumn", oldName, newName };
+            },
           }),
           schemaItem({
             id: "splitColumn",
@@ -155,14 +178,14 @@ export function AddStepMenu(props: {
             label: t("queryEditor.addStep.op.addColumn"),
             create: () => ({
               type: "addColumn",
-              name: "Custom",
+              name: uniqueName("Custom", usedColumnNames),
               formula: firstColumnName ? `[${firstColumnName}]` : "0",
             }),
           }),
         ] satisfies MenuItem[],
       },
     ];
-  }, [locale, firstColumnName, schemaReady, schemaRequiredReason, secondColumnName]);
+  }, [locale, columnNames, props.aiContext.query.steps, firstColumnName, schemaReady, schemaRequiredReason, secondColumnName]);
 
   useEffect(() => {
     if (!menuOpen) return;
