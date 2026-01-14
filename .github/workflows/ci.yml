@@ -316,7 +316,7 @@ jobs:
         if: always() && steps.build_desktop_binary.outcome == 'success'
         # Informational only (for now). The report script writes markdown to both stdout and the
         # job summary (`GITHUB_STEP_SUMMARY`) so it shows up directly in the PR UI.
-        continue-on-error: true
+        continue-on-error: ${{ !(vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == '1' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'true' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'yes' || vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE == 'on') }}
         env:
           FORMULA_ENFORCE_DESKTOP_BINARY_SIZE: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE }}
           FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
