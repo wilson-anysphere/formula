@@ -4993,15 +4993,25 @@ fn build_shared_formula_ptgfuncvar_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     // Provide numeric inputs in A1/A2 so the references are within the sheet's used range.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
-    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
 
-    // Anchor cell B1: PtgExp(B1). The shared formula definition that follows contains the actual
-    // rgce token stream.
-    let ptgexp = ptg_exp(0, 1);
+    // Base cell B1 formula: `SUM(A1,1)` encoded as a full `FORMULA.rgce` token stream.
+    //
+    // We keep the formula's cell reference relative (no `$`) so the expected text matches
+    // `SUM(A1,1)` rather than `$A$1`.
+    let full_rgce: Vec<u8> = vec![
+        0x24, // PtgRef
+        0x00, 0x00, // row = 0
+        0x00, 0xC0, // col = 0 (A) + row_rel + col_rel
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x22, // PtgFuncVar
+        0x02, // argc=2
+        0x04, 0x00, // iftab=4 (SUM)
+    ];
     push_record(
         &mut sheet,
         RECORD_FORMULA,
-        &formula_cell(0, 1, xf_cell, 0.0, &ptgexp),
+        &formula_cell(0, 1, xf_cell, 0.0, &full_rgce),
     );
 
     // Shared formula rgce stored in SHRFMLA:
@@ -5033,7 +5043,10 @@ fn build_shared_formula_ptgfuncvar_sheet_stream(xf_cell: u16) -> Vec<u8> {
         &shrfmla_record(0, 1, 1, 1, &shared_rgce),
     );
 
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
     // Follower cell B2: PtgExp(B1).
+    let ptgexp = ptg_exp(0, 1);
     push_record(
         &mut sheet,
         RECORD_FORMULA,
