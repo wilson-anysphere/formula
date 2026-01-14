@@ -455,6 +455,23 @@ fn structured_reference_items_are_not_translated_in_es_es() {
 }
 
 #[test]
+fn structured_reference_separators_roundtrip_for_fr_fr_and_es_es() {
+    // Regression test: fr-FR/es-ES use `;` as the function argument separator, but structured
+    // reference contents (including `[[#Headers],[Qty]]` comma separators) must remain canonical.
+    let canonical = "=SUM(Table1[[#Headers],[Qty]],1)";
+    for (locale, expected_localized) in [
+        (&locale::FR_FR, "=SOMME(Table1[[#Headers],[Qty]];1)"),
+        (&locale::ES_ES, "=SUMA(Table1[[#Headers],[Qty]];1)"),
+    ] {
+        let localized = locale::localize_formula(canonical, locale).unwrap();
+        assert_eq!(localized, expected_localized);
+
+        let canonical_roundtrip = locale::canonicalize_formula(&localized, locale).unwrap();
+        assert_eq!(canonical_roundtrip, canonical);
+    }
+}
+
+#[test]
 fn structured_reference_escaped_brackets_are_not_translated() {
     // Excel escapes `]` inside structured references as `]]` (e.g. column name `A]B` is written
     // as `A]]B`). Locale translation must preserve these escapes by treating `[...]` as opaque.
