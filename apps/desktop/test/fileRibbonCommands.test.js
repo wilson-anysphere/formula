@@ -16,6 +16,7 @@ test("Ribbon schema includes File tab command ids", () => {
   const schema = readRibbonSchemaSource("fileTab.ts");
 
   const ids = [
+    "file.new.new",
     "file.new.blankWorkbook",
     "file.open.open",
     "file.save.save",
@@ -54,6 +55,7 @@ test("File tab ribbon ids are registered in CommandRegistry (no exemptions neede
   const disabling = fs.readFileSync(disablingPath, "utf8");
 
   const ids = [
+    "file.new.new",
     "file.new.blankWorkbook",
     "file.open.open",
     "file.save.save",
