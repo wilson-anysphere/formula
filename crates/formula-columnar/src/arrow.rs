@@ -164,9 +164,9 @@ pub(crate) fn column_type_from_field(field: &Field) -> Result<ColumnType, ArrowI
     Ok(match field.data_type() {
         DataType::Float32 | DataType::Float64 => ColumnType::Number,
         DataType::Boolean => ColumnType::Boolean,
-        DataType::Utf8 | DataType::LargeUtf8 => ColumnType::String,
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => ColumnType::String,
         DataType::Dictionary(_, value) => match value.as_ref() {
-            DataType::Utf8 | DataType::LargeUtf8 => ColumnType::String,
+            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => ColumnType::String,
             other => return Err(ArrowInteropError::UnsupportedDictionaryValueType(other.clone())),
         },
         DataType::Int8
@@ -279,6 +279,13 @@ pub(crate) fn value_from_array(
                     .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
                 Ok(Value::String(Arc::<str>::from(arr.value(row))))
             }
+            DataType::Utf8View => {
+                let arr = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::StringViewArray>()
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
+                Ok(Value::String(Arc::<str>::from(arr.value(row))))
+            }
             DataType::LargeUtf8 => {
                 let arr = array
                     .as_any()
@@ -342,6 +349,41 @@ pub(crate) fn value_from_array(
                         DataType::Int64 => dict_string_value!(
                             arrow_array::types::Int64Type,
                             arrow_array::StringArray
+                        ),
+                        other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
+                    },
+                    DataType::Utf8View => match key.as_ref() {
+                        DataType::UInt8 => dict_string_value!(
+                            arrow_array::types::UInt8Type,
+                            arrow_array::StringViewArray
+                        ),
+                        DataType::UInt16 => dict_string_value!(
+                            arrow_array::types::UInt16Type,
+                            arrow_array::StringViewArray
+                        ),
+                        DataType::UInt32 => dict_string_value!(
+                            arrow_array::types::UInt32Type,
+                            arrow_array::StringViewArray
+                        ),
+                        DataType::UInt64 => dict_string_value!(
+                            arrow_array::types::UInt64Type,
+                            arrow_array::StringViewArray
+                        ),
+                        DataType::Int8 => dict_string_value!(
+                            arrow_array::types::Int8Type,
+                            arrow_array::StringViewArray
+                        ),
+                        DataType::Int16 => dict_string_value!(
+                            arrow_array::types::Int16Type,
+                            arrow_array::StringViewArray
+                        ),
+                        DataType::Int32 => dict_string_value!(
+                            arrow_array::types::Int32Type,
+                            arrow_array::StringViewArray
+                        ),
+                        DataType::Int64 => dict_string_value!(
+                            arrow_array::types::Int64Type,
+                            arrow_array::StringViewArray
                         ),
                         other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
                     },
