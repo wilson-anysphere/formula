@@ -118,6 +118,101 @@ test("verify_linux_desktop_integration passes for a desktop entry targeting the 
   assert.equal(proc.status, 0, proc.stderr);
 });
 
+test(
+  "verify_linux_desktop_integration validates deep-link schemes from config when desktop config is an array",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const configPath = path.join(tmp, "tauri.conf.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          identifier: "app.formula.desktop",
+          mainBinaryName: "formula-desktop",
+          plugins: {
+            "deep-link": {
+              desktop: [
+                {
+                  schemes: ["formula", "formula-extra"],
+                },
+              ],
+            },
+          },
+          bundle: {
+            fileAssociations: [
+              {
+                ext: ["xlsx"],
+                mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;x-scheme-handler/formula;x-scheme-handler/formula-extra;",
+    });
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
+  "verify_linux_desktop_integration fails when a configured deep-link scheme is missing from the app .desktop MimeType=",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
+    const configPath = path.join(tmp, "tauri.conf.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          identifier: "app.formula.desktop",
+          mainBinaryName: "formula-desktop",
+          plugins: {
+            "deep-link": {
+              desktop: [
+                {
+                  schemes: ["formula", "formula-extra"],
+                },
+              ],
+            },
+          },
+          bundle: {
+            fileAssociations: [
+              {
+                ext: ["xlsx"],
+                mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    // Missing x-scheme-handler/formula-extra.
+    const pkgRoot = writePackageRoot(tmp, {
+      mimeTypeLine:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;x-scheme-handler/formula;",
+    });
+
+    const proc = runValidator({ packageRoot: pkgRoot, configPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /missing deep link scheme handler/i);
+    assert.match(proc.stderr, /x-scheme-handler\/formula-extra/i);
+  },
+);
+
 test("verify_linux_desktop_integration accepts quoted Exec= paths", { skip: !hasPython3 }, () => {
   const tmp = mkdtempSync(path.join(tmpdir(), "formula-linux-desktop-integration-"));
   const configPath = writeConfig(tmp);
