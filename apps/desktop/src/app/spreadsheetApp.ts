@@ -111,7 +111,7 @@ import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 import { parseGoTo, splitSheetQualifier } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
-import { shiftA1References, toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
+import { extractFormulaReferences, shiftA1References, tokenizeFormula, toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
 import { createSchemaProviderFromSearchWorkbook } from "../ai/context/searchWorkbookSchemaProvider.js";
 import type { WorkbookContextBuildStats } from "../ai/context/WorkbookContextBuilder.js";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
@@ -15107,132 +15107,48 @@ export class SpreadsheetApp {
     };
 
     const rewriteStructuredReferencesToA1 = (text: string): string | null => {
-      // Supported patterns (matching the structured ref tokenizer):
-      // - TableName[ColumnName]
-      // - TableName[[#All],[ColumnName]]
       if (!text.includes("[")) return null;
 
-      const findColumnIndex = (columns: unknown, columnName: string): number | null => {
-        if (!Array.isArray(columns)) return null;
-        const target = columnName.trim().toUpperCase();
-        if (!target) return null;
-        for (let i = 0; i < columns.length; i += 1) {
-          const col = String(columns[i] ?? "").trim();
-          if (!col) continue;
-          if (col.toUpperCase() === target) return i;
-        }
-        return null;
-      };
+      // Use the shared formula tokenizer + reference extractor so structured refs stay aligned
+      // with formula-bar highlighting and hover previews.
+      //
+      // We only rewrite when *all* structured references in the expression resolve to concrete
+      // A1 ranges, since partial rewrites still leave the evaluator with unsupported syntax.
+      const structuredTokens = tokenizeFormula(text).filter(
+        (token) => token.type === "reference" && token.text.includes("[") && !token.text.includes("!")
+      );
+      if (structuredTokens.length === 0) return null;
 
-      const resolveStructuredColumnRef = (params: {
-        tableName: string;
-        columnName: string;
-        includeHeader: boolean;
-      }): string | null => {
-        const tableName = params.tableName.trim();
-        if (!tableName) return null;
-        const table: any = this.searchWorkbook.getTable(tableName);
-        if (!table) return null;
+      const { references } = extractFormulaReferences(text, undefined, undefined, { tables: this.searchWorkbook.tables as any });
+      const bySpan = new Map(references.map((ref) => [`${ref.start}:${ref.end}`, ref]));
 
-        const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
-        const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
-        const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
-        const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
-        if (startRow == null || startCol == null || endRow == null || endCol == null) return null;
-        if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) return null;
+      const replacements: Array<{ start: number; end: number; text: string }> = [];
+      for (const token of structuredTokens) {
+        const ref = bySpan.get(`${token.start}:${token.end}`);
+        if (!ref) return null;
 
-        const colIdx = findColumnIndex(table.columns, params.columnName);
-        if (colIdx == null) return null;
+        const r = ref.range;
+        const sheet = typeof r.sheet === "string" && r.sheet.trim() ? r.sheet.trim() : sheetId;
+        const sheetToken = formatSheetNameForA1(sheet);
+        const prefix = sheetToken ? `${sheetToken}!` : "";
 
-        // Table coordinates include the header row. For `Table[Column]` refs, approximate Excel
-        // semantics by skipping the header row. (Totals rows are not currently represented.)
-        const dataStartRow = params.includeHeader ? startRow : startRow + 1;
-        if (dataStartRow > endRow) return null;
-
-        const col = startCol + colIdx;
-        if (col < startCol || col > endCol) return null;
-
-        const range = rangeToA1({ startRow: dataStartRow, endRow, startCol: col, endCol: col });
-        if (!range) return null;
-
-        const sheet = typeof table.sheetName === "string" && table.sheetName.trim() ? table.sheetName.trim() : sheetId;
-        const token = formatSheetNameForA1(sheet);
-        const prefix = token ? `${token}!` : "";
-        return `${prefix}${range}`;
-      };
-
-      let changed = false;
-      let failed = false;
-
-      // Match the same supported patterns as `parseStructuredReferenceText`:
-      // - `TableName[ColumnName]`
-      // - `TableName[[#All],[ColumnName]]`
-      const allPattern = /([A-Za-z_][A-Za-z0-9_.]*)\[\[\s*#all\s*\]\s*,\s*\[\s*([^\]]+?)\s*\]\]/gi;
-      const simplePattern = /([A-Za-z_][A-Za-z0-9_.]*)\[(?!\[)\s*([^\[\]]+?)\s*\]/gi;
-
-      const rewriteSegment = (segment: string): string => {
-        let out = segment;
-        out = out.replace(allPattern, (match, tableName, colName) => {
-          const replacement = resolveStructuredColumnRef({ tableName, columnName: colName, includeHeader: true });
-          if (!replacement) {
-            failed = true;
-            return match;
-          }
-          changed = true;
-          return replacement;
-        });
-
-        out = out.replace(simplePattern, (match, tableName, colName) => {
-          const replacement = resolveStructuredColumnRef({ tableName, columnName: colName, includeHeader: false });
-          if (!replacement) {
-            failed = true;
-            return match;
-          }
-          changed = true;
-          return replacement;
-        });
-        return out;
-      };
-
-      const rewriteOutsideStrings = (input: string, transform: (segment: string) => string): string => {
-        let out = "";
-        let segment = "";
-        let inString = false;
-
-        for (let i = 0; i < input.length; i += 1) {
-          const ch = input[i];
-          if (ch !== '"') {
-            if (inString) out += ch;
-            else segment += ch;
-            continue;
-          }
-
-          if (!inString) {
-            out += transform(segment);
-            segment = "";
-            inString = true;
-            out += '"';
-            continue;
-          }
-
-          // Escaped quote inside a string literal: "" -> "
-          if (input[i + 1] === '"') {
-            out += '""';
-            i += 1;
-            continue;
-          }
-
-          inString = false;
-          out += '"';
+        let a1 = "";
+        try {
+          a1 = rangeToA1({ startRow: r.startRow, endRow: r.endRow, startCol: r.startCol, endCol: r.endCol });
+        } catch {
+          return null;
         }
 
-        out += transform(segment);
-        return out;
-      };
+        replacements.push({ start: token.start, end: token.end, text: `${prefix}${a1}` });
+      }
 
-      const rewritten = rewriteOutsideStrings(text, rewriteSegment);
-      if (!changed || failed) return null;
-      return rewritten;
+      // Apply replacements from right-to-left so offsets remain valid.
+      replacements.sort((a, b) => b.start - a.start);
+      let out = text;
+      for (const rep of replacements) {
+        out = out.slice(0, rep.start) + rep.text + out.slice(rep.end);
+      }
+      return out;
     };
 
     let reads = 0;

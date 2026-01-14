@@ -7,7 +7,8 @@ import {
   type Suggestion
 } from "@formula/ai-completion";
 import type { EngineClient } from "@formula/engine";
-
+import { extractFormulaReferences, tokenizeFormula } from "@formula/spreadsheet-frontend";
+ 
 import type { DocumentController } from "../../document/documentController.js";
 import type { FormulaBarView } from "../../formula-bar/FormulaBarView.js";
 import { getLocale } from "../../i18n/index.js";
@@ -553,151 +554,57 @@ function toA1(row: number, col: number): string {
   return `${letters}${row + 1}`;
 }
 
-function findColumnIndex(columns: string[], columnName: string): number | null {
-  const target = columnName.trim().toUpperCase();
-  if (!target) return null;
-  for (let i = 0; i < columns.length; i += 1) {
-    const col = String(columns[i] ?? "").trim();
-    if (!col) continue;
-    if (col.toUpperCase() === target) return i;
-  }
-  return null;
-}
-
-function resolveStructuredColumnRef(params: {
-  tables: Map<string, TablePreviewInfo>;
-  tableName: string;
-  columnName: string;
-  mode: "data" | "all";
-  defaultSheetId: string;
-}): string | null {
-  const { tables, tableName, columnName, mode, defaultSheetId } = params;
-  const table = tables.get(tableName.trim().toUpperCase());
-  if (!table) return null;
-
-  const colIdx = findColumnIndex(table.columns, columnName);
-  if (colIdx == null) return null;
-
-  if (
-    table.startRow == null ||
-    table.startCol == null ||
-    table.endRow == null ||
-    table.endCol == null ||
-    table.startRow < 0 ||
-    table.startCol < 0 ||
-    table.endRow < 0 ||
-    table.endCol < 0
-  ) {
-    return null;
-  }
-
-  // Table coordinates include the header row. For simple `Table[Column]` refs,
-  // approximate Excel semantics by skipping the header row. (Totals rows are not
-  // currently represented in `TableInfo`, so they remain included when present.)
-  const startRow = mode === "all" ? table.startRow : table.startRow + 1;
-  const endRow = table.endRow;
-  if (startRow > endRow) return null;
-
-  const col = table.startCol + colIdx;
-  const start = toA1(startRow, col);
-  const end = toA1(endRow, col);
-  const range = start === end ? start : `${start}:${end}`;
-
-  const sheet = table.sheetName ?? defaultSheetId;
-  const prefix = sheet ? formatSheetPrefix(sheet) : "";
-  return `${prefix}${range}`;
-}
-
 function rewriteStructuredReferences(
   formulaText: string,
   tables: Map<string, TablePreviewInfo>,
   defaultSheetId: string,
 ): string | null {
-  let changed = false;
-  let failed = false;
+  if (!formulaText.includes("[")) return null;
 
-  // Match the same supported patterns as `parseStructuredReferenceText`:
-  // - `TableName[ColumnName]`
-  // - `TableName[[#All],[ColumnName]]`
-  const allPattern = /([A-Za-z_][A-Za-z0-9_.]*)\[\[\s*#all\s*\]\s*,\s*\[\s*([^\]]+?)\s*\]\]/gi;
-  const simplePattern = /([A-Za-z_][A-Za-z0-9_.]*)\[(?!\[)\s*([^\[\]]+?)\s*\]/gi;
+  // Tokenize first so we can detect structured refs that fail to resolve (and avoid
+  // partially rewriting a formula, which would still be invalid for the evaluator).
+  const structuredTokens = tokenizeFormula(formulaText).filter(
+    (token) => token.type === "reference" && token.text.includes("[") && !token.text.includes("!")
+  );
+  if (structuredTokens.length === 0) return null;
 
-  const rewriteSegment = (segment: string) => {
-    let out = segment;
-
-    out = out.replace(allPattern, (match, tableName, colName) => {
-      const replacement = resolveStructuredColumnRef({
-        tables,
-        tableName,
-        columnName: colName,
-        mode: "all",
-        defaultSheetId,
-      });
-      if (!replacement) {
-        failed = true;
-        return match;
-      }
-      changed = true;
-      return replacement;
+  const tableInfo = new Map<string, any>();
+  for (const [key, table] of tables.entries()) {
+    tableInfo.set(key, {
+      name: key,
+      columns: table.columns,
+      sheetName: table.sheetName ?? undefined,
+      startRow: table.startRow ?? undefined,
+      startCol: table.startCol ?? undefined,
+      endRow: table.endRow ?? undefined,
+      endCol: table.endCol ?? undefined,
     });
-
-    out = out.replace(simplePattern, (match, tableName, colName) => {
-      const replacement = resolveStructuredColumnRef({
-        tables,
-        tableName,
-        columnName: colName,
-        mode: "data",
-        defaultSheetId,
-      });
-      if (!replacement) {
-        failed = true;
-        return match;
-      }
-      changed = true;
-      return replacement;
-    });
-
-    return out;
-  };
-
-  const rewritten = rewriteOutsideStrings(formulaText, rewriteSegment);
-  if (!changed || failed) return null;
-  return rewritten;
-}
-
-function rewriteOutsideStrings(text: string, transform: (segment: string) => string): string {
-  let out = "";
-  let segment = "";
-  let inString = false;
-
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (ch !== '"') {
-      if (inString) out += ch;
-      else segment += ch;
-      continue;
-    }
-
-    if (!inString) {
-      out += transform(segment);
-      segment = "";
-      inString = true;
-      out += '"';
-      continue;
-    }
-
-    // Escaped quote inside a string literal: "" -> "
-    if (text[i + 1] === '"') {
-      out += '""';
-      i += 1;
-      continue;
-    }
-
-    inString = false;
-    out += '"';
   }
 
-  out += transform(segment);
+  const { references } = extractFormulaReferences(formulaText, undefined, undefined, { tables: tableInfo });
+  const bySpan = new Map(references.map((ref) => [`${ref.start}:${ref.end}`, ref]));
+
+  const replacements: Array<{ start: number; end: number; text: string }> = [];
+  for (const token of structuredTokens) {
+    const ref = bySpan.get(`${token.start}:${token.end}`);
+    if (!ref) return null;
+
+    const r = ref.range;
+    const sheet = typeof r.sheet === "string" && r.sheet.trim() ? r.sheet.trim() : defaultSheetId;
+    const prefix = sheet ? formatSheetPrefix(sheet) : "";
+
+    const start = toA1(r.startRow, r.startCol);
+    const end = toA1(r.endRow, r.endCol);
+    const a1 = start === end ? start : `${start}:${end}`;
+    replacements.push({ start: token.start, end: token.end, text: `${prefix}${a1}` });
+  }
+
+  // Apply replacements right-to-left so offsets remain valid.
+  replacements.sort((a, b) => b.start - a.start);
+  let out = formulaText;
+  for (const rep of replacements) {
+    out = out.slice(0, rep.start) + rep.text + out.slice(rep.end);
+  }
   return out;
 }
 
