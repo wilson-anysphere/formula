@@ -98,6 +98,11 @@ export class FormulaBarModel {
   #referenceColorByText = new Map<string, string>();
   #coloredReferences: ColoredFormulaReference[] = [];
   #activeReferenceIndex: number | null = null;
+  #referenceHighlightsCache:
+    | Array<{ range: FormulaReferenceRange; color: string; text: string; index: number; active: boolean }>
+    | null = null;
+  #referenceHighlightsCacheRefs: ColoredFormulaReference[] | null = null;
+  #referenceHighlightsCacheActiveIndex: number | null = null;
   #engineHighlightSpans: HighlightSpan[] | null = null;
   #engineLexTokens: EngineFormulaToken[] | null = null;
   #engineHighlightErrorSpanKey: string | null = null;
@@ -144,6 +149,9 @@ export class FormulaBarModel {
     this.#referenceColorByText.clear();
     this.#coloredReferences = [];
     this.#activeReferenceIndex = null;
+    this.#referenceHighlightsCache = null;
+    this.#referenceHighlightsCacheRefs = null;
+    this.#referenceHighlightsCacheActiveIndex = null;
     this.#clearEditorTooling();
     this.#errorExplanationCache = null;
     this.#functionHintCache = null;
@@ -300,6 +308,9 @@ export class FormulaBarModel {
     this.#referenceColorByText.clear();
     this.#coloredReferences = [];
     this.#activeReferenceIndex = null;
+    this.#referenceHighlightsCache = null;
+    this.#referenceHighlightsCacheRefs = null;
+    this.#referenceHighlightsCacheActiveIndex = null;
     return this.#draft;
   }
 
@@ -325,6 +336,9 @@ export class FormulaBarModel {
     this.#referenceColorByText.clear();
     this.#coloredReferences = [];
     this.#activeReferenceIndex = null;
+    this.#referenceHighlightsCache = null;
+    this.#referenceHighlightsCacheRefs = null;
+    this.#referenceHighlightsCacheActiveIndex = null;
   }
 
   highlightedSpans(): HighlightSpan[] {
@@ -502,13 +516,42 @@ export class FormulaBarModel {
   }
 
   referenceHighlights(): Array<{ range: FormulaReferenceRange; color: string; text: string; index: number; active: boolean }> {
-    return this.#coloredReferences.map((ref) => ({
-      range: ref.range,
-      color: ref.color,
-      text: ref.text,
-      index: ref.index,
-      active: this.#activeReferenceIndex === ref.index,
-    }));
+    const refs = this.#coloredReferences;
+    const activeIndex = this.#activeReferenceIndex;
+
+    const cachedRefs = this.#referenceHighlightsCacheRefs;
+    let cached = this.#referenceHighlightsCache;
+
+    // When the formula text changes, rebuild the highlight list from the colored reference metadata.
+    if (!cached || cachedRefs !== refs) {
+      cached = refs.map((ref) => ({
+        range: ref.range,
+        color: ref.color,
+        text: ref.text,
+        index: ref.index,
+        active: activeIndex === ref.index,
+      }));
+      this.#referenceHighlightsCache = cached;
+      this.#referenceHighlightsCacheRefs = refs;
+      this.#referenceHighlightsCacheActiveIndex = activeIndex;
+      return cached;
+    }
+
+    // Cursor moves within the same formula are common; update only the active flag.
+    const prevActive = this.#referenceHighlightsCacheActiveIndex;
+    if (prevActive !== activeIndex) {
+      if (prevActive != null) {
+        const prev = cached[prevActive];
+        if (prev) prev.active = false;
+      }
+      if (activeIndex != null) {
+        const next = cached[activeIndex];
+        if (next) next.active = true;
+      }
+      this.#referenceHighlightsCacheActiveIndex = activeIndex;
+    }
+
+    return cached;
   }
 
   activeReferenceIndex(): number | null {
@@ -705,6 +748,9 @@ export class FormulaBarModel {
     if (!this.#isEditing || !this.#draft.trimStart().startsWith("=")) {
       this.#coloredReferences = [];
       this.#activeReferenceIndex = null;
+      this.#referenceHighlightsCache = null;
+      this.#referenceHighlightsCacheRefs = null;
+      this.#referenceHighlightsCacheActiveIndex = null;
       return;
     }
 
