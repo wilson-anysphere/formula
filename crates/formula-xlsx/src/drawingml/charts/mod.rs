@@ -120,9 +120,23 @@ pub fn extract_chart_object_refs(
 
             let frame_xml = slice_node_xml(&frame, xml).unwrap_or_default();
 
+            // The chart's DrawingML non-visual properties live at:
+            //
+            //   <xdr:graphicFrame>
+            //     <xdr:nvGraphicFramePr>
+            //       <xdr:cNvPr id="..." name="..."/>
+            //
+            // Some producers (or malformed inputs) can include other `<*:cNvPr>` elements in the
+            // subtree, so prefer the canonical `nvGraphicFramePr/cNvPr` path and fall back to any
+            // descendant match for compatibility.
             let (drawing_object_id, drawing_object_name) = frame
-                .descendants()
-                .find(|n| n.is_element() && n.tag_name().name() == "cNvPr")
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "nvGraphicFramePr")
+                .and_then(|nv| {
+                    nv.children()
+                        .find(|n| n.is_element() && n.tag_name().name() == "cNvPr")
+                })
+                .or_else(|| frame.descendants().find(|n| n.is_element() && n.tag_name().name() == "cNvPr"))
                 .map(|c_nv_pr| {
                     let id = c_nv_pr
                         .attribute("id")
@@ -173,16 +187,19 @@ mod tests {
         <xdr:nvGrpSpPr/>
         <xdr:grpSpPr/>
       <xdr:graphicFrame>
+        <!-- Place a non-canonical `<a:cNvPr>` ahead of the `nvGraphicFramePr` block to ensure the
+             parser prefers `nvGraphicFramePr/cNvPr` (not the first descendant match). -->
+        <a:graphic>
+          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+            <a:cNvPr id="999" name="Wrong"/>
+            <c:chart r:id="rId42"/>
+          </a:graphicData>
+        </a:graphic>
         <xdr:nvGraphicFramePr>
           <xdr:cNvPr id="7" name="Chart 7"/>
           <xdr:cNvGraphicFramePr/>
         </xdr:nvGraphicFramePr>
         <xdr:xfrm/>
-        <a:graphic>
-          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
-            <c:chart r:id="rId42"/>
-          </a:graphicData>
-        </a:graphic>
       </xdr:graphicFrame>
     </xdr:grpSp>
     <xdr:clientData/>

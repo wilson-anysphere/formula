@@ -1226,7 +1226,6 @@ impl Engine {
         }
         Ok(())
     }
-
     /// Returns an immutable view of the tables defined on `sheet`.
     ///
     /// Tables are needed to resolve structured references like `Table1[Col]` and `[@Col]`.
