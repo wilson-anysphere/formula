@@ -321,7 +321,7 @@ test("validate-linux-rpm accepts when extracted .desktop Exec= wraps the binary 
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
-      "/usr/share/mime/packages/app.formula.desktop.xml",
+      expectedMimeDefinitionPath,
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),
@@ -382,7 +382,7 @@ test("validate-linux-rpm fails when extracted .desktop Exec= does not reference 
     [
       `/usr/bin/${expectedMainBinary}`,
       "/usr/share/applications/formula.desktop",
-      "/usr/share/mime/packages/app.formula.desktop.xml",
+      expectedMimeDefinitionPath,
       `/usr/share/doc/${expectedRpmName}/LICENSE`,
       `/usr/share/doc/${expectedRpmName}/NOTICE`,
     ].join("\n"),

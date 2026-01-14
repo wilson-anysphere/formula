@@ -8,6 +8,17 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scriptPath = path.join(repoRoot, "scripts", "check-desktop-url-scheme.mjs");
 
+const defaultIdentifier = "app.formula.desktop";
+
+function isParquetConfigured(config) {
+  const assocs = Array.isArray(config?.bundle?.fileAssociations) ? config.bundle.fileAssociations : [];
+  return assocs.some((assoc) => {
+    const raw = assoc?.ext;
+    const exts = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+    return exts.some((e) => String(e).trim().toLowerCase().replace(/^\./, "") === "parquet");
+  });
+}
+
 function runWithConfigAndPlist(config, plistContents) {
   const tmpRoot = path.join(repoRoot, ".tmp");
   mkdirSync(tmpRoot, { recursive: true });
@@ -18,6 +29,25 @@ function runWithConfigAndPlist(config, plistContents) {
 
   const plistPath = path.join(dir, "Info.plist");
   writeFileSync(plistPath, plistContents, "utf8");
+
+  if (isParquetConfigured(config)) {
+    const identifier =
+      typeof config?.identifier === "string" && config.identifier.trim() ? config.identifier.trim() : defaultIdentifier;
+    const mimeDir = path.join(dir, "mime");
+    mkdirSync(mimeDir, { recursive: true });
+    writeFileSync(
+      path.join(mimeDir, `${identifier}.xml`),
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+        '  <mime-type type="application/vnd.apache.parquet">',
+        '    <glob pattern="*.parquet" />',
+        "  </mime-type>",
+        "</mime-info>",
+      ].join("\n"),
+      "utf8",
+    );
+  }
 
   const proc = spawnSync(process.execPath, [scriptPath], {
     cwd: repoRoot,
@@ -48,19 +78,20 @@ const defaultFileAssociations = [
 const defaultLinuxBundle = {
   deb: {
     depends: ["shared-mime-info"],
-    files: { "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml" },
+    files: { [`usr/share/mime/packages/${defaultIdentifier}.xml`]: `mime/${defaultIdentifier}.xml` },
   },
   rpm: {
     depends: ["shared-mime-info"],
-    files: { "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml" },
+    files: { [`usr/share/mime/packages/${defaultIdentifier}.xml`]: `mime/${defaultIdentifier}.xml` },
   },
   appimage: {
-    files: { "usr/share/mime/packages/app.formula.desktop.xml": "mime/app.formula.desktop.xml" },
+    files: { [`usr/share/mime/packages/${defaultIdentifier}.xml`]: `mime/${defaultIdentifier}.xml` },
   },
 };
 
 function baseConfig({ fileAssociations } = {}) {
   return {
+    identifier: defaultIdentifier,
     plugins: {
       "deep-link": {
         desktop: { schemes: ["formula"] },
