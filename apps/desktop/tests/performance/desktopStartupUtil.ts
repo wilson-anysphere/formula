@@ -14,4 +14,4 @@ export * from './processTree.ts';
 export * from './linuxProcUtil.ts';
 export * from './sleep.ts';
 export * from './desktopMemoryUtil.ts';
-export type { BenchmarkFn, BenchmarkOptions, BenchmarkResult, BenchmarkUnit } from './benchmark.ts';
+export * from './benchmark.ts';

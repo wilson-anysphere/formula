@@ -12,12 +12,11 @@ import {
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
-import { formatMb, formatMs, runBenchmark, type BenchmarkResult } from './benchmark.ts';
 import { createCollaborationBenchmarks } from './benchmarks/collaboration.bench.ts';
 import { createRenderBenchmarks } from './benchmarks/render.bench.ts';
 import { createSharedGridRendererBenchmarks } from './benchmarks/sharedGridRenderer.bench.ts';
 import { createStartupBenchmarks } from './benchmarks/startup.bench.ts';
-import { repoRoot } from './desktopStartupUtil.ts';
+import { formatMb, formatMs, repoRoot, runBenchmark, type BenchmarkResult } from './desktopStartupUtil.ts';
 import { runDesktopStartupBenchmarks } from './desktopStartupBench.ts';
 import { runDesktopMemoryBenchmarks } from './desktopMemoryBench.ts';
 
