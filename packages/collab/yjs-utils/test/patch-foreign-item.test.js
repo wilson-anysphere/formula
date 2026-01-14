@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import * as Y from "yjs";
 
-import { patchForeignItemConstructor } from "@formula/collab-yjs-utils";
+import { patchForeignAbstractTypeConstructor, patchForeignItemConstructor } from "@formula/collab-yjs-utils";
 import { requireYjsCjs } from "./require-yjs-cjs.js";
 
 test("collab-yjs-utils: patchForeignItemConstructor patches foreign Item structs to pass instanceof checks", () => {
@@ -29,4 +29,20 @@ test("collab-yjs-utils: patchForeignItemConstructor patches foreign Item structs
   patchForeignItemConstructor(item);
 
   assert.equal(item instanceof Y.Item, true);
+});
+
+test("collab-yjs-utils: patchForeignAbstractTypeConstructor patches foreign types to pass instanceof Y.AbstractType checks", () => {
+  const Ycjs = requireYjsCjs();
+
+  const foreignMap = new Ycjs.Map();
+
+  assert.equal(foreignMap instanceof Y.AbstractType, false);
+  assert.equal(foreignMap instanceof Y.Map, false);
+  assert.equal(foreignMap instanceof Ycjs.AbstractType, true);
+
+  patchForeignAbstractTypeConstructor(foreignMap);
+
+  assert.equal(foreignMap instanceof Y.AbstractType, true);
+  assert.equal(foreignMap instanceof Y.Map, false);
+  assert.equal(foreignMap instanceof Ycjs.AbstractType, true);
 });

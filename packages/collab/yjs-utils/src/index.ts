@@ -94,6 +94,7 @@ export function getDocTypeConstructors(doc: unknown): DocTypeConstructors {
 }
 
 const patchedItemConstructors = new WeakSet<Function>();
+const patchedAbstractTypeConstructors = new WeakSet<Function>();
 const patchedContentConstructors = new WeakMap<Function, Function>();
 
 function isYjsItemStruct(value: unknown): value is any {
@@ -106,6 +107,44 @@ function isYjsItemStruct(value: unknown): value is any {
   if (!("parentSub" in maybe)) return false;
   if (typeof maybe.content?.getContent !== "function") return false;
   return true;
+}
+
+/**
+ * Patch the prototype chain for a foreign Yjs type so it passes `instanceof Y.AbstractType`
+ * checks against this module instance.
+ *
+ * In mixed-module environments (ESM + CJS), a document can contain types created by a
+ * different `yjs` module instance. Yjs' UndoManager performs `instanceof AbstractType`
+ * checks when working with scopes; if these checks fail, it can emit warnings like
+ * `[yjs#509] Not same Y.Doc` and behave incorrectly.
+ *
+ * This helper is best-effort and intentionally avoids breaking `instanceof` checks in
+ * the foreign module instance by inserting the local `AbstractType.prototype` into the
+ * existing prototype chain rather than replacing it outright.
+ */
+export function patchForeignAbstractTypeConstructor(type: unknown): void {
+  if (!type || typeof type !== "object") return;
+  if (!isYAbstractType(type)) return;
+  if (type instanceof Y.AbstractType) return;
+
+  const ctor = (type as any).constructor as Function | undefined;
+  if (!ctor || ctor === Y.AbstractType) return;
+  if (patchedAbstractTypeConstructors.has(ctor)) return;
+  patchedAbstractTypeConstructors.add(ctor);
+
+  try {
+    const baseProto = Object.getPrototypeOf((ctor as any).prototype);
+    // `ctor.prototype` is usually a concrete type prototype (e.g. YMap.prototype),
+    // whose base prototype is the foreign AbstractType prototype. Patch that base
+    // prototype so the local AbstractType prototype is also in the chain.
+    if (baseProto && baseProto !== Object.prototype) {
+      Object.setPrototypeOf(baseProto, Y.AbstractType.prototype);
+    } else {
+      Object.setPrototypeOf((ctor as any).prototype, Y.AbstractType.prototype);
+    }
+  } catch {
+    // Best-effort: if we can't patch (frozen prototypes, etc), behave like upstream Yjs.
+  }
 }
 
 export function patchForeignItemConstructor(item: unknown): void {

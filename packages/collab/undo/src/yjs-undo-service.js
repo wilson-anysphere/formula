@@ -1,39 +1,5 @@
 import * as Y from "yjs";
-import { isYAbstractType, patchForeignItemConstructor } from "@formula/collab-yjs-utils";
-
-const patchedAbstractTypeConstructors = new WeakSet();
-function patchForeignAbstractTypeConstructor(type) {
-  if (!type || typeof type !== "object") return;
-  if (!isYAbstractType(type)) return;
-  if (type instanceof Y.AbstractType) return;
-  const ctor = type.constructor;
-  if (!ctor || ctor === Y.AbstractType) return;
-  if (patchedAbstractTypeConstructors.has(ctor)) return;
-  patchedAbstractTypeConstructors.add(ctor);
-
-  // In mixed-module environments (ESM + CJS), documents can contain AbstractType
-  // instances created by a different `yjs` module instance. Yjs' UndoManager
-  // uses `instanceof AbstractType` checks, and will warn `[yjs#509] Not same Y.Doc`
-  // if a scope type fails that check.
-  //
-  // Patch the foreign `AbstractType` prototype chain so foreign types pass
-  // `instanceof Y.AbstractType` checks in this module *without breaking*
-  // `instanceof` checks in the foreign module instance.
-  try {
-    const baseProto = Object.getPrototypeOf(ctor.prototype);
-    // `ctor.prototype` is usually a concrete type prototype (e.g. YMap.prototype),
-    // whose base prototype is the foreign AbstractType prototype. Patch that base
-    // prototype so the local AbstractType prototype is also in the chain.
-    if (baseProto && baseProto !== Object.prototype) {
-      Object.setPrototypeOf(baseProto, Y.AbstractType.prototype);
-    } else {
-      Object.setPrototypeOf(ctor.prototype, Y.AbstractType.prototype);
-    }
-  } catch {
-    // Best-effort: if we can't patch (frozen prototypes, etc), UndoManager will
-    // behave like upstream Yjs in mixed-module environments.
-  }
-}
+import { isYAbstractType, patchForeignAbstractTypeConstructor, patchForeignItemConstructor } from "@formula/collab-yjs-utils";
 
 function patchForeignItemsInType(type) {
   if (!type || typeof type !== "object") return;
