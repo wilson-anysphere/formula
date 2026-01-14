@@ -1,7 +1,10 @@
 use std::io::{Cursor, Read, Write};
 
 use formula_model::{CellRef, CellValue};
-use formula_xlsx::{load_from_bytes, patch_xlsx_streaming, WorksheetCellPatch};
+use formula_xlsx::{
+    load_from_bytes, patch_xlsx_streaming, CellPatch, WorkbookCellPatches, WorksheetCellPatch,
+    XlsxPackage,
+};
 use zip::write::FileOptions;
 use zip::ZipArchive;
 use zip::{CompressionMethod, ZipWriter};
@@ -140,6 +143,50 @@ fn streaming_patch_preserves_inline_string_phonetic_subtree_on_style_only_patch(
         sheet.value(CellRef::from_a1("A1")?),
         CellValue::String("Base".to_string())
     );
+
+    Ok(())
+}
+
+#[test]
+fn in_memory_patch_preserves_inline_string_phonetic_subtree_on_style_only_patch(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_inline_string_phonetic_fixture_xlsx();
+
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value_with_style(CellValue::String("Base".to_string()), 1),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    assert!(
+        out_xml.contains(r#"s="1""#),
+        "expected patched cell to contain s=\"1\" style attribute:\n{out_xml}"
+    );
+    assert!(
+        out_xml.contains("<phoneticPr"),
+        "expected worksheet XML to preserve <phoneticPr> subtree:\n{out_xml}"
+    );
+    assert!(
+        out_xml.contains("<rPh"),
+        "expected worksheet XML to preserve <rPh> subtree:\n{out_xml}"
+    );
+    assert!(
+        out_xml.contains("PHO"),
+        "expected worksheet XML to preserve phonetic marker text:\n{out_xml}"
+    );
+
+    let out_bytes = pkg.write_to_bytes()?;
+    let doc = load_from_bytes(&out_bytes)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc.workbook.sheet(sheet_id).expect("sheet exists");
+    let cell_ref = CellRef::from_a1("A1")?;
+    assert_eq!(sheet.value(cell_ref), CellValue::String("Base".to_string()));
+    let cell = sheet.cell(cell_ref).expect("cell exists");
+    assert_eq!(cell.phonetic.as_deref(), Some(PHONETIC_TEXT));
 
     Ok(())
 }

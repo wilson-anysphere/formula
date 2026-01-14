@@ -2126,38 +2126,60 @@ fn extract_inline_string_text(
     start_idx: usize,
     cell_prefix: Option<&[u8]>,
 ) -> Result<(String, usize), XlsxError> {
+    fn is_visible_inline_string_t(stack: &[Vec<u8>]) -> bool {
+        // stack: ["is", ... , "t"]
+        if !stack.last().is_some_and(|n| n.as_slice() == b"t") {
+            return false;
+        }
+        // `<rPh>` phonetic guide text is not visible.
+        if stack.iter().any(|n| n.as_slice() == b"rPh") {
+            return false;
+        }
+        // Visible text is encoded as either:
+        // - <is><t>...</t></is>
+        // - <is><r><t>...</t></r></is>
+        if stack.len() == 2 && stack[0].as_slice() == b"is" {
+            return true;
+        }
+        if stack.len() >= 3 && stack[0].as_slice() == b"is" && stack[1].as_slice() == b"r" {
+            return true;
+        }
+        false
+    }
+
     let mut out = String::new();
     let mut idx = start_idx + 1;
     let mut depth = 1usize;
-    let mut t_depth: Option<usize> = None;
+    let mut stack: Vec<Vec<u8>> = vec![b"is".to_vec()];
+    let mut in_visible_t = false;
     while idx < events.len() {
         match &events[idx] {
             Event::Start(e) => {
                 depth += 1;
-                if is_element_named(e.name().as_ref(), cell_prefix, b"t") {
-                    t_depth = Some(depth);
+                let name = local_name(e.name().as_ref()).to_vec();
+                stack.push(name.clone());
+                if name.as_slice() == b"t" && is_visible_inline_string_t(&stack) {
+                    in_visible_t = true;
                 }
             }
             Event::Empty(_) => {}
             Event::End(e) => {
-                if t_depth.is_some()
-                    && is_element_named(e.name().as_ref(), cell_prefix, b"t")
-                    && t_depth == Some(depth)
-                {
-                    t_depth = None;
+                if in_visible_t && local_name(e.name().as_ref()) == b"t" {
+                    in_visible_t = false;
                 }
                 depth = depth.saturating_sub(1);
                 if depth == 0 && is_element_named(e.name().as_ref(), cell_prefix, b"is") {
                     return Ok((out, idx + 1));
                 }
+                stack.pop();
             }
             Event::Text(t) => {
-                if t_depth.is_some() {
+                if in_visible_t {
                     out.push_str(&t.unescape()?.into_owned());
                 }
             }
             Event::CData(t) => {
-                if t_depth.is_some() {
+                if in_visible_t {
                     out.push_str(&String::from_utf8_lossy(t.as_ref()));
                 }
             }
