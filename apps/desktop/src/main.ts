@@ -9726,9 +9726,12 @@ try {
       await flushCollabLocalPersistenceBestEffort({
         session: app.getCollabSession?.() ?? null,
         whenIdle: async () => {
-          await app.whenIdle();
           await app.whenCollabBinderIdle();
+          await app.whenIdle();
         },
+        // Allow slightly more time for large paste/edit batches to propagate through
+        // the DocumentController → Yjs binder (encryption can make this async).
+        idleTimeoutMs: 1_000,
       });
       if (!invoke) {
         window.close();
@@ -9742,9 +9745,10 @@ try {
       await flushCollabLocalPersistenceBestEffort({
         session: app.getCollabSession?.() ?? null,
         whenIdle: async () => {
-          await app.whenIdle();
           await app.whenCollabBinderIdle();
+          await app.whenIdle();
         },
+        idleTimeoutMs: 1_000,
       });
       if (!invoke) {
         window.close();
@@ -10423,9 +10427,10 @@ try {
       await flushCollabLocalPersistenceBestEffort({
         session: app.getCollabSession?.() ?? null,
         whenIdle: async () => {
-          await app.whenIdle();
           await app.whenCollabBinderIdle();
+          await app.whenIdle();
         },
+        idleTimeoutMs: 1_000,
       });
       if (!invoke) {
         window.close();
