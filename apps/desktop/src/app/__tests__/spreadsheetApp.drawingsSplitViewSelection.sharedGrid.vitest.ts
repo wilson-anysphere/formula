@@ -284,4 +284,46 @@ describe("SpreadsheetApp drawings selection in split-view secondary pane (shared
     secondaryContainer.remove();
     root.remove();
   });
+
+  it("shows drawing hover cursors in the secondary pane", () => {
+    const { app, root, secondaryView, secondaryContainer, selectionCanvas } = setup();
+
+    const headerOffsetX = secondaryView.grid.renderer.scroll.cols.totalSize(1);
+    const headerOffsetY = secondaryView.grid.renderer.scroll.rows.totalSize(1);
+
+    // Hover inside the drawing bounds (absolute anchor at 0,0 with size 100x100).
+    const insideX = headerOffsetX + 10;
+    const insideY = headerOffsetY + 10;
+    const inside = createPointerLikeMouseEvent("pointermove", {
+      clientX: secondaryContainer.getBoundingClientRect().left + insideX,
+      clientY: secondaryContainer.getBoundingClientRect().top + insideY,
+      button: 0,
+    });
+    Object.defineProperty(inside, "offsetX", { configurable: true, value: insideX });
+    Object.defineProperty(inside, "offsetY", { configurable: true, value: insideY });
+    selectionCanvas.dispatchEvent(inside);
+
+    expect(selectionCanvas.style.cursor).toBe("move");
+    expect(secondaryContainer.style.cursor).toBe("move");
+
+    // Hover over an empty area; shared-grid hover logic should restore the default cursor.
+    const outsideX = headerOffsetX + 200;
+    const outsideY = headerOffsetY + 200;
+    const outside = createPointerLikeMouseEvent("pointermove", {
+      clientX: secondaryContainer.getBoundingClientRect().left + outsideX,
+      clientY: secondaryContainer.getBoundingClientRect().top + outsideY,
+      button: 0,
+    });
+    Object.defineProperty(outside, "offsetX", { configurable: true, value: outsideX });
+    Object.defineProperty(outside, "offsetY", { configurable: true, value: outsideY });
+    selectionCanvas.dispatchEvent(outside);
+
+    expect(selectionCanvas.style.cursor).toBe("default");
+    expect(secondaryContainer.style.cursor).toBe("");
+
+    secondaryView.destroy();
+    app.destroy();
+    secondaryContainer.remove();
+    root.remove();
+  });
 });

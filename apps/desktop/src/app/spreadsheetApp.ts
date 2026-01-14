@@ -1252,6 +1252,7 @@ export class SpreadsheetApp {
   private selectedDrawingIndex: number | null = null;
   private splitViewSecondaryGrid: { container: HTMLElement; grid: DesktopSharedGrid } | null = null;
   private splitViewSecondaryGridPointerAbort: AbortController | null = null;
+  private splitViewSecondarySelectionCanvas: HTMLCanvasElement | null = null;
   private readonly drawingsListeners = new Set<() => void>();
   private readonly drawingSelectionListeners = new Set<(id: DrawingObjectId | null) => void>();
   private readonly formulaChartModelStore = new FormulaChartModelStore();
@@ -4517,6 +4518,7 @@ export class SpreadsheetApp {
     // Ensure we don't keep a split-view SecondaryGridView alive via hit-test caches.
     this.splitViewSecondaryGridPointerAbort?.abort();
     this.splitViewSecondaryGridPointerAbort = null;
+    this.splitViewSecondarySelectionCanvas = null;
     this.splitViewSecondaryGrid = null;
     this.splitViewDrawingHitTestIndex = null;
     this.splitViewDrawingHitTestIndexObjects = null;
@@ -8053,6 +8055,7 @@ export class SpreadsheetApp {
     // Tear down any prior event listeners tied to the previous split pane instance.
     this.splitViewSecondaryGridPointerAbort?.abort();
     this.splitViewSecondaryGridPointerAbort = null;
+    this.splitViewSecondarySelectionCanvas = null;
 
     this.splitViewSecondaryGrid = view;
     // Drop any cached hit-test index tied to the previous secondary grid instance.
@@ -8069,11 +8072,31 @@ export class SpreadsheetApp {
       // grid element (`#grid-secondary`).
       const abort = new AbortController();
       this.splitViewSecondaryGridPointerAbort = abort;
+      // Cache the selection canvas so pointermove handlers can cheaply override cursor styles.
+      // (CanvasGridRenderer/SharedGrid controls its own cursor on the selection canvas, so we need
+      // to apply drawing cursors there to keep hover affordances correct.)
+      try {
+        this.splitViewSecondarySelectionCanvas =
+          view.container.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+      } catch {
+        this.splitViewSecondarySelectionCanvas = null;
+      }
       view.container.addEventListener("pointerdown", (e) => this.onSplitViewSecondaryDrawingPointerDownCapture(e), {
         capture: true,
         passive: false,
         signal: abort.signal,
       });
+      view.container.addEventListener("pointermove", (e) => this.onSplitViewSecondaryPointerMove(e), {
+        passive: true,
+        signal: abort.signal,
+      });
+      view.container.addEventListener(
+        "pointerleave",
+        () => {
+          view.container.style.cursor = "";
+        },
+        { signal: abort.signal },
+      );
     }
   }
 
@@ -8158,6 +8181,194 @@ export class SpreadsheetApp {
     // Prevent the secondary grid selection engine from treating the click as a cell selection.
     e.preventDefault();
     e.stopPropagation();
+  }
+
+  private onSplitViewSecondaryPointerMove(e: PointerEvent): void {
+    if (this.disposed) return;
+    const secondary = this.splitViewSecondaryGrid;
+    if (!secondary) return;
+
+    // Touch pointers do not have a hover state; skip cursor work to avoid overhead during scroll/pan.
+    if (e.pointerType === "touch") {
+      if (secondary.container.style.cursor) secondary.container.style.cursor = "";
+      return;
+    }
+
+    // While dragging (selection, scrollbar, etc), avoid fighting other handlers for cursor control.
+    if (e.buttons) return;
+
+    // When the formula bar is in range-selection mode, do not show drawing hover cursors.
+    if (this.formulaBar?.isFormulaEditing()) {
+      if (secondary.container.style.cursor) secondary.container.style.cursor = "";
+      return;
+    }
+
+    const selectionCanvas = this.splitViewSecondarySelectionCanvas;
+    const target = e.target as HTMLElement | null;
+    if (target && selectionCanvas && target !== selectionCanvas) {
+      // Skip pointermoves over scrollbars/editor overlays so drawings don't change the cursor
+      // while hovering interactive UI chrome.
+      try {
+        if (target.closest?.(".grid-scrollbar-track") || target.closest?.(".grid-scrollbar-thumb") || target.closest?.(".cell-editor")) {
+          if (secondary.container.style.cursor) secondary.container.style.cursor = "";
+          return;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const width = secondary.container.clientWidth;
+    const height = secondary.container.clientHeight;
+
+    // Convert into secondary-pane local coordinates. Prefer offsetX/Y (no layout reads) for the
+    // common case where pointermove targets the shared-grid selection canvas.
+    let x = Number((e as any).offsetX);
+    let y = Number((e as any).offsetY);
+    const canUseOffset = Number.isFinite(x) && Number.isFinite(y) && (!selectionCanvas || target === selectionCanvas);
+    if (!canUseOffset) {
+      const rect = secondary.container.getBoundingClientRect();
+      x = e.clientX - rect.left;
+      y = e.clientY - rect.top;
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (x < 0 || y < 0 || x > width || y > height) {
+      if (secondary.container.style.cursor) secondary.container.style.cursor = "";
+      return;
+    }
+
+    const cursor = this.drawingCursorInSplitViewAtPoint(secondary, x, y, width, height);
+    const nextCursor = cursor ?? "";
+    if (secondary.container.style.cursor !== nextCursor) {
+      secondary.container.style.cursor = nextCursor;
+    }
+    // CanvasGridRenderer assigns its own cursor style on the selection canvas; override it so
+    // drawings show the correct hover affordance.
+    if (cursor && selectionCanvas && selectionCanvas.style.cursor !== cursor) {
+      selectionCanvas.style.cursor = cursor;
+    }
+  }
+
+  private drawingCursorInSplitViewAtPoint(
+    secondary: { container: HTMLElement; grid: DesktopSharedGrid },
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): string | null {
+    const objects = this.drawingObjects.length > 0 ? this.drawingObjects : this.listDrawingObjectsForSheet();
+    if (objects.length === 0) return null;
+
+    const scroll = secondary.grid.getScroll();
+    const viewportState = secondary.grid.renderer.scroll.getViewportState();
+    const headerRows = 1;
+    const headerCols = 1;
+    const headerWidth = headerCols > 0 ? secondary.grid.renderer.scroll.cols.totalSize(headerCols) : 0;
+    const headerHeight = headerRows > 0 ? secondary.grid.renderer.scroll.rows.totalSize(headerRows) : 0;
+    const headerOffsetX = Math.min(headerWidth, width);
+    const headerOffsetY = Math.min(headerHeight, height);
+
+    // Drawings are clipped to the cell grid body area (under headers).
+    if (x < headerOffsetX || y < headerOffsetY) return null;
+
+    const zoomRaw = secondary.grid.renderer.getZoom();
+    const zoom = Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
+    const { frozenRows, frozenCols } = this.getFrozen();
+
+    const viewport: DrawingViewport = {
+      scrollX: scroll.x,
+      scrollY: scroll.y,
+      width,
+      height,
+      dpr: 1,
+      zoom,
+      frozenRows,
+      frozenCols,
+      headerOffsetX,
+      headerOffsetY,
+      frozenWidthPx: viewportState.frozenWidth,
+      frozenHeightPx: viewportState.frozenHeight,
+    };
+
+    const geom: DrawingGridGeometry = {
+      cellOriginPx: (cell) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          x: secondary.grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+          y: secondary.grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+        };
+      },
+      cellSizePx: (cell) => {
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          width: secondary.grid.renderer.getColWidth(gridCol),
+          height: secondary.grid.renderer.getRowHeight(gridRow),
+        };
+      },
+    };
+
+    const index = this.getSplitViewDrawingHitTestIndex(secondary, objects, geom, zoom);
+    const bounds = this.drawingHitTestScratchRect;
+    const selectedId = this.selectedDrawingId;
+    const rotationHandleEnabled = this.gridMode === "shared" || this.drawingInteractionController != null;
+
+    const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx)
+      ? Math.max(headerOffsetX, Math.min(viewport.frozenWidthPx as number, width))
+      : headerOffsetX;
+    const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx)
+      ? Math.max(headerOffsetY, Math.min(viewport.frozenHeightPx as number, height))
+      : headerOffsetY;
+    const pointInFrozenCols = frozenCols > 0 && x < frozenBoundaryX;
+    const pointInFrozenRows = frozenRows > 0 && y < frozenBoundaryY;
+
+    if (selectedId != null) {
+      const selectedIndex = index.byId.get(selectedId);
+      const selected = selectedIndex != null ? index.ordered[selectedIndex] ?? null : null;
+      if (selected) {
+        const sheetRect = index.bounds[selectedIndex!]!;
+        const anchor = selected.anchor;
+        const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+        const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+
+        // Selection handles are clipped to the object's pane. If a scrollable object is selected and
+        // the user hovers over the frozen pane (or vice versa), the unclipped handle bounds can
+        // overlap but should not produce hover cursors.
+        if (objInFrozenCols === pointInFrozenCols && objInFrozenRows === pointInFrozenRows) {
+          const scrollX = anchor.type === "absolute" ? viewport.scrollX : objInFrozenCols ? 0 : viewport.scrollX;
+          const scrollY = anchor.type === "absolute" ? viewport.scrollY : objInFrozenRows ? 0 : viewport.scrollY;
+          bounds.x = sheetRect.x - scrollX + headerOffsetX;
+          bounds.y = sheetRect.y - scrollY + headerOffsetY;
+          bounds.width = sheetRect.width;
+          bounds.height = sheetRect.height;
+
+          const canRotate = rotationHandleEnabled && selected.kind.type !== "chart";
+          if (canRotate && hitTestRotationHandle(bounds, x, y, selected.transform)) {
+            return cursorForRotationHandle(false);
+          }
+          const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
+          if (handle) return cursorForResizeHandleWithTransform(handle, selected.transform);
+        }
+      }
+    }
+
+    const hit = hitTestDrawingsInto(index, viewport, x, y, bounds);
+    if (!hit) return null;
+
+    // For hover feedback, show resize cursors on the object's handles even when it isn't selected
+    // (Excel-like affordance). However, keep a "move" cursor on the interior so users can drag
+    // without fighting the corner hit targets, and for very small objects prefer a move cursor
+    // everywhere because the handle hit areas overlap most/all of the object.
+    const minSizeForHandles = RESIZE_HANDLE_SIZE_PX * 2;
+    if (bounds.width >= minSizeForHandles && bounds.height >= minSizeForHandles) {
+      const handle = hitTestResizeHandle(bounds, x, y, hit.transform);
+      if (handle) {
+        const inside = x > bounds.x && x < bounds.x + bounds.width && y > bounds.y && y < bounds.y + bounds.height;
+        if (!inside) return cursorForResizeHandleWithTransform(handle, hit.transform);
+      }
+    }
+    return "move";
   }
 
   getGridLimits(): GridLimits {
