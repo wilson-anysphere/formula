@@ -9,6 +9,7 @@
 //! - RC4 re-keying every **0x200 bytes** (not the legacy BIFF8 RC4 0x400-byte interval), and
 //! - per-block key derivation (UTF-16LE password + 50,000 spin loop + `LE32(block)`).
 //!
+use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
 
 pub use crate::offcrypto::cryptoapi::HashAlg;
@@ -16,6 +17,7 @@ use crate::offcrypto::cryptoapi::{CALG_MD5, CALG_SHA1};
 use md5::Md5;
 use sha1::{Digest as _, Sha1};
 use thiserror::Error;
+use zeroize::{Zeroize, Zeroizing};
 
 const ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN: usize = 8;
 const RC4_BLOCK_SIZE: usize = 0x200;
@@ -97,7 +99,6 @@ pub enum Rc4CryptoApiEncryptedPackageError {
 ///
 /// Seeking is supported by re-deriving the block key and discarding `o = pos % 0x200` bytes of
 /// RC4 keystream.
-#[derive(Debug)]
 pub struct Rc4CryptoApiDecryptReader<R: Read + Seek> {
     inner: R,
 
@@ -113,7 +114,7 @@ pub struct Rc4CryptoApiDecryptReader<R: Read + Seek> {
     pos: u64,
 
     /// Base hash bytes used for per-block key derivation.
-    h: Vec<u8>,
+    h: Zeroizing<Vec<u8>>,
     /// RC4 key length in bytes (e.g. `keySize / 8` from EncryptionHeader).
     key_len: usize,
     hash_alg: HashAlg,
@@ -122,6 +123,23 @@ pub struct Rc4CryptoApiDecryptReader<R: Read + Seek> {
     block_index: Option<u32>,
     /// Offset within the current block that `rc4` is aligned to.
     block_offset: usize,
+}
+
+impl<R: Read + Seek> fmt::Debug for Rc4CryptoApiDecryptReader<R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Redact any secret/key material: `h` is effectively a key for the RC4 keystream derivation.
+        f.debug_struct("Rc4CryptoApiDecryptReader")
+            .field("ciphertext_start", &self.ciphertext_start)
+            .field("package_size", &self.package_size)
+            .field("pos", &self.pos)
+            .field("h_len", &self.h.len())
+            .field("key_len", &self.key_len)
+            .field("hash_alg", &self.hash_alg)
+            .field("block_index", &self.block_index)
+            .field("block_offset", &self.block_offset)
+            .field("rc4_initialized", &self.rc4.is_some())
+            .finish()
+    }
 }
 
 impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
@@ -196,7 +214,11 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
 
         // MS-OFFCRYPTO specifies that `keySize=0` MUST be interpreted as 40-bit (legacy "strong"
         // encryption export restrictions).
-        let key_size_bits = if key_size_bits == 0 { 40 } else { key_size_bits };
+        let key_size_bits = if key_size_bits == 0 {
+            40
+        } else {
+            key_size_bits
+        };
         if key_size_bits % 8 != 0 {
             return Err(Rc4CryptoApiEncryptedPackageError::InvalidKeySizeBits { key_size_bits });
         }
@@ -279,7 +301,7 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             inner_pos: 0,
             package_size,
             pos: 0,
-            h,
+            h: Zeroizing::new(h),
             key_len,
             hash_alg,
             rc4: None,
@@ -331,13 +353,13 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
         let digest = match self.hash_alg {
             HashAlg::Sha1 => {
                 let mut hasher = Sha1::new();
-                hasher.update(&self.h);
+                hasher.update(self.h.as_slice());
                 hasher.update(block_index.to_le_bytes());
                 hasher.finalize().to_vec()
             }
             HashAlg::Md5 => {
                 let mut hasher = Md5::new();
-                hasher.update(&self.h);
+                hasher.update(self.h.as_slice());
                 hasher.update(block_index.to_le_bytes());
                 hasher.finalize().to_vec()
             }
@@ -499,6 +521,14 @@ struct Rc4 {
     j: u8,
 }
 
+impl Drop for Rc4 {
+    fn drop(&mut self) {
+        self.s.zeroize();
+        self.i.zeroize();
+        self.j.zeroize();
+    }
+}
+
 impl std::fmt::Debug for Rc4 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Avoid dumping the full internal permutation in debug output.
@@ -553,6 +583,32 @@ impl Rc4 {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn reader_debug_redacts_hash_bytes() {
+        let h_bytes = b"super_secret_h".to_vec();
+        let h_debug = format!("{h_bytes:?}");
+
+        let reader: Rc4CryptoApiDecryptReader<Cursor<Vec<u8>>> = Rc4CryptoApiDecryptReader {
+            inner: Cursor::new(Vec::new()),
+            ciphertext_start: 0,
+            inner_pos: 0,
+            package_size: 0,
+            pos: 0,
+            h: Zeroizing::new(h_bytes),
+            key_len: 5,
+            hash_alg: HashAlg::Sha1,
+            rc4: None,
+            block_index: None,
+            block_offset: 0,
+        };
+
+        let dbg = format!("{reader:?}");
+        assert!(
+            !dbg.contains(&h_debug),
+            "Debug output leaked key material: {dbg}"
+        );
+    }
 
     fn encrypt_rc4_cryptoapi(
         plaintext: &[u8],
@@ -632,10 +688,7 @@ mod tests {
             while read < out_len {
                 let end = read + 33.min(out_len - read);
                 let n = reader.read(&mut out[read..end]).unwrap();
-                assert!(
-                    n > 0,
-                    "unexpected EOF while reading (key_len={key_len})"
-                );
+                assert!(n > 0, "unexpected EOF while reading (key_len={key_len})");
                 read += n;
             }
             assert_eq!(out, plaintext, "round-trip mismatch (key_len={key_len})");
@@ -787,8 +840,8 @@ mod tests {
         let key_len = 5usize;
         let plaintext = b"Hello, RC4 CryptoAPI!";
         let expected_ciphertext: Vec<u8> = vec![
-            0x7a, 0x8b, 0xd0, 0x00, 0x71, 0x3a, 0x6e, 0x30, 0xba, 0x99, 0x16, 0x47, 0x6d,
-            0x27, 0xb0, 0x1d, 0x36, 0x70, 0x7a, 0x6e, 0xf8,
+            0x7a, 0x8b, 0xd0, 0x00, 0x71, 0x3a, 0x6e, 0x30, 0xba, 0x99, 0x16, 0x47, 0x6d, 0x27,
+            0xb0, 0x1d, 0x36, 0x70, 0x7a, 0x6e, 0xf8,
         ];
 
         // Encrypt and assert ciphertext matches the known vector.

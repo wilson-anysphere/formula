@@ -1,7 +1,11 @@
-use formula_xlsx::offcrypto::{decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError, AES_BLOCK_SIZE};
+use formula_xlsx::offcrypto::{
+    decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError, AES_BLOCK_SIZE,
+};
 use sha1::{Digest, Sha1};
 use std::cmp::min;
+use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
+use zeroize::{Zeroize, Zeroizing};
 
 const SEGMENT_PLAINTEXT_LEN: u64 = 0x1000;
 const SIZE_PREFIX_LEN: u64 = 8;
@@ -20,11 +24,10 @@ const AES_BLOCK_LEN: usize = AES_BLOCK_SIZE;
 ///
 /// This reader exposes the decrypted plaintext as a `Read + Seek` stream without fully buffering
 /// the decrypted package.
-#[derive(Debug)]
 pub struct StandardAesEncryptedPackageReader<R> {
     inner: R,
     stream_start: u64,
-    key: Vec<u8>,
+    key: Zeroizing<Vec<u8>>,
     salt: Vec<u8>,
     orig_size: u64,
     ciphertext_len: u64,
@@ -41,7 +44,11 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
     ///
     /// `inner` must be positioned at the beginning of the `EncryptedPackage` stream (the
     /// `orig_size` prefix).
-    pub fn new(mut inner: R, key: impl Into<Vec<u8>>, salt: impl Into<Vec<u8>>) -> std::io::Result<Self> {
+    pub fn new(
+        mut inner: R,
+        key: impl Into<Vec<u8>>,
+        salt: impl Into<Vec<u8>>,
+    ) -> std::io::Result<Self> {
         let stream_start = inner.seek(SeekFrom::Current(0))?;
 
         let mut size_buf = [0u8; SIZE_PREFIX_LEN as usize];
@@ -64,7 +71,8 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
         }
         let ciphertext_len = end - ciphertext_start;
 
-        let orig_size = crate::parse_encrypted_package_size_prefix_bytes(size_buf, Some(ciphertext_len));
+        let orig_size =
+            crate::parse_encrypted_package_size_prefix_bytes(size_buf, Some(ciphertext_len));
 
         // Restore position to the ciphertext start so subsequent reads work as expected.
         inner.seek(SeekFrom::Start(ciphertext_start))?;
@@ -96,7 +104,7 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
         Ok(Self {
             inner,
             stream_start,
-            key: key.into(),
+            key: Zeroizing::new(key.into()),
             salt: salt.into(),
             orig_size,
             ciphertext_len,
@@ -136,12 +144,19 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
     fn ciphertext_offset(&self, segment_index: u64) -> std::io::Result<u64> {
         let seg_offset = segment_index
             .checked_mul(SEGMENT_PLAINTEXT_LEN)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "segment offset overflow"))?;
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "segment offset overflow")
+            })?;
         let start = self
             .stream_start
             .checked_add(SIZE_PREFIX_LEN)
             .and_then(|v| v.checked_add(seg_offset))
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "ciphertext offset overflow"))?;
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "ciphertext offset overflow",
+                )
+            })?;
         Ok(start)
     }
 
@@ -172,7 +187,9 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
         } else {
             let seg_off = segment_index
                 .checked_mul(SEGMENT_PLAINTEXT_LEN)
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "segment offset overflow"))?;
+                .ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "segment offset overflow")
+                })?;
             self.ciphertext_len.checked_sub(seg_off).ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -201,13 +218,18 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
             .map_err(|e| truncated("EncryptedPackage ciphertext segment", e))?;
 
         let iv = self.derive_iv(segment_index)?;
-        decrypt_aes_cbc_in_place(&self.key, &iv, &mut buf)?;
+        decrypt_aes_cbc_in_place(self.key.as_slice(), &iv, &mut buf)?;
 
         // Ensure the segment contains enough plaintext bytes to cover the declared orig_size.
         let seg_start = segment_index
             .checked_mul(SEGMENT_PLAINTEXT_LEN)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "segment start overflow"))?;
-        let needed = min(SEGMENT_PLAINTEXT_LEN, self.orig_size.saturating_sub(seg_start)) as usize;
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "segment start overflow")
+            })?;
+        let needed = min(
+            SEGMENT_PLAINTEXT_LEN,
+            self.orig_size.saturating_sub(seg_start),
+        ) as usize;
         if buf.len() < needed {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -216,8 +238,31 @@ impl<R: Read + Seek> StandardAesEncryptedPackageReader<R> {
         }
 
         self.cached_segment_index = Some(segment_index);
+        zeroize_vec_u8_full(&mut self.cached_plaintext);
         self.cached_plaintext = buf;
         Ok(())
+    }
+}
+
+impl<R> Drop for StandardAesEncryptedPackageReader<R> {
+    fn drop(&mut self) {
+        zeroize_vec_u8_full(&mut self.key);
+        zeroize_vec_u8_full(&mut self.cached_plaintext);
+    }
+}
+
+impl<R> fmt::Debug for StandardAesEncryptedPackageReader<R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StandardAesEncryptedPackageReader")
+            .field("stream_start", &self.stream_start)
+            .field("orig_size", &self.orig_size)
+            .field("ciphertext_len", &self.ciphertext_len)
+            .field("pos", &self.pos)
+            .field("cached_segment_index", &self.cached_segment_index)
+            .field("cached_plaintext_len", &self.cached_plaintext.len())
+            .field("key_len", &self.key.len())
+            .field("salt_len", &self.salt.len())
+            .finish()
     }
 }
 
@@ -250,9 +295,12 @@ impl<R: Read + Seek> Read for StandardAesEncryptedPackageReader<R> {
 
             let seg_start = segment_index * SEGMENT_PLAINTEXT_LEN;
             let seg_plain_len = min(SEGMENT_PLAINTEXT_LEN, self.orig_size - seg_start) as usize;
-            let available = seg_plain_len
-                .checked_sub(segment_off)
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "segment offset out of range"))?;
+            let available = seg_plain_len.checked_sub(segment_off).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "segment offset out of range",
+                )
+            })?;
 
             let to_copy = min(available, out.len() - written);
             out[written..written + to_copy]
@@ -273,12 +321,12 @@ impl<R: Read + Seek> Seek for StandardAesEncryptedPackageReader<R> {
         let end = self.orig_size as i128;
         let next: i128 = match pos {
             SeekFrom::Start(off) => off as i128,
-            SeekFrom::End(off) => end
-                .checked_add(off as i128)
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek overflow"))?,
-            SeekFrom::Current(off) => current
-                .checked_add(off as i128)
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek overflow"))?,
+            SeekFrom::End(off) => end.checked_add(off as i128).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek overflow")
+            })?,
+            SeekFrom::Current(off) => current.checked_add(off as i128).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek overflow")
+            })?,
         };
 
         if next < 0 {
@@ -287,9 +335,9 @@ impl<R: Read + Seek> Seek for StandardAesEncryptedPackageReader<R> {
                 "invalid seek to a negative position",
             ));
         }
-        let next_u64: u64 = next
-            .try_into()
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek position overflow"))?;
+        let next_u64: u64 = next.try_into().map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek position overflow")
+        })?;
 
         self.pos = next_u64;
         Ok(self.pos)
@@ -302,12 +350,25 @@ fn decrypt_aes_cbc_in_place(key: &[u8], iv: &[u8; 16], buf: &mut [u8]) -> std::i
             AesCbcDecryptError::UnsupportedKeyLength(_) => {
                 (std::io::ErrorKind::InvalidInput, err.to_string())
             }
-            AesCbcDecryptError::InvalidIvLength(_) | AesCbcDecryptError::InvalidCiphertextLength(_) => {
+            AesCbcDecryptError::InvalidIvLength(_)
+            | AesCbcDecryptError::InvalidCiphertextLength(_) => {
                 (std::io::ErrorKind::InvalidData, err.to_string())
             }
         };
         std::io::Error::new(kind, msg)
     })
+}
+
+fn zeroize_vec_u8_full(buf: &mut Vec<u8>) {
+    buf.zeroize();
+    // SAFETY: We only write zeros to uninitialized memory; it is valid to treat the spare capacity
+    // as a raw byte slice for the purpose of clearing it.
+    unsafe {
+        let spare = buf.spare_capacity_mut();
+        let ptr = spare.as_mut_ptr() as *mut u8;
+        let len = spare.len();
+        std::slice::from_raw_parts_mut(ptr, len).zeroize();
+    }
 }
 
 fn expected_min_ciphertext_len(orig_size: u64) -> std::io::Result<u64> {
@@ -335,8 +396,49 @@ fn expected_min_ciphertext_len(orig_size: u64) -> std::io::Result<u64> {
 
 fn truncated(context: &'static str, err: std::io::Error) -> std::io::Error {
     if err.kind() == std::io::ErrorKind::UnexpectedEof {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{context} is truncated"))
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{context} is truncated"),
+        )
     } else {
         err
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn reader_debug_redacts_key_and_plaintext_bytes() {
+        let key_bytes = b"super_secret_key".to_vec();
+        let plaintext_bytes = b"super_secret_plaintext".to_vec();
+        let key_debug = format!("{key_bytes:?}");
+        let plaintext_debug = format!("{plaintext_bytes:?}");
+
+        let reader: StandardAesEncryptedPackageReader<Cursor<Vec<u8>>> =
+            StandardAesEncryptedPackageReader {
+                inner: Cursor::new(Vec::new()),
+                stream_start: 0,
+                key: Zeroizing::new(key_bytes),
+                salt: vec![0u8; 16],
+                orig_size: 0,
+                ciphertext_len: 0,
+                pos: 0,
+                cached_segment_index: None,
+                cached_plaintext: plaintext_bytes,
+                pending_error: None,
+            };
+
+        let dbg = format!("{reader:?}");
+        assert!(
+            !dbg.contains(&key_debug),
+            "Debug output leaked key bytes: {dbg}"
+        );
+        assert!(
+            !dbg.contains(&plaintext_debug),
+            "Debug output leaked plaintext bytes: {dbg}"
+        );
     }
 }
