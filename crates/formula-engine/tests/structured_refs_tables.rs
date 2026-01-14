@@ -163,6 +163,34 @@ fn setup_engine_with_table() -> Engine {
     engine
 }
 
+fn setup_engine_with_table_shifted_right_one_col() -> Engine {
+    let mut engine = Engine::new();
+    let mut table = table_fixture_multi_col();
+    table.range = Range::from_a1("B1:E4").unwrap();
+    engine.set_sheet_tables("Sheet1", vec![table]);
+
+    // Header row.
+    engine.set_cell_value("Sheet1", "B1", "Col1").expect("B1");
+    engine.set_cell_value("Sheet1", "C1", "Col2").expect("C1");
+    engine.set_cell_value("Sheet1", "D1", "Col3").expect("D1");
+    engine.set_cell_value("Sheet1", "E1", "Col4").expect("E1");
+
+    // Data rows.
+    engine.set_cell_value("Sheet1", "B2", 1.0_f64).expect("B2");
+    engine.set_cell_value("Sheet1", "B3", 2.0_f64).expect("B3");
+    engine.set_cell_value("Sheet1", "B4", 3.0_f64).expect("B4");
+
+    engine.set_cell_value("Sheet1", "C2", 10.0_f64).expect("C2");
+    engine.set_cell_value("Sheet1", "C3", 20.0_f64).expect("C3");
+    engine.set_cell_value("Sheet1", "C4", 30.0_f64).expect("C4");
+
+    engine.set_cell_value("Sheet1", "D2", 100.0_f64).expect("D2");
+    engine.set_cell_value("Sheet1", "D3", 200.0_f64).expect("D3");
+    engine.set_cell_value("Sheet1", "D4", 300.0_f64).expect("D4");
+
+    engine
+}
+
 fn setup_engine_with_table_and_totals() -> Engine {
     let mut engine = Engine::new();
     engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col_with_totals()]);
@@ -837,4 +865,64 @@ fn delete_cols_that_remove_all_table_columns_drops_the_table_metadata() {
 
     let tables = engine.get_sheet_tables("Sheet1").expect("tables");
     assert!(tables.is_empty());
+}
+
+#[test]
+fn insert_cols_strictly_before_table_shifts_range_but_preserves_columns() {
+    let mut engine = setup_engine_with_table_shifted_right_one_col();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SUM(Table1[Col2])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    engine
+        .apply_operation(EditOp::InsertCols {
+            sheet: "Sheet1".into(),
+            col: 0, // Insert strictly before the table (table starts at B).
+            count: 1,
+        })
+        .expect("insert cols");
+    engine.recalculate_single_threaded();
+
+    // Structured refs should still resolve the same named column after the shift.
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(table.range, Range::from_a1("C1:F4").unwrap());
+    assert_eq!(table.columns.len(), table.range.width() as usize);
+    let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["Col1", "Col2", "Col3", "Col4"]);
+}
+
+#[test]
+fn delete_cols_strictly_before_table_shifts_range_but_preserves_columns() {
+    let mut engine = setup_engine_with_table_shifted_right_one_col();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=SUM(Table1[Col2])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    engine
+        .apply_operation(EditOp::DeleteCols {
+            sheet: "Sheet1".into(),
+            col: 0, // Delete strictly before the table (table starts at B).
+            count: 1,
+        })
+        .expect("delete cols");
+    engine.recalculate_single_threaded();
+
+    // Structured refs should still resolve the same named column after the shift.
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(60.0));
+
+    let tables = engine.get_sheet_tables("Sheet1").expect("tables");
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(table.range, Range::from_a1("A1:D4").unwrap());
+    assert_eq!(table.columns.len(), table.range.width() as usize);
+    let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["Col1", "Col2", "Col3", "Col4"]);
 }
