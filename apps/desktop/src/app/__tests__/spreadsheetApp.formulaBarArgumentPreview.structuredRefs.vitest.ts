@@ -320,7 +320,10 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
 
     expect(evalPreview("TableThisRow[[#This Row],[Amount]]")).toBe(20);
     expect(evalPreview("TableThisRow[@Amount]")).toBe(20);
+    // Implicit "this row" shorthand used in calculated column formulas.
+    expect(evalPreview("[@Amount]")).toBe(20);
     expect(evalPreview("SUM(TableThisRow[[#This Row],[Amount]], 5)")).toBe(25);
+    expect(evalPreview("SUM([@Amount], 5)")).toBe(25);
 
     app.destroy();
     root.remove();

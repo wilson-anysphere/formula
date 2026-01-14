@@ -17185,6 +17185,147 @@ export class SpreadsheetApp {
       return `${prefix}${a1}`;
     };
 
+    const rewriteImplicitThisRowReferences = (text: string): string | null => {
+      const input = String(text ?? "");
+      if (!input.includes("[@")) return null;
+
+      // Resolve the table name from the edit target (implicit `[@...]` refs are only meaningful
+      // inside a table). If we can't identify a containing table, skip rewriting.
+      const tableName = (() => {
+        for (const entry of this.searchWorkbook.tables.values()) {
+          const table: any = entry as any;
+          const name = typeof table?.name === "string" ? table.name.trim() : "";
+          if (!name) continue;
+
+          const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+          const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+          const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+          const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+          if (startRow == null || startCol == null || endRow == null || endCol == null) continue;
+          if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) continue;
+
+          const baseStartRow = Math.min(startRow, endRow);
+          const baseEndRow = Math.max(startRow, endRow);
+          const baseStartCol = Math.min(startCol, endCol);
+          const baseEndCol = Math.max(startCol, endCol);
+
+          const tableSheet =
+            typeof table.sheetName === "string" && table.sheetName.trim()
+              ? table.sheetName.trim()
+              : typeof table.sheet === "string" && table.sheet.trim()
+                ? table.sheet.trim()
+                : sheetId;
+          const resolvedSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
+          if (resolvedSheetId && resolvedSheetId.toLowerCase() !== sheetId.toLowerCase()) continue;
+
+          const row = editTarget.cell.row;
+          const col = editTarget.cell.col;
+          const dataStartRow = baseStartRow + 1;
+          if (row < dataStartRow || row > baseEndRow) continue;
+          if (col < baseStartCol || col > baseEndCol) continue;
+
+          return name;
+        }
+        return null;
+      })();
+
+      if (!tableName) return null;
+
+      const isWhitespaceChar = (ch: string): boolean => ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+      const isIdentifierPart = (ch: string): boolean =>
+        (ch >= "A" && ch <= "Z") ||
+        (ch >= "a" && ch <= "z") ||
+        (ch >= "0" && ch <= "9") ||
+        ch === "_" ||
+        ch === ".";
+      const isEscapedBracket = (value: string, index: number, depth: number): boolean => {
+        if (value[index] !== "]" || value[index + 1] !== "]") return false;
+        // When only a single bracket group is open, `]]` cannot represent nested closes.
+        if (depth === 1) return true;
+        if (value[index + 2] === "]") return true;
+        let k = index + 2;
+        while (k < value.length && isWhitespaceChar(value[k] ?? "")) k += 1;
+        const after = value[k] ?? "";
+        const isDelimiterAfterClose = after === "" || after === "," || after === ";" || after === "]" || after === ")";
+        return !isDelimiterAfterClose;
+      };
+
+      let out = "";
+      let inString = false;
+      let changed = false;
+      let i = 0;
+
+      while (i < input.length) {
+        const ch = input[i] ?? "";
+        if (inString) {
+          out += ch;
+          if (ch === '"') {
+            // Escaped quote inside a string literal: "" -> "
+            if (input[i + 1] === '"') {
+              out += '"';
+              i += 2;
+              continue;
+            }
+            inString = false;
+          }
+          i += 1;
+          continue;
+        }
+
+        if (ch === '"') {
+          out += ch;
+          inString = true;
+          i += 1;
+          continue;
+        }
+
+        if (ch === "[" && input[i + 1] === "@") {
+          // `[@Col]` is an implicit-this-row reference. Avoid rewriting `Table[@Col]` (already qualified).
+          const prev = i > 0 ? (input[i - 1] ?? "") : "";
+          if (prev && isIdentifierPart(prev)) {
+            out += ch;
+            i += 1;
+            continue;
+          }
+          const start = i;
+          let depth = 0;
+          let j = i;
+          while (j < input.length) {
+            const c = input[j] ?? "";
+            if (c === "[") {
+              depth += 1;
+              j += 1;
+              continue;
+            }
+            if (c === "]") {
+              if (depth > 0 && isEscapedBracket(input, j, depth)) {
+                j += 2;
+                continue;
+              }
+              depth = Math.max(0, depth - 1);
+              j += 1;
+              if (depth === 0) break;
+              continue;
+            }
+            j += 1;
+          }
+
+          // Only rewrite if we found a matching closing bracket.
+          if (depth === 0 && j > start) {
+            out += tableName + input.slice(start, j);
+            changed = true;
+            i = j;
+            continue;
+          }
+        }
+
+        out += ch;
+        i += 1;
+      }
+
+      return changed ? out : null;
+    };
+
     let reads = 0;
     const memo = new Map<string, SpreadsheetValue>();
     const stack = new Set<string>();
@@ -17270,7 +17411,8 @@ export class SpreadsheetApp {
     };
 
     try {
-      const value = evaluateFormula(`=${trimmedExpr}`, getCellValue, {
+      const evalExpr = rewriteImplicitThisRowReferences(trimmedExpr) ?? trimmedExpr;
+      const value = evaluateFormula(`=${evalExpr}`, getCellValue, {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
         resolveStructuredRefToReference,
