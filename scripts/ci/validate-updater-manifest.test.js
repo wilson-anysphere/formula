@@ -123,6 +123,18 @@ test("fails when a macOS updater entry points at a non-updater artifact (.dmg)",
   );
 });
 
+test("accepts a macOS updater archive ending with .tgz", () => {
+  const { platforms, assetNames } = baseline();
+  const url = "https://github.com/example/repo/releases/download/v0.1.0/Formula_universal.tgz";
+  platforms["darwin-x86_64"].url = url;
+  platforms["darwin-aarch64"].url = url;
+  assetNames.delete("Formula.app.tar.gz");
+  assetNames.add("Formula_universal.tgz");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.deepEqual(result.errors, []);
+});
+
 test("fails when Windows updater installer is .exe instead of the expected .msi", () => {
   const { platforms, assetNames } = baseline();
   platforms["windows-x86_64"].url =

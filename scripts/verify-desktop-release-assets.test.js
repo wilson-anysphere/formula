@@ -26,6 +26,7 @@ test("isPrimaryBundleAssetName matches expected suffixes", () => {
   assert.equal(isPrimaryBundleAssetName("Formula.dmg"), true);
   assert.equal(isPrimaryBundleAssetName("Formula.app.tar.gz"), true);
   assert.equal(isPrimaryBundleAssetName("Formula.tar.gz"), true);
+  assert.equal(isPrimaryBundleAssetName("Formula.tgz"), true);
   assert.equal(isPrimaryBundleAssetName("Formula.msi"), true);
   assert.equal(isPrimaryBundleAssetName("Formula.exe"), true);
   assert.equal(isPrimaryBundleAssetName("Formula.AppImage"), true);

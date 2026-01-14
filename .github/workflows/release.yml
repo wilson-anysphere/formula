@@ -2332,6 +2332,8 @@ jobs:
           # Treat these as equivalent x64 markers for collision detection.
           win_x64_re='(x64|x86[_-]64|amd64|win64)'
           win_arm64_re='(arm64|aarch64)'
+          linux_x64_re='(x64|x86[_-]64|amd64)'
+          linux_arm64_re='(arm64|aarch64)'
 
           fetch_release() {
             curl -sSfL \
@@ -2444,6 +2446,51 @@ jobs:
             require_min "Linux AppImage" '\.AppImage$' 1
             require_min "Linux DEB" '\.deb$' 1
             require_min "Linux RPM" '\.rpm$' 1
+
+            # Linux multi-arch: ensure we shipped installers/packages for both x86_64 and arm64 so
+            # they can't clobber each other on the GitHub Release.
+            count_linux_arch() {
+              local ext_re="$1"
+              local arch_re="$2"
+              local other_arch_re="$3"
+              echo "$json" | jq -r --arg ext "$ext_re" --arg arch "$arch_re" --arg other "$other_arch_re" '[.[].name
+                | select(test($ext; "i"))
+                | select(test($arch; "i"))
+                | select(test($other; "i") | not)
+              ] | length'
+            }
+
+            linux_x64_appimage_count="$(count_linux_arch '\\.AppImage$' "$linux_x64_re" "$linux_arm64_re")"
+            linux_arm64_appimage_count="$(count_linux_arch '\\.AppImage$' "$linux_arm64_re" "$linux_x64_re")"
+            linux_x64_deb_count="$(count_linux_arch '\\.deb$' "$linux_x64_re" "$linux_arm64_re")"
+            linux_arm64_deb_count="$(count_linux_arch '\\.deb$' "$linux_arm64_re" "$linux_x64_re")"
+            linux_x64_rpm_count="$(count_linux_arch '\\.rpm$' "$linux_x64_re" "$linux_arm64_re")"
+            linux_arm64_rpm_count="$(count_linux_arch '\\.rpm$' "$linux_arm64_re" "$linux_x64_re")"
+
+            if [[ "$linux_x64_appimage_count" -lt 1 ]]; then
+              echo "missing: Linux x86_64 AppImage (expected >= 1, found ${linux_x64_appimage_count})" >&2
+              missing=1
+            fi
+            if [[ "$linux_arm64_appimage_count" -lt 1 ]]; then
+              echo "missing: Linux ARM64 AppImage (expected >= 1, found ${linux_arm64_appimage_count})" >&2
+              missing=1
+            fi
+            if [[ "$linux_x64_deb_count" -lt 1 ]]; then
+              echo "missing: Linux x86_64 DEB (expected >= 1, found ${linux_x64_deb_count})" >&2
+              missing=1
+            fi
+            if [[ "$linux_arm64_deb_count" -lt 1 ]]; then
+              echo "missing: Linux ARM64 DEB (expected >= 1, found ${linux_arm64_deb_count})" >&2
+              missing=1
+            fi
+            if [[ "$linux_x64_rpm_count" -lt 1 ]]; then
+              echo "missing: Linux x86_64 RPM (expected >= 1, found ${linux_x64_rpm_count})" >&2
+              missing=1
+            fi
+            if [[ "$linux_arm64_rpm_count" -lt 1 ]]; then
+              echo "missing: Linux ARM64 RPM (expected >= 1, found ${linux_arm64_rpm_count})" >&2
+              missing=1
+            fi
 
             windows_archless_count="$(echo "$json" | jq -r --arg x64 "$win_x64_re" --arg arm64 "$win_arm64_re" '[.[].name
               | select(test("\\.(msi|exe)$"; "i"))
@@ -2609,7 +2656,7 @@ jobs:
                 echo "macos-unknown"
               fi
             elif [[ "$base" == *.deb || "$base" == *.rpm || "$base" == *.AppImage || "$base" == *.AppImage.tar.gz ]]; then
-              if [[ "$base" =~ (amd64|x86_64|x64) ]]; then
+              if [[ "$base" =~ (amd64|x86[_-]64|x64) ]]; then
                 echo "linux-x64"
               elif [[ "$base" =~ (arm64|aarch64) ]]; then
                 echo "linux-arm64"

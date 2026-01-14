@@ -878,6 +878,7 @@ function isPrimaryBundleAssetName(name) {
   const suffixes = [
     ".dmg",
     ".tar.gz",
+    ".tgz",
     ".msi",
     ".exe",
     ".appimage",
@@ -1555,7 +1556,7 @@ async function main() {
 
   if (primaryAssets.length === 0) {
     throw new ActionableError("No primary bundle assets found to hash.", [
-      "Expected at least one of: .dmg, .tar.gz, .msi, .exe, .AppImage, .deb, .rpm, .zip, .pkg",
+      "Expected at least one of: .dmg, .tar.gz, .tgz, .msi, .exe, .AppImage, .deb, .rpm, .zip, .pkg",
       `Assets present (${assetNames.length}): ${assetNames.join(", ")}`,
     ]);
   }

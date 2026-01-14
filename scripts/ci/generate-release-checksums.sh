@@ -62,27 +62,27 @@ missing=()
 
 # macOS: installer + updater archive
 mac_dmg=( "$assets_dir"/*.dmg )
-mac_app_targz=( "$assets_dir"/*.app.tar.gz )
+mac_app_targz=( "$assets_dir"/*.app.tar.gz "$assets_dir"/*.app.tgz )
 if [ ${#mac_dmg[@]} -eq 0 ]; then
   missing+=("*.dmg")
 fi
 if [ ${#mac_app_targz[@]} -eq 0 ]; then
   # Some bundlers may produce a plain .tar.gz for the macOS updater bundle; accept it
   # as a fallback, but avoid confusing it with Linux AppImage tarballs.
-  fallback_targz=( "$assets_dir"/*.tar.gz )
+  fallback_targz=( "$assets_dir"/*.tar.gz "$assets_dir"/*.tgz )
   filtered_fallback=()
   for f in "${fallback_targz[@]}"; do
     base="$(basename "$f")"
-    if [[ "$base" == *.AppImage.tar.gz ]]; then
+    if [[ "$base" == *.AppImage.tar.gz ]] || [[ "$base" == *.AppImage.tgz ]]; then
       continue
     fi
-    if [[ "$base" == *.tar.gz.sig ]]; then
+    if [[ "$base" == *.tar.gz.sig ]] || [[ "$base" == *.tgz.sig ]]; then
       continue
     fi
     filtered_fallback+=( "$f" )
   done
   if [ ${#filtered_fallback[@]} -eq 0 ]; then
-    missing+=("*.app.tar.gz (or a non-AppImage *.tar.gz)")
+    missing+=("*.app.tar.gz (or a non-AppImage *.tar.gz/*.tgz)")
   fi
 fi
 
