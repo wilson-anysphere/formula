@@ -11,6 +11,20 @@ from . import triage as triage_mod
 from .util import WorkbookInput, ensure_dir, read_workbook_input, sha256_hex, utc_now_iso, write_json
 
 
+def _normalize_workbook_extension(name: str) -> str:
+    """Return a safe workbook extension for storage naming.
+
+    Some workbooks arrive with dot-separated identifiers embedded in the filename (e.g.
+    `acme.com.xlsx`). When storing files in the private corpus, preserve only the true workbook
+    extension to avoid leaking those identifiers into filenames.
+    """
+
+    ext = Path(name).suffix.lower()
+    if ext in (".xlsx", ".xlsm", ".xlsb"):
+        return ext
+    return ".xlsx"
+
+
 def _triage_sanitized_workbook(workbook: WorkbookInput) -> dict:
     """Run corpus triage on an in-memory workbook blob.
 
@@ -72,11 +86,7 @@ def main() -> int:
     workbook = read_workbook_input(args.input)
     raw = workbook.data
     workbook_id = sha256_hex(raw)[:16]
-    # Preserve only the real workbook extension (xlsx/xlsm/xlsb) to avoid leaking customer/org
-    # identifiers embedded as extra dot-separated suffixes (e.g. `acme.com.xlsx`).
-    ext = Path(workbook.display_name).suffix.lower()
-    if ext not in (".xlsx", ".xlsm", ".xlsb"):
-        ext = ".xlsx"
+    ext = _normalize_workbook_extension(workbook.display_name)
 
     corpus_dir: Path = args.corpus_dir
     originals_dir = corpus_dir / "originals"
