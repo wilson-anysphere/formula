@@ -773,6 +773,7 @@ fn write_new_row<W: Write>(
         .and_then(|props| props.style_id)
         .filter(|style_id| *style_id != 0)
         .and_then(|style_id| style_to_xf.get(&style_id).copied())
+        .filter(|xf| *xf != 0)
         .map(|xf| xf.to_string());
     if let Some(style_xf_str) = &style_xf_str {
         row_start.push_attribute(("s", style_xf_str.as_str()));

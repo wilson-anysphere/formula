@@ -2911,9 +2911,9 @@ fn parse_col_properties(
                 let mut max: Option<u32> = None;
                 let mut width: Option<f32> = None;
                 let mut custom_width: Option<bool> = None;
+                let mut hidden = false;
                 let mut style: Option<u32> = None;
                 let mut custom_format: Option<bool> = None;
-                let mut hidden = false;
 
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -2923,9 +2923,9 @@ fn parse_col_properties(
                         b"max" => max = val.parse().ok(),
                         b"width" => width = val.parse().ok(),
                         b"customWidth" => custom_width = Some(parse_xml_bool(&val)),
+                        b"hidden" => hidden = parse_xml_bool(&val),
                         b"style" => style = val.parse().ok(),
                         b"customFormat" => custom_format = Some(parse_xml_bool(&val)),
-                        b"hidden" => hidden = parse_xml_bool(&val),
                         _ => {}
                     }
                 }
@@ -3008,7 +3008,7 @@ fn parse_cols_xml_props(
                 let mut max: Option<u32> = None;
                 let mut width: Option<f32> = None;
                 let mut custom_width: Option<bool> = None;
-                let mut style: Option<u32> = None;
+                let mut style_xf: Option<u32> = None;
                 let mut custom_format: Option<bool> = None;
                 let mut hidden = false;
                 let mut outline_level: u8 = 0;
@@ -3022,9 +3022,9 @@ fn parse_cols_xml_props(
                         b"max" => max = val.parse().ok(),
                         b"width" => width = val.parse().ok(),
                         b"customWidth" => custom_width = Some(parse_xml_bool(&val)),
-                        b"style" => style = val.parse().ok(),
-                        b"customFormat" => custom_format = Some(parse_xml_bool(&val)),
                         b"hidden" => hidden = parse_xml_bool(&val),
+                        b"style" => style_xf = val.parse().ok(),
+                        b"customFormat" => custom_format = Some(parse_xml_bool(&val)),
                         b"outlineLevel" => outline_level = val.parse().unwrap_or(0),
                         b"collapsed" => collapsed = parse_xml_bool(&val),
                         _ => {}
@@ -3043,10 +3043,11 @@ fn parse_cols_xml_props(
                     width
                 };
 
-                let style_xf = if custom_format == Some(false) {
+                let clear_style = custom_format == Some(false);
+                let style_xf = if clear_style {
                     None
                 } else {
-                    style.and_then(|xf| {
+                    style_xf.and_then(|xf| {
                         // Treat references to the default style as "no override" so no-op saves do
                         // not spuriously rewrite `<cols>` when a producer emits redundant
                         // `style="0"` (or any other xf index that maps to the default style).
@@ -3057,7 +3058,12 @@ fn parse_cols_xml_props(
                     })
                 };
 
-                if width.is_none() && !hidden && outline_level == 0 && !collapsed && style_xf.is_none()
+                if width.is_none()
+                    && !hidden
+                    && style_xf.is_none()
+                    && outline_level == 0
+                    && !collapsed
+                    && !clear_style
                 {
                     continue;
                 }
@@ -3079,10 +3085,18 @@ fn parse_cols_xml_props(
                     entry.hidden |= hidden;
                     entry.outline_level = entry.outline_level.max(outline_level);
                     entry.collapsed |= collapsed;
-                    if custom_format == Some(false) {
+                    if clear_style {
                         entry.style_xf = None;
                     } else if let Some(style_xf) = style_xf {
                         entry.style_xf = Some(style_xf);
+                    }
+                    if entry.width.is_none()
+                        && !entry.hidden
+                        && entry.outline_level == 0
+                        && !entry.collapsed
+                        && entry.style_xf.is_none()
+                    {
+                        map.remove(&col_1_based);
                     }
                 }
             }
@@ -5905,7 +5919,8 @@ fn cols_xml_props_from_sheet(
         let style_xf = props
             .style_id
             .filter(|style_id| *style_id != 0)
-            .and_then(|style_id| style_to_xf.get(&style_id).copied());
+            .and_then(|style_id| style_to_xf.get(&style_id).copied())
+            .filter(|xf| *xf != 0);
         col_xml_props.insert(
             col_1,
             ColXmlProps {
@@ -6239,7 +6254,8 @@ fn render_sheet_data(
                 out.push_str(r#" hidden="1""#);
             }
             if let Some(style_id) = row_props.style_id.filter(|id| *id != 0) {
-                if let Some(style_xf) = style_to_xf.get(&style_id).copied() {
+                if let Some(style_xf) = style_to_xf.get(&style_id).copied().filter(|xf| *xf != 0)
+                {
                     out.push_str(&format!(r#" s="{style_xf}" customFormat="1""#));
                 }
             }
@@ -6400,7 +6416,8 @@ fn render_sheet_data_columnar(
                 row_attrs.push_str(r#" hidden="1""#);
             }
             if let Some(style_id) = row_props.style_id.filter(|id| *id != 0) {
-                if let Some(style_xf) = style_to_xf.get(&style_id).copied() {
+                if let Some(style_xf) = style_to_xf.get(&style_id).copied().filter(|xf| *xf != 0)
+                {
                     row_attrs.push_str(&format!(r#" s="{style_xf}" customFormat="1""#));
                 }
             }
