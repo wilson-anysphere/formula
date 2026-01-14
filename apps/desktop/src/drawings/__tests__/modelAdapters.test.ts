@@ -579,4 +579,31 @@ describe("drawings/modelAdapters", () => {
     expect(ui[0]?.kind).toMatchObject({ type: "unknown", rawXml });
     expect(ui[0]?.kind.label).toBe("SmartArt 1");
   });
+
+  it("converts DocumentController kind encodings paired with formula-model anchors (imported charts)", () => {
+    const drawings = [
+      {
+        id: "7",
+        zOrder: 0,
+        // Formula-model/Rust anchor enum encoding (externally tagged).
+        anchor: {
+          Absolute: {
+            pos: { x_emu: 0, y_emu: 0 },
+            ext: { cx: 10, cy: 20 },
+          },
+        },
+        // DocumentController-style kind encoding (internally tagged).
+        kind: { type: "chart", chart_id: "Sheet1:7", raw_xml: "<xdr:graphicFrame/>" },
+      },
+    ];
+
+    const ui = convertDocumentSheetDrawingsToUiDrawingObjects(drawings, { sheetId: "Sheet1" });
+    expect(ui).toHaveLength(1);
+    expect(ui[0]).toMatchObject({
+      id: 7,
+      zOrder: 0,
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 20 } },
+      kind: { type: "chart", chartId: "Sheet1:7", rawXml: "<xdr:graphicFrame/>" },
+    });
+  });
 });

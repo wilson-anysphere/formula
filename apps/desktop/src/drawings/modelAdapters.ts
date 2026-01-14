@@ -783,13 +783,20 @@ export function convertDocumentSheetDrawingsToUiDrawingObjects(
           const zOrder = readOptionalNumber(pick(raw, ["zOrder", "z_order"])) ?? 0;
           const size = convertDocumentDrawingSizeToEmu(pick(raw, ["size"]));
           const anchor = convertDocumentDrawingAnchorToUiAnchor(anchorValue, size);
-          if (!anchor) continue;
+          if (anchor) {
+            const obj: DrawingObject = { id, kind, anchor, zOrder, ...(size ? { size } : {}) };
+            if (preserved) obj.preserved = preserved;
+            if (transform) obj.transform = transform;
+            out.push(obj);
+            continue;
+          }
 
-          const obj: DrawingObject = { id, kind, anchor, zOrder, ...(size ? { size } : {}) };
-          if (preserved) obj.preserved = preserved;
-          if (transform) obj.transform = transform;
-          out.push(obj);
-          continue;
+          // Some DocumentController drawings use the simplified `{ kind: { type: ... } }` encoding
+          // but store anchors in the formula-model/Rust enum shape (e.g. `{ Absolute: {...} }`),
+          // such as imported chart objects hydrated from the XLSX backend.
+          //
+          // If the anchor doesn't match the DocumentController schema, fall through to the
+          // formula-model adapter rather than dropping the object entirely.
         }
 
         // If the drawing doesn't match the DocumentController schema, fall through to the
