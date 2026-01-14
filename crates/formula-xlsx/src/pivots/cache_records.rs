@@ -470,15 +470,9 @@ pub fn pivot_cache_datetime_to_naive_date(v: &str) -> Option<NaiveDate> {
     // Common case: RFC3339/ISO8601 strings such as `2024-01-15T00:00:00Z`.
     let date_part = v.split(['T', ' ']).next().unwrap_or(v);
     if date_part.len() >= 10 {
-        let mut parts = date_part.split('-');
-        if let (Some(year), Some(month), Some(day)) = (parts.next(), parts.next(), parts.next()) {
-            if let (Ok(year), Ok(month), Ok(day)) =
-                (year.parse::<i32>(), month.parse::<u32>(), day.parse::<u32>())
-            {
-                if let Some(date) = NaiveDate::from_ymd_opt(year, month, day) {
-                    return Some(date);
-                }
-            }
+        let ymd = &date_part[..10];
+        if let Ok(date) = NaiveDate::parse_from_str(ymd, "%Y-%m-%d") {
+            return Some(date);
         }
     }
 

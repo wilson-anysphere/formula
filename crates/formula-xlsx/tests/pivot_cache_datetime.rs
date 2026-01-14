@@ -33,6 +33,14 @@ fn converts_datetime_string_to_naive_date() {
 }
 
 #[test]
+fn converts_iso_date_prefix_with_trailing_chars_to_naive_date() {
+    assert_eq!(
+        pivot_cache_datetime_to_naive_date("2024-01-15Z"),
+        NaiveDate::from_ymd_opt(2024, 1, 15)
+    );
+}
+
+#[test]
 fn converts_compact_ymd_to_naive_date() {
     assert_eq!(
         pivot_cache_datetime_to_naive_date("20240115"),
