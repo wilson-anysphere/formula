@@ -607,8 +607,8 @@ export class CanvasGridRenderer {
   private lastPrefetchRanges: CellRange[] | null = null;
 
   private zoom = 1;
-  private readonly baseDefaultRowHeight: number;
-  private readonly baseDefaultColWidth: number;
+  private baseDefaultRowHeight: number;
+  private baseDefaultColWidth: number;
   private readonly rowHeightOverridesBase = new Map<number, number>();
   private readonly colWidthOverridesBase = new Map<number, number>();
 
@@ -1001,6 +1001,149 @@ export class CanvasGridRenderer {
 
   getZoom(): number {
     return this.zoom;
+  }
+
+  /**
+   * Update the default row height (CSS px at zoom=1).
+   *
+   * This rebuilds the underlying {@link VirtualScrollManager} so all rows without explicit
+   * overrides adopt the new default size.
+   */
+  setDefaultRowHeight(defaultRowHeight: number): void {
+    if (!Number.isFinite(defaultRowHeight) || defaultRowHeight <= 0) {
+      throw new Error(`defaultRowHeight must be a positive finite number, got ${defaultRowHeight}`);
+    }
+    if (Math.abs(defaultRowHeight - this.baseDefaultRowHeight) < 1e-6) return;
+    this.updateDefaultAxisSizes({ defaultRowHeight });
+  }
+
+  /**
+   * Update the default column width (CSS px at zoom=1).
+   *
+   * This rebuilds the underlying {@link VirtualScrollManager} so all columns without explicit
+   * overrides adopt the new default size.
+   */
+  setDefaultColWidth(defaultColWidth: number): void {
+    if (!Number.isFinite(defaultColWidth) || defaultColWidth <= 0) {
+      throw new Error(`defaultColWidth must be a positive finite number, got ${defaultColWidth}`);
+    }
+    if (Math.abs(defaultColWidth - this.baseDefaultColWidth) < 1e-6) return;
+    this.updateDefaultAxisSizes({ defaultColWidth });
+  }
+
+  private updateDefaultAxisSizes(options: { defaultRowHeight?: number; defaultColWidth?: number }): void {
+    const epsilon = 1e-6;
+    const nextBaseDefaultRowHeight = options.defaultRowHeight ?? this.baseDefaultRowHeight;
+    const nextBaseDefaultColWidth = options.defaultColWidth ?? this.baseDefaultColWidth;
+
+    if (
+      Math.abs(nextBaseDefaultRowHeight - this.baseDefaultRowHeight) < epsilon &&
+      Math.abs(nextBaseDefaultColWidth - this.baseDefaultColWidth) < epsilon
+    ) {
+      return;
+    }
+
+    const prevZoom = this.zoom;
+    const prevScroll = this.scroll.getScroll();
+    const prevViewport = this.scroll.getViewportState();
+    const { rowCount, colCount } = this.scroll.getCounts();
+
+    // Preserve the current "top-left" visible cell in the main (scrollable) quadrant by keeping
+    // the same start row/col indices and their intra-cell offsets.
+    const preserve = {
+      startRow: prevViewport.main.rows.start,
+      startCol: prevViewport.main.cols.start,
+      offsetY: prevViewport.main.rows.offset,
+      offsetX: prevViewport.main.cols.offset,
+    };
+
+    this.baseDefaultRowHeight = nextBaseDefaultRowHeight;
+    this.baseDefaultColWidth = nextBaseDefaultColWidth;
+
+    const nextScroll = new VirtualScrollManager({
+      rowCount,
+      colCount,
+      defaultRowHeight: nextBaseDefaultRowHeight * prevZoom,
+      defaultColWidth: nextBaseDefaultColWidth * prevZoom,
+    });
+    nextScroll.setViewportSize(prevViewport.width, prevViewport.height);
+    nextScroll.setFrozen(prevViewport.frozenRows, prevViewport.frozenCols);
+
+    // Apply overrides in bulk to avoid O(n^2) prefix-diff updates when many overrides exist.
+    const nextRowOverrides = new Map<number, number>();
+    for (const [row, baseHeight] of this.rowHeightOverridesBase) {
+      if (Math.abs(baseHeight - nextBaseDefaultRowHeight) < epsilon) continue;
+      nextRowOverrides.set(row, baseHeight * prevZoom);
+    }
+    nextScroll.rows.setOverrides(nextRowOverrides);
+
+    const nextColOverrides = new Map<number, number>();
+    for (const [col, baseWidth] of this.colWidthOverridesBase) {
+      if (Math.abs(baseWidth - nextBaseDefaultColWidth) < epsilon) continue;
+      nextColOverrides.set(col, baseWidth * prevZoom);
+    }
+    nextScroll.cols.setOverrides(nextColOverrides);
+
+    // Keep the persisted base override maps coherent by pruning any overrides that are now equal
+    // to the new defaults.
+    const rowsToPrune: number[] = [];
+    for (const [row, baseHeight] of this.rowHeightOverridesBase) {
+      if (Math.abs(baseHeight - nextBaseDefaultRowHeight) < epsilon) {
+        rowsToPrune.push(row);
+      }
+    }
+    for (const row of rowsToPrune) this.rowHeightOverridesBase.delete(row);
+
+    const colsToPrune: number[] = [];
+    for (const [col, baseWidth] of this.colWidthOverridesBase) {
+      if (Math.abs(baseWidth - nextBaseDefaultColWidth) < epsilon) {
+        colsToPrune.push(col);
+      }
+    }
+    for (const col of colsToPrune) this.colWidthOverridesBase.delete(col);
+
+    this.scroll = nextScroll;
+
+    const viewportAfter = nextScroll.getViewportState();
+    const frozenWidth = viewportAfter.frozenWidth;
+    const frozenHeight = viewportAfter.frozenHeight;
+
+    let targetScrollX = prevScroll.x;
+    let targetScrollY = prevScroll.y;
+
+    // Only preserve scroll position when a scrollable region exists. If all rows/cols are frozen,
+    // the scroll offsets are always 0.
+    if (colCount > viewportAfter.frozenCols) {
+      const startCol = preserve.startCol;
+      if (Number.isSafeInteger(startCol) && startCol >= viewportAfter.frozenCols && startCol < colCount) {
+        const size = nextScroll.cols.getSize(startCol);
+        const offset = clamp(preserve.offsetX, 0, Math.max(0, size - epsilon));
+        const abs = nextScroll.cols.positionOf(startCol) + offset;
+        targetScrollX = abs - frozenWidth;
+      }
+    } else {
+      targetScrollX = 0;
+    }
+
+    if (rowCount > viewportAfter.frozenRows) {
+      const startRow = preserve.startRow;
+      if (Number.isSafeInteger(startRow) && startRow >= viewportAfter.frozenRows && startRow < rowCount) {
+        const size = nextScroll.rows.getSize(startRow);
+        const offset = clamp(preserve.offsetY, 0, Math.max(0, size - epsilon));
+        const abs = nextScroll.rows.positionOf(startRow) + offset;
+        targetScrollY = abs - frozenHeight;
+      }
+    } else {
+      targetScrollY = 0;
+    }
+
+    // Clamp + align scroll.
+    this.scroll.setScroll(targetScrollX, targetScrollY);
+    const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
+    this.scroll.setScroll(aligned.x, aligned.y);
+
+    this.markAllDirty();
+    this.notifyViewportChange("axisSize");
   }
 
   setZoom(nextZoom: number, options?: { anchorX?: number; anchorY?: number }): void {

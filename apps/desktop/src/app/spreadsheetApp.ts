@@ -131,6 +131,7 @@ import {
   createEngineClient,
   engineApplyDocumentChange,
   engineHydrateFromDocument,
+  excelColWidthCharsToPixels,
   type EditOp,
   type EditResult,
   type EngineClient,
@@ -7268,6 +7269,30 @@ export class SpreadsheetApp {
 
   private syncSharedGridAxisSizesFromDocument(): void {
     if (!this.sharedGrid) return;
+
+    // Ensure the shared-grid renderer's default column width matches any imported sheet metadata
+    // (OOXML `<sheetFormatPr defaultColWidth="...">`). This allows the first render after opening an
+    // XLSX workbook to match Excel for columns without explicit per-column width overrides.
+    //
+    // We intentionally fall back to the legacy default (`cellWidth`) when the metadata is absent so
+    // newly-created workbooks keep their normal appearance.
+    try {
+      const docAny = this.document as any;
+      const map = docAny?.__sheetDefaultColWidthChars;
+      const raw = map && typeof map === "object" ? (map as any)[this.sheetId] : null;
+      const widthChars = Number(raw);
+      const px =
+        Number.isFinite(widthChars) && widthChars > 0
+          ? excelColWidthCharsToPixels(widthChars)
+          : this.cellWidth;
+      if (Number.isFinite(px) && px > 0) {
+        this.sharedGrid.renderer.setDefaultColWidth(px);
+      } else {
+        this.sharedGrid.renderer.setDefaultColWidth(this.cellWidth);
+      }
+    } catch {
+      // Best-effort; default widths should never block rendering.
+    }
 
     const view = this.getSheetViewForRead(this.sheetId) as {
       colWidths?: Record<string, number>;

@@ -7,6 +7,7 @@ import type {
   GridAxisSizeChange
 } from "@formula/grid";
 import { MAX_GRID_ZOOM, MIN_GRID_ZOOM } from "@formula/grid";
+import { excelColWidthCharsToPixels } from "@formula/engine";
 import type { CellRange as FillEngineRange } from "@formula/fill-engine";
 import type { DocumentController } from "../../document/documentController.js";
 import type { DrawingObject, ImageStore } from "../../drawings/types";
@@ -849,6 +850,26 @@ export class SecondaryGridView {
       colWidths?: Record<string, number>;
       rowHeights?: Record<string, number>;
     } | null;
+
+    // Ensure the secondary pane respects any imported sheet default column width metadata so the
+    // split view matches the primary grid when opening XLSX workbooks.
+    try {
+      const docAny = this.document as any;
+      const map = docAny?.__sheetDefaultColWidthChars;
+      const raw = map && typeof map === "object" ? (map as any)[sheetId] : null;
+      const widthChars = Number(raw);
+      const px =
+        Number.isFinite(widthChars) && widthChars > 0
+          ? excelColWidthCharsToPixels(widthChars)
+          : 100;
+      if (Number.isFinite(px) && px > 0) {
+        this.grid.renderer.setDefaultColWidth(px);
+      } else {
+        this.grid.renderer.setDefaultColWidth(100);
+      }
+    } catch {
+      // ignore (best-effort)
+    }
 
     const maxRows = Math.max(0, this.grid.renderer.scroll.getCounts().rowCount - this.headerRows);
     const maxCols = Math.max(0, this.grid.renderer.scroll.getCounts().colCount - this.headerCols);
