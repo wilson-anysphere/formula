@@ -4373,30 +4373,19 @@ fn workbook_file_metadata(workbook: &Workbook) -> (Option<String>, Option<String
         .file_name()
         .and_then(|s| s.to_str())
         .map(|s| s.trim())
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let Some(filename) = filename else {
+        return (None, None);
+    };
     let directory = path
         .parent()
         .and_then(|p| p.to_str())
         .map(|s| s.trim())
-        .filter(|s| !s.is_empty());
-    let (Some(mut directory), Some(filename)) = (
-        directory.map(|s| s.to_string()),
-        filename.map(|s| s.to_string()),
-    ) else {
-        return (None, None);
-    };
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
 
-    // Excel typically includes a trailing separator in directory paths returned from worksheet
-    // information functions.
-    if directory
-        .chars()
-        .last()
-        .is_some_and(|c| c != std::path::MAIN_SEPARATOR)
-    {
-        directory.push(std::path::MAIN_SEPARATOR);
-    }
-
-    (Some(directory), Some(filename))
+    (directory, Some(filename))
 }
 
 fn dedupe_updates(updates: Vec<CellUpdateData>) -> Vec<CellUpdateData> {
@@ -7337,6 +7326,40 @@ mod tests {
             .expect("sheet exists")
             .get_cell(0, 0);
         assert_eq!(cell.computed_value, CellScalar::Text(expected));
+    }
+
+    #[test]
+    fn mark_saved_sets_engine_filename_metadata_without_directory() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_formula("=CELL(\"filename\")".to_string()));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .mark_saved(Some("foo.xlsx".to_string()), None)
+            .expect("mark_saved succeeds");
+
+        assert_eq!(
+            state.engine.get_cell_value("Sheet1", "A1"),
+            EngineValue::Text("[foo.xlsx]Sheet1".to_string())
+        );
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        let cell = workbook
+            .sheet(&sheet_id)
+            .expect("sheet exists")
+            .get_cell(0, 0);
+        assert_eq!(
+            cell.computed_value,
+            CellScalar::Text("[foo.xlsx]Sheet1".to_string())
+        );
     }
 
     #[test]
