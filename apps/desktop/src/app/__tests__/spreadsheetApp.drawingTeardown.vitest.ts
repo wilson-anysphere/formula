@@ -150,6 +150,15 @@ describe("SpreadsheetApp drawings teardown", () => {
     const selectSpy = vi.spyOn(DrawingOverlay.prototype, "setSelectedId");
     const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
 
+    // Ensure the insert-image input (if created) is cleaned up on dispose.
+    const input = (app as any).ensureInsertImageInput?.() as HTMLInputElement | undefined;
+    expect(input).toBeTruthy();
+    if (input) {
+      input.onchange = () => {};
+      expect(input.isConnected).toBe(true);
+      expect((app as any).insertImageInput).toBe(input);
+    }
+
     // Seed a single drawing object so pointer interactions have something to hit.
     const doc = app.getDocument() as any;
     doc.setSheetDrawings(app.getCurrentSheetId(), [
@@ -184,6 +193,11 @@ describe("SpreadsheetApp drawings teardown", () => {
 
     // Overlay + caches should be cleared.
     expect(clearSpy).toHaveBeenCalled();
+    if (input) {
+      expect(input.isConnected).toBe(false);
+      expect(input.onchange).toBeNull();
+      expect((app as any).insertImageInput).toBeNull();
+    }
 
     // Pointer events on the old root should not invoke drawing callbacks once disposed.
     dispatchPointerEvent(root, "pointerdown", { clientX: 60, clientY: 40, pointerId: 2, button: 0 });

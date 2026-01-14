@@ -383,6 +383,22 @@ class DocumentImageStore implements ImageStore {
     private readonly options: { mode?: "user" | "external"; source?: string } = {},
   ) {}
 
+  /**
+   * Best-effort teardown for tests/hot-reload.
+   *
+   * Clears in-memory image bytes caches so a disposed SpreadsheetApp does not
+   * retain large image payloads via the ImageStore even if the app object is
+   * still referenced somewhere.
+   */
+  dispose(): void {
+    this.fallback.clear();
+    try {
+      this.persisted.clearMemory();
+    } catch {
+      // ignore
+    }
+  }
+
   get(id: string): ImageEntry | undefined {
     const imageId = String(id ?? "");
     if (!imageId) return undefined;
@@ -3556,6 +3572,29 @@ export class SpreadsheetApp {
     this.drawingInteractionController = null;
     this.drawingInteractionCallbacks = null;
 
+    // Clear any cached image bytes kept in the drawing ImageStore.
+    try {
+      (this.drawingImages as any)?.dispose?.();
+    } catch {
+      // ignore
+    }
+
+    // If the "insert image" input was created, ensure it (and its event handler)
+    // are released even if the app object remains referenced after dispose.
+    if (this.insertImageInput) {
+      try {
+        this.insertImageInput.onchange = null;
+      } catch {
+        // ignore
+      }
+      try {
+        this.insertImageInput.remove();
+      } catch {
+        // ignore
+      }
+      this.insertImageInput = null;
+    }
+
     // Ensure overlay caches (ImageBitmaps, parsed XML) are released promptly.
     this.drawingOverlay?.destroy?.();
     this.chartSelectionOverlay?.destroy?.();
@@ -3649,6 +3688,18 @@ export class SpreadsheetApp {
     this.chartRangeRectsCache.clear();
     this.chartSelectionViewportMemo = null;
     this.conflictUiContainer = null;
+
+    // Drop references to drawings state so a disposed app instance does not retain
+    // large drawing metadata/images if it is kept alive (e.g. tests/hot reload).
+    //
+    // Do this after disposing drawing interaction controllers since they may cancel an
+    // in-progress gesture by restoring the pre-gesture object list.
+    this.selectedDrawingId = null;
+    this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    this.drawingObjects = [];
+    this.sheetDrawings = [];
     this.root.replaceChildren();
   }
 
