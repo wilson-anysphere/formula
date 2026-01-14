@@ -1844,16 +1844,26 @@ fn main() {
                     return;
                 };
 
+                let url = webview_window.url().ok();
+                let url_for_log = url
+                    .as_ref()
+                    .map(|url| url.to_string())
+                    .unwrap_or_else(|| "<unknown>".to_string());
+
+                if !url.is_some_and(|url| desktop::ipc_origin::is_trusted_app_origin(&url)) {
+                    eprintln!(
+                        "[close] blocked close-requested flow from untrusted origin: {url_for_log}"
+                    );
+                    let _ = window.hide();
+                    CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+                    return;
+                }
+
                 if let Err(err) = desktop::ipc_origin::ensure_stable_origin(
                     &webview_window,
                     "close-requested flow",
                     desktop::ipc_origin::Verb::Is,
                 ) {
-                    let url_for_log = webview_window
-                        .url()
-                        .ok()
-                        .map(|url| url.to_string())
-                        .unwrap_or_else(|| "<unknown>".to_string());
                     eprintln!(
                         "[close] blocked close-requested flow from untrusted origin: {url_for_log} ({err})"
                     );

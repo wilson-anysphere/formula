@@ -1480,7 +1480,7 @@ impl From<IpcPivotKeyPart> for PivotKeyPart {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct IpcPivotField {
-    pub source_field: PivotText,
+    pub source_field: IpcPivotFieldRef,
     #[serde(default)]
     pub sort_order: SortOrder,
     #[serde(default)]
@@ -1488,10 +1488,49 @@ pub struct IpcPivotField {
         Option<LimitedVec<IpcPivotKeyPart, { crate::resource_limits::MAX_PIVOT_MANUAL_SORT_ITEMS }>>,
 }
 
+/// IPC-friendly mirror of `formula_engine::pivot::PivotFieldRef` with resource limits applied.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum IpcPivotFieldRef {
+    /// Backward-compatible worksheet/cache field name.
+    Text(PivotText),
+    /// Structured Data Model column ref.
+    Column { table: PivotText, column: PivotText },
+    /// Structured Data Model measure ref.
+    Measure { measure: PivotText },
+    /// Alternate structured Data Model measure shape (matches `formula_model` schema).
+    MeasureName { name: PivotText },
+}
+
+impl From<IpcPivotFieldRef> for PivotFieldRef {
+    fn from(value: IpcPivotFieldRef) -> Self {
+        match value {
+            IpcPivotFieldRef::Text(raw) => {
+                let raw = raw.into_inner();
+                if let Some(measure) = formula_model::pivots::parse_dax_measure_ref(&raw) {
+                    return PivotFieldRef::DataModelMeasure(measure);
+                }
+                if let Some((table, column)) = formula_model::pivots::parse_dax_column_ref(&raw) {
+                    return PivotFieldRef::DataModelColumn { table, column };
+                }
+                PivotFieldRef::CacheFieldName(raw)
+            }
+            IpcPivotFieldRef::Column { table, column } => PivotFieldRef::DataModelColumn {
+                table: table.into_inner(),
+                column: column.into_inner(),
+            },
+            IpcPivotFieldRef::Measure { measure } => {
+                PivotFieldRef::DataModelMeasure(measure.into_inner())
+            }
+            IpcPivotFieldRef::MeasureName { name } => PivotFieldRef::DataModelMeasure(name.into_inner()),
+        }
+    }
+}
+
 impl From<IpcPivotField> for formula_engine::pivot::PivotField {
     fn from(value: IpcPivotField) -> Self {
         Self {
-            source_field: pivot_field_ref_from_ipc(value.source_field.into_inner()),
+            source_field: value.source_field.into(),
             sort_order: value.sort_order,
             manual_sort: value.manual_sort.map(|v| {
                 v.into_inner()
@@ -1507,7 +1546,7 @@ impl From<IpcPivotField> for formula_engine::pivot::PivotField {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct IpcValueField {
-    pub source_field: PivotText,
+    pub source_field: IpcPivotFieldRef,
     pub name: PivotText,
     pub aggregation: AggregationType,
     #[serde(default)]
@@ -1515,7 +1554,7 @@ pub struct IpcValueField {
     #[serde(default)]
     pub show_as: Option<ShowAsType>,
     #[serde(default)]
-    pub base_field: Option<PivotText>,
+    pub base_field: Option<IpcPivotFieldRef>,
     #[serde(default)]
     pub base_item: Option<PivotText>,
 }
@@ -1523,14 +1562,12 @@ pub struct IpcValueField {
 impl From<IpcValueField> for formula_engine::pivot::ValueField {
     fn from(value: IpcValueField) -> Self {
         Self {
-            source_field: pivot_field_ref_from_ipc(value.source_field.into_inner()),
+            source_field: value.source_field.into(),
             name: value.name.into_inner(),
             aggregation: value.aggregation,
             number_format: value.number_format.map(|s| s.into_inner()),
             show_as: value.show_as,
-            base_field: value
-                .base_field
-                .map(|s| pivot_field_ref_from_ipc(s.into_inner())),
+            base_field: value.base_field.map(PivotFieldRef::from),
             base_item: value.base_item.map(|s| s.into_inner()),
         }
     }
@@ -1540,7 +1577,7 @@ impl From<IpcValueField> for formula_engine::pivot::ValueField {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct IpcFilterField {
-    pub source_field: PivotText,
+    pub source_field: IpcPivotFieldRef,
     /// Allowed values. `None` means allow all.
     #[serde(default)]
     pub allowed: Option<
@@ -1551,7 +1588,7 @@ pub struct IpcFilterField {
 impl From<IpcFilterField> for formula_engine::pivot::FilterField {
     fn from(value: IpcFilterField) -> Self {
         Self {
-            source_field: pivot_field_ref_from_ipc(value.source_field.into_inner()),
+            source_field: value.source_field.into(),
             allowed: value.allowed.map(|vals| {
                 vals.into_inner()
                     .into_iter()
