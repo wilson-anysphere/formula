@@ -5,17 +5,15 @@ import { openCustomSortDialog } from "../sort-filter/openCustomSortDialog.js";
 import { sortSelection } from "../sort-filter/sortSelection.js";
 
 export const SORT_FILTER_RIBBON_COMMANDS = {
-  homeSortAtoZ: "home.editing.sortFilter.sortAtoZ",
-  homeSortZtoA: "home.editing.sortFilter.sortZtoA",
+  // Canonical sort command ids (used by both Home and Data tab ribbon controls).
+  sortAtoZ: "data.sortFilter.sortAtoZ",
+  sortZtoA: "data.sortFilter.sortZtoA",
+
+  // Custom Sort ribbon ids are still schema-scoped (`home.*` vs `data.*`). Register them so the
+  // ribbon doesn't auto-disable and so other surfaces (command palette/keybindings) can invoke
+  // the same behavior.
   homeCustomSort: "home.editing.sortFilter.customSort",
-
-  dataSortAtoZ: "data.sortFilter.sortAtoZ",
-  dataSortZtoA: "data.sortFilter.sortZtoA",
   dataCustomSort: "data.sortFilter.sort.customSort",
-
-  // Data tab "Sort" dropdown menu items.
-  dataDropdownSortAtoZ: "data.sortFilter.sort.sortAtoZ",
-  dataDropdownSortZtoA: "data.sortFilter.sort.sortZtoA",
 } as const;
 
 export function registerSortFilterCommands(params: { commandRegistry: CommandRegistry; app: SpreadsheetApp }): void {
@@ -35,14 +33,8 @@ export function registerSortFilterCommands(params: { commandRegistry: CommandReg
     );
   };
 
-  registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.homeSortAtoZ, "Sort A to Z", "ascending");
-  registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.homeSortZtoA, "Sort Z to A", "descending");
-
-  registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.dataSortAtoZ, "Sort A to Z", "ascending");
-  registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.dataSortZtoA, "Sort Z to A", "descending");
-
-  registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.dataDropdownSortAtoZ, "Sort A to Z", "ascending");
-  registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.dataDropdownSortZtoA, "Sort Z to A", "descending");
+  registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.sortAtoZ, "Sort A to Z", "ascending");
+  registerSortCommand(SORT_FILTER_RIBBON_COMMANDS.sortZtoA, "Sort Z to A", "descending");
 
   const registerCustomSortCommand = (commandId: string): void => {
     commandRegistry.registerBuiltinCommand(
@@ -64,3 +56,4 @@ export function registerSortFilterCommands(params: { commandRegistry: CommandReg
   registerCustomSortCommand(SORT_FILTER_RIBBON_COMMANDS.homeCustomSort);
   registerCustomSortCommand(SORT_FILTER_RIBBON_COMMANDS.dataCustomSort);
 }
+

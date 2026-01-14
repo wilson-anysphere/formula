@@ -63,8 +63,8 @@ export const dataTab: RibbonTabDefinition = {
           kind: "dropdown",
           menuItems: [
             { id: "data.sortFilter.sort.customSort", label: "Custom Sort…", ariaLabel: "Custom Sort", iconId: "settings" },
-            { id: "data.sortFilter.sort.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z", iconId: "sort" },
-            { id: "data.sortFilter.sort.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", iconId: "sort" },
+            { id: "data.sortFilter.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z", iconId: "sort" },
+            { id: "data.sortFilter.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", iconId: "sort" },
           ],
         },
         { id: "data.sortFilter.filter", label: "Filter", ariaLabel: "Filter", iconId: "filter", kind: "toggle" },

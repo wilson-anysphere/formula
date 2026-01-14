@@ -483,8 +483,8 @@ export const homeTab: RibbonTabDefinition = {
           iconId: "sortFilter",
           kind: "dropdown",
           menuItems: [
-            { id: "home.editing.sortFilter.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z", iconId: "sort" },
-            { id: "home.editing.sortFilter.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", iconId: "sort" },
+            { id: "data.sortFilter.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z", iconId: "sort" },
+            { id: "data.sortFilter.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", iconId: "sort" },
             { id: "home.editing.sortFilter.customSort", label: "Custom Sort…", ariaLabel: "Custom Sort", iconId: "settings" },
             { id: "home.editing.sortFilter.filter", label: "Filter", ariaLabel: "Filter", iconId: "filter" },
             { id: "home.editing.sortFilter.clear", label: "Clear", ariaLabel: "Clear", iconId: "close" },

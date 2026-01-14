@@ -58,22 +58,10 @@ describe("Sort & Filter ribbon commands", () => {
 
     const sortSelectionMock = vi.mocked(sortSelection);
 
-    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.homeSortAtoZ);
+    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.sortAtoZ);
     expect(sortSelectionMock).toHaveBeenLastCalledWith(app, { order: "ascending" });
 
-    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.homeSortZtoA);
-    expect(sortSelectionMock).toHaveBeenLastCalledWith(app, { order: "descending" });
-
-    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.dataSortAtoZ);
-    expect(sortSelectionMock).toHaveBeenLastCalledWith(app, { order: "ascending" });
-
-    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.dataSortZtoA);
-    expect(sortSelectionMock).toHaveBeenLastCalledWith(app, { order: "descending" });
-
-    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.dataDropdownSortAtoZ);
-    expect(sortSelectionMock).toHaveBeenLastCalledWith(app, { order: "ascending" });
-
-    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.dataDropdownSortZtoA);
+    await commandRegistry.executeCommand(SORT_FILTER_RIBBON_COMMANDS.sortZtoA);
     expect(sortSelectionMock).toHaveBeenLastCalledWith(app, { order: "descending" });
   });
 });
