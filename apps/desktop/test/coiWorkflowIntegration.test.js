@@ -25,7 +25,8 @@ function assertWorkflowUsesNoBuildForCoi(workflowName, text) {
   // Heuristic: ensure a Tauri build step exists somewhere before the COI invocation so the workflow
   // can reuse already-built artifacts.
   const firstCoi = text.indexOf(matches[0] ?? "");
-  const firstTauriAction = text.indexOf("tauri-apps/tauri-action");
+  const tauriActionRe = /^\s*uses:\s*tauri-apps\/tauri-action\b/m;
+  const firstTauriAction = text.search(tauriActionRe);
   assert.ok(
     firstTauriAction !== -1 && firstTauriAction < firstCoi,
     `expected ${workflowName} to include a tauri-apps/tauri-action step before the COI check`,
@@ -41,4 +42,3 @@ test("release + dry-run workflows run COI smoke checks against prebuilt artifact
   const dryRun = readWorkflow(repoRoot, "desktop-bundle-dry-run.yml");
   assertWorkflowUsesNoBuildForCoi("desktop-bundle-dry-run.yml", dryRun);
 });
-
