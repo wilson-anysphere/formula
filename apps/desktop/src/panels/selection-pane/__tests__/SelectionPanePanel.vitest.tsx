@@ -13,6 +13,9 @@ import { SelectionPanePanel } from "../SelectionPanePanel";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+let priorCanvasChartsEnv: string | undefined;
+let priorUseCanvasChartsEnv: string | undefined;
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -80,6 +83,14 @@ function createRoot(): HTMLElement {
 
 describe("Selection Pane panel", () => {
   beforeEach(() => {
+    priorCanvasChartsEnv = process.env.CANVAS_CHARTS;
+    priorUseCanvasChartsEnv = process.env.USE_CANVAS_CHARTS;
+    // Most Selection Pane behavior is authored/expected in legacy chart mode. In canvas charts mode,
+    // ChartStore charts are rendered as drawing objects and show up in the list alongside workbook
+    // drawings; only tests that explicitly set `?canvasCharts=1` should run in that mode.
+    process.env.CANVAS_CHARTS = "0";
+    delete process.env.USE_CANVAS_CHARTS;
+
     document.body.innerHTML = "";
 
     // Avoid leaking URL params (e.g. `?canvasCharts=0`) between tests.
@@ -122,6 +133,11 @@ describe("Selection Pane panel", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     document.body.innerHTML = "";
+
+    if (priorCanvasChartsEnv === undefined) delete process.env.CANVAS_CHARTS;
+    else process.env.CANVAS_CHARTS = priorCanvasChartsEnv;
+    if (priorUseCanvasChartsEnv === undefined) delete process.env.USE_CANVAS_CHARTS;
+    else process.env.USE_CANVAS_CHARTS = priorUseCanvasChartsEnv;
   });
 
   it("opens via ribbon command and lists drawings; clicking selects a drawing", async () => {

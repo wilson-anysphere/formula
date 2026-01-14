@@ -214,8 +214,8 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
       (app as any).renderDrawings(sharedViewport);
 
       // Four panes should be clipped (one per quadrant).
-      // Canvas-chart rendering may use additional clip paths internally; ensure the pane clip rects
-      // are present without assuming there are no other `rect/clip` calls.
+      // Note: in canvas-charts mode, the chart renderer can also use `rect`/`clip` internally.
+      // Assert on the *pane* clip rects (first 4 calls) rather than the total call count.
       expect(drawingsCtx.rect.mock.calls.length).toBeGreaterThanOrEqual(4);
       expect(drawingsCtx.clip.mock.calls.length).toBeGreaterThanOrEqual(4);
 
@@ -241,7 +241,7 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
         },
       ];
 
-      const rectCalls = drawingsCtx.rect.mock.calls.map((args) => ({
+      const rectCalls = drawingsCtx.rect.mock.calls.slice(0, 4).map((args) => ({
         x: args[0] as number,
         y: args[1] as number,
         width: args[2] as number,
@@ -263,8 +263,8 @@ describe("SpreadsheetApp drawings + frozen panes (shared grid)", () => {
       expect(dedupedPaneRectCalls).toEqual(expectedClipRects);
 
       // Verify per-pane scroll offsets by inspecting the placeholder strokeRects.
-      expect(drawingsCtx.strokeRect).toHaveBeenCalledTimes(4);
-      const strokeCalls = drawingsCtx.strokeRect.mock.calls.map((args) => ({
+      expect(drawingsCtx.strokeRect.mock.calls.length).toBeGreaterThanOrEqual(4);
+      const strokeCalls = drawingsCtx.strokeRect.mock.calls.slice(0, 4).map((args) => ({
         x: args[0] as number,
         y: args[1] as number,
       }));
