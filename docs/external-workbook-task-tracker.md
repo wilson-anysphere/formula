@@ -18,10 +18,6 @@ duplicated follow-up work across the task queue.
 - DONE — Task 384: Bytecode direct external refs
 - DONE — Task 385: Docs
 - DONE — INDIRECT supports external *single-sheet* refs (bytecode + AST); rejects external 3D spans
+- DONE — Task 381: Dynamic external deps (dependency tracing/indexing for dynamic ref producers) (`efb7d5af9`)
 
 ## Remaining (open)
-
-- TODO — Task 381: Dynamic external deps (ensure dependency tracing/indexing covers dynamic ref producers)
-  - Pointers:
-    - `crates/formula-engine/src/engine.rs`
-      - `analyze_external_dependencies` + `set_cell_external_refs`
