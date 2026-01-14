@@ -43,6 +43,10 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
   let inSheetQuote = false;
   let bracketDepth = 0;
   let braceDepth = 0;
+  // Track the most recent identifier token so we can cheaply associate it with a following '('
+  // (function call). This avoids O(n^2) rescans for formulas with many nested/grouping parens.
+  let identStart = null;
+  let pendingIdent = null;
   for (let i = 0; i < prefix.length; i++) {
     const ch = prefix[i];
     if (inString) {
@@ -67,38 +71,56 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
       }
       continue;
     }
+    // Only track identifiers outside structured references. Identifiers inside `[...]` are
+    // table/column names and shouldn't be considered function names.
+    if (bracketDepth === 0 && isIdentChar(ch)) {
+      if (identStart === null) identStart = i;
+      continue;
+    }
+    if (identStart !== null) {
+      pendingIdent = prefix.slice(identStart, i);
+      identStart = null;
+    }
     if (ch === '"') {
       inString = true;
+      pendingIdent = null;
       continue;
     }
     if (ch === "[") {
       bracketDepth += 1;
+      pendingIdent = null;
       continue;
     }
     if (ch === "]") {
       bracketDepth = Math.max(0, bracketDepth - 1);
+      pendingIdent = null;
       continue;
     }
     if (ch === "{") {
       braceDepth += 1;
+      pendingIdent = null;
       continue;
     }
     if (ch === "}") {
       braceDepth = Math.max(0, braceDepth - 1);
+      pendingIdent = null;
       continue;
     }
     if (ch === "'" && bracketDepth === 0) {
       inSheetQuote = true;
+      pendingIdent = null;
       continue;
     }
     if (bracketDepth !== 0) continue;
     if (ch === "(") {
-      // Determine whether this paren starts a function call. Excel also allows grouping parens:
-      // `=SUM((A1+B1))`. For tab completion we care about the innermost *function call* paren, not
-      // the innermost paren overall.
-      openParens.push({ index: i, functionName: findFunctionNameBeforeParen(prefix, i) });
+      openParens.push({ index: i, functionName: functionNameFromIdent(pendingIdent) });
+      pendingIdent = null;
     } else if (ch === ")") {
       openParens.pop();
+      pendingIdent = null;
+    } else if (!/\s/.test(ch)) {
+      // Any other non-whitespace token breaks the identifier->'(' link.
+      pendingIdent = null;
     }
   }
 
@@ -202,18 +224,13 @@ function clampCursor(input, cursorPosition) {
 }
 
 /**
- * Finds a plausible function name token immediately preceding the given '('.
- * @param {string} input
- * @param {number} openParenIndex
+ * Normalize a previously-parsed identifier token into a function name candidate.
+ *
+ * @param {string | null} identToken
  * @returns {string | null}
  */
-function findFunctionNameBeforeParen(input, openParenIndex) {
-  let i = openParenIndex - 1;
-  while (i >= 0 && /\s/.test(input[i])) i--;
-  const end = i + 1;
-  while (i >= 0 && isIdentChar(input[i])) i--;
-  const start = i + 1;
-  const token = input.slice(start, end);
+function functionNameFromIdent(identToken) {
+  const token = typeof identToken === "string" ? identToken : "";
   if (!token) return null;
   // Avoid returning something that is obviously a cell ref like "A1".
   if (/^[A-Za-z]{1,3}\d+$/.test(token)) return null;

@@ -269,13 +269,8 @@ function isIdentChar(ch: string): boolean {
   return Boolean(UNICODE_ALNUM_RE && UNICODE_ALNUM_RE.test(ch));
 }
 
-function findFunctionNameBeforeParen(prefix: string, openParenIndex: number): string | null {
-  let i = openParenIndex - 1;
-  while (i >= 0 && /\s/.test(prefix[i]!)) i--;
-  const end = i + 1;
-  while (i >= 0 && isIdentChar(prefix[i]!)) i--;
-  const start = i + 1;
-  const token = prefix.slice(start, end);
+function functionNameFromIdent(identToken: string | null): string | null {
+  const token = typeof identToken === "string" ? identToken : "";
   if (!token) return null;
   // Avoid returning something that is obviously a cell ref like "A1".
   if (/^[A-Za-z]{1,3}\d+$/.test(token)) return null;
@@ -311,6 +306,10 @@ function findOpenParenIndex(prefix: string): number | null {
   let inSheetQuote = false;
   let bracketDepth = 0;
   let braceDepth = 0;
+  // Track the most recent identifier token so we can cheaply associate it with a following '('
+  // (function call). This avoids O(n^2) rescans for formulas with many nested/grouping parens.
+  let identStart: number | null = null;
+  let pendingIdent: string | null = null;
   for (let i = 0; i < prefix.length; i++) {
     const ch = prefix[i];
     if (inString) {
@@ -335,35 +334,56 @@ function findOpenParenIndex(prefix: string): number | null {
       }
       continue;
     }
+    // Only track identifiers outside structured references. Identifiers inside `[...]` are
+    // table/column names and shouldn't be considered function names.
+    if (bracketDepth === 0 && isIdentChar(ch!)) {
+      if (identStart === null) identStart = i;
+      continue;
+    }
+    if (identStart !== null) {
+      pendingIdent = prefix.slice(identStart, i);
+      identStart = null;
+    }
     if (ch === '"') {
       inString = true;
+      pendingIdent = null;
       continue;
     }
     if (ch === "[") {
       bracketDepth += 1;
+      pendingIdent = null;
       continue;
     }
     if (ch === "]") {
       bracketDepth = Math.max(0, bracketDepth - 1);
+      pendingIdent = null;
       continue;
     }
     if (ch === "{") {
       braceDepth += 1;
+      pendingIdent = null;
       continue;
     }
     if (ch === "}") {
       braceDepth = Math.max(0, braceDepth - 1);
+      pendingIdent = null;
       continue;
     }
     if (ch === "'" && bracketDepth === 0) {
       inSheetQuote = true;
+      pendingIdent = null;
       continue;
     }
     if (bracketDepth !== 0) continue;
     if (ch === "(") {
-      openParens.push({ index: i, functionName: findFunctionNameBeforeParen(prefix, i) });
+      openParens.push({ index: i, functionName: functionNameFromIdent(pendingIdent) });
+      pendingIdent = null;
     } else if (ch === ")") {
       openParens.pop();
+      pendingIdent = null;
+    } else if (!/\s/.test(ch!)) {
+      // Any other non-whitespace token breaks the identifier->'(' link.
+      pendingIdent = null;
     }
   }
 
