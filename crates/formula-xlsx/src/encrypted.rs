@@ -39,10 +39,7 @@ fn open_stream<R: Read + std::io::Seek>(
     }
 }
 
-fn stream_exists<R: Read + std::io::Seek>(
-    ole: &mut cfb::CompoundFile<R>,
-    name: &str,
-) -> bool {
+fn stream_exists<R: Read + std::io::Seek>(ole: &mut cfb::CompoundFile<R>, name: &str) -> bool {
     open_stream(ole, name).is_ok()
 }
 
@@ -100,9 +97,12 @@ pub(crate) fn maybe_decrypt_office_encrypted_package<'a>(
         stream.read_to_end(&mut encrypted_package)?;
     }
 
-    let decrypted =
-        crate::offcrypto::decrypt_ooxml_encrypted_package(&encryption_info, &encrypted_package, password)
-            .map_err(map_offcrypto_error)?;
+    let decrypted = crate::offcrypto::decrypt_ooxml_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        password,
+    )
+    .map_err(map_offcrypto_error)?;
 
     // The decrypted content should be the underlying ZIP package (`.xlsx`/`.xlsm`). Sanity check
     // with ZIP parsing so callers get a clearer error than "unexpected EOF" later.
