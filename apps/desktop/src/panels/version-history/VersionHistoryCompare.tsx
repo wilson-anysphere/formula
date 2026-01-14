@@ -254,7 +254,12 @@ export function VersionHistoryCompareSection({
       const name = sheetDisplayName(entry.sheetId, entry.sheetName, sheetNameResolver);
       const cellChanges = hasAnyCellChanges(entry.diff);
       const labels = changeLabels.get(entry.sheetId) ?? [];
-      const suffix = cellChanges ? "" : labels.length > 0 ? ` (${labels.join(", ")})` : " (no changes)";
+      // Always surface sheet-level ops (added/removed/renamed/reordered) even if the sheet
+      // also has cell-level changes. For meta changes, only surface the count when the
+      // sheet has no cell changes (otherwise the sheet is already highlighted by cell diffs).
+      const displayLabels = cellChanges ? labels.filter((l) => !l.startsWith("meta:")) : labels;
+      const suffix =
+        displayLabels.length > 0 ? ` (${displayLabels.join(", ")})` : cellChanges ? "" : " (no changes)";
       return { sheetId: entry.sheetId, displayName: `${name}${suffix}`, rawName: name };
     });
   }, [diff, sheetNameResolver]);
