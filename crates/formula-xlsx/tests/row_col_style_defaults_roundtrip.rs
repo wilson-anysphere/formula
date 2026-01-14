@@ -391,6 +391,130 @@ fn noop_roundtrip_preserves_row_default_style_when_xf_index_is_zero_and_unknown_
 }
 
 #[test]
+fn clearing_row_default_style_drops_empty_row_element() -> Result<(), Box<dyn std::error::Error>> {
+    // Start with a style-only row and then clear it from the model. The patch writer should drop
+    // the now-empty `<row>` element entirely (similar to the hidden-row retention tests).
+    let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1">
+    <font>
+      <sz val="11"/>
+      <color theme="1"/>
+      <name val="Calibri"/>
+      <family val="2"/>
+      <scheme val="minor"/>
+    </font>
+  </fonts>
+  <fills count="2">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+  </fills>
+  <borders count="1">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+  </borders>
+  <cellStyleXfs count="1">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+  </cellStyleXfs>
+  <cellXfs count="2">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+  </cellXfs>
+  <cellStyles count="1">
+    <cellStyle name="Normal" xfId="0" builtinId="0"/>
+  </cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>"#;
+
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="2" s="1" customFormat="1"/>
+  </sheetData>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(sheet_xml, styles_xml);
+    let mut doc = load_from_bytes(&bytes)?;
+
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc.workbook.sheet_mut(sheet_id).expect("sheet exists");
+    assert!(
+        sheet.row_properties(1).is_some(),
+        "expected row 2 props to exist on load"
+    );
+    sheet.set_row_style_id(1, None);
+    assert!(
+        sheet.row_properties(1).is_none(),
+        "expected clearing style to remove row_properties entry"
+    );
+
+    let out = write::write_to_vec(&doc)?;
+    let out_sheet_xml = read_zip_part(&out, "xl/worksheets/sheet1.xml");
+    let parsed = roxmltree::Document::parse(&out_sheet_xml)?;
+    assert!(
+        parsed
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "row" && n.attribute("r") == Some("2"))
+            .is_none(),
+        "expected row 2 element to be removed, got:\n{out_sheet_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn clearing_col_default_style_drops_cols_element() -> Result<(), Box<dyn std::error::Error>> {
+    // Start with a style-only column range and then clear it from the model. The writer should
+    // remove `<cols>` entirely when no column metadata remains.
+    let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cellXfs count="2">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+  </cellXfs>
+</styleSheet>"#;
+
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cols>
+    <col min="2" max="2" style="1" customFormat="1"/>
+  </cols>
+  <sheetData/>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(sheet_xml, styles_xml);
+    let mut doc = load_from_bytes(&bytes)?;
+
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc.workbook.sheet_mut(sheet_id).expect("sheet exists");
+    assert!(
+        sheet.col_properties(1).is_some(),
+        "expected col B props to exist on load"
+    );
+    sheet.set_col_style_id(1, None);
+    assert!(
+        sheet.col_properties(1).is_none(),
+        "expected clearing style to remove col_properties entry"
+    );
+
+    let out = write::write_to_vec(&doc)?;
+    let out_sheet_xml = read_zip_part(&out, "xl/worksheets/sheet1.xml");
+    let parsed = roxmltree::Document::parse(&out_sheet_xml)?;
+
+    assert!(
+        parsed
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "cols")
+            .is_none(),
+        "expected <cols> to be removed, got:\n{out_sheet_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn new_document_emits_row_and_col_default_styles() -> Result<(), Box<dyn std::error::Error>> {
     let mut workbook = Workbook::new();
     let sheet_id = workbook.add_sheet("Sheet1")?;
