@@ -5,6 +5,61 @@ import { CommandRegistry } from "../extensions/commandRegistry.js";
 import { registerDesktopCommands } from "./registerDesktopCommands.js";
 
 describe("registerDesktopCommands", () => {
+  it("does not register duplicate command-palette entries (same category + title)", () => {
+    const commandRegistry = new CommandRegistry();
+
+    registerDesktopCommands({
+      commandRegistry,
+      // Commands are registered eagerly but not executed in this test, so provide only
+      // the minimal surface area required by registration-time code.
+      app: { focus: vi.fn() } as any,
+      layoutController: { layout: {} as any, openPanel: vi.fn(), closePanel: vi.fn() } as any,
+      applyFormattingToSelection: vi.fn(),
+      getActiveCellNumberFormat: () => null,
+      getActiveCellIndentLevel: () => 0,
+      openFormatCells: vi.fn(),
+      showQuickPick: async () => null,
+      findReplace: { openFind: vi.fn(), openReplace: vi.fn(), openGoTo: vi.fn() },
+      workbenchFileHandlers: {
+        newWorkbook: vi.fn(),
+        openWorkbook: vi.fn(),
+        saveWorkbook: vi.fn(),
+        saveWorkbookAs: vi.fn(),
+        setAutoSaveEnabled: vi.fn(),
+        print: vi.fn(),
+        printPreview: vi.fn(),
+        closeWorkbook: vi.fn(),
+        quit: vi.fn(),
+      },
+      pageLayoutHandlers: {
+        openPageSetupDialog: vi.fn(),
+        updatePageSetup: vi.fn(),
+        setPrintArea: vi.fn(),
+        clearPrintArea: vi.fn(),
+        addToPrintArea: vi.fn(),
+        exportPdf: vi.fn(),
+      },
+    });
+
+    // Treat `when: "false"` as "hidden from context-aware surfaces (command palette)".
+    const visible = commandRegistry.listCommands().filter((cmd) => cmd.when !== "false");
+
+    const seen = new Map<string, string[]>();
+    for (const cmd of visible) {
+      const key = `${cmd.category ?? ""}::${cmd.title}`;
+      const list = seen.get(key) ?? [];
+      list.push(cmd.commandId);
+      seen.set(key, list);
+    }
+
+    const duplicates = [...seen.entries()]
+      .filter(([, ids]) => ids.length > 1)
+      .map(([key, ids]) => ({ key, ids: [...ids].sort() }))
+      .sort((a, b) => a.key.localeCompare(b.key));
+
+    expect(duplicates).toEqual([]);
+  });
+
   it("registers expected desktop command ids and wires representative handlers", async () => {
     const commandRegistry = new CommandRegistry();
 
