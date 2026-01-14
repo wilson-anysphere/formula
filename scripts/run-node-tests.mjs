@@ -393,7 +393,7 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
   const out = [];
   const extGroup = extensions.join("|");
   const tsImportRe = new RegExp(
-    `from\\s+["'\`][^"'\`]+\\.(${extGroup})["'\`]|import\\(\\s*["'\`][^"'\`]+\\.(${extGroup})["'\`]\\s*\\)`,
+    `from\\s+["'\`][^"'\`]+\\.(${extGroup})["'\`]|import\\(\\s*["'\`][^"'\`]+\\.(${extGroup})["'\`]\\s*(?:\\)|,)`,
   );
 
   // When TypeScript/TSX execution is unavailable (older Node versions without `--experimental-strip-types`
@@ -406,7 +406,7 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
   const disallowedEntrypointExtensions = new Set(extensions.map((ext) => `.${ext}`));
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
-  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
   const dynamicImportTemplateRe = /\bimport\s*\(\s*`((?:\\.|[^`$])*)/g;
   const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
 
@@ -644,7 +644,7 @@ async function filterExternalDependencyTests(files, opts) {
   // module dependencies.
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
-  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
   const dynamicImportTemplateRe = /\bimport\s*\(\s*`((?:\\.|[^`$])*)/g;
   const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
   const requireResolveRe = /\brequire\.resolve\(\s*["']([^"']+)["']\s*\)/g;
@@ -1132,7 +1132,7 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
   // Detect dynamic imports with string literal specifiers so we can follow transitive
   // dependencies when runtime wiring uses `await import("./foo.js")` (common in ESM).
-  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  const dynamicImportRe = /\bimport\s*\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
   const dynamicImportTemplateRe = /\bimport\s*\(\s*`((?:\\.|[^`$])*)/g;
   // Some Node-oriented packages (or older code) still use `require()` even under
   // `node --test` ESM mode. Treat string-literal requires as dependencies too.
