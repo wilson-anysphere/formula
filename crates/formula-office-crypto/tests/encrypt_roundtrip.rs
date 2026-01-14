@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 
 const AGILE_PASSWORD: &str = "correct horse battery staple";
 const FAST_TEST_SPIN_COUNT: u32 = 10_000;
+const FAST_MULTI_SEGMENT_SPIN_COUNT: u32 = 1_000;
 
 fn basic_xlsx_fixture_bytes() -> &'static [u8] {
     static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
@@ -17,6 +18,32 @@ fn basic_xlsx_fixture_bytes() -> &'static [u8] {
                 "/../../fixtures/xlsx/basic/basic.xlsx"
             ));
             std::fs::read(path).expect("read basic.xlsx fixture")
+        })
+        .as_slice()
+}
+
+fn basic_xlsm_fixture_bytes() -> &'static [u8] {
+    static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
+    BYTES
+        .get_or_init(|| {
+            let path = std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../fixtures/xlsx/macros/basic.xlsm"
+            ));
+            std::fs::read(path).expect("read basic.xlsm fixture")
+        })
+        .as_slice()
+}
+
+fn large_xlsx_fixture_bytes() -> &'static [u8] {
+    static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
+    BYTES
+        .get_or_init(|| {
+            let path = std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../fixtures/xlsx/basic/comments.xlsx"
+            ));
+            std::fs::read(path).expect("read comments.xlsx fixture")
         })
         .as_slice()
 }
@@ -143,6 +170,54 @@ fn agile_encrypt_decrypt_round_trip() {
     let zip = basic_xlsx_fixture_bytes();
     let ole = agile_ole_fixture();
     let decrypted = decrypt_encrypted_package_ole(ole, AGILE_PASSWORD).expect("decrypt");
+    assert_eq!(decrypted.as_slice(), zip);
+}
+
+#[test]
+fn agile_encrypt_decrypt_round_trip_xlsm() {
+    let zip = basic_xlsm_fixture_bytes();
+    let password = "xlsm-password";
+    let ole = encrypt_package_to_ole(
+        zip,
+        password,
+        EncryptOptions {
+            spin_count: FAST_TEST_SPIN_COUNT,
+            ..Default::default()
+        },
+    )
+    .expect("encrypt");
+
+    let decrypted = decrypt_encrypted_package_ole(&ole, password).expect("decrypt");
+    assert_eq!(decrypted.as_slice(), zip);
+
+    let err = decrypt_encrypted_package_ole(&ole, "wrong-password").expect_err("wrong password");
+    assert!(
+        matches!(err, OfficeCryptoError::InvalidPassword),
+        "expected InvalidPassword, got {err:?}"
+    );
+}
+
+#[test]
+fn agile_encrypt_decrypt_round_trip_large_fixture_is_multi_segment() {
+    let zip = large_xlsx_fixture_bytes();
+    assert!(
+        zip.len() > 4096,
+        "expected comments.xlsx to be > 4096 bytes, got {}",
+        zip.len()
+    );
+
+    let password = "multi-segment-password";
+    let ole = encrypt_package_to_ole(
+        zip,
+        password,
+        EncryptOptions {
+            spin_count: FAST_MULTI_SEGMENT_SPIN_COUNT,
+            ..Default::default()
+        },
+    )
+    .expect("encrypt");
+
+    let decrypted = decrypt_encrypted_package_ole(&ole, password).expect("decrypt");
     assert_eq!(decrypted.as_slice(), zip);
 }
 
