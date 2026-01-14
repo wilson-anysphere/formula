@@ -211,7 +211,8 @@ If the decrypted bytes do **not** start with `PK`, treat that as either:
 
 Encrypted workbook fixtures are stored under:
 
-- `fixtures/encrypted/ooxml/` (`plaintext.xlsx`, `agile.xlsx`, `standard.xlsx`, `agile-empty-password.xlsx`)
+- `fixtures/encrypted/ooxml/` (see `fixtures/encrypted/ooxml/README.md` for the full list; includes
+  Agile + Standard encrypted fixtures, an empty-password sample, and `*-large.xlsx` multi-segment variants)
 
 These are **vendored test fixtures** used by `crates/formula-io/tests/encrypted_ooxml.rs`.
 

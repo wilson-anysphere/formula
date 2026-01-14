@@ -512,8 +512,11 @@ When implementing (or calling) encrypted-workbook support:
 - Encrypted/password-protected OOXML workbook fixtures live under `fixtures/encrypted/ooxml/` (for
   example `.xlsx`, `.xlsm`, `.xlsb`). The repo currently includes:
   - `fixtures/encrypted/ooxml/plaintext.xlsx` (unencrypted ZIP/OPC workbook used as the known-good plaintext)
+  - `fixtures/encrypted/ooxml/plaintext-large.xlsx` (unencrypted ZIP/OPC workbook used to exercise multi-segment decryption; intentionally > 4096 bytes)
   - `fixtures/encrypted/ooxml/agile.xlsx` (Agile encryption; `EncryptionInfo` 4.4)
+  - `fixtures/encrypted/ooxml/agile-large.xlsx` (Agile encryption; `EncryptionInfo` 4.4; decrypts to `plaintext-large.xlsx`)
   - `fixtures/encrypted/ooxml/standard.xlsx` (Standard encryption; `EncryptionInfo` 3.2)
+  - `fixtures/encrypted/ooxml/standard-large.xlsx` (Standard encryption; `EncryptionInfo` 3.2; decrypts to `plaintext-large.xlsx`)
   - `fixtures/encrypted/ooxml/agile-empty-password.xlsx` (Agile encryption; `EncryptionInfo` 4.4; empty password `""`)
   See `fixtures/encrypted/ooxml/README.md` for more fixture details.
   These files are OLE/CFB wrappers (not ZIP/OPC), so they must not live under `fixtures/xlsx/`
