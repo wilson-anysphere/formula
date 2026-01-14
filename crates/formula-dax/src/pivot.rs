@@ -2010,11 +2010,11 @@ fn pivot_row_scan(
     filter: &FilterContext,
 ) -> DaxResult<PivotResult> {
     let engine = DaxEngine::new();
+    let base_table_key = normalize_ident(base_table);
 
     let table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
-    let base_table_key = normalize_ident(base_table);
     let row_sets = (!filter.is_empty())
         .then(|| crate::engine::resolve_row_sets(model, filter))
         .transpose()?;
