@@ -237,6 +237,11 @@ fn bool_attr(value: bool) -> String {
 }
 
 fn trim_float(value: f64) -> String {
+    // Avoid serializing `-0` for `-0.0` inputs; Excel will treat it as zero but it produces
+    // unnecessary diffs/noise.
+    if value == 0.0 {
+        return "0".to_string();
+    }
     let s = format!("{value:.15}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
     if s.is_empty() {
@@ -301,5 +306,11 @@ mod tests {
         assert!(updated.contains("<calcPr"));
         assert!(updated.contains("</workbook>"));
         assert!(!updated.contains(":calcPr"));
+    }
+
+    #[test]
+    fn trim_float_serializes_negative_zero_as_zero() {
+        assert_eq!(trim_float(-0.0), "0");
+        assert_eq!(trim_float(0.0), "0");
     }
 }
