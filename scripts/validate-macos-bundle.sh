@@ -192,11 +192,15 @@ PY
 
 EXPECTED_BUNDLE_IDENTIFIER="$(get_tauri_conf_value identifier || true)"
 EXPECTED_DESKTOP_VERSION="$(get_tauri_conf_value version || true)"
+EXPECTED_MAIN_BINARY_NAME="$(get_tauri_conf_value mainBinaryName || true)"
 if [ -z "$EXPECTED_BUNDLE_IDENTIFIER" ]; then
   die "Expected apps/desktop/src-tauri/tauri.conf.json to contain a non-empty \"identifier\" field."
 fi
 if [ -z "$EXPECTED_DESKTOP_VERSION" ]; then
   die "Expected apps/desktop/src-tauri/tauri.conf.json to contain a non-empty \"version\" field."
+fi
+if [ -z "$EXPECTED_MAIN_BINARY_NAME" ]; then
+  EXPECTED_MAIN_BINARY_NAME="formula-desktop"
 fi
 
 get_expected_file_extensions() {
@@ -600,7 +604,7 @@ validate_universal_binary() {
   local exe_name=""
   exe_name="$(plist_get_string "$plist_path" "CFBundleExecutable" 2>/dev/null || true)"
   if [ -z "$exe_name" ]; then
-    exe_name="formula-desktop"
+    exe_name="$EXPECTED_MAIN_BINARY_NAME"
   fi
 
   local macos_dir="${app_path}/Contents/MacOS"
