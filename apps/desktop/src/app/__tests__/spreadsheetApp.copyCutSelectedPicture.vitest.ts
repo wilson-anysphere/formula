@@ -94,6 +94,14 @@ function createRoot(): HTMLElement {
   return root;
 }
 
+async function flushMicrotasks(): Promise<void> {
+  // Several turns helps flush async chains that include multiple `await` boundaries.
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 describe("SpreadsheetApp copy/cut selected picture", () => {
   beforeEach(() => {
     priorGridMode = process.env.DESKTOP_GRID_MODE;
@@ -408,5 +416,81 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
 
     app.destroy();
     root.remove();
+  });
+
+  it("does not hang if a selected picture requires transcoding and the <img> decode never resolves", async () => {
+    vi.useFakeTimers();
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    root.focus();
+
+    const write = vi.fn(async () => {});
+    (app as any).clipboardProviderPromise = Promise.resolve({ write, read: vi.fn(async () => ({})) });
+
+    const sheetId = app.getCurrentSheetId();
+    const imageId = "img-transcode-timeout";
+    const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 1, 2, 3, 4, 5, 6, 7, 8]);
+    (app as any).drawingImages.set({ id: imageId, bytes: jpegBytes, mimeType: "image/jpeg" });
+
+    const drawing: DrawingObject = {
+      id: 1,
+      kind: { type: "image", imageId },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+      zOrder: 0,
+    };
+    (app.getDocument() as any).setSheetDrawings(sheetId, [drawing]);
+    (app as any).selectedDrawingId = drawing.id;
+
+    // Force the transcode path to use the <img> fallback.
+    vi.stubGlobal("createImageBitmap", vi.fn(() => Promise.reject(new Error("decode failed"))) as any);
+
+    // Stub URL.createObjectURL/revokeObjectURL (jsdom does not implement them) so we can assert cleanup.
+    const URLCtor = globalThis.URL as any;
+    const originalCreateObjectURL = URLCtor?.createObjectURL;
+    const originalRevokeObjectURL = URLCtor?.revokeObjectURL;
+    const createObjectURL = vi.fn(() => "blob:fake");
+    const revokeObjectURL = vi.fn();
+    URLCtor.createObjectURL = createObjectURL;
+    URLCtor.revokeObjectURL = revokeObjectURL;
+
+    try {
+      class FakeImage {
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        decoding: string | undefined;
+        set src(_value: string) {
+          // Intentionally never call onload/onerror.
+        }
+      }
+      vi.stubGlobal("Image", FakeImage as unknown as typeof Image);
+
+      app.copy();
+      await flushMicrotasks();
+
+      // The transcode path should time out after 5s and fail the copy without hanging.
+      vi.advanceTimersByTime(5_000);
+      await flushMicrotasks();
+      await app.whenIdle();
+
+      expect(write).not.toHaveBeenCalled();
+      expect((app.getDocument() as any).getSheetDrawings(sheetId)).toHaveLength(1);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalCreateObjectURL === undefined) delete URLCtor.createObjectURL;
+      else URLCtor.createObjectURL = originalCreateObjectURL;
+      if (originalRevokeObjectURL === undefined) delete URLCtor.revokeObjectURL;
+      else URLCtor.revokeObjectURL = originalRevokeObjectURL;
+
+      vi.useRealTimers();
+      app.destroy();
+      root.remove();
+    }
   });
 });
