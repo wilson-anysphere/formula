@@ -7730,6 +7730,10 @@ registerDesktopCommands({
     },
   },
   openCommandPalette: () => openCommandPalette?.(),
+  sheetStructureHandlers: {
+    insertSheet: handleAddSheet,
+    deleteActiveSheet: handleDeleteActiveSheet,
+  },
   openGoalSeekDialog: () => showGoalSeekDialogModal(),
 });
 

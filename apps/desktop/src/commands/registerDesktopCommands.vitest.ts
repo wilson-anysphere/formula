@@ -123,6 +123,43 @@ describe("registerDesktopCommands", () => {
     expect(formatPainterArm).toHaveBeenCalledTimes(1);
   });
 
+  it("wires sheet-structure ribbon command ids when sheetStructureHandlers are provided", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const insertSheet = vi.fn(async () => {});
+    const deleteActiveSheet = vi.fn(async () => {});
+
+    registerDesktopCommands({
+      commandRegistry,
+      app: { isReadOnly: () => false } as any,
+      layoutController: null,
+      sheetStructureHandlers: { insertSheet, deleteActiveSheet },
+      applyFormattingToSelection: () => {},
+      getActiveCellNumberFormat: () => null,
+      getActiveCellIndentLevel: () => 0,
+      openFormatCells: () => {},
+      showQuickPick: async () => null,
+      findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      workbenchFileHandlers: {
+        newWorkbook: () => {},
+        openWorkbook: () => {},
+        saveWorkbook: () => {},
+        saveWorkbookAs: () => {},
+        setAutoSaveEnabled: () => {},
+        print: () => {},
+        printPreview: () => {},
+        closeWorkbook: () => {},
+        quit: () => {},
+      },
+    });
+
+    await commandRegistry.executeCommand("home.cells.insert.insertSheet");
+    expect(insertSheet).toHaveBeenCalledTimes(1);
+
+    await commandRegistry.executeCommand("home.cells.delete.deleteSheet");
+    expect(deleteActiveSheet).toHaveBeenCalledTimes(1);
+  });
+
   it("registers Data → Queries & Connections commands when dataQueriesHandlers are provided", async () => {
     const commandRegistry = new CommandRegistry();
 
