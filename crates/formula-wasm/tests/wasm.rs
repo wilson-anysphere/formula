@@ -1561,7 +1561,7 @@ fn cell_prefix_respects_effective_alignment_and_explicit_clears() {
     let style_fill = wb
         .intern_style(to_js_value(&json!({ "alignment": { "horizontal": "fill" } })))
         .unwrap();
-    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), style_fill)
+    wb.set_cell_style_id("A1".to_string(), style_fill, Some(DEFAULT_SHEET.to_string()))
         .unwrap();
     wb.recalculate(None).unwrap();
     let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
@@ -1572,7 +1572,7 @@ fn cell_prefix_respects_effective_alignment_and_explicit_clears() {
     let style_clear = wb
         .intern_style(to_js_value(&json!({ "alignment": { "horizontal": null } })))
         .unwrap();
-    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), style_clear)
+    wb.set_cell_style_id("A1".to_string(), style_clear, Some(DEFAULT_SHEET.to_string()))
         .unwrap();
     wb.recalculate(None).unwrap();
     let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
@@ -2763,7 +2763,7 @@ fn cell_format_reflects_intern_style_and_set_cell_style_id() {
     let style_id_snake = wb.intern_style(fmt_snake.into()).unwrap();
     assert_eq!(style_id_camel, style_id_snake);
 
-    wb.set_cell_style_id(DEFAULT_SHEET.to_string(), "A1".to_string(), style_id_camel)
+    wb.set_cell_style_id("A1".to_string(), style_id_camel, Some(DEFAULT_SHEET.to_string()))
         .unwrap();
     wb.recalculate(None).unwrap();
 
