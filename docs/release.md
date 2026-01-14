@@ -189,7 +189,9 @@ node scripts/check-updater-config.mjs
 # (Requires the Tauri CLI + platform WebView dependencies; see "Toolchain versions" above.)
 node scripts/check-tauri-permissions.mjs
 
-# Ensures the packaged app registers the `formula://` URL scheme (installer/bundle metadata).
+# Ensures the packaged app registers the `formula://` URL scheme (installer/bundle metadata) and
+# that `bundle.fileAssociations` includes `.xlsx` (so “Open with…” / double-click spreadsheet
+# integration is configured for desktop bundles).
 node scripts/check-desktop-url-scheme.mjs
 
 # Ensures the committed Cargo.lock matches the desktop build dependency graph.
