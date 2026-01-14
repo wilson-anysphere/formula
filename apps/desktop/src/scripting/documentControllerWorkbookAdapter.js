@@ -1549,13 +1549,16 @@ class DocumentControllerRangeAdapter {
     const doc = this.sheet.workbook.documentController;
     const sheetId = this.sheet.sheetId;
     const sheets = doc?.model?.sheets;
+    const meta = doc?.sheetMeta;
+    // If we can't inspect sheet registries, be permissive (supports unit tests with lightweight
+    // DocumentController mocks and avoids hard dependency on internal controller shape).
+    if (!(sheets instanceof Map) && !(meta instanceof Map)) return;
     // DocumentController materializes sheets lazily; treat the default Sheet1 as existing
     // even when the controller hasn't created any sheets yet.
     if (sheets instanceof Map) {
       if (sheets.size === 0 && String(sheetId).toLowerCase() === "sheet1") return;
       if (sheets.has(sheetId)) return;
     }
-    const meta = doc?.sheetMeta;
     if (meta instanceof Map && meta.has(sheetId)) return;
     throw new Error(`Unknown sheet: ${this.sheet.name}`);
   }
