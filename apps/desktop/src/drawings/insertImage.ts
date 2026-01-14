@@ -1,6 +1,10 @@
 import { createDrawingObjectId, type Anchor, type DrawingObject, type ImageEntry, type ImageStore } from "./types";
 import { MAX_INSERT_IMAGE_BYTES } from "./insertImageLimits.js";
 
+// Keep this in sync with the clipboard image guard (currently 5MiB raw PNG bytes).
+// This is only the *default* for base64 decoding helpers; callers may override via `opts.maxBytes`.
+const DEFAULT_MAX_BASE64_IMAGE_BYTES = 5 * 1024 * 1024; // 5MiB
+
 export { MAX_INSERT_IMAGE_BYTES };
 
 export async function insertImageFromFile(
@@ -97,7 +101,7 @@ export function insertImageFromBytes(
  */
 export function decodeBase64ToBytes(base64: string, opts: { maxBytes?: number } = {}): Uint8Array | null {
   if (typeof base64 !== "string") return null;
-  const maxBytes = Number.isFinite(opts.maxBytes) ? Number(opts.maxBytes) : MAX_INSERT_IMAGE_BYTES;
+  const maxBytes = Number.isFinite(opts.maxBytes) ? Number(opts.maxBytes) : DEFAULT_MAX_BASE64_IMAGE_BYTES;
 
   let trimmed = base64.trim();
   if (!trimmed) return null;
