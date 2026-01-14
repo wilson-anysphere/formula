@@ -46,7 +46,12 @@ async function whenIdle(page: Page, timeoutMs: number = 15_000): Promise<void> {
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (attempt === 0 && message.includes("Execution context was destroyed")) {
+      if (
+        attempt === 0 &&
+        (message.includes("Execution context was destroyed") ||
+          message.includes("frame was detached") ||
+          message.includes("net::ERR_ABORTED"))
+      ) {
         await page.waitForLoadState("domcontentloaded");
         continue;
       }
