@@ -165,21 +165,34 @@ exit 0
   chmodSync(rpm2cpioPath, 0o755);
 
   let effectiveMimeTypeLine = mimeTypeLine;
-  if (
-    withMimeType &&
-    withParquetMime &&
-    !effectiveMimeTypeLine.toLowerCase().includes("application/vnd.apache.parquet")
-  ) {
-    if (!effectiveMimeTypeLine.trim().endsWith(";")) {
-      effectiveMimeTypeLine = `${effectiveMimeTypeLine};`;
-    }
-    effectiveMimeTypeLine = `${effectiveMimeTypeLine}application/vnd.apache.parquet;`;
-  }
-  if (withMimeType && withSchemeMime && !effectiveMimeTypeLine.toLowerCase().includes("x-scheme-handler/")) {
-    if (!effectiveMimeTypeLine.trim().endsWith(";")) {
-      effectiveMimeTypeLine = `${effectiveMimeTypeLine};`;
-    }
-    effectiveMimeTypeLine = `${effectiveMimeTypeLine}x-scheme-handler/formula;`;
+  if (withMimeType) {
+    // Parse the provided MimeType= line into a stable list so we can reliably
+    // include/exclude specific entries regardless of what tauri.conf.json
+    // currently advertises.
+    const raw = effectiveMimeTypeLine.replace(/^MimeType=/i, "");
+    const tokens = raw
+      .split(";")
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    const hasToken = (value) => tokens.some((t) => t.toLowerCase() === value.toLowerCase());
+    const removeToken = (value) => {
+      const lower = value.toLowerCase();
+      for (let i = tokens.length - 1; i >= 0; i -= 1) {
+        if (tokens[i].toLowerCase() === lower) tokens.splice(i, 1);
+      }
+    };
+
+    // Tests pass flags like `withParquetMime: false` to ensure the extracted
+    // desktop file lacks that MIME type, even if it is included in the default
+    // fileAssociation set.
+    if (!withParquetMime) removeToken("application/vnd.apache.parquet");
+    if (!withSchemeMime) removeToken("x-scheme-handler/formula");
+
+    if (withParquetMime && !hasToken("application/vnd.apache.parquet")) tokens.push("application/vnd.apache.parquet");
+    if (withSchemeMime && !hasToken("x-scheme-handler/formula")) tokens.push("x-scheme-handler/formula");
+
+    effectiveMimeTypeLine = `MimeType=${tokens.join(";")};`;
   }
 
   const desktopLines = [
