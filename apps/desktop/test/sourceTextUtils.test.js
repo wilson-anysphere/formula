@@ -6,6 +6,7 @@ import {
   stripCssComments,
   stripHtmlComments,
   stripHashComments,
+  stripYamlBlockScalarBodies,
   stripPowerShellComments,
   stripPythonComments,
   stripRustComments,
@@ -139,6 +140,40 @@ test("stripHashComments strips # line comments but preserves strings/urls", () =
   assert.match(out, /name:\s*"build #1"/);
   assert.match(out, /https:\/\/example\.com\/#anchor/);
   assert.match(out, /single:\s*'it''s # not a comment'/);
+});
+
+test("stripYamlBlockScalarBodies strips YAML block scalar bodies", () => {
+  const input = [
+    "steps:",
+    "  - name: First",
+    "    run: |",
+    "      echo \"name: Should not match\"",
+    "      echo ok",
+    "  - name: Second",
+    "    run: echo hi",
+  ].join("\n");
+
+  const out = stripYamlBlockScalarBodies(stripHashComments(input));
+  assert.match(out, /\brun:\s*\|/);
+  assert.doesNotMatch(out, /\bShould not match\b/);
+  assert.doesNotMatch(out, /\becho ok\b/);
+  assert.match(out, /^\s*-\s*name:\s*Second\b/m);
+  assert.match(out, /\brun: echo hi\b/);
+});
+
+test("stripYamlBlockScalarBodies does not end a block scalar early on blank lines", () => {
+  const input = [
+    "run: |",
+    "  echo a",
+    "",
+    "  echo b",
+    "name: After",
+  ].join("\n");
+
+  const out = stripYamlBlockScalarBodies(stripHashComments(input));
+  assert.doesNotMatch(out, /\becho a\b/);
+  assert.doesNotMatch(out, /\becho b\b/);
+  assert.match(out, /\bname: After\b/);
 });
 
 test("stripPowerShellComments strips # and <# #> comments but preserves strings + here-strings", () => {
