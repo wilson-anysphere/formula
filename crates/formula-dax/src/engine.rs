@@ -128,6 +128,8 @@ enum RowFilter {
     All,
     /// An explicit set of physical row indices.
     Rows(HashSet<usize>),
+    /// A bitmap of allowed physical row indices.
+    Mask(Arc<BitVec>),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -3433,7 +3435,7 @@ impl DaxEngine {
                                 if mask.all_true() {
                                     row_filters.push((table_key, RowFilter::All));
                                 } else {
-                                    row_filters.push((table_key, RowFilter::Rows(mask.iter_ones().collect())));
+                                    row_filters.push((table_key, RowFilter::Mask(mask)));
                                 }
                                 Ok(())
                             }
@@ -3491,6 +3493,45 @@ impl DaxEngine {
                                 *existing_rows = next;
                             } else {
                                 existing_rows.retain(|row| rows.contains(row));
+                            }
+                        }
+                        RowFilter::Mask(existing_mask) => {
+                            let mask = existing_mask.clone();
+                            let mut next = rows;
+                            next.retain(|row| *row < mask.len() && mask.get(*row));
+                            *existing = RowFilter::Rows(next);
+                        }
+                    },
+                    RowFilter::Mask(mask) => match existing {
+                        RowFilter::All => {
+                            *existing = RowFilter::Mask(mask);
+                        }
+                        RowFilter::Rows(existing_rows) => {
+                            existing_rows.retain(|row| *row < mask.len() && mask.get(*row));
+                        }
+                        RowFilter::Mask(existing_mask) => {
+                            // Prefer keeping the dense representation unless the result becomes
+                            // sparse enough that a `HashSet` is more efficient.
+                            if existing_mask.len() != mask.len() {
+                                *existing = RowFilter::Rows(
+                                    existing_mask
+                                        .iter_ones()
+                                        .filter(|row| *row < mask.len() && mask.get(*row))
+                                        .collect(),
+                                );
+                            } else {
+                                let mut next = existing_mask.as_ref().clone();
+                                next.and_inplace(&mask);
+                                let visible = next.count_ones();
+                                let row_count = next.len();
+                                let sparse_to_dense_threshold = row_count / 64;
+                                if visible == row_count {
+                                    *existing = RowFilter::All;
+                                } else if visible <= sparse_to_dense_threshold {
+                                    *existing = RowFilter::Rows(next.iter_ones().collect());
+                                } else {
+                                    *existing = RowFilter::Mask(Arc::new(next));
+                                }
                             }
                         }
                     },
@@ -5850,6 +5891,21 @@ pub(crate) fn resolve_row_sets(
                     for &row in rows {
                         if row < row_count {
                             allowed.set(row, true);
+                        }
+                    }
+                }
+                RowFilter::Mask(mask) => {
+                    // `PhysicalMask` row sets are sized to the physical row count, so this should
+                    // match `row_count`. If it doesn't (e.g. due to a stale filter context), fall
+                    // back to a safe rebuild.
+                    if mask.len() == row_count {
+                        allowed = mask.as_ref().clone();
+                    } else {
+                        allowed = BitVec::with_len_all_false(row_count);
+                        for row in mask.iter_ones() {
+                            if row < row_count {
+                                allowed.set(row, true);
+                            }
                         }
                     }
                 }
