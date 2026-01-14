@@ -12,7 +12,12 @@ use std::sync::Arc;
 pub enum LowerError {
     #[error("unsupported expression")]
     Unsupported,
-    #[error("external workbook references are not supported")]
+    /// External workbook reference that the bytecode lowering layer cannot represent.
+    ///
+    /// This typically indicates an external workbook reference shape that the engine cannot
+    /// canonicalize into an [`ExternalValueProvider`](crate::ExternalValueProvider) sheet key (for
+    /// example, an external 3D sheet span like `[Book.xlsx]Sheet1:Sheet3!A1`).
+    #[error("unsupported external workbook reference")]
     ExternalReference,
     #[error("cross-sheet references are not supported")]
     CrossSheetReference,
