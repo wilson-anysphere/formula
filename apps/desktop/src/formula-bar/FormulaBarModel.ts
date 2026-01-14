@@ -134,6 +134,7 @@ export class FormulaBarModel {
    * suggestion string.
    */
   #aiSuggestion: string | null = null;
+  #aiSuggestionIsFullDraft = false;
   #aiSuggestionPreview: unknown | null = null;
 
   setActiveCell(info: ActiveCellInfo): void {
@@ -158,6 +159,7 @@ export class FormulaBarModel {
     this.#errorExplanationCache = null;
     this.#functionHintCache = null;
     this.#aiSuggestion = null;
+    this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
   }
 
@@ -294,6 +296,7 @@ export class FormulaBarModel {
     }
     if (this.#aiSuggestion != null) {
       this.#aiSuggestion = null;
+      this.#aiSuggestionIsFullDraft = false;
     }
     if (this.#aiSuggestionPreview != null) {
       this.#aiSuggestionPreview = null;
@@ -310,6 +313,7 @@ export class FormulaBarModel {
     this.#tokenCache = null;
     this.#clearActiveArgumentSpanCache();
     this.#aiSuggestion = null;
+    this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
     this.#hoveredReferenceText = null;
@@ -338,6 +342,7 @@ export class FormulaBarModel {
     this.#tokenCache = null;
     this.#clearActiveArgumentSpanCache();
     this.#aiSuggestion = null;
+    this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
     this.#hoveredReferenceText = null;
@@ -568,6 +573,7 @@ export class FormulaBarModel {
       active ? { start: active.start, end: active.end } : null
     );
     this.#aiSuggestion = null;
+    this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
     this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
@@ -586,13 +592,17 @@ export class FormulaBarModel {
     ) {
       // Some range selection providers can emit multiple updates with identical ranges.
       // Avoid re-tokenizing / re-highlighting the full draft when nothing changed.
-      if (this.#aiSuggestion != null) this.#aiSuggestion = null;
+      if (this.#aiSuggestion != null) {
+        this.#aiSuggestion = null;
+        this.#aiSuggestionIsFullDraft = false;
+      }
       if (this.#aiSuggestionPreview != null) this.#aiSuggestionPreview = null;
       return;
     }
 
     this.#insertOrReplaceRange(rangeText, false);
     this.#aiSuggestion = null;
+    this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
     this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
@@ -601,6 +611,7 @@ export class FormulaBarModel {
   endRangeSelection(): void {
     this.#rangeInsertion = null;
     this.#aiSuggestion = null;
+    this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
   }
 
@@ -610,6 +621,7 @@ export class FormulaBarModel {
 
     if (!suggestionText) {
       this.#aiSuggestion = null;
+      this.#aiSuggestionIsFullDraft = false;
       this.#aiSuggestionPreview = null;
       return;
     }
@@ -618,6 +630,7 @@ export class FormulaBarModel {
     // so `aiGhostText()` + `acceptAiSuggestion()` can operate consistently.
     if (!this.#isEditing) {
       this.#aiSuggestion = suggestionText;
+      this.#aiSuggestionIsFullDraft = false;
       this.#aiSuggestionPreview = preview;
       return;
     }
@@ -629,6 +642,7 @@ export class FormulaBarModel {
     const looksLikeFullSuggestion =
       suggestionText.startsWith(prefix) && (!suffix || suggestionText.endsWith(suffix));
     this.#aiSuggestion = looksLikeFullSuggestion ? suggestionText : prefix + suggestionText + suffix;
+    this.#aiSuggestionIsFullDraft = true;
     this.#aiSuggestionPreview = preview;
   }
 
@@ -645,6 +659,13 @@ export class FormulaBarModel {
     if (this.#cursorStart !== this.#cursorEnd) return "";
 
     const cursor = this.#cursorStart;
+    if (this.#aiSuggestionIsFullDraft) {
+      const suffixLen = this.#draft.length - cursor;
+      const end = this.#aiSuggestion.length - suffixLen;
+      if (end < cursor) return "";
+      return this.#aiSuggestion.slice(cursor, end);
+    }
+
     const prefix = this.#draft.slice(0, cursor);
     const suffix = this.#draft.slice(cursor);
     if (!this.#aiSuggestion.startsWith(prefix)) return "";
@@ -683,6 +704,7 @@ export class FormulaBarModel {
       this.#cursorEnd = newCursor;
     }
     this.#aiSuggestion = null;
+    this.#aiSuggestionIsFullDraft = false;
     this.#aiSuggestionPreview = null;
     this.#rangeInsertion = null;
     this.#updateReferenceHighlights();
