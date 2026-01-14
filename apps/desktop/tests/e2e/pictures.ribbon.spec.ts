@@ -46,57 +46,89 @@ async function getImageDrawingCount(page: Page): Promise<number> {
 }
 
 test.describe("Insert → Pictures", () => {
-  test("Insert → Pictures → This Device opens file picker and inserts image drawings", async ({ page }) => {
-    await gotoDesktop(page);
-    await whenIdle(page);
+  const GRID_MODES = ["legacy", "shared"] as const;
 
-    const ribbon = page.getByTestId("ribbon-root");
-    await ribbon.getByRole("tab", { name: "Insert" }).click();
+  for (const mode of GRID_MODES) {
+    test(`Insert → Pictures → This Device opens file picker and inserts image drawings (${mode})`, async ({ page }) => {
+      const url = mode === "legacy" ? "/?grid=legacy" : "/?grid=shared";
+      await gotoDesktop(page, url);
+      await whenIdle(page);
 
-    const picturesDropdown = ribbon.getByTestId("ribbon-insert-pictures");
-    await expect(picturesDropdown).toBeVisible();
-    await picturesDropdown.click();
+      // Ensure insertion starts from a deterministic location so the inserted pictures land in the viewport.
+      await page.evaluate(() => {
+        const app = window.__formulaApp as any;
+        app.activateCell({ row: 0, col: 0 });
+        app.focus();
+      });
 
-    const thisDevice = ribbon.getByTestId("ribbon-insert-pictures-this-device");
-    await expect(thisDevice).toBeVisible();
-    await expect(thisDevice).toBeEnabled();
+      const ribbon = page.getByTestId("ribbon-root");
+      await ribbon.getByRole("tab", { name: "Insert" }).click();
 
-    const pngBytes = Buffer.from(TINY_PNG_BASE64, "base64");
+      const picturesDropdown = ribbon.getByTestId("ribbon-insert-pictures");
+      await expect(picturesDropdown).toBeVisible();
+      await picturesDropdown.click();
 
-    const beforeCount = await getImageDrawingCount(page);
+      const thisDevice = ribbon.getByTestId("ribbon-insert-pictures-this-device");
+      await expect(thisDevice).toBeVisible();
+      await expect(thisDevice).toBeEnabled();
 
-    let fileChooser: import("@playwright/test").FileChooser;
-    try {
-      [fileChooser] = await Promise.all([page.waitForEvent("filechooser", { timeout: 10_000 }), thisDevice.click()]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message.includes("filechooser") && message.includes("Timeout")) {
-        throw new Error(
-          `Expected a file chooser to open after clicking Insert → Pictures → This Device… but none was observed.\n\nOriginal error: ${message}`,
-        );
+      const pngBytes = Buffer.from(TINY_PNG_BASE64, "base64");
+
+      const beforeCount = await getImageDrawingCount(page);
+
+      let fileChooser: import("@playwright/test").FileChooser;
+      try {
+        [fileChooser] = await Promise.all([page.waitForEvent("filechooser", { timeout: 10_000 }), thisDevice.click()]);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("filechooser") && message.includes("Timeout")) {
+          throw new Error(
+            `Expected a file chooser to open after clicking Insert → Pictures → This Device… but none was observed.\n\nOriginal error: ${message}`,
+          );
+        }
+        throw err;
       }
-      throw err;
-    }
 
-    const selectedFiles = fileChooser.isMultiple()
-      ? [
-          { name: "tiny-1.png", mimeType: "image/png", buffer: pngBytes },
-          { name: "tiny-2.png", mimeType: "image/png", buffer: pngBytes },
-        ]
-      : [{ name: "tiny.png", mimeType: "image/png", buffer: pngBytes }];
-    await fileChooser.setFiles(selectedFiles);
+      const selectedFiles = fileChooser.isMultiple()
+        ? [
+            { name: "tiny-1.png", mimeType: "image/png", buffer: pngBytes },
+            { name: "tiny-2.png", mimeType: "image/png", buffer: pngBytes },
+          ]
+        : [{ name: "tiny.png", mimeType: "image/png", buffer: pngBytes }];
+      await fileChooser.setFiles(selectedFiles);
 
-    await expect
-      .poll(
-        async () => {
-          await whenIdle(page, 5_000);
-          return await getImageDrawingCount(page);
-        },
-        {
-          timeout: 20_000,
-          message: `Expected inserting ${selectedFiles.length} image file(s) to create ${selectedFiles.length} image drawing(s).`,
-        },
-      )
-      .toBe(beforeCount + selectedFiles.length);
-  });
+      await expect
+        .poll(
+          async () => {
+            await whenIdle(page, 5_000);
+            return await getImageDrawingCount(page);
+          },
+          {
+            timeout: 20_000,
+            message: `Expected inserting ${selectedFiles.length} image file(s) to create ${selectedFiles.length} image drawing(s).`,
+          },
+        )
+        .toBe(beforeCount + selectedFiles.length);
+
+      // Assert at least one inserted image has a resolved rect (i.e. would be visible as a drawing overlay).
+      await expect
+        .poll(
+          async () => {
+            await whenIdle(page, 5_000);
+            return await page.evaluate(() => {
+              const state = (window.__formulaApp as any).getDrawingsDebugState();
+              const drawings = Array.isArray(state?.drawings) ? state.drawings : [];
+              const visibleImages = drawings.filter((d: any) => {
+                if (d?.kind !== "image") return false;
+                const rect = d?.rectPx;
+                return rect && rect.width > 0 && rect.height > 0;
+              });
+              return visibleImages.length;
+            });
+          },
+          { timeout: 20_000, message: "Expected at least one inserted picture to have a non-empty drawing rect." },
+        )
+        .toBeGreaterThanOrEqual(1);
+    });
+  }
 });
