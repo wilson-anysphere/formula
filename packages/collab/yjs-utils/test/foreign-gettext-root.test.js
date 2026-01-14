@@ -40,6 +40,30 @@ test("collab-yjs-utils: getTextRoot normalizes foreign AbstractType placeholder 
   assert.ok(doc.getText("title") instanceof Y.Text);
 });
 
+test("collab-yjs-utils: getTextRoot normalizes foreign placeholders even when they pass `instanceof Y.AbstractType` checks", () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+
+  // Foreign placeholder.
+  Ycjs.Doc.prototype.get.call(doc, "title");
+  const placeholder = doc.share.get("title");
+  assert.ok(placeholder);
+
+  const ctor = placeholder.constructor;
+  assert.equal(typeof ctor, "function");
+  class RenamedForeignAbstractType extends ctor {}
+  Object.setPrototypeOf(RenamedForeignAbstractType.prototype, Y.AbstractType.prototype);
+  Object.setPrototypeOf(placeholder, RenamedForeignAbstractType.prototype);
+  assert.equal(placeholder instanceof Y.AbstractType, true);
+
+  assert.throws(() => doc.getText("title"), /different constructor/);
+
+  const title = getTextRoot(doc, "title");
+  assert.ok(title instanceof Y.Text);
+  assert.ok(doc.getText("title") instanceof Y.Text);
+});
+
 test("collab-yjs-utils: getTextRoot preserves foreign formatting/content when normalizing a text root", () => {
   const Ycjs = requireYjsCjs();
 

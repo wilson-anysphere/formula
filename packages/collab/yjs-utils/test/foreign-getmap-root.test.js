@@ -39,3 +39,30 @@ test("collab-yjs-utils: getMapRoot normalizes foreign AbstractType placeholder r
   assert.ok(cells instanceof Y.Map);
   assert.ok(doc.getMap("cells") instanceof Y.Map);
 });
+
+test("collab-yjs-utils: getMapRoot normalizes foreign placeholders even when they pass `instanceof Y.AbstractType` checks", () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+
+  // Foreign placeholder.
+  Ycjs.Doc.prototype.get.call(doc, "cells");
+  const placeholder = doc.share.get("cells");
+  assert.ok(placeholder);
+
+  // Simulate collab undo's prototype patching behavior: foreign placeholders may
+  // pass `instanceof Y.AbstractType` checks while still failing constructor
+  // identity checks.
+  const ctor = placeholder.constructor;
+  assert.equal(typeof ctor, "function");
+  class RenamedForeignAbstractType extends ctor {}
+  Object.setPrototypeOf(RenamedForeignAbstractType.prototype, Y.AbstractType.prototype);
+  Object.setPrototypeOf(placeholder, RenamedForeignAbstractType.prototype);
+  assert.equal(placeholder instanceof Y.AbstractType, true);
+
+  assert.throws(() => doc.getMap("cells"), /different constructor/);
+
+  const cells = getMapRoot(doc, "cells");
+  assert.ok(cells instanceof Y.Map);
+  assert.ok(doc.getMap("cells") instanceof Y.Map);
+});

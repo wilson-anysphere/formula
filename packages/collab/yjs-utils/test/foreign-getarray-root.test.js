@@ -39,3 +39,27 @@ test("collab-yjs-utils: getArrayRoot normalizes foreign AbstractType placeholder
   assert.ok(items instanceof Y.Array);
   assert.ok(doc.getArray("items") instanceof Y.Array);
 });
+
+test("collab-yjs-utils: getArrayRoot normalizes foreign placeholders even when they pass `instanceof Y.AbstractType` checks", () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+
+  // Foreign placeholder.
+  Ycjs.Doc.prototype.get.call(doc, "items");
+  const placeholder = doc.share.get("items");
+  assert.ok(placeholder);
+
+  const ctor = placeholder.constructor;
+  assert.equal(typeof ctor, "function");
+  class RenamedForeignAbstractType extends ctor {}
+  Object.setPrototypeOf(RenamedForeignAbstractType.prototype, Y.AbstractType.prototype);
+  Object.setPrototypeOf(placeholder, RenamedForeignAbstractType.prototype);
+  assert.equal(placeholder instanceof Y.AbstractType, true);
+
+  assert.throws(() => doc.getArray("items"), /different constructor/);
+
+  const items = getArrayRoot(doc, "items");
+  assert.ok(items instanceof Y.Array);
+  assert.ok(doc.getArray("items") instanceof Y.Array);
+});
