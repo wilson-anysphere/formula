@@ -2878,9 +2878,6 @@ export class SpreadsheetApp {
           : Array.isArray(payload?.imagesDeltas)
             ? payload.imagesDeltas
             : [];
-        const activeDesiredBackgroundId = this.getSheetBackgroundImageId(this.sheetId);
-        let activeBackgroundNeedsReload = false;
-
         for (const delta of imageDeltas) {
           const imageId = typeof delta?.imageId === "string" ? delta.imageId : typeof delta?.id === "string" ? delta.id : null;
           if (!imageId) continue;
@@ -2903,25 +2900,9 @@ export class SpreadsheetApp {
                 this.imageStore.set(imageId, { bytes, mimeType });
               }
             }
-
-            // Image bytes may have changed; invalidate decoded bitmaps so patterns re-decode.
-            this.workbookImageBitmaps.invalidate(imageId);
-
-            if (imageId === activeDesiredBackgroundId) {
-              activeBackgroundNeedsReload = true;
-            }
           } catch {
             // ignore
           }
-        }
-
-        if (activeBackgroundNeedsReload) {
-          // Force a reload even when the active sheet points at the same image id.
-          this.activeSheetBackgroundAbort?.abort();
-          this.activeSheetBackgroundAbort = null;
-          this.activeSheetBackgroundImageId = null;
-          this.activeSheetBackgroundBitmap = null;
-          this.syncActiveSheetBackgroundImage();
         }
         this.handleWorkbookImageDeltasForBackground(payload);
         invalidateAndRenderDrawings("document:change");
