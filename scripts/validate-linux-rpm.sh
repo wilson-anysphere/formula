@@ -474,6 +474,47 @@ validate_static() {
 
   rpm -qp --info "${rpm_path}" >/dev/null || die "rpm --info query failed for: ${rpm_path}"
 
+  local requires
+  requires="$(rpm -qpR "${rpm_path}")" || die "rpm -qpR query failed for: ${rpm_path}"
+
+  assert_requires_any() {
+    local label="$1"
+    shift
+    local matched=0
+    local needle
+    for needle in "$@"; do
+      if printf '%s\n' "${requires}" | grep -Eqi "${needle}"; then
+        matched=1
+        break
+      fi
+    done
+    if [[ "${matched}" -ne 1 ]]; then
+      die "RPM metadata missing required dependency (${label}); expected one of: $*"
+    fi
+  }
+
+  assert_requires_rich_or() {
+    local label="$1"
+    local left_re="$2"
+    local right_re="$3"
+    local pattern
+    pattern="(${left_re}).*\\bor\\b.*(${right_re})|(${right_re}).*\\bor\\b.*(${left_re})"
+    if ! printf '%s\n' "${requires}" | grep -Eqi "${pattern}"; then
+      die "RPM metadata missing rich dependency OR expression (${label}); expected a line containing both '${left_re}' and '${right_re}' joined by 'or'"
+    fi
+  }
+
+  # Runtime dependencies (match `scripts/ci/verify-linux-package-deps.sh`).
+  assert_requires_any "shared-mime-info (MIME database integration)" "shared-mime-info"
+  assert_requires_rich_or "WebKitGTK 4.1 (Fedora/RHEL vs openSUSE)" "webkit2gtk4\\.1" "libwebkit2gtk-4_1"
+  assert_requires_rich_or "GTK3 (Fedora/RHEL vs openSUSE)" "gtk3" "libgtk-3-0"
+  assert_requires_rich_or \
+    "AppIndicator/Ayatana (Fedora/RHEL vs openSUSE)" \
+    "(libayatana-appindicator-gtk3|libappindicator-gtk3)" \
+    "(libayatana-appindicator3-1|libappindicator3-1)"
+  assert_requires_rich_or "librsvg (Fedora/RHEL vs openSUSE)" "librsvg2" "librsvg-2-2"
+  assert_requires_rich_or "OpenSSL (Fedora/RHEL vs openSUSE)" "openssl-libs" "libopenssl3"
+
   local rpm_version
   local rpm_version_out
   set +e
