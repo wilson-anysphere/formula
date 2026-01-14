@@ -5009,7 +5009,13 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 let end_id = grid.resolve_sheet_name(end)?;
                 (start_id == end_id).then_some(start_id)
             }
-            crate::eval::SheetReference::External(_) => None,
+            crate::eval::SheetReference::External(key) => {
+                // Keep INDIRECT's historical "no true 3D spans" behavior: only accept
+                // single-sheet external keys like `"[Book.xlsx]Sheet1"`.
+                crate::eval::is_valid_external_sheet_key(key)
+                    .then(|| grid.resolve_sheet_name(key))
+                    .flatten()
+            }
         }
     }
 

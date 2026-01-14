@@ -99,6 +99,7 @@ pub struct PivotConfig {
     #[serde(default)]
     pub grand_totals: GrandTotals,
 }
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SortOrder {
