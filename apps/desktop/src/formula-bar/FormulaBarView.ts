@@ -3263,8 +3263,10 @@ export class FormulaBarView {
       } else {
         let ghostInserted = false;
         let previewInserted = false;
-        const ghostHtml = `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
-        const previewHtml = previewText ? `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>` : "";
+        const ghostContent = ESCAPE_HTML_TEST_RE.test(ghost) ? escapeHtml(ghost) : ghost;
+        const ghostHtml = `<span class="formula-bar-ghost">${ghostContent}</span>`;
+        const previewContent = previewText && ESCAPE_HTML_TEST_RE.test(previewText) ? escapeHtml(previewText) : previewText;
+        const previewHtml = previewText ? `<span class="formula-bar-preview">${previewContent}</span>` : "";
 
         for (let i = 0; i < highlightedSpans.length; i += 1) {
           const span = highlightedSpans[i]!;
