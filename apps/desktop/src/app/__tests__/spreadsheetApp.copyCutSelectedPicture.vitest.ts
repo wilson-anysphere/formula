@@ -306,6 +306,12 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     app.getDocument().setSheetDrawings(sheetId, [drawing]);
     app.selectDrawing(drawing.id);
 
+    // The drawings overlay may attempt best-effort decoding when `createImageBitmap` is available.
+    // This test specifically asserts that the clipboard copy path does not invoke `createImageBitmap`
+    // when the stored bytes already look like a PNG, even if the mimeType metadata is wrong.
+    await app.whenIdle();
+    createImageBitmapMock.mockClear();
+
     app.copy();
     await app.whenIdle();
     expect(write).toHaveBeenCalledWith({ text: "", imagePng: pngBytes });
