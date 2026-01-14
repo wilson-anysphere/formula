@@ -144,6 +144,36 @@ describe("SpreadsheetApp keyboard shortcuts respect split-view editing mode", ()
     root.remove();
   });
 
+  it("no-ops show formulas shortcut while split-view editing is active", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    expect(app.getShowFormulas()).toBe(false);
+
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "`", code: "Backquote", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(app.getShowFormulas()).toBe(true);
+
+    app.setShowFormulas(false);
+    expect(app.getShowFormulas()).toBe(false);
+
+    (globalThis as any).__formulaSpreadsheetIsEditing = true;
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "`", code: "Backquote", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(app.getShowFormulas()).toBe(false);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("does not run workbook undo/redo while split-view editing is active", () => {
     const root = createRoot();
     const status = {

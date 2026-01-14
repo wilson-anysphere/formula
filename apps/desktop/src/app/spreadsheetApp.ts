@@ -18480,6 +18480,9 @@ export class SpreadsheetApp {
     // Only trigger when *not* actively editing text.
     if (this.editor.isOpen()) return false;
     if (this.formulaBar?.isEditing()) return false;
+    // In split view, a secondary editor can own edit mode even when the primary editor is closed.
+    // Match ribbon/keybinding disabled-state behavior by blocking while any editor is active.
+    if (this.isSpreadsheetEditingIncludingSecondary()) return false;
 
     const target = e.target as HTMLElement | null;
     if (target) {
