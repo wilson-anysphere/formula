@@ -368,6 +368,21 @@ test("validate-linux-appimage fails when Exec= lacks file placeholder", { skip: 
   assert.match(proc.stderr, /Exec=.*placeholder|invalid Exec=/i);
 });
 
+test("validate-linux-appimage fails when .desktop Exec= does not reference AppRun or the expected binary", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, {
+    withDesktopFile: true,
+    withXlsxMime: true,
+    execLine: "something-else %U",
+  });
+
+  const proc = runValidator(appImagePath);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /referenced expected main binary/i);
+  assert.match(proc.stderr, /AppRun/i);
+});
+
 test(
   "validate-linux-appimage accepts Version= when X-AppImage-Version is absent (semver-like)",
   { skip: !hasBash },

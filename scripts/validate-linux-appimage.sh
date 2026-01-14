@@ -465,6 +465,45 @@ validate_appimage() {
     die "No .desktop files found under squashfs-root/usr/share/applications/"
   fi
 
+  # Filter to the desktop entry (or entries) that actually launch our app. It's
+  # possible (though uncommon) for an AppImage AppDir to contain unrelated
+  # .desktop entries; we should validate *our* desktop integration.
+  local expected_binary_escaped
+  expected_binary_escaped="$(printf '%s' "$EXPECTED_MAIN_BINARY" | sed -e 's/[][(){}.^$*+?|\\]/\\&/g')"
+  local exec_token_re
+  # Accept either the expected main binary name or AppRun (common in AppImage .desktop entries).
+  exec_token_re="(^|[[:space:]])[\"']?([^[:space:]]*/)?(AppRun|${expected_binary_escaped})[\"']?([[:space:]]|$)"
+
+  declare -a matched_desktop_files=()
+  local desktop_file
+  for desktop_file in "${desktop_files[@]}"; do
+    local exec_line
+    exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+    local exec_value
+    exec_value="$(printf '%s' "$exec_line" | sed -E "s/^[[:space:]]*Exec[[:space:]]*=[[:space:]]*//I")"
+    if [[ -n "$exec_value" ]] && printf '%s' "$exec_value" | grep -Eq "${exec_token_re}"; then
+      matched_desktop_files+=("$desktop_file")
+    fi
+  done
+
+  if [ "${#matched_desktop_files[@]}" -eq 0 ]; then
+    echo "${SCRIPT_NAME}: error: No .desktop file referenced expected main binary '${EXPECTED_MAIN_BINARY}' (or AppRun) in its Exec= entry." >&2
+    echo "${SCRIPT_NAME}: error: .desktop files inspected:" >&2
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#$appdir/}"
+      local exec_line
+      exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+      if [ -z "$exec_line" ]; then
+        exec_line="(no Exec= entry)"
+      fi
+      echo "  - ${rel}: ${exec_line}" >&2
+    done
+    die "No .desktop file referenced expected main binary '${EXPECTED_MAIN_BINARY}' (or AppRun) in Exec=."
+  fi
+
+  desktop_files=("${matched_desktop_files[@]}")
+
   # 4) Validate the bundle advertises spreadsheet file associations via desktop metadata.
   #
   # On Linux, file associations are driven by the `MimeType=` field in the `.desktop`
@@ -484,7 +523,6 @@ validate_appimage() {
   local bad_exec_count=0
   local required_scheme_mime="x-scheme-handler/formula"
 
-  local desktop_file
   for desktop_file in "${desktop_files[@]}"; do
     local mime_line
     mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
