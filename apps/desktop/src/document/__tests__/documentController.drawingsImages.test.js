@@ -238,6 +238,41 @@ test("applyState accepts legacy metadata.drawingsBySheet snapshots (branching sc
   assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
 });
 
+test("applyState accepts nested sheet.view drawings payloads", () => {
+  const drawing = {
+    id: "d_view",
+    zOrder: 4,
+    kind: { type: "image", imageId: "img_view" },
+    anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+  };
+
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          cells: [],
+          view: {
+            frozenRows: 2,
+            frozenCols: 1,
+            drawings: [drawing],
+          },
+        },
+      ],
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
+  assert.equal(doc.getSheetView("Sheet1").frozenRows, 2);
+  assert.equal(doc.getSheetView("Sheet1").frozenCols, 1);
+});
+
 test("applyExternalDrawingDeltas updates sheet drawings without creating undo history", () => {
   const doc = new DocumentController();
   let lastChange = null;

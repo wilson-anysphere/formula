@@ -6281,22 +6281,33 @@ export class DocumentController {
       nextSheetMeta.set(sheetId, { name, visibility, ...(tabColor ? { tabColor } : {}) });
 
       const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];
+      const viewRaw = sheet?.view && typeof sheet.view === "object" ? sheet.view : null;
       const rawDrawings = Array.isArray(sheet?.drawings)
         ? sheet.drawings
-        : Array.isArray(legacyDrawingsBySheet?.[sheetId])
-          ? legacyDrawingsBySheet[sheetId]
-          : null;
+        : Array.isArray(viewRaw?.drawings)
+          ? viewRaw.drawings
+          : Array.isArray(legacyDrawingsBySheet?.[sheetId])
+            ? legacyDrawingsBySheet[sheetId]
+            : null;
       const view = normalizeSheetViewState({
-        frozenRows: sheet?.frozenRows,
-        frozenCols: sheet?.frozenCols,
-        backgroundImageId: sheet?.backgroundImageId ?? sheet?.background_image_id,
-        colWidths: sheet?.colWidths,
-        rowHeights: sheet?.rowHeights,
+        frozenRows: sheet?.frozenRows ?? viewRaw?.frozenRows,
+        frozenCols: sheet?.frozenCols ?? viewRaw?.frozenCols,
+        backgroundImageId:
+          sheet?.backgroundImageId ??
+          sheet?.background_image_id ??
+          viewRaw?.backgroundImageId ??
+          viewRaw?.background_image_id,
+        colWidths: sheet?.colWidths ?? viewRaw?.colWidths,
+        rowHeights: sheet?.rowHeights ?? viewRaw?.rowHeights,
         mergedRanges:
           sheet?.mergedRanges ??
           sheet?.merged_ranges ??
           sheet?.mergedRegions ??
           sheet?.merged_regions ??
+          viewRaw?.mergedRanges ??
+          viewRaw?.merged_ranges ??
+          viewRaw?.mergedRegions ??
+          viewRaw?.merged_regions ??
           // Backwards compatibility with earlier snapshots.
           sheet?.mergedCells ??
           sheet?.merged_cells,
