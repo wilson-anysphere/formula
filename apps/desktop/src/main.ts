@@ -2258,7 +2258,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
       const compact = normalized.toLowerCase().replace(/\s+/g, "");
 
-      if (/^[$€£¥]#,##0(\.[0]+)?$/.test(compact)) return "Currency";
+      if (/^[$€£¥](?:#,##0|0)(\.[0]+)?$/.test(compact)) return "Currency";
       if (compact.includes("yyyy-mm-dd")) return "Long Date";
       if (compact.includes("m/d/yyyy")) return "Short Date";
       if (compact === NUMBER_FORMATS.date.toLowerCase()) return "Short Date";
