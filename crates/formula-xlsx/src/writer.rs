@@ -637,6 +637,29 @@ struct ColXmlProps {
     style_xf: Option<u32>,
 }
 
+fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    if sheet.default_col_width.is_none()
+        && sheet.default_row_height.is_none()
+        && sheet.base_col_width.is_none()
+    {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("<sheetFormatPr");
+    if let Some(base) = sheet.base_col_width {
+        out.push_str(&format!(r#" baseColWidth="{base}""#));
+    }
+    if let Some(width) = sheet.default_col_width {
+        out.push_str(&format!(r#" defaultColWidth="{width}""#));
+    }
+    if let Some(height) = sheet.default_row_height {
+        out.push_str(&format!(r#" defaultRowHeight="{height}""#));
+    }
+    out.push_str("/>");
+    out
+}
+
 fn render_cols(sheet: &Worksheet, outline: &Outline, style_to_xf: &HashMap<u32, u32>) -> String {
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
 
