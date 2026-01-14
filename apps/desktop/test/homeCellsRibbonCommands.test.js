@@ -17,6 +17,10 @@ test("Ribbon schema includes Home → Cells command ids", () => {
   const schema = readRibbonSchemaSource("homeTab.ts");
 
   const ids = [
+    // Dropdown triggers (menu containers).
+    "home.cells.insert",
+    "home.cells.delete",
+    "home.cells.format",
     "home.cells.format.organizeSheets",
     "home.cells.insert.insertCells",
     "home.cells.insert.insertSheetRows",
@@ -117,6 +121,16 @@ test("Home → Cells ribbon commands are registered in CommandRegistry and not h
       main,
       new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
       `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
+    );
+  }
+
+  // Dropdown triggers are UI-only ids (menu containers). They should not show "Ribbon: ..." toasts when
+  // invoked unexpectedly; the router treats them as no-ops.
+  for (const triggerId of ["home.cells.insert", "home.cells.delete", "home.cells.format"]) {
+    assert.match(
+      router,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(triggerId)}["']:`),
+      `Expected ribbonCommandRouter.ts to treat ${triggerId} as a no-op dropdown trigger`,
     );
   }
 

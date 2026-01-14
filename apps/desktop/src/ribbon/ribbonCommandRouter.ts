@@ -164,6 +164,13 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
     }
 
     switch (commandId) {
+      case "home.cells.insert":
+      case "home.cells.delete":
+      case "home.cells.format":
+        // These ids are dropdown triggers (menu containers). They should not normally fire as commands,
+        // but some ribbon interactions can surface them via `onCommand`. Treat them as no-ops to avoid
+        // spurious "Ribbon: ..." toasts.
+        return;
       case "insert.illustrations.pictures":
       case "insert.illustrations.pictures.thisDevice":
       case "insert.illustrations.pictures.stockImages":
