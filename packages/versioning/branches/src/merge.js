@@ -145,6 +145,205 @@ function mergeFormatRunsByCol(baseValue, oursValue, theirsValue) {
 }
 
 /**
+ * Merge the `mergedRanges` sheet view structure.
+ *
+ * `mergedRanges` is represented as a list of inclusive rectangles. We merge at the
+ * rectangle granularity so independent edits (different rectangles) merge without clobbering.
+ *
+ * Conflicts (both sides changed the same rectangle differently) are resolved by preferring
+ * `ours` (consistent with existing view-state semantics).
+ *
+ * @param {any} baseValue
+ * @param {any} oursValue
+ * @param {any} theirsValue
+ * @returns {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }> | undefined}
+ */
+function mergeMergedRanges(baseValue, oursValue, theirsValue) {
+  const baseArr = Array.isArray(baseValue) ? baseValue : undefined;
+  const oursArr = Array.isArray(oursValue) ? oursValue : undefined;
+  const theirsArr = Array.isArray(theirsValue) ? theirsValue : undefined;
+
+  // Preserve explicit presence (including explicit empty arrays) when any side has the key.
+  const hadKey = baseArr !== undefined || oursArr !== undefined || theirsArr !== undefined;
+
+  /**
+   * @param {any[] | undefined} arr
+   * @returns {Set<string>}
+   */
+  const toSet = (arr) => {
+    /** @type {Set<string>} */
+    const set = new Set();
+    if (!Array.isArray(arr) || arr.length === 0) return set;
+    for (const entry of arr) {
+      const sr = Number(entry?.startRow ?? entry?.start_row ?? entry?.sr);
+      const er = Number(entry?.endRow ?? entry?.end_row ?? entry?.er);
+      const sc = Number(entry?.startCol ?? entry?.start_col ?? entry?.sc);
+      const ec = Number(entry?.endCol ?? entry?.end_col ?? entry?.ec);
+      if (!Number.isInteger(sr) || sr < 0) continue;
+      if (!Number.isInteger(er) || er < 0) continue;
+      if (!Number.isInteger(sc) || sc < 0) continue;
+      if (!Number.isInteger(ec) || ec < 0) continue;
+      const startRow = Math.min(sr, er);
+      const endRow = Math.max(sr, er);
+      const startCol = Math.min(sc, ec);
+      const endCol = Math.max(sc, ec);
+      if (startRow === endRow && startCol === endCol) continue;
+      set.add(`${startRow},${endRow},${startCol},${endCol}`);
+    }
+    return set;
+  };
+
+  const baseSet = toSet(baseArr);
+  const oursSet = toSet(oursArr);
+  const theirsSet = toSet(theirsArr);
+
+  const keys = new Set([...baseSet, ...oursSet, ...theirsSet]);
+
+  /**
+   * @param {string} key
+   */
+  const parseKey = (key) => {
+    const parts = key.split(",");
+    if (parts.length !== 4) return null;
+    const startRow = Number(parts[0]);
+    const endRow = Number(parts[1]);
+    const startCol = Number(parts[2]);
+    const endCol = Number(parts[3]);
+    if (!Number.isInteger(startRow) || startRow < 0) return null;
+    if (!Number.isInteger(endRow) || endRow < 0) return null;
+    if (!Number.isInteger(startCol) || startCol < 0) return null;
+    if (!Number.isInteger(endCol) || endCol < 0) return null;
+    return { startRow, endRow, startCol, endCol };
+  };
+
+  /** @type {Array<{ key: string, weight: number, range: { startRow: number, endRow: number, startCol: number, endCol: number } }>} */
+  const chosen = [];
+
+  for (const key of keys) {
+    const baseHas = baseSet.has(key);
+    const oursHas = oursSet.has(key);
+    const theirsHas = theirsSet.has(key);
+
+    let nextHas = oursHas;
+    if (oursHas === theirsHas) nextHas = oursHas;
+    else if (baseHas === oursHas) nextHas = theirsHas;
+    else if (baseHas === theirsHas) nextHas = oursHas;
+    // else: both changed differently; prefer ours (existing view-state semantics).
+
+    if (!nextHas) continue;
+
+    const range = parseKey(key);
+    if (!range) continue;
+
+    const weight = oursHas ? 2 : theirsHas ? 1 : 0;
+    chosen.push({ key, weight, range });
+  }
+
+  if (chosen.length === 0) return hadKey ? [] : undefined;
+
+  // Resolve overlapping rectangles deterministically, preferring ours > theirs > base.
+  chosen.sort((a, b) => {
+    if (a.weight !== b.weight) return a.weight - b.weight;
+    const ra = a.range;
+    const rb = b.range;
+    return ra.startRow - rb.startRow || ra.startCol - rb.startCol || ra.endRow - rb.endRow || ra.endCol - rb.endCol;
+  });
+
+  const overlaps = (a, b) =>
+    a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol;
+
+  /** @type {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} */
+  const out = [];
+  for (const entry of chosen) {
+    const candidate = entry.range;
+    for (let i = out.length - 1; i >= 0; i -= 1) {
+      if (overlaps(out[i], candidate)) out.splice(i, 1);
+    }
+    out.push(candidate);
+  }
+
+  out.sort((a, b) => a.startRow - b.startRow || a.startCol - b.startCol || a.endRow - b.endRow || a.endCol - b.endCol);
+  return out.length === 0 ? [] : out;
+}
+
+/**
+ * Merge the `drawings` sheet view structure.
+ *
+ * `drawings` is represented as a list of objects with stable `id` fields. We merge per-id so
+ * independent inserts/moves resize operations (different ids) merge without clobbering.
+ *
+ * Conflicts (both sides changed the same drawing differently) are resolved by preferring `ours`
+ * (consistent with existing view-state semantics).
+ *
+ * @param {any} baseValue
+ * @param {any} oursValue
+ * @param {any} theirsValue
+ * @returns {unknown[] | undefined}
+ */
+function mergeDrawings(baseValue, oursValue, theirsValue) {
+  const baseArr = Array.isArray(baseValue) ? baseValue : undefined;
+  const oursArr = Array.isArray(oursValue) ? oursValue : undefined;
+  const theirsArr = Array.isArray(theirsValue) ? theirsValue : undefined;
+
+  // Preserve explicit presence (including explicit empty arrays) when any side has the key.
+  const hadKey = baseArr !== undefined || oursArr !== undefined || theirsArr !== undefined;
+
+  /**
+   * @param {any[] | undefined} arr
+   * @returns {Map<string, any>}
+   */
+  const toMap = (arr) => {
+    /** @type {Map<string, any>} */
+    const map = new Map();
+    if (!Array.isArray(arr) || arr.length === 0) return map;
+    for (const entry of arr) {
+      if (!isRecord(entry)) continue;
+      const id = entry.id;
+      if (id === undefined || id === null) continue;
+      map.set(String(id), entry);
+    }
+    return map;
+  };
+
+  const baseMap = toMap(baseArr);
+  const oursMap = toMap(oursArr);
+  const theirsMap = toMap(theirsArr);
+
+  const ids = new Set([...baseMap.keys(), ...oursMap.keys(), ...theirsMap.keys()]);
+  const sortedIds = Array.from(ids).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+  /** @type {any[]} */
+  const out = [];
+
+  for (const id of sortedIds) {
+    const baseObj = baseMap.get(id);
+    const oursObj = oursMap.get(id);
+    const theirsObj = theirsMap.get(id);
+
+    let nextObj = oursObj;
+    if (deepEqual(oursObj, theirsObj)) nextObj = oursObj;
+    else if (deepEqual(baseObj, oursObj)) nextObj = theirsObj;
+    else if (deepEqual(baseObj, theirsObj)) nextObj = oursObj;
+    // else: both changed differently; prefer ours (existing view-state semantics).
+
+    if (nextObj !== undefined) out.push(structuredClone(nextObj));
+  }
+
+  if (out.length === 0) return hadKey ? [] : undefined;
+
+  out.sort((a, b) => {
+    const za = Number.isFinite(Number(a?.zOrder)) ? Number(a.zOrder) : 0;
+    const zb = Number.isFinite(Number(b?.zOrder)) ? Number(b.zOrder) : 0;
+    if (za !== zb) return za - zb;
+    const ida = a?.id == null ? "" : String(a.id);
+    const idb = b?.id == null ? "" : String(b.id);
+    return ida < idb ? -1 : ida > idb ? 1 : 0;
+  });
+
+  return out;
+}
+
+/**
  * Merge per-sheet view state (frozen panes, axis sizes, default formatting, range-run formatting).
  *
  * Treat missing keys as "no change" (important for older clients).
@@ -172,6 +371,8 @@ function mergeSheetView(baseView, oursView, theirsView) {
     "backgroundImageId",
     "colWidths",
     "rowHeights",
+    "mergedRanges",
+    "drawings",
     "defaultFormat",
     "rowFormats",
     "colFormats",
@@ -197,6 +398,20 @@ function mergeSheetView(baseView, oursView, theirsView) {
     if (key === "formatRunsByCol") {
       const mergedRuns = mergeFormatRunsByCol(baseVal, oursVal, theirsVal);
       if (mergedRuns !== undefined) merged[key] = mergedRuns;
+      else delete merged[key];
+      continue;
+    }
+
+    if (key === "mergedRanges") {
+      const mergedRanges = mergeMergedRanges(baseVal, oursVal, theirsVal);
+      if (mergedRanges !== undefined) merged[key] = mergedRanges;
+      else delete merged[key];
+      continue;
+    }
+
+    if (key === "drawings") {
+      const mergedDrawings = mergeDrawings(baseVal, oursVal, theirsVal);
+      if (mergedDrawings !== undefined) merged[key] = mergedDrawings;
       else delete merged[key];
       continue;
     }

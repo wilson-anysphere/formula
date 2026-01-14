@@ -69,6 +69,19 @@
  *    *\/
  *   rowHeights?: Record<string, number>,
  *   /**
+ *    * Optional sheet-level merged ranges.
+ *    *
+ *    * Stored as a list of inclusive rectangle coordinates.
+ *    *\/
+ *   mergedRanges?: Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>,
+ *   /**
+ *    * Optional sheet-level drawing metadata (images, shapes, etc).
+ *    *
+ *    * This is treated as opaque JSON by BranchService; image bytes and other
+ *    * large payloads are managed separately.
+ *    *\/
+ *   drawings?: unknown[],
+ *   /**
  *    * Default sheet format applied to all cells unless overridden by a row/column/cell format.
  *    *
  *    * Stored as a style object (not a style id) so BranchService snapshots are self-contained.

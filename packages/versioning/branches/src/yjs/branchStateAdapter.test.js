@@ -243,6 +243,8 @@ test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: round-trips sheet view (fr
     backgroundImageId: "bg.png",
     colWidths: { "0": 120 },
     rowHeights: { "1": 40 },
+    mergedRanges: [],
+    drawings: [],
   });
 
   const doc2 = new Y.Doc();
@@ -256,6 +258,63 @@ test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: round-trips sheet view (fr
     backgroundImageId: "bg.png",
     colWidths: { "0": 120 },
     rowHeights: { "1": 40 },
+  });
+});
+
+test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: round-trips mergedRanges + drawings in sheet view", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("view", {
+      mergedRanges: [{ startRow: 0, endRow: 1, startCol: 0, endCol: 2 }],
+      drawings: [
+        {
+          id: 1,
+          zOrder: 0,
+          kind: { type: "image", imageId: "img-1" },
+          anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+        },
+      ],
+    });
+    sheets.push([sheet]);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view, {
+    frozenRows: 0,
+    frozenCols: 0,
+    backgroundImageId: null,
+    mergedRanges: [{ startRow: 0, endRow: 1, startCol: 0, endCol: 2 }],
+    drawings: [
+      {
+        id: 1,
+        zOrder: 0,
+        kind: { type: "image", imageId: "img-1" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+      },
+    ],
+  });
+
+  const doc2 = new Y.Doc();
+  applyBranchStateToYjsDoc(doc2, state);
+  const sheet2 = doc2.getArray("sheets").get(0);
+  assert.ok(sheet2 instanceof Y.Map);
+  assert.deepEqual(sheet2.get("view"), {
+    frozenRows: 0,
+    frozenCols: 0,
+    backgroundImageId: null,
+    mergedRanges: [{ startRow: 0, endRow: 1, startCol: 0, endCol: 2 }],
+    drawings: [
+      {
+        id: 1,
+        zOrder: 0,
+        kind: { type: "image", imageId: "img-1" },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+      },
+    ],
   });
 });
 
@@ -281,6 +340,8 @@ test("branchStateFromYjsDoc: reads legacy top-level sheet view fields (frozen pa
     backgroundImageId: "bg.png",
     colWidths: { "0": 120 },
     rowHeights: { "1": 40 },
+    mergedRanges: [],
+    drawings: [],
   });
 
   const doc2 = new Y.Doc();
@@ -325,6 +386,8 @@ test("applyBranchStateToYjsDoc: drops legacy top-level axis sizes when applying 
     backgroundImageId: "bg.png",
     colWidths: { "0": 120 },
     rowHeights: { "1": 40 },
+    mergedRanges: [],
+    drawings: [],
   });
 
   applyBranchStateToYjsDoc(doc, state);

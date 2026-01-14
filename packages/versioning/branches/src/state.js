@@ -43,6 +43,8 @@ function normalizeFrozenCount(value) {
  *   backgroundImageId?: string | null,
  *   colWidths?: Record<string, number>,
  *   rowHeights?: Record<string, number>,
+ *   mergedRanges?: Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>,
+ *   drawings?: unknown[],
  *   defaultFormat?: Record<string, any>,
  *   rowFormats?: Record<string, Record<string, any>>,
  *   colFormats?: Record<string, Record<string, any>>,
@@ -67,6 +69,129 @@ function normalizeSheetView(value) {
     // Preserve explicit clears so semantic merges can distinguish "omitted" from "cleared".
     backgroundImageId = null;
   }
+
+  const hasMergedRanges =
+    isRecord(value) &&
+    (Object.prototype.hasOwnProperty.call(value, "mergedRanges") ||
+      Object.prototype.hasOwnProperty.call(value, "mergedCells") ||
+      Object.prototype.hasOwnProperty.call(value, "merged_cells"));
+  const mergedRangesRaw = isRecord(value)
+    ? value.mergedRanges ?? value.mergedCells ?? value.merged_cells
+    : undefined;
+
+  /**
+   * @param {any} raw
+   * @returns {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>}
+   */
+  const normalizeMergedRanges = (raw) => {
+    if (raw == null) return [];
+    let arr = raw;
+    if (!Array.isArray(arr) && typeof arr?.toArray === "function") {
+      try {
+        arr = arr.toArray();
+      } catch {
+        // ignore
+      }
+    }
+    if (!Array.isArray(arr) || arr.length === 0) return [];
+
+    const overlaps = (a, b) =>
+      a.startRow <= b.endRow && a.endRow >= b.startRow && a.startCol <= b.endCol && a.endCol >= b.startCol;
+
+    /** @type {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} */
+    const out = [];
+
+    for (const entry of arr) {
+      const sr = Number(entry?.startRow ?? entry?.start_row ?? entry?.sr);
+      const er = Number(entry?.endRow ?? entry?.end_row ?? entry?.er);
+      const sc = Number(entry?.startCol ?? entry?.start_col ?? entry?.sc);
+      const ec = Number(entry?.endCol ?? entry?.end_col ?? entry?.ec);
+      if (!Number.isInteger(sr) || sr < 0) continue;
+      if (!Number.isInteger(er) || er < 0) continue;
+      if (!Number.isInteger(sc) || sc < 0) continue;
+      if (!Number.isInteger(ec) || ec < 0) continue;
+
+      const startRow = Math.min(sr, er);
+      const endRow = Math.max(sr, er);
+      const startCol = Math.min(sc, ec);
+      const endCol = Math.max(sc, ec);
+      // Skip degenerate single-cell merges.
+      if (startRow === endRow && startCol === endCol) continue;
+
+      const candidate = { startRow, endRow, startCol, endCol };
+      for (let i = out.length - 1; i >= 0; i -= 1) {
+        if (overlaps(out[i], candidate)) out.splice(i, 1);
+      }
+      out.push(candidate);
+    }
+
+    if (out.length === 0) return [];
+
+    out.sort((a, b) => a.startRow - b.startRow || a.startCol - b.startCol || a.endRow - b.endRow || a.endCol - b.endCol);
+
+    /** @type {Array<{ startRow: number, endRow: number, startCol: number, endCol: number }>} */
+    const deduped = [];
+    let lastKey = null;
+    for (const r of out) {
+      const key = `${r.startRow},${r.endRow},${r.startCol},${r.endCol}`;
+      if (key === lastKey) continue;
+      lastKey = key;
+      deduped.push(r);
+    }
+
+    return deduped;
+  };
+
+  const mergedRanges = hasMergedRanges ? normalizeMergedRanges(mergedRangesRaw) : null;
+
+  const hasDrawings = isRecord(value) && Object.prototype.hasOwnProperty.call(value, "drawings");
+  const drawingsRaw = isRecord(value) ? value.drawings : undefined;
+
+  /**
+   * @param {any} raw
+   * @returns {unknown[]}
+   */
+  const normalizeDrawings = (raw) => {
+    if (raw == null) return [];
+    let arr = raw;
+    if (!Array.isArray(arr) && typeof arr?.toArray === "function") {
+      try {
+        arr = arr.toArray();
+      } catch {
+        // ignore
+      }
+    }
+    if (!Array.isArray(arr) || arr.length === 0) return [];
+
+    /** @type {any[]} */
+    const out = [];
+
+    for (const entry of arr) {
+      let json = entry;
+      if (json && typeof json === "object" && typeof json.toJSON === "function") {
+        try {
+          json = json.toJSON();
+        } catch {
+          // ignore
+        }
+      }
+      if (!isRecord(json)) continue;
+      out.push(structuredClone(json));
+    }
+
+    out.sort((a, b) => {
+      const za = Number.isFinite(Number(a?.zOrder)) ? Number(a.zOrder) : 0;
+      const zb = Number.isFinite(Number(b?.zOrder)) ? Number(b.zOrder) : 0;
+      if (za !== zb) return za - zb;
+      const ida = a?.id == null ? "" : String(a.id);
+      const idb = b?.id == null ? "" : String(b.id);
+      return ida < idb ? -1 : ida > idb ? 1 : 0;
+    });
+
+    return out;
+  };
+
+  const drawings = hasDrawings ? normalizeDrawings(drawingsRaw) : null;
 
   const normalizeFormatObject = (raw) => {
     if (!isRecord(raw)) return null;
@@ -222,6 +347,8 @@ function normalizeSheetView(value) {
     ...(hasBackgroundImageId ? { backgroundImageId } : {}),
     ...(colWidths ? { colWidths } : {}),
     ...(rowHeights ? { rowHeights } : {}),
+    ...(hasMergedRanges ? { mergedRanges } : {}),
+    ...(hasDrawings ? { drawings } : {}),
     ...(defaultFormat ? { defaultFormat } : {}),
     ...(rowFormats ? { rowFormats } : {}),
     ...(colFormats ? { colFormats } : {}),

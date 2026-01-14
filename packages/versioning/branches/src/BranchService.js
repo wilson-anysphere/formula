@@ -129,7 +129,13 @@ function shouldPreserveSchemaV1SheetView(value, sheetId) {
     "frozenRows" in meta ||
     "frozenCols" in meta ||
     "backgroundImageId" in meta ||
-    "background_image_id" in meta
+    "background_image_id" in meta ||
+    "colWidths" in meta ||
+    "rowHeights" in meta ||
+    "mergedRanges" in meta ||
+    "mergedCells" in meta ||
+    "merged_cells" in meta ||
+    "drawings" in meta
   ) {
     return false;
   }
@@ -466,6 +472,21 @@ export class BranchService {
 
         if (!("rowHeights" in rawView) && currentView.rowHeights !== undefined) {
           mergedView.rowHeights = structuredClone(currentView.rowHeights);
+          didOverlay = true;
+        }
+
+        if (
+          !("mergedRanges" in rawView) &&
+          !("mergedCells" in rawView) &&
+          !("merged_cells" in rawView) &&
+          currentView.mergedRanges !== undefined
+        ) {
+          mergedView.mergedRanges = structuredClone(currentView.mergedRanges);
+          didOverlay = true;
+        }
+
+        if (!("drawings" in rawView) && currentView.drawings !== undefined) {
+          mergedView.drawings = structuredClone(currentView.drawings);
           didOverlay = true;
         }
 

@@ -388,24 +388,33 @@ export function branchStateFromYjsDoc(doc) {
       const backgroundImageId = readYMapOrObject(entry, "backgroundImageId") ?? readYMapOrObject(entry, "background_image_id");
       const colWidths = readYMapOrObject(entry, "colWidths");
       const rowHeights = readYMapOrObject(entry, "rowHeights");
+      const mergedRanges =
+        readYMapOrObject(entry, "mergedRanges") ??
+        readYMapOrObject(entry, "mergedCells") ??
+        readYMapOrObject(entry, "merged_cells");
+      const drawings = readYMapOrObject(entry, "drawings");
       if (
         frozenRows !== undefined ||
         frozenCols !== undefined ||
         backgroundImageId !== undefined ||
         colWidths !== undefined ||
-        rowHeights !== undefined
+        rowHeights !== undefined ||
+        mergedRanges !== undefined ||
+        drawings !== undefined
       ) {
         view = {
           frozenRows: yjsValueToJson(frozenRows) ?? 0,
           frozenCols: yjsValueToJson(frozenCols) ?? 0,
           // Always include the key (even when null) so BranchService can distinguish
           // explicit clears from omissions during semantic merges.
-          backgroundImageId: yjsValueToJson(backgroundImageId) ?? null,
-          ...(colWidths !== undefined ? { colWidths: yjsValueToJson(colWidths) } : {}),
-          ...(rowHeights !== undefined ? { rowHeights: yjsValueToJson(rowHeights) } : {}),
-        };
-      }
-    }
+           backgroundImageId: yjsValueToJson(backgroundImageId) ?? null,
+           ...(colWidths !== undefined ? { colWidths: yjsValueToJson(colWidths) } : {}),
+           ...(rowHeights !== undefined ? { rowHeights: yjsValueToJson(rowHeights) } : {}),
+           ...(mergedRanges !== undefined ? { mergedRanges: yjsValueToJson(mergedRanges) } : {}),
+           ...(drawings !== undefined ? { drawings: yjsValueToJson(drawings) } : {}),
+         };
+       }
+     }
 
     // Ensure BranchService snapshots can represent explicit clears for `backgroundImageId`.
     //
@@ -413,13 +422,46 @@ export function branchStateFromYjsDoc(doc) {
     // keys as "no change" to support older clients. Include `backgroundImageId: null` so clears
     // survive commits + semantic merges.
     if (view == null) {
-      view = { frozenRows: 0, frozenCols: 0, backgroundImageId: null };
+      view = { frozenRows: 0, frozenCols: 0, backgroundImageId: null, mergedRanges: [], drawings: [] };
     } else if (isRecord(view)) {
       const hasKey =
         Object.prototype.hasOwnProperty.call(view, "backgroundImageId") ||
         Object.prototype.hasOwnProperty.call(view, "background_image_id");
       if (!hasKey) {
-        view.backgroundImageId = null;
+        const topLevelBackgroundImageId =
+          readYMapOrObject(entry, "backgroundImageId") ?? readYMapOrObject(entry, "background_image_id");
+        if (topLevelBackgroundImageId !== undefined) {
+          view.backgroundImageId = yjsValueToJson(topLevelBackgroundImageId) ?? null;
+        } else {
+          view.backgroundImageId = null;
+        }
+      }
+
+      const hasMergedRanges =
+        Object.prototype.hasOwnProperty.call(view, "mergedRanges") ||
+        Object.prototype.hasOwnProperty.call(view, "mergedCells") ||
+        Object.prototype.hasOwnProperty.call(view, "merged_cells");
+      if (!hasMergedRanges) {
+        const topLevelMergedRanges =
+          readYMapOrObject(entry, "mergedRanges") ??
+          readYMapOrObject(entry, "mergedCells") ??
+          readYMapOrObject(entry, "merged_cells");
+        if (topLevelMergedRanges !== undefined) {
+          view.mergedRanges = yjsValueToJson(topLevelMergedRanges) ?? [];
+        } else {
+          view.mergedRanges = [];
+        }
+      } else if (!Object.prototype.hasOwnProperty.call(view, "mergedRanges")) {
+        view.mergedRanges = view.mergedCells ?? view.merged_cells ?? [];
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(view, "drawings")) {
+        const topLevelDrawings = readYMapOrObject(entry, "drawings");
+        if (topLevelDrawings !== undefined) {
+          view.drawings = yjsValueToJson(topLevelDrawings) ?? [];
+        } else {
+          view.drawings = [];
+        }
       }
     }
 
@@ -703,10 +745,14 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
                 key === "view" ||
                 key === "frozenRows" ||
                 key === "frozenCols" ||
-                key === "backgroundImageId" ||
-                key === "background_image_id" ||
-                key === "colWidths" ||
-                key === "rowHeights"
+               key === "backgroundImageId" ||
+               key === "background_image_id" ||
+               key === "colWidths" ||
+                key === "rowHeights" ||
+                key === "mergedRanges" ||
+                key === "mergedCells" ||
+                key === "merged_cells" ||
+                key === "drawings"
               ) {
                 continue;
               }
@@ -715,7 +761,16 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
           }
           entry.set("id", sheetId);
           entry.set("name", meta?.name ?? null);
-          if (meta?.view !== undefined) entry.set("view", structuredClone(meta.view));
+          if (meta?.view !== undefined) {
+            const nextView = structuredClone(meta.view);
+            if (isRecord(nextView)) {
+              // Keep the Yjs document canonical and lightweight: omit empty list fields that the
+              // collaboration schema commonly represents by deleting the key.
+              if (Array.isArray(nextView.mergedRanges) && nextView.mergedRanges.length === 0) delete nextView.mergedRanges;
+              if (Array.isArray(nextView.drawings) && nextView.drawings.length === 0) delete nextView.drawings;
+            }
+            entry.set("view", nextView);
+          }
           // Normalize layered formatting + range-run metadata onto the top-level sheet entry.
           //
           // Collab schema prefers storing these fields as top-level keys so the binder and

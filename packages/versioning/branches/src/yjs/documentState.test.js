@@ -46,7 +46,15 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
         Sheet1: {
           id: "Sheet1",
           name: "Sheet1",
-          view: { frozenRows: 2, frozenCols: 1, backgroundImageId: "bg.png", colWidths: { "0": 120 }, rowHeights: { "1": 40 } },
+          view: {
+            frozenRows: 2,
+            frozenCols: 1,
+            backgroundImageId: "bg.png",
+            colWidths: { "0": 120 },
+            rowHeights: { "1": 40 },
+            mergedRanges: [],
+            drawings: [],
+          },
         },
       },
     },
