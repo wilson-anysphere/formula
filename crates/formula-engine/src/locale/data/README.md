@@ -51,17 +51,22 @@ Missing entries are treated as identity mappings (canonical == localized).
 whenever possible. Hand-maintained or web-scraped translation tables are frequently incomplete, and
 any missing entry will silently fall back to English in the generated TSVs.
 
-In general, prefer to keep the extractor output **verbatim** (one entry per canonical function,
-including identity mappings). That makes the source JSON an explicit snapshot of what Excel reports
-for the full catalog, and avoids accidentally dropping translations for functions that *are*
-localized.
+For readability and cleaner diffs, the committed `sources/*.json` files omit explicit identity
+entries (e.g. `ABS -> ABS`). After generating a source JSON, normalize it in-place with:
+
+```bash
+node scripts/normalize-locale-function-sources.js
+```
+
+Note: after normalization, the JSON will typically contain **fewer entries** than
+`shared/functionCatalog.json`, since identity mappings are omitted.
 
 #### `es-ES` (Spanish) source requirements
 
-`es-ES` must be backed by a **complete Excel-extracted** mapping that covers the engine’s full
-function catalog. Do **not** replace `sources/es-ES.json` with partial online translation tables:
-those commonly omit large parts of Excel’s function surface area, causing many Spanish spellings to
-degrade to canonical (English) names.
+`es-ES` should be backed by a complete Excel-extracted mapping. Do **not** replace
+`sources/es-ES.json` with partial online translation tables: those commonly omit large parts of
+Excel’s function surface area, causing many Spanish spellings to degrade to canonical (English)
+names.
 
 #### Generating `sources/<locale>.json` from a real Excel install (Windows)
 
@@ -113,12 +118,6 @@ Quick verification checklist (especially for `es-ES`):
   - Note: `--check` only verifies that the committed TSVs match what would be generated from the
     committed JSON sources; it does **not** prove that the sources are complete (missing entries are
     silently treated as identity mappings).
-- Verify the `es-ES` source JSON is **complete** (one entry per canonical function name in
-  `shared/functionCatalog.json`):
-
-  ```bash
-  node --input-type=module -e "import fs from 'node:fs'; const cat=JSON.parse(fs.readFileSync('shared/functionCatalog.json','utf8')); const src=JSON.parse(fs.readFileSync('crates/formula-engine/src/locale/data/sources/es-ES.json','utf8')); console.log('es-ES translations:', Object.keys(src.translations).length, '/', cat.functions.length);"
-  ```
 - Spot-check that a few functions known to be localized in Spanish are **not** falling back to
   English in `crates/formula-engine/src/locale/data/es-ES.tsv`, e.g.:
   - `SUM` → `SUMA`
