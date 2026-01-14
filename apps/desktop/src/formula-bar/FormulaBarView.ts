@@ -3185,14 +3185,12 @@ export class FormulaBarView {
         return null;
       };
 
-      const renderSpan = (
-        span: { kind: string; start: number; end: number; className?: string },
-        text: string
-      ): string => {
+      const renderSpan = (span: { start: number; end: number; className?: string } & Record<string, any>, text: string): string => {
+        const kind: string = span.kind ?? span.type ?? "unknown";
         const extraClass = span.className;
         // Whitespace spans don't receive styling and are never hover targets; avoid wrapping them
         // in <span> tags to keep long, formatted formulas lighter to render.
-        if (span.kind === "whitespace" && !extraClass) {
+        if (kind === "whitespace" && !extraClass) {
           return text;
         }
 
@@ -3203,32 +3201,32 @@ export class FormulaBarView {
 
         if (!isFormulaEditing) {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${content}</span>`;
+          return `<span data-kind="${kind}"${classAttr}>${content}</span>`;
         }
 
-        if (span.kind === "error") {
+        if (kind === "error") {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${content}</span>`;
+          return `<span data-kind="${kind}"${classAttr}>${content}</span>`;
         }
 
         // Only `reference` and `identifier` spans can correspond to extracted references
         // (A1 refs / structured refs are tokenized as `reference`, named ranges as `identifier`).
         // Avoid the per-token reference containment checks for everything else.
-        if (span.kind !== "reference" && span.kind !== "identifier") {
+        if (kind !== "reference" && kind !== "identifier") {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${content}</span>`;
+          return `<span data-kind="${kind}"${classAttr}>${content}</span>`;
         }
 
         const containing = findContainingRef(span.start, span.end);
         if (!containing) {
           const classAttr = extraClass ? ` class="${extraClass}"` : "";
-          return `<span data-kind="${span.kind}"${classAttr}>${content}</span>`;
+          return `<span data-kind="${kind}"${classAttr}>${content}</span>`;
         }
 
         const isActive = activeReferenceIndex === containing.index;
         const baseClass = isActive ? "formula-bar-reference formula-bar-reference--active" : "formula-bar-reference";
         const classAttr = extraClass ? ` class="${baseClass} ${extraClass}"` : ` class="${baseClass}"`;
-        return `<span data-kind="${span.kind}" data-ref-index="${containing.index}"${classAttr} style="color: ${containing.color};">${content}</span>`;
+        return `<span data-kind="${kind}" data-ref-index="${containing.index}"${classAttr} style="color: ${containing.color};">${content}</span>`;
       };
 
       if (!ghost) {

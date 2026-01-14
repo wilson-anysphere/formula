@@ -67,6 +67,8 @@ type HighlightSpan = {
   className?: string;
 };
 
+type HighlightSpanLike = HighlightSpan | FormulaToken;
+
 export class FormulaBarModel {
   #activeCell: ActiveCellInfo = { address: "A1", input: "", value: "" };
   #draft: string = "";
@@ -90,7 +92,7 @@ export class FormulaBarModel {
         references: FormulaReference[];
       }
     | null = null;
-  #highlightedSpansCache: HighlightSpan[] | null = null;
+  #highlightedSpansCache: HighlightSpanLike[] | null = null;
   #highlightedSpansCacheDraft: string | null = null;
   #rangeInsertion: { start: number; end: number } | null = null;
   #hoveredReference: RangeAddress | null = null;
@@ -341,14 +343,14 @@ export class FormulaBarModel {
     this.#referenceHighlightsCacheActiveIndex = null;
   }
 
-  highlightedSpans(): HighlightSpan[] {
+  highlightedSpans(): HighlightSpanLike[] {
     if (this.#engineToolingFormula === this.#draft && this.#engineHighlightSpans) {
       return this.#engineHighlightSpans;
     }
     if (this.#highlightedSpansCache && this.#highlightedSpansCacheDraft === this.#draft) {
       return this.#highlightedSpansCache;
     }
-    const tokens = this.#tokensForDraft() as unknown as HighlightSpan[];
+    const tokens = this.#tokensForDraft();
     this.#highlightedSpansCache = tokens;
     this.#highlightedSpansCacheDraft = this.#draft;
     return tokens;
@@ -358,12 +360,6 @@ export class FormulaBarModel {
     const cache = this.#tokenCache;
     if (cache && cache.draft === this.#draft) return cache.tokens;
     const tokens = tokenizeFormula(this.#draft);
-    // `tokenizeFormula` returns `FormulaToken` objects keyed by `type`. For highlight rendering we
-    // also want a `kind` field (matching engine tooling spans) without allocating a parallel span
-    // object per token. Add a lightweight alias property in-place and reuse the same objects.
-    for (const token of tokens) {
-      (token as unknown as { kind?: FormulaTokenType }).kind = token.type;
-    }
     this.#tokenCache = { draft: this.#draft, tokens };
     return tokens;
   }
