@@ -349,11 +349,14 @@ impl<'a> Lexer<'a> {
 }
 
 fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_' || c == '.'
+    // DAX identifiers are Unicode-aware: table/variable/function identifiers can contain
+    // non-ASCII letters (e.g. `Straße`).
+    c.is_alphabetic() || c == '_' || c == '.'
 }
 
 fn is_ident_part(c: char) -> bool {
-    is_ident_start(c) || c.is_ascii_digit()
+    // Allow Unicode digits/letters in identifier bodies.
+    c.is_alphanumeric() || c == '_' || c == '.'
 }
 
 struct Parser<'a> {

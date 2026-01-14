@@ -123,6 +123,15 @@ fn identifiers_are_case_insensitive_for_unicode_names() {
         .evaluate_measure("[TOTAL]", &FilterContext::empty())
         .unwrap();
     assert_eq!(total, Value::from(3.0));
+
+    // Unquoted Unicode identifiers should also be accepted when they match identifier-like rules.
+    // (This aligns with the pivot/model display helpers that render `Straße[Maß]` without quotes.)
+    model.add_measure("Total Unquoted", "SUM(Straße[Maß])")
+        .unwrap();
+    let total_unquoted = model
+        .evaluate_measure("total unquoted", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(total_unquoted, Value::from(3.0));
 }
 
 #[test]
@@ -134,7 +143,7 @@ fn var_names_are_case_insensitive_for_unicode_names() {
     let value = engine
         .evaluate(
             &model,
-            "VAR 'Straße' = 1 RETURN 'STRASSE'",
+            "VAR Straße = 1 RETURN STRASSE",
             &FilterContext::empty(),
             &RowContext::default(),
         )
