@@ -648,6 +648,8 @@ Notes:
 - The password is required at save time because `OpenedWorkbookWithPreservedOle` does not store it.
 - If you want to write a **new encrypted output** workbook (without preserving extra OLE metadata
   streams), use `save_workbook_with_options(.., SaveOptions { password: Some(..), encryption_scheme: ... })`.
+  - Note: encrypted `.xlsb` output currently requires saving a `Workbook::Xlsb` to an `.xlsb` path
+    (Formula does not export arbitrary workbooks *to* `.xlsb`; save as `.xlsx` instead).
 - This path can also re-encrypt and save `.xlsb` workbooks (use an `.xlsb` output extension if you
   want to keep the binary format).
 - Legacy `.xls` `FILEPASS` encryption is not preserved on save.

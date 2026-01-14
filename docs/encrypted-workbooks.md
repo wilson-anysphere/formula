@@ -202,6 +202,8 @@ full mapping table and remediation suggestions.
   - To write a **new encrypted output** workbook, use `save_workbook_with_options(..)` with
     `SaveOptions { password: Some(..), encryption_scheme: SaveEncryptionScheme::Agile | ::Standard }`
     (requires `formula-io/encrypted-workbooks`).
+    - Note: encrypted `.xlsb` output currently requires saving a `Workbook::Xlsb` to an `.xlsb` path
+      (Formula does not export arbitrary workbooks *to* `.xlsb`; save as `.xlsx` instead).
   - For Office-encrypted OOXML inputs, callers that want to preserve encryption should use
     `open_workbook_with_password_and_preserved_ole(..)` and then
     `OpenedWorkbookWithPreservedOle::save_preserving_encryption(..)` (requires
