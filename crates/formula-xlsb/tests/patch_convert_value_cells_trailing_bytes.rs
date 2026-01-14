@@ -312,8 +312,8 @@ fn converting_inline_string_cell_with_trailing_bytes_to_formula_requires_explici
 }
 
 #[test]
-fn converting_inline_string_cell_with_trailing_bytes_and_low_byte_zero_to_formula_requires_explicit_new_rgcb()
-{
+fn converting_inline_string_cell_with_trailing_bytes_and_low_byte_zero_to_formula_requires_explicit_new_rgcb(
+) {
     // Regression: for the "simple" BrtCellSt layout, the byte at offset 12 is the first UTF-16LE
     // byte of the string. When that byte happens to look like a plausible flags byte (e.g. `0x00`
     // for U+0100), we must still treat unexpected trailing bytes as trailing *payload* and require
@@ -357,6 +357,39 @@ fn converting_inline_string_cell_with_trailing_bytes_and_low_byte_zero_to_formul
             .expect("patch_sheet_bin_streaming");
     assert!(changed);
     assert_eq!(patched_stream, patched_in_mem);
+}
+
+#[test]
+fn converting_inline_string_cell_with_trailing_bytes_and_low_byte_one_to_formula_requires_explicit_new_rgcb(
+) {
+    // Like `...low_byte_zero...`, but where the first UTF-16LE byte is `0x01` (which also overlaps
+    // with the `FLAG_RICH` bit in the flagged layout).
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_inline_string(0, 0, "ā"); // U+0101 => UTF-16LE starts with 0x01
+    let sheet_bin = read_sheet1_bin_from_fixture(&builder.build_bytes());
+    let tweaked = append_trailing_bytes_to_cell_payload(&sheet_bin, 0, 0, CELL_ST, &[0xAB]);
+
+    let rgce = encode_rgce("=1+1").expect("encode formula");
+    let edits_missing_rgcb = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(2.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(rgce.clone()),
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let err = patch_sheet_bin(&tweaked, &edits_missing_rgcb)
+        .expect_err("expected InvalidInput when converting CELL_ST record with trailing bytes");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
+
+    let mut out = Vec::new();
+    let err = patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut out, &edits_missing_rgcb)
+        .expect_err("expected InvalidInput when streaming convert CELL_ST record with trailing bytes");
+    assert_invalid_input_contains(err, "provide CellEdit.new_rgcb");
 }
 
 #[test]
