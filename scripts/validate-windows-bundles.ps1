@@ -75,6 +75,20 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+$runningOnWindows = $false
+try {
+  $runningOnWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::Windows
+  )
+} catch {
+  # Best-effort fallback for older PowerShell/.NET environments.
+  $runningOnWindows = ($env:OS -eq "Windows_NT")
+}
+
+if (-not $runningOnWindows) {
+  throw "scripts/validate-windows-bundles.ps1 must be run on Windows (requires signtool.exe and Windows Installer COM APIs)."
+}
+
 function Get-RepoRoot {
   # scripts/validate-windows-bundles.ps1 lives in <repoRoot>/scripts/
   $root = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
