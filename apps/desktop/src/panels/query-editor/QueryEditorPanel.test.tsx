@@ -12,6 +12,10 @@ import { QueryEditorPanel } from "./QueryEditorPanel";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+async function flushMicrotasks(count = 8): Promise<void> {
+  for (let i = 0; i < count; i++) await Promise.resolve();
+}
+
 function baseQuery(steps: QueryStep[]): Query {
   return { id: "q1", name: "Query 1", source: { type: "range", range: { values: [] } }, steps };
 }
@@ -62,11 +66,13 @@ describe("QueryEditorPanel", () => {
 
     await act(async () => {
       root?.render(<QueryEditorPanel query={baseQuery(steps)} engine={engine} onAiSuggestNextSteps={onAiSuggestNextSteps} />);
+      await flushMicrotasks(10);
     });
 
     // Select the first step in the list.
     await act(async () => {
       findButtonByText(host!, "Step 1").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushMicrotasks(10);
     });
 
     const input = host!.querySelector("input.query-editor-add-step__ai-input") as HTMLInputElement;
@@ -85,4 +91,3 @@ describe("QueryEditorPanel", () => {
     expect(ctx.query.steps[0]?.id).toBe("s1");
   });
 });
-
