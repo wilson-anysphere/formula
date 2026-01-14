@@ -395,6 +395,14 @@ export class EncryptedRangeManager {
           allLocal = false;
           break;
         }
+        // Canonical entries must include a stable `id` field. Older/buggy clients may
+        // omit it even when using a local Y.Map, so treat missing ids as non-canonical
+        // and normalize below.
+        const id = coerceString(map.get("id"))?.trim();
+        if (!id) {
+          allLocal = false;
+          break;
+        }
       }
       if (allLocal) return;
     }
