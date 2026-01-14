@@ -2,8 +2,8 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 
 use crate::crypto::{
-    aes_cbc_decrypt, aes_ecb_decrypt, aes_ecb_encrypt, rc4_xor_in_place, HashAlgorithm,
-    StandardKeyDerivation, StandardKeyDeriver,
+    aes_cbc_decrypt, aes_cbc_decrypt_in_place, aes_ecb_decrypt, aes_ecb_decrypt_in_place,
+    aes_ecb_encrypt, rc4_xor_in_place, HashAlgorithm, StandardKeyDerivation, StandardKeyDeriver,
 };
 use crate::error::OfficeCryptoError;
 use crate::util::{
@@ -657,12 +657,19 @@ pub(crate) fn decrypt_standard_encrypted_package(
                 )));
             }
             let to_decrypt = &ciphertext[..padded_len];
-            let mut plain = match mode {
-                StandardAesCipherMode::Ecb => aes_ecb_decrypt(key0.as_slice(), to_decrypt)?,
-                StandardAesCipherMode::Cbc { iv } => {
-                    aes_cbc_decrypt(key0.as_slice(), &iv, to_decrypt)?
+            let mut plain = Vec::new();
+            plain.try_reserve_exact(padded_len).map_err(|source| {
+                OfficeCryptoError::EncryptedPackageAllocationFailed { total_size, source }
+            })?;
+            plain.extend_from_slice(to_decrypt);
+            match mode {
+                StandardAesCipherMode::Ecb => {
+                    aes_ecb_decrypt_in_place(key0.as_slice(), &mut plain)?;
                 }
-            };
+                StandardAesCipherMode::Cbc { iv } => {
+                    aes_cbc_decrypt_in_place(key0.as_slice(), &iv, &mut plain)?;
+                }
+            }
             if expected_len > plain.len() {
                 return Err(OfficeCryptoError::InvalidFormat(format!(
                     "decrypted package length {} shorter than expected {}",

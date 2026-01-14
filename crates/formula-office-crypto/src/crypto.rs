@@ -304,25 +304,34 @@ pub(crate) fn aes_cbc_decrypt(
     iv: &[u8],
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, OfficeCryptoError> {
+    let mut buf = ciphertext.to_vec();
+    aes_cbc_decrypt_in_place(key, iv, &mut buf)?;
+    Ok(buf)
+}
+
+pub(crate) fn aes_cbc_decrypt_in_place(
+    key: &[u8],
+    iv: &[u8],
+    buf: &mut [u8],
+) -> Result<(), OfficeCryptoError> {
     if iv.len() != 16 {
         return Err(OfficeCryptoError::InvalidFormat(format!(
             "AES-CBC IV must be 16 bytes (got {})",
             iv.len()
         )));
     }
-    if ciphertext.len() % 16 != 0 {
+    if buf.len() % 16 != 0 {
         return Err(OfficeCryptoError::InvalidFormat(format!(
             "AES-CBC ciphertext length must be multiple of 16 (got {})",
-            ciphertext.len()
+            buf.len()
         )));
     }
-    let mut buf = ciphertext.to_vec();
     match key.len() {
         16 => {
             let dec = Decryptor::<Aes128>::new_from_slices(key, iv).map_err(|_| {
                 OfficeCryptoError::InvalidFormat("invalid AES-128 key/iv".to_string())
             })?;
-            dec.decrypt_padded_mut::<NoPadding>(&mut buf).map_err(|_| {
+            dec.decrypt_padded_mut::<NoPadding>(buf).map_err(|_| {
                 OfficeCryptoError::InvalidFormat("AES-CBC decrypt failed".to_string())
             })?;
         }
@@ -330,7 +339,7 @@ pub(crate) fn aes_cbc_decrypt(
             let dec = Decryptor::<Aes192>::new_from_slices(key, iv).map_err(|_| {
                 OfficeCryptoError::InvalidFormat("invalid AES-192 key/iv".to_string())
             })?;
-            dec.decrypt_padded_mut::<NoPadding>(&mut buf).map_err(|_| {
+            dec.decrypt_padded_mut::<NoPadding>(buf).map_err(|_| {
                 OfficeCryptoError::InvalidFormat("AES-CBC decrypt failed".to_string())
             })?;
         }
@@ -338,7 +347,7 @@ pub(crate) fn aes_cbc_decrypt(
             let dec = Decryptor::<Aes256>::new_from_slices(key, iv).map_err(|_| {
                 OfficeCryptoError::InvalidFormat("invalid AES-256 key/iv".to_string())
             })?;
-            dec.decrypt_padded_mut::<NoPadding>(&mut buf).map_err(|_| {
+            dec.decrypt_padded_mut::<NoPadding>(buf).map_err(|_| {
                 OfficeCryptoError::InvalidFormat("AES-CBC decrypt failed".to_string())
             })?;
         }
@@ -348,7 +357,7 @@ pub(crate) fn aes_cbc_decrypt(
             )))
         }
     }
-    Ok(buf)
+    Ok(())
 }
 
 pub(crate) fn aes_ecb_decrypt_in_place(
