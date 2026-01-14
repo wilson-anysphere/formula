@@ -1520,6 +1520,12 @@ export class SpreadsheetApp {
         bySheetId: Map<string, DrawingObject[]>;
       }
     | null = null;
+  private canvasChartDrawingObjectsOverride:
+    | {
+        sheetId: string;
+        objects: DrawingObject[];
+      }
+    | null = null;
   private canvasChartCombinedDrawingObjectsCache:
     | {
         sheetId: string;
@@ -2978,6 +2984,25 @@ export class SpreadsheetApp {
         let selectedCanvasChartDrawingId: number | null = null;
         let selectedCanvasChartIndex: number | null = null;
         let lastCanvasChartAnchor: DrawingObject["anchor"] | null = null;
+        const getSelectedCanvasChartObject = (list: DrawingObject[]): DrawingObject | null => {
+          const targetId = selectedCanvasChartDrawingId;
+          if (targetId == null) return null;
+          let idx = selectedCanvasChartIndex;
+          const hasCachedIndex =
+            typeof idx === "number" && idx >= 0 && idx < list.length && list[idx]?.id === targetId;
+          if (!hasCachedIndex) {
+            idx = -1;
+            for (let i = 0; i < list.length; i += 1) {
+              if (list[i]!.id === targetId) {
+                idx = i;
+                break;
+              }
+            }
+            selectedCanvasChartIndex = idx >= 0 ? idx : null;
+          }
+          if (idx == null || idx < 0) return null;
+          return list[idx] ?? null;
+        };
 
         this.chartDrawingInteraction = new DrawingInteractionController(
           this.root,
@@ -3007,29 +3032,23 @@ export class SpreadsheetApp {
               );
             },
             setObjects: (next) => {
-              const targetId = selectedCanvasChartDrawingId;
-              if (targetId == null) return;
-
-              let idx = selectedCanvasChartIndex;
-              const hasCachedIndex =
-                typeof idx === "number" && idx >= 0 && idx < next.length && next[idx]?.id === targetId;
-              if (!hasCachedIndex) {
-                idx = -1;
-                for (let i = 0; i < next.length; i += 1) {
-                  if (next[i]!.id === targetId) {
-                    idx = i;
-                    break;
-                  }
-                }
-                selectedCanvasChartIndex = idx >= 0 ? idx : null;
-              }
-              if (idx == null || idx < 0) return;
-              const obj = next[idx];
+              const obj = getSelectedCanvasChartObject(next);
               if (!obj) return;
               if (lastCanvasChartAnchor && anchorsEqual(lastCanvasChartAnchor, obj.anchor)) return;
               const chartId = obj.kind.type === "chart" ? obj.kind.chartId : undefined;
               if (typeof chartId !== "string" || chartId.trim() === "") return;
               lastCanvasChartAnchor = obj.anchor;
+              // Cache the in-flight chart drawing objects during the gesture so render/hit-test paths can
+              // reuse object identities from the DrawingInteractionController (avoids rebuilding fresh
+              // chart drawing objects from `ChartStore` on every pointermove).
+              this.canvasChartDrawingObjectsOverride = { sheetId: this.sheetId, objects: next };
+              this.scheduleDrawingsRender("chart:gesture");
+            },
+            commitObjects: (next) => {
+              const obj = getSelectedCanvasChartObject(next);
+              if (!obj) return;
+              const chartId = obj.kind.type === "chart" ? obj.kind.chartId : undefined;
+              if (typeof chartId !== "string" || chartId.trim() === "") return;
               this.chartStore.updateChartAnchor(chartId, drawingAnchorToChartAnchor(obj.anchor));
             },
             beginBatch: () => {
@@ -3039,10 +3058,12 @@ export class SpreadsheetApp {
             endBatch: () => {
               this.chartDrawingGestureActive = false;
               lastCanvasChartAnchor = null;
+              this.canvasChartDrawingObjectsOverride = null;
             },
             cancelBatch: () => {
               this.chartDrawingGestureActive = false;
               lastCanvasChartAnchor = null;
+              this.canvasChartDrawingObjectsOverride = null;
             },
             onPointerDownHit: () => {
               if (this.editor.isOpen()) {
@@ -14835,6 +14856,10 @@ export class SpreadsheetApp {
   private listCanvasChartDrawingObjectsForSheet(sheetId: string): DrawingObject[] {
     const id = String(sheetId ?? "");
     if (!id) return EMPTY_DRAWING_OBJECTS;
+    const override = this.canvasChartDrawingObjectsOverride;
+    if (override && override.sheetId === id) {
+      return override.objects;
+    }
     const charts = this.chartStore.listCharts();
     const cached = this.canvasChartDrawingObjectsCache;
     if (cached && cached.source === charts) {
