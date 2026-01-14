@@ -16,7 +16,10 @@ fn leftb_rightb_truncate_at_dbcs_character_boundaries() {
 
     // Under cp932, "漢" is a 2-byte character. When asked to return a range that would split a
     // DBCS code unit, the engine truncates to avoid returning partial characters.
-    assert_eq!(eval_cp932(&mut engine, r#"=LEFTB("漢",1)"#), Value::Text(String::new()));
+    assert_eq!(
+        eval_cp932(&mut engine, r#"=LEFTB("漢",1)"#),
+        Value::Text(String::new())
+    );
     assert_eq!(
         eval_cp932(&mut engine, r#"=LEFTB("漢",2)"#),
         Value::Text("漢".to_string())
@@ -89,4 +92,3 @@ fn findb_rounds_start_offset_forward_when_it_lands_mid_dbcs_character() {
         Value::Number(4.0)
     );
 }
-

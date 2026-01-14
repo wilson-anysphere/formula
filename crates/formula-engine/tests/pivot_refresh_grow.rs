@@ -218,4 +218,3 @@ fn pivot_refresh_does_not_clear_cells_outside_old_or_new_output_when_shape_chang
         Value::Text("Keep".to_string())
     );
 }
-

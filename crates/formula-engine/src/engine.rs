@@ -11284,7 +11284,13 @@ impl crate::eval::ValueResolver for Snapshot {
         //
         // When a style does not specify a number format (`number_format=None`), it is treated as
         // "inherit" so lower-precedence layers can contribute the number format.
-        for style_id in [cell_style_id, run_style_id, row_style_id, col_style_id, sheet_style_id] {
+        for style_id in [
+            cell_style_id,
+            run_style_id,
+            row_style_id,
+            col_style_id,
+            sheet_style_id,
+        ] {
             if let Some(fmt) = self
                 .styles
                 .get(style_id)

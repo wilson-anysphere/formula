@@ -145,4 +145,3 @@ fn info_origin_legacy_per_sheet_overrides_workbook_level_fallback() {
         Value::Text("$D$6".to_string())
     );
 }
-

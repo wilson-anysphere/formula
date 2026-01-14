@@ -1261,11 +1261,7 @@ fn cell_format_color_and_parentheses_reflect_cell_number_format_override() {
 
     let mut engine = Engine::new();
     engine
-        .set_cell_number_format(
-            "Sheet1",
-            "A1",
-            Some("__builtin_numFmtId:12".to_string()),
-        )
+        .set_cell_number_format("Sheet1", "A1", Some("__builtin_numFmtId:12".to_string()))
         .expect("set number format");
     engine
         .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
@@ -1297,11 +1293,7 @@ fn cell_format_recalculates_when_cell_number_format_changes() {
 
     let mut engine = Engine::new();
     engine
-        .set_cell_number_format(
-            "Sheet1",
-            "A1",
-            Some("__builtin_numFmtId:12".to_string()),
-        )
+        .set_cell_number_format("Sheet1", "A1", Some("__builtin_numFmtId:12".to_string()))
         .expect("set number format");
     engine
         .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")

@@ -10,10 +10,14 @@ fn setup_rng_sheet(engine: &mut Engine) {
 
     // Nested volatile calls within a single cell evaluation. The engine should treat each call as
     // a distinct deterministic draw, scoped to the cell evaluation.
-    engine.set_cell_formula("Sheet1", "A3", "=RAND()+RAND()").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=RAND()+RAND()")
+        .unwrap();
     // Stronger check for "distinct draws": if RAND() were incorrectly cached within a single cell
     // evaluation, this would always be zero.
-    engine.set_cell_formula("Sheet1", "A5", "=RAND()-RAND()").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", "=RAND()-RAND()")
+        .unwrap();
 
     // LET should evaluate its bound expression exactly once and reuse the value for each reference
     // of the bound name (Excel semantics).
@@ -32,7 +36,9 @@ fn setup_rng_sheet(engine: &mut Engine) {
         .set_cell_formula("Sheet1", "C1", "=RANDARRAY(2,2,1,1000000,TRUE)")
         .unwrap();
     // Force a consumer of the spilled range to ensure spill scheduling/dependencies are exercised.
-    engine.set_cell_formula("Sheet1", "E1", "=SUM(C1#)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "E1", "=SUM(C1#)")
+        .unwrap();
 }
 
 fn assert_rand_unit_interval(value: &Value, label: &str) {
@@ -50,10 +56,7 @@ fn assert_rand_unit_interval(value: &Value, label: &str) {
 fn assert_randbetween_bounds(value: &Value, label: &str, low: f64, high: f64) {
     match value {
         Value::Number(n) => {
-            assert!(
-                n.is_finite(),
-                "expected {label} to be finite, got {n}"
-            );
+            assert!(n.is_finite(), "expected {label} to be finite, got {n}");
             assert!(
                 (n.fract()).abs() < 1e-9,
                 "expected {label} to be an integer, got {n}"
@@ -70,10 +73,7 @@ fn assert_randbetween_bounds(value: &Value, label: &str, low: f64, high: f64) {
 fn assert_rand_sum_bounds(value: &Value, label: &str) {
     match value {
         Value::Number(n) => {
-            assert!(
-                n.is_finite(),
-                "expected {label} to be finite, got {n}"
-            );
+            assert!(n.is_finite(), "expected {label} to be finite, got {n}");
             assert!(
                 *n >= 0.0 && *n < 2.0,
                 "expected {label} to be in [0,2), got {n}"
@@ -85,10 +85,12 @@ fn assert_rand_sum_bounds(value: &Value, label: &str) {
 
 fn snapshot(engine: &Engine) -> Vec<Value> {
     // Include the spill cells explicitly so equality checks catch spill scheduling differences.
-    ["A1", "A2", "A3", "A4", "A5", "B1", "B2", "C1", "D1", "C2", "D2", "E1"]
-        .into_iter()
-        .map(|addr| engine.get_cell_value("Sheet1", addr))
-        .collect()
+    [
+        "A1", "A2", "A3", "A4", "A5", "B1", "B2", "C1", "D1", "C2", "D2", "E1",
+    ]
+    .into_iter()
+    .map(|addr| engine.get_cell_value("Sheet1", addr))
+    .collect()
 }
 
 #[test]
@@ -114,9 +116,18 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
     // Multiple RAND() calls within a single cell evaluation should produce distinct draws.
     match single.get_cell_value("Sheet1", "A5") {
         Value::Number(n) => {
-            assert!(n.is_finite(), "expected RAND()-RAND() to be finite, got {n}");
-            assert!(n > -1.0 && n < 1.0, "expected RAND()-RAND() in (-1,1), got {n}");
-            assert!(n != 0.0, "expected RAND()-RAND() to be non-zero (distinct draws)");
+            assert!(
+                n.is_finite(),
+                "expected RAND()-RAND() to be finite, got {n}"
+            );
+            assert!(
+                n > -1.0 && n < 1.0,
+                "expected RAND()-RAND() in (-1,1), got {n}"
+            );
+            assert!(
+                n != 0.0,
+                "expected RAND()-RAND() to be non-zero (distinct draws)"
+            );
         }
         other => panic!("expected RAND()-RAND() to be a number, got {other:?}"),
     }
@@ -211,8 +222,14 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
         }
     }
 
-    assert!(changed_a1, "expected RAND() to change across recalculations");
-    assert!(changed_a2, "expected RANDBETWEEN() to change across recalculations");
+    assert!(
+        changed_a1,
+        "expected RAND() to change across recalculations"
+    );
+    assert!(
+        changed_a2,
+        "expected RANDBETWEEN() to change across recalculations"
+    );
     assert!(
         changed_a3,
         "expected RAND()+RAND() to change across recalculations"

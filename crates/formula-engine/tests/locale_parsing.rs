@@ -852,10 +852,7 @@ fn canonicalize_and_localize_additional_function_translations_for_es_es() {
     assert_roundtrip("=DESREF(A1;1;1)", "=OFFSET(A1,1,1)");
     assert_roundtrip("=INDIRECTO(\"A1\")", "=INDIRECT(\"A1\")");
     assert_roundtrip("=HOY()", "=TODAY()");
-    assert_roundtrip(
-        "=FECHANUMERO(\"2020-01-01\")",
-        "=DATEVALUE(\"2020-01-01\")",
-    );
+    assert_roundtrip("=FECHANUMERO(\"2020-01-01\")", "=DATEVALUE(\"2020-01-01\")");
     assert_roundtrip("=HORANUMERO(\"1:00\")", "=TIMEVALUE(\"1:00\")");
     assert_roundtrip("=EXACTO(\"a\";\"b\")", "=EXACT(\"a\",\"b\")");
     assert_roundtrip("=IMAGEN(\"x\")", "=IMAGE(\"x\")");

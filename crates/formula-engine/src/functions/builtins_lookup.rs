@@ -6,7 +6,9 @@ use crate::functions::{
     eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference, SheetId,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::pivot::{AggregationType as PivotAggregationType, PivotKeyPart, PivotValue as PivotEngineValue};
+use crate::pivot::{
+    AggregationType as PivotAggregationType, PivotKeyPart, PivotValue as PivotEngineValue,
+};
 use crate::value::{casefold, Array, ErrorKind, Value};
 use chrono::Datelike;
 use std::borrow::Cow;
