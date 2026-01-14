@@ -105,7 +105,7 @@ describe("AddStepMenu", () => {
   });
 
   it("constructs a minimally-valid operation for menu selections", async () => {
-    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const preview = new DataTable([{ name: "  Region  ", type: "string" }], []);
     const onAddStep = vi.fn();
 
     await act(async () => {
@@ -132,7 +132,7 @@ describe("AddStepMenu", () => {
     const query: Query = {
       ...baseQuery(),
       steps: [
-        { id: "s1", name: "Added Custom", operation: { type: "addColumn", name: "Custom", formula: "0" } },
+        { id: "s1", name: "Added Custom", operation: { type: "addColumn", name: "  Custom  ", formula: "0" } },
       ],
     };
     const onAddStep = vi.fn();

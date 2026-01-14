@@ -37,7 +37,13 @@ export function AddStepMenu(props: {
   const locale = getLocale();
 
   const schema = props.aiContext.preview?.columns ?? [];
-  const columnNames = useMemo(() => schema.map((col) => col.name).filter((name) => name.trim().length > 0), [schema]);
+  const columnNames = useMemo(
+    () =>
+      schema
+        .map((col) => String(col?.name ?? "").trim())
+        .filter((name) => name.length > 0),
+    [schema],
+  );
   const schemaReady = columnNames.length > 0;
   const firstColumnName = columnNames[0] ?? "";
   const secondColumnName = columnNames[1] ?? firstColumnName;
@@ -73,23 +79,32 @@ export function AddStepMenu(props: {
     const usedColumnNames = new Set(columnNames);
     for (const step of props.aiContext.query.steps) {
       const op = step.operation;
-      if (op.type === "addColumn" && typeof op.name === "string" && op.name.trim()) {
-        usedColumnNames.add(op.name);
+      if (op.type === "addColumn" && typeof op.name === "string") {
+        const trimmed = op.name.trim();
+        if (trimmed) usedColumnNames.add(trimmed);
       }
-      if (op.type === "renameColumn" && typeof op.newName === "string" && op.newName.trim()) {
-        usedColumnNames.add(op.newName);
+      if (op.type === "renameColumn" && typeof op.newName === "string") {
+        const trimmed = op.newName.trim();
+        if (trimmed) usedColumnNames.add(trimmed);
       }
       if (op.type === "unpivot") {
-        if (typeof op.nameColumn === "string" && op.nameColumn.trim()) usedColumnNames.add(op.nameColumn);
-        if (typeof op.valueColumn === "string" && op.valueColumn.trim()) usedColumnNames.add(op.valueColumn);
+        const nameColumn = typeof op.nameColumn === "string" ? op.nameColumn.trim() : "";
+        const valueColumn = typeof op.valueColumn === "string" ? op.valueColumn.trim() : "";
+        if (nameColumn) usedColumnNames.add(nameColumn);
+        if (valueColumn) usedColumnNames.add(valueColumn);
       }
       if (op.type === "groupBy" && Array.isArray(op.aggregations)) {
         for (const agg of op.aggregations) {
           const name =
             typeof agg?.as === "string" && agg.as.trim()
               ? agg.as.trim()
-              : typeof agg?.op === "string" && typeof agg?.column === "string" && agg.column.trim()
-                ? `${agg.op} of ${agg.column}`
+              : typeof agg?.op === "string" && typeof agg?.column === "string"
+                ? (() => {
+                    const opName = agg.op.trim();
+                    const column = agg.column.trim();
+                    if (!opName || !column) return null;
+                    return `${opName} of ${column}`;
+                  })()
                 : null;
           if (name) usedColumnNames.add(name);
         }
