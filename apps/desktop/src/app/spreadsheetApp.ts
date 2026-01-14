@@ -2690,6 +2690,21 @@ export class SpreadsheetApp {
             });
           }
 
+          for (const sheet of this.searchWorkbook.sheets) {
+            const id = typeof (sheet as any)?.sheetId === "string" ? String((sheet as any).sheetId) : "";
+            const name = typeof (sheet as any)?.name === "string" ? String((sheet as any).name).trim() : "";
+            if (!id || !name) continue;
+            const formatted = formatSheetNameForA1(name);
+            const prefix = formatted ? `${formatted}!` : "";
+            push({
+              kind: "sheet",
+              key: `sheet:${id}`,
+              label: name,
+              reference: `${prefix}A1`,
+              description: `${prefix}A1`,
+            });
+          }
+
           return items;
         },
       };
