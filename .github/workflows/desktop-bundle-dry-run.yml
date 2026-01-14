@@ -1,5 +1,10 @@
 name: Desktop Release (dry run)
 
+# NOTE: Third-party GitHub Actions are pinned to immutable commit SHAs for
+# supply-chain hardening. To update, pick the desired upstream tag (same major
+# version), resolve it to a commit with `git ls-remote <repo> <tag> <tag>^{}`,
+# then replace the SHA below and update the trailing comment.
+
 on:
   workflow_dispatch:
     inputs:
@@ -14,54 +19,64 @@ on:
         default: false
         type: boolean
 
-# NOTE: This workflow is a lightweight packaging smoke test and does **not** exactly mirror the
-# tagged Desktop Release workflow (`.github/workflows/release.yml`), which builds the full multi-arch
-# release matrix and performs stricter validations.
-#
-# For a full multi-arch dry-run (without touching GitHub Releases), run the **Desktop Release**
-# workflow via workflow_dispatch with `upload=false`.
-#
-# This workflow still provides value as a quick “does bundling work on default *-latest runners”
-# check, and remains fork-friendly.
+# This workflow builds the same desktop bundles as the release pipeline, but:
+# - does NOT create/update a GitHub Release
+# - uploads bundles to Actions artifacts for inspection
 permissions:
   contents: read
 
 env:
-  # Keep dry-run desktop bundles on the same Node.js major as CI/release workflows
-  # to avoid subtle differences in generated assets.
+  # Keep release builds on the same Node.js major as CI (see ci.yml) to avoid
+  # "works in CI, breaks in release" drift.
   NODE_VERSION: 22
-  # Pinned to match the tagged release workflow (release.yml) so dry-run builds
-  # don't depend on "latest wasm-pack" from crates.io.
+  # Pin the pnpm patch version for deterministic builds.
+  # Keep this in sync with the root package.json `packageManager` field.
+  PNPM_VERSION: 9.0.0
+  # Pin wasm-pack for reproducible bundling.
   WASM_PACK_VERSION: 0.13.1
-  # Pin the Tauri CLI (`cargo tauri`) version so this workflow can't drift from the
-  # repo's pinned Tauri crates (see `.github/workflows/release.yml`).
+  # Pin the Tauri CLI (`cargo tauri`) version used by bundling.
   TAURI_CLI_VERSION: "2.9.5"
 
 jobs:
   conflict-marker-guard:
-    name: "Guard: no merge conflict markers"
-    runs-on: ubuntu-latest
+    name: "Guard: repo sanity checks"
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ inputs.ref || github.ref }}
+
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
+
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         run: bash scripts/ci/check-rust-toolchain-pins.sh
+
+      - name: "Guard: Node version pins match CI workflow"
+        run: bash scripts/ci/check-node-version-pins.sh
+
+      - name: "Guard: pnpm version pins match package.json + CI workflow"
+        run: bash scripts/ci/check-pnpm-version-pins.sh
+
+      - name: "Guard: wasm-pack version pins match CI workflow"
+        run: bash scripts/ci/check-wasm-pack-version-pins.sh
+
+      - name: "Guard: Tauri CLI version pins match CI workflow"
+        run: bash scripts/ci/check-tauri-cli-version-pins.sh
 
   preflight:
     name: Preflight validations
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ inputs.ref || github.ref }}
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -69,7 +84,6 @@ jobs:
         run: node scripts/ci/check-tauri-cli-version.mjs
 
       # Optional: only runs when a tag-like ref is explicitly requested.
-      # This keeps dry runs usable from branches while still allowing "build this tag" validation.
       - name: Check desktop version matches tag (optional)
         if: ${{ inputs.ref != '' && (startsWith(inputs.ref, 'v') || startsWith(inputs.ref, 'refs/tags/v')) }}
         run: node scripts/check-desktop-version.mjs "${{ inputs.ref }}"
@@ -77,41 +91,129 @@ jobs:
       - name: Validate Tauri updater config
         run: node scripts/check-updater-config.mjs
 
+      - name: Validate Windows WebView2 installer configuration
+        run: node scripts/ci/check-webview2-install-mode.mjs
+
+      - name: Validate Windows Authenticode timestamp URL (HTTPS)
+        run: node scripts/ci/check-windows-timestamp-url.mjs
+
+      - name: Validate Windows downgrade / rollback support (allowDowngrades)
+        run: node scripts/ci/check-windows-allow-downgrades.mjs
+
       - name: Validate Tauri updater signing secrets (optional)
-        # Only required when the user explicitly opts into signing (uses repository secrets).
-        if: ${{ inputs.enableSigning }}
+        if: inputs.enableSigning == 'true'
         run: node scripts/check-updater-signing-secrets.mjs
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
   build:
-    name: Build (${{ matrix.platform }})
+    name: Build (${{ matrix.label }})
     needs: preflight
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-24.04, windows-latest]
+        include:
+          - platform: macos-14
+            label: macos-14 (universal)
+            cache_target: universal-apple-darwin
+            cache_features: desktop
+            rust_target: ""
+            tauri_args: "--target universal-apple-darwin"
+          - platform: ubuntu-24.04
+            label: ubuntu-24.04 (x64)
+            cache_target: x86_64-unknown-linux-gnu
+            cache_features: desktop
+            rust_target: ""
+            tauri_args: "--bundles appimage,deb,rpm"
+          - platform: ubuntu-24.04-arm64
+            label: ubuntu-24.04 (arm64)
+            cache_target: aarch64-unknown-linux-gnu
+            cache_features: desktop
+            rust_target: ""
+            tauri_args: "--bundles appimage,deb,rpm"
+          - platform: windows-2022
+            label: windows-2022 (x64)
+            cache_target: x86_64-pc-windows-msvc
+            cache_features: desktop
+            rust_target: x86_64-pc-windows-msvc
+            tauri_args: "--target x86_64-pc-windows-msvc --bundles msi,nsis"
+          - platform: windows-2022
+            label: windows-2022 (arm64)
+            cache_target: aarch64-pc-windows-msvc
+            cache_features: desktop
+            rust_target: aarch64-pc-windows-msvc
+            tauri_args: "--target aarch64-pc-windows-msvc --bundles msi,nsis"
 
     runs-on: ${{ matrix.platform }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.ref || github.ref }}
 
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
+      # Ensure all Cargo builds (including `cargo tauri build`) emit artifacts under the
+      # expected path `apps/desktop/src-tauri/target/**`. This keeps validation deterministic.
+      - name: Set CARGO_TARGET_DIR for desktop builds (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $targetDir = Join-Path $env:GITHUB_WORKSPACE 'apps/desktop/src-tauri/target'
+          "CARGO_TARGET_DIR=$targetDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Set CARGO_TARGET_DIR for desktop builds (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/apps/desktop/src-tauri/target" >> "$GITHUB_ENV"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
         with:
-          # Pin pnpm patch version for deterministic installs (keep in sync with package.json).
-          version: 9.0.0
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Validate macOS entitlements (hardened runtime)
+        if: runner.os == 'macOS'
+        run: node scripts/check-macos-entitlements.mjs
+
+      # Code signing is optional and frequently unavailable in forks/dry-runs (no repo secrets).
+      # When signing is disabled, patch `tauri.conf.json` so unsigned bundles can still be built.
+      - name: Prepare optional Tauri signing config (macOS/Windows, signing disabled)
+        if: inputs.enableSigning != 'true'
+        run: node scripts/ci/prepare-tauri-signing-config.mjs
+        env:
+          FORMULA_REQUIRE_CODESIGN: "0"
+
+      - name: Prepare optional Tauri signing config (macOS/Windows, signing enabled)
+        if: inputs.enableSigning == 'true'
+        run: node scripts/ci/prepare-tauri-signing-config.mjs
+        env:
+          # Optional: set as a GitHub Actions "Variable" to enforce platform code signing.
+          # - FORMULA_REQUIRE_CODESIGN=1 to fail when required signing secrets are missing
+          FORMULA_REQUIRE_CODESIGN: ${{ vars.FORMULA_REQUIRE_CODESIGN }}
+
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+          # Optional: Tauri updater signing secrets. Forks/dry-runs often do not configure these,
+          # so the helper only exports them to subsequent steps when non-empty.
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
@@ -119,42 +221,272 @@ jobs:
       - name: Install Rust targets (WASM)
         run: rustup target add wasm32-unknown-unknown
 
-      - name: Install Rust targets (macOS universal)
-        if: matrix.platform == 'macos-latest'
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Install macOS Rust targets (universal build)
+        if: runner.os == 'macOS'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
 
-      - name: Install Rust targets (Windows arm64)
-        if: matrix.platform == 'windows-latest'
-        run: rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+      - name: Install Rust target (${{ matrix.rust_target }})
+        if: matrix.rust_target != ''
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Ensure MSVC ARM64 build tools are installed (Windows ARM64)
+        if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (!(Test-Path $vswhere)) {
+            throw "vswhere not found at $vswhere (expected on GitHub-hosted Windows runners)."
+          }
+          $installPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$installPath) {
+            throw "Failed to locate a Visual Studio installation via vswhere."
+          }
+          Write-Host "Visual Studio install path: $installPath"
+          $msvcRoot = Join-Path $installPath "VC\Tools\MSVC"
+          $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (!$msvcVersionDir) {
+            throw "MSVC toolset directory not found under $msvcRoot"
+          }
+          $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
+          $arm64BinDir = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64"
+          $arm64Cl = Join-Path $arm64BinDir "cl.exe"
+          $arm64LinkExe = Join-Path $arm64BinDir "link.exe"
+          $hasArm64Toolchain = (Test-Path $arm64LibDir) -and (Test-Path $arm64Cl) -and (Test-Path $arm64LinkExe)
+
+          if (-not $hasArm64Toolchain) {
+            Write-Host "MSVC ARM64 toolchain not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+            $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+            if (!(Test-Path $vsInstaller)) {
+              throw "Visual Studio installer not found at $vsInstaller"
+            }
+            & $vsInstaller modify --installPath $installPath --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended --passive --norestart
+            $exitCode = $LASTEXITCODE
+            # 3010 is a common "success, reboot required" code for Windows installers.
+            if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+              throw "vs_installer.exe failed with exit code $exitCode while installing MSVC ARM64 components."
+            }
+
+            $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+            $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
+            $arm64BinDir = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64"
+            $arm64Cl = Join-Path $arm64BinDir "cl.exe"
+            $arm64LinkExe = Join-Path $arm64BinDir "link.exe"
+          }
+
+          if (!(Test-Path $arm64LibDir) -or !(Test-Path $arm64Cl) -or !(Test-Path $arm64LinkExe)) {
+            throw "MSVC ARM64 build tools were not found. Expected:`n  - $arm64LibDir`n  - $arm64Cl`n  - $arm64LinkExe`nWindows ARM64 builds require the MSVC ARM64 toolchain to be present on the runner."
+          }
+
+          Write-Host "MSVC ARM64 tools present:"
+          Write-Host "  - libs: $arm64LibDir"
+          Write-Host "  - cl.exe: $arm64Cl"
+          Write-Host "  - link.exe: $arm64LinkExe"
+
+          $sdkLibRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Lib"
+          if (!(Test-Path $sdkLibRoot)) {
+            throw "Windows SDK lib root not found at $sdkLibRoot. Windows ARM64 builds require the Windows 10/11 SDK with ARM64 libraries."
+          }
+
+          function Find-SdkArm64($root) {
+            $dirs = @(Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+            foreach ($dir in $dirs) {
+              $um = Join-Path $dir.FullName "um\arm64"
+              $ucrt = Join-Path $dir.FullName "ucrt\arm64"
+              if ((Test-Path $um) -and (Test-Path $ucrt)) {
+                return [pscustomobject]@{ VersionDir = $dir; Um = $um; Ucrt = $ucrt; AllDirs = $dirs }
+              }
+            }
+            return [pscustomobject]@{ VersionDir = $null; Um = $null; Ucrt = $null; AllDirs = $dirs }
+          }
+
+          $sdkInfo = Find-SdkArm64 $sdkLibRoot
+          if (-not $sdkInfo.AllDirs -or $sdkInfo.AllDirs.Count -eq 0) {
+            throw "No Windows SDK lib versions found under $sdkLibRoot. Windows ARM64 builds require a Windows SDK installation with ARM64 libraries."
+          }
+
+          if (-not $sdkInfo.VersionDir) {
+            # Some runner images can have the Windows SDK installed without the ARM64 lib subset.
+            # Attempt to add the matching Windows 10 SDK component via the Visual Studio installer.
+            $candidateName = $sdkInfo.AllDirs[0].Name
+            $sdkBuild = $null
+            if ($candidateName -match '^10\.0\.(\d+)\.\d+$') {
+              $sdkBuild = $Matches[1]
+            }
+            if (-not $sdkBuild) {
+              # Reasonable fallback for windows-2022 images (10.0.20348.0).
+              $sdkBuild = "20348"
+            }
+
+            $sdkComponents = @(
+              "Microsoft.VisualStudio.Component.Windows10SDK.$sdkBuild",
+              "Microsoft.VisualStudio.Component.Windows11SDK.$sdkBuild"
+            ) | Select-Object -Unique
+            Write-Host "Windows SDK ARM64 libs not found; attempting to install one of:"
+            $sdkComponents | ForEach-Object { Write-Host "  - $_" }
+            $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+            if (!(Test-Path $vsInstaller)) {
+              throw "Visual Studio installer not found at $vsInstaller"
+            }
+            $installErrors = @()
+            foreach ($sdkComponent in $sdkComponents) {
+              Write-Host "Installing Windows SDK component: $sdkComponent"
+              & $vsInstaller modify --installPath $installPath --add $sdkComponent --includeRecommended --passive --norestart
+              $exitCode = $LASTEXITCODE
+              # 3010 is a common "success, reboot required" code for Windows installers.
+              if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+                $installErrors += "$sdkComponent (exit code $exitCode)"
+                continue
+              }
+              $sdkInfo = Find-SdkArm64 $sdkLibRoot
+              if ($sdkInfo.VersionDir) {
+                break
+              }
+            }
+
+            if (-not $sdkInfo.VersionDir -and $installErrors.Count -gt 0) {
+              Write-Host "Windows SDK component install attempts failed:"
+              $installErrors | ForEach-Object { Write-Host "  - $_" }
+            }
+          }
+
+          if (-not $sdkInfo.VersionDir) {
+            throw "Windows SDK ARM64 UM/UCRT libraries were not found under $sdkLibRoot. The runner image may be missing the Windows SDK ARM64 components."
+          }
+
+          $sdkVersionDir = $sdkInfo.VersionDir
+          $sdkUmArm64 = $sdkInfo.Um
+          $sdkUcrtArm64 = $sdkInfo.Ucrt
+
+          Write-Host "windows-arm64-toolchain: OK"
+          Write-Host " - MSVC: $($msvcVersionDir.FullName)"
+          Write-Host " - link.exe: $arm64LinkExe"
+          Write-Host " - MSVC lib: $arm64LibDir"
+          Write-Host " - SDK um/arm64: $sdkUmArm64"
+          Write-Host " - SDK ucrt/arm64: $sdkUcrtArm64"
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
 
-      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
-      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
-      # CARGO_HOME so cargo installs/builds share the same cache.
+      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent contention on shared ~/.cargo.
+      # In GitHub Actions we prefer the default CARGO_HOME so cargo installs/builds share the same cache.
       - name: Use shared Cargo home for CI caching (Windows)
-        if: matrix.platform == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $cargoHome = Join-Path $env:USERPROFILE ".cargo"
           "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Use shared Cargo home for CI caching (Unix)
-        if: matrix.platform != 'windows-latest'
+        if: runner.os != 'Windows'
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
+      - name: Install WiX Toolset (required for MSI builds)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Tauri's MSI bundler requires WiX (candle.exe/light.exe) to be on PATH.
+          # GitHub runners don't consistently have it available, and Tauri may skip
+          # MSI generation without failing. Install WiX deterministically.
+          $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
+          $light = Get-Command light.exe -ErrorAction SilentlyContinue
+          if (-not $candle -or -not $light) {
+            choco install wixtoolset --yes --no-progress
+
+            # Ensure the newly-installed tools are visible in the current step.
+            # (Chocolatey may update PATH via the registry; refreshenv reloads it.)
+            if (Test-Path "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1") {
+              Import-Module "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1"
+              refreshenv
+            }
+          }
+
+          # Add common WiX install locations to PATH for subsequent steps.
+          $wixRoots = Get-ChildItem -Path (Join-Path ${env:ProgramFiles(x86)} "WiX Toolset v*") -Directory -ErrorAction SilentlyContinue
+          foreach ($root in $wixRoots) {
+            $bin = Join-Path $root.FullName "bin"
+            if (Test-Path $bin) {
+              $env:PATH = "$bin;$env:PATH"
+              $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+            }
+          }
+
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            throw "WiX Toolset installation failed: candle.exe not found on PATH."
+          }
+          if (-not (Get-Command light.exe -ErrorAction SilentlyContinue)) {
+            throw "WiX Toolset installation failed: light.exe not found on PATH."
+          }
+
+      - name: Install NSIS (required for EXE builds)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Tauri's NSIS bundler requires makensis.exe. If it's missing, Tauri may
+          # skip EXE generation without failing the overall build. Install NSIS
+          # deterministically so Windows bundles always include both `.exe` and `.msi`.
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) {
+            choco install nsis --yes --no-progress
+
+            # Ensure the newly-installed tools are visible in the current step.
+            if (Test-Path "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1") {
+              Import-Module "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1"
+              refreshenv
+            }
+          }
+
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) {
+            throw "NSIS installation failed: makensis.exe not found on PATH."
+          }
+
+      - name: Cache Rust (cargo registry + git)
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          # We cache build artifacts separately (see "Cache cargo target") to keep cache sizes
+          # bounded. rust-cache still provides fast restores for the Cargo registry/git index.
+          cache-targets: "false"
+
+      - name: Cache cargo target (release build artifacts)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            target/**/release/deps
+            target/**/release/build
+            target/**/release/.fingerprint
+            target/**/release/incremental
+            target/**/release/wbuild
+            target/.rustc_info.json
+            target/**/.rustc_info.json
+            apps/desktop/src-tauri/target/**/release/deps
+            apps/desktop/src-tauri/target/**/release/build
+            apps/desktop/src-tauri/target/**/release/.fingerprint
+            apps/desktop/src-tauri/target/**/release/incremental
+            apps/desktop/src-tauri/target/**/release/wbuild
+            apps/desktop/src-tauri/target/.rustc_info.json
+            apps/desktop/src-tauri/target/**/.rustc_info.json
+          # Keep these caches isolated per Rust target triple + runner arch so cross-compile jobs
+          # don't thrash/overwrite caches or restore host build-script binaries from an incompatible
+          # runner architecture. Include the Rust toolchain pin so caches don't leak across upgrades.
+          key: cargo-target-desktop-dry-run-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ matrix.cache_features }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-target-desktop-dry-run-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ matrix.cache_features }}-${{ hashFiles('rust-toolchain.toml') }}-
+            cargo-target-desktop-dry-run-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ hashFiles('rust-toolchain.toml') }}-
+
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-24.04'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            file \
             binutils \
             cpio \
             xvfb \
-            file \
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
@@ -170,13 +502,11 @@ jobs:
           # Prefer it in CI to reduce reliance on a working FUSE setup.
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "${GITHUB_ENV}"
 
-          # `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
-          # Ubuntu 24.04 renamed the package to `libfuse2t64`; try both, but don't fail
-          # the dry run if neither is available (some runners may already provide it).
+          # `appimagetool` is distributed as an AppImage and may require the FUSE 2 runtime on some hosts.
+          # Ubuntu 24.04 uses `libfuse2t64` as part of the time_t 64-bit transition.
+          #
+          # Best-effort install: extract-and-run mode means the build can proceed without FUSE.
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
-
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Detect Pyodide version (for caching)
         id: pyodide
@@ -186,27 +516,28 @@ jobs:
           version="$(node -p 'const fs=require("fs");const src=fs.readFileSync("apps/desktop/scripts/ensure-pyodide-assets.mjs","utf8");const m=src.match(/const\s+PYODIDE_VERSION\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]/);if(!m){throw new Error("PYODIDE_VERSION not found in ensure-pyodide-assets.mjs");}m[1];')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Restore Pyodide asset cache
-        id: pyodide-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - name: Cache Pyodide assets
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
-          key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+          path: apps/desktop/public/pyodide/
+          key: pyodide-v${{ steps.pyodide.outputs.version }}-${{ runner.os }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+          restore-keys: |
+            pyodide-v${{ steps.pyodide.outputs.version }}-
 
-      - name: Ensure Pyodide assets are present (populate cache on miss)
-        shell: bash
+      - name: Ensure Pyodide assets are present
         run: node apps/desktop/scripts/ensure-pyodide-assets.mjs
 
-      - name: Save Pyodide asset cache
-        if: steps.pyodide-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: apps/desktop/public/pyodide/v${{ steps.pyodide.outputs.version }}/full/
-          key: pyodide-${{ runner.os }}-${{ steps.pyodide.outputs.version }}-${{ hashFiles('apps/desktop/scripts/ensure-pyodide-assets.mjs') }}
+      - name: Install JS dependencies
+        # Prefer cached pnpm store entries to reduce network flakiness on reruns.
+        env:
+          # Release builds don't run Playwright tests, so skip the ~GB browser downloads
+          # performed by `@playwright/test`'s postinstall script.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cargo/bin/wasm-pack*
           # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
@@ -216,7 +547,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (Linux)
         if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           # wasm-pack downloads wasm-bindgen + binaryen (wasm-opt) into this cache dir.
           path: ~/.cache/.wasm-pack
@@ -226,7 +557,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (macOS)
         if: runner.os == 'macOS'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/Library/Caches/.wasm-pack
           key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
@@ -235,7 +566,7 @@ jobs:
 
       - name: Cache wasm-pack tool downloads (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.LOCALAPPDATA }}/.wasm-pack
           key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
@@ -259,41 +590,12 @@ jobs:
 
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
         id: tauri-cli-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cargo/bin/cargo-tauri*
-          # Include the Rust toolchain pin so Rust upgrades force rebuilding the cached binary.
           key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.TAURI_CLI_VERSION }}
           restore-keys: |
             cargo-tauri-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
-
-      - name: Cache Tauri tooling downloads (Linux)
-        if: runner.os == 'Linux'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/tauri
-          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
-          restore-keys: |
-            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Cache Tauri tooling downloads (macOS)
-        if: runner.os == 'macOS'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/Library/Caches/tauri
-          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
-          restore-keys: |
-            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Cache Tauri tooling downloads (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          # Tauri's cache directory lives under %LOCALAPPDATA% on Windows.
-          path: ${{ env.LOCALAPPDATA }}/tauri
-          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
-          restore-keys: |
-            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install pinned Tauri CLI (cargo tauri)
         if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
@@ -310,29 +612,45 @@ jobs:
             exit 1
           fi
 
-      - name: Print Tauri CLI version
-        run: cargo tauri --version
+      - name: Cache Tauri tooling downloads (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/tauri
+          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
 
-      # Ensure platform signing is truly optional:
-      # - when `enableSigning` is false (default), this step forces signing disabled for the run.
-      # - when `enableSigning` is true, it only exports signing/notarization env vars when secrets exist.
-      - name: Prepare optional Tauri signing config (macOS/Windows)
-        run: node scripts/ci/prepare-tauri-signing-config.mjs
-        env:
-          # Gate all signing-related secrets behind the workflow input so forks can run unsigned builds
-          # even if the upstream repo has secrets configured.
-          APPLE_CERTIFICATE: ${{ inputs.enableSigning && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ inputs.enableSigning && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ inputs.enableSigning && secrets.APPLE_SIGNING_IDENTITY || '' }}
-          APPLE_ID: ${{ inputs.enableSigning && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ inputs.enableSigning && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ inputs.enableSigning && secrets.APPLE_TEAM_ID || '' }}
+      - name: Cache Tauri tooling downloads (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/Library/Caches/tauri
+          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
 
-          WINDOWS_CERTIFICATE: ${{ inputs.enableSigning && secrets.WINDOWS_CERTIFICATE || '' }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ inputs.enableSigning && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+      - name: Cache Tauri tooling downloads (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          # Tauri's cache directory lives under %LOCALAPPDATA% on Windows.
+          path: ${{ env.LOCALAPPDATA }}/tauri
+          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
 
-          TAURI_PRIVATE_KEY: ${{ inputs.enableSigning && secrets.TAURI_PRIVATE_KEY || '' }}
-          TAURI_KEY_PASSWORD: ${{ inputs.enableSigning && secrets.TAURI_KEY_PASSWORD || '' }}
+      - name: Validate Tauri capability permission identifiers
+        if: runner.os == 'Linux'
+        run: node scripts/check-tauri-permissions.mjs
+
+      - name: Setup MSVC cross-compilation environment (amd64 → arm64)
+        # Only needed for the Windows ARM64 bundle job; set it immediately before the Tauri build so
+        # earlier host-target `cargo install` steps (wasm-pack, tauri-cli) run in the default x64 environment.
+        if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
+        uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5 # v1.9.0
+        with:
+          arch: amd64_arm64
 
       - name: Build desktop bundles (dry run)
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
@@ -340,204 +658,252 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
+          # Use the Cargo-installed Tauri CLI (`cargo tauri`) instead of letting the
+          # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
+          args: ${{ matrix.tauri_args }}
 
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
-        if: matrix.platform == 'ubuntu-24.04'
+        # Run against the already-built Tauri artifacts from the previous step.
+        # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
+        if: >-
+          (runner.os == 'Linux' || !contains(fromJson('["0","false","False","FALSE"]'), vars.FORMULA_COI_CHECK_ALL_PLATFORMS))
+          && (runner.os != 'Windows' || matrix.rust_target != 'aarch64-pc-windows-msvc')
         run: pnpm -C apps/desktop check:coi -- --no-build
 
-      - name: Validate Linux bundles (AppImage/RPM/DEB)
-        if: matrix.platform == 'ubuntu-24.04'
+      - name: Desktop dist asset report
+        if: runner.os != 'macOS'
+        run: node scripts/desktop_dist_asset_report.mjs --json-out desktop-dist-assets-report.json
+        env:
+          # Optional: set as GitHub Actions variables to enable gating.
+          FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
+          FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
+
+      - name: Upload desktop dist asset report (JSON)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-dist-assets-report-dry-run-${{ matrix.cache_target }}
+          path: desktop-dist-assets-report.json
+          if-no-files-found: ignore
+
+      - name: Validate macOS bundle
+        if: runner.os == 'macOS'
+        run: bash scripts/validate-macos-bundle.sh
+
+      - name: Validate Linux AppImage bundle
+        if: runner.os == 'Linux'
+        shell: bash
         run: |
           set -euo pipefail
-
-          roots=()
-          for candidate in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
-            if [ -d "$candidate" ]; then
-              roots+=("$candidate")
-            fi
-          done
-          if [ "${#roots[@]}" -eq 0 ]; then
-            echo "linux-validate: ERROR: No Cargo target directories found (expected apps/desktop/src-tauri/target, apps/desktop/target, or target/)." >&2
-            exit 1
-          fi
-
-          # Validate the AppImage structure + desktop integration metadata (no GUI).
-          bash scripts/validate-linux-appimage.sh
-
-          deb_count=0
-          for root in "${roots[@]}"; do
-            while IFS= read -r deb; do
-              deb_count=$((deb_count + 1))
-              echo "linux-validate: DEB -> $deb"
-              dpkg -I "$deb"
-              tmpdir="$(mktemp -d)"
-              dpkg-deb -x "$deb" "$tmpdir"
-              ldd "$tmpdir/usr/bin/formula-desktop" | tee "$tmpdir/ldd.txt"
-              if grep -q "not found" "$tmpdir/ldd.txt"; then
-                echo "linux-validate: ERROR: Missing shared libraries in .deb binary (ldd reports 'not found')." >&2
-                exit 1
-              fi
-              rm -rf "$tmpdir"
-            done < <(find "$root" -type f -path '*/release/bundle/deb/*.deb' -print)
+          for script in scripts/validate-linux-appimage.*; do
+            echo "Running $script"
+            case "$script" in
+              *.mjs|*.js) node "$script" ;;
+              *.py) python "$script" ;;
+              *) bash "$script" ;;
+            esac
           done
 
-          if [ "$deb_count" -eq 0 ]; then
-            echo "linux-validate: ERROR: No .deb bundles found." >&2
-            exit 1
-          fi
-          # Validate RPM payload structure (static `rpm -qp` checks). Skip the Fedora container
-          # install check here; the tagged release workflow runs the full container smoke test.
-          bash scripts/validate-linux-rpm.sh --no-container
-
-      - name: Verify Linux package dependency metadata (deb + rpm)
-        if: matrix.platform == 'ubuntu-24.04'
-        run: bash scripts/ci/verify-linux-package-deps.sh
-
-      - name: Validate macOS DMG
-        if: matrix.platform == 'macos-latest'
+      - name: Validate Linux RPM bundle
+        if: runner.os == 'Linux'
+        shell: bash
         run: |
           set -euo pipefail
-          roots=()
-          for candidate in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
-            if [ -d "$candidate" ]; then
-              roots+=("$candidate")
-            fi
-          done
-          if [ "${#roots[@]}" -eq 0 ]; then
-            echo "macos-validate: ERROR: No Cargo target directories found (expected apps/desktop/src-tauri/target, apps/desktop/target, or target/)." >&2
-            exit 1
-          fi
-
-          dmg_count=0
-          for root in "${roots[@]}"; do
-            while IFS= read -r dmg; do
-              dmg_count=$((dmg_count + 1))
-              echo "macos-validate: DMG -> $dmg"
-
-              dmg_abs="$PWD/$dmg"
-              mount_dir="$(mktemp -d)"
-              device=""
-
-              cleanup() {
-                if [ -n "$device" ]; then
-                  hdiutil detach "$device" -force || true
-                fi
-                rm -rf "$mount_dir"
-              }
-              trap cleanup EXIT
-
-              attach_out="$(hdiutil attach "$dmg_abs" -nobrowse -readonly -mountpoint "$mount_dir")"
-              device="$(echo "$attach_out" | head -n 1 | awk '{print $1}')"
-              if [ -z "$device" ]; then
-                echo "macos-validate: ERROR: Failed to parse hdiutil attach output." >&2
-                exit 1
-              fi
-
-              # Expect at least one .app in the mounted DMG.
-              app="$(find "$mount_dir" -maxdepth 2 -name '*.app' -print -quit)"
-              if [ -z "$app" ]; then
-                echo "macos-validate: ERROR: DMG mount does not contain an .app (expected at the root)." >&2
-                exit 1
-              fi
-
-              # Only verify signatures when signing secrets are actually configured (forks/dry-runs
-              # should be able to build unsigned bundles successfully).
-              if [ -n "${APPLE_CERTIFICATE:-}" ]; then
-                codesign --verify --deep --strict --verbose=2 "$app"
-              fi
-
-              hdiutil detach "$device" -force
-              device=""
-              rm -rf "$mount_dir"
-              trap - EXIT
-            done < <(find "$root" -type f -path '*/release/bundle/dmg/*.dmg' -print)
+          for script in scripts/validate-linux-rpm.*; do
+            echo "Running $script"
+            case "$script" in
+              *.mjs|*.js) node "$script" ;;
+              *.py) python "$script" ;;
+              *) bash "$script" ;;
+            esac
           done
 
-          if [ "$dmg_count" -eq 0 ]; then
-            echo "macos-validate: ERROR: No .dmg bundles found." >&2
-            exit 1
-          fi
+      - name: Validate Windows installer bundles (presence + Authenticode)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ inputs.enableSigning == 'true' && secrets.WINDOWS_CERTIFICATE || '' }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = "${{ matrix.rust_target }}"
+          if ([string]::IsNullOrWhiteSpace($target)) {
+            throw "windows-bundle: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
+          }
 
-      - name: Validate Windows installers (MSI/NSIS)
-        if: matrix.platform == 'windows-latest'
+          $bundleCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bundleDir) {
+            $candidatesJoined = $bundleCandidates -join "`n"
+            throw "windows-bundle: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
+          }
+
+          ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir -RequireExe -RequireMsi
+
+      - name: Verify Windows ARM64 binary architecture (AA64)
+        if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $checkSigning = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)
-
-          $targetRoots = @(
-            (Join-Path $env:GITHUB_WORKSPACE 'apps\desktop\src-tauri\target'),
-            (Join-Path $env:GITHUB_WORKSPACE 'apps\desktop\target'),
-            (Join-Path $env:GITHUB_WORKSPACE 'target')
-          ) | Where-Object { Test-Path $_ }
-          if (-not $targetRoots -or $targetRoots.Count -eq 0) {
-            throw "windows-validate: ERROR: No Cargo target directories found (expected apps\\desktop\\src-tauri\\target, apps\\desktop\\target, or target\\)."
+          $ErrorActionPreference = "Stop"
+          $target = "${{ matrix.rust_target }}"
+          $releaseCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release")
+          )
+          $releaseDir = $releaseCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $releaseDir) {
+            $candidatesJoined = $releaseCandidates -join "`n"
+            throw "windows-arm64: Expected Rust release directory not found. Looked in:`n$candidatesJoined"
+          }
+          $exe = Get-ChildItem -Path $releaseDir -Recurse -File -Filter "formula-desktop.exe" | Select-Object -First 1
+          if (-not $exe) {
+            throw "windows-arm64: Expected compiled binary formula-desktop.exe not found under: $releaseDir"
+          }
+          $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
+          if (-not $dumpbin) {
+            throw "windows-arm64: dumpbin.exe not found on PATH (expected after MSVC dev-cmd setup)."
+          }
+          $headers = & dumpbin.exe /headers $exe.FullName
+          $joined = ($headers -join "`n")
+          if ($joined -notmatch '\\bAA64\\b') {
+            throw "windows-arm64: Expected ARM64 machine type 'AA64' in dumpbin output for $($exe.FullName), but it was not found."
+          }
+          if ($joined -match '\\b8664\\b') {
+            throw "windows-arm64: Binary appears to be x64 (machine type '8664'), expected ARM64 (AA64)."
           }
 
-          $msis = Get-ChildItem -Path $targetRoots -Recurse -File -Filter *.msi -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\release\\bundle\\msi\\' }
-          $exes = Get-ChildItem -Path $targetRoots -Recurse -File -Filter *.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\release\\bundle\\(nsis|nsis-web)\\' }
-
-          if (-not $msis -and -not $exes) {
-            throw "windows-validate: ERROR: No Windows installer bundles found (.msi or NSIS .exe)."
+      - name: Verify Windows ARM64 MSI targets ARM64 (template summary)
+        if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = "${{ matrix.rust_target }}"
+          $bundleCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bundleDir) {
+            throw "windows-arm64-msi: ERROR expected Tauri bundle dir not found."
+          }
+          $msis = @(
+            Get-ChildItem -Path (Join-Path $bundleDir "msi") -Recurse -File -Filter "*.msi" -ErrorAction SilentlyContinue
+          )
+          if ($msis.Count -eq 0) {
+            throw "windows-arm64-msi: ERROR no .msi installers found under: $bundleDir"
           }
 
+          $installer = New-Object -ComObject WindowsInstaller.Installer
           foreach ($msi in $msis) {
-            Write-Host "windows-validate: MSI -> $($msi.FullName)"
-            if ($checkSigning) {
-              $sig = Get-AuthenticodeSignature -FilePath $msi.FullName
-              if ($sig.Status -ne 'Valid') {
-                throw "windows-validate: ERROR: MSI Authenticode signature status is $($sig.Status) for $($msi.FullName)"
-              }
-            }
-
-            $extractDir = Join-Path $env:RUNNER_TEMP ("msi-extract-" + [guid]::NewGuid().ToString())
-            New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
-
-            # Administrative install to extract payload without installing on the runner.
-            $proc = Start-Process -FilePath msiexec.exe -ArgumentList @('/a', $msi.FullName, '/qn', "TARGETDIR=$extractDir") -Wait -PassThru
-            if ($proc.ExitCode -ne 0) {
-              throw "windows-validate: ERROR: msiexec extraction failed with exit code $($proc.ExitCode) for $($msi.FullName)"
-            }
-
-            $payloadExe =
-              (Get-ChildItem -Path $extractDir -Recurse -File -Filter 'formula-desktop.exe' -ErrorAction SilentlyContinue | Select-Object -First 1) ??
-              (Get-ChildItem -Path $extractDir -Recurse -File -Filter 'Formula.exe' -ErrorAction SilentlyContinue | Select-Object -First 1)
-
-            if (-not $payloadExe) {
-              throw "windows-validate: ERROR: Could not find extracted desktop binary (formula-desktop.exe/Formula.exe) in MSI payload ($extractDir)."
+            $db = $installer.OpenDatabase($msi.FullName, 0)
+            $summary = $db.SummaryInformation(0)
+            $template = $summary.Property(7)
+            Write-Host "windows-arm64-msi: $($msi.Name) template=$template"
+            if ($template -notmatch '(?i)arm64') {
+              throw "windows-arm64-msi: ERROR Expected MSI Template Summary to include ARM64 for $($msi.FullName), got: $template"
             }
           }
 
-          foreach ($exe in $exes) {
-            Write-Host "windows-validate: NSIS -> $($exe.FullName)"
+      - name: Verify Windows installers bundle/reference WebView2 (bootstrapper/runtime)
+        if: runner.os == 'Windows'
+        run: python scripts/ci/check-windows-webview2-installer.py
 
-            if ($checkSigning) {
-              $sig = Get-AuthenticodeSignature -FilePath $exe.FullName
-              if ($sig.Status -ne 'Valid') {
-                throw "windows-validate: ERROR: NSIS installer Authenticode signature status is $($sig.Status) for $($exe.FullName)"
-              }
-            }
+      - name: Smoke test produced AppImage (extract + ldd + arch)
+        if: runner.os == 'Linux'
+        run: bash scripts/ci/check-appimage.sh
 
-            if ($exe.Length -lt 1024) {
-              throw "windows-validate: ERROR: Installer file is unexpectedly small (< 1KB): $($exe.FullName)"
-            }
+      - name: Verify Linux .deb package (deps + ldd + desktop integration)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Preferred location (matches docs/release.md), but fall back to scanning common Cargo target dirs.
+          shopt -s nullglob
+          debs=(apps/desktop/src-tauri/target/release/bundle/deb/*.deb)
 
-            $fs = [System.IO.File]::OpenRead($exe.FullName)
-            try {
-              $b0 = $fs.ReadByte()
-              $b1 = $fs.ReadByte()
-            } finally {
-              $fs.Dispose()
-            }
-            if ($b0 -ne 0x4D -or $b1 -ne 0x5A) {
-              throw "windows-validate: ERROR: Installer does not start with an 'MZ' header: $($exe.FullName)"
-            }
-          }
+          if ((${#debs[@]} == 0)); then
+            roots=()
+            if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+              roots+=("${CARGO_TARGET_DIR}")
+            fi
+            roots+=("apps/desktop/src-tauri/target" "apps/desktop/target" "target")
 
-      - name: Report desktop installer artifact sizes
+            debs=()
+            for root in "${roots[@]}"; do
+              [[ -d "${root}" ]] || continue
+              debs+=("${root}"/release/bundle/deb/*.deb)
+              debs+=("${root}"/*/release/bundle/deb/*.deb)
+            done
+          fi
+
+          if ((${#debs[@]} > 0)); then mapfile -t debs < <(printf '%s\n' "${debs[@]}" | sort -u); fi
+          shopt -u nullglob
+
+          if ((${#debs[@]} == 0)); then
+            echo "::error::could not find any .deb artifacts under apps/desktop/src-tauri/target/release/bundle/deb or target/**/release/bundle/deb" >&2
+            exit 1
+          fi
+
+          for deb in "${debs[@]}"; do
+            echo "Using deb: ${deb}"
+
+            echo "::group::dpkg -I ${deb}"
+            dpkg -I "${deb}" | tee dpkg-info.txt
+            echo "::endgroup::"
+
+            # Ensure key runtime deps are declared (at least: WebKitGTK + GTK + AppIndicator).
+            for needle in "webkit2gtk" "libgtk-3" "appindicator"; do
+              if ! grep -qi "$needle" dpkg-info.txt; then
+                echo "::error::Expected runtime dependency '$needle' missing from dpkg -I output for ${deb}"
+                exit 1
+              fi
+            done
+
+            tmpdir="$(mktemp -d)"
+            trap 'rm -rf "${tmpdir}"' EXIT
+            dpkg-deb -x "${deb}" "${tmpdir}"
+
+            bin="${tmpdir}/usr/bin/formula-desktop"
+            if [[ ! -f "${bin}" ]]; then
+              echo "::error::Expected installed binary not found at ${bin} after extracting ${deb}"
+              exit 1
+            fi
+
+            echo "::group::ldd ${bin}"
+            ldd "${bin}" | tee ldd.txt
+            echo "::endgroup::"
+            if grep -q "not found" ldd.txt; then
+              echo "::error::Missing shared library dependencies detected by ldd for ${bin}"
+              exit 1
+            fi
+
+            # Smoke test the packaged binary quickly under Xvfb.
+            echo "::group::Run packaged binary smoke check (--cross-origin-isolation-check)"
+            (
+              export HOME="${tmpdir}/home"
+              export XDG_CONFIG_HOME="${HOME}/.config"
+              export XDG_DATA_HOME="${HOME}/.local/share"
+              mkdir -p "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}"
+              bash scripts/xvfb-run-safe.sh timeout 45s "${bin}" --cross-origin-isolation-check
+            )
+            echo "::endgroup::"
+
+            python scripts/ci/verify_linux_desktop_integration.py --deb-root "${tmpdir}"
+
+            rm -rf "${tmpdir}"
+            trap - EXIT
+          done
+
+      - name: Verify Linux package dependency metadata (.deb + .rpm)
+        if: runner.os == 'Linux'
+        run: bash scripts/ci/verify-linux-package-deps.sh
+
+      - name: Report desktop bundle sizes
         if: always()
         env:
           # Optional: set these as GitHub Actions "Variables" to enable gating.
@@ -549,9 +915,9 @@ jobs:
 
       - name: Upload desktop bundles
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: desktop-bundles-${{ matrix.platform }}-${{ runner.arch }}
+          name: desktop-bundles-dry-run-${{ matrix.cache_target }}
           if-no-files-found: warn
           path: |
             apps/desktop/src-tauri/target/**/release/bundle/**/*.dmg
