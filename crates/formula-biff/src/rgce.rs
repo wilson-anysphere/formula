@@ -840,7 +840,7 @@ fn decode_rgce_impl(
                         offset: ptg_offset,
                         ptg,
                     })?;
-                    let mut func_name_text = func_name.text;
+                    let func_name_text = func_name.text;
                     let mut args = Vec::with_capacity(argc.saturating_sub(1));
                     for _ in 0..argc.saturating_sub(1) {
                         args.push(stack.pop().ok_or(DecodeRgceError::StackUnderflow {
