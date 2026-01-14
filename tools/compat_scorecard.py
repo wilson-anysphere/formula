@@ -82,6 +82,13 @@ def _as_int(value: Any, *, label: str, path: Path) -> int:
     return value
 
 
+def _as_nonneg_int(value: Any, *, label: str, path: Path) -> int:
+    out = _as_int(value, label=label, path=path)
+    if out < 0:
+        raise SystemExit(f"Expected non-negative int for {label} in {path}, got {out}")
+    return out
+
+
 def _as_float(value: Any, *, label: str, path: Path) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise SystemExit(f"Expected float for {label} in {path}, got {type(value).__name__}")
@@ -133,9 +140,18 @@ def _parse_corpus_summary(path: Path, payload: Any) -> CorpusMetrics:
     if rates is not None and not isinstance(rates, dict):
         raise SystemExit(f"Corpus summary rates must be an object when present: {path}")
 
-    total = _as_int(counts.get("total"), label="counts.total", path=path)
-    open_ok = _as_int(counts.get("open_ok"), label="counts.open_ok", path=path)
-    rt_ok = _as_int(counts.get("round_trip_ok"), label="counts.round_trip_ok", path=path)
+    total = _as_nonneg_int(counts.get("total"), label="counts.total", path=path)
+    open_ok = _as_nonneg_int(counts.get("open_ok"), label="counts.open_ok", path=path)
+    rt_ok = _as_nonneg_int(counts.get("round_trip_ok"), label="counts.round_trip_ok", path=path)
+
+    if open_ok > total:
+        raise SystemExit(
+            f"Corpus summary has inconsistent counts in {path}: open_ok={open_ok} > total={total}"
+        )
+    if rt_ok > total:
+        raise SystemExit(
+            f"Corpus summary has inconsistent counts in {path}: round_trip_ok={rt_ok} > total={total}"
+        )
 
     open_rate_raw = rates.get("open") if isinstance(rates, dict) else None
     rt_rate_raw = rates.get("round_trip") if isinstance(rates, dict) else None
@@ -150,6 +166,20 @@ def _parse_corpus_summary(path: Path, payload: Any) -> CorpusMetrics:
         if rt_rate_raw is not None
         else (rt_ok / total if total else 0.0)
     )
+
+    # Sanity check: when rates are present, they should match the derived ratios.
+    if open_rate_raw is not None and total:
+        expected = open_ok / total
+        if abs(open_rate - expected) > 1e-9:
+            raise SystemExit(
+                f"Corpus summary has inconsistent open rate in {path}: rates.open={open_rate} != open_ok/total={expected}"
+            )
+    if rt_rate_raw is not None and total:
+        expected = rt_ok / total
+        if abs(rt_rate - expected) > 1e-9:
+            raise SystemExit(
+                f"Corpus summary has inconsistent round-trip rate in {path}: rates.round_trip={rt_rate} != round_trip_ok/total={expected}"
+            )
 
     return CorpusMetrics(
         path=path,
@@ -172,14 +202,24 @@ def _parse_oracle_report(path: Path, payload: Any) -> OracleMetrics:
     if not isinstance(summary, dict):
         raise SystemExit(f"Mismatch report missing summary object: {path}")
 
-    total = _as_int(summary.get("totalCases"), label="summary.totalCases", path=path)
-    mismatches = _as_int(summary.get("mismatches"), label="summary.mismatches", path=path)
+    total = _as_nonneg_int(summary.get("totalCases"), label="summary.totalCases", path=path)
+    mismatches = _as_nonneg_int(summary.get("mismatches"), label="summary.mismatches", path=path)
+    if mismatches > total:
+        raise SystemExit(
+            f"Mismatch report has inconsistent counts in {path}: mismatches={mismatches} > totalCases={total}"
+        )
     mismatch_rate_raw = summary.get("mismatchRate")
     mismatch_rate = (
         _as_float(mismatch_rate_raw, label="summary.mismatchRate", path=path)
         if mismatch_rate_raw is not None
         else (mismatches / total if total else 0.0)
     )
+    if mismatch_rate_raw is not None and total:
+        expected = mismatches / total
+        if abs(mismatch_rate - expected) > 1e-9:
+            raise SystemExit(
+                f"Mismatch report has inconsistent mismatchRate in {path}: mismatchRate={mismatch_rate} != mismatches/totalCases={expected}"
+            )
     max_rate_raw = summary.get("maxMismatchRate")
     max_rate = None
     if max_rate_raw is not None:
@@ -200,7 +240,7 @@ def _parse_oracle_report(path: Path, payload: Any) -> OracleMetrics:
     max_cases_raw = summary.get("maxCases")
     max_cases = None
     if max_cases_raw is not None:
-        max_cases = _as_int(max_cases_raw, label="summary.maxCases", path=path)
+        max_cases = _as_nonneg_int(max_cases_raw, label="summary.maxCases", path=path)
 
     return OracleMetrics(
         path=path,
