@@ -1,22 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { FunctionRegistry } from "@formula/ai-completion";
 
-// The desktop UI currently only ships `en-US`, `de-DE`, and `ar` translations, but the
-// WASM formula engine supports additional locales (e.g. `fr-FR`, `es-ES`) for parsing.
-//
-// `createLocaleAwarePartialFormulaParser` relies on `getLocale()` to select the locale,
-// so mock it here to ensure the localized->canonical function mapping tables remain correct.
-let currentLocale = "fr-FR";
-vi.mock("../../i18n/index.js", () => ({
-  getLocale: () => currentLocale,
-}));
+import { createLocaleAwarePartialFormulaParser } from "./parsePartialFormula.js";
 
 describe("createLocaleAwarePartialFormulaParser (engine-supported locales)", () => {
   it("canonicalizes fr-FR function names (SOMME -> SUM)", async () => {
-    currentLocale = "fr-FR";
-    const { createLocaleAwarePartialFormulaParser } = await import("./parsePartialFormula.js");
-    const parser = createLocaleAwarePartialFormulaParser({});
+    const parser = createLocaleAwarePartialFormulaParser({ getLocaleId: () => "fr-FR" });
     const fnRegistry = new FunctionRegistry();
 
     const input = "=SOMME(A";
@@ -29,9 +19,7 @@ describe("createLocaleAwarePartialFormulaParser (engine-supported locales)", () 
   });
 
   it("canonicalizes fr-FR dotted function names (NB.SI -> COUNTIF)", async () => {
-    currentLocale = "fr-FR";
-    const { createLocaleAwarePartialFormulaParser } = await import("./parsePartialFormula.js");
-    const parser = createLocaleAwarePartialFormulaParser({});
+    const parser = createLocaleAwarePartialFormulaParser({ getLocaleId: () => "fr-FR" });
     const fnRegistry = new FunctionRegistry();
 
     const input = "=NB.SI(A";
@@ -44,9 +32,7 @@ describe("createLocaleAwarePartialFormulaParser (engine-supported locales)", () 
   });
 
   it("canonicalizes es-ES function names (SUMA -> SUM)", async () => {
-    currentLocale = "es-ES";
-    const { createLocaleAwarePartialFormulaParser } = await import("./parsePartialFormula.js");
-    const parser = createLocaleAwarePartialFormulaParser({});
+    const parser = createLocaleAwarePartialFormulaParser({ getLocaleId: () => "es-ES" });
     const fnRegistry = new FunctionRegistry();
 
     const input = "=SUMA(A";
@@ -59,31 +45,27 @@ describe("createLocaleAwarePartialFormulaParser (engine-supported locales)", () 
   });
 
   it("treats ',' as a decimal separator (not an arg separator) in semicolon locales", async () => {
-    const { createLocaleAwarePartialFormulaParser } = await import("./parsePartialFormula.js");
-    const parser = createLocaleAwarePartialFormulaParser({});
     const fnRegistry = new FunctionRegistry();
 
-    currentLocale = "fr-FR";
+    const frParser = createLocaleAwarePartialFormulaParser({ getLocaleId: () => "fr-FR" });
     const frInput = "=SOMME(1,";
-    const frResult = await parser(frInput, frInput.length, fnRegistry);
+    const frResult = await frParser(frInput, frInput.length, fnRegistry);
     expect(frResult.argIndex).toBe(0);
     expect(frResult.currentArg?.text).toBe("1,");
     expect(frResult.functionName).toBe("SUM");
 
-    currentLocale = "es-ES";
+    const esParser = createLocaleAwarePartialFormulaParser({ getLocaleId: () => "es-ES" });
     const esInput = "=SUMA(1,";
-    const esResult = await parser(esInput, esInput.length, fnRegistry);
+    const esResult = await esParser(esInput, esInput.length, fnRegistry);
     expect(esResult.argIndex).toBe(0);
     expect(esResult.currentArg?.text).toBe("1,");
     expect(esResult.functionName).toBe("SUM");
   });
 
   it("normalizes POSIX/variant locale IDs to the supported engine locale (de_DE.UTF-8 → de-DE)", async () => {
-    const { createLocaleAwarePartialFormulaParser } = await import("./parsePartialFormula.js");
-    const parser = createLocaleAwarePartialFormulaParser({});
+    const parser = createLocaleAwarePartialFormulaParser({ getLocaleId: () => "de_DE.UTF-8" });
     const fnRegistry = new FunctionRegistry();
 
-    currentLocale = "de_DE.UTF-8";
     const input = "=SUMME(1,";
     const result = await parser(input, input.length, fnRegistry);
 
