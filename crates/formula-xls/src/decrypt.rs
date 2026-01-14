@@ -471,8 +471,8 @@ fn decrypt_range_by_offset(
         let in_block = stream_pos % PAYLOAD_BLOCK_SIZE;
         let take = remaining.min(PAYLOAD_BLOCK_SIZE - in_block);
 
-        let key = derive_block_key(key_material, block, key_len);
-        let mut rc4 = Rc4::new(&key);
+        let key: Zeroizing<Vec<u8>> = Zeroizing::new(derive_block_key(key_material, block, key_len));
+        let mut rc4 = Rc4::new(key.as_slice());
         rc4_discard(&mut rc4, in_block);
         rc4.apply_keystream(&mut bytes[pos..pos + take]);
 
@@ -1088,17 +1088,19 @@ fn verify_password_legacy(
         )));
     }
 
-    let key_material = derive_key_material_legacy(password, &info.verifier.salt)?;
-    let key0 = derive_block_key(&key_material, 0, key_len);
-    let mut rc4 = Rc4::new(&key0);
+    let key_material: Zeroizing<[u8; 20]> =
+        Zeroizing::new(derive_key_material_legacy(password, &info.verifier.salt)?);
+    let key0: Zeroizing<Vec<u8>> = Zeroizing::new(derive_block_key(&key_material, 0, key_len));
+    let mut rc4 = Rc4::new(key0.as_slice());
 
-    let mut verifier = info.verifier.encrypted_verifier;
-    rc4.apply_keystream(&mut verifier);
+    let mut verifier: Zeroizing<[u8; 16]> = Zeroizing::new(info.verifier.encrypted_verifier);
+    rc4.apply_keystream(&mut verifier[..]);
 
-    let mut verifier_hash = info.verifier.encrypted_verifier_hash.clone();
-    rc4.apply_keystream(&mut verifier_hash);
+    let mut verifier_hash: Zeroizing<Vec<u8>> =
+        Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
+    rc4.apply_keystream(&mut verifier_hash[..]);
 
-    let expected = sha1_bytes(&[&verifier]);
+    let expected: Zeroizing<[u8; 20]> = Zeroizing::new(sha1_bytes(&[&verifier[..]]));
     if verifier_hash.len() < verifier_hash_size {
         return Err(DecryptError::InvalidFormat(format!(
             "EncryptedVerifierHash length {} shorter than VerifierHashSize {verifier_hash_size}",
@@ -1109,7 +1111,7 @@ fn verify_password_legacy(
         return Err(DecryptError::WrongPassword);
     }
 
-    Ok(key_material)
+    Ok(*key_material)
 }
 
 fn parse_filepass_record_payload(payload: &[u8]) -> Result<CryptoApiEncryptionInfo, DecryptError> {
@@ -1306,7 +1308,8 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
             const RECORD_BOUNDSHEET8: u16 = 0x0085;
 
             let info = parse_cryptoapi_encryption_info_legacy_filepass(filepass_payload)?;
-            let key_material = verify_password_legacy(&info, password)?;
+            let key_material: Zeroizing<[u8; 20]> =
+                Zeroizing::new(verify_password_legacy(&info, password)?);
 
             let key_size_bits = info.header.key_size_bits;
             let key_len = (key_size_bits / 8) as usize;

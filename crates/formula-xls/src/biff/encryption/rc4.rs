@@ -1,6 +1,7 @@
 use md5::{Digest as _, Md5};
 
 use crate::ct::ct_eq;
+use zeroize::Zeroize;
 
 /// Minimal RC4 stream cipher implementation (KSA + PRGA).
 ///
@@ -42,6 +43,14 @@ impl Rc4 {
             let k = self.s[idx as usize];
             *b ^= k;
         }
+    }
+}
+
+impl Drop for Rc4 {
+    fn drop(&mut self) {
+        self.s.zeroize();
+        self.i.zeroize();
+        self.j.zeroize();
     }
 }
 
