@@ -50,6 +50,28 @@ fn roundtrip_with_path_qualified_external_ref_with_brackets_in_path_prefix() {
 }
 
 #[test]
+fn roundtrip_with_external_ref_with_escaped_rbracket_in_workbook_name() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("=[Book[Name]].xlsx]Sheet1!A1+1", opts, ser);
+}
+
+#[test]
+fn roundtrip_with_quoted_external_ref_with_escaped_rbracket_in_workbook_name() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("='[Book[Name]].xlsx]Sheet1'!A1+1", opts, ser);
+}
+
+#[test]
+fn roundtrip_with_external_ref_with_literal_brackets_in_workbook_name() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    // Workbook name is `[Book]`, which becomes `[[Book]]]` in external prefix syntax.
+    roundtrip("=[[Book]]]Sheet1!A1+1", opts, ser);
+}
+
+#[test]
 fn roundtrip_with_unquoted_external_ref_with_spaces_in_workbook_name() {
     let opts = ParseOptions::default();
     let ser = SerializeOptions::default();
