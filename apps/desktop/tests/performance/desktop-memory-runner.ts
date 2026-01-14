@@ -638,8 +638,8 @@ async function main(): Promise<void> {
     const outputPath = resolve(jsonPath);
     mkdirSync(dirname(outputPath), { recursive: true });
     const measurement = process.platform === "win32" ? "working_set" : "rss";
-    const perfHomeRel = formatLogPath(perfHome);
-    const profileRootRel = formatLogPath(profileRoot);
+    const perfHomeRel = formatPerfPath(perfHome);
+    const profileRootRel = formatPerfPath(profileRoot);
     writeFileSync(
       outputPath,
       JSON.stringify(

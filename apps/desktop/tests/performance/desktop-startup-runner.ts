@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 import {
   defaultDesktopBinPath,
@@ -7,7 +7,6 @@ import {
   buildDesktopStartupProfileRoot,
   parseDesktopStartupMode,
   formatPerfPath,
-  repoRoot,
   runDesktopStartupIterations,
   resolveDesktopStartupBenchKind,
   resolveDesktopStartupArgv,
@@ -348,8 +347,8 @@ async function main(): Promise<void> {
   if (jsonPath) {
     const outputPath = resolve(jsonPath);
     mkdirSync(dirname(outputPath), { recursive: true });
-    const perfHomeRel = formatLogPath(perfHome);
-    const profileRootRel = formatLogPath(profileRoot);
+    const perfHomeRel = formatPerfPath(perfHome);
+    const profileRootRel = formatPerfPath(profileRoot);
     writeFileSync(
       outputPath,
       JSON.stringify(
