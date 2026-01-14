@@ -99,4 +99,25 @@ describe("FormulaBarView function hint UI", () => {
 
     host.remove();
   });
+
+  it("keeps showing the innermost function hint when the cursor is after a closing paren", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=ROUND(1, 2)";
+    // Cursor after the closing paren.
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+    await nextFrame();
+
+    expect(getSignatureName(host)).toBe("ROUND(");
+    // When positioned after the closing paren, treat the last argument as active.
+    expect(getActiveParamText(host)).toBe("num_digits");
+
+    host.remove();
+  });
 });
