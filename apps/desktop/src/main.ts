@@ -8597,15 +8597,21 @@ async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
     return false;
   }
 
-  const next = ribbonAutoFilterStore.setColumn(sheetId, rangeA1, { headerRows, colId, values: selected });
-  const hiddenRows = computeFilterHiddenRows({ range, headerRows: next.headerRows, filterColumns: next.filterColumns, getValue });
+  // If the user selected all values, treat it as "no filter" for that column (Excel-like),
+  // so future newly-entered values remain visible by default.
+  const uniqueSet = new Set(uniqueValues);
+  const selectedSet = new Set(selected);
+  const isSelectAll = selectedSet.size === uniqueSet.size && Array.from(selectedSet).every((v) => uniqueSet.has(v));
 
-  // Clear prior filter-hidden flags in the target range before applying the new filter.
-  app.clearFilteredHiddenRowsInRange(dataStartRow, range.endRow);
-  app.setRowsFilteredHidden(hiddenRows, true);
+  const currentColumns = existing?.filterColumns ?? [];
+  const nextColumns = currentColumns.filter((c) => c.colId !== colId);
+  if (!isSelectAll) {
+    nextColumns.push({ colId, values: selected });
+  }
+  ribbonAutoFilterStore.set(sheetId, { rangeA1, headerRows, filterColumns: nextColumns });
 
-  scheduleRibbonSelectionFormatStateUpdate();
-  app.focus();
+  // Reapply all stored filters so row hidden state stays consistent even if multiple filter ranges overlap.
+  reapplyRibbonAutoFiltersForActiveSheet();
   return true;
 }
 
