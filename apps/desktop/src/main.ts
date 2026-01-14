@@ -9682,6 +9682,10 @@ try {
   const queueOpenWorkbook = (path: string) => {
     pendingOpenFiles = pendingOpenFiles.then(async () => {
       try {
+        // Ensure the window is visible so any UI feedback (toasts, prompts) is visible even
+        // when the app is running in the background (e.g. opened via file association while
+        // minimized to tray).
+        await showTauriWindowBestEffort();
         await openWorkbookFromPath(path);
       } catch (err) {
         console.error("Failed to open workbook:", err);
