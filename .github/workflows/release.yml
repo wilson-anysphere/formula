@@ -866,8 +866,11 @@ jobs:
         with:
           # wasm-pack downloads wasm-bindgen + binaryen (wasm-opt) into this cache dir.
           path: ~/.cache/.wasm-pack
-          key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
+          # Include Cargo.lock so when the wasm-bindgen version changes we can save the new
+          # downloaded toolchain instead of re-downloading it every run (cache keys are immutable).
+          key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
+            wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}-
             wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Cache wasm-pack tool downloads (macOS)
@@ -875,8 +878,9 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/Library/Caches/.wasm-pack
-          key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
+          key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
+            wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}-
             wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Cache wasm-pack tool downloads (Windows)
@@ -884,8 +888,9 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.LOCALAPPDATA }}/.wasm-pack
-          key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
+          key: wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
+            wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}-
             wasm-pack-tools-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install wasm-pack (required for @formula/engine WASM build)
