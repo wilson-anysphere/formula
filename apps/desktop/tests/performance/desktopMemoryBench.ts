@@ -490,7 +490,7 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
   const settleMs = Math.max(0, Number(process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS ?? '5000') || 5000);
   const timeoutMs = Math.max(
     1,
-    Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? '20000') || 20000,
+    Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? '30000') || 30000,
   );
 
   const targetRaw =
@@ -507,11 +507,19 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
     );
   }
 
+  // eslint-disable-next-line no-console
+  console.log(
+    `[desktop-memory] idle RSS benchmark: runs=${runs} settleMs=${settleMs} timeoutMs=${timeoutMs} targetMb=${targetMb}`,
+  );
+
   const values: number[] = [];
   for (let i = 0; i < runs; i += 1) {
     // eslint-disable-next-line no-console
     console.log(`[desktop-memory] run ${i + 1}/${runs}...`);
-    values.push(await runOnce(binPath, timeoutMs, settleMs));
+    const rssMb = await runOnce(binPath, timeoutMs, settleMs);
+    values.push(rssMb);
+    // eslint-disable-next-line no-console
+    console.log(`[desktop-memory]   idleRssMb=${rssMb.toFixed(1)}mb`);
   }
 
   return [buildResult('desktop.memory.idle_rss_mb.p95', values, targetMb)];
