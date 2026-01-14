@@ -141,6 +141,13 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
     }
   }, []);
 
+  // When selection changes externally (e.g. clicking a drawing on the grid), keep the
+  // selected row visible (Excel-like behavior) without stealing focus.
+  useEffect(() => {
+    if (selectedId == null) return;
+    scrollItemIntoView(selectedId);
+  }, [scrollItemIntoView, selectedId]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (items.length === 0) return;
@@ -208,7 +215,19 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
                 role="option"
                 aria-selected={selected}
                 className={selected ? "selection-pane__row selection-pane__row--selected" : "selection-pane__row"}
-                onClick={() => app.selectDrawingById(obj.id)}
+                onClick={() => {
+                  // Match typical listbox behavior: clicking an option should focus the list
+                  // so Arrow key navigation works immediately after click.
+                  const root = rootRef.current;
+                  if (root) {
+                    try {
+                      (root as any).focus?.({ preventScroll: true });
+                    } catch {
+                      root.focus?.();
+                    }
+                  }
+                  app.selectDrawingById(obj.id);
+                }}
               >
                 <span className="selection-pane__icon" aria-hidden="true">
                   <DrawingKindIcon kind={obj.kind.type} />
