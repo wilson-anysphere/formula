@@ -494,6 +494,15 @@ deb_smoke_test_dir() {
         exit 1
       fi
       IFS=";" read -r -a mime_tokens <<< "${mime_value}"
+      declare -A mime_set=()
+      for token in "${mime_tokens[@]}"; do
+        token="${token#"${token%%[![:space:]]*}"}"
+        token="${token%"${token##*[![:space:]]}"}"
+        token="$(printf "%s" "${token}" | tr "[:upper:]" "[:lower:]")"
+        if [ -n "${token}" ]; then
+          mime_set["$token"]=1
+        fi
+      done
       IFS="," read -r -a schemes <<<"${schemes_csv}"
       for scheme in "${schemes[@]}"; do
         scheme="${scheme%%://}"
@@ -502,26 +511,26 @@ deb_smoke_test_dir() {
         scheme="$(printf "%s" "${scheme}" | tr "[:upper:]" "[:lower:]")"
         if [ -n "${scheme}" ]; then
           expected_mime="x-scheme-handler/${scheme}"
-          found=0
-          for token in "${mime_tokens[@]}"; do
-            token="${token#"${token%%[![:space:]]*}"}"
-            token="${token%"${token##*[![:space:]]}"}"
-            token="$(printf "%s" "${token}" | tr "[:upper:]" "[:lower:]")"
-            if [ "${token}" = "${expected_mime}" ]; then
-              found=1
-              break
-            fi
-          done
-          if [ "${found}" -ne 1 ]; then
+          if [ -z "${mime_set["$expected_mime"]+x}" ]; then
             echo "Missing URL scheme handler in desktop entry MimeType=: ${expected_mime}" >&2
             echo "Observed MimeType= value: ${mime_value}" >&2
             exit 1
           fi
         fi
       done
-      grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
+      required_xlsx_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      if [ -z "${mime_set["$required_xlsx_mime"]+x}" ]; then
+        echo "Missing xlsx MIME type in desktop entry MimeType=: ${required_xlsx_mime}" >&2
+        echo "Observed MimeType= value: ${mime_value}" >&2
+        exit 1
+      fi
       if [[ "${parquet}" == "1" ]]; then
-        grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
+        required_parquet_mime="application/vnd.apache.parquet"
+        if [ -z "${mime_set["$required_parquet_mime"]+x}" ]; then
+          echo "Missing Parquet MIME type in desktop entry MimeType=: ${required_parquet_mime}" >&2
+          echo "Observed MimeType= value: ${mime_value}" >&2
+          exit 1
+        fi
       fi
       set +e
       out="$(ldd "/usr/bin/${bin}" 2>&1)"
@@ -654,6 +663,15 @@ rpm_smoke_test_dir() {
         exit 1
       fi
       IFS=";" read -r -a mime_tokens <<< "${mime_value}"
+      declare -A mime_set=()
+      for token in "${mime_tokens[@]}"; do
+        token="${token#"${token%%[![:space:]]*}"}"
+        token="${token%"${token##*[![:space:]]}"}"
+        token="$(printf "%s" "${token}" | tr "[:upper:]" "[:lower:]")"
+        if [ -n "${token}" ]; then
+          mime_set["$token"]=1
+        fi
+      done
       IFS="," read -r -a schemes <<<"${schemes_csv}"
       for scheme in "${schemes[@]}"; do
         scheme="${scheme%%://}"
@@ -662,26 +680,26 @@ rpm_smoke_test_dir() {
         scheme="$(printf "%s" "${scheme}" | tr "[:upper:]" "[:lower:]")"
         if [ -n "${scheme}" ]; then
           expected_mime="x-scheme-handler/${scheme}"
-          found=0
-          for token in "${mime_tokens[@]}"; do
-            token="${token#"${token%%[![:space:]]*}"}"
-            token="${token%"${token##*[![:space:]]}"}"
-            token="$(printf "%s" "${token}" | tr "[:upper:]" "[:lower:]")"
-            if [ "${token}" = "${expected_mime}" ]; then
-              found=1
-              break
-            fi
-          done
-          if [ "${found}" -ne 1 ]; then
+          if [ -z "${mime_set["$expected_mime"]+x}" ]; then
             echo "Missing URL scheme handler in desktop entry MimeType=: ${expected_mime}" >&2
             echo "Observed MimeType= value: ${mime_value}" >&2
             exit 1
           fi
         fi
       done
-      grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
+      required_xlsx_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      if [ -z "${mime_set["$required_xlsx_mime"]+x}" ]; then
+        echo "Missing xlsx MIME type in desktop entry MimeType=: ${required_xlsx_mime}" >&2
+        echo "Observed MimeType= value: ${mime_value}" >&2
+        exit 1
+      fi
       if [[ "${parquet}" == "1" ]]; then
-        grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
+        required_parquet_mime="application/vnd.apache.parquet"
+        if [ -z "${mime_set["$required_parquet_mime"]+x}" ]; then
+          echo "Missing Parquet MIME type in desktop entry MimeType=: ${required_parquet_mime}" >&2
+          echo "Observed MimeType= value: ${mime_value}" >&2
+          exit 1
+        fi
       fi
       set +e
       out="$(ldd "/usr/bin/${bin}" 2>&1)"
