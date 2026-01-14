@@ -23,6 +23,13 @@ For a deep dive on **Agile (4.4)** OOXML password decryption (including the *exa
 HMAC target bytes and common IV/salt mixups), see
 [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
+For a deep dive on **Standard (CryptoAPI)** (`EncryptionInfo` `versionMinor == 2`; commonly `3.2`)
+password decryption, see:
+
+- Key derivation + verifier validation: [`docs/offcrypto-standard-cryptoapi.md`](./offcrypto-standard-cryptoapi.md)
+- RC4 variant specifics (0x200 block size, vectors): [`docs/offcrypto-standard-cryptoapi-rc4.md`](./offcrypto-standard-cryptoapi-rc4.md)
+- `EncryptedPackage` framing + truncation: [`docs/offcrypto-standard-encryptedpackage.md`](./offcrypto-standard-encryptedpackage.md)
+
 Relevant specs:
 
 - **MS-OFFCRYPTO** (Office document encryption): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
