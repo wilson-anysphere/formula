@@ -25,6 +25,7 @@
     "test:vitest": "node scripts/run-vitest.mjs",
     "vitest": "node scripts/run-vitest.mjs",
     "test:node": "node scripts/test-node.mjs",
+    "test:release-manifest": "node --test scripts/__tests__/release-manifest.test.mjs",
     "test:e2e": "pnpm -C apps/web test:e2e && pnpm -C apps/desktop test:e2e",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bench:gpu-kernels": "node packages/gpu-kernels/bench/bench.mjs",
