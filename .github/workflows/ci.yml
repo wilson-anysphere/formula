@@ -167,6 +167,8 @@ jobs:
       # CARGO_HOME so cargo installs and wasm-pack builds share the same cache.
       - name: Use shared Cargo home for CI caching
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
 
       - name: Check formula-engine builds for wasm32
         run: cargo check -p formula-engine --target wasm32-unknown-unknown --all-targets --locked
@@ -371,7 +373,7 @@ jobs:
           # changing the workflow. Leaving them unset (or empty) keeps the report informational.
           FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
           FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB }}
-        run: python scripts/desktop_size_report.py --binary target/release/formula-desktop --dist apps/desktop/dist --json-out desktop-size-report.json
+        run: python3 scripts/desktop_size_report.py --binary target/release/formula-desktop --dist apps/desktop/dist --json-out desktop-size-report.json
 
       - name: Upload desktop size report (JSON)
         if: always()
