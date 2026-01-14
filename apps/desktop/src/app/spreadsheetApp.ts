@@ -1347,12 +1347,15 @@ export class SpreadsheetApp {
   private selectionCtx: CanvasRenderingContext2D;
   private presenceRenderer: PresenceRenderer | null = null;
   private remotePresences: GridPresence[] = [];
+  private readonly presenceClipRectScratch = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly overlayCellRectScratch: CellCoord = { row: 0, col: 0 };
 
   private auditingRenderer = new AuditingOverlayRenderer();
   private auditingMode: "off" | AuditingMode = "off";
   private auditingTransitive = false;
   private auditingHighlights: AuditingOverlays = { precedents: new Set(), dependents: new Set() };
   private auditingErrors: { precedents: string | null; dependents: string | null } = { precedents: null, dependents: null };
+  private readonly auditingClipRectScratch = { x: 0, y: 0, width: 0, height: 0 };
   private readonly auditingCache = new Map<string, AuditingCacheEntry>();
   private auditingLegend!: HTMLDivElement;
   private auditingUpdateScheduled = false;
@@ -16689,32 +16692,34 @@ export class SpreadsheetApp {
     this.auditingNeedsClear = false;
     this.auditingRenderer.clear(this.auditingCtx);
 
-    const clipRect = this.sharedGrid
-      ? (() => {
-          const viewport = this.sharedGrid.renderer.scroll.getViewportState();
-          const headerWidth = Math.max(0, this.sharedGrid.renderer.getColWidth(0));
-          const headerHeight = Math.max(0, this.sharedGrid.renderer.getRowHeight(0));
-          return {
-            x: headerWidth,
-            y: headerHeight,
-            width: Math.max(0, viewport.width - headerWidth),
-            height: Math.max(0, viewport.height - headerHeight),
-          };
-        })()
-      : {
-          x: this.rowHeaderWidth,
-          y: this.colHeaderHeight,
-          width: this.viewportWidth(),
-          height: this.viewportHeight(),
-        };
+    const clipRect = this.auditingClipRectScratch;
+    if (this.sharedGrid) {
+      const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+      const headerWidth = Math.max(0, this.sharedGrid.renderer.getColWidth(0));
+      const headerHeight = Math.max(0, this.sharedGrid.renderer.getRowHeight(0));
+      clipRect.x = headerWidth;
+      clipRect.y = headerHeight;
+      clipRect.width = Math.max(0, viewport.width - headerWidth);
+      clipRect.height = Math.max(0, viewport.height - headerHeight);
+    } else {
+      clipRect.x = this.rowHeaderWidth;
+      clipRect.y = this.colHeaderHeight;
+      clipRect.width = this.viewportWidth();
+      clipRect.height = this.viewportHeight();
+    }
 
     this.auditingCtx.save();
     this.auditingCtx.beginPath();
     this.auditingCtx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
     this.auditingCtx.clip();
 
+    const cellScratch = this.overlayCellRectScratch;
     this.auditingRenderer.render(this.auditingCtx, this.auditingHighlights, {
-      getCellRect: (row, col) => this.getCellRect({ row, col }),
+      getCellRect: (row, col) => {
+        cellScratch.row = row;
+        cellScratch.col = col;
+        return this.getCellRect(cellScratch);
+      },
     });
 
     this.auditingCtx.restore();
@@ -16731,20 +16736,24 @@ export class SpreadsheetApp {
     if (this.remotePresences.length === 0) return;
 
     this.ensureViewportMappingCurrent();
-    const clipRect = {
-      x: this.rowHeaderWidth,
-      y: this.colHeaderHeight,
-      width: this.viewportWidth(),
-      height: this.viewportHeight(),
-    };
+    const clipRect = this.presenceClipRectScratch;
+    clipRect.x = this.rowHeaderWidth;
+    clipRect.y = this.colHeaderHeight;
+    clipRect.width = this.viewportWidth();
+    clipRect.height = this.viewportHeight();
 
     ctx.save();
     ctx.beginPath();
     ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
     ctx.clip();
 
+    const cellScratch = this.overlayCellRectScratch;
     renderer.render(ctx, this.remotePresences, {
-      getCellRect: (row: number, col: number) => this.getCellRect({ row, col }),
+      getCellRect: (row: number, col: number) => {
+        cellScratch.row = row;
+        cellScratch.col = col;
+        return this.getCellRect(cellScratch);
+      },
     });
 
     ctx.restore();
