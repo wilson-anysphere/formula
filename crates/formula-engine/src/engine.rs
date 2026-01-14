@@ -15741,7 +15741,21 @@ fn walk_calc_expr(
                                 Expr::CellRef(_)
                                 | Expr::RangeRef(_)
                                 | Expr::StructuredRef(_)
-                                | Expr::SpillRange(_) => return,
+                                | Expr::SpillRange(_) => {
+                                    for a in args.iter().skip(2) {
+                                        walk_calc_expr(
+                                            a,
+                                            current_cell,
+                                            tables_by_sheet,
+                                            workbook,
+                                            spills,
+                                            precedents,
+                                            visiting_names,
+                                            lexical_scopes,
+                                        );
+                                    }
+                                    return;
+                                }
                                 Expr::ImplicitIntersection(inner) => {
                                     if matches!(
                                         inner.as_ref(),
@@ -15750,6 +15764,18 @@ fn walk_calc_expr(
                                             | Expr::StructuredRef(_)
                                             | Expr::SpillRange(_)
                                     ) {
+                                        for a in args.iter().skip(2) {
+                                            walk_calc_expr(
+                                                a,
+                                                current_cell,
+                                                tables_by_sheet,
+                                                workbook,
+                                                spills,
+                                                precedents,
+                                                visiting_names,
+                                                lexical_scopes,
+                                            );
+                                        }
                                         return;
                                     }
                                 }
