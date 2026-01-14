@@ -239,6 +239,37 @@ test("CellStructuralConflictMonitor supports manual move conflict resolution wit
   docB.destroy();
 });
 
+test("CollabSession cellConflicts.maxOpRecordAgeMs prunes old persisted op log records on startup", () => {
+  const doc = new Y.Doc();
+  const ops = doc.getMap("cellStructuralOps");
+  const now = Date.now();
+
+  doc.transact(() => {
+    ops.set("old-op", {
+      id: "old-op",
+      kind: "edit",
+      userId: "someone",
+      createdAt: now - 60_000,
+      beforeState: [],
+      afterState: [],
+    });
+  });
+
+  const session = createCollabSession({
+    doc,
+    cellConflicts: {
+      localUserId: "user-a",
+      onConflict: () => {},
+      maxOpRecordAgeMs: 1_000,
+    },
+  });
+
+  assert.equal(doc.getMap("cellStructuralOps").has("old-op"), false);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CellStructuralConflictMonitor detects conflicts after re-instantiating a session with pre-existing local op log entries", async () => {
   const docA1 = new Y.Doc();
   const docB = new Y.Doc();
