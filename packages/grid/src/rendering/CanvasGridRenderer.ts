@@ -563,6 +563,8 @@ export class CanvasGridRenderer {
     selection: [] as Rect[]
   };
   private readonly selectionDirtyRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly fullViewportRectScratch: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly fullViewportRectListScratch: Rect[] = [this.fullViewportRectScratch];
 
   private scheduled = false;
   private renderRafId: number | null = null;
@@ -3146,11 +3148,24 @@ export class CanvasGridRenderer {
     const regions = CanvasGridRenderer.mergeDirtyRegions(backgroundRegions, contentRegions);
     if (regions.length === 0) return;
 
-    const full = { x: 0, y: 0, width: viewport.width, height: viewport.height };
-    const shouldFullRender =
-      regions.length > 8 ||
-      regions.some((region) => region.x <= 0 && region.y <= 0 && region.width >= viewport.width && region.height >= viewport.height);
-    const toRender = shouldFullRender ? [full] : regions;
+    const full = this.fullViewportRectScratch;
+    full.x = 0;
+    full.y = 0;
+    full.width = viewport.width;
+    full.height = viewport.height;
+
+    let shouldFullRender = regions.length > 8;
+    if (!shouldFullRender) {
+      for (let i = 0; i < regions.length; i++) {
+        const region = regions[i]!;
+        if (region.x <= 0 && region.y <= 0 && region.width >= viewport.width && region.height >= viewport.height) {
+          shouldFullRender = true;
+          break;
+        }
+      }
+    }
+
+    const toRender = shouldFullRender ? this.fullViewportRectListScratch : regions;
 
     const gridCtx = this.gridCtx;
     const contentCtx = this.contentCtx;
@@ -3226,12 +3241,24 @@ export class CanvasGridRenderer {
     if (viewport.width === 0 || viewport.height === 0) return;
     if (regions.length === 0) return;
 
-    const full = { x: 0, y: 0, width: viewport.width, height: viewport.height };
-    const shouldFullRender =
-      regions.length > 8 ||
-      regions.some((region) => region.x <= 0 && region.y <= 0 && region.width >= viewport.width && region.height >= viewport.height);
+    const full = this.fullViewportRectScratch;
+    full.x = 0;
+    full.y = 0;
+    full.width = viewport.width;
+    full.height = viewport.height;
 
-    const toRender = shouldFullRender ? [full] : regions;
+    let shouldFullRender = regions.length > 8;
+    if (!shouldFullRender) {
+      for (let i = 0; i < regions.length; i++) {
+        const region = regions[i]!;
+        if (region.x <= 0 && region.y <= 0 && region.width >= viewport.width && region.height >= viewport.height) {
+          shouldFullRender = true;
+          break;
+        }
+      }
+    }
+
+    const toRender = shouldFullRender ? this.fullViewportRectListScratch : regions;
 
     if (layer === "selection") {
       // Selection primitives (selection fill/stroke, remote presence overlays) are already expressed in
