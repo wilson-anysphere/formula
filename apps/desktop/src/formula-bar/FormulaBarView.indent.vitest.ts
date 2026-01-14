@@ -5,7 +5,6 @@
 import { describe, expect, it } from "vitest";
 
 import { FormulaBarView } from "./FormulaBarView.js";
-import { computeFormulaIndentation } from "./computeFormulaIndentation.js";
 
 describe("FormulaBarView Alt+Enter auto-indentation", () => {
   it("inserts a newline + indentation based on paren nesting", () => {
@@ -90,12 +89,31 @@ describe("FormulaBarView Alt+Enter auto-indentation", () => {
 
     host.remove();
   });
-});
 
-describe("computeFormulaIndentation()", () => {
   it("ignores parentheses inside string literals", () => {
-    const text = `=IF("(",1,2`;
-    expect(computeFormulaIndentation(text, text.length)).toBe("  ");
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const commits: string[] = [];
+    const view = new FormulaBarView(host, { onCommit: (text) => commits.push(text) });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    const formula = `=IF("(",1,2`;
+    view.textarea.value = formula;
+    view.textarea.setSelectionRange(formula.length, formula.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true }));
+
+    // Should indent for the `IF(` call, but ignore the `(` inside the string literal.
+    const expected = `=IF("(",1,2\n  `;
+    expect(view.textarea.value).toBe(expected);
+    expect(view.model.draft).toBe(expected);
+    expect(view.textarea.selectionStart).toBe(expected.length);
+    expect(view.textarea.selectionEnd).toBe(expected.length);
+    expect(commits).toEqual([]);
+
+    host.remove();
   });
 });
-
