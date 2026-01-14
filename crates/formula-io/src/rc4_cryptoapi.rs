@@ -740,6 +740,41 @@ mod tests {
     }
 
     #[test]
+    fn encrypted_package_stream_falls_back_to_low_dword_when_size_prefix_high_dword_is_reserved() {
+        let h = b"0123456789ABCDEFGHIJ".to_vec(); // 20 bytes
+        let key_len = 7; // 56-bit
+
+        // Ensure plaintext crosses a 0x200 boundary.
+        let mut plaintext = vec![0u8; RC4_BLOCK_SIZE + 64];
+        for (i, b) in plaintext.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len, HashAlg::Sha1);
+
+        // Simulate EncryptedPackage stream layout but with a non-zero high DWORD in the size prefix.
+        // Some producers treat this prefix as `(u32 size, u32 reserved)` and may write a non-zero
+        // reserved high DWORD.
+        let size_lo = u32::try_from(plaintext.len()).expect("plaintext length fits in u32");
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&size_lo.to_le_bytes());
+        stream.extend_from_slice(&1u32.to_le_bytes()); // reserved high DWORD
+        stream.extend_from_slice(&ciphertext);
+
+        let cursor = Cursor::new(stream);
+        let mut reader = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+            cursor,
+            h.clone(),
+            56, // keySize (bits)
+            CALG_SHA1,
+        )
+        .expect("create RC4 decrypt reader with reserved size prefix high DWORD");
+
+        let mut out = vec![0u8; plaintext.len()];
+        reader.read_exact(&mut out).unwrap();
+        assert_eq!(out, plaintext);
+    }
+
+    #[test]
     fn seek_into_middle_of_block_and_read() {
         let h = b"0123456789ABCDEFGHIJ".to_vec(); // 20 bytes
         for key_len in [5usize, 7, 16] {
