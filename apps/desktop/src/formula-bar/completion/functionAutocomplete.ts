@@ -281,6 +281,11 @@ export class FormulaBarFunctionAutocompleteController {
 
   destroy(): void {
     for (const stop of this.#unsubscribe.splice(0)) stop();
+    this.close();
+    // Clean up ARIA attributes we own (FormulaBarView does not manage these).
+    this.#textarea.removeAttribute("aria-haspopup");
+    this.#textarea.removeAttribute("aria-controls");
+    this.#textarea.removeAttribute("aria-expanded");
     this.#dropdownEl.remove();
   }
 
@@ -289,16 +294,19 @@ export class FormulaBarFunctionAutocompleteController {
   }
 
   close(): void {
-    if (this.#dropdownEl.hidden) return;
-    this.#dropdownEl.hidden = true;
-    this.#dropdownEl.textContent = "";
-    this.#itemEls = [];
+    // Always clear state/ARIA even if the dropdown is already hidden (defensive:
+    // DOM state may be manipulated externally and we don't want stale activedescendant ids).
     this.#context = null;
     this.#suggestions = [];
     this.#selectedIndex = 0;
     this.#activeDescendantId = null;
     this.#textarea.removeAttribute("aria-activedescendant");
     this.#textarea.setAttribute("aria-expanded", "false");
+
+    if (this.#dropdownEl.hidden) return;
+    this.#dropdownEl.hidden = true;
+    this.#dropdownEl.textContent = "";
+    this.#itemEls = [];
   }
 
   update(): void {
