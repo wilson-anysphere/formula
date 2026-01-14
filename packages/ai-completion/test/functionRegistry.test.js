@@ -237,4 +237,15 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
     "date_text",
     "Expected DATEVALUE arg1 to be date_text"
   );
+
+  // Bond/treasury functions: ensure arg naming matches enum indices in TabCompletionEngine.
+  const price = registry.getFunction("PRICE");
+  assert.ok(price, "Expected PRICE to have a curated signature");
+  assert.equal(price?.args?.[0]?.name, "settlement", "Expected PRICE arg1 to be settlement");
+  assert.equal(price?.args?.[5]?.name, "frequency", "Expected PRICE arg6 to be frequency");
+  assert.ok(price?.args?.[6]?.optional, "Expected PRICE basis to be optional");
+
+  assert.equal(registry.getArgType("ACCRINT", 7), "boolean", "Expected ACCRINT calc_method to be boolean");
+  assert.equal(registry.getFunction("COUPDAYBS")?.args?.[2]?.name, "frequency", "Expected COUPDAYBS arg3 to be frequency");
+  assert.equal(registry.getFunction("TBILLYIELD")?.args?.[2]?.name, "pr", "Expected TBILLYIELD arg3 to be pr");
 });
