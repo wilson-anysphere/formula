@@ -151,3 +151,35 @@ fn calculated_column_dependencies_traverse_var_bindings_and_body() {
     assert_eq!(t.value(1, "B").unwrap(), Value::from(12.0));
     assert_eq!(t.value(1, "C").unwrap(), Value::from(23.0));
 }
+
+#[test]
+fn calculated_column_dependencies_resolve_unicode_identifiers_case_insensitively() {
+    // Use a German sharp S (ß) to ensure Unicode-aware case folding (ß -> SS) is applied when:
+    // - registering calculated column definitions (`add_calculated_column_definition`)
+    // - resolving bracket identifiers like `[MASS]` to same-table columns in row context
+    // - computing dependency order between calculated columns.
+    let mut model = DataModel::new();
+
+    // Persisted model: calculated column storage already exists, but definitions can be registered
+    // in any order.
+    let mut t = Table::new("Straße", vec!["Maß", "Maß2", "Quad"]);
+    t.push_row(vec![1.into(), Value::Blank, Value::Blank]).unwrap();
+    model.add_table(t).unwrap();
+
+    // Register out-of-order on purpose: Quad depends on Maß2; Maß2 depends on Maß.
+    //
+    // Use ASCII-only identifiers (`STRASSE`, `MASS`, `MASS2`) to ensure Unicode-aware folding is
+    // used during lookup.
+    model
+        .add_calculated_column_definition("STRASSE", "Quad", "[MASS2] * 2")
+        .unwrap();
+    model
+        .add_calculated_column_definition("strasse", "MASS2", "[mass] + 1")
+        .unwrap();
+
+    model.insert_row("strasse", vec![10.into()]).unwrap();
+
+    let t = model.table("STRASSE").unwrap();
+    assert_eq!(t.value(1, "Maß2").unwrap(), Value::from(11.0));
+    assert_eq!(t.value(1, "Quad").unwrap(), Value::from(22.0));
+}
