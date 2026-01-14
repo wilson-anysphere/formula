@@ -17,6 +17,7 @@ const browserSafeEntrypoints = [
   new URL("../src/budgetPlanner.js", import.meta.url),
   new URL("../src/dlp.js", import.meta.url),
   new URL("../src/abort.js", import.meta.url),
+  new URL("../src/tsv.js", import.meta.url),
 ];
 
 test("browser-safe entrypoints do not contain static node:* imports", async () => {

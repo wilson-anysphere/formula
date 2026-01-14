@@ -13,11 +13,12 @@ describe("ai-context TS entrypoint", () => {
       writeFileSync(
       tmpFile,
       [
-        'import { ContextManager, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, RagIndex, classifyText, chunkSheetByRegions, chunkSheetByRegionsWithSchema, extractSheetSchema, extractWorkbookSchema, isLikelyHeaderRow, parseA1Range, summarizeRegion, summarizeSheetSchema, summarizeWorkbookSchema, trimMessagesToBudget } from "../src/index.js";',
+        'import { ContextManager, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, RagIndex, classifyText, chunkSheetByRegions, chunkSheetByRegionsWithSchema, extractSheetSchema, extractWorkbookSchema, isLikelyHeaderRow, parseA1Range, summarizeRegion, summarizeSheetSchema, summarizeWorkbookSchema, trimMessagesToBudget, valuesRangeToTsv } from "../src/index.js";',
         'import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows, tailSampleRows } from "../src/index.js";',
         "",
         "EXCEL_MAX_ROWS satisfies number;",
         "EXCEL_MAX_COLS satisfies number;",
+        'valuesRangeToTsv([["a"]], { startRow: 0, startCol: 0, endRow: 0, endCol: 0 }, { maxRows: 1 }) satisfies string;',
         "",
         'isLikelyHeaderRow(["Header"], ["Value"]) satisfies boolean;',
         "",
@@ -102,6 +103,9 @@ describe("ai-context TS entrypoint", () => {
         ");",
         "indexedSchema.dataRegions[0]?.range satisfies string;",
         "chunkCount satisfies number;",
+        "",
+        "// @ts-expect-error - valuesRangeToTsv requires maxRows in options.",
+        'valuesRangeToTsv([["a"]], { startRow: 0, startCol: 0, endRow: 0, endCol: 0 }, {});',
         "",
         "// @ts-expect-error - parseA1Range expects a string.",
         "parseA1Range(123);",
