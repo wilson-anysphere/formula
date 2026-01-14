@@ -600,21 +600,38 @@ try {
     }
     $desktop = $desktopProp.Value
  
-    $schemesProp = $desktop.PSObject.Properties["schemes"]
-    if ($null -eq $schemesProp -or $null -eq $schemesProp.Value) {
-      return $default
+    $schemes = @()
+ 
+    function Add-SchemesFromProtocol {
+      param([Parameter(Mandatory = $true)] $Protocol)
+ 
+      if ($null -eq $Protocol) { return }
+ 
+      $schemesProp = $Protocol.PSObject.Properties["schemes"]
+      if ($null -eq $schemesProp -or $null -eq $schemesProp.Value) { return }
+ 
+      foreach ($s in @($schemesProp.Value)) {
+        if ($null -eq $s) { continue }
+        $v = $s.ToString().Trim()
+        if ([string]::IsNullOrWhiteSpace($v)) { continue }
+        # Normalize common user input like "formula://" to just the scheme name.
+        $v = $v.TrimEnd("/").TrimEnd(":")
+        $v = $v.ToLowerInvariant()
+        if (-not [string]::IsNullOrWhiteSpace($v)) {
+          $schemes += $v
+        }
+      }
     }
  
-    $schemesRaw = $schemesProp.Value
-    $schemes = @()
-    foreach ($s in @($schemesRaw)) {
-      if ($null -eq $s) { continue }
-      $v = $s.ToString().Trim()
-      if ([string]::IsNullOrWhiteSpace($v)) { continue }
-      # Normalize common user input like "formula://" to just the scheme name.
-      $v = $v.TrimEnd("/").TrimEnd(":")
-      $v = $v.ToLowerInvariant()
-      $schemes += $v
+    # plugins.deep-link.desktop can be either:
+    # - a single protocol object with a `schemes` field
+    # - an array of protocol objects
+    if ($desktop -is [System.Array]) {
+      foreach ($proto in @($desktop)) {
+        Add-SchemesFromProtocol -Protocol $proto
+      }
+    } else {
+      Add-SchemesFromProtocol -Protocol $desktop
     }
     if ($schemes.Count -eq 0) {
       return $default
