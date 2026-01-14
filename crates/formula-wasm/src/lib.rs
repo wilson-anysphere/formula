@@ -5845,8 +5845,8 @@ impl WasmWorkbook {
     /// Return a lightweight workbook metadata payload (sheet list + dimensions + best-effort used ranges)
     /// without materializing the full workbook JSON string returned by `toJson()`.
     ///
-    /// This is intended for web clients that need to open `.xlsx` bytes and quickly determine the
-    /// available sheets / their used ranges without scanning every cell key in JS.
+    /// This is intended for web clients that need to open `.xlsx`/`.xlsm` bytes and quickly determine
+    /// the available sheets / their used ranges without scanning every cell key in JS.
     #[wasm_bindgen(js_name = "getWorkbookInfo")]
     pub fn get_workbook_info(&self) -> Result<JsValue, JsValue> {
         let obj = Object::new();
