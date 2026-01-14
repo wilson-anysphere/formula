@@ -2339,10 +2339,11 @@ fn write_xlsb_to_disk_impl(path: &Path, workbook: &Workbook) -> anyhow::Result<(
                     None => (None, None),
                 };
 
-                if let Some((baseline_value, baseline_formula)) = workbook
-                    .cell_input_baseline
-                    .get(&(sheet.id.clone(), *row, *col))
-                {
+                let baseline_key = (sheet.id.clone(), *row, *col);
+                let baseline = workbook.cell_input_baseline.get(&baseline_key);
+                let baseline_had_formula = baseline.map_or(false, |baseline| baseline.1.is_some());
+
+                if let Some((baseline_value, baseline_formula)) = baseline {
                     if &current_input == baseline_value && &current_formula == baseline_formula {
                         continue;
                     }
@@ -2411,11 +2412,12 @@ fn write_xlsb_to_disk_impl(path: &Path, workbook: &Workbook) -> anyhow::Result<(
                         row: row_u32,
                         col: col_u32,
                         new_value,
+                        new_style: None,
+                        clear_formula: baseline_had_formula,
                         new_formula: None,
                         new_rgcb: None,
                         new_formula_flags: None,
                         shared_string_index: None,
-                        new_style: None,
                     },
                 };
                 edits.push(edit);

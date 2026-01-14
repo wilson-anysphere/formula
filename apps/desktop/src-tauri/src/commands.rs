@@ -1231,6 +1231,8 @@ pub struct IpcValueField {
     pub name: PivotText,
     pub aggregation: AggregationType,
     #[serde(default)]
+    pub number_format: Option<PivotText>,
+    #[serde(default)]
     pub show_as: Option<ShowAsType>,
     #[serde(default)]
     pub base_field: Option<PivotText>,
@@ -1244,6 +1246,7 @@ impl From<IpcValueField> for formula_engine::pivot::ValueField {
             source_field: value.source_field.into_inner(),
             name: value.name.into_inner(),
             aggregation: value.aggregation,
+            number_format: value.number_format.map(|s| s.into_inner()),
             show_as: value.show_as,
             base_field: value.base_field.map(|s| s.into_inner()),
             base_item: value.base_item.map(|s| s.into_inner()),

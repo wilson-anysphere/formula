@@ -748,6 +748,7 @@ impl XlsbWorkbook {
                 col: edit.col,
                 new_value: edit.new_value.clone(),
                 new_style: None,
+                clear_formula: false,
                 new_formula: Some(encoded.rgce),
                 new_rgcb: Some(encoded.rgcb),
                 new_formula_flags: None,
