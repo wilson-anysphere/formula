@@ -15054,21 +15054,18 @@ export class SpreadsheetApp {
       ctx.clip();
 
       // Grid lines for this quadrant.
+      ctx.beginPath();
       for (let r = 0; r <= rows.length; r++) {
         const y = startY + r * this.cellHeight + 0.5;
-        ctx.beginPath();
         ctx.moveTo(startX, y);
         ctx.lineTo(endX, y);
-        ctx.stroke();
       }
-
       for (let c = 0; c <= cols.length; c++) {
         const x = startX + c * this.cellWidth + 0.5;
-        ctx.beginPath();
         ctx.moveTo(x, startY);
         ctx.lineTo(x, endY);
-        ctx.stroke();
       }
+      ctx.stroke();
 
       for (let visualRow = 0; visualRow < rows.length; visualRow++) {
         const row = rows[visualRow]!;
