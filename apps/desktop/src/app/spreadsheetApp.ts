@@ -7898,6 +7898,15 @@ export class SpreadsheetApp {
     } catch {
       // Best-effort.
     }
+
+    // Shared-grid row/col resizing is also a pointer-driven gesture that commits sheet-view
+    // mutations on pointerup. Cancel any in-progress resize drag so it can't "finish" on the
+    // newly activated sheet.
+    try {
+      this.sharedGrid?.cancelResizeDrag?.();
+    } catch {
+      // Best-effort.
+    }
   }
 
   activateSheet(sheetId: string): void {

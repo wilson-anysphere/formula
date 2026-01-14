@@ -428,6 +428,29 @@ export class DesktopSharedGrid {
     return true;
   }
 
+  /**
+   * Cancel an in-progress row/col resize drag (if any).
+   *
+   * Returns true when a resize drag was active and was canceled.
+   */
+  cancelResizeDrag(): boolean {
+    const pointerId = this.resizePointerId;
+    if (pointerId == null) return false;
+
+    this.resizePointerId = null;
+    this.resizeDrag = null;
+    this.clearViewportOrigin();
+    this.selectionCanvas.style.cursor = "default";
+
+    try {
+      this.selectionCanvas.releasePointerCapture?.(pointerId);
+    } catch {
+      // Ignore capture release failures.
+    }
+
+    return true;
+  }
+
   getScroll(): { x: number; y: number } {
     return this.renderer.scroll.getScroll();
   }
