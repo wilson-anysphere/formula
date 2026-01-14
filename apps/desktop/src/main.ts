@@ -8915,6 +8915,13 @@ function handleRibbonCommand(commandId: string): void {
         if (isSpreadsheetEditing() || app.isReadOnly()) return;
         void handleDeleteActiveSheet();
         return;
+      // Legacy ribbon schema ids (Home → Editing → AutoSum).
+      case "home.editing.autoSum":
+      case "home.editing.autoSum.sum":
+        executeBuiltinCommand("edit.autoSum");
+        // `edit.autoSum` restores focus, but ensure the grid is focused even if the command is a no-op.
+        app.focus();
+        return;
       case "home.editing.autoSum.average":
         app.autoSumAverage();
         app.focus();
