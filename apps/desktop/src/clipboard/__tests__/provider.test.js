@@ -1548,6 +1548,38 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("tauri: write uses clipboard_write_text for oversized plain text when legacy writeText is unavailable", async () => {
+    const largeText = "x".repeat(3 * 1024 * 1024);
+
+    /** @type {any[]} */
+    const invokeCalls = [];
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd, args) {
+              invokeCalls.push([cmd, args]);
+              if (cmd === "clipboard_write_text") return;
+              throw new Error(`unexpected invoke: ${cmd}`);
+            },
+          },
+          // Intentionally omit `clipboard.writeText` to simulate hardened builds (no clipboard-manager plugin).
+          clipboard: undefined,
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: largeText, html: "<p>hello</p>" });
+
+        assert.equal(invokeCalls.length, 1);
+        assert.equal(invokeCalls[0][0], "clipboard_write_text");
+        assert.deepEqual(invokeCalls[0][1], { text: largeText });
+      }
+    );
+  });
+
   await t.test("tauri: write invokes core.invoke('clipboard_write') and does not attempt ClipboardItem write", async () => {
     /** @type {any[]} */
     const invokeCalls = [];

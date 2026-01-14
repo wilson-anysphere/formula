@@ -173,8 +173,9 @@ test("clipboard provider JS limits match Rust backend clipboard IPC guardrails",
   const consts = parseUsizeConsts(rustText);
   const rustMaxPngBytes = evalConst("MAX_PNG_BYTES", consts, new Set());
   const rustMaxTextBytes = evalConst("MAX_TEXT_BYTES", consts, new Set());
+  const rustMaxPlainTextWriteBytes = evalConst("MAX_PLAINTEXT_WRITE_BYTES", consts, new Set());
 
   assert.equal(CLIPBOARD_LIMITS.maxImageBytes, rustMaxPngBytes);
   assert.equal(CLIPBOARD_LIMITS.maxRichTextBytes, rustMaxTextBytes);
+  assert.equal(CLIPBOARD_LIMITS.maxPlainTextWriteBytes, rustMaxPlainTextWriteBytes);
 });
-

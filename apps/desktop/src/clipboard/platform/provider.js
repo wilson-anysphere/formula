@@ -33,6 +33,7 @@ const MAX_PLAINTEXT_WRITE_BYTES = 10 * 1024 * 1024; // 10MB (UTF-8 bytes)
 export const CLIPBOARD_LIMITS = {
   maxImageBytes: MAX_IMAGE_BYTES,
   maxRichTextBytes: MAX_RICH_TEXT_BYTES,
+  maxPlainTextWriteBytes: MAX_PLAINTEXT_WRITE_BYTES,
 };
 
 // Internal marker used to communicate "we detected an oversized text/plain blob" between provider

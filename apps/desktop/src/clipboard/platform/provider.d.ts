@@ -8,6 +8,7 @@ export type ClipboardProvider = {
 export const CLIPBOARD_LIMITS: {
   maxImageBytes: number;
   maxRichTextBytes: number;
+  maxPlainTextWriteBytes: number;
 };
 
 export function createClipboardProvider(): Promise<ClipboardProvider>;

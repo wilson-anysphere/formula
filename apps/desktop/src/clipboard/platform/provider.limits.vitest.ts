@@ -51,6 +51,9 @@ describe("clipboard caps stay in sync with the Rust backend", () => {
 
     const rustMaxPngBytes = evalRustUsizeExpression(readRustConstExpression(rustSource, "MAX_PNG_BYTES"));
     const rustMaxTextBytes = evalRustUsizeExpression(readRustConstExpression(rustSource, "MAX_TEXT_BYTES"));
+    const rustMaxPlainTextWriteBytes = evalRustUsizeExpression(
+      readRustConstExpression(rustSource, "MAX_PLAINTEXT_WRITE_BYTES"),
+    );
 
     const mismatches: string[] = [];
 
@@ -63,6 +66,12 @@ describe("clipboard caps stay in sync with the Rust backend", () => {
     if (CLIPBOARD_LIMITS.maxRichTextBytes !== rustMaxTextBytes) {
       mismatches.push(
         `- JS provider CLIPBOARD_LIMITS.maxRichTextBytes (${CLIPBOARD_LIMITS.maxRichTextBytes}) does not match Rust MAX_TEXT_BYTES (${rustMaxTextBytes}).`
+      );
+    }
+
+    if (CLIPBOARD_LIMITS.maxPlainTextWriteBytes !== rustMaxPlainTextWriteBytes) {
+      mismatches.push(
+        `- JS provider CLIPBOARD_LIMITS.maxPlainTextWriteBytes (${CLIPBOARD_LIMITS.maxPlainTextWriteBytes}) does not match Rust MAX_PLAINTEXT_WRITE_BYTES (${rustMaxPlainTextWriteBytes}).`
       );
     }
 
@@ -79,4 +88,3 @@ describe("clipboard caps stay in sync with the Rust backend", () => {
     }
   });
 });
-
