@@ -3612,6 +3612,7 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
 }
 
 #[cfg(feature = "encrypted-workbooks")]
+#[allow(dead_code)]
 fn try_open_standard_aes_encrypted_ooxml_model_workbook(
     path: &Path,
     password: Option<&str>,
@@ -3873,11 +3874,6 @@ pub fn open_workbook_with_options(
     // surface an "unsupported encryption" error so callers don't assume a password will work.
     #[cfg(feature = "encrypted-workbooks")]
     {
-        if let Some(workbook) =
-            try_open_standard_aes_encrypted_ooxml_model_workbook(path, opts.password.as_deref())?
-        {
-            return Ok(Workbook::Model(workbook));
-        }
         if let Some(bytes) =
             try_decrypt_ooxml_encrypted_package_from_path(path, opts.password.as_deref())?
         {
