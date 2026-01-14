@@ -1069,6 +1069,8 @@ CI guardrails (tagged releases):
   **core runtime dependencies** are missing from the RPM metadata.
 - `bash scripts/ci/linux-package-install-smoke.sh rpm` installs the `.rpm` into a clean Fedora container and fails if
   `ldd /usr/bin/formula-desktop` reports missing shared libraries.
+- Optional: set the GitHub Actions variable `FORMULA_OPENSUSE_SMOKE=1` to also run an openSUSE/Tumbleweed RPM install smoke
+  test (helps validate the RPM rich-deps cover openSUSE package naming).
 
 Note: showing a tray icon also requires a desktop environment with **StatusNotifier/AppIndicator**
 support (e.g. the GNOME Shell “AppIndicator and KStatusNotifierItem Support” extension).
