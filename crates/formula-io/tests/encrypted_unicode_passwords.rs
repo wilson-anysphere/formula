@@ -41,8 +41,11 @@ fn encrypt_bytes_with_password(plain: &[u8], password: &str) -> Vec<u8> {
 fn opens_encrypted_ooxml_with_unicode_passwords_including_emoji() {
     let plain_xlsx = build_tiny_xlsx();
 
-    // Include both non-ASCII BMP codepoints and a non-BMP emoji (surrogate pair in UTF-16).
-    let passwords = ["pässwörd🔒", "密码🔒"];
+    // Include:
+    // - non-ASCII BMP codepoints
+    // - a non-BMP emoji (surrogate pair in UTF-16)
+    // - leading/trailing whitespace to ensure caller input is not trimmed
+    let passwords = ["pässwörd🔒", "密码🔒", "pässwörd🔒 ", " 密码🔒"];
 
     for password in passwords {
         let encrypted = encrypt_bytes_with_password(&plain_xlsx, password);
@@ -57,15 +60,27 @@ fn opens_encrypted_ooxml_with_unicode_passwords_including_emoji() {
             "expected Error::PasswordRequired, got {err:?}"
         );
 
-        // Slightly different password must fail (no normalization/trimming of the caller input).
-        let mut wrong = password.to_string();
-        wrong.pop();
-        let err = open_workbook_model_with_password(&path, Some(&wrong))
-            .expect_err("expected invalid password");
-        assert!(
-            matches!(err, Error::InvalidPassword { .. }),
-            "expected Error::InvalidPassword, got {err:?}"
-        );
+        // Password strings must match exactly; callers must not be normalized or trimmed.
+        let trimmed = password.trim();
+        if trimmed != password {
+            // If the *correct* password has whitespace, the trimmed version must fail.
+            let err = open_workbook_model_with_password(&path, Some(trimmed))
+                .expect_err("expected invalid password");
+            assert!(
+                matches!(err, Error::InvalidPassword { .. }),
+                "expected Error::InvalidPassword, got {err:?}"
+            );
+        } else {
+            // If the correct password has no leading/trailing whitespace, adding whitespace must fail
+            // (guards against `trim()` on caller input).
+            let wrong = format!("{password} ");
+            let err = open_workbook_model_with_password(&path, Some(&wrong))
+                .expect_err("expected invalid password");
+            assert!(
+                matches!(err, Error::InvalidPassword { .. }),
+                "expected Error::InvalidPassword, got {err:?}"
+            );
+        }
 
         // Correct password succeeds.
         let wb =
@@ -80,4 +95,3 @@ fn opens_encrypted_ooxml_with_unicode_passwords_including_emoji() {
         assert!(matches!(wb, Workbook::Xlsx(_)), "expected Workbook::Xlsx, got {wb:?}");
     }
 }
-
