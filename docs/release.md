@@ -1296,14 +1296,15 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
     - SBOM: `sbom.spdx.json` (SPDX JSON; Rust + JS dependency set; also uploaded as a workflow artifact named `sbom-<tag>`)
     - Build provenance bundles: `provenance-*.intoto.jsonl` (also uploaded as workflow artifacts `provenance-*`)
-    - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
+    - macOS (**universal**): `.dmg` (installer) + updater payload archive (`*.app.tar.gz` preferred;
+      allow `*.tar.gz`/`*.tgz`)
     - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
     - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
     - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `amd64` vs `arm64` / `aarch64`)
 
    This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
    be uploaded alongside the produced artifacts:
-   - macOS: `.dmg.sig` and `.app.tar.gz.sig`
+   - macOS: `.dmg.sig` and updater archive signature (`*.tar.gz.sig`/`*.tgz.sig`)
    - Windows (each architecture): `.msi.sig` and `.exe.sig`
    - Linux (each architecture): `.AppImage.sig`, `.deb.sig`, `.rpm.sig`
 
@@ -1356,7 +1357,8 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     ```
 
    Also confirm each platform entry points at the **updater-consumed** asset type:
-   - `darwin-*` → `*.app.tar.gz` updater archive (**not** `.dmg`)
+   - `darwin-*` → updater payload archive (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`)
+     (**not** `.dmg`)
    - `windows-*` → `*.msi` (updater runs the Windows Installer; this repo requires the manifest to reference the MSI)
    - `linux-*` → `*.AppImage`
 
@@ -1367,9 +1369,11 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
    Run `lipo -info` on the bundled executable (`Formula.app/Contents/MacOS/formula-desktop`):
 
     ```bash
-     # Option A: from the `.app.tar.gz` updater archive.
-     app_tgz="$(ls *.app.tar.gz 2>/dev/null | head -n 1 || true)"
-     test -n "$app_tgz" || { echo "No macOS updater archive found (*.app.tar.gz)" >&2; exit 1; }
+     # Option A: from the updater archive (`*.app.tar.gz` preferred; allow `*.tar.gz`/`*.tgz`).
+     app_tgz="$(
+       ls *.app.tar.gz *.tar.gz *.tgz 2>/dev/null | grep -v -i '\.appimage\.' | head -n 1 || true
+     )"
+     test -n "$app_tgz" || { echo "No macOS updater archive found (*.app.tar.gz / *.tar.gz / *.tgz)" >&2; exit 1; }
      tar -xzf "$app_tgz"
      lipo -info "Formula.app/Contents/MacOS/formula-desktop"
 
