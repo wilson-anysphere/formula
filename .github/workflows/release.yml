@@ -1412,13 +1412,9 @@ jobs:
         # Run the COI smoke check against the already-built Tauri artifacts produced
         # by the `tauri-apps/tauri-action` step above.
         #
-        # By default we run this on all platforms. Set FORMULA_COI_CHECK_ALL_PLATFORMS
-        # to 0/false to only run the check on Linux.
-        #
         # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
         if: >-
           needs.preflight.outputs.upload == 'true'
-          && (runner.os == 'Linux' || !contains(fromJson('["0","false","False","FALSE"]'), vars.FORMULA_COI_CHECK_ALL_PLATFORMS))
           && (runner.os != 'Windows' || matrix.rust_target != 'aarch64-pc-windows-msvc')
           && (
             (runner.os == 'macOS' && steps.tauri_release_macos.outcome == 'success')
@@ -1594,12 +1590,9 @@ jobs:
         # Run against the already-built Tauri artifacts produced by the earlier
         # `tauri-apps/tauri-action` build step(s) in this job.
         #
-        # By default we run this on all platforms. Set FORMULA_COI_CHECK_ALL_PLATFORMS to 0/false
-        # to only run the check on Linux.
         # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
         if: >-
           needs.preflight.outputs.upload != 'true'
-          && (runner.os == 'Linux' || !contains(fromJson('["0","false","False","FALSE"]'), vars.FORMULA_COI_CHECK_ALL_PLATFORMS))
           && (runner.os != 'Windows' || matrix.rust_target != 'aarch64-pc-windows-msvc')
         run: pnpm -C apps/desktop check:coi -- --no-build
 
