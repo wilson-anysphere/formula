@@ -565,6 +565,24 @@ pub fn build_shared_formula_shrfmla_ref8_header_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture where the `SHRFMLA` range header uses the `Ref8` encoding but omits
+/// the `cUse` field.
+///
+/// Shared formula range: `A1:B2`
+/// - `A1:A2` and `B1:B2` formulas are recovered from the sheet-level `SHRFMLA` record.
+pub fn build_shared_formula_shrfmla_ref8_no_cuse_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_shrfmla_ref8_no_cuse_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a shared formula whose shared `SHRFMLA.rgce` includes a
 /// `PtgMemAreaN` token.
 ///
@@ -7802,6 +7820,53 @@ fn build_shared_formula_shrfmla_ref8_header_sheet_stream(xf_cell: u16) -> Vec<u8
     shrfmla.extend_from_slice(&0u16.to_le_bytes()); // colFirst = 0 (A)
     shrfmla.extend_from_slice(&1u16.to_le_bytes()); // colLast = 1 (B)
     shrfmla.extend_from_slice(&0u16.to_le_bytes()); // cUse
+    shrfmla.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+    shrfmla.extend_from_slice(&rgce);
+    push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla);
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_shrfmla_ref8_no_cuse_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_shrfmla_ref8_no_cuse_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedRef8NoCuse", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_shrfmla_ref8_no_cuse_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 2) cols [0, 3) => A1:C2.
+    // The shared formula range itself is only `A1:B2`; we include `C1` as a value cell so the
+    // sheet is non-empty without overlapping the formula range.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // C1: a numeric cell so calamine sees a non-empty sheet value range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 2, xf_cell, 0.0));
+
+    // Shared formula body stored in SHRFMLA: `"X"` (PtgStr).
+    let rgce: [u8; 4] = [0x17, 1, 0, b'X']; // [PtgStr][cch=1][flags=0][X]
+
+    // SHRFMLA definition for range A1:B2 using a Ref8 range header, omitting `cUse`:
+    //   [rwFirst:u16][rwLast:u16][colFirst:u16][colLast:u16][cce:u16][rgce]
+    let mut shrfmla = Vec::<u8>::new();
+    shrfmla.extend_from_slice(&0u16.to_le_bytes()); // rwFirst = 0
+    shrfmla.extend_from_slice(&1u16.to_le_bytes()); // rwLast = 1
+    shrfmla.extend_from_slice(&0u16.to_le_bytes()); // colFirst = 0 (A)
+    shrfmla.extend_from_slice(&1u16.to_le_bytes()); // colLast = 1 (B)
     shrfmla.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
     shrfmla.extend_from_slice(&rgce);
     push_record(&mut sheet, RECORD_SHRFMLA, &shrfmla);

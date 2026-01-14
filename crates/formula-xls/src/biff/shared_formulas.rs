@@ -141,50 +141,111 @@ fn parse_shrfmla_record(record: &records::LogicalBiffRecord<'_>) -> Option<Share
         return None;
     }
 
+    let data = record.data.as_ref();
+    let expected_cce = parsed.rgce.len();
+
     // Try to identify the correct SHRFMLA header layout by matching the `cce` value stored in the
     // record body against the length of the parsed rgce stream. This avoids misidentifying Ref8
     // headers (which use u16 column fields) as RefU when the shared range starts in column A.
-    let data = record.data.as_ref();
-    let expected_cce = parsed.rgce.len();
+    //
+    // Note: When `cUse` is omitted, `Ref8 + cce` (Layout D) and `RefU + cUse + cce` (Layout A) both
+    // place `cce` at offset 8. To avoid truncating Ref8 ranges to column A, we collect all matching
+    // candidates and apply a small heuristic: if a `cUse` field is present and non-zero, it is
+    // expected to match the range area (number of cells) in well-formed sheets.
     let header = {
-        let mut out: Option<RangeHeader> = None;
-        let set_if_matches =
-            |header: Option<RangeHeader>, cce_offset: usize, data: &[u8], out: &mut Option<RangeHeader>| {
+        #[derive(Clone, Copy)]
+        struct Candidate {
+            header: RangeHeader,
+            uses_ref8: bool,
+            cuse: Option<u16>,
+        }
+
+        fn valid_range(h: RangeHeader) -> bool {
+            h.row_first <= h.row_last && h.col_first <= h.col_last
+        }
+
+        fn range_area(h: RangeHeader) -> u64 {
+            let rows = (h.row_last.saturating_sub(h.row_first) as u64).saturating_add(1);
+            let cols = (h.col_last.saturating_sub(h.col_first) as u64).saturating_add(1);
+            rows.saturating_mul(cols)
+        }
+
+        let expected_cce_u16 = u16::try_from(expected_cce).ok()?;
+
+        let mut candidates: Vec<Candidate> = Vec::new();
+        let push_candidate =
+            |header: Option<RangeHeader>,
+             uses_ref8: bool,
+             cuse: Option<u16>,
+             cce_offset: usize,
+             candidates: &mut Vec<Candidate>| {
                 let Some(header) = header else {
                     return;
                 };
-                if header.row_first > header.row_last || header.col_first > header.col_last {
+                if !valid_range(header) {
                     return;
                 }
                 let cce_bytes = match data.get(cce_offset..cce_offset + 2) {
                     Some(v) => v,
                     None => return,
                 };
-                let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]) as usize;
-                if cce == expected_cce {
-                    *out = Some(header);
+                let cce = u16::from_le_bytes([cce_bytes[0], cce_bytes[1]]);
+                if cce == expected_cce_u16 {
+                    candidates.push(Candidate {
+                        header,
+                        uses_ref8,
+                        cuse,
+                    });
                 }
             };
 
-        // Match the parsing order used by `worksheet_formulas::parse_biff8_shrfmla_record`.
         // Layout A: RefU (6) + cUse (2) + cce (2).
-        set_if_matches(parse_refu_range(data), 8, data, &mut out);
-        // Layout B: Ref8 (8) + cUse (2) + cce (2).
-        if out.is_none() {
-            set_if_matches(parse_ref8_range(data), 10, data, &mut out);
-        }
-        // Layout C: RefU (6) + cce (2) (cUse omitted).
-        if out.is_none() {
-            set_if_matches(parse_refu_range(data), 6, data, &mut out);
-        }
-        // Layout D: Ref8 (8) + cce (2) (cUse omitted).
-        if out.is_none() {
-            set_if_matches(parse_ref8_range(data), 8, data, &mut out);
-        }
+        let cuse_a = data
+            .get(6..8)
+            .map(|v| u16::from_le_bytes([v[0], v[1]]));
+        push_candidate(parse_refu_range(data), false, cuse_a, 8, &mut candidates);
 
-        out
+        // Layout B: Ref8 (8) + cUse (2) + cce (2).
+        let cuse_b = data
+            .get(8..10)
+            .map(|v| u16::from_le_bytes([v[0], v[1]]));
+        push_candidate(parse_ref8_range(data), true, cuse_b, 10, &mut candidates);
+
+        // Layout C: RefU (6) + cce (2) (cUse omitted).
+        push_candidate(parse_refu_range(data), false, None, 6, &mut candidates);
+
+        // Layout D: Ref8 (8) + cce (2) (cUse omitted).
+        push_candidate(parse_ref8_range(data), true, None, 8, &mut candidates);
+
+        if candidates.is_empty() {
+            None
+        } else {
+            candidates
+                .into_iter()
+                .min_by_key(|c| {
+                    let area = range_area(c.header);
+                    let cuse_rank: u8 = match c.cuse {
+                        Some(cuse) if cuse != 0 && (cuse as u64) == area => 0,
+                        Some(0) => 1,
+                        None => 1,
+                        Some(_) => 2,
+                    };
+                    (
+                        cuse_rank,
+                        // Prefer Ref8 headers when other signals are equal: they are more general
+                        // and avoid dropping columns when a producer uses Ref8 unnecessarily.
+                        if c.uses_ref8 { 0u8 } else { 1u8 },
+                        area,
+                        c.header.row_first,
+                        c.header.row_last,
+                        c.header.col_first,
+                        c.header.col_last,
+                    )
+                })
+                .map(|c| c.header)
+        }
     }
-    // Fallback to the old heuristic if we fail to match a header layout.
+    // Fallback: accept the first parseable header when we cannot match `cce`.
     .or_else(|| {
         [parse_refu_range(data), parse_ref8_range(data)]
             .into_iter()
