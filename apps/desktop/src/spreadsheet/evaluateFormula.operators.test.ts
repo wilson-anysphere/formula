@@ -31,9 +31,14 @@ describe("evaluateFormula operators", () => {
     expect(evaluateFormula("=1 2", () => null)).toBe("#VALUE!");
   });
 
-  it("accepts semicolons as function argument separators", () => {
-    expect(evaluateFormula("=SUM(1;2)", () => null)).toBe(3);
-    expect(evaluateFormula("=IF(1>0; TRUE; FALSE)", () => null)).toBe(true);
+  it("does not accept semicolons as function argument separators in comma locales (en-US)", () => {
+    expect(evaluateFormula("=SUM(1;2)", () => null)).toBe("#VALUE!");
+    expect(evaluateFormula("=IF(1>0; TRUE; FALSE)", () => null)).toBe("#VALUE!");
+  });
+
+  it("accepts semicolons as function argument separators in semicolon locales (de-DE)", () => {
+    expect(evaluateFormula("=SUM(1;2)", () => null, { localeId: "de-DE" })).toBe(3);
+    expect(evaluateFormula("=IF(1>0; TRUE; FALSE)", () => null, { localeId: "de-DE" })).toBe(true);
   });
 
   it("treats whitespace between function names and '(' as a function call", () => {

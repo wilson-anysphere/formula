@@ -223,6 +223,21 @@ function getNumberLocaleConfig(localeId?: string): NumberLocaleConfig {
   }
 }
 
+type FormulaArgSeparator = "," | ";";
+
+function getFormulaArgSeparator(localeId?: string): FormulaArgSeparator {
+  // Mirror `formula_engine::LocaleConfig` argument separator defaults for locales the WASM engine
+  // currently ships. Unsupported locale IDs should fall back to en-US semantics.
+  switch (normalizeFormulaLocaleId(localeId)) {
+    case "de-DE":
+    case "fr-FR":
+    case "es-ES":
+      return ";";
+    default:
+      return ",";
+  }
+}
+
 function splitNumericExponent(raw: string): { mantissa: string; exponent: string } {
   // Port of `formula_engine::LocaleConfig::split_numeric_exponent`.
   if (!/[eE]/.test(raw)) return { mantissa: raw, exponent: "" };
@@ -432,6 +447,7 @@ type EvalToken =
 
 function lex(formula: string, options: EvaluateFormulaOptions): EvalToken[] {
   const locale = getNumberLocaleConfig(options.localeId);
+  const argSeparator = getFormulaArgSeparator(options.localeId);
   const tokens = tokenizeFormula(formula).filter((token) => token.type !== "whitespace");
   const out: EvalToken[] = [];
 
@@ -578,10 +594,10 @@ function lex(formula: string, options: EvaluateFormulaOptions): EvalToken[] {
           out.push({ type: "paren", value: token.text });
           break;
         }
-        // Support locale-specific argument separators (`;` in many locales) by treating them
-        // equivalently to commas. This evaluator is used in UI previews where locale-aware
-        // parsing should avoid returning misleading errors.
-        if (token.text === "," || token.text === ";") {
+        // Respect the locale's function-argument separator (`,` for en-US, `;` for many
+        // comma-decimal locales). This keeps UI preview evaluation aligned with the WASM
+        // engine's parsing semantics, including the "unsupported locale -> en-US" fallback.
+        if (token.text === argSeparator) {
           out.push({ type: "comma", value: "," });
           break;
         }
