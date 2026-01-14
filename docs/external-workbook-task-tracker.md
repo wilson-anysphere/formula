@@ -12,16 +12,13 @@ duplicated follow-up work across the task queue.
 - DONE — Debug trace path-qualified external refs (`e8a16064`)
 - DONE — Task 375: External 3D precedents in `Engine::precedents`
 - DONE — Task 377: `SHEET()` external index when sheet order exists
+- DONE — Task 379: Unit tests for external key parsing helpers
 - DONE — Task 380: External invalidation (sheet/workbook) + external dependency indexing
 - DONE — Task 384: Bytecode direct external refs
 - DONE — Task 385: Docs
 
 ## Remaining (open)
 
-- TODO — Task 379: Unit tests for external key parsing helpers
-  - Pointers: `crates/formula-engine/src/eval/evaluator.rs`
-    - `split_external_sheet_key`
-    - `split_external_sheet_span_key`
 - TODO — Task 381: Dynamic external deps (ensure dependency tracing/indexing covers dynamic ref producers)
   - Pointers:
     - `crates/formula-engine/src/engine.rs`
