@@ -563,6 +563,115 @@ describe("engine.worker workbook metadata RPCs", () => {
     }
   });
 
+  it("trims whitespace in sheet names for sheet-scoped metadata RPCs", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      const sheet = "  Sheet2  ";
+
+      let resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setCellStyleId",
+        params: { sheet, address: "A1", styleId: 7 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setRowStyleId",
+        params: { sheet, row: 5, styleId: 9 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 3,
+        method: "setColStyleId",
+        params: { sheet, col: 2, styleId: 11 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 4,
+        method: "setSheetDefaultStyleId",
+        params: { sheet, styleId: 13 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 5,
+        method: "setColWidth",
+        params: { sheet, col: 2, width: 120 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 6,
+        method: "setColWidthChars",
+        params: { sheet, col: 3, widthChars: 8.5 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 7,
+        method: "setColHidden",
+        params: { sheet, col: 2, hidden: true }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 8,
+        method: "setSheetDimensions",
+        params: { sheet, rows: 10, cols: 20 }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 9,
+        method: "getSheetDimensions",
+        params: { sheet }
+      });
+      expect(resp.ok).toBe(true);
+      expect((resp as RpcResponseOk).result).toEqual({ rows: 100, cols: 200 });
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 10,
+        method: "setFormatRunsByCol",
+        params: { sheet, col: 2, runs: [{ startRow: 0, endRowExclusive: 1, styleId: 17 }] }
+      });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["setCellStyleId", "Sheet2", "A1", 7],
+        ["setRowStyleId", "Sheet2", 5, 9],
+        ["setColStyleId", "Sheet2", 2, 11],
+        ["setSheetDefaultStyleId", "Sheet2", 13],
+        ["setColWidth", "Sheet2", 2, 120],
+        ["setColWidthChars", "Sheet2", 3, 8.5],
+        ["setColHidden", "Sheet2", 2, true],
+        ["setSheetDimensions", "Sheet2", 10, 20],
+        ["getSheetDimensions", "Sheet2"],
+        ["setFormatRunsByCol", "Sheet2", 2, [{ startRow: 0, endRowExclusive: 1, styleId: 17 }]]
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
   it("treats blank sheet names as missing for sheet-optional cell edit RPCs", async () => {
     (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
