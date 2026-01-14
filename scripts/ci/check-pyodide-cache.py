@@ -168,6 +168,84 @@ def check_job(
         ]
         if raw
     )
+
+    def split_steps() -> list[list[tuple[int, str]]]:
+        """Split a job block into step blocks using indentation heuristics.
+
+        We only need a best-effort parser for guardrails (not full YAML). This
+        splits on lines like:
+
+        - `- name: ...`
+        - `- uses: ...`
+
+        at a consistent indentation level.
+        """
+
+        steps: list[list[tuple[int, str]]] = []
+        i = 0
+        while i < len(job_lines):
+            ln, line = job_lines[i]
+            if is_comment(line):
+                i += 1
+                continue
+            m = re.match(r"^(\s*)-\s+(name|uses):\s*(.+)$", line)
+            if not m:
+                i += 1
+                continue
+            indent = len(m.group(1))
+            start = i
+            i += 1
+            while i < len(job_lines):
+                _, next_line = job_lines[i]
+                if is_comment(next_line):
+                    i += 1
+                    continue
+                m2 = re.match(r"^(\s*)-\s+(name|uses):\s*(.+)$", next_line)
+                if m2 and len(m2.group(1)) == indent:
+                    break
+                i += 1
+            steps.append(job_lines[start:i])
+        return steps
+
+    def find_step(name_substr: str) -> list[tuple[int, str]] | None:
+        for step in split_steps():
+            for _, line in step:
+                if is_comment(line):
+                    continue
+                if "name:" in line and name_substr in line:
+                    return step
+        return None
+
+    def extract_multiline_value(
+        step: list[tuple[int, str]], field: str
+    ) -> tuple[int, list[str]] | None:
+        """Extract `field:` value lines from a `|`-style multi-line scalar.
+
+        Returns (line_number_of_field, values) or None if field not present.
+        """
+
+        for i, (ln, line) in enumerate(step):
+            if is_comment(line):
+                continue
+            m = re.match(rf"^(\s*){re.escape(field)}:\s*(.*)$", line)
+            if not m:
+                continue
+            indent = len(m.group(1))
+            rest = m.group(2).strip()
+            if rest and rest != "|":
+                # Single-line value.
+                return (ln, [rest])
+            values: list[str] = []
+            for _, next_line in step[i + 1 :]:
+                if next_line.strip() == "" or is_comment(next_line):
+                    continue
+                next_indent = len(next_line) - len(next_line.lstrip(" "))
+                if next_indent <= indent:
+                    # Dedented; stop.
+                    break
+                values.append(next_line.strip())
+            return (ln, values)
+        return None
     if caches_whole_pyodide_tree:
         restore_tracked_line = next(
             (
@@ -187,6 +265,46 @@ def check_job(
             errors.append(
                 f"- Tracked Pyodide restore step appears before the cache restore step (tracked restore line {restore_tracked_line}, cache restore line {restore_line})"
             )
+
+        # Cross-OS restore requires both:
+        # - `restore-keys` that can match a cache created on a different OS
+        # - `enableCrossOsArchive: true` on restore/save
+        restore_step = find_step("Restore Pyodide asset cache")
+        if restore_step is None:
+            errors.append("- Missing 'Restore Pyodide asset cache' step block (unable to validate enableCrossOsArchive/restore-keys)")
+        else:
+            if "enableCrossOsArchive: true" not in "\n".join(line for _, line in restore_step):
+                errors.append(
+                    "- Pyodide cache restore step is missing `enableCrossOsArchive: true` (required for cross-OS restore keys)"
+                )
+            restore_keys = extract_multiline_value(restore_step, "restore-keys")
+            if restore_keys is None:
+                errors.append(
+                    "- Pyodide cache restore step is missing `restore-keys:` (required to fall back to same Pyodide version across OSes)"
+                )
+            else:
+                _, keys = restore_keys
+                has_cross_os_fallback = any(
+                    ("runner.os" not in k)
+                    and (
+                        "steps.pyodide.outputs.version" in k
+                        or pyodide_version in k
+                    )
+                    for k in keys
+                )
+                if not has_cross_os_fallback:
+                    errors.append(
+                        "- Pyodide cache restore-keys is missing a cross-OS fallback prefix (expected a key that includes the Pyodide version but not runner.os)"
+                    )
+
+        save_step = find_step("Save Pyodide asset cache")
+        if save_step is None:
+            errors.append("- Missing 'Save Pyodide asset cache' step block (unable to validate enableCrossOsArchive)")
+        else:
+            if "enableCrossOsArchive: true" not in "\n".join(line for _, line in save_step):
+                errors.append(
+                    "- Pyodide cache save step is missing `enableCrossOsArchive: true` (ensures caches are restorable across OSes)"
+                )
 
     if errors:
         header = f"{workflow.as_posix()} job `{job_id}` runs a desktop build but is missing required Pyodide caching:"
