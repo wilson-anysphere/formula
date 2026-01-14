@@ -664,7 +664,11 @@ test("validate-linux-rpm fails when extracted .desktop lacks Parquet MIME type (
   const binDir = join(tmp, "bin");
   mkdirSync(binDir, { recursive: true });
   writeFakeRpmTool(binDir);
-  writeFakeRpmExtractTools(binDir, { withParquetMime: false });
+  const mimeTypesNoParquet = expectedFileAssociationMimeTypes.filter((mt) => mt !== "application/vnd.apache.parquet");
+  writeFakeRpmExtractTools(binDir, {
+    withParquetMime: false,
+    mimeTypeLine: `MimeType=${mimeTypesNoParquet.join(";")};`,
+  });
 
   writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
 

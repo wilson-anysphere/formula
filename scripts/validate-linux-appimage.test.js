@@ -54,6 +54,7 @@ function writeFakeAppImage(
     withSchemeMime = true,
     withParquetMimeDefinition = true,
     parquetMimeDefinitionContents = "",
+    mainBinaryName = expectedMainBinaryName,
     execLine = `${expectedMainBinaryName} %U`,
     withLicense = true,
     withNotice = true,
@@ -97,11 +98,11 @@ function writeFakeAppImage(
   const parquetMimeContents = parquetMimeDefinitionContents || defaultParquetMimeDefinitionContents;
 
   const script = `#!/usr/bin/env bash
- set -euo pipefail
- 
- if [[ "\${1:-}" == "--appimage-extract" ]]; then
+set -euo pipefail
+
+if [[ "\${1:-}" == "--appimage-extract" ]]; then
   mkdir -p squashfs-root/usr/bin
-  mkdir -p squashfs-root/usr/share/doc/${expectedMainBinaryName}
+  mkdir -p squashfs-root/usr/share/doc/${mainBinaryName}
   mkdir -p squashfs-root/usr/share/mime/packages
 
   cat > squashfs-root/AppRun <<'APPRUN'
@@ -110,22 +111,22 @@ echo "AppRun stub"
 APPRUN
   chmod +x squashfs-root/AppRun
 
-  cat > squashfs-root/usr/bin/${expectedMainBinaryName} <<'BIN'
+  cat > squashfs-root/usr/bin/${mainBinaryName} <<'BIN'
 #!/usr/bin/env bash
-echo "${expectedMainBinaryName} stub"
+echo "${mainBinaryName} stub"
 BIN
-  chmod +x squashfs-root/usr/bin/${expectedMainBinaryName}
+  chmod +x squashfs-root/usr/bin/${mainBinaryName}
 
-   ${withLicense ? 'echo "LICENSE stub" > squashfs-root/usr/share/doc/' + expectedMainBinaryName + '/LICENSE' : ":"}
-   ${withNotice ? 'echo "NOTICE stub" > squashfs-root/usr/share/doc/' + expectedMainBinaryName + '/NOTICE' : ":"}
-   ${
-     withParquetMimeDefinition
+  ${withLicense ? 'echo "LICENSE stub" > squashfs-root/usr/share/doc/' + mainBinaryName + '/LICENSE' : ":"}
+  ${withNotice ? 'echo "NOTICE stub" > squashfs-root/usr/share/doc/' + mainBinaryName + '/NOTICE' : ":"}
+  ${
+    withParquetMimeDefinition
       ? `cat > squashfs-root/usr/share/mime/packages/app.formula.desktop.xml <<'MIME'\n${parquetMimeContents}\nMIME`
       : ":"
-   }
- 
-   ${desktopBlock}
-   exit 0
+  }
+
+  ${desktopBlock}
+  exit 0
 fi
 
 echo "unsupported args: $*" >&2
@@ -202,6 +203,22 @@ test("validate-linux-appimage accepts a structurally valid AppImage", { skip: !h
   writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, appImageVersion: expectedVersion });
 
   const proc = runValidator(appImagePath);
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("validate-linux-appimage honors FORMULA_APPIMAGE_MAIN_BINARY override", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  const overrideBin = "formula-desktop-alt";
+  writeFakeAppImage(appImagePath, {
+    mainBinaryName: overrideBin,
+    execLine: `${overrideBin} %U`,
+    withDesktopFile: true,
+    withXlsxMime: true,
+    appImageVersion: expectedVersion,
+  });
+
+  const proc = runValidatorWithArgs(appImagePath, { env: { FORMULA_APPIMAGE_MAIN_BINARY: overrideBin } });
   assert.equal(proc.status, 0, proc.stderr);
 });
 
