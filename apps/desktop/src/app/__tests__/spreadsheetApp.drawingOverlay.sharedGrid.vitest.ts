@@ -886,8 +886,8 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       };
 
       const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
-      // Avoid exercising async image rendering / bitmap decode paths in this unit test; we only
-      // care about the interaction math + in-memory anchor updates.
+      // Avoid exercising bitmap decode paths in this unit test; we only care about the
+      // interaction math + in-memory anchor updates.
       vi.spyOn((app as any).drawingOverlay, "render").mockImplementation(() => {});
 
       const image: DrawingObject = {

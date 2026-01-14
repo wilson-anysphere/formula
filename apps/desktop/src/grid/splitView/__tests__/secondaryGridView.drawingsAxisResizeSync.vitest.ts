@@ -94,7 +94,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     };
   });
 
-  it("re-renders drawings when column widths change", async () => {
+  it("re-renders drawings when column widths change", () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
     Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
@@ -144,7 +144,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
 
     // Flush any initial render work from construction.
     calls.splice(0, calls.length);
-    await (gridView as any).renderDrawings();
+    (gridView as any).renderDrawings();
 
     const firstStrokes = calls.filter((call) => call.method === "strokeRect");
     const firstStroke = firstStrokes[0];
@@ -174,8 +174,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     });
 
     expect(renderSpy).toHaveBeenCalled();
-    // Wait for the async overlay render triggered by the axis-size callback.
-    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
+    // `renderDrawings()` is synchronous; the overlay has already re-rendered.
 
     const secondStrokes = calls.filter((call) => call.method === "strokeRect");
     const secondStroke = secondStrokes[secondStrokes.length - 1];
@@ -187,7 +186,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     container.remove();
   });
 
-  it("updates drawings during interactive column resize (viewport changes)", async () => {
+  it("updates drawings during interactive column resize (viewport changes)", () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
     Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
@@ -236,7 +235,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     });
 
     calls.splice(0, calls.length);
-    await (gridView as any).renderDrawings();
+    (gridView as any).renderDrawings();
 
     const firstStroke = calls.find((call) => call.method === "strokeRect");
     expect(firstStroke).toBeTruthy();
@@ -251,9 +250,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
 
     calls.splice(0, calls.length);
     renderer.setColWidth(index, nextSize);
-
-    // Wait for the async overlay render triggered by the viewport notification.
-    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
+    // The synchronous rAF stub + sync `renderDrawings()` path means the overlay has already re-rendered.
 
     const secondStroke = calls.find((call) => call.method === "strokeRect");
     expect(secondStroke).toBeTruthy();
@@ -264,7 +261,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     container.remove();
   });
 
-  it("re-renders drawings when row heights change", async () => {
+  it("re-renders drawings when row heights change", () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
     Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
@@ -313,7 +310,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     });
 
     calls.splice(0, calls.length);
-    await (gridView as any).renderDrawings();
+    (gridView as any).renderDrawings();
 
     const firstStrokes = calls.filter((call) => call.method === "strokeRect");
     const firstStroke = firstStrokes[0];
@@ -342,7 +339,7 @@ describe("SecondaryGridView drawings overlay + axis resize", () => {
     });
 
     expect(renderSpy).toHaveBeenCalled();
-    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
+    // `renderDrawings()` is synchronous; the overlay has already re-rendered.
 
     const secondStrokes = calls.filter((call) => call.method === "strokeRect");
     const secondStroke = secondStrokes[secondStrokes.length - 1];

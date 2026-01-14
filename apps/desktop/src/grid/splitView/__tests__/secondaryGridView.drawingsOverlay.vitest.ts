@@ -95,7 +95,7 @@ describe("SecondaryGridView drawings overlay", () => {
     };
   });
 
-  it("renders drawing objects to the drawings canvas layer", async () => {
+  it("renders drawing objects to the drawings canvas layer", () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
     Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
@@ -142,7 +142,7 @@ describe("SecondaryGridView drawings overlay", () => {
       images,
     });
 
-    await (gridView as any).renderDrawings();
+    (gridView as any).renderDrawings();
 
     expect(calls).toContain("strokeRect");
     expect(calls).toContain("fillText");
@@ -151,7 +151,7 @@ describe("SecondaryGridView drawings overlay", () => {
     container.remove();
   });
 
-  it("passes frozen pane metadata to the drawings overlay viewport", async () => {
+  it("passes frozen pane metadata to the drawings overlay viewport", () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
     Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
@@ -184,7 +184,7 @@ describe("SecondaryGridView drawings overlay", () => {
     const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render");
     renderSpy.mockClear();
 
-    await (gridView as any).renderDrawings();
+    (gridView as any).renderDrawings();
 
     expect(renderSpy).toHaveBeenCalled();
     const viewport = renderSpy.mock.calls.at(-1)?.[1] as any;
@@ -243,7 +243,7 @@ describe("SecondaryGridView drawings overlay", () => {
     container.remove();
   });
 
-  it("re-renders drawings when sheetViewDeltas mutate drawings metadata (undo/redo)", async () => {
+  it("re-renders drawings when sheetViewDeltas mutate drawings metadata (undo/redo)", () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
     Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
@@ -280,8 +280,7 @@ describe("SecondaryGridView drawings overlay", () => {
       images,
     });
 
-    // Wait for any initial render work to finish, then reset the spy to focus on deltas.
-    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
+    // Initial render happens synchronously during construction; reset the spy to focus on deltas.
     renderSpy.mockClear();
 
     doc.setSheetDrawings(
@@ -297,13 +296,11 @@ describe("SecondaryGridView drawings overlay", () => {
       { label: "Insert Drawing" },
     );
 
-    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
     expect(renderSpy).toHaveBeenCalled();
     expect(renderSpy.mock.calls.at(-1)?.[0]).toHaveLength(1);
 
     renderSpy.mockClear();
     doc.undo();
-    await ((gridView as any).drawingsRenderPromise ?? Promise.resolve());
     expect(renderSpy).toHaveBeenCalled();
     expect(renderSpy.mock.calls.at(-1)?.[0]).toHaveLength(0);
 
