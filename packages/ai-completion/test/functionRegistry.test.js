@@ -287,6 +287,15 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
     "Expected DATEVALUE arg1 to be date_text"
   );
 
+  // Core time value of money functions (catalog arg_types are too coarse; curated names improve hinting).
+  const pv = registry.getFunction("PV");
+  assert.ok(pv, "Expected PV to have a curated signature");
+  assert.equal(pv?.args?.[0]?.name, "rate", "Expected PV arg1 to be rate");
+  assert.equal(pv?.args?.[4]?.name, "type", "Expected PV arg5 to be type");
+  assert.ok(pv?.args?.[4]?.optional, "Expected PV type to be optional");
+  assert.equal(registry.getArgType("CUMIPMT", 5), "number", "Expected CUMIPMT type to be a number");
+  assert.equal(registry.getFunction("VDB")?.args?.[6]?.type, "boolean", "Expected VDB no_switch to be boolean");
+
   // Bond/treasury functions: ensure arg naming matches enum indices in TabCompletionEngine.
   const price = registry.getFunction("PRICE");
   assert.ok(price, "Expected PRICE to have a curated signature");

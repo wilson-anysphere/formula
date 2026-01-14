@@ -1273,6 +1273,161 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "PV",
+    description: "Returns the present value of an investment.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "nper", type: "number" },
+      { name: "pmt", type: "number" },
+      { name: "fv", type: "number", optional: true },
+      { name: "type", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "FV",
+    description: "Returns the future value of an investment.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "nper", type: "number" },
+      { name: "pmt", type: "number" },
+      { name: "pv", type: "number", optional: true },
+      { name: "type", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "PMT",
+    description: "Returns the periodic payment for an annuity.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "nper", type: "number" },
+      { name: "pv", type: "number" },
+      { name: "fv", type: "number", optional: true },
+      { name: "type", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "NPER",
+    description: "Returns the number of periods for an investment.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "pmt", type: "number" },
+      { name: "pv", type: "number" },
+      { name: "fv", type: "number", optional: true },
+      { name: "type", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "RATE",
+    description: "Returns the interest rate per period of an annuity.",
+    args: [
+      { name: "nper", type: "number" },
+      { name: "pmt", type: "number" },
+      { name: "pv", type: "number" },
+      { name: "fv", type: "number", optional: true },
+      { name: "type", type: "number", optional: true },
+      { name: "guess", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "IPMT",
+    description: "Returns the interest payment for a given period for an investment.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "per", type: "number" },
+      { name: "nper", type: "number" },
+      { name: "pv", type: "number" },
+      { name: "fv", type: "number", optional: true },
+      { name: "type", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "PPMT",
+    description: "Returns the payment on the principal for a given period for an investment.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "per", type: "number" },
+      { name: "nper", type: "number" },
+      { name: "pv", type: "number" },
+      { name: "fv", type: "number", optional: true },
+      { name: "type", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "CUMIPMT",
+    description: "Returns the cumulative interest paid between two periods.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "nper", type: "number" },
+      { name: "pv", type: "number" },
+      { name: "start_period", type: "number" },
+      { name: "end_period", type: "number" },
+      { name: "type", type: "number" },
+    ],
+  },
+  {
+    name: "CUMPRINC",
+    description: "Returns the cumulative principal paid between two periods.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "nper", type: "number" },
+      { name: "pv", type: "number" },
+      { name: "start_period", type: "number" },
+      { name: "end_period", type: "number" },
+      { name: "type", type: "number" },
+    ],
+  },
+  {
+    name: "ISPMT",
+    description: "Calculates the interest paid during a specific period of an investment.",
+    args: [
+      { name: "rate", type: "number" },
+      { name: "per", type: "number" },
+      { name: "nper", type: "number" },
+      { name: "pv", type: "number" },
+    ],
+  },
+  {
+    name: "RRI",
+    description: "Returns an equivalent interest rate for the growth of an investment.",
+    args: [
+      { name: "nper", type: "number" },
+      { name: "pv", type: "number" },
+      { name: "fv", type: "number" },
+    ],
+  },
+  {
+    name: "EFFECT",
+    description: "Returns the effective annual interest rate.",
+    args: [
+      { name: "nominal_rate", type: "number" },
+      { name: "npery", type: "number" },
+    ],
+  },
+  {
+    name: "NOMINAL",
+    description: "Returns the nominal annual interest rate.",
+    args: [
+      { name: "effect_rate", type: "number" },
+      { name: "npery", type: "number" },
+    ],
+  },
+  {
+    name: "DOLLARDE",
+    description: "Converts a dollar price expressed as a fraction into a decimal.",
+    args: [
+      { name: "fractional_dollar", type: "number" },
+      { name: "fraction", type: "number" },
+    ],
+  },
+  {
+    name: "DOLLARFR",
+    description: "Converts a dollar price expressed as a decimal into a fraction.",
+    args: [
+      { name: "decimal_dollar", type: "number" },
+      { name: "fraction", type: "number" },
+    ],
+  },
+  {
     name: "FVSCHEDULE",
     description: "Returns the future value of an initial principal after applying a series of compound interest rates.",
     args: [
@@ -1620,6 +1775,60 @@ const CURATED_FUNCTIONS = [
       { name: "period", type: "number" },
       { name: "rate", type: "number" },
       { name: "basis", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "SLN",
+    description: "Returns the straight-line depreciation of an asset for one period.",
+    args: [
+      { name: "cost", type: "number" },
+      { name: "salvage", type: "number" },
+      { name: "life", type: "number" },
+    ],
+  },
+  {
+    name: "SYD",
+    description: "Returns the sum-of-years' digits depreciation of an asset for a specified period.",
+    args: [
+      { name: "cost", type: "number" },
+      { name: "salvage", type: "number" },
+      { name: "life", type: "number" },
+      { name: "per", type: "number" },
+    ],
+  },
+  {
+    name: "DB",
+    description: "Returns the depreciation of an asset for a specified period by using the fixed-declining balance method.",
+    args: [
+      { name: "cost", type: "number" },
+      { name: "salvage", type: "number" },
+      { name: "life", type: "number" },
+      { name: "period", type: "number" },
+      { name: "month", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "DDB",
+    description: "Returns the depreciation of an asset for a specified period by using the double-declining balance method or another method you specify.",
+    args: [
+      { name: "cost", type: "number" },
+      { name: "salvage", type: "number" },
+      { name: "life", type: "number" },
+      { name: "period", type: "number" },
+      { name: "factor", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "VDB",
+    description: "Returns the depreciation of an asset for any period you specify, including partial periods.",
+    args: [
+      { name: "cost", type: "number" },
+      { name: "salvage", type: "number" },
+      { name: "life", type: "number" },
+      { name: "start_period", type: "number" },
+      { name: "end_period", type: "number" },
+      { name: "factor", type: "number", optional: true },
+      { name: "no_switch", type: "boolean", optional: true },
     ],
   },
   {
