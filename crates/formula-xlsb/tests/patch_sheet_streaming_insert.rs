@@ -444,6 +444,13 @@ fn decode_rk_number(raw: u32) -> f64 {
     v
 }
 
+fn write_record(out: &mut Vec<u8>, id: u32, payload: &[u8]) {
+    biff12_varint::write_record_id(out, id).expect("write record id");
+    let len = u32::try_from(payload.len()).expect("record too large");
+    biff12_varint::write_record_len(out, len).expect("write record len");
+    out.extend_from_slice(payload);
+}
+
 #[test]
 fn patch_sheet_bin_streaming_insert_matches_in_memory_insert() {
     let mut builder = XlsbFixtureBuilder::new();
@@ -1063,6 +1070,102 @@ fn patch_sheet_bin_streaming_preserves_cell_st_header_varint_bytes_for_style_onl
 }
 
 #[test]
+fn patch_sheet_bin_streaming_preserves_cell_st_header_varint_bytes_for_flagged_layout_style_only_edit(
+) {
+    const DIMENSION: u32 = 0x0094;
+    const SHEETDATA: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
+    const WORKSHEET_END: u32 = 0x0082;
+    const ROW: u32 = 0x0000;
+    const CELL_ST: u32 = 0x0006;
+
+    // BrtCellSt flagged-wide-string payload:
+    //   [col:u32][style:u32][cch:u32][flags:u8][utf16 chars...]
+    // For "Hello": 8 + 4 + 1 + 10 = 23 bytes.
+    const CELL_ST_PAYLOAD_LEN: u8 = 23;
+
+    let mut sheet_bin = Vec::new();
+    let dim_payload = [
+        0u32.to_le_bytes(),
+        0u32.to_le_bytes(),
+        0u32.to_le_bytes(),
+        0u32.to_le_bytes(),
+    ]
+    .concat();
+    write_record(&mut sheet_bin, DIMENSION, &dim_payload);
+    write_record(&mut sheet_bin, SHEETDATA, &[]);
+    write_record(&mut sheet_bin, ROW, &0u32.to_le_bytes());
+
+    let text = "Hello";
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let mut wide = Vec::new();
+    wide.extend_from_slice(&(units.len() as u32).to_le_bytes());
+    wide.push(0u8); // flags
+    for u in units {
+        wide.extend_from_slice(&u.to_le_bytes());
+    }
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&0u32.to_le_bytes()); // col
+    payload.extend_from_slice(&0u32.to_le_bytes()); // style
+    payload.extend_from_slice(&wide);
+    assert_eq!(payload.len(), CELL_ST_PAYLOAD_LEN as usize);
+
+    write_record(&mut sheet_bin, CELL_ST, &payload);
+    write_record(&mut sheet_bin, SHEETDATA_END, &[]);
+    write_record(&mut sheet_bin, WORKSHEET_END, &[]);
+
+    let tweaked = rewrite_cell_header_as_two_byte_varints(&sheet_bin, 0, 0);
+    let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(
+        id_raw,
+        vec![0x86, 0x00],
+        "expected non-canonical id varint for CELL_ST"
+    );
+    assert_eq!(
+        len_raw,
+        vec![(CELL_ST_PAYLOAD_LEN | 0x80), 0x00],
+        "expected non-canonical len varint for flagged CELL_ST payload"
+    );
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text(text.to_string()),
+        new_style: Some(1),
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let Some((patched_id_raw, patched_len_raw)) = cell_header_raw(&patched_in_mem, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(patched_id_raw, id_raw);
+    assert_eq!(patched_len_raw, len_raw);
+
+    let (id, payload) = find_cell_record(&patched_in_mem, 0, 0).expect("find patched cell");
+    assert_eq!(id, CELL_ST);
+    assert_eq!(
+        u32::from_le_bytes(payload[4..8].try_into().unwrap()),
+        1,
+        "expected patched CELL_ST style id"
+    );
+    assert_eq!(payload[12], 0, "expected flags byte to be preserved");
+}
+
+#[test]
 fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_fixed_size_value_edits() {
     const FLOAT: u32 = 0x0005;
 
@@ -1415,6 +1518,121 @@ fn patch_sheet_bin_streaming_preserves_formula_string_header_varint_bytes_when_p
         u32::from_le_bytes(payload[4..8].try_into().unwrap()),
         1,
         "expected patched FORMULA_STRING style id"
+    );
+}
+
+#[test]
+fn patch_sheet_bin_streaming_preserves_formula_string_header_varint_bytes_with_rich_phonetic_cached_value_when_payload_len_unchanged(
+) {
+    const DIMENSION: u32 = 0x0094;
+    const SHEETDATA: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
+    const WORKSHEET_END: u32 = 0x0082;
+    const ROW: u32 = 0x0000;
+    const FORMULA_STRING: u32 = 0x0008;
+
+    // For "Hello" and a `PtgStr` token stream containing "Hello", with cached string flags set to
+    // rich+phonetic but with empty blocks:
+    //   payload = [col+style:8]
+    //          + [cached: cch(4) + flags(2) + utf16(10) + cRun(4) + cb(4) = 24]
+    //          + [cce:4]
+    //          + [rgce:13]
+    //          = 49 bytes.
+    const FORMULA_STRING_PAYLOAD_LEN: u8 = 49;
+
+    fn ptg_str(s: &str) -> Vec<u8> {
+        let mut out = vec![0x17]; // PtgStr
+        let units: Vec<u16> = s.encode_utf16().collect();
+        out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+        for u in units {
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+        out
+    }
+
+    let text = "Hello";
+    let rgce = ptg_str(text);
+
+    let mut fmla_payload = Vec::new();
+    fmla_payload.extend_from_slice(&0u32.to_le_bytes()); // col
+    fmla_payload.extend_from_slice(&0u32.to_le_bytes()); // style
+    fmla_payload.extend_from_slice(&(text.encode_utf16().count() as u32).to_le_bytes()); // cch
+    fmla_payload.extend_from_slice(&0x0003u16.to_le_bytes()); // flags (rich+phonetic)
+    for u in text.encode_utf16() {
+        fmla_payload.extend_from_slice(&u.to_le_bytes());
+    }
+    fmla_payload.extend_from_slice(&0u32.to_le_bytes()); // cRun (empty)
+    fmla_payload.extend_from_slice(&0u32.to_le_bytes()); // cb (empty)
+    fmla_payload.extend_from_slice(&(rgce.len() as u32).to_le_bytes());
+    fmla_payload.extend_from_slice(&rgce);
+    assert_eq!(fmla_payload.len(), FORMULA_STRING_PAYLOAD_LEN as usize);
+
+    let mut sheet_bin = Vec::new();
+    let dim_payload = [
+        0u32.to_le_bytes(),
+        0u32.to_le_bytes(),
+        0u32.to_le_bytes(),
+        0u32.to_le_bytes(),
+    ]
+    .concat();
+    write_record(&mut sheet_bin, DIMENSION, &dim_payload);
+    write_record(&mut sheet_bin, SHEETDATA, &[]);
+    write_record(&mut sheet_bin, ROW, &0u32.to_le_bytes());
+    write_record(&mut sheet_bin, FORMULA_STRING, &fmla_payload);
+    write_record(&mut sheet_bin, SHEETDATA_END, &[]);
+    write_record(&mut sheet_bin, WORKSHEET_END, &[]);
+
+    let tweaked = rewrite_cell_header_as_two_byte_varints(&sheet_bin, 0, 0);
+    let Some((id_raw, len_raw)) = cell_header_raw(&tweaked, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(
+        id_raw,
+        vec![0x88, 0x00],
+        "expected non-canonical id varint for FORMULA_STRING"
+    );
+    assert_eq!(
+        len_raw,
+        vec![(FORMULA_STRING_PAYLOAD_LEN | 0x80), 0x00],
+        "expected non-canonical len varint for rich/phonetic FORMULA_STRING payload"
+    );
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text(text.to_string()),
+        new_style: Some(1),
+        clear_formula: false,
+        new_formula: None,
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&tweaked, &edits).expect("patch_sheet_bin");
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&tweaked), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+    assert!(changed);
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let Some((patched_id_raw, patched_len_raw)) = cell_header_raw(&patched_in_mem, 0, 0) else {
+        panic!("expected cell record");
+    };
+    assert_eq!(patched_id_raw, id_raw);
+    assert_eq!(patched_len_raw, len_raw);
+
+    let (id, payload) = find_cell_record(&patched_in_mem, 0, 0).expect("find patched cell");
+    assert_eq!(id, FORMULA_STRING);
+    assert_eq!(
+        u32::from_le_bytes(payload[4..8].try_into().unwrap()),
+        1,
+        "expected patched FORMULA_STRING style id"
+    );
+    assert_eq!(
+        u16::from_le_bytes(payload[12..14].try_into().unwrap()),
+        0x0003,
+        "expected cached string flags to be preserved"
     );
 }
 
