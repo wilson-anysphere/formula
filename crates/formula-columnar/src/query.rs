@@ -2399,6 +2399,143 @@ impl GroupByEngine {
         Ok(())
     }
 
+    pub fn consume_mask(&mut self, table: &ColumnarTable, mask: &BitVec) -> Result<(), QueryError> {
+        if mask.len() != table.row_count() {
+            return Err(QueryError::InternalInvariant(
+                "filter mask length must match table row count",
+            ));
+        }
+
+        if mask.all_true() {
+            return self.consume_all(table);
+        }
+
+        let row_count = table.row_count();
+        let page = table.page_size_rows();
+
+        // Gather chunk slices for each key column once.
+        let mut key_chunks: Vec<&[EncodedChunk]> = Vec::with_capacity(self.key_cols.len());
+        for &col_idx in &self.key_cols {
+            let chunks = table.encoded_chunks(col_idx).ok_or(QueryError::ColumnOutOfBounds {
+                col: col_idx,
+                column_count: table.column_count(),
+            })?;
+            key_chunks.push(chunks);
+        }
+
+        // Gather chunk slices for each agg plan column once.
+        let mut agg_chunks: Vec<Option<&[EncodedChunk]>> = Vec::with_capacity(self.agg_plans.len());
+        for plan in &self.agg_plans {
+            if plan.from_key_pos.is_some() {
+                agg_chunks.push(None);
+                continue;
+            }
+            let chunks = table.encoded_chunks(plan.col).ok_or(QueryError::ColumnOutOfBounds {
+                col: plan.col,
+                column_count: table.column_count(),
+            })?;
+            agg_chunks.push(Some(chunks));
+        }
+
+        let mut current_chunk_idx = usize::MAX;
+        let mut key_chunk_refs: Vec<&EncodedChunk> = Vec::with_capacity(self.key_cols.len());
+        let mut agg_chunk_refs: Vec<Option<&EncodedChunk>> =
+            Vec::with_capacity(self.agg_plans.len());
+
+        for row in mask.iter_ones() {
+            // Mask iteration should keep us in bounds, but keep defensive behavior.
+            if row >= row_count {
+                return Err(QueryError::RowOutOfBounds { row, row_count });
+            }
+
+            let chunk_idx = row / page;
+            let row_in_chunk = row % page;
+
+            if chunk_idx != current_chunk_idx {
+                current_chunk_idx = chunk_idx;
+
+                key_chunk_refs.clear();
+                for chunks in &key_chunks {
+                    let chunk = chunks
+                        .get(chunk_idx)
+                        .ok_or(QueryError::RowOutOfBounds { row, row_count })?;
+                    key_chunk_refs.push(chunk);
+                }
+
+                agg_chunk_refs.clear();
+                for (plan_idx, plan) in self.agg_plans.iter().enumerate() {
+                    if plan.from_key_pos.is_some() {
+                        agg_chunk_refs.push(None);
+                        continue;
+                    }
+                    let chunks = agg_chunks
+                        .get(plan_idx)
+                        .and_then(|chunks| chunks.as_ref().copied())
+                        .ok_or(QueryError::InternalInvariant(
+                            "agg chunks missing for non-key agg plan",
+                        ))?;
+                    let chunk = chunks
+                        .get(chunk_idx)
+                        .ok_or(QueryError::RowOutOfBounds { row, row_count })?;
+                    agg_chunk_refs.push(Some(chunk));
+                }
+            }
+
+            for pos in 0..self.key_cols.len() {
+                let col_idx = self.key_cols[pos];
+                let ty = table.schema()[col_idx].column_type;
+                let scalar = scalar_from_column_chunk_at(
+                    col_idx,
+                    ty,
+                    key_chunk_refs[pos],
+                    row_in_chunk,
+                )?;
+                self.scratch_key_scalars[pos] = scalar;
+                self.scratch_keys[pos] = scalar_to_key(self.key_kinds[pos], scalar);
+            }
+
+            let group_idx = if let Some(&idx) = self.groups.get(self.scratch_keys.as_slice()) {
+                idx
+            } else {
+                let idx = self.groups_len;
+                self.groups_len += 1;
+                self.groups
+                    .insert(self.scratch_keys.to_vec().into_boxed_slice(), idx);
+                for (pos, builder) in self.key_builders.iter_mut().enumerate() {
+                    builder.push(self.scratch_key_scalars[pos]);
+                }
+                for state in &mut self.agg_states {
+                    state.push_group();
+                }
+                idx
+            };
+
+            for &agg_idx in &self.count_row_aggs {
+                self.agg_states[agg_idx].update_count_row(group_idx);
+            }
+
+            for (plan_idx, plan) in self.agg_plans.iter().enumerate() {
+                let scalar = if let Some(key_pos) = plan.from_key_pos {
+                    self.scratch_key_scalars[key_pos]
+                } else {
+                    let chunk = agg_chunk_refs
+                        .get(plan_idx)
+                        .and_then(|chunk| chunk.as_ref().copied())
+                        .ok_or(QueryError::InternalInvariant(
+                            "chunk missing for non-key agg plan",
+                        ))?;
+                    let ty = table.schema()[plan.col].column_type;
+                    scalar_from_column_chunk_at(plan.col, ty, chunk, row_in_chunk)?
+                };
+                for &agg_idx in &plan.agg_indices {
+                    self.agg_states[agg_idx].update_from_scalar(group_idx, scalar);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn consume_all(&mut self, table: &ColumnarTable) -> Result<(), QueryError> {
         let rows = table.row_count();
         let page = table.page_size_rows();
@@ -2442,6 +2579,17 @@ pub fn group_by_rows(
 ) -> Result<GroupByResult, QueryError> {
     let mut engine = GroupByEngine::new(table, keys, aggs)?;
     engine.consume_rows(table, rows)?;
+    Ok(engine.finish())
+}
+
+pub fn group_by_mask(
+    table: &ColumnarTable,
+    keys: &[usize],
+    aggs: &[AggSpec],
+    mask: &BitVec,
+) -> Result<GroupByResult, QueryError> {
+    let mut engine = GroupByEngine::new(table, keys, aggs)?;
+    engine.consume_mask(table, mask)?;
     Ok(engine.finish())
 }
 

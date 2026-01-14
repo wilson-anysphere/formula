@@ -598,6 +598,15 @@ impl ColumnarTable {
         crate::query::group_by_rows(self, keys, aggs, rows)
     }
 
+    pub fn group_by_mask(
+        &self,
+        keys: &[usize],
+        aggs: &[crate::query::AggSpec],
+        mask: &BitVec,
+    ) -> Result<crate::query::GroupByResult, crate::query::QueryError> {
+        crate::query::group_by_mask(self, keys, aggs, mask)
+    }
+
     /// Evaluate a filter predicate and return a [`BitVec`] mask of matching rows.
     pub fn filter_mask(
         &self,

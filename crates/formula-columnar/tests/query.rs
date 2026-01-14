@@ -1,5 +1,5 @@
 use formula_columnar::{
-    AggSpec, ColumnSchema, ColumnType, ColumnarTable, ColumnarTableBuilder, PageCacheConfig,
+    AggSpec, BitVec, ColumnSchema, ColumnType, ColumnarTable, ColumnarTableBuilder, PageCacheConfig,
     TableOptions, Value,
 };
 use std::sync::Arc;
@@ -238,6 +238,58 @@ fn group_by_rows_matches_group_by_on_selected_rows() {
         .group_by_rows(&[0], &[AggSpec::count_rows(), AggSpec::sum_f64(1)], &selected)
         .unwrap()
         .to_values();
+
+    fn as_map(cols: &[Vec<Value>]) -> std::collections::HashMap<String, (Value, Value)> {
+        let mut out = std::collections::HashMap::new();
+        for row in 0..cols[0].len() {
+            let key = match &cols[0][row] {
+                Value::Null => "<null>".to_owned(),
+                Value::String(s) => s.as_ref().to_owned(),
+                other => format!("{other:?}"),
+            };
+            out.insert(key, (cols[1][row].clone(), cols[2][row].clone()));
+        }
+        out
+    }
+
+    assert_eq!(as_map(&expected), as_map(&actual));
+}
+
+#[test]
+fn group_by_mask_matches_group_by_rows() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "v".to_owned(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let rows = vec![
+        vec![Value::String(Arc::<str>::from("A")), Value::Number(1.0)],
+        vec![Value::String(Arc::<str>::from("B")), Value::Number(2.0)],
+        vec![Value::Null, Value::Number(3.0)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Null],
+        vec![Value::String(Arc::<str>::from("C")), Value::Number(4.0)],
+    ];
+    let table = build_table(schema, rows);
+
+    let selected = vec![0usize, 2, 3, 4];
+    let mut mask = BitVec::with_len_all_false(table.row_count());
+    for &row in &selected {
+        mask.set(row, true);
+    }
+
+    let keys = [0usize];
+    let aggs = [AggSpec::count_rows(), AggSpec::sum_f64(1)];
+
+    let expected = table
+        .group_by_rows(&keys, &aggs, &selected)
+        .unwrap()
+        .to_values();
+    let actual = table.group_by_mask(&keys, &aggs, &mask).unwrap().to_values();
 
     fn as_map(cols: &[Vec<Value>]) -> std::collections::HashMap<String, (Value, Value)> {
         let mut out = std::collections::HashMap::new();
