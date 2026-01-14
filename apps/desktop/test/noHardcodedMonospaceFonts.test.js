@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { stripCssNonSemanticText } from "./testUtils/stripCssNonSemanticText.js";
+import { stripCssComments } from "./sourceTextUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.join(__dirname, "..");
@@ -47,25 +47,41 @@ test("desktop styles should not hardcode monospace font stacks (use --font-mono 
     })
     .sort((a, b) => a.localeCompare(b));
 
+  const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
+
   // Keep in sync with `--font-mono` in `src/styles/tokens.css`; we only allow hardcoded
   // monospace stacks in that single source of truth.
-  const forbiddenFontStackToken = /\b(ui-monospace|SFMono|Menlo|Consolas|monospace)\b/gi;
+  //
+  // Note: We intentionally scan only `font` / `font-family` declarations so we can preserve
+  // quoted font family names like `"SF Mono"` without triggering false positives in unrelated
+  // strings (e.g. `content: "monospace"` or urls).
+  const forbiddenFontStackToken = /\b(?:ui-monospace|SFMono(?:-Regular)?|SF\s*Mono|Menlo|Consolas|monospace)\b/gi;
 
   /** @type {string[]} */
   const violations = [];
 
   for (const file of cssFiles) {
     const raw = fs.readFileSync(file, "utf8");
-    const stripped = stripCssNonSemanticText(raw);
+    const stripped = stripCssComments(raw);
+    const relPath = path.relative(desktopRoot, file).replace(/\\\\/g, "/");
 
-    let match;
-    while ((match = forbiddenFontStackToken.exec(stripped))) {
-      const line = getLineNumber(stripped, match.index ?? 0);
-      violations.push(
-        `${path.relative(desktopRoot, file).replace(/\\\\/g, "/")}:L${line}: ${match[0]}`,
-      );
+    cssDeclaration.lastIndex = 0;
+    let decl;
+    while ((decl = cssDeclaration.exec(stripped))) {
+      const prop = (decl?.groups?.prop ?? "").toLowerCase();
+      if (prop !== "font-family" && prop !== "font") continue;
+
+      const value = decl?.groups?.value ?? "";
+      const valueStart = (decl.index ?? 0) + decl[0].length - value.length;
+
+      forbiddenFontStackToken.lastIndex = 0;
+      let match;
+      while ((match = forbiddenFontStackToken.exec(value))) {
+        const absIndex = valueStart + (match.index ?? 0);
+        const line = getLineNumber(stripped, absIndex);
+        violations.push(`${relPath}:L${line}: ${match[0]}`);
+      }
     }
-
     forbiddenFontStackToken.lastIndex = 0;
   }
 
