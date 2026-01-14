@@ -4,6 +4,15 @@ use std::path::{Path, PathBuf};
 use formula_engine::functions::FunctionSpec;
 use formula_engine::ErrorKind;
 
+fn casefold_key(s: &str) -> String {
+    // Match the runtime case-folding used by the locale registry (`value::casefold`):
+    // ASCII fast path + Unicode-aware uppercasing fallback.
+    if s.is_ascii() {
+        return s.to_ascii_uppercase();
+    }
+    s.chars().flat_map(|c| c.to_uppercase()).collect()
+}
+
 struct ParsedLocaleTsv {
     canonical_keys: BTreeSet<String>,
     localized_keys: BTreeSet<String>,
@@ -18,7 +27,7 @@ struct ParsedErrorTsv {
 fn inventory_function_names() -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for spec in inventory::iter::<FunctionSpec> {
-        let name = spec.name.to_ascii_uppercase();
+        let name = casefold_key(spec.name);
         if !names.insert(name.clone()) {
             panic!("duplicate function name registered in formula-engine inventory: {name}");
         }
@@ -59,13 +68,13 @@ fn parse_locale_tsv(locale_id: &str, path: &Path, raw_tsv: &str) -> ParsedLocale
             );
         }
 
-        let canon = canon.to_ascii_uppercase();
         // Locale translation tables are keyed using the same case folding as runtime parsing:
         // Unicode-aware uppercasing (`char::to_uppercase`), not ASCII-only uppercasing.
         //
         // This ensures collisions like `fü` vs `FÜ` are detected here the same way they'd be at
         // runtime when building `loc_to_canon`.
-        let loc = casefold_unicode(loc);
+        let canon = casefold_key(canon);
+        let loc = casefold_key(loc);
 
         if let Some(first_line) = canon_first_seen.get(&canon).copied() {
             duplicate_canon.push(format!("{canon} (lines {first_line} and {line_no})"));
@@ -114,10 +123,6 @@ fn parse_locale_tsv(locale_id: &str, path: &Path, raw_tsv: &str) -> ParsedLocale
         canonical_keys,
         localized_keys,
     }
-}
-
-fn casefold_unicode(s: &str) -> String {
-    s.chars().flat_map(|c| c.to_uppercase()).collect()
 }
 
 #[test]
@@ -214,8 +219,8 @@ fn parse_error_tsv(
             prev_canon = Some(canon.to_string());
         }
 
-        let canon_key = casefold_unicode(canon);
-        let loc_key = casefold_unicode(loc);
+        let canon_key = casefold_key(canon);
+        let loc_key = casefold_key(loc);
 
         if let Some((prior_canon, prior_line)) = localized_first_seen.get(&loc_key).cloned() {
             duplicate_localized.push(format!(
