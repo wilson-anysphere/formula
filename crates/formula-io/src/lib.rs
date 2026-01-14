@@ -3248,6 +3248,227 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
     }
 }
 
+#[cfg(feature = "encrypted-workbooks")]
+fn try_open_standard_aes_encrypted_ooxml_model_workbook(
+    path: &Path,
+    password: Option<&str>,
+) -> Result<Option<formula_model::Workbook>, Error> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+
+    // Only handle Office-encrypted OOXML OLE containers.
+    let mut file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if n < OLE_MAGIC.len() || header[..OLE_MAGIC.len()] != OLE_MAGIC {
+        return Ok(None);
+    }
+    file.rewind().map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let Ok(mut ole) = cfb::CompoundFile::open(file) else {
+        // Malformed OLE container; let the normal open path surface errors.
+        return Ok(None);
+    };
+
+    // Read `EncryptionInfo` so we can decide whether this is Standard/CryptoAPI AES.
+    let encryption_info = match read_stream_bytes_case_insensitive(&mut ole, "EncryptionInfo") {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
+            })
+        }
+    };
+
+    if encryption_info.len() < 4 {
+        return Err(Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major: 0,
+            version_minor: 0,
+        });
+    }
+    let version_major = u16::from_le_bytes([encryption_info[0], encryption_info[1]]);
+    let version_minor = u16::from_le_bytes([encryption_info[2], encryption_info[3]]);
+
+    // Only handle Standard/CryptoAPI encryption (minor == 2). Agile decryption uses different open
+    // semantics (we preserve the ZIP package for Workbook::Xlsx).
+    let is_standard = version_minor == 2 && matches!(version_major, 2 | 3 | 4);
+    if !is_standard {
+        return Ok(None);
+    }
+
+    // Parse Standard header to detect RC4 vs AES.
+    let info = crate::offcrypto::parse_encryption_info_standard(&encryption_info).map_err(|err| {
+        match err {
+            crate::offcrypto::OffcryptoError::UnsupportedEncryptionInfoVersion { major, minor, .. } => {
+                Error::UnsupportedOoxmlEncryption {
+                    path: path.to_path_buf(),
+                    version_major: major,
+                    version_minor: minor,
+                }
+            }
+            _ => Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major,
+                version_minor,
+            },
+        }
+    })?;
+
+    if info.header.alg_id == crate::offcrypto::CALG_RC4 {
+        // Standard/CryptoAPI RC4 is still opened as a preserved ZIP package via the in-memory
+        // decrypt path (it is not supported by the streaming decrypt reader).
+        return Ok(None);
+    }
+
+    if !matches!(
+        info.header.alg_id,
+        crate::offcrypto::CALG_AES_128 | crate::offcrypto::CALG_AES_192 | crate::offcrypto::CALG_AES_256
+    ) {
+        return Err(Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major,
+            version_minor,
+        });
+    }
+
+    let Some(password) = password else {
+        return Err(Error::PasswordRequired {
+            path: path.to_path_buf(),
+        });
+    };
+
+    let mut encrypted_package_stream = match open_stream_case_insensitive(&mut ole, "EncryptedPackage")
+    {
+        Ok(stream) => stream,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major,
+                version_minor,
+            })
+        }
+    };
+
+    // The `EncryptedPackage` stream begins with an 8-byte plaintext length prefix.
+    let mut len_bytes = [0u8; 8];
+    encrypted_package_stream
+        .read_exact(&mut len_bytes)
+        .map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let plaintext_len = u64::from_le_bytes(len_bytes);
+
+    // Wrap the OLE stream so offset 0 corresponds to the start of ciphertext (after the length
+    // header).
+    struct CiphertextStream<R> {
+        inner: R,
+        base: u64,
+    }
+
+    impl<R: std::io::Read> std::io::Read for CiphertextStream<R> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+
+    impl<R: std::io::Read + std::io::Seek> std::io::Seek for CiphertextStream<R> {
+        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+            let end_inner = match pos {
+                SeekFrom::End(_) => Some(self.inner.seek(SeekFrom::End(0))?),
+                _ => None,
+            };
+
+            let cur_inner = self.inner.seek(SeekFrom::Current(0))?;
+            let cur = cur_inner
+                .checked_sub(self.base)
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid ciphertext base offset"))?;
+
+            let new_pos: i128 = match pos {
+                SeekFrom::Start(n) => n as i128,
+                SeekFrom::Current(off) => cur as i128 + off as i128,
+                SeekFrom::End(off) => {
+                    let end = end_inner
+                        .expect("end_inner computed above")
+                        .checked_sub(self.base)
+                        .ok_or_else(|| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                "invalid ciphertext end offset",
+                            )
+                        })?;
+                    end as i128 + off as i128
+                }
+            };
+            if new_pos < 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "invalid seek to a negative position",
+                ));
+            }
+            let new_pos_u64 = new_pos as u64;
+            self.inner.seek(SeekFrom::Start(self.base + new_pos_u64))?;
+            Ok(new_pos_u64)
+        }
+    }
+
+    let base = encrypted_package_stream
+        .seek(SeekFrom::Current(0))
+        .map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let ciphertext_reader = CiphertextStream {
+        inner: encrypted_package_stream,
+        base,
+    };
+
+    let reader = encrypted_ooxml::decrypted_package_reader(
+        ciphertext_reader,
+        plaintext_len,
+        &encryption_info,
+        password,
+    )
+    .map_err(|err| match err {
+        encrypted_ooxml::DecryptError::InvalidPassword => Error::InvalidPassword {
+            path: path.to_path_buf(),
+        },
+        encrypted_ooxml::DecryptError::UnsupportedVersion { major, minor } => {
+            Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: major,
+                version_minor: minor,
+            }
+        }
+        encrypted_ooxml::DecryptError::InvalidInfo(_) | encrypted_ooxml::DecryptError::Io(_) => {
+            Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major,
+                version_minor,
+            }
+        }
+    })?;
+
+    let workbook = xlsx::read_workbook_from_reader(reader).map_err(|source| Error::OpenXlsx {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(Some(workbook))
+}
+
 /// Open a spreadsheet workbook with options.
 ///
 /// This is the password-aware variant of [`open_workbook`]. When a password is provided and the
@@ -3266,6 +3487,11 @@ pub fn open_workbook_with_options(
     // surface an "unsupported encryption" error so callers don't assume a password will work.
     #[cfg(feature = "encrypted-workbooks")]
     {
+        if let Some(workbook) =
+            try_open_standard_aes_encrypted_ooxml_model_workbook(path, opts.password.as_deref())?
+        {
+            return Ok(Workbook::Model(workbook));
+        }
         if let Some(bytes) =
             try_decrypt_ooxml_encrypted_package_from_path(path, opts.password.as_deref())?
         {
