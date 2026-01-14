@@ -39,7 +39,7 @@ export interface EngineClient {
   newWorkbook(): Promise<void>;
   loadWorkbookFromJson(json: string): Promise<void>;
   /**
-   * Load a workbook from raw `.xlsx` bytes.
+   * Load a workbook from raw `.xlsx`/`.xlsm` bytes.
    *
    * The underlying `ArrayBuffer` may be transferred to a Worker thread to avoid
    * an extra structured-clone copy. When the buffer is transferred it becomes
@@ -50,7 +50,7 @@ export interface EngineClient {
    */
   loadWorkbookFromXlsxBytes(bytes: Uint8Array, options?: RpcOptions): Promise<void>;
   /**
-   * Load a workbook from Office-encrypted `.xlsx` bytes and decrypt it using `password`.
+   * Load a workbook from Office-encrypted `.xlsx`/`.xlsm`/`.xlsb` bytes and decrypt it using `password`.
    *
    * Additive API: older WASM builds / worker bundles may not support this call.
    */

@@ -1,7 +1,7 @@
 # Encrypted OOXML fixture generator (Apache POI)
 
 This directory contains a small, standalone generator for producing **Office-encrypted OOXML**
-workbooks (`.xlsx`) without Excel.
+workbooks (`.xlsx`/`.xlsm`) without Excel.
 
 It is an **alternative** regeneration tool for the encrypted OOXML fixtures under
 `fixtures/encrypted/ooxml/` (or to create new ones).
@@ -17,9 +17,9 @@ Excel password-encrypted OOXML workbooks are stored on disk as an **OLE/CFB cont
 containing:
 
 - `EncryptionInfo`
-- `EncryptedPackage` (encrypted bytes of the underlying `.xlsx` ZIP payload)
+- `EncryptedPackage` (encrypted bytes of the underlying `.xlsx`/`.xlsm` ZIP payload)
 
-The generator wraps a plaintext OOXML ZIP (`.xlsx`) into this container using Apache POI.
+The generator wraps a plaintext OOXML ZIP (`.xlsx`/`.xlsm`) into this container using Apache POI.
 
 ## Usage
 

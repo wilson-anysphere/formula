@@ -452,7 +452,7 @@ export class EngineWorker {
   }
 
   /**
-   * Load a workbook from raw `.xlsx` bytes.
+   * Load a workbook from raw `.xlsx`/`.xlsm` bytes.
    *
    * Note: the payload is transferred to the worker to avoid an extra
    * structured-clone copy.
@@ -480,7 +480,7 @@ export class EngineWorker {
   }
 
   /**
-   * Load a workbook from Office-encrypted `.xlsx` bytes, decrypting it in WASM with `password`.
+   * Load a workbook from Office-encrypted `.xlsx`/`.xlsm`/`.xlsb` bytes, decrypting it in WASM with `password`.
    *
    * Note: the payload is transferred to the worker to avoid an extra
    * structured-clone copy (same semantics as `loadWorkbookFromXlsxBytes`).
