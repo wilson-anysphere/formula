@@ -27,7 +27,10 @@ pub fn format_value_for_display(
     fn value_to_display_string(value: Value, options: &FormatOptions) -> Result<String, &'static str> {
         match value {
             Value::Blank => Ok(String::new()),
-            Value::Number(n) => Ok(formula_format::format_value(FmtValue::Number(n), None, options).text),
+            Value::Number(n) => {
+                let fmt_value = FmtValue::Number(n);
+                Ok(formula_format::format_value(fmt_value, None, options).text)
+            }
             Value::Text(s) => Ok(s),
             Value::Entity(v) => Ok(v.display),
             Value::Record(v) => record_to_display_text(&v, options).map(|cow| cow.into_owned()),
@@ -74,7 +77,10 @@ pub fn format_value_for_display(
 
     let display_value = to_display_value(value, options);
     match display_value {
-        DisplayValue::Number(n) => formula_format::format_value(FmtValue::Number(n), format_code, options),
+        DisplayValue::Number(n) => {
+            let fmt_value = FmtValue::Number(n);
+            formula_format::format_value(fmt_value, format_code, options)
+        }
         DisplayValue::Text(text) => {
             // Records are treated as text for formatting purposes so numeric format codes
             // don't reinterpret their display strings.
