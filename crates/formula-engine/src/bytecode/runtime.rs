@@ -1196,9 +1196,7 @@ fn apply_implicit_intersection_sheet_range(
             row: range.row_start,
             col: range.col_start,
         };
-        if let SheetId::Local(sheet_id) = &area.sheet {
-            grid.record_reference(*sheet_id, coord, coord);
-        }
+        grid.record_reference_on_sheet(&area.sheet, coord, coord);
         return grid.get_value_on_sheet(&area.sheet, coord);
     }
 
@@ -1209,9 +1207,7 @@ fn apply_implicit_intersection_sheet_range(
                 row: base.row,
                 col: range.col_start,
             };
-            if let SheetId::Local(sheet_id) = &area.sheet {
-                grid.record_reference(*sheet_id, coord, coord);
-            }
+            grid.record_reference_on_sheet(&area.sheet, coord, coord);
             return grid.get_value_on_sheet(&area.sheet, coord);
         }
         return Value::Error(ErrorKind::Value);
@@ -1223,9 +1219,7 @@ fn apply_implicit_intersection_sheet_range(
                 row: range.row_start,
                 col: base.col,
             };
-            if let SheetId::Local(sheet_id) = &area.sheet {
-                grid.record_reference(*sheet_id, coord, coord);
-            }
+            grid.record_reference_on_sheet(&area.sheet, coord, coord);
             return grid.get_value_on_sheet(&area.sheet, coord);
         }
         return Value::Error(ErrorKind::Value);
@@ -1237,9 +1231,7 @@ fn apply_implicit_intersection_sheet_range(
         && base.col >= range.col_start
         && base.col <= range.col_end
     {
-        if let SheetId::Local(sheet_id) = &area.sheet {
-            grid.record_reference(*sheet_id, base, base);
-        }
+        grid.record_reference_on_sheet(&area.sheet, base, base);
         return grid.get_value_on_sheet(&area.sheet, base);
     }
 
@@ -1571,19 +1563,17 @@ fn deref_range_dynamic_on_sheet(grid: &dyn Grid, sheet: &SheetId, range: Resolve
         return Value::Error(ErrorKind::Ref);
     }
 
-    if let SheetId::Local(sheet_id) = sheet {
-        grid.record_reference(
-            *sheet_id,
-            CellCoord {
-                row: range.row_start,
-                col: range.col_start,
-            },
-            CellCoord {
-                row: range.row_end,
-                col: range.col_end,
-            },
-        );
-    }
+    grid.record_reference_on_sheet(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() == 1 && range.cols() == 1 {
         return grid.get_value_on_sheet(
@@ -4211,19 +4201,17 @@ fn and_range_on_sheet(
         return Some(ErrorKind::Ref);
     }
 
-    if let SheetId::Local(sheet_id) = sheet {
-        grid.record_reference(
-            *sheet_id,
-            CellCoord {
-                row: range.row_start,
-                col: range.col_start,
-            },
-            CellCoord {
-                row: range.row_end,
-                col: range.col_end,
-            },
-        );
-    }
+    grid.record_reference_on_sheet(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -4340,19 +4328,17 @@ fn or_range_on_sheet(
         return Some(ErrorKind::Ref);
     }
 
-    if let SheetId::Local(sheet_id) = sheet {
-        grid.record_reference(
-            *sheet_id,
-            CellCoord {
-                row: range.row_start,
-                col: range.col_start,
-            },
-            CellCoord {
-                row: range.row_end,
-                col: range.col_end,
-            },
-        );
-    }
+    grid.record_reference_on_sheet(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -4527,19 +4513,17 @@ where
             }
 
             // Record the referenced rectangle once for dynamic dependency tracing.
-            if let SheetId::Local(sheet) = &area.sheet {
-                grid.record_reference(
-                    *sheet,
-                    CellCoord {
-                        row: resolved.row_start,
-                        col: resolved.col_start,
-                    },
-                    CellCoord {
-                        row: resolved.row_end,
-                        col: resolved.col_end,
-                    },
-                );
-            }
+            grid.record_reference_on_sheet(
+                &area.sheet,
+                CellCoord {
+                    row: resolved.row_start,
+                    col: resolved.col_start,
+                },
+                CellCoord {
+                    row: resolved.row_end,
+                    col: resolved.col_end,
+                },
+            );
 
             if resolved.rows() == 1 && resolved.cols() == 1 {
                 let v = grid.get_value_on_sheet(
@@ -4674,9 +4658,7 @@ fn fn_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                         col: resolved.col_start,
                     };
                     if grid.in_bounds_on_sheet(&only.sheet, coord) {
-                        if let SheetId::Local(sheet_id) = &only.sheet {
-                            grid.record_reference(*sheet_id, coord, coord);
-                        }
+                        grid.record_reference_on_sheet(&only.sheet, coord, coord);
                     }
                     let v = grid.get_value_on_sheet(&only.sheet, coord);
                     type_code_for_scalar(&v)
@@ -5545,19 +5527,17 @@ fn xor_range_on_sheet(
         ));
     }
 
-    if let SheetId::Local(sheet_id) = sheet {
-        grid.record_reference(
-            *sheet_id,
-            CellCoord {
-                row: range.row_start,
-                col: range.col_start,
-            },
-            CellCoord {
-                row: range.row_end,
-                col: range.col_end,
-            },
-        );
-    }
+    grid.record_reference_on_sheet(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -5841,19 +5821,17 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     if !range_in_bounds_on_sheet(grid, &area.sheet, range) {
                         return Value::Error(ErrorKind::Ref);
                     }
-                    if let SheetId::Local(sheet) = &area.sheet {
-                        grid.record_reference(
-                            *sheet,
-                            CellCoord {
-                                row: range.row_start,
-                                col: range.col_start,
-                            },
-                            CellCoord {
-                                row: range.row_end,
-                                col: range.col_end,
-                            },
-                        );
-                    }
+                    grid.record_reference_on_sheet(
+                        &area.sheet,
+                        CellCoord {
+                            row: range.row_start,
+                            col: range.col_start,
+                        },
+                        CellCoord {
+                            row: range.row_end,
+                            col: range.col_end,
+                        },
+                    );
 
                     for row in range.row_start..=range.row_end {
                         for col in range.col_start..=range.col_end {
@@ -10745,19 +10723,17 @@ fn count_if_range_criteria_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
-    if let SheetId::Local(sheet_id) = sheet {
-        grid.record_reference(
-            *sheet_id,
-            CellCoord {
-                row: range.row_start,
-                col: range.col_start,
-            },
-            CellCoord {
-                row: range.row_end,
-                col: range.col_end,
-            },
-        );
-    }
+    grid.record_reference_on_sheet(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -11119,19 +11095,17 @@ fn sum_range_on_sheet_with_coord(
         ));
     }
 
-    if let SheetId::Local(sheet_id) = sheet {
-        grid.record_reference(
-            *sheet_id,
-            CellCoord {
-                row: range.row_start,
-                col: range.col_start,
-            },
-            CellCoord {
-                row: range.row_end,
-                col: range.col_end,
-            },
-        );
-    }
+    grid.record_reference_on_sheet(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {

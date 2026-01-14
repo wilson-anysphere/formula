@@ -400,6 +400,37 @@ fn precedents_include_external_refs() {
 }
 
 #[test]
+fn precedents_include_dynamic_external_precedents_from_indirect() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[Book.xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        41.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
+        .unwrap();
+    assert!(
+        engine.bytecode_compile_report(10).is_empty(),
+        "{:?}",
+        engine.bytecode_compile_report(10)
+    );
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::ExternalCell {
+            sheet: "[Book.xlsx]Sheet1".to_string(),
+            addr: CellAddr { row: 0, col: 0 },
+        }]
+    );
+}
+
+#[test]
 fn precedents_include_dynamic_external_precedents_from_offset() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set(
@@ -426,6 +457,83 @@ fn precedents_include_dynamic_external_precedents_from_offset() {
             PrecedentNode::ExternalCell {
                 sheet: "[Book.xlsx]Sheet1".to_string(),
                 addr: CellAddr { row: 1, col: 0 },
+            },
+        ]
+    );
+}
+
+#[test]
+fn precedents_include_dynamic_external_range_from_offset() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 0 }, 2.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 3, col: 0 }, 3.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM(OFFSET([Book.xlsx]Sheet1!A1,1,0,3,1))")
+        .unwrap();
+    assert!(
+        engine.bytecode_compile_report(10).is_empty(),
+        "{:?}",
+        engine.bytecode_compile_report(10)
+    );
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+    assert_eq!(
+        engine.precedents("Sheet1", "A1").unwrap(),
+        vec![
+            PrecedentNode::ExternalCell {
+                sheet: "[Book.xlsx]Sheet1".to_string(),
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::ExternalRange {
+                sheet: "[Book.xlsx]Sheet1".to_string(),
+                start: CellAddr { row: 1, col: 0 },
+                end: CellAddr { row: 3, col: 0 },
+            },
+        ]
+    );
+}
+
+#[test]
+fn precedents_transitive_include_dynamic_external_precedents() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 0 }, 2.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 3, col: 0 }, 3.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM(OFFSET([Book.xlsx]Sheet1!A1,1,0,3,1))")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=A1+1").unwrap();
+    assert!(
+        engine.bytecode_compile_report(10).is_empty(),
+        "{:?}",
+        engine.bytecode_compile_report(10)
+    );
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(7.0));
+    assert_eq!(
+        engine.precedents_transitive("Sheet1", "B1").unwrap(),
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::ExternalCell {
+                sheet: "[Book.xlsx]Sheet1".to_string(),
+                addr: CellAddr { row: 0, col: 0 },
+            },
+            PrecedentNode::ExternalRange {
+                sheet: "[Book.xlsx]Sheet1".to_string(),
+                start: CellAddr { row: 1, col: 0 },
+                end: CellAddr { row: 3, col: 0 },
             },
         ]
     );
@@ -574,6 +682,29 @@ fn external_refs_can_be_non_volatile_with_explicit_invalidation() {
     engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+}
+
+#[test]
+fn external_sheet_invalidation_dirties_dynamic_external_indirect_dependents() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine.set_external_refs_volatile(false);
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
+        .unwrap();
+    assert!(
+        engine.bytecode_compile_report(10).is_empty(),
+        "{:?}",
+        engine.bytecode_compile_report(10)
+    );
+    engine.recalculate();
+    assert!(!engine.is_dirty("Sheet1", "A1"));
+
+    engine.mark_external_sheet_dirty("[Book.xlsx]Sheet1");
+    assert!(engine.is_dirty("Sheet1", "A1"));
 }
 
 #[test]

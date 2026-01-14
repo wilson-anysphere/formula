@@ -62,6 +62,17 @@ pub trait Grid: Sync {
         let _ = end;
     }
 
+    /// Sheet-aware variant of [`Grid::record_reference`].
+    ///
+    /// This is invoked for sheet-qualified references (e.g. `Sheet2!A1` or external workbook
+    /// references). The default implementation records local sheets and ignores external sheets.
+    #[inline]
+    fn record_reference_on_sheet(&self, sheet: &SheetId, start: CellCoord, end: CellCoord) {
+        if let SheetId::Local(sheet_id) = sheet {
+            self.record_reference(*sheet_id, start, end);
+        }
+    }
+
     /// Source worksheet id for the grid.
     ///
     /// This is used for deterministic volatile behavior in the bytecode backend (e.g. RAND,

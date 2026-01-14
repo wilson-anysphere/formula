@@ -12718,6 +12718,46 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         guard.record_reference(reference);
     }
 
+    fn record_reference_on_sheet(
+        &self,
+        sheet: &bytecode::SheetId,
+        start: bytecode::CellCoord,
+        end: bytecode::CellCoord,
+    ) {
+        match sheet {
+            bytecode::SheetId::Local(sheet_id) => self.record_reference(*sheet_id, start, end),
+            bytecode::SheetId::External(sheet_key) => {
+                let Some(trace) = self.trace else {
+                    return;
+                };
+                let (Ok(start_row), Ok(start_col), Ok(end_row), Ok(end_col)) = (
+                    u32::try_from(start.row),
+                    u32::try_from(start.col),
+                    u32::try_from(end.row),
+                    u32::try_from(end.col),
+                ) else {
+                    return;
+                };
+                let reference = crate::functions::Reference {
+                    sheet_id: crate::functions::SheetId::External(sheet_key.to_string()),
+                    start: CellAddr {
+                        row: start_row,
+                        col: start_col,
+                    },
+                    end: CellAddr {
+                        row: end_row,
+                        col: end_col,
+                    },
+                };
+                let mut guard = match trace.lock() {
+                    Ok(g) => g,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                guard.record_reference(reference);
+            }
+        }
+    }
+
     fn sheet_id(&self) -> usize {
         self.sheet_id
     }
