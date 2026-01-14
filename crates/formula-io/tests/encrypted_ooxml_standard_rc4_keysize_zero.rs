@@ -6,7 +6,9 @@
 
 use std::io::{Cursor, Write as _};
 
-use formula_io::{open_workbook_model_with_password, Error};
+use formula_io::{
+    open_workbook_model_with_password, open_workbook_with_password_and_preserved_ole, Error,
+};
 use formula_model::{CellRef, CellValue};
 use sha1::{Digest as _, Sha1};
 
@@ -169,6 +171,22 @@ fn build_encryption_info_standard_rc4_keysize_zero(
     out
 }
 
+fn find_preserved_stream_bytes<'a>(
+    entries: &'a formula_office_crypto::OleEntries,
+    name: &str,
+) -> Option<&'a [u8]> {
+    let want = name.trim_start_matches('/');
+    entries.streams.iter().find_map(|s| {
+        let got = s.path.to_string_lossy();
+        let got = got.strip_prefix('/').unwrap_or(&got);
+        if got.eq_ignore_ascii_case(want) {
+            Some(s.bytes.as_slice())
+        } else {
+            None
+        }
+    })
+}
+
 #[test]
 fn decrypts_standard_cryptoapi_rc4_with_keysize_zero() {
     let password = "password";
@@ -218,6 +236,12 @@ fn decrypts_standard_cryptoapi_rc4_with_keysize_zero() {
         .expect("create EncryptedPackage")
         .write_all(&encrypted_package)
         .expect("write EncryptedPackage");
+    let preserved_name = "CustomStream";
+    let preserved_bytes = b"formula-preserve-test";
+    ole.create_stream(preserved_name)
+        .expect("create preserved stream")
+        .write_all(preserved_bytes)
+        .expect("write preserved stream");
     let bytes = ole.into_inner().into_inner();
 
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -242,4 +266,15 @@ fn decrypts_standard_cryptoapi_rc4_with_keysize_zero() {
         sheet.value(CellRef::from_a1("B1").unwrap()),
         CellValue::String("Hello".to_string())
     );
+
+    // --- Decrypt via the preserved-OLE path ----------------------------------------------------
+    let opened = open_workbook_with_password_and_preserved_ole(&path, Some(password))
+        .expect("decrypt + open workbook with preserved ole");
+    assert!(
+        opened.preserved_ole.is_some(),
+        "expected preserved OLE entries for encrypted workbook"
+    );
+    let preserved = opened.preserved_ole.as_ref().unwrap();
+    let got = find_preserved_stream_bytes(preserved, preserved_name).expect("missing preserved stream");
+    assert_eq!(got, preserved_bytes);
 }
