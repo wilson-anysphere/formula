@@ -857,12 +857,41 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
                 // values (and to avoid JSON clone dropping `undefined` keys).
                 if (raw && typeof raw === "object") {
                   const obj = raw as any;
-                  if ("result" in obj || "changes" in obj) {
+                  if ("result" in obj && "changes" in obj) {
                     const normalizedResult =
                       obj.result && typeof obj.result === "object" ? { ...(obj.result as any) } : obj.result;
-                    result = { result: normalizedResult, changes: normalizeCellChanges(obj.changes) };
+                    const rawChanges = obj.changes;
+                    result = {
+                      result: normalizedResult,
+                      changes: Array.isArray(rawChanges) ? normalizeCellChanges(rawChanges) : [],
+                    };
+                  } else if ("success" in obj && "solution" in obj) {
+                    // Backward compatibility: older WASM builds returned a flat payload
+                    // `{ success, status?, solution, iterations, finalError, finalOutput? }`.
+                    const legacy = cloneToPlainData(obj) as any;
+                    const status =
+                      typeof legacy.status === "string" && legacy.status.trim()
+                        ? legacy.status
+                        : legacy.success
+                          ? "Converged"
+                          : "NumericalFailure";
+                    result = {
+                      result: {
+                        status,
+                        solution: typeof legacy.solution === "number" ? legacy.solution : Number(legacy.solution),
+                        iterations: typeof legacy.iterations === "number" ? legacy.iterations : Number(legacy.iterations),
+                        finalOutput:
+                          typeof legacy.finalOutput === "number"
+                            ? legacy.finalOutput
+                            : legacy.finalOutput === undefined
+                              ? NaN
+                              : Number(legacy.finalOutput),
+                        finalError: typeof legacy.finalError === "number" ? legacy.finalError : Number(legacy.finalError),
+                      },
+                      changes: [],
+                    };
                   } else {
-                    result = cloneToPlainData(raw);
+                    result = cloneToPlainData(obj);
                   }
                 } else {
                   result = cloneToPlainData(raw);
