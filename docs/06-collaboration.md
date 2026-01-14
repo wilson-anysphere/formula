@@ -26,6 +26,7 @@ If you are editing collaboration code, start here and keep this doc in sync with
 - Desktop sheet view binder: [`apps/desktop/src/collab/sheetViewBinder.ts`](../apps/desktop/src/collab/sheetViewBinder.ts) (`bindSheetViewToCollabSession`)
 - Collaborative undo: [`packages/collab/undo/index.js`](../packages/collab/undo/index.js) (`createUndoService`, `REMOTE_ORIGIN`)
 - Cell encryption: [`packages/collab/encryption/src/index.node.js`](../packages/collab/encryption/src/index.node.js) (`encryptCellPlaintext`, `decryptCellPlaintext`)
+- Encrypted/protected range metadata + policy: [`packages/collab/encrypted-ranges/src/index.ts`](../packages/collab/encrypted-ranges/src/index.ts) (`EncryptedRangeManager`, `createEncryptionPolicyFromDoc`, `createEncryptedRangeManagerForSession`)
 - Presence (Awareness wrapper): [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js) (`PresenceManager`)
 - Desktop presence renderer: [`apps/desktop/src/grid/presence-renderer/`](../apps/desktop/src/grid/presence-renderer/) (`PresenceRenderer`)
 - Permissions + masking: [`packages/collab/permissions/index.js`](../packages/collab/permissions/index.js) (`getCellPermissions`, `maskCellValue`)
@@ -220,18 +221,101 @@ const session = createCollabSession({
 });
 ```
 
-Encrypted range metadata (key ids, ranges):
+#### Shared encrypted-range metadata (`metadata.encryptedRanges`) (`@formula/collab-encrypted-ranges`)
 
-- The canonical source of truth for *which* cells should be encrypted lives in workbook metadata under `metadata.encryptedRanges`.
-  - This is managed by `@formula/collab-encrypted-ranges` (`EncryptedRangeManager`, `createEncryptionPolicyFromDoc`).
-- Canonical schema: a `Y.Array<Y.Map>` where each entry contains:
-  - `id` (stable identifier)
-  - `sheetId` (stable workbook sheet id, not the display name)
-  - `startRow`, `startCol`, `endRow`, `endCol` (0-based, inclusive)
-  - `keyId` (identifier only; secret key material is not stored in Yjs)
-- Legacy docs may store `encryptedRanges` in older shapes (e.g. map schema, plain objects, missing `id`, `sheetName` instead of `sheetId`).
-  - Policy helpers include best-effort compatibility for these older formats.
-- Overlap precedence: when multiple encrypted ranges overlap, the **most recently added** range (last in the array order) wins.
+For end-to-end encryption to be safe in collaborative mode, **all clients must agree on which cells are “protected” and must be written encrypted**, even if a given client does not have the actual key bytes. Formula stores this *policy metadata* in the shared workbook `metadata` root:
+
+- Location: `getWorkbookRoots(doc).metadata.get("encryptedRanges")` (aka `doc.getMap("metadata").get("encryptedRanges")`)
+- When you derive `encryption.shouldEncryptCell` from this metadata (see below), clients without keys can still refuse plaintext writes into protected cells.
+- Important: **only metadata is shared** (range rectangles + `keyId`). **Secret key material must never be stored in the Y.Doc.**
+
+Canonical schema (new writes should always use this):
+
+- `metadata.encryptedRanges`: `Y.Array<Y.Map<unknown>>`
+- Each entry is a `Y.Map` with:
+
+```ts
+type EncryptedRange = {
+  id: string;
+  sheetId: string; // stable workbook sheet id (not the display name)
+  startRow: number; // 0-based, inclusive
+  startCol: number; // 0-based, inclusive
+  endRow: number; // 0-based, inclusive
+  endCol: number; // 0-based, inclusive
+  keyId: string; // key identifier (not key bytes)
+  createdAt?: number;
+  createdBy?: string;
+};
+```
+
+Legacy schemas tolerated (read support):
+
+- `metadata.encryptedRanges` stored as `Y.Map<id, Y.Map>` (map key is treated as the range id)
+- Array entries missing an explicit `id` (plain objects or `Y.Map`s); ids are derived deterministically as `legacy:...` so policy lookup still works
+- Older fields such as `sheetName` / `sheet` instead of stable `sheetId`
+
+Normalization + dedupe (write support):
+
+- `EncryptedRangeManager` normalizes `metadata.encryptedRanges` into the canonical `Y.Array` + local `Y.Map` entry constructors **before** applying undo-tracked edits. This avoids Yjs `instanceof` pitfalls when a doc was hydrated using a different Yjs module instance (ESM vs CJS), and ensures collaborative undo only captures the user’s explicit change.
+- During normalization it drops malformed entries and dedupes duplicates, including identical ranges with different ids (e.g. from concurrent inserts).
+
+APIs (source: [`packages/collab/encrypted-ranges/src/index.ts`](../packages/collab/encrypted-ranges/src/index.ts)):
+
+- `EncryptedRangeManager`
+  - `list(): EncryptedRange[]` (deterministic ordering)
+  - `add(range: { sheetId, startRow, startCol, endRow, endCol, keyId, createdAt?, createdBy? }): string`
+  - `update(id: string, patch: Partial<...>): void`
+  - `remove(id: string): void`
+- `createEncryptedRangeManagerForSession(session)` → `EncryptedRangeManager`
+  - Uses `session.transactLocal(...)` so range edits participate in collaborative undo scope.
+- `createEncryptionPolicyFromDoc(doc)` → `{ shouldEncryptCell(cell): boolean; keyIdForCell(cell): string | null }`
+  - Reads `metadata.encryptedRanges` (including legacy schemas) to answer:
+    - **should this cell be encrypted on write?** (`shouldEncryptCell`)
+    - **which key id applies?** (`keyIdForCell`)
+  - Overlap rule: when multiple ranges match, the most recently added match wins for the canonical array schema (last entry wins).
+
+#### Wiring pattern: derive `shouldEncryptCell` from shared metadata
+
+Recommended pattern (allows keyless clients to refuse plaintext writes into protected ranges):
+
+```ts
+import * as Y from "yjs";
+import { createCollabSession } from "@formula/collab-session";
+import {
+  createEncryptionPolicyFromDoc,
+  createEncryptedRangeManagerForSession,
+} from "@formula/collab-encrypted-ranges";
+
+const doc = new Y.Doc({ guid: docId });
+const policy = createEncryptionPolicyFromDoc(doc);
+
+const session = createCollabSession({
+  doc,
+  connection: { wsUrl, docId, token },
+  encryption: {
+    shouldEncryptCell: policy.shouldEncryptCell,
+    keyForCell: (cell) => {
+      const keyId = policy.keyIdForCell(cell);
+      if (!keyId) return null;
+
+      // Resolve key bytes out-of-band (KMS/keyring). DO NOT store these in the doc.
+      const keyBytes = keyring.getAes256KeyBytes(keyId);
+      return keyBytes ? { keyId, keyBytes } : null;
+    },
+  },
+});
+
+// Mutate the shared metadata via a manager that uses transactLocal for undo scope.
+const ranges = createEncryptedRangeManagerForSession(session);
+ranges.add({ sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 9, endCol: 9, keyId: "k1" });
+```
+
+Tests worth reading:
+
+- Policy enforcement in session (keyless clients block plaintext writes): [`packages/collab/session/test/encrypted-ranges.policy.test.js`](../packages/collab/session/test/encrypted-ranges.policy.test.js)
+- Undo + foreign-Yjs normalization behavior: [`packages/collab/session/test/encrypted-ranges.undo.test.js`](../packages/collab/session/test/encrypted-ranges.undo.test.js)
+
+Reminder: encryption is **orthogonal** to collaboration permissions. Viewer/commenter role enforcement and comment-only restrictions are handled separately (see “Permissions + masking” below); encrypted ranges only define confidentiality + “must-encrypt” write policy.
 
 Desktop dev/testing toggle:
 
