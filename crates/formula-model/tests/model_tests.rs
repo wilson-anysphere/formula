@@ -1,5 +1,5 @@
 use formula_model::{
-    CellKey, CellRef, CellValue, DataValidation, DataValidationAssignment, DataValidationKind,
+    Cell, CellKey, CellRef, CellValue, DataValidation, DataValidationAssignment, DataValidationKind,
     ErrorValue, Hyperlink, HyperlinkTarget, Range, Table, TableColumn, Workbook, Worksheet,
     EXCEL_MAX_COLS, EXCEL_MAX_ROWS, SCHEMA_VERSION,
 };
@@ -106,6 +106,37 @@ fn formula_and_style_keep_empty_cells_in_sparse_store() {
     // Resetting to default style drops the cell.
     sheet.set_style_id(CellRef::new(1, 1), 0);
     assert_eq!(sheet.cell_count(), 0);
+}
+
+#[test]
+fn cell_phonetic_roundtrips_through_workbook_json() {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1").unwrap();
+    let sheet = workbook.sheet_mut(sheet_id).unwrap();
+
+    let mut cell = Cell::new(CellValue::String("漢字".to_string()));
+    cell.phonetic = Some("かんじ".to_string());
+    sheet.set_cell(CellRef::new(0, 0), cell);
+
+    let json = serde_json::to_string(&workbook).unwrap();
+    assert!(
+        json.contains("\"phonetic\""),
+        "expected serialized workbook to include phonetic metadata"
+    );
+
+    let decoded: Workbook = serde_json::from_str(&json).unwrap();
+    let decoded_sheet = decoded.sheet_by_name("Sheet1").unwrap();
+    let decoded_cell = decoded_sheet.cell(CellRef::new(0, 0)).unwrap();
+    assert_eq!(decoded_cell.phonetic_text(), Some("かんじ"));
+
+    // Back-compat: older payloads without the `phonetic` key must deserialize.
+    let legacy: Cell = serde_json::from_str("{}").unwrap();
+    assert_eq!(legacy.phonetic_text(), None);
+    let legacy_json = serde_json::to_string(&legacy).unwrap();
+    assert!(
+        !legacy_json.contains("\"phonetic\""),
+        "expected phonetic key to be omitted when None"
+    );
 }
 
 #[test]

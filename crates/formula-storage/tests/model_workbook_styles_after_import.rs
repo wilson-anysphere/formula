@@ -18,6 +18,7 @@ fn export_model_workbook_includes_styles_added_after_import() {
             Cell {
                 value: CellValue::Number(1.0),
                 formula: None,
+                phonetic: None,
                 style_id: existing_style_id,
             },
         );
@@ -69,4 +70,3 @@ fn export_model_workbook_includes_styles_added_after_import() {
         .expect("style exists in exported table");
     assert_eq!(style.number_format.as_deref(), Some("0.000"));
 }
-

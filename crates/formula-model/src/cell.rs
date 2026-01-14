@@ -170,6 +170,12 @@ pub struct Cell {
     )]
     pub formula: Option<String>,
 
+    /// Excel phonetic guide (furigana) text associated with this cell.
+    ///
+    /// This is used to power Excel-compatible functions like `PHONETIC()`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phonetic: Option<String>,
+
     /// Index into the workbook style table.
     #[serde(default)]
     pub style_id: u32,
@@ -180,6 +186,7 @@ impl Default for Cell {
         Self {
             value: CellValue::Empty,
             formula: None,
+            phonetic: None,
             style_id: 0,
         }
     }
@@ -198,7 +205,15 @@ impl Cell {
     ///
     /// Such cells should not be stored in the sparse map.
     pub fn is_truly_empty(&self) -> bool {
-        self.value == CellValue::Empty && self.formula.is_none() && self.style_id == 0
+        self.value == CellValue::Empty
+            && self.formula.is_none()
+            && self.phonetic.is_none()
+            && self.style_id == 0
+    }
+
+    /// Returns the phonetic guide text (furigana) for this cell, if any.
+    pub fn phonetic_text(&self) -> Option<&str> {
+        self.phonetic.as_deref()
     }
 }
 

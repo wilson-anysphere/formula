@@ -13,6 +13,7 @@ fn main() {
         Cell {
             value: CellValue::String("Item".into()),
             formula: None,
+            phonetic: None,
             style_id: 0,
         },
     );
@@ -21,6 +22,7 @@ fn main() {
         Cell {
             value: CellValue::String("Qty".into()),
             formula: None,
+            phonetic: None,
             style_id: 0,
         },
     );
@@ -29,6 +31,7 @@ fn main() {
         Cell {
             value: CellValue::String("Price".into()),
             formula: None,
+            phonetic: None,
             style_id: 0,
         },
     );
@@ -37,6 +40,7 @@ fn main() {
         Cell {
             value: CellValue::String("Total".into()),
             formula: None,
+            phonetic: None,
             style_id: 0,
         },
     );
@@ -54,6 +58,7 @@ fn main() {
             Cell {
                 value: CellValue::String((*item).into()),
                 formula: None,
+                phonetic: None,
                 style_id: 0,
             },
         );
@@ -62,6 +67,7 @@ fn main() {
             Cell {
                 value: CellValue::Number(*qty),
                 formula: None,
+                phonetic: None,
                 style_id: 0,
             },
         );
@@ -70,6 +76,7 @@ fn main() {
             Cell {
                 value: CellValue::Number(*price),
                 formula: None,
+                phonetic: None,
                 style_id: 0,
             },
         );
@@ -78,6 +85,7 @@ fn main() {
             Cell {
                 value: CellValue::Number(*total),
                 formula: Some("[@Qty]*[@Price]".into()),
+                phonetic: None,
                 style_id: 0,
             },
         );
@@ -89,6 +97,7 @@ fn main() {
         Cell {
             value: CellValue::Number(20.0),
             formula: Some("SUM(Table1[Total])".into()),
+            phonetic: None,
             style_id: 0,
         },
     );
@@ -98,6 +107,7 @@ fn main() {
         Cell {
             value: CellValue::String("Qty".into()),
             formula: Some("Table1[[#Headers],[Qty]]".into()),
+            phonetic: None,
             style_id: 0,
         },
     );

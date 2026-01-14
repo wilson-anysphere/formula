@@ -47,6 +47,7 @@ fn delete_sheet_rewrites_references_in_formulas_and_metadata() {
             Cell {
                 value: formula_model::CellValue::Empty,
                 formula: Some("Data!A1".to_string()),
+                phonetic: None,
                 style_id: 0,
             },
         );
@@ -148,4 +149,3 @@ fn delete_sheet_rewrites_references_in_formulas_and_metadata() {
         .iter()
         .all(|s| s.sheet_name != "Data"));
 }
-
