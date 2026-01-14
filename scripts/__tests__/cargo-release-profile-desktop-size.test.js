@@ -4,16 +4,20 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripHashComments } from "../../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const cargoTomlPath = path.join(repoRoot, "Cargo.toml");
 const desktopCargoTomlPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "Cargo.toml");
 
 async function readCargoToml() {
-  return await readFile(cargoTomlPath, "utf8");
+  // Strip comments so inline `# ...` annotations can't break the guardrail and commented-out
+  // settings can't satisfy it.
+  return stripHashComments(await readFile(cargoTomlPath, "utf8"));
 }
 
 async function readDesktopCargoToml() {
-  return await readFile(desktopCargoTomlPath, "utf8");
+  return stripHashComments(await readFile(desktopCargoTomlPath, "utf8"));
 }
 
 /**
