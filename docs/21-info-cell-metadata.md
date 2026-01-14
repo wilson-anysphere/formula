@@ -136,6 +136,8 @@ Behavior:
   - `C:\Dir\[Book.xlsx]Sheet1`
   - `/dir/[Book.xlsx]Sheet1`
 - `CELL("filename", reference)` uses the referenced cell’s sheet name component.
+  - For local sheets, this is the sheet’s **display name** (tab name) as configured via `setSheetDisplayName` (or `renameSheet`).
+  - For external references, the engine returns the canonical external sheet key (e.g. `"[Book.xlsx]Sheet1"`), which already includes the workbook + sheet.
 
 In this repo, hosts can inject this metadata via:
 
@@ -339,6 +341,11 @@ This section documents the “wiring points” for hosts.
 - Sheet count (`INFO("numfile")`): create all sheets up-front when loading a workbook
   - `WasmWorkbook.fromJson({ sheets: { Sheet1: …, Sheet2: … } })`
   - `WasmWorkbook.fromXlsxBytes(bytes)` (creates all sheets from the XLSX model)
+ 
+- Sheet display names (affects `CELL("address")` and the sheet component of `CELL("filename")`):
+  - `EngineClient.setSheetDisplayName(sheetId, name)`
+  - This is metadata-only: it does **not** rewrite stored formulas and does **not** change the engine-facing sheet id/key.
+  - For Excel-like rename semantics (rewrite formulas that reference a sheet), use `EngineClient.renameSheet(oldName, newName)` when available.
 
 - Calculation mode (`INFO("recalc")`): exposed via `EngineClient.getCalcSettings()` / `EngineClient.setCalcSettings()`.
   - Note: the worker protocol typically runs edits in manual mode so JS callers can explicitly request `recalculate()` and receive deterministic value-change deltas.
