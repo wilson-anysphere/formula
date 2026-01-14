@@ -251,7 +251,8 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     const app = new SpreadsheetApp(root, status);
     const sheetId = app.getCurrentSheetId();
     const doc = app.getDocument();
-    const initialValue = doc.getCell(sheetId, { row: 0, col: 0 }).value;
+    const editedCell = { row: 0, col: 0 };
+    const initialValue = doc.getCell(sheetId, editedCell).value;
 
     const bytes = new Uint8Array([1, 2, 3, 4]);
 
@@ -270,7 +271,7 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     const insertPromise = (app as any).insertImageFromPickedFile(file);
 
     // While the image bytes are still loading, perform a normal cell edit.
-    doc.setCellInput(sheetId, { row: 0, col: 0 }, "hello", { label: "Edit Cell" });
+    doc.setCellInput(sheetId, editedCell, "hello", { label: "Edit Cell" });
 
     resolveBytes!(bytes.buffer);
     await insertPromise;
@@ -281,11 +282,11 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     // Undo should first remove the inserted drawing, leaving the cell edit intact.
     doc.undo();
     expect((doc as any).getSheetDrawings(sheetId)).toHaveLength(0);
-    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe("hello");
+    expect(doc.getCell(sheetId, editedCell).value).toBe("hello");
 
     // Undo again should revert the cell edit.
     doc.undo();
-    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe(initialValue);
+    expect(doc.getCell(sheetId, editedCell).value).toBe(initialValue);
 
     app.destroy();
     root.remove();
