@@ -298,8 +298,12 @@ If this comparison fails, we should return a **wrong password** error:
 ### IV usage for verifier/key fields (important)
 
 For the password key-encryptor fields (`encryptedVerifierHashInput`, `encryptedVerifierHashValue`,
-`encryptedKeyValue`), the IV used by Excel-compatible implementations is the `p:encryptedKey/@saltValue`
-(padded/truncated to the AES block size).
+`encryptedKeyValue`), the IV used by Excel-compatible implementations is:
+
+> `IV = p:encryptedKey/@saltValue[..blockSize]`
+
+i.e. the first AES block of `p:encryptedKey/@saltValue` (the attribute must be at least `blockSize`
+bytes long).
 
 Do **not** reuse the per-segment IV logic from `EncryptedPackage` here.
 
