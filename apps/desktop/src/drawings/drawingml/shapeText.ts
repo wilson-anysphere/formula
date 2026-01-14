@@ -321,8 +321,7 @@ function parseRunStyleFromDom(el: Element | null): RunStyle {
   const solidFill = findFirstByLocalName(el, "solidFill");
   if (solidFill) {
     const srgb = findFirstByLocalName(solidFill, "srgbClr");
-    const scheme = findFirstByLocalName(solidFill, "schemeClr");
-    color = normalizeHexColor(srgb?.getAttribute("val")) ?? (scheme?.getAttribute("val")?.trim() ? undefined : undefined);
+    color = normalizeHexColor(srgb?.getAttribute("val"));
   }
 
   const style: RunStyle = {};
