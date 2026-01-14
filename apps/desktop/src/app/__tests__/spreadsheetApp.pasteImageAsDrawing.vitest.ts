@@ -152,7 +152,9 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     const imageId = raw?.kind?.imageId;
     expect(typeof imageId).toBe("string");
-    const stored = (app as any).drawingImages?.get?.(imageId);
+    // Image bytes are stored out-of-band (IndexedDB + in-memory drawing image store)
+    // rather than in DocumentController snapshots.
+    const stored = app.getDrawingImages().get(imageId);
     expect(stored?.mimeType).toBe("image/png");
     expect(stored?.bytes).toBeInstanceOf(Uint8Array);
 
