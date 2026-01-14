@@ -2874,16 +2874,25 @@ fn decrypt_encrypted_ooxml_package(
             version_minor: 0,
         })?;
 
-    // Some synthetic fixtures (and some pipelines) may already contain a plaintext ZIP payload in
-    // `EncryptedPackage`. Support those by returning the ZIP bytes directly.
+    // Some synthetic fixtures (and some pipelines) may already contain a plaintext OOXML ZIP payload
+    // in `EncryptedPackage`. When that happens, skip cryptography entirely and treat the bytes as
+    // the "decrypted" package payload.
     if let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) {
-        let format = sniff_ooxml_zip_workbook_kind(package_bytes).unwrap_or(WorkbookFormat::Xlsx);
-        let reuse_full_buffer = package_bytes.as_ptr() == encrypted_package.as_ptr()
-            && package_bytes.len() == encrypted_package.len();
-        if reuse_full_buffer {
-            return Ok(Some((format, encrypted_package)));
+        // Validate ZIP structure before treating the stream as plaintext to avoid false positives
+        // on ciphertext that happens to begin with `PK`.
+        if let Some(format) = workbook_format_from_ooxml_zip_bytes(package_bytes) {
+            let format = if matches!(format, WorkbookFormat::Unknown) {
+                WorkbookFormat::Xlsx
+            } else {
+                format
+            };
+            let reuse_full_buffer = package_bytes.as_ptr() == encrypted_package.as_ptr()
+                && package_bytes.len() == encrypted_package.len();
+            if reuse_full_buffer {
+                return Ok(Some((format, encrypted_package)));
+            }
+            return Ok(Some((format, package_bytes.to_vec())));
         }
-        return Ok(Some((format, package_bytes.to_vec())));
     }
 
     // `EncryptionInfo` version header is the first 4 bytes:
@@ -2925,7 +2934,8 @@ fn decrypt_encrypted_ooxml_package(
         // Real-world producers vary in how they encode/wrap the Agile `EncryptionInfo` XML
         // (UTF-8/UTF-16, length prefixes, padding). Normalize to a strict UTF-8 XML payload so we
         // can reuse the `formula-xlsx` offcrypto implementation.
-        let xml = extract_agile_encryption_info_xml(&encryption_info).map_err(|_err| {
+        let xml = extract_agile_encryption_info_xml(&encryption_info).map_err(|_| {
+            // Treat malformed Agile descriptors as unsupported encryption (not a wrong password).
             Error::UnsupportedOoxmlEncryption {
                 path: path.to_path_buf(),
                 version_major,
@@ -3136,8 +3146,8 @@ fn decrypt_encrypted_ooxml_package(
             // Prefer the Standard decryptor in `formula-office-crypto` because it supports a wider
             // range of hash algorithms (and performs verifier validation). However, some producers
             // omit or mis-set `EncryptionHeader.Flags` (e.g. missing `fCryptoAPI`/`fAES`), which the
-            // strict parser rejects. Fall back to `formula-xlsx`'s legacy Standard decryptor for
-            // compatibility in those cases.
+            // strict parser rejects. Fall back to `formula-xlsx`'s Standard decryptor
+            // (`formula-offcrypto`) for compatibility in those cases.
             match formula_office_crypto::decrypt_standard_encrypted_package(
                 &encryption_info,
                 &encrypted_package,
@@ -3149,7 +3159,7 @@ fn decrypt_encrypted_ooxml_package(
                         path: path.to_path_buf(),
                     });
                 }
-                Err(_err) => match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
+                Err(_) => match xlsx::offcrypto::decrypt_ooxml_encrypted_package(
                     &encryption_info,
                     &encrypted_package,
                     password,
@@ -3160,7 +3170,7 @@ fn decrypt_encrypted_ooxml_package(
                         | xlsx::OffCryptoError::IntegrityMismatch => {
                             return Err(Error::InvalidPassword {
                                 path: path.to_path_buf(),
-                            })
+                            });
                         }
                         xlsx::OffCryptoError::UnsupportedEncryptionVersion { major, minor } => {
                             return Err(Error::UnsupportedOoxmlEncryption {
@@ -3170,9 +3180,11 @@ fn decrypt_encrypted_ooxml_package(
                             });
                         }
                         _ => {
-                            return Err(Error::InvalidPassword {
+                            return Err(Error::UnsupportedOoxmlEncryption {
                                 path: path.to_path_buf(),
-                            })
+                                version_major,
+                                version_minor,
+                            });
                         }
                     },
                 },
