@@ -132,6 +132,12 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("AGGREGATE", 2), "Expected AGGREGATE ref1 to be a range");
   assert.ok(registry.isRangeArg("AGGREGATE", 3), "Expected AGGREGATE ref2 to be a range (varargs)");
 
+  // CEILING.MATH/FLOOR.MATH: scalar-but-often-cell-referenced args should allow range/schema completion.
+  assert.ok(registry.isRangeArg("CEILING.MATH", 0), "Expected CEILING.MATH number to be a range");
+  assert.equal(registry.getFunction("CEILING.MATH")?.args?.[2]?.name, "mode", "Expected CEILING.MATH arg3 to be mode");
+  assert.ok(registry.getFunction("CEILING.MATH")?.args?.[2]?.optional, "Expected CEILING.MATH mode to be optional");
+  assert.ok(registry.isRangeArg("FLOOR.MATH", 0), "Expected FLOOR.MATH number to be a range");
+
   // FORECAST.LINEAR(x, known_y's, known_x's)
   assert.equal(
     registry.isRangeArg("FORECAST.LINEAR", 0),

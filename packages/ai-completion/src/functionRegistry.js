@@ -233,6 +233,24 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "CEILING.MATH",
+    description: "Rounds a number up to the nearest integer or nearest multiple of significance.",
+    args: [
+      { name: "number", type: "range" },
+      { name: "significance", type: "number", optional: true },
+      { name: "mode", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "FLOOR.MATH",
+    description: "Rounds a number down to the nearest integer or nearest multiple of significance.",
+    args: [
+      { name: "number", type: "range" },
+      { name: "significance", type: "number", optional: true },
+      { name: "mode", type: "number", optional: true },
+    ],
+  },
+  {
     name: "WORKDAY",
     description: "Returns a date that is a specified number of working days before or after a start date.",
     args: [
