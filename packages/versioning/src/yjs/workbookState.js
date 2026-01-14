@@ -238,7 +238,8 @@ export function workbookStateFromYjsDoc(doc) {
    * @type {Map<string, any>}
    */
   const sheetEntriesById = new Map();
-  for (const entry of sheetsArray.toArray()) {
+  for (let i = 0; i < sheetsArray.length; i++) {
+    const entry = sheetsArray.get(i);
     const rawId = readYMapOrObject(entry, "id");
     const id = coerceString(rawId);
     if (!id) continue;
