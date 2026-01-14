@@ -2042,9 +2042,9 @@ export class FormulaBarView {
     // Toggle editing UI state (textarea visibility, hover hit-testing, etc.) through CSS classes.
     this.root.classList.toggle("formula-bar--editing", this.model.isEditing);
 
-    const syntaxError = this.model.syntaxError();
+    const syntaxError = isFormulaEditing ? this.model.syntaxError() : null;
     this.#hintEl.classList.toggle("formula-bar-hint--syntax-error", Boolean(syntaxError));
-    const hint = this.model.functionHint();
+    const hint = isFormulaEditing ? this.model.functionHint() : null;
     this.#hintEl.replaceChildren();
     if (syntaxError) {
       this.#clearArgumentPreviewState();

@@ -33,6 +33,20 @@ function getSignatureName(host: HTMLElement): string | null {
 }
 
 describe("FormulaBarView function hint UI", () => {
+  it("does not show a function hint when not editing", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "=ROUND(1, 2)", value: null });
+
+    const hint = getHintEl(host);
+    expect(hint.querySelector(".formula-bar-hint-panel")).toBeNull();
+    expect(hint.textContent).toBe("");
+
+    host.remove();
+  });
+
   it("updates the active parameter as the cursor moves across commas", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
