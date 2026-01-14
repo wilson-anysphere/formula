@@ -272,6 +272,10 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     const afterDown = view.textarea.getAttribute("aria-activedescendant");
     expect(afterDown).not.toBe(initial);
 
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", cancelable: true }));
+    const afterPageDown = view.textarea.getAttribute("aria-activedescendant");
+    expect(afterPageDown).not.toBe(afterDown);
+
     // Closing clears aria-activedescendant.
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
     expect(view.textarea.hasAttribute("aria-activedescendant")).toBe(false);

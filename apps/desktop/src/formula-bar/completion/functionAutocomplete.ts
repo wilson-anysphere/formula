@@ -386,6 +386,34 @@ export class FormulaBarFunctionAutocompleteController {
       return true;
     }
 
+    if (e.key === "PageDown") {
+      e.preventDefault();
+      this.#selectedIndex = Math.min(this.#selectedIndex + 5, this.#suggestions.length - 1);
+      this.#syncSelection();
+      return true;
+    }
+
+    if (e.key === "PageUp") {
+      e.preventDefault();
+      this.#selectedIndex = Math.max(this.#selectedIndex - 5, 0);
+      this.#syncSelection();
+      return true;
+    }
+
+    if (e.key === "Home") {
+      e.preventDefault();
+      this.#selectedIndex = 0;
+      this.#syncSelection();
+      return true;
+    }
+
+    if (e.key === "End") {
+      e.preventDefault();
+      this.#selectedIndex = Math.max(0, this.#suggestions.length - 1);
+      this.#syncSelection();
+      return true;
+    }
+
     if (e.key === "Escape") {
       e.preventDefault();
       this.close();
