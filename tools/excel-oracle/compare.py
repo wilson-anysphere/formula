@@ -135,6 +135,30 @@ def _redact_paths_in_obj(obj: Any, *, privacy_mode: str) -> Any:
     return obj
 
 
+def _redact_error_details_in_obj(obj: Any, *, privacy_mode: str) -> Any:
+    """Recursively redact free-form error `detail` strings in privacy mode.
+
+    The formula engine (and some adapters) may include an additional `detail` field for error values
+    (t="e") containing arbitrary text (often derived from exception strings). In privacy mode we
+    hash these to avoid leaking filenames, local paths, or internal identifiers in CI artifacts.
+    """
+
+    if privacy_mode != _PRIVACY_PRIVATE:
+        return obj
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        is_error_value = obj.get("t") == "e"
+        for k, v in obj.items():
+            if is_error_value and k == "detail" and isinstance(v, str) and v:
+                out[k] = v if v.startswith("sha256=") else f"sha256={_sha256_text(v)}"
+            else:
+                out[k] = _redact_error_details_in_obj(v, privacy_mode=privacy_mode)
+        return out
+    if isinstance(obj, list):
+        return [_redact_error_details_in_obj(v, privacy_mode=privacy_mode) for v in obj]
+    return obj
+
+
 def _index_results(
     results: Iterable[dict[str, Any]], *, label: str
 ) -> dict[str, dict[str, Any]]:
@@ -811,6 +835,7 @@ def main() -> int:
         "actualSource": _redact_paths_in_obj(actual_source, privacy_mode=args.privacy_mode),
         "mismatches": mismatches,
     }
+    report = _redact_error_details_in_obj(report, privacy_mode=args.privacy_mode)
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     with report_path.open("w", encoding="utf-8", newline="\n") as f:
