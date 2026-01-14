@@ -4875,10 +4875,29 @@ export class SpreadsheetApp {
     filename: string | null,
     options: { syncEngine?: boolean; recalculate?: boolean } = {},
   ): Promise<void> {
-    this.workbookFileMetadata = { directory: directory ?? null, filename: filename ?? null };
+    const next = { directory: directory ?? null, filename: filename ?? null };
+    const prev = this.workbookFileMetadata;
+    const changed = prev.directory !== next.directory || prev.filename !== next.filename;
+    this.workbookFileMetadata = next;
 
     const shouldSyncEngine = options.syncEngine !== false;
     if (!shouldSyncEngine) return;
+
+    // When the UI is using the in-process evaluator (multi-sheet workbooks, missing WASM engine),
+    // workbook metadata changes do not flow through DocumentController deltas. Invalidate rendered
+    // cell caches so formulas like `CELL("filename")` re-evaluate against the latest metadata.
+    if (changed && this.uiReady) {
+      const sheetCount = (this.document as any)?.model?.sheets?.size;
+      const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
+      const hasWasmEngine = Boolean(this.wasmEngine && !this.wasmSyncSuspended);
+      if (!hasWasmEngine || !useEngineCache) {
+        if (this.sharedGrid && this.sharedProvider) {
+          this.sharedProvider.invalidateAll();
+        } else if (!this.sharedGrid) {
+          this.refresh("scroll");
+        }
+      }
+    }
 
     if (!this.wasmEngine) return;
 
@@ -20679,6 +20698,8 @@ export class SpreadsheetApp {
         value = evaluateFormula(state.formula, getCellValue, {
           cellAddress: `${targetSheet}!${normalizedAddr}`,
           resolveNameToReference,
+          workbookFileMetadata: this.workbookFileMetadata,
+          currentSheetName: this.resolveSheetDisplayNameById(targetSheet),
           localeId: getLocale(),
           maxRangeCells: MAX_CELL_READS,
         });
@@ -20702,6 +20723,8 @@ export class SpreadsheetApp {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
         resolveStructuredRefToReference,
+        workbookFileMetadata: this.workbookFileMetadata,
+        currentSheetName: this.resolveSheetDisplayNameById(sheetId),
         localeId: getLocale(),
         maxRangeCells: MAX_CELL_READS,
       });
@@ -21253,6 +21276,8 @@ export class SpreadsheetApp {
       cellAddress,
       resolveNameToReference,
       resolveStructuredRefToReference,
+      workbookFileMetadata: this.workbookFileMetadata,
+      currentSheetName: this.resolveSheetDisplayNameById(sheetId),
       localeId: getLocale(),
     });
 

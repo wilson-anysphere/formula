@@ -53,6 +53,24 @@ export interface EvaluateFormulaOptions {
   ai?: AiFunctionEvaluator;
   cellAddress?: string;
   /**
+   * Optional workbook file metadata used by Excel-compatible worksheet information functions
+   * like `CELL("filename")` and `INFO("directory")`.
+   *
+   * When omitted (or when `filename` is missing), these functions should behave like an unsaved
+   * workbook and return `""`.
+   */
+  workbookFileMetadata?: { directory: string | null; filename: string | null } | null;
+  /**
+   * Optional current-sheet display name.
+   *
+   * This is used by functions like `CELL("filename")` when no explicit reference argument is
+   * provided, or when the reference is unqualified (e.g. `A1`).
+   *
+   * When omitted, callers can still provide `cellAddress: "Sheet1!A1"` and the evaluator will
+   * best-effort infer the sheet name from that.
+   */
+  currentSheetName?: string;
+  /**
    * Optional locale identifier used for canonicalizing localized function names (e.g. de-DE `SUMME` -> `SUM`).
    *
    * Callers should generally pass the current UI/workbook locale when evaluating user-visible previews.
@@ -562,6 +580,29 @@ function sheetIdFromCellAddress(cellAddress?: string): string | null {
   return cellAddress.slice(0, bang);
 }
 
+function normalizeFunctionName(name: string): string {
+  const upper = String(name ?? "").toUpperCase();
+  const PREFIX = "_XLFN.";
+  if (upper.startsWith(PREFIX)) return upper.slice(PREFIX.length);
+  return upper;
+}
+
+function workbookDirForExcel(dir: string): string {
+  const raw = String(dir ?? "");
+  if (!raw) return "";
+  if (raw.endsWith("/") || raw.endsWith("\\")) return raw;
+
+  const lastSlash = raw.lastIndexOf("/");
+  const lastBackslash = raw.lastIndexOf("\\");
+  const sep =
+    lastSlash >= 0 || lastBackslash >= 0
+      ? lastSlash > lastBackslash
+        ? "/"
+        : "\\"
+      : "/";
+  return `${raw}${sep}`;
+}
+
 function evalFunction(
   name: string,
   args: CellValue[],
@@ -570,11 +611,68 @@ function evalFunction(
   context: EvalContext,
   argProvenance?: AiFunctionArgumentProvenance[],
 ): CellValue {
-  const upper = name.toUpperCase();
+  const upper = normalizeFunctionName(name);
   if (upper === "AI" || upper === "AI.EXTRACT" || upper === "AI.CLASSIFY" || upper === "AI.TRANSLATE") {
     return options.ai
       ? options.ai.evaluateAiFunction({ name: upper, args, cellAddress: options.cellAddress, argProvenance })
       : "#NAME?";
+  }
+
+  if (upper === "CELL") {
+    const infoTypeArg = args[0] ?? null;
+    const infoTypeScalar = unwrapProvenance(infoTypeArg);
+    if (Array.isArray(infoTypeScalar)) return "#VALUE!";
+    const infoType = typeof infoTypeScalar === "string" ? infoTypeScalar.trim().toLowerCase() : "";
+    if (!infoType) return "#VALUE!";
+    if (infoType !== "filename") return "#VALUE!";
+
+    const meta = options.workbookFileMetadata ?? null;
+    const filename = typeof meta?.filename === "string" ? meta.filename.trim() : "";
+    if (!filename) return "";
+
+    const dirRaw = typeof meta?.directory === "string" ? meta.directory : null;
+    const dir = dirRaw != null && dirRaw.trim() !== "" ? workbookDirForExcel(dirRaw) : "";
+
+    const currentSheetName = (() => {
+      const raw = typeof options.currentSheetName === "string" ? options.currentSheetName.trim() : "";
+      if (raw) return raw;
+      const inferred = sheetIdFromCellAddress(options.cellAddress);
+      return inferred ? inferred.trim() : "";
+    })();
+
+    const refSheetName = (() => {
+      const refArg = args[1] ?? null;
+      if (refArg == null) return currentSheetName;
+
+      const refs = provenanceRefs(refArg);
+      const firstRef = refs[0] ?? "";
+      if (!firstRef) return currentSheetName;
+      const split = splitSheetQualifier(firstRef);
+      return split.sheetName ?? currentSheetName;
+    })();
+
+    const value = dir ? `${dir}[${filename}]${refSheetName}` : `[${filename}]${refSheetName}`;
+    if (!context.preserveReferenceProvenance) return value;
+    const refs = args.flatMap((arg) => provenanceRefs(arg));
+    return wrapWithProvenance(value, refs);
+  }
+
+  if (upper === "INFO") {
+    const typeTextArg = args[0] ?? null;
+    const typeTextScalar = unwrapProvenance(typeTextArg);
+    if (Array.isArray(typeTextScalar)) return "#VALUE!";
+    const typeText = typeof typeTextScalar === "string" ? typeTextScalar.trim().toLowerCase() : "";
+    if (!typeText) return "#VALUE!";
+    if (typeText !== "directory") return "#VALUE!";
+
+    const meta = options.workbookFileMetadata ?? null;
+    const dirRaw = typeof meta?.directory === "string" ? meta.directory : null;
+    const dir = dirRaw != null && dirRaw.trim() !== "" ? workbookDirForExcel(dirRaw) : "";
+    if (!dir) return "";
+
+    if (!context.preserveReferenceProvenance) return dir;
+    const refs = args.flatMap((arg) => provenanceRefs(arg));
+    return wrapWithProvenance(dir, refs);
   }
 
   if (upper === "AND" || upper === "OR") {
@@ -822,7 +920,7 @@ function toA1(addr: { row: number; col: number }): string {
 }
 
 function isAiFunctionName(name: string): boolean {
-  const upper = name.toUpperCase();
+  const upper = normalizeFunctionName(name);
   return upper === "AI" || upper === "AI.EXTRACT" || upper === "AI.CLASSIFY" || upper === "AI.TRANSLATE";
 }
 
@@ -888,16 +986,26 @@ function parsePrimary(
     if (!parser.match("paren", "(")) return "#VALUE!";
 
     const args: CellValue[] = [];
-    const argContext = isAiFunctionName(name)
-      ? {
-          preserveReferenceProvenance: true,
-          sampleRangeReferences: true,
-          maxRangeCells: clampInt(
-            options.aiRangeSampleLimit ?? options.ai?.rangeSampleLimit ?? DEFAULT_AI_RANGE_SAMPLE_LIMIT,
-            { min: 1, max: 10_000 },
-          ),
-        }
-      : { ...context, sampleRangeReferences: false };
+    const upperName = normalizeFunctionName(name);
+    const argContext =
+      isAiFunctionName(upperName)
+        ? {
+            preserveReferenceProvenance: true,
+            sampleRangeReferences: true,
+            maxRangeCells: clampInt(
+              options.aiRangeSampleLimit ?? options.ai?.rangeSampleLimit ?? DEFAULT_AI_RANGE_SAMPLE_LIMIT,
+              { min: 1, max: 10_000 },
+            ),
+          }
+        : upperName === "CELL"
+          ? {
+              // `CELL(info_type, [reference])` needs access to the reference's sheet name
+              // (and should not materialize large range values just to capture provenance).
+              preserveReferenceProvenance: true,
+              sampleRangeReferences: true,
+              maxRangeCells: 1,
+            }
+          : { ...context, sampleRangeReferences: false };
     const argProvenance: AiFunctionArgumentProvenance[] = [];
     const isAiFn = isAiFunctionName(name) && Boolean(options.ai);
     if (!parser.match("paren", ")")) {
