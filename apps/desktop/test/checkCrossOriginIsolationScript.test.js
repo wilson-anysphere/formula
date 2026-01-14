@@ -32,6 +32,8 @@ test("pnpm check:coi script builds via cargo_agent and targets the desktop tauri
     "formula-desktop",
     "--release",
     "--cross-origin-isolation-check",
+    // The check uses a real (non-blob) worker URL so we catch asset protocol + CSP regressions.
+    "coi-check-worker.js",
   ]) {
     assert.ok(
       src.includes(token),
