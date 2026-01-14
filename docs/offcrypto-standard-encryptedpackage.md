@@ -24,8 +24,9 @@ High-level behavior in `formula-io`:
     currently decrypt to in-memory buffers.
 
 Standard/CryptoAPI decryption primitives also exist in lower-level crates (notably
-`crates/formula-offcrypto` and `crates/formula-office-crypto`), but the full open-path plumbing is
-still converging (see [`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md)).
+`crates/formula-offcrypto` and `crates/formula-office-crypto`). The high-level open path in
+`formula-io` is still evolving (especially around streaming and cross-crate API consolidation); see
+[`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md).
 
 This document focuses on the `EncryptedPackage` stream itself, because the most common interop bugs
 cluster around:
