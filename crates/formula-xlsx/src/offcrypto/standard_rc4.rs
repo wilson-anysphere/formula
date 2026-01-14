@@ -170,12 +170,12 @@ fn derive_rc4_key_for_block(
         h_final.len()
     );
 
-    // For MS-OFFCRYPTO Standard RC4, the RC4 key length is exactly `key_size_bits / 8` bytes.
-    // For 40-bit RC4, `key_size_bytes == 5`; use the raw 5-byte key material.
+    // For Standard CryptoAPI RC4, the derived RC4 key is exactly `key_size_bits / 8` bytes.
     //
-    // Do not apply the legacy CryptoAPI behavior of expanding a 40-bit key to 16 bytes by
-    // appending 11 zero bytes: that changes RC4's key scheduling and produces a different
-    // keystream.
+    // Notably, for the "40-bit" legacy case (`keySize == 0` or `keySize == 40`), this is a 5-byte
+    // key. Do not pad it to 16 bytes; that behavior applies to legacy BIFF8 CryptoAPI RC4
+    // variants, not MS-OFFCRYPTO Standard Encryption RC4 (see
+    // `docs/offcrypto-standard-cryptoapi-rc4.md`).
     h_final[..key_size_bytes].to_vec()
 }
 
@@ -377,12 +377,12 @@ mod tests {
 
         // With `keySize == 0`, MS-OFFCRYPTO specifies the effective key size is 40-bit, so the
         // derived RC4 key is the first 5 bytes of `Hash(H || LE32(block))` (un-padded).
-        let expected_key_material: [u8; 5] = [0x6A, 0xD7, 0xDE, 0xDF, 0x2D];
+        let expected_key: [u8; 5] = [0x6A, 0xD7, 0xDE, 0xDF, 0x2D];
 
         let key_size_bits = 0;
         let key0 =
             derive_rc4_key_for_block(password, &salt, CryptoApiHashAlg::Sha1, key_size_bits, 0);
-        assert_eq!(key0.as_slice(), expected_key_material.as_slice());
+        assert_eq!(key0.as_slice(), expected_key.as_slice());
 
         // Ensure `keySize=0` matches the `keySize=40` behavior.
         let key0_40 = derive_rc4_key_for_block(password, &salt, CryptoApiHashAlg::Sha1, 40, 0);

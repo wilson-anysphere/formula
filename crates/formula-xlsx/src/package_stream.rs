@@ -264,6 +264,7 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
         let Some(canonical) = self.resolve_source_part_name(&canonical_input) else {
             return Ok(None);
         };
+
         if let Some(override_op) = self.part_overrides.get(canonical) {
             match override_op {
                 PartOverride::Remove => return Ok(None),
