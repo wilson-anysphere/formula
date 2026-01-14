@@ -285,7 +285,15 @@ validate_static() {
   rpm -qp --info "${rpm_path}" >/dev/null || die "rpm --info query failed for: ${rpm_path}"
 
   local rpm_version
-  rpm_version="$(rpm -qp --queryformat '%{VERSION}\n' "${rpm_path}" 2>/dev/null | head -n 1 | tr -d '\r')"
+  local rpm_version_out
+  set +e
+  rpm_version_out="$(rpm -qp --queryformat '%{VERSION}\n' "${rpm_path}" 2>&1)"
+  local rpm_version_status=$?
+  set -e
+  if [[ "$rpm_version_status" -ne 0 ]]; then
+    die "rpm query failed for %{VERSION} on ${rpm_path}: ${rpm_version_out}"
+  fi
+  rpm_version="$(printf '%s' "$rpm_version_out" | head -n 1 | tr -d '\r')"
   if [[ -z "$rpm_version" ]]; then
     die "Failed to read RPM %{VERSION} from: ${rpm_path}"
   fi
@@ -294,7 +302,15 @@ validate_static() {
   fi
 
   local rpm_name
-  rpm_name="$(rpm -qp --queryformat '%{NAME}\n' "${rpm_path}" 2>/dev/null | head -n 1 | tr -d '\r')"
+  local rpm_name_out
+  set +e
+  rpm_name_out="$(rpm -qp --queryformat '%{NAME}\n' "${rpm_path}" 2>&1)"
+  local rpm_name_status=$?
+  set -e
+  if [[ "$rpm_name_status" -ne 0 ]]; then
+    die "rpm query failed for %{NAME} on ${rpm_path}: ${rpm_name_out}"
+  fi
+  rpm_name="$(printf '%s' "$rpm_name_out" | head -n 1 | tr -d '\r')"
   if [[ -z "$rpm_name" ]]; then
     die "Failed to read RPM %{NAME} from: ${rpm_path}"
   fi

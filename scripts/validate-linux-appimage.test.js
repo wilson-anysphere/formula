@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const tauriConfig = JSON.parse(
+  readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"),
+);
+const expectedVersion = String(tauriConfig?.version ?? "").trim();
 
 const hasBash = (() => {
   if (process.platform === "win32") return false;
@@ -23,7 +27,12 @@ const hasBash = (() => {
  */
 function writeFakeAppImage(
   appImagePath,
-  { withDesktopFile = true, withXlsxMime = true, withMimeTypeEntry = true } = {},
+  {
+    withDesktopFile = true,
+    withXlsxMime = true,
+    withMimeTypeEntry = true,
+    appImageVersion = expectedVersion,
+  } = {},
 ) {
   const desktopMime = withXlsxMime
     ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;"
@@ -36,6 +45,7 @@ function writeFakeAppImage(
         "[Desktop Entry]",
         "Name=Formula",
         "Exec=formula-desktop %U",
+        ...(appImageVersion ? [`X-AppImage-Version=${appImageVersion}`] : []),
         ...(withMimeTypeEntry ? [`MimeType=${desktopMime}`] : []),
         "DESKTOP",
       ].join("\n")
@@ -92,7 +102,7 @@ function runValidator(appImagePath) {
 test("validate-linux-appimage accepts a structurally valid AppImage", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
   const appImagePath = join(tmp, "Formula.AppImage");
-  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true });
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, appImageVersion: expectedVersion });
 
   const proc = runValidator(appImagePath);
   assert.equal(proc.status, 0, proc.stderr);
@@ -111,7 +121,7 @@ test("validate-linux-appimage fails when no .desktop files exist", { skip: !hasB
 test("validate-linux-appimage fails when .desktop lacks xlsx integration", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
   const appImagePath = join(tmp, "Formula.AppImage");
-  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: false });
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: false, appImageVersion: expectedVersion });
 
   const proc = runValidator(appImagePath);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
@@ -121,9 +131,19 @@ test("validate-linux-appimage fails when .desktop lacks xlsx integration", { ski
 test("validate-linux-appimage fails when .desktop lacks a MimeType entry", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
   const appImagePath = join(tmp, "Formula.AppImage");
-  writeFakeAppImage(appImagePath, { withDesktopFile: true, withMimeTypeEntry: false });
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withMimeTypeEntry: false, appImageVersion: expectedVersion });
 
   const proc = runValidator(appImagePath);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /MimeType=/i);
+});
+
+test("validate-linux-appimage fails when X-AppImage-Version does not match tauri.conf.json", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withXlsxMime: true, appImageVersion: "0.0.0" });
+
+  const proc = runValidator(appImagePath);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /AppImage version mismatch/i);
 });

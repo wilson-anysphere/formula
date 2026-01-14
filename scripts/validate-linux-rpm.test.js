@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const tauriConfig = JSON.parse(
+  readFileSync(join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8"),
+);
+const expectedVersion = String(tauriConfig?.version ?? "").trim();
+const expectedRpmName = String(tauriConfig?.mainBinaryName ?? "").trim();
 
 const hasBash = (() => {
   if (process.platform === "win32") return false;
@@ -19,6 +24,8 @@ function writeFakeRpmTool(binDir) {
 set -euo pipefail
 
 mode="\${FAKE_RPM_MODE:-ok}"
+fake_version="\${FAKE_RPM_VERSION:-0.0.0}"
+fake_name="\${FAKE_RPM_NAME:-formula-desktop}"
 
 if [[ "\${1:-}" != "-qp" ]]; then
   echo "fake rpm: unexpected args: $*" >&2
@@ -26,19 +33,20 @@ if [[ "\${1:-}" != "-qp" ]]; then
 fi
 
 query="\${2:-}"
-rpm_path="\${3:-}"
 
 case "$query" in
   --info)
+    rpm_path="\${3:-}"
     if [[ "$mode" == "fail-info" ]]; then
       echo "fake rpm: failing --info for $rpm_path" >&2
       exit 1
     fi
-    echo "Name        : formula-desktop"
-    echo "Version     : 0.0.0"
+    echo "Name        : $fake_name"
+    echo "Version     : $fake_version"
     exit 0
     ;;
   --list)
+    rpm_path="\${3:-}"
     if [[ "$mode" == "fail-list" ]]; then
       echo "fake rpm: failing --list for $rpm_path" >&2
       exit 1
@@ -49,6 +57,24 @@ case "$query" in
     fi
     cat "$FAKE_RPM_LIST_FILE"
     exit 0
+    ;;
+  --queryformat)
+    fmt="\${3:-}"
+    rpm_path="\${4:-}"
+    if [[ "$mode" == "fail-queryformat" ]]; then
+      echo "fake rpm: failing --queryformat for $rpm_path" >&2
+      exit 1
+    fi
+    if [[ "$fmt" == *"%{VERSION}"* ]]; then
+      echo "$fake_version"
+      exit 0
+    fi
+    if [[ "$fmt" == *"%{NAME}"* ]]; then
+      echo "$fake_name"
+      exit 0
+    fi
+    echo "fake rpm: unsupported queryformat: $fmt" >&2
+    exit 2
     ;;
   *)
     echo "fake rpm: unsupported query: $query" >&2
@@ -74,6 +100,8 @@ function runValidator({ cwd, rpmArg, fakeListFile, fakeMode }) {
         PATH: `${join(cwd, "bin")}:${process.env.PATH}`,
         FAKE_RPM_LIST_FILE: fakeListFile,
         FAKE_RPM_MODE: fakeMode ?? "ok",
+        FAKE_RPM_VERSION: expectedVersion,
+        FAKE_RPM_NAME: expectedRpmName,
       },
     },
   );
@@ -200,4 +228,76 @@ test("validate-linux-rpm fails when rpm --info query fails", { skip: !hasBash },
   });
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /rpm --info query failed/i);
+});
+
+test("validate-linux-rpm fails when RPM version does not match tauri.conf.json", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(
+    listFile,
+    ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop"].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = spawnSync(
+    "bash",
+    [join(repoRoot, "scripts", "validate-linux-rpm.sh"), "--no-container", "--rpm", "Formula.rpm"],
+    {
+      cwd: tmp,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
+        FAKE_RPM_LIST_FILE: listFile,
+        FAKE_RPM_MODE: "ok",
+        FAKE_RPM_VERSION: "0.0.0",
+        FAKE_RPM_NAME: expectedRpmName,
+      },
+    },
+  );
+  if (proc.error) throw proc.error;
+
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /RPM version mismatch/i);
+});
+
+test("validate-linux-rpm fails when RPM name does not match tauri.conf.json", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-rpm-test-"));
+  const binDir = join(tmp, "bin");
+  mkdirSync(binDir, { recursive: true });
+  writeFakeRpmTool(binDir);
+  writeFileSync(join(tmp, "Formula.rpm"), "not-a-real-rpm", { encoding: "utf8" });
+
+  const listFile = join(tmp, "rpm-list.txt");
+  writeFileSync(
+    listFile,
+    ["/usr/bin/formula-desktop", "/usr/share/applications/formula.desktop"].join("\n"),
+    { encoding: "utf8" },
+  );
+
+  const proc = spawnSync(
+    "bash",
+    [join(repoRoot, "scripts", "validate-linux-rpm.sh"), "--no-container", "--rpm", "Formula.rpm"],
+    {
+      cwd: tmp,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
+        FAKE_RPM_LIST_FILE: listFile,
+        FAKE_RPM_MODE: "ok",
+        FAKE_RPM_VERSION: expectedVersion,
+        FAKE_RPM_NAME: "some-other-name",
+      },
+    },
+  );
+  if (proc.error) throw proc.error;
+
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /RPM name mismatch/i);
 });
