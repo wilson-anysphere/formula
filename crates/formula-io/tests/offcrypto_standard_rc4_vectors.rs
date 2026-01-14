@@ -74,11 +74,6 @@ fn standard_rc4_spun_password_hash(password: &str, salt: &[u8], spin_count: u32)
 /// Algorithm:
 /// `h_block = SHA1(H || LE32(block_index))`, `key_material = h_block[0..key_len]` where
 /// `key_len = keySize/8` (40→5 bytes, 56→7 bytes, 128→16 bytes).
-///
-/// Important: for **40-bit RC4** (`key_len == 5` / `keySize == 0`/`40`), CryptoAPI/Office do **not**
-/// feed the raw 5-byte `key_material` into RC4. Instead they pad it to 16 bytes
-/// (`key_material || 0x00 * 11`) before initializing RC4. That quirk is covered by
-/// `standard_cryptoapi_rc4_40_bit_key_vector` below.
 fn standard_rc4_derive_block_key(h: [u8; 20], block_index: u32, key_len: usize) -> Vec<u8> {
     let mut hasher = Sha1::new();
     hasher.update(h);
@@ -180,7 +175,6 @@ fn standard_cryptoapi_rc4_derivation_vector() {
     assert_eq!(key3, hex_decode("e65b2643eaba3815a37a61159f137840"));
 
     // Key material for 40-bit and 56-bit keys is a raw truncation of `SHA1(H || LE32(block))`.
-    // (CryptoAPI applies an additional padding quirk for 40-bit RC4 when initializing RC4.)
     let key0_40 = standard_rc4_derive_block_key(h, 0, 5);
     let key1_40 = standard_rc4_derive_block_key(h, 1, 5);
     assert_eq!(key0_40, hex_decode("6ad7dedf2d"));
