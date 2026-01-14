@@ -12,6 +12,31 @@ export type InsertPicturesRibbonCommandApp = Pick<SpreadsheetApp, "insertPicture
 export async function handleInsertPicturesRibbonCommand(commandId: string, app: InsertPicturesRibbonCommandApp): Promise<boolean> {
   if (commandId === "insert.illustrations.pictures.thisDevice" || commandId === "insert.illustrations.pictures") {
     try {
+      // Picture insertion mutates the workbook (sheet drawings + embedded image bytes). Block it in
+      // collab read-only sessions (viewer/commenter) so the local UI doesn't diverge from the shared
+      // document state.
+      //
+      // Guard early so we don't open a file picker only to reject the insertion after selection.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const appAny = app as any;
+      if (typeof appAny?.isReadOnly === "function" && appAny.isReadOnly() === true) {
+        try {
+          showToast("Read-only: you don't have permission to insert pictures.", "warning");
+        } catch {
+          // `showToast` requires a #toast-root; ignore in headless contexts/tests.
+        }
+        try {
+          app.focus();
+        } catch {
+          // ignore
+        }
+        return true;
+      }
+    } catch {
+      // ignore (best-effort guard only)
+    }
+
+    try {
       const files = await pickLocalImageFiles({ multiple: true });
       if (files.length > 0) {
         await app.insertPicturesFromFiles(files);
@@ -19,24 +44,35 @@ export async function handleInsertPicturesRibbonCommand(commandId: string, app: 
       app.focus();
     } catch (err) {
       console.error("Failed to insert picture:", err);
-      showToast(`Failed to insert picture: ${String((err as any)?.message ?? err)}`, "error");
+      try {
+        showToast(`Failed to insert picture: ${String((err as any)?.message ?? err)}`, "error");
+      } catch {
+        // `showToast` requires a #toast-root; ignore in headless contexts/tests.
+      }
       app.focus();
     }
     return true;
   }
 
   if (commandId === "insert.illustrations.pictures.stockImages") {
-    showToast("Stock Images not implemented yet");
+    try {
+      showToast("Stock Images not implemented yet");
+    } catch {
+      // ignore
+    }
     app.focus();
     return true;
   }
 
   if (commandId === "insert.illustrations.pictures.onlinePictures" || commandId === "insert.illustrations.onlinePictures") {
-    showToast("Online Pictures not implemented yet");
+    try {
+      showToast("Online Pictures not implemented yet");
+    } catch {
+      // ignore
+    }
     app.focus();
     return true;
   }
 
   return false;
 }
-

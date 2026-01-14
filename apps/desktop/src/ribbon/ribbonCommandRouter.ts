@@ -2,6 +2,7 @@ import type { SpreadsheetApp } from "../app/spreadsheetApp.js";
 import type { CommandContribution, CommandRegistry } from "../extensions/commandRegistry.js";
 import { PAGE_LAYOUT_COMMANDS } from "../commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "../commands/registerWorkbenchFileCommands.js";
+import { READ_ONLY_SHEET_MUTATION_MESSAGE } from "../collab/permissionGuards.js";
 import { promptAndApplyCustomNumberFormat } from "../formatting/promptCustomNumberFormat.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "../formatting/selectionSizeGuard.js";
 import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
@@ -174,6 +175,12 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
         return;
 
       case "home.cells.format.organizeSheets":
+        if (deps.isSpreadsheetEditing()) return;
+        if (deps.app.isReadOnly()) {
+          deps.showToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+          safeFocusGrid(deps.app);
+          return;
+        }
         deps.openOrganizeSheets();
         return;
 
@@ -195,12 +202,22 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
         return;
 
       case "home.cells.insert.insertSheet":
-        if (deps.isSpreadsheetEditing() || deps.app.isReadOnly()) return;
+        if (deps.isSpreadsheetEditing()) return;
+        if (deps.app.isReadOnly()) {
+          deps.showToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+          safeFocusGrid(deps.app);
+          return;
+        }
         void deps.handleAddSheet().catch((err) => reportRibbonCommandError(deps, commandId, err));
         return;
 
       case "home.cells.delete.deleteSheet":
-        if (deps.isSpreadsheetEditing() || deps.app.isReadOnly()) return;
+        if (deps.isSpreadsheetEditing()) return;
+        if (deps.app.isReadOnly()) {
+          deps.showToast(READ_ONLY_SHEET_MUTATION_MESSAGE, "warning");
+          safeFocusGrid(deps.app);
+          return;
+        }
         void deps.handleDeleteActiveSheet().catch((err) => reportRibbonCommandError(deps, commandId, err));
         return;
 
