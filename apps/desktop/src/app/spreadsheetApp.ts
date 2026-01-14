@@ -8737,7 +8737,7 @@ export class SpreadsheetApp {
                 : null;
 
         const normalizedType = normalizeEnumTag(type);
-        const hasDirectImageId = typeof kindAny.imageId === "string" || typeof kindAny.image_id === "string";
+        const hasDirectImageId = Boolean(normalizeImageId(kindAny.imageId ?? kindAny.image_id));
         const isImage = normalizedType === "image" || (normalizedType === "" && hasDirectImageId);
         if (!isImage) continue;
 
