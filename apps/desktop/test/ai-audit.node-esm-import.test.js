@@ -9,6 +9,7 @@ test("ai-audit is importable under Node ESM when executing TS sources directly",
   // This test lives under apps/desktop so `@formula/ai-audit` resolves via
   // apps/desktop/node_modules (where it's declared as a dependency).
   const mod = await import("@formula/ai-audit");
+  const exportMod = await import("@formula/ai-audit/export");
 
   assert.equal(typeof mod.AIAuditRecorder, "function");
   assert.equal(typeof mod.MemoryAIAuditStore, "function");
@@ -16,6 +17,7 @@ test("ai-audit is importable under Node ESM when executing TS sources directly",
   assert.equal(typeof mod.NoopAIAuditStore, "function");
   assert.equal(typeof mod.FailingAIAuditStore, "function");
   assert.equal(typeof RecorderFromTs, "function");
+  assert.equal(typeof exportMod.serializeAuditEntries, "function");
 
   const store = new mod.MemoryAIAuditStore();
   const recorder = new mod.AIAuditRecorder({
@@ -46,4 +48,7 @@ test("ai-audit is importable under Node ESM when executing TS sources directly",
 
   const failing = new mod.FailingAIAuditStore("boom");
   await assert.rejects(() => failing.logEntry({ id: "x", timestamp_ms: Date.now(), session_id: "s", mode: "chat", input: null, model: "m", tool_calls: [] }));
+
+  // Export entrypoint smoke: can serialize entries.
+  assert.equal(typeof exportMod.serializeAuditEntries([]), "string");
 });
