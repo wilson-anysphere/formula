@@ -511,18 +511,10 @@ H = Hash(salt || pw)
 for i in 0..50000:
   H = Hash(LE32(i) || H)
 
-// Per-block RC4 key (`keyLen` is `KeySizeBits / 8` from the CryptoAPI header, with `KeySizeBits==0`
-// treated as 40-bit; e.g. 16 for 128-bit, 5 for 0/40-bit). Note the 40-bit CryptoAPI quirk:
-//
-// CryptoAPI/Office represent a “40-bit” RC4 key as a 128-bit (16-byte) RC4 key with the low 40 bits
-// set and the remaining 88 bits zero. Using a raw 5-byte RC4 key changes RC4 KSA and yields the
-// wrong keystream.
+// Per-block RC4 key (`keyLen` is `KeySizeBits / 8` from the CryptoAPI header: 5 for 40-bit, 7 for
+// 56-bit, 16 for 128-bit). Some producers also use `KeySizeBits==0` to mean 40-bit RC4.
 H_block = Hash(H || LE32(blockIndex))
-key_material = H_block[0..keyLen]
-if KeySizeBits in {0, 40}:
-  K_block = key_material || 0x00 * 11    // 16 bytes total
-else:
-  K_block = key_material                                 // 7 bytes (56-bit) or 16 bytes (128-bit)
+K_block = H_block[0..keyLen]
 ```
 
 ### Payload decryption model (record-payload-only RC4 stream)

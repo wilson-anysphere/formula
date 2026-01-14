@@ -367,30 +367,13 @@ fn verify_password_standard_with_key_and_mode(
             // RC4 is a stream cipher. CryptoAPI encrypts/decrypts the verifier and verifier hash
             // using the **same** RC4 stream (continuing the keystream), so we must apply RC4 to the
             // concatenated bytes rather than resetting the cipher per field.
-            //
-            // Additionally, CryptoAPI represents "40-bit" RC4 keys as a 128-bit key where the
-            // high 88 bits are zero.
             let mut buf = Vec::with_capacity(
                 verifier.encrypted_verifier.len() + verifier.encrypted_verifier_hash.len(),
             );
             buf.extend_from_slice(&verifier.encrypted_verifier);
             buf.extend_from_slice(&verifier.encrypted_verifier_hash);
 
-            // MS-OFFCRYPTO: a keySize of 0 must be interpreted as 40-bit RC4.
-            let effective_key_bits = if header.key_bits == 0 { 40 } else { header.key_bits };
-            if effective_key_bits == 40 {
-                if key0.len() != 5 {
-                    return Err(OfficeCryptoError::InvalidFormat(format!(
-                        "derived RC4 key for keySize=40 must be 5 bytes (got {})",
-                        key0.len(),
-                    )));
-                }
-                let mut padded = [0u8; 16];
-                padded[..5].copy_from_slice(&key0[..5]);
-                rc4_xor_in_place(&padded, &mut buf)?;
-            } else {
-                rc4_xor_in_place(key0, &mut buf)?;
-            }
+            rc4_xor_in_place(key0, &mut buf)?;
 
             let verifier_plain = buf.get(..16).ok_or_else(|| {
                 OfficeCryptoError::InvalidFormat("RC4 verifier out of range".to_string())
@@ -764,19 +747,7 @@ fn decrypt_standard_encrypted_package_rc4(
     let mut block_index: u32 = 0;
     for chunk in out.chunks_mut(RC4_ENCRYPTED_PACKAGE_BLOCK_SIZE) {
         let key = deriver.derive_key_for_block(block_index)?;
-        if effective_key_bits == 40 {
-            if key.len() != 5 {
-                return Err(OfficeCryptoError::InvalidFormat(format!(
-                    "derived RC4 key for keySize=40 must be 5 bytes (got {})",
-                    key.len()
-                )));
-            }
-            let mut padded = [0u8; 16];
-            padded[..5].copy_from_slice(&key[..5]);
-            rc4_xor_in_place(&padded, chunk)?;
-        } else {
-            rc4_xor_in_place(&key, chunk)?;
-        }
+        rc4_xor_in_place(&key, chunk)?;
         block_index = block_index.checked_add(1).ok_or_else(|| {
             OfficeCryptoError::InvalidFormat("RC4 block index overflow".to_string())
         })?;
@@ -1253,15 +1224,7 @@ pub(crate) mod tests {
                     Vec::with_capacity(verifier_plain.len() + verifier_hash.len());
                 verifier_buf.extend_from_slice(&verifier_plain);
                 verifier_buf.extend_from_slice(&verifier_hash);
-                if effective_key_bits == 40 {
-                    // For 40-bit RC4, Office uses a 16-byte key with the high bytes set to 0.
-                    let mut padded = [0u8; 16];
-                    padded[..5].copy_from_slice(&key_ref[..5]);
-                    rc4_xor_in_place(&padded, &mut verifier_buf).expect("rc4 encrypt verifier buf");
-                } else {
-                    rc4_xor_in_place(&key_ref, &mut verifier_buf)
-                        .expect("rc4 encrypt verifier buf");
-                }
+                rc4_xor_in_place(&key_ref, &mut verifier_buf).expect("rc4 encrypt verifier buf");
                 let encrypted_verifier = verifier_buf[..16].to_vec();
                 let encrypted_verifier_hash = verifier_buf[16..].to_vec();
 

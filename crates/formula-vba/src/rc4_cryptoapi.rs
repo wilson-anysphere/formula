@@ -133,17 +133,7 @@ impl Rc4CryptoApiDecryptor {
         match self.hash_alg {
             HashAlg::Sha1 => {
                 let digest = sha1_digest(&[&self.password_hash, &block_index.to_le_bytes()]);
-                // MS-OFFCRYPTO specifies a special case for 40-bit RC4 keys: the key bytes passed
-                // into the RC4 KSA are 16 bytes long, with the derived 5 bytes followed by 11
-                // zero bytes.
-                if self.key_len == 5 {
-                    let mut key = Vec::with_capacity(16);
-                    key.extend_from_slice(&digest[..5]);
-                    key.resize(16, 0);
-                    Ok(key)
-                } else {
-                    Ok(digest[..self.key_len].to_vec())
-                }
+                Ok(digest[..self.key_len].to_vec())
             }
         }
     }
@@ -230,14 +220,7 @@ mod tests {
 
         fn key_for_block(&self, block_index: u32) -> Vec<u8> {
             let digest = sha1_digest(&[&self.password_hash, &block_index.to_le_bytes()]);
-            if self.key_len == 5 {
-                let mut key = Vec::with_capacity(16);
-                key.extend_from_slice(&digest[..5]);
-                key.resize(16, 0);
-                key
-            } else {
-                digest[..self.key_len].to_vec()
-            }
+            digest[..self.key_len].to_vec()
         }
 
         fn encrypt_encrypted_package(&self, plaintext: &[u8]) -> Vec<u8> {
@@ -276,26 +259,29 @@ mod tests {
             0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
             0xDC, 0xFE,
         ];
-        let key_len = 16; // 128-bit RC4 key
+        for key_len in [5usize, 7, 16] {
+            // Keep encryption helper independent of the production decryptor's key derivation.
+            let helper = TestCryptoApiRc4::new(password, &salt, key_len);
+            let decryptor = Rc4CryptoApiDecryptor::new(password, &salt, key_len, HashAlg::Sha1)
+                .expect("decryptor");
 
-        // Keep encryption helper independent of the production decryptor's key derivation.
-        let helper = TestCryptoApiRc4::new(password, &salt, key_len);
-        let decryptor =
-            Rc4CryptoApiDecryptor::new(password, &salt, key_len, HashAlg::Sha1).expect("decryptor");
-
-        let lengths = [0usize, 1, 511, 512, 513, 1023, 1024, 1025, 10_000];
-        for len in lengths {
-            let plaintext = make_plaintext_pattern(len);
-            let encrypted_package = helper.encrypt_encrypted_package(&plaintext);
-            let decrypted = decryptor
-                .decrypt_encrypted_package(&encrypted_package)
-                .expect("decrypt");
-            assert_eq!(decrypted, plaintext, "round-trip mismatch at len={len}");
+            let lengths = [0usize, 1, 511, 512, 513, 1023, 1024, 1025, 10_000];
+            for len in lengths {
+                let plaintext = make_plaintext_pattern(len);
+                let encrypted_package = helper.encrypt_encrypted_package(&plaintext);
+                let decrypted = decryptor
+                    .decrypt_encrypted_package(&encrypted_package)
+                    .expect("decrypt");
+                assert_eq!(
+                    decrypted, plaintext,
+                    "round-trip mismatch at len={len} (key_len={key_len})"
+                );
+            }
         }
     }
 
     #[test]
-    fn rc4_cryptoapi_40_bit_key_is_padded_to_16_bytes() {
+    fn rc4_cryptoapi_40_bit_key_is_5_bytes() {
         let password = "password";
         let salt: [u8; 16] = (0u8..16u8).collect::<Vec<_>>().try_into().unwrap();
         let key_len = 5; // 40-bit
@@ -303,14 +289,8 @@ mod tests {
         let decryptor =
             Rc4CryptoApiDecryptor::new(password, &salt, key_len, HashAlg::Sha1).expect("decryptor");
         let derived = decryptor.derive_key(0).expect("derive key");
-        assert_eq!(derived.len(), 16);
-        assert_eq!(
-            derived,
-            vec![
-                0x6a, 0xd7, 0xde, 0xdf, 0x2d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00
-            ]
-        );
+        assert_eq!(derived.len(), 5);
+        assert_eq!(derived, vec![0x6a, 0xd7, 0xde, 0xdf, 0x2d]);
     }
 
     #[test]
@@ -321,7 +301,7 @@ mod tests {
             0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
             0xDC, 0xFE,
         ];
-        let key_len = 5; // 40-bit (padded to 16 bytes for RC4)
+        let key_len = 5; // 40-bit
 
         // Keep encryption helper independent of the production decryptor's key derivation.
         let helper = TestCryptoApiRc4::new(password, &salt, key_len);

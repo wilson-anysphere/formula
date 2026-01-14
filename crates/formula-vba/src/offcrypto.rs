@@ -630,13 +630,6 @@ pub(crate) fn standard_cryptoapi_rc4_block_key(
     if key_size_bytes > key.len() {
         return None;
     }
-    if key_size_bits == 40 {
-        // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit key with the low 40 bits set
-        // and the remaining 88 bits cleared. Concretely: take 5 derived bytes and pad to 16 bytes.
-        key.truncate(5);
-        key.resize(16, 0);
-        return Some(key);
-    }
     key.truncate(key_size_bytes);
     Some(key)
 }
@@ -1164,18 +1157,20 @@ mod tests {
 
         let key_40 = standard_cryptoapi_rc4_block_key(CALG_MD5, password, &salt, 50_000, 0, 40)
             .expect("should derive md5 rc4 block key");
-        assert_eq!(hex_lower(&key_40), "69badcae240000000000000000000000");
+        assert_eq!(hex_lower(&key_40), "69badcae24");
+        assert_eq!(key_40.len(), 5);
     }
 
     #[test]
-    fn standard_cryptoapi_rc4_key_derivation_sha1_40_bit_pads_to_16_bytes() {
+    fn standard_cryptoapi_rc4_key_derivation_sha1_40_bit_truncates_to_5_bytes() {
         // Matches the SHA-1 worked example in `docs/offcrypto-standard-cryptoapi.md`.
         let password = "password";
         let salt: Vec<u8> = (0u8..=0x0F).collect();
 
         let key_40 = standard_cryptoapi_rc4_block_key(CALG_SHA1, password, &salt, 50_000, 0, 40)
             .expect("should derive sha1 rc4 block key");
-        assert_eq!(hex_lower(&key_40), "6ad7dedf2d0000000000000000000000");
+        assert_eq!(hex_lower(&key_40), "6ad7dedf2d");
+        assert_eq!(key_40.len(), 5);
     }
 
     #[test]
@@ -1220,8 +1215,7 @@ mod tests {
 
         let key_40 = standard_cryptoapi_rc4_block_key(CALG_SHA1, password, &salt, 50_000, 0, 40)
             .expect("should derive sha1 rc4 block key");
-        // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit key with the high 88 bits
-        // cleared. `standard_cryptoapi_rc4_block_key` returns the padded 16-byte RC4 key.
-        assert_eq!(hex_lower(&key_40), "6ad7dedf2d0000000000000000000000");
+        assert_eq!(hex_lower(&key_40), "6ad7dedf2d");
+        assert_eq!(key_40.len(), 5);
     }
 }

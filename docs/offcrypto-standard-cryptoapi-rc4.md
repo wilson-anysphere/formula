@@ -131,19 +131,14 @@ For each ciphertext block index `block` (0-based):
 
 ```text
 h_block = Hash(h || LE32(block))
-key_material = h_block[0..key_size_bytes]   // key_size_bytes = key_size_bits/8
-
-// CryptoAPI RC4 quirk: 40-bit keys are padded to 16 bytes for the RC4 KSA.
-//
-// If you use the raw 5-byte key_material directly, you will generate a different RC4 keystream
-// than CryptoAPI/Office and the plaintext will be garbage.
-if key_size_bytes == 5:                     // KeySize == 0 (→40) or 40 bits
-  rc4_key = key_material || 0x00 * 11       // 16 bytes total
-else:
-  rc4_key = key_material                    // 7 bytes (56-bit) or 16 bytes (128-bit)
+rc4_key = h_block[0..key_size_bytes]   // key_size_bytes = key_size_bits/8 (for RC4, key_size_bits==0 means 40)
 ```
 
 Then decrypt exactly 0x200 ciphertext bytes using RC4 with `rc4_key` (reset RC4 state per block).
+
+**40-bit note:** MS-OFFCRYPTO specifies `keySize == 0` MUST be interpreted as 40-bit RC4. In both
+cases (“0” or “40”), `key_size_bytes == 5`; use the 5-byte key directly
+(`rc4_key = h_block[0..5]`). Do **not** pad it to 16 bytes.
 
 ## Password verification (EncryptionVerifier)
 
@@ -196,7 +191,7 @@ RC4(key=block0, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
   e7c9974140e69857dbdec656c7ccb4f9283d723236
 ```
 
-### 40-bit RC4 key padding example (raw 5-byte key vs CryptoAPI padded key)
+### 40-bit RC4 key length example (5-byte key; do not pad to 16 bytes)
 
 Using the same parameters as above but with `KeySize = 0` (interpreted as 40) or `KeySize = 40`
 bits (`key_size_bytes = 5`):
@@ -208,18 +203,18 @@ block 0 H_block (SHA1(H || LE32(0))) =
 key_material (5 bytes) =
   6ad7dedf2d
 
-rc4_key used for KSA (CryptoAPI padded to 16 bytes) =
+zero-padded 16-byte key (a common legacy behavior; **incorrect for MS-OFFCRYPTO Standard RC4**) =
   6ad7dedf2d0000000000000000000000
 
 RC4(key=raw 5-byte key_material, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
   d1fa444913b4839b06eb4851750a07761005f025bf
 
-RC4(key=CryptoAPI padded 16-byte key, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
+RC4(key=zero-padded 16-byte key, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
   7a8bd000713a6e30ba9916476d27b01d36707a6ef8
 ```
 
-These ciphertexts differ, demonstrating why a **raw 5-byte RC4 key is not CryptoAPI-compatible**
-when `KeySize == 40`.
+These ciphertexts differ, demonstrating why implementations must treat `keySize==0/40` as a **5-byte
+RC4 key** (`keyLen = keySize/8`) and must **not** zero-pad it to 16 bytes for Standard RC4.
 
 ### 56-bit RC4 key truncation example
 
@@ -280,10 +275,11 @@ RC4(key=block0, plaintext="Hello, RC4 CryptoAPI!") ciphertext =
   acdabc88ff665d0454d32d952b18e05e8331dfb44e
 ```
 
-#### MD5 + 40-bit (padding rule) vector
+#### MD5 + 40-bit key length example (5-byte key; do not pad to 16 bytes)
 
-This vector covers the CryptoAPI `CALG_MD5` variant and the **40-bit key padding** behavior. For
-MD5, note that `EncryptionVerifier.verifierHashSize` is **16** bytes.
+This vector covers the `CALG_MD5` variant and guards against the common mistake of treating a
+40-bit key as a 16-byte (zero-padded) RC4 key. For MD5, note that
+`EncryptionVerifier.verifierHashSize` is **16** bytes.
 
 Parameters:
 
@@ -291,7 +287,7 @@ Parameters:
 - salt (hex): `00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f`
 - spinCount: `50000` (`0x0000C350`)
 - algIdHash: `CALG_MD5` (`0x00008003`)
-- keySize: `40` bits (5 bytes of key material, but **16 bytes used for RC4**; see above)
+- keySize: `40` bits (5 bytes used for RC4; `keyLen = keySize/8`)
 
 Expected values:
 
@@ -302,14 +298,11 @@ block 0 hash (Hb0 = MD5(H || LE32(0))) =
 key_material (40-bit) =
   69badcae24
 
-padded key (CryptoAPI RC4 key bytes, 16 bytes) =
-  69badcae240000000000000000000000
-
-RC4(key=padded_key, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
-  565016a3d8158632bb36ce1d76996628512061bfa3
-
 RC4(key=key_material, plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
   db037cd60d38c882019b5f5d8c43382373f476da28
+
+RC4(key=zero-padded 16-byte key (incorrect), plaintext=\"Hello, RC4 CryptoAPI!\") ciphertext =
+  565016a3d8158632bb36ce1d76996628512061bfa3
 ```
 
 ## CryptoAPI constants (for parsing `EncryptionHeader`)

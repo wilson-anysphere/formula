@@ -203,15 +203,15 @@ The `EncryptionHeader` `AlgID` and `AlgIDHash` are CryptoAPI `ALG_ID` values.
 | AES-192 | `CALG_AES_192` | `0x0000660F` | 24 |
 | AES-256 | `CALG_AES_256` | `0x00006610` | 32 |
 
-**RC4 key size note:** `KeySize` is stored in *bits*. MS-OFFCRYPTO specifies that for **RC4**,
+**RC4 key size semantics:** `KeySize` is stored in *bits*. MS-OFFCRYPTO specifies that for **RC4**,
 `KeySize == 0` MUST be interpreted as **40** (legacy 40-bit RC4).
 
-For 40-bit RC4 (`KeySize == 0` or `KeySize == 40`), derive `key_material = H_block[0..5]`, then run
-RC4 KSA with:
+For MS-OFFCRYPTO Standard RC4, the RC4 KSA key length is exactly `keyLen = KeySize / 8` bytes
+(40→5, 56→7, 128→16). When deriving per-block keys, use the first `keyLen` bytes of the per-block
+hash (`H_block[0..keyLen]`).
 
-```text
-rc4_key = key_material || 0x00 * 11   // 16 bytes total
-```
+Note: some legacy CryptoAPI RC4 implementations “expand” 40-bit keys to 16 bytes by appending
+11 zero bytes. Do **not** apply that padding for MS-OFFCRYPTO Standard RC4.
 
 ### 3.2) Hash `AlgIDHash` values
 

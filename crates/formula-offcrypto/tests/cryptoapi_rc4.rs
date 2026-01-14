@@ -171,7 +171,7 @@ fn cryptoapi_rc4_key_is_raw_truncation_not_cryptderivekey() {
 }
 
 #[test]
-fn cryptoapi_rc4_40bit_keys_are_padded_to_16_bytes() {
+fn cryptoapi_rc4_40bit_keys_truncate_to_5_bytes() {
     let password = "password";
     let salt: Vec<u8> = (0u8..16).collect();
 
@@ -185,18 +185,12 @@ fn cryptoapi_rc4_40bit_keys_are_padded_to_16_bytes() {
 
     let key =
         cryptoapi::rc4_key_for_block(h.as_slice(), 0, 40, HashAlgorithm::Sha1).expect("40-bit key");
-    assert_eq!(key.len(), 16);
-    assert!(key[5..].iter().all(|b| *b == 0));
-    assert_eq!(&key[..5], &hex_bytes("6ad7dedf2d")[..]);
-
-    // MS-OFFCRYPTO specifies `keySize=0` MUST be interpreted as 40-bit for RC4.
-    let key0 =
-        cryptoapi::rc4_key_for_block(h.as_slice(), 0, 0, HashAlgorithm::Sha1).expect("keySize=0");
-    assert_eq!(key0.as_slice(), key.as_slice());
+    assert_eq!(key.len(), 5);
+    assert_eq!(key.as_slice(), hex_bytes("6ad7dedf2d").as_slice());
 }
 
 #[test]
-fn cryptoapi_rc4_56bit_keys_are_7_bytes_and_not_padded() {
+fn cryptoapi_rc4_56bit_keys_truncate_to_7_bytes() {
     let password = "password";
     let salt: Vec<u8> = (0u8..16).collect();
 
@@ -208,7 +202,6 @@ fn cryptoapi_rc4_56bit_keys_are_7_bytes_and_not_padded() {
     )
     .expect("iterated hash");
 
-    // For keySize=56, the key is the first 7 bytes of Hfinal (no zero padding).
     let key =
         cryptoapi::rc4_key_for_block(h.as_slice(), 0, 56, HashAlgorithm::Sha1).expect("56-bit key");
     assert_eq!(key.len(), 7);
@@ -233,8 +226,8 @@ fn cryptoapi_rc4_keysize_zero_is_interpreted_as_40bit() {
     let key40 = cryptoapi::rc4_key_for_block(h.as_slice(), 0, 40, HashAlgorithm::Sha1)
         .expect("40-bit key");
     assert_eq!(key0.as_slice(), key40.as_slice());
-    assert_eq!(key0.len(), 16);
-    assert!(key0[5..].iter().all(|b| *b == 0));
+    assert_eq!(key0.len(), 5);
+    assert_eq!(key0.as_slice(), hex_bytes("6ad7dedf2d").as_slice());
 }
 
 #[test]
@@ -254,37 +247,37 @@ fn cryptoapi_rc4_40bit_padding_affects_ciphertext_vectors() {
     )
     .expect("derive SHA1 iterated hash");
 
-    // Expected ciphertext when 40-bit key material is padded to 16 bytes (CryptoAPI behavior).
-    let ciphertext_sha1_padded = hex_bytes("7a8bd000713a6e30ba9916476d27b01d36707a6ef8");
-    let decrypted_sha1 = cryptoapi::rc4_decrypt_stream(
-        &ciphertext_sha1_padded,
-        h_sha1.as_slice(),
-        40,
-        HashAlgorithm::Sha1,
-    )
-    .expect("decrypt SHA1 padded");
-    assert_eq!(decrypted_sha1.as_slice(), plaintext);
-
-    // keySize=0 must be interpreted as 40-bit.
-    let decrypted_sha1_keysize0 = cryptoapi::rc4_decrypt_stream(
-        &ciphertext_sha1_padded,
-        h_sha1.as_slice(),
-        0,
-        HashAlgorithm::Sha1,
-    )
-    .expect("decrypt SHA1 padded (keySize=0)");
-    assert_eq!(decrypted_sha1_keysize0.as_slice(), plaintext);
-
-    // If we (incorrectly) treated the 40-bit key as a raw 5-byte RC4 key, we'd decrypt a different
-    // ciphertext to the plaintext.
+    // Expected ciphertext when using the **unpadded** 5-byte key (`keyLen = keySize/8`).
     let ciphertext_sha1_unpadded = hex_bytes("d1fa444913b4839b06eb4851750a07761005f025bf");
-    let decrypted_sha1_wrong = cryptoapi::rc4_decrypt_stream(
+    let decrypted_sha1 = cryptoapi::rc4_decrypt_stream(
         &ciphertext_sha1_unpadded,
         h_sha1.as_slice(),
         40,
         HashAlgorithm::Sha1,
     )
-    .expect("decrypt SHA1 unpadded ciphertext");
+    .expect("decrypt SHA1 unpadded");
+    assert_eq!(decrypted_sha1.as_slice(), plaintext);
+
+    // keySize=0 must be interpreted as 40-bit.
+    let decrypted_sha1_keysize0 = cryptoapi::rc4_decrypt_stream(
+        &ciphertext_sha1_unpadded,
+        h_sha1.as_slice(),
+        0,
+        HashAlgorithm::Sha1,
+    )
+    .expect("decrypt SHA1 unpadded (keySize=0)");
+    assert_eq!(decrypted_sha1_keysize0.as_slice(), plaintext);
+
+    // Regression guard: if we (incorrectly) zero-padded the 5-byte key material to 16 bytes, we'd
+    // produce/decrypt a different ciphertext.
+    let ciphertext_sha1_padded = hex_bytes("7a8bd000713a6e30ba9916476d27b01d36707a6ef8");
+    let decrypted_sha1_wrong = cryptoapi::rc4_decrypt_stream(
+        &ciphertext_sha1_padded,
+        h_sha1.as_slice(),
+        40,
+        HashAlgorithm::Sha1,
+    )
+    .expect("decrypt SHA1 padded ciphertext");
     assert_ne!(decrypted_sha1_wrong.as_slice(), plaintext);
 
     // --- MD5 -----------------------------------------------------------------
@@ -296,32 +289,32 @@ fn cryptoapi_rc4_40bit_padding_affects_ciphertext_vectors() {
     )
     .expect("derive MD5 iterated hash");
 
-    let ciphertext_md5_padded = hex_bytes("565016a3d8158632bb36ce1d76996628512061bfa3");
-    let decrypted_md5 = cryptoapi::rc4_decrypt_stream(
-        &ciphertext_md5_padded,
-        h_md5.as_slice(),
-        40,
-        HashAlgorithm::Md5,
-    )
-    .expect("decrypt MD5 padded");
-    assert_eq!(decrypted_md5.as_slice(), plaintext);
-
-    let decrypted_md5_keysize0 = cryptoapi::rc4_decrypt_stream(
-        &ciphertext_md5_padded,
-        h_md5.as_slice(),
-        0,
-        HashAlgorithm::Md5,
-    )
-    .expect("decrypt MD5 padded (keySize=0)");
-    assert_eq!(decrypted_md5_keysize0.as_slice(), plaintext);
-
     let ciphertext_md5_unpadded = hex_bytes("db037cd60d38c882019b5f5d8c43382373f476da28");
-    let decrypted_md5_wrong = cryptoapi::rc4_decrypt_stream(
+    let decrypted_md5 = cryptoapi::rc4_decrypt_stream(
         &ciphertext_md5_unpadded,
         h_md5.as_slice(),
         40,
         HashAlgorithm::Md5,
     )
-    .expect("decrypt MD5 unpadded ciphertext");
+    .expect("decrypt MD5 unpadded");
+    assert_eq!(decrypted_md5.as_slice(), plaintext);
+
+    let decrypted_md5_keysize0 = cryptoapi::rc4_decrypt_stream(
+        &ciphertext_md5_unpadded,
+        h_md5.as_slice(),
+        0,
+        HashAlgorithm::Md5,
+    )
+    .expect("decrypt MD5 unpadded (keySize=0)");
+    assert_eq!(decrypted_md5_keysize0.as_slice(), plaintext);
+
+    let ciphertext_md5_padded = hex_bytes("565016a3d8158632bb36ce1d76996628512061bfa3");
+    let decrypted_md5_wrong = cryptoapi::rc4_decrypt_stream(
+        &ciphertext_md5_padded,
+        h_md5.as_slice(),
+        40,
+        HashAlgorithm::Md5,
+    )
+    .expect("decrypt MD5 padded ciphertext");
     assert_ne!(decrypted_md5_wrong.as_slice(), plaintext);
 }

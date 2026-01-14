@@ -146,8 +146,8 @@ pub fn crypt_derive_key(
 
 /// Derive the CryptoAPI RC4 key bytes for a given `block` index.
 ///
-/// **Important:** Standard/CryptoAPI RC4 uses *raw `Hfinal` truncation* (plus the 40-bit padding
-/// rule), not `CryptDeriveKey` ipad/opad expansion.
+/// **Important:** Standard/CryptoAPI RC4 uses *raw `Hfinal` truncation*, not `CryptDeriveKey`
+/// ipad/opad expansion.
 pub fn rc4_key_for_block(
     h: &[u8],
     block: u32,
@@ -168,11 +168,8 @@ pub fn rc4_key_for_block(
         });
     }
 
-    // CryptoAPI "40-bit RC4" keys are represented as a 16-byte key blob where the first 5 bytes
-    // contain key material and the remaining 11 bytes are zeros.
-    let out_len = if key_size_bits == 40 { 16 } else { key_len };
-    let mut key = Zeroizing::new(vec![0u8; out_len]);
-    key[..key_len].copy_from_slice(&hfinal[..key_len]);
+    let mut key = Zeroizing::new(vec![0u8; key_len]);
+    key.copy_from_slice(&hfinal[..key_len]);
     Ok(key)
 }
 

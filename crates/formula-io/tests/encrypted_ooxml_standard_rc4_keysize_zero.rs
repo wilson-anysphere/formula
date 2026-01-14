@@ -97,10 +97,10 @@ fn rc4_apply(key: &[u8], data: &[u8]) -> Vec<u8> {
     out
 }
 
-fn rc4_key_40bit_from_digest(digest: &[u8; 20]) -> [u8; 16] {
-    // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit key with the high 88 bits zero.
-    let mut key = [0u8; 16];
-    key[..5].copy_from_slice(&digest[..5]);
+fn rc4_key_40bit_from_digest(digest: &[u8; 20]) -> [u8; 5] {
+    // MS-OFFCRYPTO Standard RC4 uses `keyLen = keySize/8` bytes directly (40-bit => 5 bytes).
+    let mut key = [0u8; 5];
+    key.copy_from_slice(&digest[..5]);
     key
 }
 

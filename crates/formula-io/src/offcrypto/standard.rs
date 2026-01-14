@@ -671,13 +671,8 @@ pub(crate) fn derive_key_standard_for_block(
             if key_len > h_block.len() {
                 return Err(OffcryptoError::InvalidKeySize { key_size_bits });
             }
-            // Standard RC4 key derivation truncates H_block0 directly. CryptoAPI/Office represent a
-            // "40-bit" RC4 key as a padded 16-byte key (high 88 bits zero).
-            let mut key = h_block[..key_len].to_vec();
-            if key_len == 5 {
-                key.resize(16, 0);
-            }
-            Ok(key)
+            // Standard RC4 key derivation truncates H_block directly.
+            Ok(h_block[..key_len].to_vec())
         }
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
             crypt_derive_key(&h_block, key_len, info.header.alg_id_hash)
@@ -811,21 +806,6 @@ fn rc4_apply_keystream(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoError>
     if key.is_empty() {
         return Err(OffcryptoError::crypto("invalid RC4 key length (empty)"));
     }
-
-    // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit RC4 key with the high 88 bits
-    // zero. Concretely, when `keySize == 40` (`key_len == 5`), the RC4 key bytes passed into the
-    // RC4 KSA are:
-    //
-    //   key = key[0..5] || 0x00 * 11   // 16 bytes total
-    //
-    // See `docs/offcrypto-standard-cryptoapi.md` and `docs/offcrypto-standard-cryptoapi-rc4.md`.
-    let mut padded_key = [0u8; 16];
-    let key = if key.len() == 5 {
-        padded_key[..5].copy_from_slice(key);
-        padded_key.as_slice()
-    } else {
-        key
-    };
 
     let mut s = [0u8; 256];
     for (i, b) in s.iter_mut().enumerate() {
@@ -1141,10 +1121,7 @@ mod tests {
             0x1D, 0x1E, 0x1F,
         ];
 
-        let expected_key: [u8; 16] = [
-            0x8F, 0x5C, 0x2B, 0x8A, 0xD0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00,
-        ];
+        let expected_key: [u8; 5] = [0x8F, 0x5C, 0x2B, 0x8A, 0xD0];
 
         let header = EncryptionHeader {
             flags: EncryptionHeaderFlags::from_raw(EncryptionHeaderFlags::F_CRYPTOAPI),
@@ -1169,9 +1146,7 @@ mod tests {
         let block = 0u32.to_le_bytes();
         let h_final = hash(CALG_SHA1, &[&h, &block]).unwrap();
         let key_40bit = h_final[..5].to_vec();
-        let mut key_padded = key_40bit.clone();
-        key_padded.resize(16, 0);
-        assert_eq!(key_padded.as_slice(), expected_key);
+        assert_eq!(key_40bit.as_slice(), expected_key);
 
         // Encrypt verifier || verifier_hash using RC4 (symmetric).
         let mut plaintext = Vec::new();
@@ -1180,14 +1155,12 @@ mod tests {
 
         let mut ciphertext = plaintext.clone();
         rc4_apply_keystream(&key_40bit, &mut ciphertext).unwrap();
-        // CryptoAPI 40-bit RC4 uses a padded 16-byte key; applying RC4 with the derived 5-byte key
-        // should match applying RC4 with the explicit padded key.
+        // 40-bit keys are 5 bytes; padding to 16 bytes must not be applied.
         let mut ciphertext_padded = plaintext.clone();
+        let mut key_padded = key_40bit.clone();
+        key_padded.resize(16, 0);
         rc4_apply_keystream(&key_padded, &mut ciphertext_padded).unwrap();
-        assert_eq!(
-            ciphertext, ciphertext_padded,
-            "RC4 40-bit key must be treated as 16-byte padded key"
-        );
+        assert_ne!(ciphertext, ciphertext_padded);
 
         let encrypted_verifier: [u8; 16] = ciphertext[0..16].try_into().unwrap();
         let encrypted_verifier_hash = ciphertext[16..].to_vec();
@@ -1415,16 +1388,12 @@ mod tests {
                 let block = 0u32.to_le_bytes();
                 let h_final = hash(alg_id_hash, &[&h, &block]).unwrap();
                 // Standard RC4 key derivation truncates `H_final` directly (unlike AES, which uses
-                // `CryptDeriveKey`). CryptoAPI/Office represent a 40-bit key as a padded 16-byte
-                // key (high 88 bits zero).
-                let mut key = h_final[..key_len].to_vec();
-                if key_len == 5 {
-                    key.resize(16, 0);
-                }
+                // `CryptDeriveKey`).
+                let key = h_final[..key_len].to_vec();
 
                 assert_eq!(
                     key.len(),
-                    if key_len == 5 { 16 } else { key_len },
+                    key_len,
                     "key_size={key_size} bits (effective={effective_key_size})"
                 );
                 assert!(

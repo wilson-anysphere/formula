@@ -4,11 +4,9 @@ use sha1::{Digest as _, Sha1};
 ///
 /// Notes on key length semantics:
 /// - `key_size_bits` is read from `EncryptionHeader.KeySize` (bits).
-/// - Per MS-OFFCRYPTO, the 40-bit case is special: the effective key is 40 bits, but the *RC4 key
-///   material* passed to the cipher is 128 bits where the remaining 88 bits are zero.
-/// - For other key sizes (including 56-bit), the key is the first `key_size_bits/8` bytes of
-///   `Hfinal` (no additional zero padding).
-#[allow(dead_code)]
+/// - Per MS-OFFCRYPTO, `key_size_bits == 0` MUST be interpreted as 40-bit RC4.
+/// - The RC4 key bytes passed into the cipher are exactly the first `key_size_bits/8` bytes of
+///   `Hfinal` (no additional zero padding for 40-bit keys).
 pub(crate) fn derive_rc4_cryptoapi_key(
     password: &str,
     salt: &[u8; 16],
@@ -44,15 +42,7 @@ pub(crate) fn derive_rc4_cryptoapi_key(
     hfinal.update(&block.to_le_bytes());
     let hfinal = hfinal.finalize();
 
-    if key_size_bits == 40 {
-        // 40-bit special-case: first 40 bits + 88 zero bits => 128-bit key material.
-        let mut key = Vec::with_capacity(16);
-        key.extend_from_slice(&hfinal[..5]);
-        key.extend_from_slice(&[0u8; 11]);
-        key
-    } else {
-        hfinal[..(key_size_bits as usize / 8)].to_vec()
-    }
+    hfinal[..(key_size_bits as usize / 8)].to_vec()
 }
 
 #[cfg(test)]
@@ -66,9 +56,7 @@ mod tests {
         // Computation (MS-OFFCRYPTO §2.3.5.2):
         //   H0     = SHA1(salt || UTF-16LE(password))
         //   Hfinal = SHA1(H0 || block_le32)
-        //   key:
-        //     - for 40-bit: key = Hfinal[0..5] || 11x00
-        //     - otherwise:  key = Hfinal[0..keySize/8]
+        //   key_bytes = Hfinal[0..keySize/8] (with keySize==0 interpreted as 40-bit => 5 bytes)
         let salt: [u8; 16] = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
             0x0E, 0x0F,
@@ -76,17 +64,12 @@ mod tests {
         let password = "VelvetSweatshop";
         let block = 0u32;
 
-        // 40-bit (special-case: 16 bytes with 11 trailing zeros)
+        // 40-bit: exactly 5 bytes (no padding to 16)
         let key40 = derive_rc4_cryptoapi_key(password, &salt, 40, block);
-        assert_eq!(
-            key40,
-            vec![
-                0xAC, 0x2A, 0x7B, 0x17, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00
-            ]
-        );
+        assert_eq!(key40, vec![0xAC, 0x2A, 0x7B, 0x17, 0x24]);
+        assert_eq!(key40.len(), 5);
 
-        // 56-bit: exactly 7 bytes (no padding to 16)
+        // 56-bit: exactly 7 bytes
         let key56 = derive_rc4_cryptoapi_key(password, &salt, 56, block);
         assert_eq!(key56, vec![0xAC, 0x2A, 0x7B, 0x17, 0x24, 0x74, 0xC7]);
         assert_eq!(key56.len(), 7);

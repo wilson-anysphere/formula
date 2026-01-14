@@ -6,7 +6,7 @@
 //! - RC4 for the package stream, re-keyed per 512-byte block
 //!
 //! Key derivation for the RC4 per-block key uses **raw hash truncation**:
-//! `Hfinal = Hash(H || LE32(b))`, `rc4_key_b = Hfinal[0..keySize/8]`, with the 40-bit padding rule.
+//! `Hfinal = Hash(H || LE32(b))`, `rc4_key_b = Hfinal[0..keySize/8]`.
 
 use crate::cryptoapi;
 use crate::rc4::Rc4;

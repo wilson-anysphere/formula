@@ -399,12 +399,6 @@ fn derive_cryptoapi_key_material_md5(password: &str, salt: &[u8; 16]) -> [u8; 16
 fn derive_cryptoapi_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<u8> {
     let block_bytes = block.to_le_bytes();
     let digest = sha1_bytes(&[key_material, &block_bytes]);
-    if key_len == 5 {
-        // CryptoAPI 40-bit RC4 keys are expressed as a 128-bit key where the high 88 bits are zero.
-        let mut key = digest[..5].to_vec();
-        key.resize(16, 0);
-        return key;
-    }
     digest[..key_len].to_vec()
 }
 

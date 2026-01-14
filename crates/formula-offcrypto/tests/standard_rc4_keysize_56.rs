@@ -2,9 +2,13 @@
 
 //! End-to-end Standard (CryptoAPI) RC4 tests for non-128-bit key sizes.
 //!
-//! Motivation: 40-bit RC4 has special "pad to 16 bytes with zeros" key material semantics, and
-//! MS-OFFCRYPTO also specifies that `keySize == 0` MUST be interpreted as 40-bit. This test builds a
-//! small synthetic Standard RC4 encrypted OLE container and ensures decryption works for:
+//! Motivation: non-128-bit Standard/CryptoAPI RC4 key sizes are easy to implement incorrectly.
+//! MS-OFFCRYPTO specifies:
+//! - `keyLen = keySize/8` bytes (40→5 bytes, 56→7 bytes)
+//! - `keySize == 0` MUST be interpreted as 40-bit RC4
+//!
+//! This test builds a small synthetic Standard RC4 encrypted OLE container and ensures decryption
+//! works for:
 //! - keySize = 56 (7-byte RC4 key, **no** zero padding)
 //! - keySize = 0 (treated as 40-bit)
 //!
@@ -153,15 +157,7 @@ fn rc4_key_for_block(h: &[u8], block: u32, key_size_bits: u32, hash_alg: HashAlg
     let key_len = (key_size_bits / 8) as usize;
     let digest = block_hash(h, block, hash_alg);
 
-    if key_size_bits == 40 {
-        // 40-bit special-case: 16-byte key blob where bytes 5.. are zero.
-        let mut key = Vec::with_capacity(16);
-        key.extend_from_slice(&digest[..5]);
-        key.resize(16, 0);
-        key
-    } else {
-        digest[..key_len].to_vec()
-    }
+    digest[..key_len].to_vec()
 }
 
 fn build_tiny_zip() -> Vec<u8> {

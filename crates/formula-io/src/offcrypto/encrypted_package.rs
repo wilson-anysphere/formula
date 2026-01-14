@@ -877,16 +877,7 @@ impl CryptoapiRc4EncryptedPackageDecryptor {
         let mut out = ciphertext[..orig_size_usize].to_vec();
         for (block_index, chunk) in out.chunks_mut(ENCRYPTED_PACKAGE_RC4_BLOCK_LEN).enumerate() {
             let digest = final_hash(&self.password_hash, block_index as u32, self.hash_alg);
-            let mut rc4 = if self.key_len == 5 {
-                // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit RC4 key with the high
-                // 88 bits zero. Using a raw 5-byte key changes RC4 KSA and yields the wrong
-                // keystream.
-                let mut padded = [0u8; 16];
-                padded[..5].copy_from_slice(&digest[..5]);
-                Rc4::new(&padded)
-            } else {
-                Rc4::new(&digest[..self.key_len])
-            };
+            let mut rc4 = Rc4::new(&digest[..self.key_len]);
             rc4.apply_keystream(chunk);
         }
 
@@ -906,8 +897,7 @@ impl CryptoapiRc4EncryptedPackageDecryptor {
 /// - `password_hash = Hash(salt || UTF16LE(password))`
 /// - for `i in 0..50000`: `password_hash = Hash(LE32(i) || password_hash)`
 /// - `h_i = Hash(password_hash || LE32(i))`
-/// - If `key_len == 5` (40-bit): `rc4_key_i = h_i[0..5] || 0x00 * 11` (16 bytes total)
-/// - Otherwise: `rc4_key_i = h_i[0..key_len]`
+/// - `rc4_key_i = h_i[0..key_len]` where `key_len = keySize/8` (40→5 bytes, 56→7 bytes, 128→16 bytes)
 /// - RC4 is **reset** per block (do not carry keystream state across blocks).
 ///
 /// See `docs/offcrypto-standard-cryptoapi-rc4.md` for additional notes and test vectors.
@@ -1406,14 +1396,7 @@ mod tests {
         hasher.update(password_hash);
         hasher.update(block_index.to_le_bytes());
         let digest: [u8; 20] = hasher.finalize().into();
-        if key_len == 5 {
-            let mut key = Vec::with_capacity(16);
-            key.extend_from_slice(&digest[..5]);
-            key.resize(16, 0);
-            key
-        } else {
-            digest[..key_len].to_vec()
-        }
+        digest[..key_len].to_vec()
     }
 
     fn test_cryptoapi_password_hash_md5(password: &str, salt: &[u8]) -> [u8; 16] {
@@ -1445,14 +1428,7 @@ mod tests {
         hasher.update(password_hash);
         hasher.update(block_index.to_le_bytes());
         let digest: [u8; 16] = hasher.finalize().into();
-        if key_len == 5 {
-            let mut key = Vec::with_capacity(16);
-            key.extend_from_slice(&digest[..5]);
-            key.resize(16, 0);
-            key
-        } else {
-            digest[..key_len].to_vec()
-        }
+        digest[..key_len].to_vec()
     }
 
     struct TestCryptoapiRc4Encryptor {
@@ -1547,25 +1523,25 @@ mod tests {
             0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
             0xDC, 0xFE,
         ];
-        let key_len = 16;
+        for key_len in [5usize, 7, 16] {
+            let encryptor = TestCryptoapiRc4Encryptor::new(password, &salt, key_len);
+            let decryptor = CryptoapiRc4EncryptedPackageDecryptor::new(password, &salt, key_len)
+                .expect("decryptor");
 
-        let encryptor = TestCryptoapiRc4Encryptor::new(password, &salt, key_len);
-        let decryptor = CryptoapiRc4EncryptedPackageDecryptor::new(password, &salt, key_len)
-            .expect("decryptor");
-
-        for len in [0usize, 1, 511, 512, 513, 1023, 1024, 1025, 10_000] {
-            let plaintext = make_plaintext_pattern(len);
-            let encrypted = encryptor.encrypt_encrypted_package_stream(&plaintext);
-            let decrypted = decryptor
-                .decrypt_encrypted_package_stream(&encrypted)
-                .expect("decrypt");
-            assert_eq!(decrypted, plaintext, "failed for len={len}");
+            for len in [0usize, 1, 511, 512, 513, 1023, 1024, 1025, 10_000] {
+                let plaintext = make_plaintext_pattern(len);
+                let encrypted = encryptor.encrypt_encrypted_package_stream(&plaintext);
+                let decrypted = decryptor
+                    .decrypt_encrypted_package_stream(&encrypted)
+                    .expect("decrypt");
+                assert_eq!(decrypted, plaintext, "failed for len={len} (key_len={key_len})");
+            }
         }
     }
 
     #[test]
     fn rc4_cryptoapi_encryptedpackage_roundtrip_with_40_bit_key() {
-        // Regression: 40-bit CryptoAPI RC4 uses a padded 16-byte RC4 key, not a raw 5-byte key.
+        // Regression: 40-bit CryptoAPI RC4 uses a 5-byte key (no padding).
         let password = "correct horse battery staple";
         let salt: [u8; 16] = [
             0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,

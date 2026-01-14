@@ -118,12 +118,6 @@ impl Rc4 {
 ///    `H = Hash(LE32(i) || H)`
 /// 3. `Hfinal = Hash(H || LE32(block_index))`
 /// 4. `rc4_key = Hfinal[0..key_size_bytes]`
-///
-/// **40-bit note:** CryptoAPI/Office represent a "40-bit" RC4 key as a padded 16-byte key where the
-/// high 88 bits are 0. Concretely, when `key_size_bytes == 5`, the RC4 key bytes passed into the
-/// RC4 KSA are:
-///
-/// `rc4_key = Hfinal[0..5] || 0x00 * 11` (16 bytes total)
 fn derive_rc4_key_for_block(
     password: &str,
     salt: &[u8],
@@ -131,10 +125,9 @@ fn derive_rc4_key_for_block(
     key_size_bits: u32,
     block_index: u32,
 ) -> Vec<u8> {
-    assert!(
-        key_size_bits.is_multiple_of(8),
-        "key size must be a whole number of bytes"
-    );
+    // MS-OFFCRYPTO: for Standard/CryptoAPI RC4, `keySize == 0` MUST be interpreted as 40-bit.
+    let key_size_bits = if key_size_bits == 0 { 40 } else { key_size_bits };
+    assert!(key_size_bits.is_multiple_of(8), "key size must be byte-aligned");
     let key_size_bytes = (key_size_bits / 8) as usize;
     assert!(key_size_bytes > 0, "key size must be non-zero");
 
@@ -154,11 +147,7 @@ fn derive_rc4_key_for_block(
         h_final.len()
     );
 
-    let mut key = h_final[..key_size_bytes].to_vec();
-    if key_size_bytes == 5 {
-        key.resize(16, 0);
-    }
-    key
+    h_final[..key_size_bytes].to_vec()
 }
 
 /// Standard / CryptoAPI RC4 verifier bundle (MS-OFFCRYPTO `EncryptionVerifier`).
@@ -304,7 +293,7 @@ mod tests {
             0xDE, 0xF0,
         ];
 
-        // Use 40-bit key size to exercise the CryptoAPI 40-bit padding behavior.
+        // Use 40-bit key size to exercise 5-byte RC4 keys.
         let verifier = build_fixture(
             password,
             salt,

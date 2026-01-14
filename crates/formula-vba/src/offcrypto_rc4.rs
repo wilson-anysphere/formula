@@ -48,8 +48,6 @@ fn password_utf16le_bytes(password: &str) -> Vec<u8> {
 ///   H = Hash(LE32(i) || H)
 /// h_block = Hash(H || LE32(block_index))
 /// key_b = h_block[0 .. keySize/8]
-/// if keySize == 40:
-///   key_b = key_b || 0x00 * 11   // 16 bytes total
 /// ```
 pub(crate) fn derive_rc4_key_b(
     password: &str,
@@ -87,13 +85,7 @@ pub(crate) fn derive_rc4_key_b(
     buf.extend_from_slice(&h);
     buf.extend_from_slice(&block_index.to_le_bytes());
     let block_hash = hash(hash_alg, &buf);
-    let mut key: Vec<u8> = block_hash.into_iter().take(key_len).collect();
-    if key_size_bits == 40 {
-        // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit key where only the first
-        // 5 bytes are derived and the remaining 11 bytes are zeros.
-        key.resize(16, 0);
-    }
-    key
+    block_hash.into_iter().take(key_len).collect()
 }
 
 #[cfg(test)]
@@ -146,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn rc4_cryptoapi_standard_derive_rc4_key_b_sha1_keysize_40_pads_to_16_bytes() {
+    fn rc4_cryptoapi_standard_derive_rc4_key_b_sha1_keysize_40_truncates_to_5_bytes() {
         let password = "password";
         let salt: [u8; 16] = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
@@ -154,11 +146,8 @@ mod tests {
         ];
 
         let derived = derive_rc4_key_b(password, &salt, 40, 0, HashAlg::Sha1);
-        assert_eq!(
-            derived,
-            decode_hex("6ad7dedf2d0000000000000000000000")
-        );
-        assert_eq!(derived.len(), 16);
+        assert_eq!(derived, decode_hex("6ad7dedf2d"));
+        assert_eq!(derived.len(), 5);
     }
 
     #[test]

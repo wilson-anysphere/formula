@@ -19303,15 +19303,7 @@ fn derive_key_material(password: &str, salt: &[u8]) -> [u8; 20] {
 fn derive_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<u8> {
     let block_bytes = block.to_le_bytes();
     let digest = sha1_bytes(&[key_material, &block_bytes]);
-    if key_len == 5 {
-        // Match the decryptor's 40-bit padding behaviour: use a 16-byte key with the low 40 bits set.
-        let mut key = Vec::with_capacity(16);
-        key.extend_from_slice(&digest[..5]);
-        key.resize(16, 0);
-        key
-    } else {
-        digest[..key_len].to_vec()
-    }
+    digest[..key_len].to_vec()
 }
 
 #[derive(Debug, Clone)]

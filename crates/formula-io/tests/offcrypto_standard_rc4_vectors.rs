@@ -10,8 +10,7 @@ use md5::{Digest as _, Md5};
 use sha1::Sha1;
 use std::io::{Cursor, Read as _, Seek as _, SeekFrom};
 
-use formula_io::offcrypto::cryptoapi::CALG_MD5;
-use formula_io::{HashAlg, Rc4CryptoApiDecryptReader};
+use formula_io::Rc4CryptoApiDecryptReader;
 
 fn hex_decode(mut s: &str) -> Vec<u8> {
     // Keep parsing permissive for readability in expected-value literals.
@@ -72,26 +71,14 @@ fn standard_rc4_spun_password_hash(password: &str, salt: &[u8], spin_count: u32)
 /// Standard CryptoAPI per-block key derivation helper.
 ///
 /// Algorithm:
-/// `h_block = SHA1(H || LE32(block_index))`
-///
-/// **40-bit note:** CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit RC4 key with the
-/// high 88 bits zero. Concretely, when `key_len == 5` (`keySize == 40`), the RC4 key bytes passed
-/// into the RC4 KSA are:
-///
-/// `rc4_key = h_block[0..5] || 0x00 * 11` (16 bytes total)
+/// `h_block = SHA1(H || LE32(block_index))`, `rc4_key = h_block[0..key_len]` where
+/// `key_len = keySize/8` (40→5 bytes, 56→7 bytes, 128→16 bytes).
 fn standard_rc4_derive_block_key(h: [u8; 20], block_index: u32, key_len: usize) -> Vec<u8> {
     let mut hasher = Sha1::new();
     hasher.update(h);
     hasher.update(block_index.to_le_bytes());
     let digest = hasher.finalize();
-    if key_len == 5 {
-        let mut key = Vec::with_capacity(16);
-        key.extend_from_slice(&digest[..5]);
-        key.resize(16, 0);
-        key
-    } else {
-        digest[..key_len].to_vec()
-    }
+    digest[..key_len].to_vec()
 }
 
 /// Standard CryptoAPI "spun password hash" helper for MD5.
@@ -118,14 +105,7 @@ fn standard_rc4_derive_block_key_md5(h: [u8; 16], block_index: u32, key_len: usi
     hasher.update(h);
     hasher.update(block_index.to_le_bytes());
     let digest = hasher.finalize();
-    if key_len == 5 {
-        let mut key = Vec::with_capacity(16);
-        key.extend_from_slice(&digest[..5]);
-        key.resize(16, 0);
-        key
-    } else {
-        digest[..key_len].to_vec()
-    }
+    digest[..key_len].to_vec()
 }
 
 /// Minimal RC4 implementation (KSA + PRGA).
@@ -193,6 +173,17 @@ fn standard_cryptoapi_rc4_derivation_vector() {
     assert_eq!(key2, hex_decode("9ce57d0699be3938951f47fa949361db"));
     assert_eq!(key3, hex_decode("e65b2643eaba3815a37a61159f137840"));
 
+    // 40-bit and 56-bit keys are not special-cased; they are truncated to KeySize/8 bytes.
+    let key0_40 = standard_rc4_derive_block_key(h, 0, 5);
+    let key1_40 = standard_rc4_derive_block_key(h, 1, 5);
+    assert_eq!(key0_40, hex_decode("6ad7dedf2d"));
+    assert_eq!(key1_40, hex_decode("2ed4e8825c"));
+
+    let key0_56 = standard_rc4_derive_block_key(h, 0, 7);
+    let key1_56 = standard_rc4_derive_block_key(h, 1, 7);
+    assert_eq!(key0_56, hex_decode("6ad7dedf2da351"));
+    assert_eq!(key1_56, hex_decode("2ed4e8825cd48a"));
+
     // Sanity: different block indexes must yield different keys.
     assert_ne!(key0, key1);
 
@@ -203,43 +194,6 @@ fn standard_cryptoapi_rc4_derivation_vector() {
         hex_decode("e7c9974140e69857dbdec656c7ccb4f9283d723236")
     );
     assert_eq!(rc4_apply(&key0, &ciphertext), plaintext);
-
-    // CryptoAPI 40-bit RC4 uses a 128-bit key with the high 88 bits zero.
-    let key0_40 = standard_rc4_derive_block_key(h, 0, 5);
-    assert_eq!(key0_40, hex_decode("6ad7dedf2d0000000000000000000000"));
-    assert_eq!(key0_40.len(), 16);
-    assert!(key0_40[5..].iter().all(|b| *b == 0));
-
-    // 56-bit RC4 uses 7 bytes of key material (no CryptoAPI padding to 16 bytes).
-    let key0_56 = standard_rc4_derive_block_key(h, 0, 7);
-    assert_eq!(key0_56, hex_decode("6ad7dedf2da351"));
-    assert_eq!(key0_56.len(), 7);
-    let ciphertext_56 = rc4_apply(&key0_56, plaintext);
-    assert_eq!(
-        ciphertext_56,
-        hex_decode("883dbf39789abb12c0245ad562f13dd69da9b44660")
-    );
-    assert_eq!(rc4_apply(&key0_56, &ciphertext_56), plaintext);
-
-    // Ensure the production decrypt reader treats 56-bit keys as 7-byte keys (no padding).
-    let mut stream_56 = Vec::new();
-    stream_56.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
-    stream_56.extend_from_slice(&ciphertext_56);
-    let mut cursor = Cursor::new(stream_56);
-    cursor.seek(SeekFrom::Start(8)).unwrap();
-    let mut reader =
-        Rc4CryptoApiDecryptReader::new(cursor, plaintext.len() as u64, h.to_vec(), 7).unwrap();
-    let mut decrypted = Vec::new();
-    reader.read_to_end(&mut decrypted).unwrap();
-    assert_eq!(decrypted, plaintext);
-
-    // Regression guard: zero-padding the 7-byte key to 16 bytes yields a different keystream.
-    let mut key0_56_padded = key0_56.clone();
-    key0_56_padded.resize(16, 0);
-    assert_eq!(
-        rc4_apply(&key0_56_padded, plaintext),
-        hex_decode("e2ee114e2de13f90931900fdfd524642357df6a3fe")
-    );
 }
 
 #[test]
@@ -265,6 +219,17 @@ fn standard_cryptoapi_rc4_derivation_md5_vector() {
     assert_eq!(key2, hex_decode("ac69022e396c7750872133f37e2c7afc"));
     assert_eq!(key3, hex_decode("1b056e7118ab8d35e9d67adee8b11104"));
 
+    // 40-bit and 56-bit keys are not special-cased; they are truncated to KeySize/8 bytes.
+    let key0_40 = standard_rc4_derive_block_key_md5(h, 0, 5);
+    let key1_40 = standard_rc4_derive_block_key_md5(h, 1, 5);
+    assert_eq!(key0_40, hex_decode("69badcae24"));
+    assert_eq!(key1_40, hex_decode("6f4d502ab3"));
+
+    let key0_56 = standard_rc4_derive_block_key_md5(h, 0, 7);
+    let key1_56 = standard_rc4_derive_block_key_md5(h, 1, 7);
+    assert_eq!(key0_56, hex_decode("69badcae244868"));
+    assert_eq!(key1_56, hex_decode("6f4d502ab37700"));
+
     let plaintext = b"Hello, RC4 CryptoAPI!";
     let ciphertext = rc4_apply(&key0, plaintext);
     assert_eq!(
@@ -272,53 +237,10 @@ fn standard_cryptoapi_rc4_derivation_md5_vector() {
         hex_decode("425dd9c8165e1216065e53eb586e897b5e85a07a6d")
     );
     assert_eq!(rc4_apply(&key0, &ciphertext), plaintext);
-
-    // CryptoAPI 40-bit RC4 uses a 128-bit key with the high 88 bits zero.
-    let key0_40 = standard_rc4_derive_block_key_md5(h, 0, 5);
-    assert_eq!(key0_40, hex_decode("69badcae240000000000000000000000"));
-    assert_eq!(key0_40.len(), 16);
-    assert!(key0_40[5..].iter().all(|b| *b == 0));
-
-    // 56-bit RC4 uses 7 bytes of key material (no CryptoAPI padding to 16 bytes).
-    let key0_56 = standard_rc4_derive_block_key_md5(h, 0, 7);
-    assert_eq!(key0_56, hex_decode("69badcae244868"));
-    assert_eq!(key0_56.len(), 7);
-    let ciphertext_56 = rc4_apply(&key0_56, plaintext);
-    assert_eq!(
-        ciphertext_56,
-        hex_decode("acdabc88ff665d0454d32d952b18e05e8331dfb44e")
-    );
-    assert_eq!(rc4_apply(&key0_56, &ciphertext_56), plaintext);
-
-    // Ensure the production decrypt reader treats 56-bit keys as 7-byte keys (no padding).
-    let mut stream_56 = Vec::new();
-    stream_56.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
-    stream_56.extend_from_slice(&ciphertext_56);
-    let mut cursor = Cursor::new(stream_56);
-    cursor.seek(SeekFrom::Start(8)).unwrap();
-    let mut reader = Rc4CryptoApiDecryptReader::new_with_hash_alg(
-        cursor,
-        plaintext.len() as u64,
-        h.to_vec(),
-        7,
-        HashAlg::Md5,
-    )
-    .unwrap();
-    let mut decrypted = Vec::new();
-    reader.read_to_end(&mut decrypted).unwrap();
-    assert_eq!(decrypted, plaintext);
-
-    // Regression guard: zero-padding the 7-byte key to 16 bytes yields a different keystream.
-    let mut key0_56_padded = key0_56.clone();
-    key0_56_padded.resize(16, 0);
-    assert_eq!(
-        rc4_apply(&key0_56_padded, plaintext),
-        hex_decode("8240cfc192e7380beabb4b5f825fb117023e620b98")
-    );
 }
 
 #[test]
-fn standard_cryptoapi_rc4_40_bit_key_padding_vector() {
+fn standard_cryptoapi_rc4_40_bit_key_vector() {
     let password = "password";
     let salt: Vec<u8> = (0u8..=0x0F).collect();
     let spin_count = 50_000u32;
@@ -339,13 +261,16 @@ fn standard_cryptoapi_rc4_40_bit_key_padding_vector() {
     let key_material = hb[..5].to_vec();
     assert_eq!(key_material, hex_decode("6ad7dedf2d"));
 
+    // 40-bit RC4 uses a 5-byte key (`keyLen = keySize/8`). Zero-padding it to 16 bytes changes RC4
+    // KSA and yields a different keystream.
     let mut padded_key = key_material.clone();
     padded_key.resize(16, 0);
     assert_eq!(padded_key, hex_decode("6ad7dedf2d0000000000000000000000"));
 
     let plaintext = b"Hello, RC4 CryptoAPI!";
 
-    // CryptoAPI uses the padded 16-byte key for 40-bit RC4.
+    // Demonstrate that padding changes the ciphertext (and therefore must not be applied by
+    // MS-OFFCRYPTO Standard RC4 readers).
     let ciphertext_padded = rc4_apply(&padded_key, plaintext);
     assert_eq!(
         ciphertext_padded,
@@ -360,90 +285,16 @@ fn standard_cryptoapi_rc4_40_bit_key_padding_vector() {
     );
     assert_ne!(ciphertext_padded, ciphertext_unpadded);
 
-    // Ensure the production decrypt reader uses the padded key form.
+    // Ensure the production decrypt reader uses the **unpadded** 5-byte key form.
     let mut stream = Vec::new();
     stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
-    stream.extend_from_slice(&ciphertext_padded);
+    stream.extend_from_slice(&ciphertext_unpadded);
 
     let mut cursor = Cursor::new(stream);
     cursor.seek(SeekFrom::Start(8)).unwrap();
 
     let mut reader =
         Rc4CryptoApiDecryptReader::new(cursor, plaintext.len() as u64, h.to_vec(), key_len).unwrap();
-    let mut decrypted = Vec::new();
-    reader.read_to_end(&mut decrypted).unwrap();
-    assert_eq!(decrypted, plaintext);
-}
-
-#[test]
-fn standard_cryptoapi_rc4_md5_40bit_padding_vector() {
-    let password = "password";
-    let salt: Vec<u8> = (0u8..=0x0F).collect();
-    let spin_count = 50_000u32;
-
-    // H = MD5(salt || UTF16LE(password)), spun 50k times.
-    let h = standard_rc4_spun_password_hash_md5(password, &salt, spin_count);
-    // Hb0 = MD5(H || LE32(0)).
-    let hb0 = standard_rc4_derive_block_key_md5(h, 0, 16);
-    assert_eq!(hb0, hex_decode("69badcae244868e209d4e053ccd2a3bc"));
-
-    // CryptoAPI 40-bit rule: treat the key as 16 bytes by padding the remaining bytes with zeros.
-    let key_material = &hb0[..5];
-    assert_eq!(key_material, hex_decode("69badcae24"));
-
-    let mut padded_key = Vec::with_capacity(16);
-    padded_key.extend_from_slice(key_material);
-    padded_key.resize(16, 0);
-    assert_eq!(padded_key, hex_decode("69badcae240000000000000000000000"));
-
-    let plaintext = b"Hello, RC4 CryptoAPI!";
-
-    // Expected ciphertext when the 40-bit key material is padded to 16 bytes (CryptoAPI behavior).
-    let ciphertext_padded = rc4_apply(&padded_key, plaintext);
-    assert_eq!(
-        ciphertext_padded,
-        hex_decode("565016a3d8158632bb36ce1d76996628512061bfa3")
-    );
-
-    // Sanity: feeding RC4 the raw 5-byte key material produces different ciphertext.
-    let ciphertext_raw = rc4_apply(key_material, plaintext);
-    assert_eq!(
-        ciphertext_raw,
-        hex_decode("db037cd60d38c882019b5f5d8c43382373f476da28")
-    );
-    assert_ne!(ciphertext_raw, ciphertext_padded);
-
-    // Ensure the production decrypt reader uses MD5 for per-block key derivation and applies the
-    // CryptoAPI 40-bit padding rule (5-byte key material treated as a 16-byte RC4 key).
-    let mut stream = Vec::new();
-    stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
-    stream.extend_from_slice(&ciphertext_padded);
-
-    // Exercise the production framing + parameter-validation path.
-    let cursor = Cursor::new(stream.clone());
-    let mut reader = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
-        cursor,
-        h.to_vec(),
-        0, // keySize=0 => 40-bit per MS-OFFCRYPTO
-        CALG_MD5,
-    )
-    .unwrap();
-    let mut decrypted = Vec::new();
-    reader.read_to_end(&mut decrypted).unwrap();
-    assert_eq!(decrypted, plaintext);
-
-    // Also exercise the lower-level constructor that assumes the caller has already parsed the
-    // `EncryptedPackage` size prefix.
-    let mut cursor = Cursor::new(stream);
-    cursor.seek(SeekFrom::Start(8)).unwrap();
-    let mut reader = Rc4CryptoApiDecryptReader::new_with_hash_alg(
-        cursor,
-        plaintext.len() as u64,
-        h.to_vec(),
-        5,
-        HashAlg::Md5,
-    )
-    .unwrap();
     let mut decrypted = Vec::new();
     reader.read_to_end(&mut decrypted).unwrap();
     assert_eq!(decrypted, plaintext);

@@ -643,47 +643,30 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     }
 
     let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
-    let rc4_key0: Vec<u8> = if key_bits == 40 {
-        assert_eq!(key0.len(), 5, "40-bit RC4 key must be 5 bytes");
-        let mut padded = vec![0u8; 16];
-        padded[..5].copy_from_slice(&key0);
-        let expected_padded = match hash_alg {
-            Rc4HashAlgorithm::Sha1 => hex_decode("6ad7dedf2d0000000000000000000000"),
-            Rc4HashAlgorithm::Md5 => hex_decode("69badcae240000000000000000000000"),
-        };
-        assert_eq!(
-            padded, expected_padded,
-            "40-bit CryptoAPI RC4 key must be padded to 16 bytes with zeros"
-        );
-        padded
-    } else {
-        key0.clone()
-    };
+    assert_eq!(key0.len(), key_len, "derived key should be keySize/8");
 
-    // MS-OFFCRYPTO Standard RC4 40-bit key padding regression guard:
+    // MS-OFFCRYPTO Standard RC4 40-bit regression guard:
     //
-    // CryptoAPI's RC4 implementation expects a 16-byte key buffer even when `keySize` is 40 bits.
-    // For `password="password"`, `salt=00..0f`, `spinCount=50000`, `block=0`, the derived 5-byte
-    // key material is `6ad7dedf2d` and the padded key is `6ad7dedf2d || 0x00*11`.
-    //
-    // Assert a known RC4 ciphertext so this test cannot pass if both the test encryptor and the
-    // production decryptor mistakenly treat the key as a raw 5-byte RC4 key.
+    // For Standard/CryptoAPI RC4, the RC4 KSA key is exactly `keyLen = keySize/8` bytes. In
+    // particular, 40-bit RC4 uses a 5-byte key (no zero-padding to 16 bytes).
     if hash_alg == Rc4HashAlgorithm::Sha1 && key_bits == 40 {
-        let expected_ciphertext = hex_decode("7a8bd000713a6e30ba9916476d27b01d36707a6ef8");
+        let expected_ciphertext = hex_decode("d1fa444913b4839b06eb4851750a07761005f025bf");
 
         let mut ciphertext = b"Hello, RC4 CryptoAPI!".to_vec();
-        rc4_apply(&rc4_key0, &mut ciphertext);
+        rc4_apply(&key0, &mut ciphertext);
         assert_eq!(
             ciphertext, expected_ciphertext,
-            "RC4(16-byte padded 40-bit key, plaintext) vector mismatch"
+            "RC4(40-bit keyLen=5, plaintext) vector mismatch"
         );
 
-        // Sanity: the raw 5-byte key MUST produce a different ciphertext.
+        // Sanity: zero-padding the key to 16 bytes MUST produce a different ciphertext.
+        let mut padded = vec![0u8; 16];
+        padded[..5].copy_from_slice(&key0);
         let mut wrong = b"Hello, RC4 CryptoAPI!".to_vec();
-        rc4_apply(&key0, &mut wrong);
+        rc4_apply(&padded, &mut wrong);
         assert_ne!(
             wrong, expected_ciphertext,
-            "RC4 ciphertext unexpectedly matches when using raw 5-byte key"
+            "RC4 ciphertext unexpectedly matches when padding 40-bit key to 16 bytes"
         );
     }
 
@@ -704,7 +687,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
         verifier_buf.extend_from_slice(&verifier_hash);
         verifier_buf.resize(16 + verifier_hash_size as usize, 0);
     }
-    rc4_apply(&rc4_key0, &mut verifier_buf);
+    rc4_apply(&key0, &mut verifier_buf);
     let encrypted_verifier = &verifier_buf[..16];
     let encrypted_verifier_hash = &verifier_buf[16..];
 
@@ -759,14 +742,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     let mut block_index: u32 = 0;
     for chunk in ciphertext.chunks_mut(0x200) {
         let key = standard_rc4_derive_key(hash_alg, &spun, key_len, block_index);
-        if key_bits == 40 {
-            assert_eq!(key.len(), 5, "40-bit RC4 key must be 5 bytes");
-            let mut padded = vec![0u8; 16];
-            padded[..5].copy_from_slice(&key);
-            rc4_apply(&padded, chunk);
-        } else {
-            rc4_apply(&key, chunk);
-        }
+        rc4_apply(&key, chunk);
         block_index = block_index.checked_add(1).expect("block counter overflow");
     }
 
@@ -778,16 +754,7 @@ fn encrypt_standard_rc4_ooxml_ole_inner(
     if plaintext.len() >= 0x400 && ciphertext.len() >= 0x400 {
         let key0 = standard_rc4_derive_key(hash_alg, &spun, key_len, 0);
         let key1 = standard_rc4_derive_key(hash_alg, &spun, key_len, 1);
-
-        let (k0, k1) = if key_bits == 40 {
-            let mut k0p = vec![0u8; 16];
-            k0p[..5].copy_from_slice(&key0);
-            let mut k1p = vec![0u8; 16];
-            k1p[..5].copy_from_slice(&key1);
-            (k0p, k1p)
-        } else {
-            (key0, key1)
-        };
+        let (k0, k1) = (key0, key1);
 
         // If we (incorrectly) used a 0x400-byte re-key interval, bytes [0x200..0x3ff] would be
         // encrypted by *continuing* the RC4 stream with block0 key.
