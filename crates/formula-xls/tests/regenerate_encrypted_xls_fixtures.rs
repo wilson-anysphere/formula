@@ -1130,6 +1130,15 @@ fn regenerate_encrypted_xls_fixtures() {
         panic!("write encrypted fixture {rc4_standard_unicode_path:?} failed: {err}");
     });
 
+    // Unicode + emoji password variant (non-BMP / UTF-16 surrogate pair).
+    let rc4_standard_unicode_emoji_path =
+        fixtures_dir.join("biff8_rc4_standard_unicode_emoji_pw_open.xls");
+    let rc4_standard_unicode_emoji_bytes = build_rc4_standard_encrypted_xls_bytes("pässwörd🔒");
+    std::fs::write(&rc4_standard_unicode_emoji_path, rc4_standard_unicode_emoji_bytes)
+        .unwrap_or_else(|err| {
+            panic!("write encrypted fixture {rc4_standard_unicode_emoji_path:?} failed: {err}");
+        });
+
     // RC4 Standard edge-case fixtures derived from `basic.xls`.
     let rc4_standard_long_path = fixtures_dir.join("biff8_rc4_standard_pw_open_long_password.xls");
     let rc4_standard_long_bytes =
