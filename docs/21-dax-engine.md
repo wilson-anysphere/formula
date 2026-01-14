@@ -301,6 +301,12 @@ Tabular models behave as if the table on the `to_table` side of a relationship h
 - `BLANK`, or
 - not present in the dimension key column (when referential integrity is not enforced)
 
+The engine treats “blank member existence” as a **dynamic, filter-context-dependent** property:
+the virtual blank member exists for a `to_table` only when there are **currently visible**
+unmatched/blank foreign keys on the `from_table` side under the active relationship set (including
+`USERELATIONSHIP` / `CROSSFILTER` overrides). This means that filtering the fact table can make the
+blank member appear or disappear even if the model contains unmatched keys overall.
+
 Important nuance: in `formula-dax`, fact-side `BLANK` foreign keys always belong to this
 relationship-generated blank member, even if the dimension table contains a *physical* row whose key
 is `BLANK`. In other words, `BLANK` is treated as an **unmatchable** relationship join key during
