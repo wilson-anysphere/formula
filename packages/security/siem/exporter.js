@@ -157,7 +157,9 @@ export class SiemExporter {
 
     if (this.config.flushIntervalMs > 0) {
       this.interval = setInterval(() => {
-        void this.flush();
+        void this.flush().catch(() => {
+          // Best-effort: avoid unhandled rejections when automatic background flush fails.
+        });
       }, this.config.flushIntervalMs);
       this.interval.unref?.();
     }
@@ -167,7 +169,11 @@ export class SiemExporter {
     if (!event || typeof event !== "object") throw new Error("SIEM audit event must be an object");
     assertUuid(event.id);
     this.buffer.push(event);
-    if (this.buffer.length >= this.config.batchSize) void this.flush();
+    if (this.buffer.length >= this.config.batchSize) {
+      void this.flush().catch(() => {
+        // Best-effort: avoid unhandled rejections when a fire-and-forget flush fails.
+      });
+    }
   }
 
   async flush() {
