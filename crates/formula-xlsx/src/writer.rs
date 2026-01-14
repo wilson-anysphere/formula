@@ -1705,7 +1705,6 @@ fn cell_xml(
         if let Some(xf_index) = style_to_xf
             .get(&cell.style_id)
             .copied()
-            .filter(|xf| *xf != 0)
         {
             attrs.push_str(&format!(r#" s="{}""#, xf_index));
         }

@@ -14,6 +14,23 @@ fn read_part(bytes: &[u8], part: &str) -> Result<String, Box<dyn std::error::Err
     Ok(text)
 }
 
+fn extract_data_validations_subtree(xml: &str) -> Option<String> {
+    let start = xml.find("<dataValidations")?;
+
+    if let Some(end_rel) = xml[start..].find("</dataValidations>") {
+        let end = start + end_rel + "</dataValidations>".len();
+        return Some(xml[start..end].to_string());
+    }
+
+    // Self-closing block (rare, but valid).
+    if let Some(end_rel) = xml[start..].find("/>") {
+        let end = start + end_rel + "/>".len();
+        return Some(xml[start..end].to_string());
+    }
+
+    None
+}
+
 #[test]
 fn writes_data_validations_section() -> Result<(), Box<dyn std::error::Error>> {
     let mut workbook = Workbook::new();
@@ -256,3 +273,23 @@ fn clearing_data_validations_removes_data_validations_block() -> Result<(), Box<
 
     Ok(())
 }
+
+#[test]
+fn no_op_roundtrip_preserves_data_validations_subtree() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/metadata/data-validation-list.xlsx");
+    let fixture_bytes = std::fs::read(&fixture)?;
+    let original_sheet_xml = read_part(&fixture_bytes, "xl/worksheets/sheet1.xml")?;
+    let original_dv = extract_data_validations_subtree(&original_sheet_xml)
+        .expect("fixture should contain a <dataValidations> block");
+
+    let doc = load_from_path(&fixture)?;
+    let out_bytes = doc.save_to_vec()?;
+    let out_sheet_xml = read_part(&out_bytes, "xl/worksheets/sheet1.xml")?;
+    let out_dv = extract_data_validations_subtree(&out_sheet_xml)
+        .expect("output should contain a <dataValidations> block");
+
+    assert_eq!(out_dv, original_dv);
+    Ok(())
+}
+

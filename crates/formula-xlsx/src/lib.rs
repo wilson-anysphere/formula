@@ -31,6 +31,7 @@ pub mod comments;
 mod compare;
 pub mod conditional_formatting;
 mod content_types;
+pub mod data_validations;
 pub mod drawingml;
 pub mod drawings;
 mod encrypted;

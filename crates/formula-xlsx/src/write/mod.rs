@@ -7,9 +7,10 @@ use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::drawings::DrawingObjectKind;
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
-    CellIsOperator, CellRef, CellValue, CfRule, CfRuleKind, Comment, CommentKind, ErrorValue,
-    Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range, SheetProtection, SheetVisibility,
-    WorkbookProtection, WorkbookWindowState, Worksheet, WorksheetId,
+    CellIsOperator, CellRef, CellValue, CfRule, CfRuleKind, Comment, CommentKind,
+    DataValidationAssignment, DataValidationErrorStyle, DataValidationKind, DataValidationOperator,
+    ErrorValue, Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range, SheetProtection,
+    SheetVisibility, WorkbookProtection, WorkbookWindowState, Worksheet, WorksheetId,
 };
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::Event;
@@ -812,6 +813,7 @@ fn build_parts(
             orig_merges,
             orig_hyperlinks,
             orig_drawing_rel_id,
+            orig_data_validations,
             orig_views,
             orig_sheet_format,
             orig_cols,
@@ -850,6 +852,13 @@ fn build_parts(
 
             let orig_drawing_rel_id = worksheet_drawing_rel_id(orig_xml)?;
 
+            let orig_data_validations = if orig_has_data_validations {
+                crate::data_validations::read_data_validations_from_worksheet_xml(orig_xml)
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
             let orig_autofilter = crate::autofilter::parse_worksheet_autofilter(orig_xml).map_err(
                 |err| match err {
                     AutoFilterParseError::Xml(e) => WriteError::Xml(e),
@@ -872,6 +881,7 @@ fn build_parts(
                 orig_merges,
                 orig_hyperlinks,
                 orig_drawing_rel_id,
+                orig_data_validations,
                 orig_views,
                 orig_sheet_format,
                 orig_cols,
@@ -886,6 +896,7 @@ fn build_parts(
                 Vec::new(),
                 Vec::new(),
                 None,
+                Vec::new(),
                 SheetViewSettings::default(),
                 SheetFormatSettings::default(),
                 BTreeMap::new(),
@@ -951,10 +962,20 @@ fn build_parts(
             orig_sheet_protection.is_some()
         };
 
-        let data_validations_changed = if sheet.data_validations.is_empty() {
-            orig_has_data_validations
+        let data_validations_changed = if sheet.data_validations.is_empty() && !orig_has_data_validations
+        {
+            false
         } else {
-            true
+            let model_norm = normalize_data_validations(&sheet.data_validations);
+            let orig_norm = normalize_parsed_data_validations(&orig_data_validations);
+            if model_norm.is_empty() && orig_norm.is_empty() && orig_has_data_validations {
+                // We couldn't parse any modeled validations from the existing worksheet, but we
+                // can see a `<dataValidations>` block. Preserve it for no-op round trips unless the
+                // caller supplies new validations.
+                false
+            } else {
+                model_norm != orig_norm
+            }
         };
 
         let local_to_global_dxf = cf_dxfs
@@ -1074,11 +1095,11 @@ fn build_parts(
             && !cols_changed
             && !outline_cols_changed
             && !autofilter_changed
+            && !data_validations_changed
             && !sheet_protection_changed
             && !drawings_need_emit
             && !drawings_need_remove
             && !conditional_formatting_changed
-            && !data_validations_changed
         {
             parts.insert(sheet_meta.path.clone(), sheet_xml_bytes);
             continue;
@@ -1144,6 +1165,12 @@ fn build_parts(
         if is_new_sheet || sheet_protection_changed {
             sheet_xml = update_sheet_protection_xml(&sheet_xml, &sheet.sheet_protection)?;
         }
+        if (is_new_sheet && sheet.auto_filter.is_some()) || autofilter_changed {
+            sheet_xml = crate::autofilter::write_worksheet_autofilter(
+                &sheet_xml,
+                sheet.auto_filter.as_ref(),
+            )?;
+        }
         if is_new_sheet || hyperlinks_changed {
             sheet_xml = crate::update_worksheet_xml(&sheet_xml, &current_hyperlinks)?;
 
@@ -1157,12 +1184,6 @@ fn build_parts(
                     parts.remove(&rels_part);
                 }
             }
-        }
-        if (is_new_sheet && sheet.auto_filter.is_some()) || autofilter_changed {
-            sheet_xml = crate::autofilter::write_worksheet_autofilter(
-                &sheet_xml,
-                sheet.auto_filter.as_ref(),
-            )?;
         }
 
         if drawings_need_emit {
@@ -1673,6 +1694,161 @@ fn comment_kind_rank(kind: CommentKind) -> u8 {
         CommentKind::Note => 0,
         CommentKind::Threaded => 1,
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct DataValidationKey {
+    ranges: Vec<(u32, u32, u32, u32)>,
+    kind: u8,
+    operator: Option<u8>,
+    formula1: String,
+    formula2: Option<String>,
+    allow_blank: bool,
+    show_input_message: bool,
+    show_error_message: bool,
+    show_drop_down: bool,
+    prompt_title: Option<String>,
+    prompt: Option<String>,
+    error_style: Option<u8>,
+    error_title: Option<String>,
+    error: Option<String>,
+}
+
+fn normalize_dv_formula(formula: &str) -> String {
+    let trimmed = formula.trim();
+    trimmed.strip_prefix('=').unwrap_or(trimmed).to_string()
+}
+
+fn normalize_dv_ranges(ranges: &[Range]) -> Vec<(u32, u32, u32, u32)> {
+    let mut out: Vec<(u32, u32, u32, u32)> = ranges
+        .iter()
+        .map(|r| (r.start.row, r.start.col, r.end.row, r.end.col))
+        .collect();
+    out.sort();
+    out
+}
+
+fn dv_kind_rank(kind: DataValidationKind) -> u8 {
+    match kind {
+        DataValidationKind::Whole => 0,
+        DataValidationKind::Decimal => 1,
+        DataValidationKind::List => 2,
+        DataValidationKind::Date => 3,
+        DataValidationKind::Time => 4,
+        DataValidationKind::TextLength => 5,
+        DataValidationKind::Custom => 6,
+    }
+}
+
+fn dv_operator_rank(op: DataValidationOperator) -> u8 {
+    match op {
+        DataValidationOperator::Between => 0,
+        DataValidationOperator::NotBetween => 1,
+        DataValidationOperator::Equal => 2,
+        DataValidationOperator::NotEqual => 3,
+        DataValidationOperator::GreaterThan => 4,
+        DataValidationOperator::GreaterThanOrEqual => 5,
+        DataValidationOperator::LessThan => 6,
+        DataValidationOperator::LessThanOrEqual => 7,
+    }
+}
+
+fn dv_error_style_rank(style: DataValidationErrorStyle) -> u8 {
+    match style {
+        DataValidationErrorStyle::Stop => 0,
+        DataValidationErrorStyle::Warning => 1,
+        DataValidationErrorStyle::Information => 2,
+    }
+}
+
+fn normalize_data_validation(
+    validation: &formula_model::DataValidation,
+    ranges: &[Range],
+) -> DataValidationKey {
+    let ranges = normalize_dv_ranges(ranges);
+    let formula1 = normalize_dv_formula(&validation.formula1);
+    let formula2 = validation.formula2.as_deref().map(normalize_dv_formula);
+
+    let (prompt_title, prompt) = match &validation.input_message {
+        Some(msg) => {
+            let title = msg
+                .title
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let body = msg
+                .body
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            if title.is_none() && body.is_none() {
+                (None, None)
+            } else {
+                (title, body)
+            }
+        }
+        None => (None, None),
+    };
+
+    let (error_style, error_title, error) = match &validation.error_alert {
+        Some(alert) => {
+            let title = alert
+                .title
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let body = alert
+                .body
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            if title.is_none() && body.is_none() && alert.style == DataValidationErrorStyle::Stop {
+                (None, None, None)
+            } else {
+                (Some(dv_error_style_rank(alert.style)), title, body)
+            }
+        }
+        None => (None, None, None),
+    };
+
+    DataValidationKey {
+        ranges,
+        kind: dv_kind_rank(validation.kind),
+        operator: validation.operator.map(dv_operator_rank),
+        formula1,
+        formula2,
+        allow_blank: validation.allow_blank,
+        show_input_message: validation.show_input_message,
+        show_error_message: validation.show_error_message,
+        show_drop_down: validation.show_drop_down,
+        prompt_title,
+        prompt,
+        error_style,
+        error_title,
+        error,
+    }
+}
+
+fn normalize_data_validations(validations: &[DataValidationAssignment]) -> Vec<DataValidationKey> {
+    let mut out: Vec<DataValidationKey> = validations
+        .iter()
+        .filter(|dv| !dv.ranges.is_empty())
+        .map(|dv| normalize_data_validation(&dv.validation, &dv.ranges))
+        .collect();
+    out.sort();
+    out
+}
+
+fn normalize_parsed_data_validations(
+    validations: &[crate::data_validations::ParsedDataValidation],
+) -> Vec<DataValidationKey> {
+    let mut out: Vec<DataValidationKey> = validations
+        .iter()
+        .filter(|dv| !dv.ranges.is_empty())
+        .map(|dv| normalize_data_validation(&dv.validation, &dv.ranges))
+        .collect();
+    out.sort();
+    out
 }
 
 #[derive(Clone, Debug, PartialEq)]
