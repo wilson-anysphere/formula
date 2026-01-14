@@ -119,6 +119,7 @@ const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
 const AUTOFILTER_OP_NONE: u8 = 0;
 const AUTOFILTER_OP_EQUAL: u8 = 3;
 const AUTOFILTER_OP_GREATER_THAN: u8 = 5;
+const AUTOFILTER_OP_LESS_THAN: u8 = 6;
 
 // DOPER "vt" values are based on [MS-XLS] / VARIANT type tags. The importer is
 // tolerant, but we aim to emit the canonical values.
@@ -15377,6 +15378,13 @@ fn build_autofilter_criteria_workbook_stream() -> Vec<u8> {
     let doper1 = autofilter_doper_number(AUTOFILTER_OP_GREATER_THAN, 1.0);
     let doper2 = autofilter_doper_none();
     let autofilter = autofilter_record(1, false, &doper1, &doper2);
+    push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
+
+    // Third AUTOFILTER record: two numeric comparisons on column C combined with AND.
+    // Criterion: column value > 10 AND < 20.
+    let doper1 = autofilter_doper_number(AUTOFILTER_OP_GREATER_THAN, 10.0);
+    let doper2 = autofilter_doper_number(AUTOFILTER_OP_LESS_THAN, 20.0);
+    let autofilter = autofilter_record(2, true, &doper1, &doper2);
     push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet

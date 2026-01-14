@@ -40,6 +40,16 @@ fn imports_biff8_autofilter_criteria_from_autofilter_records() {
                 values: Vec::new(),
                 raw_xml: Vec::new(),
             },
+            FilterColumn {
+                col_id: 2,
+                join: FilterJoin::All,
+                criteria: vec![
+                    FilterCriterion::Number(NumberComparison::GreaterThan(10.0)),
+                    FilterCriterion::Number(NumberComparison::LessThan(20.0)),
+                ],
+                values: Vec::new(),
+                raw_xml: Vec::new(),
+            },
         ],
         "unexpected filter columns; warnings={:?}",
         result.warnings
