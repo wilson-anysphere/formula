@@ -3134,6 +3134,8 @@ export function bindYjsToDocumentController(options) {
     /**
      * Wait for any pending binder work to settle.
      *
+     * - Yjs → DocumentController applies are serialized through `applyChain`
+     *   (encryption/decryption can be async).
      * - DocumentController → Yjs writes are serialized through `writeChain`/`sheetWriteChain`
      *   (encryption can be async).
      *
@@ -3150,6 +3152,7 @@ export function bindYjsToDocumentController(options) {
       };
 
       await Promise.all([
+        waitForChain(() => applyChain),
         waitForChain(() => writeChain),
         waitForChain(() => sheetWriteChain),
       ]);

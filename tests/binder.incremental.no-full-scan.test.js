@@ -37,6 +37,11 @@ test("binder: Yjs→DocumentController incremental updates avoid full cells-map 
   const documentController = new DocumentController();
   const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
 
+  // The binder applies the initial hydration through an async apply chain (encryption/decryption can
+  // be async). Wait for that initial apply to settle so the single-cell update below isn't queued
+  // behind the initial ~10k-cell hydration under CPU contention.
+  await binder.whenIdle();
+
   // After initial hydration, the binder must never iterate the full cells map on single-cell updates.
   const originalForEach = cells.forEach.bind(cells);
   cells.forEach = () => {
