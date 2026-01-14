@@ -90,6 +90,35 @@ fn in_operator_calculate_filter_rhs_table_expression() {
 }
 
 #[test]
+fn in_operator_calculate_filter_rhs_physical_mask_table_expression() {
+    // Regression test: ensure CALCULATE's `col IN <table expr>` filter handling supports
+    // `TableResult::PhysicalMask` without materializing a large `Vec<usize>`.
+    //
+    // `FILTER` produces `PhysicalMask` for small tables (dense representation threshold is 0 when
+    // row_count < 64), so this is deterministic.
+    let mut model = DataModel::new();
+    let mut t = Table::new("T", vec!["Id"]);
+    for id in 1..=5i64 {
+        t.push_row(vec![id.into()]).unwrap();
+    }
+    model.add_table(t).unwrap();
+
+    let engine = DaxEngine::new();
+    let filter = FilterContext::empty();
+    let row_ctx = RowContext::default();
+
+    let value = engine
+        .evaluate(
+            &model,
+            "CALCULATE(COUNTROWS(T), T[Id] IN FILTER(T, T[Id] <= 3))",
+            &filter,
+            &row_ctx,
+        )
+        .unwrap();
+    assert_eq!(value, Value::from(3i64));
+}
+
+#[test]
 fn in_operator_table_expression_requires_one_column() {
     let model = build_model();
     let engine = DaxEngine::new();
