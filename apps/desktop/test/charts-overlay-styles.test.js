@@ -47,6 +47,17 @@ test("SpreadsheetApp overlay canvases use CSS classes (no static inline styles)"
     "expected selectionCanvas pointer-events to be driven by CSS",
   );
   assert.ok(!block.includes(".style.overflow"), "expected overlay overflow clipping to be driven by CSS");
+
+  // Presence overlays share the selection z-index (charts-overlay.css) and rely on DOM insertion
+  // order for tie-breaking (selection should remain on top of presence highlights).
+  const presenceAppendIndex = block.search(/\bappendChild\(this\.presenceCanvas\)/);
+  const selectionAppendIndex = block.search(/\bappendChild\(this\.selectionCanvas\)/);
+  assert.ok(presenceAppendIndex !== -1, "expected SpreadsheetApp to append presenceCanvas when present");
+  assert.ok(selectionAppendIndex !== -1, "expected SpreadsheetApp to append selectionCanvas");
+  assert.ok(
+    presenceAppendIndex < selectionAppendIndex,
+    "expected presenceCanvas to be appended before selectionCanvas so selection renders above presence",
+  );
 });
 
 test("chart + drawing overlay hosts are styled via charts-overlay.css", async () => {
