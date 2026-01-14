@@ -268,6 +268,48 @@ fn info_exposes_host_provided_metadata() {
 }
 
 #[test]
+fn cell_format_color_and_parentheses_reflect_number_format() {
+    use formula_engine::Engine;
+    use formula_model::Style;
+
+    let mut engine = Engine::new();
+    let style_id = engine.intern_style(Style {
+        // Fractions are not part of the standard CELL("format") numeric families.
+        number_format: Some("__builtin_numFmtId:12".to_string()),
+        ..Style::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A1", style_id)
+        .expect("set style id");
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"format\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("N".to_string())
+    );
+
+    // Color/parentheses flags are derived from the explicit negative section.
+    let style_id = engine.intern_style(Style {
+        number_format: Some("0;[Red](0)".to_string()),
+        ..Style::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A2", style_id)
+        .expect("set style id");
+    engine
+        .set_cell_formula("Sheet1", "B2", "=CELL(\"color\",A2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=CELL(\"parentheses\",A2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_number(&engine.get_cell_value("Sheet1", "B2"), 1.0);
+    assert_number(&engine.get_cell_value("Sheet1", "B3"), 1.0);
+}
+
+#[test]
 fn cell_errors_for_unknown_info_types() {
     let mut sheet = TestSheet::new();
 
