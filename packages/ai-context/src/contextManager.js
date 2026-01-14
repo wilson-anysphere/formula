@@ -1949,27 +1949,63 @@ export class ContextManager {
           if (!item || typeof item !== "object" || Array.isArray(item)) return item;
           const type = item.type;
           const reference = item.reference;
-          if (type !== "range" || typeof reference !== "string") return item;
-          let parsed;
-          try {
-            parsed = parseA1Range(reference);
-          } catch {
-            return item;
+          if (typeof reference !== "string") return item;
+
+          if (type === "range") {
+            let parsed;
+            try {
+              parsed = parseA1Range(reference);
+            } catch {
+              return item;
+            }
+            if (!parsed.sheetName) return item;
+            const sheetId = resolveDlpSheetId(parsed.sheetName);
+            const range = {
+              start: { row: parsed.startRow, col: parsed.startCol },
+              end: { row: parsed.endRow, col: parsed.endCol },
+            };
+            const recordClassification = index
+              ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
+              : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+            const recordDecision = evaluatePolicy({
+              action: DLP_ACTION.AI_CLOUD_PROCESSING,
+              classification: recordClassification,
+              policy: dlp.policy,
+              options: { includeRestrictedContent },
+            });
+            if (recordDecision.decision === DLP_DECISION.ALLOW) return item;
+            return { ...item, reference: rangeToA1({ ...parsed, sheetName: "[REDACTED]" }) };
           }
-          if (!parsed.sheetName) return item;
-          const sheetId = resolveDlpSheetId(parsed.sheetName);
-          const range = { start: { row: parsed.startRow, col: parsed.startCol }, end: { row: parsed.endRow, col: parsed.endCol } };
-          const recordClassification = index
-            ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
-            : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
-          const recordDecision = evaluatePolicy({
-            action: DLP_ACTION.AI_CLOUD_PROCESSING,
-            classification: recordClassification,
-            policy: dlp.policy,
-            options: { includeRestrictedContent },
-          });
-          if (recordDecision.decision === DLP_DECISION.ALLOW) return item;
-          return { ...item, reference: rangeToA1({ ...parsed, sheetName: "[REDACTED]" }) };
+
+          if (type === "table") {
+            const target = reference;
+            const tables = Array.isArray(params.workbook?.tables) ? params.workbook.tables : [];
+            for (const t of tables) {
+              throwIfAborted(signal);
+              if (!t || typeof t !== "object") continue;
+              if (t.name !== target) continue;
+              const sheetName = String(t.sheetName ?? "");
+              const rect = t.rect;
+              const range = rectToRange(rect);
+              const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
+              if (!range || !sheetId) continue;
+              const recordClassification = index
+                ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
+                : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+              const recordDecision = evaluatePolicy({
+                action: DLP_ACTION.AI_CLOUD_PROCESSING,
+                classification: recordClassification,
+                policy: dlp.policy,
+                options: { includeRestrictedContent },
+              });
+              if (recordDecision.decision !== DLP_DECISION.ALLOW) {
+                return { ...item, reference: "[REDACTED]" };
+              }
+              break;
+            }
+          }
+
+          return item;
         });
       })();
 

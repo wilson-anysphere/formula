@@ -981,6 +981,53 @@ test("buildWorkbookContext: range-level structured DLP REDACT also redacts non-h
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
 
+test("buildWorkbookContext: structured DLP REDACT also redacts non-heuristic table attachment references (no-op redactor)", async () => {
+  const workbook = {
+    id: "wb-dlp-structured-table-attachment",
+    sheets: [
+      {
+        name: "Sheet1",
+        cells: [[{ v: "Hello" }]],
+      },
+    ],
+    tables: [{ name: "TopSecret", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } }],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 0 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "hello",
+    topK: 0,
+    attachments: [{ type: "table", reference: "TopSecret" }],
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
 test("buildWorkbookContext: structured Restricted classifications can block when policy requires", async () => {
   const workbook = makeSensitiveWorkbook();
   workbook.sheets[0].cells[1][0].v = "TopSecret";
