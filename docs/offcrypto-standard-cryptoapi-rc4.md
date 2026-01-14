@@ -20,6 +20,12 @@ References:
 - **CryptoAPI algorithm IDs / `CALG_*` constants** (WinCrypt):  
   https://learn.microsoft.com/en-us/windows/win32/seccrypto/cryptographic-algorithm-identifiers
 
+Normative spec sections (MS-OFFCRYPTO) referenced by this doc:
+
+- **§2.3.4.4** — `\EncryptedPackage` stream layout (8-byte plaintext size prefix)
+- **§2.3.4.5** — `\EncryptionInfo` stream layout (Standard / CryptoAPI; `versionMinor == 2`)
+- **§2.3.4.7** — password hashing + key generation (fixed **50,000** iterations)
+
 ## Container and stream layout (what’s on disk)
 
 Password-encrypted OOXML workbooks are **not ZIP files on disk**, even if the extension is

@@ -1,3 +1,14 @@
+//! MS-OFFCRYPTO Standard / CryptoAPI RC4 `EncryptedPackage` decryptor.
+//!
+//! This module implements the **Standard Encryption (CryptoAPI)** RC4 variant used by
+//! password-to-open OOXML files stored inside an OLE/CFB container (`EncryptionInfo` +
+//! `EncryptedPackage` streams).
+//!
+//! See `docs/offcrypto-standard-cryptoapi-rc4.md` for a from-scratch writeup of:
+//! - `EncryptedPackage` stream framing (`u64le` plaintext size prefix + ciphertext),
+//! - RC4 re-keying every **0x200 bytes** (not the legacy BIFF8 RC4 0x400-byte interval), and
+//! - per-block key derivation (UTF-16LE password + 50,000 spin loop + `LE32(block)`).
+//!
 use std::io::{Read, Seek, SeekFrom};
 
 use md5::Md5;

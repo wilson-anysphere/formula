@@ -20,6 +20,83 @@ pub use workbook::{PivotCacheModel, PivotChartModel, SlicerModel, TimelineModel}
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
 
+/// Pivot layout style (Excel-like).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Layout {
+    #[default]
+    Compact,
+    Outline,
+    Tabular,
+}
+
+/// Where subtotals appear for a grouped field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtotalPosition {
+    #[default]
+    None,
+    Top,
+    Bottom,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Controls whether grand totals are produced for rows and/or columns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrandTotals {
+    #[serde(default = "default_true")]
+    pub rows: bool,
+    #[serde(default = "default_true")]
+    pub columns: bool,
+}
+
+impl Default for GrandTotals {
+    fn default() -> Self {
+        Self {
+            rows: true,
+            columns: true,
+        }
+    }
+}
+
+/// Configuration for a pivot table filter field.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterField {
+    pub source_field: String,
+    /// Allowed values. `None` means allow all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<HashSet<PivotKeyPart>>,
+}
+
+/// Canonical, serialization-friendly pivot table configuration.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotConfig {
+    #[serde(default)]
+    pub row_fields: Vec<PivotField>,
+    #[serde(default)]
+    pub column_fields: Vec<PivotField>,
+    #[serde(default)]
+    pub value_fields: Vec<ValueField>,
+    #[serde(default)]
+    pub filter_fields: Vec<FilterField>,
+    #[serde(default)]
+    pub calculated_fields: Vec<CalculatedField>,
+    #[serde(default)]
+    pub calculated_items: Vec<CalculatedItem>,
+    #[serde(default)]
+    pub layout: Layout,
+    #[serde(default)]
+    pub subtotals: SubtotalPosition,
+    #[serde(default)]
+    pub grand_totals: GrandTotals,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SortOrder {

@@ -397,12 +397,21 @@ impl CryptoapiRc4EncryptedPackageDecryptor {
 
 /// Decrypt an MS-OFFCRYPTO "Standard" (CryptoAPI) RC4 `EncryptedPackage` stream.
 ///
+/// Stream framing:
+/// - first 8 bytes: `orig_size` (`u64le`, plaintext size)
+/// - remaining bytes: ciphertext (RC4-encrypted package bytes)
+///
 /// Unlike AES-based `EncryptedPackage` encryption (0x1000-byte segments), the RC4 variant uses
-/// **0x200-byte blocks** and derives a fresh RC4 key for each block:
+/// **0x200-byte blocks** (note: this differs from BIFF8 `FILEPASS` RC4, which re-keys every 0x400 bytes)
+/// and derives a fresh RC4 key for each block:
+/// - `password_hash = SHA1(salt || UTF16LE(password))`
+/// - for `i in 0..50000`: `password_hash = SHA1(LE32(i) || password_hash)`
 /// - `h_i = SHA1(password_hash || LE32(i))`
 /// - If `key_len == 5` (40-bit): `rc4_key_i = h_i[0..5] || 0x00 * 11` (16 bytes total)
 /// - Otherwise: `rc4_key_i = h_i[0..key_len]`
 /// - RC4 is **reset** per block (do not carry keystream state across blocks).
+///
+/// See `docs/offcrypto-standard-cryptoapi-rc4.md` for additional notes and test vectors.
 pub fn decrypt_standard_cryptoapi_rc4_encrypted_package_stream(
     encrypted_package_stream: &[u8],
     password: &str,
