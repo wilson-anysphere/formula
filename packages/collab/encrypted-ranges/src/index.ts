@@ -285,7 +285,10 @@ export class EncryptedRangeManager {
   remove(id: string): void {
     const normalizedId = normalizeId(id);
 
-    this.normalizeEncryptedRangesForUndoScope();
+    // If the doc contains duplicate encryptedRanges entries (e.g. concurrent inserts),
+    // normalize before applying the tracked mutation. Prefer keeping the entry
+    // referenced by `normalizedId` so `remove()` reliably removes the intended range.
+    this.normalizeEncryptedRangesForUndoScope(normalizedId);
     this.transact(() => {
       const arr = getYArray(this.metadata.get(METADATA_KEY));
       if (!arr) return;
@@ -318,7 +321,10 @@ export class EncryptedRangeManager {
 
     const patchCreatedBy = patch.createdBy == null ? undefined : String(patch.createdBy).trim() || undefined;
 
-    this.normalizeEncryptedRangesForUndoScope();
+    // If the doc contains duplicate encryptedRanges entries (e.g. concurrent inserts),
+    // normalize before applying the tracked mutation. Prefer keeping the entry
+    // referenced by `normalizedId` so updates are never silently dropped.
+    this.normalizeEncryptedRangesForUndoScope(normalizedId);
     this.transact(() => {
       const arr = getYArray(this.metadata.get(METADATA_KEY));
       if (!arr) return;
@@ -385,7 +391,7 @@ export class EncryptedRangeManager {
    * UndoManager relies on `instanceof` checks, so we normalize in an *untracked*
    * transaction before applying user edits.
    */
-  private normalizeEncryptedRangesForUndoScope(): void {
+  private normalizeEncryptedRangesForUndoScope(preferId?: string): void {
     const existing = this.metadata.get(METADATA_KEY);
     if (existing == null) return;
 
@@ -487,17 +493,55 @@ export class EncryptedRangeManager {
       const current = this.metadata.get(METADATA_KEY);
       if (current == null) return;
 
-      const next = new Y.Array<Y.Map<unknown>>();
-
       /** @type {Set<string>} */
-      const signatures = new Set();
+      const ids = new Set<string>();
+      /** @type {Map<string, string>} */
+      const idBySignature = new Map<string, string>();
+      /** @type {Map<string, number>} */
+      const indexBySignature = new Map<string, number>();
+
+      // Build the normalized array in JS first. Some Yjs APIs warn when reading
+      // data from unintegrated types (e.g. `yarray.length`). Building in JS avoids
+      // that and keeps normalization noise-free.
+      /** @type {Array<Y.Map<unknown>>} */
+      const out: Array<Y.Map<unknown>> = [];
+
+      const tryPushParsed = (parsed: EncryptedRange) => {
+        // Enforce unique ids in the canonical schema.
+        if (ids.has(parsed.id)) return;
+        const sig = rangeSignature(parsed);
+
+        // Dedupe identical ranges (can happen after concurrent inserts). When
+        // `preferId` is provided (e.g. update/remove), prefer keeping that id so
+        // the caller's mutation is applied to a surviving entry.
+        const existingId = idBySignature.get(sig);
+        if (existingId) {
+          const preferred = preferId ? String(preferId).trim() : "";
+          if (!preferred) return;
+          if (existingId === preferred) return;
+          if (parsed.id !== preferred) return;
+
+          const idx = indexBySignature.get(sig);
+          if (idx == null) return;
+          // Replace the previously-kept entry with the preferred id.
+          ids.delete(existingId);
+          ids.add(parsed.id);
+          out[idx] = cloneRangeToLocal(parsed);
+          idBySignature.set(sig, parsed.id);
+          return;
+        }
+
+        ids.add(parsed.id);
+        const idx = out.length;
+        out.push(cloneRangeToLocal(parsed));
+        indexBySignature.set(sig, idx);
+        idBySignature.set(sig, parsed.id);
+      };
+
       const pushFrom = (value: unknown, fallbackId?: string) => {
         const parsed = yRangeToEncryptedRange(value, fallbackId);
         if (!parsed) return;
-        const sig = rangeSignature(parsed);
-        if (signatures.has(sig)) return;
-        signatures.add(sig);
-        next.push([cloneRangeToLocal(parsed)]);
+        tryPushParsed(parsed);
       };
 
       const arr = getYArray(current);
@@ -520,6 +564,8 @@ export class EncryptedRangeManager {
         }
       }
 
+      const next = new Y.Array<Y.Map<unknown>>();
+      if (out.length > 0) next.push(out);
       this.metadata.set(METADATA_KEY, next);
     });
   }

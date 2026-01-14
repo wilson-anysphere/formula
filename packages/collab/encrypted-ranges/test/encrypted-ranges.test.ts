@@ -414,6 +414,47 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(list[0]?.endCol).toBe(1);
   });
 
+  it("manager normalization keeps the mutated id when deduping identical ranges", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<Y.Map<unknown>>();
+
+    const r1 = new Y.Map<unknown>();
+    r1.set("id", "a");
+    r1.set("sheetId", "s1");
+    r1.set("startRow", 0);
+    r1.set("startCol", 0);
+    r1.set("endRow", 0);
+    r1.set("endCol", 0);
+    r1.set("keyId", "k1");
+
+    const r2 = new Y.Map<unknown>();
+    r2.set("id", "b");
+    // Identical range contents but different id.
+    r2.set("sheetId", "s1");
+    r2.set("startRow", 0);
+    r2.set("startCol", 0);
+    r2.set("endRow", 0);
+    r2.set("endCol", 0);
+    r2.set("keyId", "k1");
+
+    doc.transact(() => {
+      ranges.push([r1, r2]);
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const mgr = new EncryptedRangeManager({ doc });
+
+    // Mutating the second id should keep that id as the canonical survivor.
+    mgr.update("b", { endCol: 2 });
+
+    const list = mgr.list();
+    expect(list.map((r) => r.id)).toEqual(["b"]);
+    expect(list[0]?.endCol).toBe(2);
+  });
+
   it("policy helper prefers the most recently added encrypted range when overlaps exist", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
