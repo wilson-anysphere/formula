@@ -43,6 +43,17 @@ PASSWORD="$2"
 IN_PLAINTEXT_XLSX="$3"
 OUT_ENCRYPTED_XLSX="$4"
 
+if [[ "${MODE}" != "agile" && "${MODE}" != "standard" ]]; then
+  echo "ERROR: mode must be 'agile' or 'standard' (got: ${MODE})" >&2
+  usage
+  exit 2
+fi
+
+if [[ ! -f "${IN_PLAINTEXT_XLSX}" ]]; then
+  echo "ERROR: input plaintext xlsx not found: ${IN_PLAINTEXT_XLSX}" >&2
+  exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CACHE_DIR="${SCRIPT_DIR}/.cache"
 JARS_DIR="${CACHE_DIR}/jars"
