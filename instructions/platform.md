@@ -262,7 +262,8 @@ The scope check uses canonicalization to normalize paths and prevent symlink-bas
   - Measured by `python scripts/desktop_bundle_size_report.py` (scans `target/**/release/bundle` after `tauri build`).
   - CI gate (tagged releases) in `.github/workflows/release.yml`: **enforced by default**; override via GitHub Actions variables
     `FORMULA_ENFORCE_BUNDLE_SIZE=0` and/or `FORMULA_BUNDLE_SIZE_LIMIT_MB=50`.
-  - CI report (Linux PRs + main) in `.github/workflows/desktop-bundle-size.yml`: informational by default, with optional gating via
+  - CI report (Linux PRs + main) in `.github/workflows/desktop-bundle-size.yml` (workflow name: “Desktop installer artifact sizes”):
+    informational by default, with optional gating via
     `FORMULA_ENFORCE_BUNDLE_SIZE=1` and `FORMULA_BUNDLE_SIZE_LIMIT_MB=50`. Uploads a JSON report artifact for debugging.
 - **Frontend asset download size** (the WebView payload; built Vite `dist/`):
   - Measured by `node scripts/frontend_asset_size_report.mjs --dist apps/desktop/dist` (Brotli/gzip total of `dist/assets/**/*.{js,css,wasm}`).
