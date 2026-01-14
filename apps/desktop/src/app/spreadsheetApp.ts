@@ -1184,6 +1184,7 @@ export class SpreadsheetApp {
   private formulaRangePreviewTooltipVisible = false;
   private formulaRangePreviewTooltipLastKey: string | null = null;
   private formulaEditCell: { sheetId: string; cell: CellCoord } | null = null;
+  private keyboardRangeSelectionActive = false;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
   private referenceHighlights: Array<{ start: CellCoord; end: CellCoord; color: string; active: boolean }> = [];
   private referenceHighlightsSource: Array<{
@@ -3124,6 +3125,14 @@ export class SpreadsheetApp {
           referenceStyle: "A1",
         }
       );
+
+      // Excel-style range selection mode: while the formula bar is editing a formula, focus may
+      // temporarily move to the grid so keyboard navigation can select a range. When focus returns
+      // to the formula bar textarea, end any in-progress keyboard-driven pointing gesture so
+      // subsequent arrow keys behave like normal caret navigation.
+      this.formulaBar.textarea.addEventListener("focus", () => this.endKeyboardRangeSelection(), {
+        signal: this.domAbort.signal,
+      });
 
       // Provide workbook schema context (defined names + tables) to the spreadsheet-frontend
       // reference extractor so formula-bar range highlighting can resolve named ranges and
@@ -14683,12 +14692,14 @@ export class SpreadsheetApp {
     if (this.formulaBar?.isEditing() || this.formulaEditCell) {
       const primary = e.ctrlKey || e.metaKey;
       if (e.key === "Escape") {
+        this.endKeyboardRangeSelection();
         e.preventDefault();
         this.formulaBar?.cancelEdit();
         return;
       }
       // Match FormulaBarView: Enter commits, Alt+Enter inserts newline.
       if (e.key === "Enter" && !e.altKey) {
+        this.endKeyboardRangeSelection();
         e.preventDefault();
         this.formulaBar?.commitEdit("enter", e.shiftKey);
         return;
@@ -14696,6 +14707,7 @@ export class SpreadsheetApp {
       // Match FormulaBarView: Tab/Shift+Tab commits (and the app navigates selection). Prevent
       // browser focus traversal while editing, even if the grid temporarily has focus.
       if (e.key === "Tab") {
+        this.endKeyboardRangeSelection();
         e.preventDefault();
         this.formulaBar?.commitEdit("tab", e.shiftKey);
         return;
@@ -14711,6 +14723,7 @@ export class SpreadsheetApp {
         this.formulaBar &&
         this.formulaBar.textarea.value.trim().startsWith("=")
       ) {
+        this.endKeyboardRangeSelection();
         e.preventDefault();
         const textarea = this.formulaBar.textarea;
         const prevText = textarea.value;
@@ -14729,6 +14742,7 @@ export class SpreadsheetApp {
       // In range-selection mode, focus may temporarily move to the grid. Ensure deletion keys still
       // edit the formula bar text (and do not clear sheet contents).
       if ((e.key === "Backspace" || e.key === "Delete") && this.formulaBar) {
+        this.endKeyboardRangeSelection();
         e.preventDefault();
         const textarea = this.formulaBar.textarea;
         const current = textarea.value;
@@ -14772,6 +14786,7 @@ export class SpreadsheetApp {
         const key = e.key.toLowerCase();
 
         if (isUndoKeyboardEvent(e) || isRedoKeyboardEvent(e)) {
+          this.endKeyboardRangeSelection();
           e.preventDefault();
           this.formulaBar.focus();
           try {
@@ -14783,6 +14798,7 @@ export class SpreadsheetApp {
         }
 
         if (!e.shiftKey && key === "a") {
+          this.endKeyboardRangeSelection();
           e.preventDefault();
           this.formulaBar.focus();
           textarea.setSelectionRange(0, textarea.value.length);
@@ -14790,6 +14806,7 @@ export class SpreadsheetApp {
         }
 
         if (!e.shiftKey && (key === "c" || key === "x" || key === "v")) {
+          this.endKeyboardRangeSelection();
           e.preventDefault();
           this.formulaBar.focus();
           const command = key === "c" ? "copy" : key === "x" ? "cut" : "paste";
@@ -15099,6 +15116,7 @@ export class SpreadsheetApp {
       if (this.formulaBar?.isEditing() || this.formulaEditCell) {
         const bar = this.formulaBar;
         if (bar) {
+          this.endKeyboardRangeSelection();
           e.preventDefault();
           const textarea = bar.textarea;
           const current = textarea.value;
@@ -15136,12 +15154,40 @@ export class SpreadsheetApp {
 
     e.preventDefault();
     this.selection = next;
+
+    // Keyboard "point mode": while editing a formula in the formula bar, arrow-key navigation
+    // should update the formula draft by inserting/replacing a reference token that matches the
+    // current selection range.
+    if (
+      this.formulaBar?.isFormulaEditing() &&
+      !e.isComposing &&
+      (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight")
+    ) {
+      const r = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
+      if (r) {
+        const rangeSheetId = this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+        const rangeSheetName = rangeSheetId ? this.resolveSheetDisplayNameById(rangeSheetId) : undefined;
+        const a1Range = { start: { row: r.startRow, col: r.startCol }, end: { row: r.endRow, col: r.endCol } };
+        if (this.keyboardRangeSelectionActive) {
+          this.formulaBar.updateRangeSelection(a1Range, rangeSheetName);
+        } else {
+          this.formulaBar.beginRangeSelection(a1Range, rangeSheetName);
+          this.keyboardRangeSelectionActive = true;
+        }
+      }
+    }
     const didScroll = this.scrollCellIntoView(this.selection.active);
     if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
     else if (didScroll) this.ensureViewportMappingCurrent();
     this.renderSelection();
     this.updateStatus();
     if (didScroll) this.refresh("scroll");
+  }
+
+  private endKeyboardRangeSelection(): void {
+    if (!this.keyboardRangeSelectionActive) return;
+    this.keyboardRangeSelectionActive = false;
+    this.formulaBar?.endRangeSelection();
   }
 
   private handleInsertDateTimeShortcut(e: KeyboardEvent): boolean {
@@ -17431,6 +17477,7 @@ export class SpreadsheetApp {
   }
 
   private commitFormulaBar(text: string, commit: FormulaBarCommit): void {
+    this.endKeyboardRangeSelection();
     if (this.isReadOnly()) {
       this.cancelFormulaBar();
       return;
@@ -17478,6 +17525,7 @@ export class SpreadsheetApp {
   }
 
   private cancelFormulaBar(): void {
+    this.endKeyboardRangeSelection();
     const target = this.formulaEditCell;
     this.formulaEditCell = null;
     this.updateEditState();
