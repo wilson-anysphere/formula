@@ -859,6 +859,14 @@ export type CellValue =
   | { type: "blank" };
 ```
 
+WASM binding implementation note (important):
+
+- Several Rust structs below implement `Serialize`/`Deserialize` but do **not** use `#[serde(default)]` on optional-ish fields.
+  - If a WASM binding deserializes directly into the Rust type (e.g. `serde_wasm_bindgen::from_value::<GoalSeekParams>(...)`), **all fields must be present**.
+  - To provide a JS-friendly API with optional fields, define a small JS-facing DTO with `Option<T>` fields and map it into the Rust types using constructors:
+    - `GoalSeekParams::new(...)` + overwrite tuning fields when provided
+    - `SimulationConfig::new(iterations)` + fill `seed`, `histogram_bins`, etc.
+
 Error surface (host contract):
 
 - Rust functions return `Result<T, WhatIfError<_>>`. WASM bindings should throw a JS `Error` whose message is `WhatIfError::to_string()` (e.g. `"invalid parameters: iterations must be > 0"`).
