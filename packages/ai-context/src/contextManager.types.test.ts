@@ -52,6 +52,7 @@ type _WorkbookRetrievedShape = Assert<
   BuildWorkbookContextResult["retrieved"][number] extends RetrievedWorkbookChunk ? true : false
 >;
 type _WorkbookChunkMetadataNotAny = Assert<IsAny<WorkbookChunkMetadata> extends false ? true : false>;
+type _WorkbookChunkMetadataTextIsUndefined = Assert<WorkbookChunkMetadata["text"] extends undefined ? true : false>;
 type _WorkbookIndexStatsNotAny = Assert<IsAny<BuildWorkbookContextResult["indexStats"]> extends false ? true : false>;
 type _WorkbookIndexStatsShape = Assert<
   BuildWorkbookContextResult["indexStats"] extends WorkbookIndexStats | null ? true : false

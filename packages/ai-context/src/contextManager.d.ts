@@ -4,7 +4,12 @@ import type { RagIndex } from "./rag.js";
 import type { SheetSchema } from "./schema.js";
 import type { TokenEstimator } from "./tokenBudget.js";
 
-export type Attachment = { type: "range" | "formula" | "table" | "chart"; reference: string; data?: unknown };
+export type Attachment = {
+  type: "range" | "formula" | "table" | "chart";
+  reference: string;
+  data?: unknown;
+  [key: string]: unknown;
+};
 
 export interface ContextSheet {
   name: string;
@@ -161,6 +166,11 @@ export interface WorkbookChunkMetadata {
   kind?: string;
   title?: string;
   rect?: WorkbookRagRect;
+  /**
+   * ContextManager strips the raw chunk text stored in vector-store metadata before returning it.
+   * Use `RetrievedWorkbookChunk.text` instead.
+   */
+  text?: undefined;
   [key: string]: unknown;
 }
 
