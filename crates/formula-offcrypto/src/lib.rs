@@ -2965,7 +2965,7 @@ pub fn agile_secret_key_with_options(
             info.password_hash_algorithm,
         )?,
     };
-    let mut secret_key = aes_cbc_decrypt(&info.encrypted_key_value, &encryption_key[..], &iv)?;
+    let secret_key_full = aes_cbc_decrypt(&info.encrypted_key_value, &encryption_key[..], &iv)?;
 
     // The decrypted blob may include trailing zero padding; only the first `keyBits/8` bytes are
     // the actual package key.
@@ -2975,13 +2975,14 @@ pub fn agile_secret_key_with_options(
         });
     }
     let key_len = info.password_key_bits / 8;
-    if key_len == 0 || key_len > secret_key.len() {
+    if key_len == 0 || key_len > secret_key_full.len() {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "decrypted encryptedKeyValue shorter than keyBits/8",
         });
     }
-    secret_key.truncate(key_len);
-    Ok(secret_key)
+    // Copy into a right-sized buffer so we don't keep the full decrypted block (including any
+    // padding bytes) alive in the returned allocation's spare capacity.
+    Ok(Zeroizing::new(secret_key_full[..key_len].to_vec()))
 }
 
 /// Decrypt a Standard-encrypted OOXML package (e.g. `.docx`, `.xlsx`) from a raw OLE/CFB wrapper.
