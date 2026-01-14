@@ -4,8 +4,16 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../../extensions/commandRegistry";
+import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState";
+import { panelRegistry } from "../../panels/panelRegistry";
+import { registerDesktopCommands } from "../../commands/registerDesktopCommands";
+import { registerDataQueriesCommands } from "../../commands/registerDataQueriesCommands";
+import { registerFormatPainterCommand } from "../../commands/formatPainterCommand";
+import { registerRibbonMacroCommands } from "../../commands/registerRibbonMacroCommands";
 import { Ribbon } from "../Ribbon";
 import type { RibbonSchema } from "../ribbonSchema";
+import { defaultRibbonSchema } from "../ribbonSchema";
+import { COMMAND_REGISTRY_EXEMPT_IDS } from "../ribbonCommandRegistryDisabling";
 import { computeRibbonDisabledByIdFromCommandRegistry } from "../ribbonCommandRegistryDisabling";
 import { setRibbonUiState } from "../ribbonUiState";
 
@@ -24,6 +32,134 @@ afterEach(() => {
 });
 
 describe("CommandRegistry-backed ribbon disabling", () => {
+  function collectDefaultRibbonIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const tab of defaultRibbonSchema.tabs) {
+      for (const group of tab.groups) {
+        for (const button of group.buttons) {
+          ids.add(button.id);
+          for (const menuItem of button.menuItems ?? []) {
+            ids.add(menuItem.id);
+          }
+        }
+      }
+    }
+    return ids;
+  }
+
+  function createDesktopCommandRegistry(): CommandRegistry {
+    const commandRegistry = new CommandRegistry();
+
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+      // Some registered commands reference split APIs; keep them present so registrations
+      // don't drift when invoked from unit tests.
+      setSplitDirection(direction: string, ratio?: number) {
+        this.layout = {
+          ...this.layout,
+          splitView: {
+            ...(this.layout as any).splitView,
+            direction,
+            ratio: typeof ratio === "number" ? ratio : (this.layout as any)?.splitView?.ratio ?? 0.5,
+          },
+        };
+      },
+    } as any;
+
+    registerDesktopCommands({
+      commandRegistry,
+      app: {} as any,
+      layoutController,
+      themeController: { setThemePreference: () => {} } as any,
+      refreshRibbonUiState: () => {},
+      applyFormattingToSelection: () => {},
+      getActiveCellNumberFormat: () => null,
+      getActiveCellIndentLevel: () => 0,
+      openFormatCells: () => {},
+      showQuickPick: async () => null,
+      pageLayoutHandlers: {
+        openPageSetupDialog: () => {},
+        updatePageSetup: () => {},
+        setPrintArea: () => {},
+        clearPrintArea: () => {},
+        addToPrintArea: () => {},
+        exportPdf: () => {},
+      },
+      findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
+      workbenchFileHandlers: {
+        newWorkbook: () => {},
+        openWorkbook: () => {},
+        saveWorkbook: () => {},
+        saveWorkbookAs: () => {},
+        setAutoSaveEnabled: () => {},
+        print: () => {},
+        printPreview: () => {},
+        closeWorkbook: () => {},
+        quit: () => {},
+      },
+      openCommandPalette: () => {},
+    });
+
+    registerRibbonMacroCommands({
+      commandRegistry,
+      handlers: {
+        openPanel: () => {},
+        focusScriptEditorPanel: () => {},
+        focusVbaMigratePanel: () => {},
+        setPendingMacrosPanelFocus: () => {},
+        startMacroRecorder: () => {},
+        stopMacroRecorder: () => {},
+        isTauri: () => false,
+      },
+    });
+
+    registerFormatPainterCommand({
+      commandRegistry,
+      isArmed: () => false,
+      arm: () => {},
+      disarm: () => {},
+    });
+
+    registerDataQueriesCommands({
+      commandRegistry,
+      layoutController,
+      getPowerQueryService: () => null,
+      showToast: () => {},
+      notify: () => {},
+      refreshRibbonUiState: () => {},
+      focusAfterExecute: () => {},
+    });
+
+    return commandRegistry;
+  }
+
+  it("keeps the CommandRegistry exemption list in sync with the ribbon schema", () => {
+    const ribbonIds = collectDefaultRibbonIds();
+    const staleExemptions = [...COMMAND_REGISTRY_EXEMPT_IDS].filter((id) => !ribbonIds.has(id)).sort();
+    expect(
+      staleExemptions,
+      `Exemptions contain ids that are no longer present in defaultRibbonSchema:\n${staleExemptions.map((id) => `- ${id}`).join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("ensures CommandRegistry exemptions are truly non-registry ids (catches drift)", () => {
+    const commandRegistry = createDesktopCommandRegistry();
+    const implementedExemptions = [...COMMAND_REGISTRY_EXEMPT_IDS].filter((id) => commandRegistry.getCommand(id) != null).sort();
+    expect(
+      implementedExemptions,
+      [
+        "Exemptions contain ids that are now registered commands (please remove them from COMMAND_REGISTRY_EXEMPT_IDS):",
+        ...implementedExemptions.map((id) => `- ${id}`),
+      ].join("\n"),
+    ).toEqual([]);
+  });
+
   it("renders an unknown command id as disabled when the baseline override is applied", () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -124,15 +260,10 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                   ariaLabel: "Format Cells",
                   kind: "dropdown",
                   menuItems: [
-                    { id: "home.cells.format.formatCells", label: "Format Cells…", ariaLabel: "Format Cells" },
-                    { id: "home.cells.format.rowHeight", label: "Row Height…", ariaLabel: "Row Height" },
-                    { id: "home.cells.format.columnWidth", label: "Column Width…", ariaLabel: "Column Width" },
                     { id: "home.cells.format.organizeSheets", label: "Organize Sheets", ariaLabel: "Organize Sheets" },
                   ],
                 },
-                // Exempt command id to prove the exemption list keeps implemented ribbon-only
-                // actions enabled even when the CommandRegistry doesn't register them.
-                { id: "home.editing.fill.up", label: "Fill Up", ariaLabel: "Fill Up" },
+                { id: "home.editing.autoSum.average", label: "Average", ariaLabel: "Average" },
                 // Non-exempt id to prove the baseline is still working.
                 { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
               ],
@@ -167,9 +298,9 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     expect(trigger?.disabled).toBe(false);
 
-    const fillUp = container.querySelector<HTMLButtonElement>('[data-command-id="home.editing.fill.up"]');
-    expect(fillUp).toBeInstanceOf(HTMLButtonElement);
-    expect(fillUp?.disabled).toBe(false);
+    const average = container.querySelector<HTMLButtonElement>('[data-command-id="home.editing.autoSum.average"]');
+    expect(average).toBeInstanceOf(HTMLButtonElement);
+    expect(average?.disabled).toBe(false);
 
     const unknown = container.querySelector<HTMLButtonElement>('[data-command-id="totally.unknown"]');
     expect(unknown).toBeInstanceOf(HTMLButtonElement);
@@ -179,28 +310,15 @@ describe("CommandRegistry-backed ribbon disabling", () => {
       trigger?.click();
     });
 
-    const formatCells = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.formatCells"]');
-    const rowHeight = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.rowHeight"]');
-    const colWidth = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.columnWidth"]');
-    const organizeSheets = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.organizeSheets"]');
-    expect(formatCells).toBeInstanceOf(HTMLButtonElement);
-    expect(rowHeight).toBeInstanceOf(HTMLButtonElement);
-    expect(colWidth).toBeInstanceOf(HTMLButtonElement);
-    expect(organizeSheets).toBeInstanceOf(HTMLButtonElement);
-    expect(formatCells?.disabled).toBe(false);
-    expect(rowHeight?.disabled).toBe(false);
-    expect(colWidth?.disabled).toBe(false);
-    expect(organizeSheets?.disabled).toBe(false);
+    const organize = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.format.organizeSheets"]');
+    expect(organize).toBeInstanceOf(HTMLButtonElement);
+    expect(organize?.disabled).toBe(false);
 
     act(() => root.unmount());
   });
 
-  it("keeps implemented Home → Editing → Clear menu items enabled when commands are registered", () => {
-    const commandRegistry = new CommandRegistry();
-    commandRegistry.registerBuiltinCommand("format.clearAll", "Clear All", () => {});
-    commandRegistry.registerBuiltinCommand("format.clearFormats", "Clear Formats", () => {});
-    commandRegistry.registerBuiltinCommand("edit.clearContents", "Clear Contents", () => {});
-
+  it("disables unimplemented Clear dropdown menu items while keeping registered ones enabled", () => {
+    const commandRegistry = createDesktopCommandRegistry();
     const schema: RibbonSchema = {
       tabs: [
         {
@@ -208,7 +326,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
           label: "Home",
           groups: [
             {
-              id: "editing",
+              id: "home.editing",
               label: "Editing",
               buttons: [
                 {
@@ -233,12 +351,12 @@ describe("CommandRegistry-backed ribbon disabling", () => {
 
     const disabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry, { schema });
 
-    // Implemented commands should remain enabled because they are registered in CommandRegistry.
+    // These are canonical ids registered in the desktop CommandRegistry.
     expect(disabledById["format.clearAll"]).not.toBe(true);
     expect(disabledById["format.clearFormats"]).not.toBe(true);
     expect(disabledById["edit.clearContents"]).not.toBe(true);
 
-    // Unimplemented variants should remain disabled by default.
+    // These are not yet implemented, so they should remain disabled.
     expect(disabledById["home.editing.clear.clearComments"]).toBe(true);
     expect(disabledById["home.editing.clear.clearHyperlinks"]).toBe(true);
 

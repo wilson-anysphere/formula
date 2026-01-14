@@ -10,25 +10,27 @@ import { defaultRibbonSchema, type RibbonSchema } from "./ribbonSchema.js";
  * NOTE: Keep this list small and focused — prefer registering real commands in `CommandRegistry`
  * when possible so other UI surfaces (e.g. command palette / keybindings) stay consistent.
  */
-const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
-  // --- Desktop/file actions ----------------------------------------------------
-  "file.save.autoSave",
-  "file.new.new",
+export const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
+  // --- File tab / backstage actions --------------------------------------------
+  //
+  // File operations are routed through `RibbonActions.fileActions` and/or special-cased
+  // handling in `apps/desktop/src/main.ts` (they are not CommandRegistry ids).
   "file.new.blankWorkbook",
   "file.open.open",
   "file.save.save",
   "file.save.saveAs",
   "file.save.saveAs.copy",
   "file.save.saveAs.download",
+  "file.save.autoSave",
   "file.info.manageWorkbook.versions",
   "file.info.manageWorkbook.branches",
   "file.export.createPdf",
   "file.export.export.pdf",
-  "file.export.changeFileType.pdf",
   "file.export.export.csv",
+  "file.export.export.xlsx",
+  "file.export.changeFileType.pdf",
   "file.export.changeFileType.csv",
   "file.export.changeFileType.tsv",
-  "file.export.export.xlsx",
   "file.export.changeFileType.xlsx",
   "file.print.print",
   "file.print.printPreview",
@@ -37,64 +39,26 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "file.print.pageSetup.margins",
   "file.options.close",
 
-  // --- Clipboard --------------------------------------------------------------
-  "home.clipboard.cut",
-  "home.clipboard.copy",
-  "home.clipboard.formatPainter",
-  "home.clipboard.paste",
-  "home.clipboard.paste.default",
-  "home.clipboard.paste.values",
-  "home.clipboard.paste.formulas",
-  "home.clipboard.paste.formats",
-  "home.clipboard.paste.transpose",
-  "home.clipboard.pasteSpecial",
-  "home.clipboard.pasteSpecial.dialog",
-  "home.clipboard.pasteSpecial.values",
-  "home.clipboard.pasteSpecial.formulas",
-  "home.clipboard.pasteSpecial.formats",
-  "home.clipboard.pasteSpecial.transpose",
+  // --- Ribbon-only handlers (not CommandRegistry yet) --------------------------
+  //
+  // These ids currently dispatch through `onUnknownCommand` / ribbon overrides in the
+  // desktop shell. If/when they become real commands, remove them from this list.
 
-  // --- Formatting (top-level controls) ---------------------------------------
-  "home.font.bold",
-  "home.font.italic",
-  "home.font.underline",
-  "home.font.strikethrough",
-  "home.font.fontName",
-  "home.font.fontSize",
-  "home.font.fontColor",
-  "home.font.fillColor",
-  "home.font.borders",
-  "home.font.clearFormatting",
-  "home.alignment.wrapText",
-  "home.alignment.alignLeft",
-  "home.alignment.center",
-  "home.alignment.alignRight",
-  "home.alignment.topAlign",
-  "home.alignment.middleAlign",
-  "home.alignment.bottomAlign",
-  "home.alignment.increaseIndent",
-  "home.alignment.decreaseIndent",
-  "home.alignment.orientation.angleCounterclockwise",
-  "home.alignment.orientation.angleClockwise",
-  "home.alignment.orientation.verticalText",
-  "home.alignment.orientation.rotateUp",
-  "home.alignment.orientation.rotateDown",
-  "home.alignment.orientation.formatCellAlignment",
-  // Merge commands are routed via the ribbon fallback handler in main.ts (not CommandRegistry yet).
-  "home.alignment.mergeCenter",
+  // Home → Alignment → Merge & Center.
   "home.alignment.mergeCenter.mergeCenter",
   "home.alignment.mergeCenter.mergeAcross",
   "home.alignment.mergeCenter.mergeCells",
   "home.alignment.mergeCenter.unmergeCells",
+
+  // Home → Number → More Formats.
   "home.number.moreFormats.custom",
-  "home.cells.format.formatCells",
-  "home.cells.format.rowHeight",
-  "home.cells.format.columnWidth",
+
+  // Home → Cells → Format.
   "home.cells.format.organizeSheets",
-  // Insert/delete cells (not whole sheets). Handled directly by `main.ts` via a dialog-style quick pick.
+
+  // Home → Cells (structural edits).
   "home.cells.insert.insertCells",
   "home.cells.delete.deleteCells",
-  // Structural sheet row/col/sheet operations are handled directly by `main.ts` (not CommandRegistry).
   "home.cells.insert.insertSheetRows",
   "home.cells.insert.insertSheetColumns",
   "home.cells.insert.insertSheet",
@@ -102,10 +66,7 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.cells.delete.deleteSheetColumns",
   "home.cells.delete.deleteSheet",
 
-  // --- Home editing -----------------------------------------------------------
-  // Legacy AutoSum trigger/menu ids (current schema uses `edit.autoSum`).
-  "home.editing.autoSum",
-  "home.editing.autoSum.sum",
+  // Home → Editing.
   "home.editing.autoSum.average",
   "home.editing.autoSum.countNumbers",
   "home.editing.autoSum.max",
@@ -113,85 +74,50 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.editing.fill.up",
   "home.editing.fill.left",
   "home.editing.fill.series",
-  // Find & Select dropdown menu items are canonical commands; keep these legacy ids enabled in case
-  // older ribbon schemas emit them (the current schema uses `edit.find` / `edit.replace` / `navigation.goTo`).
-  "home.editing.findSelect.find",
-  "home.editing.findSelect.replace",
-  "home.editing.findSelect.goTo",
+  "home.editing.sortFilter.customSort",
   "home.editing.sortFilter.filter",
   "home.editing.sortFilter.clear",
   "home.editing.sortFilter.reapply",
 
-  // --- Sort / filter (ribbon MVP) ---------------------------------------------
+  // Data → Sort & Filter.
+  "data.sortFilter.sort.customSort",
   "data.sortFilter.filter",
   "data.sortFilter.clear",
   "data.sortFilter.reapply",
   "data.sortFilter.advanced.clearFilter",
 
-  // Home → Editing → Clear dropdown is intentionally handled in the desktop shell (routed to the
-  // existing `format.clear*` implementations). Keep these ids enabled so the ribbon does not
-  // fall back to the default "Ribbon: …" toast/no-op behavior.
-  "home.editing.clear.clearAll",
-  "home.editing.clear.clearFormats",
-  "home.editing.clear.clearContents",
-
-  // Sort/filter (ribbon-only handlers / partially implemented).
-  "home.editing.sortFilter.sortAtoZ",
-  "home.editing.sortFilter.sortZtoA",
-  "home.editing.sortFilter.customSort",
-  // Data → Sort & Filter (same implementations as Home tab).
-  "data.sortFilter.sortAtoZ",
-  "data.sortFilter.sortZtoA",
-  "data.sortFilter.sort.customSort",
-  "data.sortFilter.sort.sortAtoZ",
-  "data.sortFilter.sort.sortZtoA",
-
-  // --- Home → Styles ----------------------------------------------------------
-  // Cell Styles are currently handled via `main.ts` (not CommandRegistry yet). Only the
-  // Good/Bad/Neutral submenu is implemented today; the remaining menus show a placeholder toast.
+  // Home → Styles.
+  "home.styles.formatAsTable.light",
+  "home.styles.formatAsTable.medium",
+  "home.styles.formatAsTable.dark",
+  "home.styles.formatAsTable.newStyle",
   "home.styles.cellStyles.goodBadNeutral",
   "home.styles.cellStyles.dataModel",
   "home.styles.cellStyles.titlesHeadings",
   "home.styles.cellStyles.numberFormat",
   "home.styles.cellStyles.newStyle",
-  "home.styles.formatAsTable",
-  "home.styles.formatAsTable.light",
-  "home.styles.formatAsTable.medium",
-  "home.styles.formatAsTable.dark",
-  "home.styles.formatAsTable.newStyle",
 
-  // --- Comments ---------------------------------------------------------------
-  "review.comments.newComment",
-  "review.comments.showComments",
-
-  // --- Formula auditing -------------------------------------------------------
-  "formulas.formulaAuditing.tracePrecedents",
-  "formulas.formulaAuditing.traceDependents",
-  "formulas.formulaAuditing.removeArrows",
-
-  // --- What-If Analysis / Solver ---------------------------------------------
+  // Data → Forecast / What-If Analysis.
   "data.forecast.whatIfAnalysis.scenarioManager",
   "data.forecast.whatIfAnalysis.goalSeek",
   "data.forecast.whatIfAnalysis.monteCarlo",
+
+  // Formulas → Solutions.
   "formulas.solutions.solver",
 
-  // --- Insert pictures --------------------------------------------------------
-  // Insert → Pictures menu items are routed via `handleInsertPicturesRibbonCommand` in main.ts.
-  "insert.illustrations.pictures",
+  // Insert → Pictures.
   "insert.illustrations.pictures.thisDevice",
   "insert.illustrations.pictures.stockImages",
   "insert.illustrations.pictures.onlinePictures",
   "insert.illustrations.onlinePictures",
-
-  // --- View -------------------------------------------------------------------
-  "view.appearance.theme.system",
-  "view.appearance.theme.light",
-  "view.appearance.theme.dark",
-  "view.appearance.theme.highContrast",
 ]);
 
+function isExemptViaPattern(_commandId: string): boolean {
+  return false;
+}
+
 function defaultIsExemptFromCommandRegistry(commandId: string): boolean {
-  return COMMAND_REGISTRY_EXEMPT_IDS.has(commandId);
+  return COMMAND_REGISTRY_EXEMPT_IDS.has(commandId) || isExemptViaPattern(commandId);
 }
 
 function isRegistered(commandRegistry: CommandRegistry, commandId: string): boolean {
