@@ -1182,6 +1182,8 @@ Each tagged release includes a `SHA256SUMS.txt` asset. To verify a download:
 Also verify **cross-origin isolation** is enabled in the packaged app (required for `SharedArrayBuffer` and the Pyodide Worker backend):
 
 - From source (recommended preflight): `pnpm -C apps/desktop check:coi`
+  - If you already ran a Tauri build (for example `cargo tauri build` / `tauri-action`), you can reuse the built artifacts:
+    `pnpm -C apps/desktop check:coi -- --no-build`
 - Or in an installed build: ensure there is no startup toast complaining about missing cross-origin isolation, and (if you have DevTools)
    confirm `globalThis.crossOriginIsolated === true`.
 

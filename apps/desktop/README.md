@@ -299,6 +299,19 @@ pnpm -C apps/desktop check:coi
 This builds the production frontend + a release desktop binary and launches it in a special mode that exits with
 success/failure after evaluating `globalThis.crossOriginIsolated`, `SharedArrayBuffer`, and basic Worker support inside the WebView.
 
+If you already built the app (for example via `cargo tauri build` / `tauri-action`), you can skip rebuilding and run the check against
+the existing artifacts:
+
+```bash
+pnpm -C apps/desktop check:coi -- --no-build
+```
+
+Optional: override the binary path explicitly (useful when multiple `target/**/release` outputs exist):
+
+```bash
+pnpm -C apps/desktop check:coi -- --no-build --bin <path-to-formula-desktop>
+```
+
 CI note: tagged desktop releases run this check on macOS/Windows/Linux before uploading artifacts. To temporarily skip the
 check on macOS/Windows (while keeping the Linux signal), set the GitHub Actions variable
 `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`).
