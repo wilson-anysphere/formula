@@ -32,7 +32,19 @@ const REQUIRED_SCHEME = "formula";
 // Keep this list stable and explicit so CI fails if we accidentally drop
 // associations from `bundle.fileAssociations` (packaging regressions are
 // high-impact for end-user UX).
-const REQUIRED_FILE_EXTS = ["xlsx", "csv", "parquet"];
+const REQUIRED_FILE_EXTS = [
+  "xlsx",
+  "xls",
+  "xlt",
+  "xla",
+  "xlsm",
+  "xltx",
+  "xltm",
+  "xlam",
+  "xlsb",
+  "csv",
+  "parquet",
+];
 
 /**
  * @param {string} value
@@ -394,6 +406,14 @@ function main() {
     // If these drift, the `.desktop` (Linux) and file manager resolution may no longer line up.
     const expectedMimeByExt = {
       xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      xls: "application/vnd.ms-excel",
+      xlt: "application/vnd.ms-excel",
+      xla: "application/vnd.ms-excel",
+      xlsm: "application/vnd.ms-excel.sheet.macroenabled.12",
+      xltx: "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+      xltm: "application/vnd.ms-excel.template.macroenabled.12",
+      xlam: "application/vnd.ms-excel.addin.macroenabled.12",
+      xlsb: "application/vnd.ms-excel.sheet.binary.macroenabled.12",
       csv: "text/csv",
       parquet: "application/vnd.apache.parquet",
     };

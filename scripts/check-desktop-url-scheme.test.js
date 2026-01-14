@@ -9,6 +9,19 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const scriptPath = path.join(repoRoot, "scripts", "check-desktop-url-scheme.mjs");
 
 const defaultIdentifier = "app.formula.desktop";
+const requiredFileExtensions = [
+  "xlsx",
+  "xls",
+  "xlt",
+  "xla",
+  "xlsm",
+  "xltx",
+  "xltm",
+  "xlam",
+  "xlsb",
+  "csv",
+  "parquet",
+];
 
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
@@ -76,13 +89,21 @@ function runWithConfigAndPlist(config, plistContents) {
   return proc;
 }
 
-function basePlistWithFormulaScheme(fileExtensions = ["xlsx", "csv", "parquet"]) {
+function basePlistWithFormulaScheme(fileExtensions = requiredFileExtensions) {
   const extsXml = fileExtensions.map((ext) => `        <string>${ext}</string>`).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n${extsXml}\n      </array>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
 }
 
 const defaultFileAssociations = [
   { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+  { ext: ["xls"], mimeType: "application/vnd.ms-excel" },
+  { ext: ["xlt"], mimeType: "application/vnd.ms-excel" },
+  { ext: ["xla"], mimeType: "application/vnd.ms-excel" },
+  { ext: ["xlsm"], mimeType: "application/vnd.ms-excel.sheet.macroEnabled.12" },
+  { ext: ["xltx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.template" },
+  { ext: ["xltm"], mimeType: "application/vnd.ms-excel.template.macroEnabled.12" },
+  { ext: ["xlam"], mimeType: "application/vnd.ms-excel.addin.macroEnabled.12" },
+  { ext: ["xlsb"], mimeType: "application/vnd.ms-excel.sheet.binary.macroEnabled.12" },
   { ext: ["csv"], mimeType: "text/csv" },
   { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
 ];
@@ -119,15 +140,9 @@ function baseConfig({ fileAssociations } = {}) {
   };
 }
 
-test("passes when bundle.fileAssociations includes .xlsx and all entries have mimeType", () => {
-  const config = baseConfig({
-    fileAssociations: [
-      { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-      { ext: ["csv"], mimeType: "text/csv" },
-      { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
-    ],
-  });
-  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme(["xlsx", "csv", "parquet"]));
+test("passes when bundle.fileAssociations includes required extensions and all entries have mimeType", () => {
+  const config = baseConfig();
+  const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /preflight passed/i);
 });
@@ -254,13 +269,10 @@ test("fails when tauri.conf.json deep-link schemes do not include formula", () =
 });
 
 test("fails when .xlsx association is missing a mimeType entry", () => {
-  const config = baseConfig({
-    fileAssociations: [
-      { ext: ["xlsx"] },
-      { ext: ["csv"], mimeType: "text/csv" },
-      { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
-    ],
-  });
+  const fileAssociations = cloneJson(defaultFileAssociations);
+  // Remove mimeType for the required .xlsx association.
+  fileAssociations[0] = { ext: ["xlsx"] };
+  const config = baseConfig({ fileAssociations });
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /Missing Linux mimeType fields/i);
@@ -268,13 +280,11 @@ test("fails when .xlsx association is missing a mimeType entry", () => {
 });
 
 test("fails when Parquet association uses an unexpected mimeType", () => {
-  const config = baseConfig({
-    fileAssociations: [
-      { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-      { ext: ["csv"], mimeType: "text/csv" },
-      { ext: ["parquet"], mimeType: "application/x-parquet" },
-    ],
-  });
+  const fileAssociations = cloneJson(defaultFileAssociations);
+  const parquet = fileAssociations.find((assoc) => Array.isArray(assoc?.ext) && assoc.ext.includes("parquet"));
+  if (!parquet) throw new Error("expected defaultFileAssociations to include parquet");
+  parquet.mimeType = "application/x-parquet";
+  const config = baseConfig({ fileAssociations });
   const proc = runWithConfigAndPlist(config, basePlistWithFormulaScheme());
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /mimeType mismatch/i);
@@ -301,14 +311,46 @@ test("fails when macOS Info.plist CFBundleDocumentTypes does not include xlsx", 
 });
 
 test("fails when xlsx appears only in UT*TypeDeclarations (not CFBundleDocumentTypes)", () => {
-  const config = baseConfig({
-    fileAssociations: [
-      { ext: ["xlsx"], mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-      { ext: ["csv"], mimeType: "text/csv" },
-      { ext: ["parquet"], mimeType: "application/vnd.apache.parquet" },
-    ],
-  });
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleURLTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleURLSchemes</key>\n      <array>\n        <string>formula</string>\n      </array>\n    </dict>\n  </array>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>txt</string>\n      </array>\n    </dict>\n  </array>\n  <key>UTExportedTypeDeclarations</key>\n  <array>\n    <dict>\n      <key>UTTypeTagSpecification</key>\n      <dict>\n        <key>public.filename-extension</key>\n        <array>\n          <string>xlsx</string>\n        </array>\n      </dict>\n    </dict>\n  </array>\n</dict>\n</plist>\n`;
+  const config = baseConfig();
+  const docTypeExts = requiredFileExtensions.filter((ext) => ext !== "xlsx");
+  const extsXml = docTypeExts.map((ext) => `        <string>${ext}</string>`).join("\n");
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>formula</string>
+      </array>
+    </dict>
+  </array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+${extsXml}
+      </array>
+    </dict>
+  </array>
+  <key>UTImportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>xlsx</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>
+`;
 
   const proc = runWithConfigAndPlist(config, plist);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
