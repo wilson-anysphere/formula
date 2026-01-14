@@ -61,7 +61,7 @@ The CI workflow runs a single entrypoint script:
 ```
 
 Prerequisites:
-- Rust toolchain pinned by `rust-toolchain.toml` with clippy (`rustup component add clippy`)
+- Rust toolchain pinned by `rust-toolchain.toml` (includes `clippy` + `rustfmt` components)
 - `cargo-audit` (`bash scripts/cargo_agent.sh install cargo-audit --locked`)
 - Node + pnpm (via Corepack)
 - `gitleaks` (install from https://github.com/gitleaks/gitleaks)
