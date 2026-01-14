@@ -46,12 +46,21 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.setSelectionRange(4, 4);
     view.textarea.dispatchEvent(new Event("input"));
 
-    // The handler will throw (synchronously) after it updates internal state.
-    try {
-      view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
-    } catch {
-      // expected
-    }
+    // In browsers, exceptions thrown inside event listeners are reported as window "error"
+    // events rather than being rethrown from `dispatchEvent`. Capture + suppress it so Vitest
+    // doesn't treat it as an unhandled exception, while still asserting the view updated its
+    // internal state before calling the callback.
+    const onWindowError = vi.fn((event: ErrorEvent) => {
+      event.preventDefault();
+    });
+    window.addEventListener("error", onWindowError);
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    window.removeEventListener("error", onWindowError);
+
+    expect(onWindowError).toHaveBeenCalledTimes(1);
+    const err = onWindowError.mock.calls[0]?.[0]?.error;
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe("commit failure");
 
     expect(view.model.isEditing).toBe(false);
     expect(view.model.activeCell.input).toBe("boom");
