@@ -4,6 +4,10 @@ use formula_dax::{
 };
 
 fn build_model() -> DataModel {
+    build_model_with_relationship_active(true)
+}
+
+fn build_model_with_relationship_active(is_active: bool) -> DataModel {
     let mut model = DataModel::new();
 
     let mut customers = Table::new("Customers", vec!["CustomerId", "Name", "Region"]);
@@ -43,7 +47,7 @@ fn build_model() -> DataModel {
             to_column: "CUSTOMERID".into(),
             cardinality: Cardinality::OneToMany,
             cross_filter_direction: CrossFilterDirection::Single,
-            is_active: true,
+            is_active,
             enforce_referential_integrity: true,
         })
         .unwrap();
@@ -179,4 +183,32 @@ fn dax_engine_resolves_mixed_case_table_and_column_refs() {
         )
         .unwrap();
     assert_eq!(value, Value::from(43.0));
+}
+
+#[test]
+fn userelationship_resolves_relationship_case_insensitively() {
+    // Start with an inactive relationship, so USERELATIONSHIP is required for propagation.
+    let mut model = build_model_with_relationship_active(false);
+
+    model.add_measure(
+        "Orders East (inactive)",
+        "CALCULATE(SUM(orders[amount]), customers[REGION] = \"East\")",
+    )
+    .unwrap();
+
+    model.add_measure(
+        "Orders East (userelationship)",
+        "CALCULATE(SUM(orders[amount]), USERELATIONSHIP(orders[customerid], CUSTOMERS[CUSTOMERID]), customers[REGION] = \"East\")",
+    )
+    .unwrap();
+
+    let no_rel = model
+        .evaluate_measure("orders east (inactive)", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(no_rel, Value::from(43.0));
+
+    let with_rel = model
+        .evaluate_measure("ORDERS EAST (USERELATIONSHIP)", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(with_rel, Value::from(38.0));
 }
