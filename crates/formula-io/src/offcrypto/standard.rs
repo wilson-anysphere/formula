@@ -391,6 +391,12 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OffcryptoEr
             key_size_bits: key_size_raw,
         });
     }
+    // Standard/CryptoAPI RC4 is only specified for 40/56/128-bit keys.
+    if alg_id == CALG_RC4 && !matches!(key_size, 40 | 56 | 128) {
+        return Err(OffcryptoError::InvalidKeySize {
+            key_size_bits: key_size_raw,
+        });
+    }
     let provider_type = r.read_u32_le("EncryptionHeader.providerType")?;
     let reserved1 = r.read_u32_le("EncryptionHeader.reserved1")?;
     let reserved2 = r.read_u32_le("EncryptionHeader.reserved2")?;
@@ -1379,8 +1385,10 @@ mod tests {
             let verifier_hash = hash(alg_id_hash, &[&verifier]).expect("hash verifier");
             assert_eq!(verifier_hash.len(), expected_hash_len);
 
-            for key_size in [40u32, 56u32, 128u32] {
-                let key_len = (key_size / 8) as usize;
+            for key_size in [0u32, 40u32, 56u32, 128u32] {
+                // MS-OFFCRYPTO specifies `keySize=0` MUST be interpreted as 40-bit for RC4.
+                let effective_key_size = if key_size == 0 { 40 } else { key_size };
+                let key_len = (effective_key_size / 8) as usize;
 
                 let header = EncryptionHeader {
                     flags: EncryptionHeaderFlags::from_raw(EncryptionHeaderFlags::F_CRYPTOAPI),
@@ -1410,7 +1418,7 @@ mod tests {
                 assert_eq!(
                     key.len(),
                     if key_len == 5 { 16 } else { key_len },
-                    "key_size={key_size} bits"
+                    "key_size={key_size} bits (effective={effective_key_size})"
                 );
                 assert!(
                     key.len() <= expected_hash_len,
