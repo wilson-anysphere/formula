@@ -144,6 +144,8 @@ arg_list    = expression ("," expression)* ;
 External workbook references like `=[Book.xlsx]Sheet1!A1` are resolved through the host-provided
 [`ExternalValueProvider`](../crates/formula-engine/src/engine.rs) trait.
 
+If no `ExternalValueProvider` is configured, all external workbook references evaluate to `#REF!`.
+
 The engine passes a **sheet key** string to `ExternalValueProvider::get(sheet, addr)`:
 
 * **Internal sheet access** (same workbook): `sheet` is the plain worksheet name, e.g. `"Sheet1"`.

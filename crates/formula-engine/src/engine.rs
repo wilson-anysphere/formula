@@ -9765,6 +9765,8 @@ fn rewrite_defined_name_constants_for_bytecode(
 ///   cell is not present in the engine's internal sheet storage, the engine will query the
 ///   provider using the local sheet display name (e.g. `"Sheet1"`).
 ///
+/// If no provider is configured, external workbook references evaluate to `#REF!`.
+///
 /// # External sheet key format
 ///
 /// For external workbook references, the engine passes a canonical **external sheet key** as the
