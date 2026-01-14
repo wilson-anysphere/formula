@@ -1126,11 +1126,11 @@ impl DataModel {
                 .get(&from_table_key)
                 .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.from_table.clone()))?;
             match unmatched {
-                UnmatchedFactRows::Sparse(_) => {
+                UnmatchedFactRows::Sparse(rows) => {
                     // When the unmatched set is sparse, scanning it is cheaper than finding all
                     // matches and removing them.
                     let key = &key_for_updates;
-                    unmatched.retain(|row| {
+                    rows.retain(|row| {
                         let v = from_table_ref
                             .value_by_idx(*row, from_idx)
                             .unwrap_or(Value::Blank);

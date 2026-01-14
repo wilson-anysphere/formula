@@ -2631,41 +2631,41 @@ impl DaxEngine {
                 //   Orders[Amount] > 10 && Orders[Amount] < 20
                 //   NOT(Orders[Amount] > 10)
                 // These are treated like table filters against the one referenced table.
-                Expr::BinaryOp {
-                    op: BinaryOp::And | BinaryOp::Or,
-                    ..
-                } => apply_boolean_filter_expr(
-                    engine,
-                    model,
-                    arg,
-                    eval_filter,
-                    row_ctx,
-                    env,
-                    keep_filters,
-                    clear_columns,
-                    row_filters,
-                ),
-                Expr::Call { name, .. }
-                    if name.eq_ignore_ascii_case("NOT")
-                        || name.eq_ignore_ascii_case("AND")
-                        || name.eq_ignore_ascii_case("OR") =>
-                {
-                    apply_boolean_filter_expr(
-                        engine,
-                        model,
-                        arg,
-                        eval_filter,
-                        row_ctx,
-                        env,
-                        keep_filters,
-                        clear_columns,
-                        row_filters,
-                    )
-                }
-                Expr::BinaryOp { op, left, right } => {
-                    let Expr::ColumnRef { table, column } = left.as_ref() else {
-                        return Err(DaxError::Eval(
-                            "CALCULATE filter must be a column comparison".into(),
+                 Expr::BinaryOp {
+                     op: BinaryOp::And | BinaryOp::Or,
+                     ..
+                 } => apply_boolean_filter_expr(
+                     engine,
+                     model,
+                     arg,
+                     eval_filter,
+                     row_ctx,
+                     env,
+                     keep_filters,
+                     clear_columns,
+                     row_filters,
+                 ),
+                 Expr::Call { name, .. }
+                     if name.eq_ignore_ascii_case("NOT")
+                         || name.eq_ignore_ascii_case("AND")
+                         || name.eq_ignore_ascii_case("OR") =>
+                 {
+                     apply_boolean_filter_expr(
+                         engine,
+                         model,
+                         arg,
+                         eval_filter,
+                         row_ctx,
+                         env,
+                         keep_filters,
+                         clear_columns,
+                         row_filters,
+                     )
+                 }
+                 Expr::BinaryOp { op, left, right } => {
+                     let Expr::ColumnRef { table, column } = left.as_ref() else {
+                         return Err(DaxError::Eval(
+                             "CALCULATE filter must be a column comparison".into(),
                         ));
                     };
 
