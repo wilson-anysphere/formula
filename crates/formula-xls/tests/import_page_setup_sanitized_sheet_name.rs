@@ -25,6 +25,10 @@ fn imports_page_setup_for_sanitized_sheet_name() {
         "expected sanitized sheet name `Bad_Name`; sheets={:?}",
         workbook.sheets.iter().map(|s| &s.name).collect::<Vec<_>>()
     );
+    assert!(
+        workbook.sheet_by_name("Bad:Name").is_none(),
+        "did not expect the invalid BIFF sheet name `Bad:Name` to be preserved"
+    );
 
     let settings = workbook.sheet_print_settings_by_name("Bad_Name");
     assert_eq!(
