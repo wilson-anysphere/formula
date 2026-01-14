@@ -2,6 +2,30 @@ use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
 
+use formula_engine::eval::CompiledExpr;
+use formula_engine::functions::{
+    ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
+};
+
+fn recalc_tick_test(ctx: &dyn FunctionContext, _args: &[CompiledExpr]) -> Value {
+    // Use only 53 bits so the f64 conversion is exact and comparisons remain deterministic.
+    Value::Number((ctx.volatile_rand_u64() >> 11) as f64)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "RECALC_TICK_TEST",
+        min_args: 0,
+        max_args: 0,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[],
+        implementation: recalc_tick_test,
+    }
+}
+
 #[test]
 fn cell_address_row_and_col() {
     let mut sheet = TestSheet::new();
@@ -207,4 +231,53 @@ fn cell_address_quotes_sheet_names_when_needed() {
         engine.get_cell_value("Sheet1", "B3"),
         Value::Text("'O''Brien'!$A$1".to_string())
     );
+}
+
+#[test]
+fn nonvolatile_formulas_are_not_recalculated_when_nothing_is_dirty() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RECALC_TICK_TEST()")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    let first = engine.get_cell_value("Sheet1", "A1");
+
+    // With no dirty cells and no volatile inputs, the engine should short-circuit and keep the
+    // previously computed value.
+    engine.recalculate_single_threaded();
+    let second = engine.get_cell_value("Sheet1", "A1");
+
+    assert_eq!(first, second);
+}
+
+#[test]
+fn cell_and_info_make_formulas_recalculate_each_tick() {
+    use formula_engine::Engine;
+
+    // CELL(...) should put the formula into the volatile closure, causing it to be evaluated on
+    // each recalc tick even when nothing is dirty.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=RECALC_TICK_TEST()+0*CELL(\"row\",A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    let first = engine.get_cell_value("Sheet1", "B1");
+    engine.recalculate_single_threaded();
+    let second = engine.get_cell_value("Sheet1", "B1");
+    assert_ne!(first, second);
+
+    // INFO(...) should also be treated as volatile for Excel compatibility.
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RECALC_TICK_TEST()+0*INFO(\"numfile\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    let first = engine.get_cell_value("Sheet1", "A1");
+    engine.recalculate_single_threaded();
+    let second = engine.get_cell_value("Sheet1", "A1");
+    assert_ne!(first, second);
 }
