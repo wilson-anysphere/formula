@@ -473,6 +473,51 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     }
   });
 
+  it("re-renders the selection canvas when selecting a drawing via selectDrawingById (legacy grid)", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+      const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: false });
+
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: "1",
+          kind: { type: "shape" },
+          anchor: {
+            type: "oneCell",
+            from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+            size: { cx: pxToEmu(100), cy: pxToEmu(50) },
+          },
+          zOrder: 0,
+        },
+      ]);
+
+      const renderSelectionSpy = vi.spyOn(app as any, "renderSelection");
+      renderSelectionSpy.mockClear();
+
+      app.selectDrawingById(1);
+
+      expect(app.getSelectedDrawingId()).toBe(1);
+      // In legacy mode, selection chrome is drawn on the selection canvas, so the drawing overlay stays unselected.
+      expect(((app as any).drawingOverlay as any).selectedId).toBe(null);
+      expect(renderSelectionSpy).toHaveBeenCalled();
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("renders rotated drawing selections in the selection canvas layer", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";

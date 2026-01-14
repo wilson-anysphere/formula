@@ -7199,6 +7199,7 @@ export class SpreadsheetApp {
     }
 
     // Clear selection if it pointed at the deleted object.
+    const clearedSelection = this.selectedDrawingId === drawingId;
     if (this.selectedDrawingId === drawingId) {
       this.selectedDrawingId = null;
       this.drawingOverlay.setSelectedId(null);
@@ -7209,6 +7210,12 @@ export class SpreadsheetApp {
     this.invalidateDrawingHitTestIndexCaches();
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
     this.dispatchDrawingsChanged();
+    // In legacy grid mode (without the dedicated interaction controller), drawing selection handles
+    // are rendered on the selection canvas layer. Ensure we clear them immediately when deleting the
+    // currently-selected drawing.
+    if (clearedSelection && !this.sharedGrid && this.drawingInteractionController == null) {
+      this.renderSelection();
+    }
     if (this.getSelectedDrawingId() !== prevSelected) {
       this.dispatchDrawingSelectionChanged();
     }
@@ -7274,6 +7281,11 @@ export class SpreadsheetApp {
 
     const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
     this.renderDrawings(sharedViewport);
+    // Legacy grid mode renders drawing selection chrome on the selection canvas, so repaint it when
+    // selecting a drawing programmatically (e.g. selection pane / context menu selection).
+    if (prev !== id && !this.sharedGrid && this.drawingInteractionController == null) {
+      this.renderSelection();
+    }
   }
 
   /**
