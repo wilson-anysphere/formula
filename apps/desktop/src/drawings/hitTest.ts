@@ -444,6 +444,144 @@ export function hitTestDrawings(
   return { object: index.ordered[hitIndex]!, bounds: screen };
 }
 
+/**
+ * Allocation-free hit test helper.
+ *
+ * Returns the hit object (top-most by zOrder) and writes its screen-space bounds
+ * into `outBounds`.
+ *
+ * This is intended for high-frequency pointer-move paths (hover cursors, etc)
+ * where allocating a `{ object, bounds }` result on every frame can create GC
+ * churn even when the hit-test index itself is cached.
+ */
+export function hitTestDrawingsInto(
+  index: HitTestIndex,
+  viewport: Viewport,
+  x: number,
+  y: number,
+  outBounds: Rect,
+  geom: GridGeometry = index.geom,
+  layout?: HitTestViewportLayout,
+): DrawingObject | null {
+  const headerOffsetX = layout
+    ? layout.headerOffsetX
+    : Number.isFinite(viewport.headerOffsetX)
+      ? Math.max(0, viewport.headerOffsetX!)
+      : 0;
+  const headerOffsetY = layout
+    ? layout.headerOffsetY
+    : Number.isFinite(viewport.headerOffsetY)
+      ? Math.max(0, viewport.headerOffsetY!)
+      : 0;
+
+  // Ignore pointer events over the header area; drawings are rendered under headers.
+  if (x < headerOffsetX || y < headerOffsetY) return null;
+
+  const frozenRows = layout
+    ? layout.frozenRows
+    : Number.isFinite(viewport.frozenRows)
+      ? Math.max(0, Math.trunc(viewport.frozenRows!))
+      : 0;
+  const frozenCols = layout
+    ? layout.frozenCols
+    : Number.isFinite(viewport.frozenCols)
+      ? Math.max(0, Math.trunc(viewport.frozenCols!))
+      : 0;
+  let frozenBoundaryX = layout ? layout.frozenBoundaryX : headerOffsetX;
+  let frozenBoundaryY = layout ? layout.frozenBoundaryY : headerOffsetY;
+
+  if (!layout && frozenCols > 0) {
+    let raw = viewport.frozenWidthPx;
+    if (!Number.isFinite(raw)) {
+      let derived = 0;
+      try {
+        CELL_SCRATCH.row = 0;
+        CELL_SCRATCH.col = frozenCols;
+        derived = geom.cellOriginPx(CELL_SCRATCH).x;
+      } catch {
+        derived = 0;
+      }
+      raw = headerOffsetX + derived;
+    }
+    frozenBoundaryX = clampNumber(raw as number, headerOffsetX, viewport.width);
+  }
+
+  if (!layout && frozenRows > 0) {
+    let raw = viewport.frozenHeightPx;
+    if (!Number.isFinite(raw)) {
+      let derived = 0;
+      try {
+        CELL_SCRATCH.row = frozenRows;
+        CELL_SCRATCH.col = 0;
+        derived = geom.cellOriginPx(CELL_SCRATCH).y;
+      } catch {
+        derived = 0;
+      }
+      raw = headerOffsetY + derived;
+    }
+    frozenBoundaryY = clampNumber(raw as number, headerOffsetY, viewport.height);
+  }
+
+  const inFrozenCols = frozenCols > 0 && x < frozenBoundaryX;
+  const inFrozenRows = frozenRows > 0 && y < frozenBoundaryY;
+
+  // Convert from screen-space to sheet-space using the same frozen-pane scroll semantics
+  // as `DrawingOverlay.render()`.
+  const scrollX = inFrozenCols ? 0 : viewport.scrollX;
+  const scrollY = inFrozenRows ? 0 : viewport.scrollY;
+  const sheetX = x - headerOffsetX + scrollX;
+  const sheetY = y - headerOffsetY + scrollY;
+
+  const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
+  if (Math.abs(zoom - index.zoom) > 1e-6) {
+    // Zoom changes affect EMU->px conversions; fall back to a linear scan (still
+    // respecting z-order) if the caller didn't rebuild the index for the current
+    // zoom.
+    const hasFrozenPanes = frozenRows !== 0 || frozenCols !== 0;
+    for (const obj of index.ordered) {
+      if (hasFrozenPanes) {
+        const anchor = obj.anchor;
+        const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+        const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+        if (objInFrozenRows !== inFrozenRows || objInFrozenCols !== inFrozenCols) continue;
+      }
+
+      const rect = anchorToRectPx(obj.anchor, geom, zoom);
+      const transform = obj.transform;
+      if (hasNonIdentityTransform(transform)) {
+        let flags = 4;
+        if (transform!.flipH) flags |= 1;
+        if (transform!.flipV) flags |= 2;
+        const radians = (transform!.rotationDeg * Math.PI) / 180;
+        const cos = Math.cos(radians);
+        const sin = Math.sin(radians);
+        const aabb = rectToAabb(rect, cos, sin, flags);
+        if (!pointInRect(sheetX, sheetY, aabb)) continue;
+        if (!pointInTransformedRect(sheetX, sheetY, rect, cos, sin, flags)) continue;
+      } else if (!pointInRect(sheetX, sheetY, rect)) {
+        continue;
+      }
+
+      outBounds.x = rect.x - scrollX + headerOffsetX;
+      outBounds.y = rect.y - scrollY + headerOffsetY;
+      outBounds.width = rect.width;
+      outBounds.height = rect.height;
+      return obj;
+    }
+    return null;
+  }
+
+  const hitIndex = hitTestCandidateIndex(index, sheetX, sheetY, frozenRows, frozenCols, inFrozenRows, inFrozenCols);
+  if (hitIndex == null) return null;
+
+  const rect = index.bounds[hitIndex]!;
+  outBounds.x = rect.x - scrollX + headerOffsetX;
+  outBounds.y = rect.y - scrollY + headerOffsetY;
+  outBounds.width = rect.width;
+  outBounds.height = rect.height;
+  return index.ordered[hitIndex]!;
+}
+
 export function hitTestDrawingsObject(
   index: HitTestIndex,
   viewport: Viewport,

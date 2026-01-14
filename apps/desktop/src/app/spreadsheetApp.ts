@@ -13,7 +13,7 @@ import { ChartRendererAdapter, type ChartStore as ChartRendererStore } from "../
 import type { ChartModel } from "../charts/renderChart";
 import { FormulaChartModelStore } from "../charts/formulaChartModelStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
-import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawings, type HitTestIndex } from "../drawings/hitTest";
+import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawingsInto, type HitTestIndex } from "../drawings/hitTest";
 import {
   DrawingInteractionController,
   resizeAnchor,
@@ -1087,6 +1087,7 @@ export class SpreadsheetApp {
   private drawingObjects: DrawingObject[] = [];
   private drawingHitTestIndex: HitTestIndex | null = null;
   private drawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
+  private readonly drawingHitTestScratchRect = { x: 0, y: 0, width: 0, height: 0 };
   private selectedDrawingId: DrawingObjectId | null = null;
   private splitViewSecondaryGrid: { container: HTMLElement; grid: DesktopSharedGrid } | null = null;
   private readonly formulaChartModelStore = new FormulaChartModelStore();
@@ -7179,8 +7180,8 @@ export class SpreadsheetApp {
 
     const viewport = this.getDrawingInteractionViewport();
     const index = this.getDrawingHitTestIndex(objects);
-    const hit = hitTestDrawings(index, viewport, x, y);
-    return hit?.object.id ?? null;
+    const hit = hitTestDrawingsInto(index, viewport, x, y, this.drawingHitTestScratchRect);
+    return hit?.id ?? null;
   }
 
   selectDrawing(id: number | null): void {
@@ -8982,12 +8983,22 @@ export class SpreadsheetApp {
     if (objects.length === 0) return null;
 
     const viewport = this.getDrawingInteractionViewport();
+    const bounds = this.drawingHitTestScratchRect;
+    const index = this.getDrawingHitTestIndex(objects);
 
     const selectedId = this.selectedDrawingId;
     if (selectedId != null) {
-      const selected = objects.find((obj) => obj.id === selectedId) ?? null;
+      const selectedIndex = index.byId.get(selectedId);
+      const selected = selectedIndex != null ? index.ordered[selectedIndex] ?? null : null;
       if (selected) {
-        const bounds = drawingObjectToViewportRect(selected, viewport, this.drawingGeom);
+        const sheetRect = index.bounds[selectedIndex!]!;
+        const scroll = effectiveScrollForAnchor(selected.anchor, viewport);
+        const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+        const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+        bounds.x = sheetRect.x - scroll.scrollX + headerOffsetX;
+        bounds.y = sheetRect.y - scroll.scrollY + headerOffsetY;
+        bounds.width = sheetRect.width;
+        bounds.height = sheetRect.height;
         if (hitTestRotationHandle(bounds, x, y, selected.transform)) return cursorForRotationHandle(false);
         // When selected, handles can extend slightly outside the untransformed bounds. Check the selected
         // object explicitly so hover feedback works even when the cursor lies just beyond the anchor rect.
@@ -8996,11 +9007,10 @@ export class SpreadsheetApp {
       }
     }
 
-    const index = this.getDrawingHitTestIndex(objects);
-    const hit = hitTestDrawings(index, viewport, x, y);
+    const hit = hitTestDrawingsInto(index, viewport, x, y, bounds);
     if (!hit) return null;
-    const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
-    if (handle) return cursorForResizeHandleWithTransform(handle, hit.object.transform);
+    const handle = hitTestResizeHandle(bounds, x, y, hit.transform);
+    if (handle) return cursorForResizeHandleWithTransform(handle, hit.transform);
     return "move";
   }
 
@@ -11215,7 +11225,7 @@ export class SpreadsheetApp {
     const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
     const viewport = this.getDrawingInteractionViewport(sharedViewport);
     const index = this.getDrawingHitTestIndex(objects);
-    const hit = hitTestDrawings(index, viewport, x, y, this.drawingGeom);
+    const hit = hitTestDrawingsInto(index, viewport, x, y, this.drawingHitTestScratchRect);
 
     if (!hit) {
       // Clicking outside of any drawing clears selection, but still allows normal grid selection.
@@ -11252,7 +11262,7 @@ export class SpreadsheetApp {
       this.setSelectedChartId(null);
     }
 
-    this.selectedDrawingId = hit.object.id;
+    this.selectedDrawingId = hit.id;
     if (this.selectedDrawingId !== prevSelected) {
       this.dispatchDrawingSelectionChanged();
       this.renderDrawings(sharedViewport);
@@ -14022,19 +14032,21 @@ export class SpreadsheetApp {
     const y = e.clientY - rect.top;
 
     const primaryButton = e.pointerType !== "mouse" || e.button === 0;
-
     const formulaEditing = this.formulaBar?.isFormulaEditing() === true;
     if (!formulaEditing) {
       // Drawing hit testing must happen before cell-selection logic so clicks on
       // overlaid objects (charts/images/shapes) behave like Excel.
       const drawingViewport = this.getDrawingInteractionViewport();
       const drawings = this.listDrawingObjectsForSheet();
+      const hitIndex = this.getDrawingHitTestIndex(drawings);
+      const drawingBounds = this.drawingHitTestScratchRect;
 
       // Allow grabbing a resize handle for the current drawing selection even when the
       // pointer is slightly outside the object's bounds (handles extend beyond the
       // selection outline).
       if (primaryButton && this.selectedDrawingId != null) {
-        const selected = drawings.find((obj) => obj.id === this.selectedDrawingId) ?? null;
+        const selectedIndex = hitIndex.byId.get(this.selectedDrawingId);
+        const selected = selectedIndex != null ? hitIndex.ordered[selectedIndex] ?? null : null;
         if (selected) {
           const headerOffsetX = Number.isFinite(drawingViewport.headerOffsetX)
             ? Math.max(0, drawingViewport.headerOffsetX!)
@@ -14043,8 +14055,13 @@ export class SpreadsheetApp {
             ? Math.max(0, drawingViewport.headerOffsetY!)
             : 0;
           if (x >= headerOffsetX && y >= headerOffsetY) {
-            const selectedBounds = drawingObjectToViewportRect(selected, drawingViewport, this.drawingGeom);
-            const handle = hitTestResizeHandle(selectedBounds, x, y, selected.transform);
+            const sheetRect = hitIndex.bounds[selectedIndex!]!;
+            const scroll = effectiveScrollForAnchor(selected.anchor, drawingViewport);
+            drawingBounds.x = sheetRect.x - scroll.scrollX + headerOffsetX;
+            drawingBounds.y = sheetRect.y - scroll.scrollY + headerOffsetY;
+            drawingBounds.width = sheetRect.width;
+            drawingBounds.height = sheetRect.height;
+            const handle = hitTestResizeHandle(drawingBounds, x, y, selected.transform);
             if (handle) {
               if (editorWasOpen) {
                 this.editor.commit("command");
@@ -14053,7 +14070,6 @@ export class SpreadsheetApp {
               this.renderSelection();
               this.focus();
 
-              const scroll = effectiveScrollForAnchor(selected.anchor, drawingViewport);
               const startSheetX = x - headerOffsetX + scroll.scrollX;
               const startSheetY = y - headerOffsetY + scroll.scrollY;
               this.drawingGesture = {
@@ -14064,12 +14080,12 @@ export class SpreadsheetApp {
                 startSheetX,
                 startSheetY,
                 startAnchor: selected.anchor,
-                startWidthPx: selectedBounds.width,
-                startHeightPx: selectedBounds.height,
+                startWidthPx: drawingBounds.width,
+                startHeightPx: drawingBounds.height,
                 transform: selected.transform,
                 aspectRatio:
-                  selected.kind.type === "image" && selectedBounds.width > 0 && selectedBounds.height > 0
-                    ? selectedBounds.width / selectedBounds.height
+                  selected.kind.type === "image" && drawingBounds.width > 0 && drawingBounds.height > 0
+                    ? drawingBounds.width / drawingBounds.height
                     : null,
               };
               try {
@@ -14083,15 +14099,14 @@ export class SpreadsheetApp {
         }
       }
 
-      const hitIndex = this.getDrawingHitTestIndex(drawings);
-      const hit = hitTestDrawings(hitIndex, drawingViewport, x, y, this.drawingGeom);
+      const hit = hitTestDrawingsInto(hitIndex, drawingViewport, x, y, drawingBounds, this.drawingGeom);
       if (hit) {
         if (editorWasOpen) {
           this.editor.commit("command");
         }
         const prevSelected = this.selectedDrawingId;
-        this.selectedDrawingId = hit.object.id;
-        if (prevSelected !== hit.object.id) {
+        this.selectedDrawingId = hit.id;
+        if (prevSelected !== hit.id) {
           this.dispatchDrawingSelectionChanged();
         }
         this.renderSelection();
@@ -14100,8 +14115,8 @@ export class SpreadsheetApp {
         // Begin drag/resize gesture for primary-button interactions.
         if (primaryButton) {
           e.preventDefault();
-          const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
-          const scroll = effectiveScrollForAnchor(hit.object.anchor, drawingViewport);
+          const handle = hitTestResizeHandle(drawingBounds, x, y, hit.transform);
+          const scroll = effectiveScrollForAnchor(hit.anchor, drawingViewport);
           const headerOffsetX = Number.isFinite(drawingViewport.headerOffsetX)
             ? Math.max(0, drawingViewport.headerOffsetX!)
             : 0;
@@ -14114,26 +14129,26 @@ export class SpreadsheetApp {
             ? {
                 pointerId: e.pointerId,
                 mode: "resize",
-                objectId: hit.object.id,
+                objectId: hit.id,
                 handle,
                 startSheetX,
                 startSheetY,
-                startAnchor: hit.object.anchor,
-                startWidthPx: hit.bounds.width,
-                startHeightPx: hit.bounds.height,
-                transform: hit.object.transform,
+                startAnchor: hit.anchor,
+                startWidthPx: drawingBounds.width,
+                startHeightPx: drawingBounds.height,
+                transform: hit.transform,
                 aspectRatio:
-                  hit.object.kind.type === "image" && hit.bounds.width > 0 && hit.bounds.height > 0
-                    ? hit.bounds.width / hit.bounds.height
+                  hit.kind.type === "image" && drawingBounds.width > 0 && drawingBounds.height > 0
+                    ? drawingBounds.width / drawingBounds.height
                     : null,
               }
             : {
                 pointerId: e.pointerId,
                 mode: "drag",
-                objectId: hit.object.id,
+                objectId: hit.id,
                 startSheetX,
                 startSheetY,
-                startAnchor: hit.object.anchor,
+                startAnchor: hit.anchor,
               };
           try {
             this.root.setPointerCapture(e.pointerId);
