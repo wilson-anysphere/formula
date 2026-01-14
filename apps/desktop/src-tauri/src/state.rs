@@ -2663,6 +2663,66 @@ impl AppState {
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
 
+        // Fetch workbook cell metadata (formulas/number formats) in bulk. This is columnar-aware and
+        // avoids per-cell lookups.
+        let cells = sheet.get_range_cells(start_row, start_col, end_row, end_col);
+
+        // Fetch computed engine values in bulk to avoid per-cell A1 conversions and engine lookups.
+        //
+        // The engine uses `u32` coordinates; preserve prior behavior for out-of-range indices by
+        // filling with `#REF!` (or blank when the sheet does not exist in the engine).
+        let engine_sheet_exists = self.engine.sheet_id(&sheet.name).is_some();
+        let values: Vec<Vec<EngineValue>> = if !engine_sheet_exists {
+            vec![vec![EngineValue::Blank; col_count]; row_count]
+        } else {
+            match (u32::try_from(start_row), u32::try_from(start_col)) {
+                (Ok(start_row_u32), Ok(start_col_u32)) => {
+                    // Clamp the representable portion of the range to `u32::MAX` and fill anything
+                    // beyond with `#REF!` to match the per-cell `get_cell_value` semantics when A1
+                    // parsing would overflow.
+                    let max_row = u64::from(u32::MAX);
+                    let max_col = u64::from(u32::MAX);
+                    let remaining_rows =
+                        max_row.saturating_sub(u64::from(start_row_u32)).saturating_add(1);
+                    let remaining_cols =
+                        max_col.saturating_sub(u64::from(start_col_u32)).saturating_add(1);
+                    let in_bounds_rows = remaining_rows.min(row_count as u64) as usize;
+                    let in_bounds_cols = remaining_cols.min(col_count as u64) as usize;
+
+                    let end_row_u32 = start_row_u32 + (in_bounds_rows as u32).saturating_sub(1);
+                    let end_col_u32 = start_col_u32 + (in_bounds_cols as u32).saturating_sub(1);
+
+                    let range = formula_model::Range::new(
+                        formula_model::CellRef::new(start_row_u32, start_col_u32),
+                        formula_model::CellRef::new(end_row_u32, end_col_u32),
+                    );
+
+                    let mut values = self
+                        .engine
+                        .get_range_values(&sheet.name, range)
+                        .map_err(|e| AppStateError::Engine(e.to_string()))?;
+
+                    if in_bounds_cols < col_count {
+                        for row in &mut values {
+                            row.extend(
+                                std::iter::repeat(EngineValue::Error(ErrorKind::Ref))
+                                    .take(col_count - in_bounds_cols),
+                            );
+                        }
+                    }
+                    if in_bounds_rows < row_count {
+                        values.extend(
+                            std::iter::repeat(vec![EngineValue::Error(ErrorKind::Ref); col_count])
+                                .take(row_count - in_bounds_rows),
+                        );
+                    }
+
+                    values
+                }
+                _ => vec![vec![EngineValue::Error(ErrorKind::Ref); col_count]; row_count],
+            }
+        };
+
         let viewport = if let Some(persistent) = self.persistent.as_ref() {
             let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
                 AppStateError::Persistence(format!(
@@ -2686,32 +2746,39 @@ impl AppState {
             None
         };
 
-        let mut rows = Vec::with_capacity(row_count);
-        for r in start_row..=end_row {
+        let mut rows_out = Vec::with_capacity(row_count);
+        for (r_off, (value_row, cell_row)) in values.into_iter().zip(cells.into_iter()).enumerate()
+        {
             let mut row_out = Vec::with_capacity(col_count);
-            for c in start_col..=end_col {
-                let cell = sheet.get_cell(r, c);
-                let addr = coord_to_a1(r, c);
-                let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
-                let display_value =
-                    format_scalar_for_display_with_date_system(&value, cell.number_format.as_deref(), date_system);
+            for (c_off, (engine_value, cell)) in
+                value_row.into_iter().zip(cell_row.into_iter()).enumerate()
+            {
+                let value = engine_value_to_scalar(engine_value);
+                let display_value = format_scalar_for_display_with_date_system(
+                    &value,
+                    cell.number_format.as_deref(),
+                    date_system,
+                );
 
-                 let formula = if let Some(viewport) = viewport.as_ref() {
-                      let cached = viewport
-                          .get(r as i64, c as i64)
-                          .and_then(|c| c.formula.as_ref())
-                         .and_then(|f| {
-                             let display = formula_model::display_formula_text(f);
-                             if display.is_empty() {
-                                 None
-                             } else {
-                                 Some(display)
-                             }
-                         });
-                     cached.or(cell.formula)
-                 } else {
-                     cell.formula
-                 };
+                let r = start_row.saturating_add(r_off);
+                let c = start_col.saturating_add(c_off);
+
+                let formula = if let Some(viewport) = viewport.as_ref() {
+                    let cached = viewport
+                        .get(r as i64, c as i64)
+                        .and_then(|c| c.formula.as_ref())
+                        .and_then(|f| {
+                            let display = formula_model::display_formula_text(f);
+                            if display.is_empty() {
+                                None
+                            } else {
+                                Some(display)
+                            }
+                        });
+                    cached.or(cell.formula)
+                } else {
+                    cell.formula
+                };
 
                 row_out.push(CellData {
                     value,
@@ -2719,9 +2786,9 @@ impl AppState {
                     display_value,
                 });
             }
-            rows.push(row_out);
+            rows_out.push(row_out);
         }
-        Ok(rows)
+        Ok(rows_out)
     }
 
     pub fn get_precedents(
@@ -5583,8 +5650,8 @@ mod tests {
     use crate::file_io::{read_xlsx_blocking, write_xlsx_blocking};
     use crate::resource_limits::{MAX_ORIGIN_XLSX_BYTES, MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
     use formula_engine::pivot::{
-        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef,
-        SubtotalPosition, ValueField,
+        AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef, SubtotalPosition,
+        ValueField,
     };
     use formula_engine::what_if::monte_carlo::{Distribution, InputDistribution};
     use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
@@ -8207,6 +8274,47 @@ mod tests {
             .expect("expected A1 update");
         assert_eq!(update.value, CellScalar::Number(2.5));
         assert_eq!(update.display_value, "2.50");
+    }
+
+    #[test]
+    fn get_range_returns_values_and_preserves_formulas() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut a1 = Cell::from_literal(Some(CellScalar::Number(1.25)));
+        a1.number_format = Some("0.00".to_string());
+
+        let sheet = workbook.sheet_mut(&sheet_id).unwrap();
+        sheet.set_cell(0, 0, a1);
+        sheet.set_cell(0, 1, Cell::from_formula("=A1+1".to_string()));
+        sheet.set_cell(1, 0, Cell::from_literal(Some(CellScalar::Text("hello".to_string()))));
+        sheet.set_cell(1, 1, Cell::from_formula("=B1*2".to_string()));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let range = state
+            .get_range(&sheet_id, 0, 0, 1, 1)
+            .expect("get range");
+
+        assert_eq!(range.len(), 2);
+        assert_eq!(range[0].len(), 2);
+
+        assert_eq!(range[0][0].value, CellScalar::Number(1.25));
+        assert_eq!(range[0][0].formula, None);
+        assert_eq!(range[0][0].display_value, "1.25");
+
+        assert_eq!(range[0][1].value, CellScalar::Number(2.25));
+        assert_eq!(range[0][1].formula.as_deref(), Some("=A1+1"));
+
+        assert_eq!(range[1][0].value, CellScalar::Text("hello".to_string()));
+        assert_eq!(range[1][0].formula, None);
+        assert_eq!(range[1][0].display_value, "hello");
+
+        assert_eq!(range[1][1].value, CellScalar::Number(4.5));
+        assert_eq!(range[1][1].formula.as_deref(), Some("=B1*2"));
+        assert_eq!(range[1][1].display_value, "4.5");
     }
 
     #[test]
