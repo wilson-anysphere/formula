@@ -338,6 +338,13 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
     expect(evalPreview("SUM([@])")).toBe(220);
     expect(evalPreview("SUM(TableThisRow[@])")).toBe(220);
 
+    const bar = (app as any).formulaBar;
+    expect(bar?.model?.resolveReferenceText?.("[@]")).toEqual({ start: { row: 2, col: 0 }, end: { row: 2, col: 1 } });
+    expect(bar?.model?.resolveReferenceText?.("TableThisRow[@]")).toEqual({
+      start: { row: 2, col: 0 },
+      end: { row: 2, col: 1 },
+    });
+
     app.destroy();
     root.remove();
     formulaBarHost.remove();

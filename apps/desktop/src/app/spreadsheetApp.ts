@@ -19043,6 +19043,49 @@ export class SpreadsheetApp {
       };
     };
 
+    const resolveThisRowRow = (tableName: string) => {
+      const name = String(tableName ?? "").trim();
+      if (!name) return null;
+      const table: any = this.searchWorkbook.getTable(name);
+      if (!table) return null;
+
+      const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+      const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+      const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+      const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+      if (startRow == null || startCol == null || endRow == null || endCol == null) return null;
+      if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) return null;
+
+      const baseStartRow = Math.min(startRow, endRow);
+      const baseEndRow = Math.max(startRow, endRow);
+      const baseStartCol = Math.min(startCol, endCol);
+      const baseEndCol = Math.max(startCol, endCol);
+
+      const tableSheet =
+        typeof table.sheetName === "string" && table.sheetName.trim()
+          ? table.sheetName.trim()
+          : typeof table.sheet === "string" && table.sheet.trim()
+            ? table.sheet.trim()
+            : editTarget.sheetId;
+      const resolvedTableSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
+      if (resolvedTableSheetId && resolvedTableSheetId.toLowerCase() !== editTarget.sheetId.toLowerCase()) return null;
+
+      // Conservative: only resolve this-row refs when the formula cell is inside the table's data rows.
+      const row = editTarget.cell.row;
+      const cellCol = editTarget.cell.col;
+      const dataStartRow = baseStartRow + 1;
+      if (row < dataStartRow || row > baseEndRow) return null;
+      if (cellCol < baseStartCol || cellCol > baseEndCol) return null;
+
+      return {
+        sheet: tableSheet || undefined,
+        startRow: row,
+        endRow: row,
+        startCol: baseStartCol,
+        endCol: baseEndCol,
+      };
+    };
+
     const findContainingTableName = (): string | null => {
       for (const entry of this.searchWorkbook.tables.values()) {
         const table: any = entry as any;
@@ -19091,6 +19134,7 @@ export class SpreadsheetApp {
     const atNestedRe = new RegExp(`^([A-Za-z_][A-Za-z0-9_.]*)\\[\\s*@\\s*\\[\\s*${escapedItem}\\s*\\]\\s*\\]$`, "i");
     const implicitAtRe = new RegExp(`^\\[\\s*@\\s*${escapedItem}\\s*\\]$`, "i");
     const implicitAtNestedRe = new RegExp(`^\\[\\s*@\\s*\\[\\s*${escapedItem}\\s*\\]\\s*\\]$`, "i");
+    const implicitAtRowRe = new RegExp(`^\\[\\s*@\\s*\\]$`, "i");
 
     const qualified = qualifiedRe.exec(trimmed);
     if (qualified) {
@@ -19111,7 +19155,7 @@ export class SpreadsheetApp {
       const item = unescapeStructuredRefItem(simple[2]!.trim());
       if (!item.startsWith("@")) return null;
       const columnName = item.slice(1).trim();
-      if (!columnName) return null;
+      if (!columnName) return resolveThisRowRow(simple[1]!);
       return resolveThisRowCell(simple[1]!, columnName);
     }
 
@@ -19131,6 +19175,13 @@ export class SpreadsheetApp {
       const tableName = findContainingTableName();
       if (!tableName) return null;
       return resolveThisRowCell(tableName, columnName);
+    }
+
+    const implicitRow = implicitAtRowRe.exec(trimmed);
+    if (implicitRow) {
+      const tableName = findContainingTableName();
+      if (!tableName) return null;
+      return resolveThisRowRow(tableName);
     }
 
     const implicitSimple = implicitAtRe.exec(trimmed);
