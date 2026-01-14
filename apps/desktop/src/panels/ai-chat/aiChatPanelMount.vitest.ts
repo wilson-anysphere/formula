@@ -99,6 +99,9 @@ describe("AI chat panel", () => {
 
       expect(body.querySelector('[data-testid="ai-tab-chat"]')).toBeInstanceOf(HTMLButtonElement);
       expect(body.querySelector('[data-testid="ai-tab-agent"]')).toBeInstanceOf(HTMLButtonElement);
+      const includeFormulaValues = body.querySelector('[data-testid="ai-include-formula-values"]');
+      expect(includeFormulaValues).toBeInstanceOf(HTMLInputElement);
+      expect((includeFormulaValues as HTMLInputElement).checked).toBe(false);
 
       // Cursor-only backend: the Settings button should be gone.
       expect(body.querySelector('[data-testid="ai-open-settings"]')).toBeNull();
@@ -106,11 +109,45 @@ describe("AI chat panel", () => {
       const lastCall = mocks.createAiChatOrchestrator.mock.calls.at(-1)?.[0] as any;
       expect(lastCall?.llmClient).toBe(mocks.sentinelClient);
       expect(lastCall?.model).toBe("test-model");
+      expect(lastCall?.toolExecutorOptions?.include_formula_values).toBe(false);
       const orchestrator = mocks.createAiChatOrchestrator.mock.results.at(-1)?.value as any;
       act(() => {
         renderer.cleanup([]);
       });
 
+      expect(orchestrator.dispose).toHaveBeenCalled();
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    "hydrates include_formula_values from localStorage",
+    async () => {
+      const doc = new DocumentController();
+      const getDocumentController = vi.fn(() => doc);
+
+      window.localStorage.setItem("formula.ai.includeFormulaValues", "true");
+
+      const renderer = createPanelBodyRenderer({ getDocumentController });
+
+      const body = document.createElement("div");
+      document.body.appendChild(body);
+
+      await act(async () => {
+        renderer.renderPanelBody(PanelIds.AI_CHAT, body);
+      });
+
+      const includeFormulaValues = body.querySelector('[data-testid="ai-include-formula-values"]');
+      expect(includeFormulaValues).toBeInstanceOf(HTMLInputElement);
+      expect((includeFormulaValues as HTMLInputElement).checked).toBe(true);
+
+      const lastCall = mocks.createAiChatOrchestrator.mock.calls.at(-1)?.[0] as any;
+      expect(lastCall?.toolExecutorOptions?.include_formula_values).toBe(true);
+
+      const orchestrator = mocks.createAiChatOrchestrator.mock.results.at(-1)?.value as any;
+      act(() => {
+        renderer.cleanup([]);
+      });
       expect(orchestrator.dispose).toHaveBeenCalled();
     },
     TEST_TIMEOUT_MS

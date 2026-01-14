@@ -22,6 +22,57 @@ import { AIChatPanel, type AIChatPanelSendMessage, type AIChatPanelChartOption, 
 import { ApprovalModal } from "./ApprovalModal.js";
 import { confirmPreviewApproval } from "./previewApproval.js";
 
+const INCLUDE_FORMULA_VALUES_STORAGE_KEY = "formula.ai.includeFormulaValues";
+
+function getLocalStorageOrNull(): Storage | null {
+  // Prefer `window.localStorage` when available (jsdom + browser runtimes).
+  if (typeof window !== "undefined") {
+    try {
+      const storage = window.localStorage;
+      if (!storage) return null;
+      if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") return null;
+      return storage;
+    } catch {
+      // ignore
+    }
+  }
+
+  // Node can expose `globalThis.localStorage` as a throwing accessor (e.g. Node 25 without flags).
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const storage = (globalThis as any)?.localStorage as Storage | undefined;
+    if (!storage) return null;
+    if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") return null;
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+function readIncludeFormulaValuesFromStorage(): boolean {
+  const storage = getLocalStorageOrNull();
+  if (!storage) return false;
+  try {
+    const raw = storage.getItem(INCLUDE_FORMULA_VALUES_STORAGE_KEY);
+    if (raw == null) return false;
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return raw === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeIncludeFormulaValuesToStorage(value: boolean): void {
+  const storage = getLocalStorageOrNull();
+  if (!storage) return;
+  try {
+    storage.setItem(INCLUDE_FORMULA_VALUES_STORAGE_KEY, value ? "true" : "false");
+  } catch {
+    // ignore
+  }
+}
+
 function clampRangeToMaxCells(range: Range, maxCells: number): Range {
   const normalized = normalizeExtensionRange(range);
   const { rows, cols, cellCount } = getExtensionRangeSize(normalized);
@@ -140,6 +191,7 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
 
 function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
   const [tab, setTab] = useState<"chat" | "agent">("chat");
+  const [includeFormulaValues, setIncludeFormulaValues] = useState<boolean>(() => readIncludeFormulaValuesFromStorage());
 
   const sessionId = useRef<string>(generateSessionId());
   const llmHistory = useRef<LLMMessage[] | undefined>(undefined);
@@ -230,11 +282,13 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
       previewOptions: { approval_cell_threshold: 0 },
       sessionId: `${workbookId}:${sessionId.current}`,
       ragService,
+      toolExecutorOptions: { include_formula_values: includeFormulaValues },
     });
   }, [
     auditStore,
     client,
     documentController,
+    includeFormulaValues,
     model,
     onApprovalRequired,
     props.createChart,
@@ -461,6 +515,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
           }),
         onApprovalRequired: onApprovalRequired as any,
         ragService,
+        toolExecutorOptions: { include_formula_values: includeFormulaValues },
         continueOnApprovalDenied: agentContinueOnDenied,
         maxIterations: 20,
         maxDurationMs: 5 * 60 * 1000,
@@ -482,6 +537,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     agentRunning,
     auditStore,
     client,
+    includeFormulaValues,
     documentController,
     model,
     onApprovalRequired,
@@ -501,6 +557,20 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
           Agent
         </TabButton>
         <div className="ai-chat-runtime__tabs-spacer" />
+        <label className={agentRunning ? "ai-chat-runtime__option ai-chat-runtime__option--disabled" : "ai-chat-runtime__option"}>
+          <input
+            type="checkbox"
+            checked={includeFormulaValues}
+            onChange={(e) => {
+              const next = e.target.checked;
+              setIncludeFormulaValues(next);
+              writeIncludeFormulaValuesToStorage(next);
+            }}
+            disabled={agentRunning}
+            data-testid="ai-include-formula-values"
+          />
+          Include formula values
+        </label>
       </div>
       <div className="ai-chat-runtime__content">
         {tab === "chat" ? (

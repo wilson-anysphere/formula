@@ -28,6 +28,22 @@
   flex: 1;
 }
 
+.ai-chat-runtime__option {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.ai-chat-runtime__option input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.ai-chat-runtime__option--disabled {
+  opacity: 0.6;
+}
+
 .ai-chat-runtime__content {
   position: relative;
   flex: 1;
