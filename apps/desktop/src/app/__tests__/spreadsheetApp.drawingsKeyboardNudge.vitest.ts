@@ -112,6 +112,18 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       observe() {}
       disconnect() {}
     };
+
+    // jsdom doesn't always ship PointerEvent. Provide a minimal polyfill so we can
+    // exercise pointer-driven drawing interactions (Escape cancel gesture behavior).
+    if (!(globalThis as any).PointerEvent) {
+      (globalThis as any).PointerEvent = class PointerEvent extends MouseEvent {
+        pointerId: number;
+        constructor(type: string, init: any = {}) {
+          super(type, init);
+          this.pointerId = Number(init.pointerId ?? 0);
+        }
+      };
+    }
   });
 
   it("nudges the selected drawing with arrow keys and clears selection with Escape (legacy grid)", () => {
@@ -204,6 +216,67 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       expect((app as any).selectedDrawingId).toBeNull();
       expect(((app as any).drawingsInteraction as any).selectedId).toBe(null);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
+  it("does not block Escape from cancelling an active drawing drag gesture", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument() as any;
+
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: 1,
+          kind: { type: "unknown", label: "picture" },
+          anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: pxToEmu(100), cy: pxToEmu(100) } },
+          zOrder: 0,
+        },
+      ]);
+
+      const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+      const rowHeaderWidth = (app as any).rowHeaderWidth as number;
+      const colHeaderHeight = (app as any).colHeaderHeight as number;
+
+      const startClientX = rowHeaderWidth + 10;
+      const startClientY = colHeaderHeight + 10;
+
+      selectionCanvas.dispatchEvent(
+        new (globalThis as any).PointerEvent("pointerdown", { clientX: startClientX, clientY: startClientY, pointerId: 1, buttons: 1 }),
+      );
+      selectionCanvas.dispatchEvent(
+        new (globalThis as any).PointerEvent("pointermove", { clientX: startClientX + 20, clientY: startClientY, pointerId: 1, buttons: 1 }),
+      );
+
+      // Drag should have moved the in-memory drawing state.
+      expect(((app as any).sheetDrawings as any[])[0]?.anchor?.pos?.xEmu).not.toBe(0);
+
+      // Escape should be able to bubble to the controller's window-level handler and cancel the drag.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+
+      expect(((app as any).sheetDrawings as any[])[0]?.anchor?.pos?.xEmu).toBe(0);
+
+      // Releasing the pointer after cancel should not re-commit the drag.
+      selectionCanvas.dispatchEvent(
+        new (globalThis as any).PointerEvent("pointerup", { clientX: startClientX + 20, clientY: startClientY, pointerId: 1 }),
+      );
+
+      expect(doc.getSheetDrawings(sheetId)[0].anchor.pos.xEmu).toBe(0);
 
       app.destroy();
       root.remove();

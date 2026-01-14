@@ -12039,7 +12039,10 @@ export class SpreadsheetApp {
 
     if (key === "Escape") {
       e.preventDefault();
-      e.stopPropagation();
+      // Intentionally do *not* stop propagation: DrawingInteractionController attaches a
+      // window-level Escape handler while dragging/resizing to cancel the active gesture.
+      // If we stop propagation here, Escape would deselect the drawing but fail to cancel
+      // the in-progress pointer gesture.
       this.selectDrawing(null);
       this.focus();
       return true;
