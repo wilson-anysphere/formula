@@ -360,6 +360,19 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
       start: { row: 1, col: 0 },
       end: { row: 3, col: 1 },
     });
+    // Multi-item selector unions (rectangular) should resolve when written implicitly inside the table.
+    expect(bar?.model?.resolveReferenceText?.("[[#Headers],[#Data]]")).toEqual({
+      start: { row: 0, col: 0 },
+      end: { row: 3, col: 1 },
+    });
+    expect(bar?.model?.resolveReferenceText?.("[[#All],[#Totals]]")).toEqual({
+      start: { row: 0, col: 0 },
+      end: { row: 3, col: 1 },
+    });
+    expect(bar?.model?.resolveReferenceText?.("[[#Headers],[#Data],[Amount]]")).toEqual({
+      start: { row: 0, col: 0 },
+      end: { row: 3, col: 0 },
+    });
     expect(bar?.model?.resolveReferenceText?.("TableThisRow[[#This Row],[Amount],[Total Amount]]")).toEqual({
       start: { row: 2, col: 0 },
       end: { row: 2, col: 1 },

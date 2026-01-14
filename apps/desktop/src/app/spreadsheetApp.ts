@@ -22558,13 +22558,26 @@ export class SpreadsheetApp {
     if (implicitQualified) {
       const selector = normalizeSelector(unescapeStructuredRefItem(implicitQualified[1]!.trim()));
       const columnName = unescapeStructuredRefItem(implicitQualified[2]!.trim());
-      const tableName = findContainingTableName();
-      if (!tableName) return null;
-      if (selector === "#this row") return resolveThisRowCell(tableName, columnName);
-      if (selector === "#all" || selector === "#headers" || selector === "#totals" || selector === "#data") {
-        return resolveImplicitSelectorColumn(tableName, selector, columnName);
+      const normalizedColumnName = normalizeSelector(columnName);
+      const columnLooksLikeSelector =
+        normalizedColumnName === "#all" ||
+        normalizedColumnName === "#headers" ||
+        normalizedColumnName === "#data" ||
+        normalizedColumnName === "#totals" ||
+        normalizedColumnName === "#this row";
+
+      // `[[#All],[#Totals]]`-style implicit refs are multi-item selector unions (no explicit column).
+      // Don't treat the second selector as a column name; fall through so the generic `[[...]]`
+      // handler can delegate to the shared structured-ref resolver.
+      if (!columnLooksLikeSelector) {
+        const tableName = findContainingTableName();
+        if (!tableName) return null;
+        if (selector === "#this row") return resolveThisRowCell(tableName, columnName);
+        if (selector === "#all" || selector === "#headers" || selector === "#totals" || selector === "#data") {
+          return resolveImplicitSelectorColumn(tableName, selector, columnName);
+        }
+        return null;
       }
-      return null;
     }
 
     const implicitNested = implicitAtNestedRe.exec(trimmed);

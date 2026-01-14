@@ -715,6 +715,46 @@ function createPreviewEvaluator(params: {
       // Structured refs are never sheet-qualified in formula text.
       if (!trimmed.includes("[") || trimmed.includes("!")) return null;
 
+      // Implicit nested structured refs (no table prefix) are only valid inside a table context.
+      // Infer the containing table based on the active edit cell and then delegate back to the
+      // shared table resolver by rewriting the reference to a table-qualified form.
+      if (trimmed.startsWith("[[")) {
+        if (!activeCellCoord) return null;
+        const normalizeSheetName = (value: string): string => normalizeSheetNameToken(value).toLowerCase();
+        const currentSheetName = normalizeSheetName(defaultSheetName);
+
+        const findContainingTableName = (): string | null => {
+          for (const [name, table] of tables.entries()) {
+            if (!table) continue;
+            const startRow = table.startRow;
+            const endRow = table.endRow;
+            const startCol = table.startCol;
+            const endCol = table.endCol;
+            if (![startRow, endRow, startCol, endCol].every((v) => typeof v === "number" && Number.isFinite(v))) continue;
+
+            const bounds = {
+              startRow: Math.min(startRow!, endRow!),
+              endRow: Math.max(startRow!, endRow!),
+              startCol: Math.min(startCol!, endCol!),
+              endCol: Math.max(startCol!, endCol!),
+            };
+
+            const tableSheet = table.sheetName ? normalizeSheetName(table.sheetName) : currentSheetName;
+            if (table.sheetName && tableSheet !== currentSheetName) continue;
+
+            const dataStartRow = bounds.startRow + 1; // exclude header row
+            if (activeCellCoord.row < dataStartRow || activeCellCoord.row > bounds.endRow) continue;
+            if (activeCellCoord.col < bounds.startCol || activeCellCoord.col > bounds.endCol) continue;
+            return name;
+          }
+          return null;
+        };
+
+        const tableName = findContainingTableName();
+        if (!tableName) return null;
+        return resolveStructuredRefToReference(`${tableName}${trimmed}`);
+      }
+
       const { references } = extractFormulaReferences(trimmed, undefined, undefined, {
         tables: structuredTables,
         resolveStructuredRef: resolveThisRowStructuredRefRange,
