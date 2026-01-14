@@ -326,6 +326,7 @@ def main() -> int:
                                 {
                                     "fixture": str(fixture_path),
                                     "expectations": str(expectations_path),
+                                    "expectations_entry": exp,
                                     "expectations_changed": False,
                                     "fixture_changed": False,
                                     "needs_force": {"fixture": False, "expectations": False},
@@ -377,6 +378,7 @@ def main() -> int:
                                     {
                                         "fixture": str(fixture_path),
                                         "expectations": str(expectations_path),
+                                        "expectations_entry": exp,
                                         "expectations_changed": False,
                                         "fixture_changed": False,
                                         "needs_force": {"fixture": False, "expectations": False},
@@ -473,6 +475,7 @@ def main() -> int:
                             {
                                 "fixture": str(fixture_path),
                                 "expectations": str(expectations_path),
+                                "expectations_entry": exp,
                                 "expectations_changed": False,
                                 "fixture_changed": False,
                                 "needs_force": {"fixture": False, "expectations": False},
@@ -562,6 +565,7 @@ def main() -> int:
                 {
                     "fixture": str(fixture_path),
                     "expectations": str(expectations_path),
+                    "expectations_entry": entry,
                     "fixture_changed": fixture_changed,
                     "expectations_changed": expectations_changed,
                     "needs_force": {
@@ -592,6 +596,7 @@ def main() -> int:
     summary = {
         "fixture": str(fixture_path),
         "expectations": str(expectations_path),
+        "expectations_entry": entry,
         "expectations_changed": changed,
         "fixture_changed": fixture_changed,
         "dry_run": False,
