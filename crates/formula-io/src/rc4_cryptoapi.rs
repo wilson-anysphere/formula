@@ -341,7 +341,10 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
         }
 
         // Derive per-block RC4 key: Hash(H || LE32(block_index)) truncated to key_len.
-        let digest = match self.hash_alg {
+        //
+        // This digest (and the derived key bytes) are sensitive; wrap in `Zeroizing` so the
+        // intermediate is wiped even if we early-return.
+        let digest = Zeroizing::new(match self.hash_alg {
             HashAlg::Sha1 => {
                 let mut hasher = Sha1::new();
                 hasher.update(self.h.as_slice());
@@ -354,7 +357,7 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
                 hasher.update(block_index.to_le_bytes());
                 hasher.finalize().to_vec()
             }
-        };
+        });
 
         // For 40-bit RC4 (`keySize == 0`/`40` → `key_len == 5`), the key material is the first
         // 5 bytes of the digest. Do **not** pad the key to 16 bytes; RC4's KSA depends on the key
@@ -362,6 +365,7 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
         let key = &digest[..self.key_len];
 
         let mut rc4 = Rc4::new(key);
+        padded_key.zeroize();
         rc4.skip(offset);
 
         self.rc4 = Some(rc4);
