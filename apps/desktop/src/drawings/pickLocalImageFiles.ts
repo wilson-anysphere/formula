@@ -1,3 +1,5 @@
+import { pickImagesFromTauriDialog, readBinaryFile } from "./pickImagesFromTauriDialog.js";
+
 export interface PickLocalImageFilesOptions {
   /**
    * Allow selecting multiple images.
@@ -15,6 +17,17 @@ export interface PickLocalImageFilesOptions {
  * - Cleans up the temporary input element and listeners.
  */
 export function pickLocalImageFiles(options: PickLocalImageFilesOptions = {}): Promise<File[]> {
+  const tauriDialogOpenAvailable =
+    typeof (globalThis as any).__TAURI__?.dialog?.open === "function" ||
+    typeof (globalThis as any).__TAURI__?.plugin?.dialog?.open === "function";
+  const tauriInvokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+
+  // Desktop/Tauri: prefer the native dialog + backend file reads so we can work with
+  // filesystem paths directly (avoids `<input type=file>` sandbox quirks).
+  if (tauriDialogOpenAvailable && tauriInvokeAvailable) {
+    return pickLocalImageFilesViaTauriDialog(options);
+  }
+
   if (typeof document === "undefined" || !document.body) return Promise.resolve([]);
 
   return new Promise((resolve, reject) => {
@@ -80,3 +93,51 @@ export function pickLocalImageFiles(options: PickLocalImageFilesOptions = {}): P
   });
 }
 
+async function pickLocalImageFilesViaTauriDialog(options: PickLocalImageFilesOptions): Promise<File[]> {
+  const multiple = options.multiple ?? true;
+  const paths = await pickImagesFromTauriDialog();
+  const selected = multiple ? paths : paths.slice(0, 1);
+  if (selected.length === 0) return [];
+
+  const FileCtor = (globalThis as any).File as typeof File | undefined;
+  if (typeof FileCtor !== "function") {
+    throw new Error("File API not available in this environment");
+  }
+
+  const out: File[] = [];
+  for (const path of selected) {
+    const name = basename(path);
+    const bytes = await readBinaryFile(path);
+    const mimeType = guessImageMimeType(name);
+    out.push(new FileCtor([bytes], name, { type: mimeType }));
+  }
+  return out;
+}
+
+function basename(path: string): string {
+  const raw = String(path ?? "");
+  const parts = raw.split(/[/\\]/);
+  return parts[parts.length - 1] ?? raw;
+}
+
+function guessImageMimeType(name: string): string {
+  const ext = String(name ?? "")
+    .split(".")
+    .pop()
+    ?.toLowerCase();
+  switch (ext) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "bmp":
+      return "image/bmp";
+    case "webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
+}

@@ -39,6 +39,7 @@ import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore
 import { createDrawingObjectId, type Anchor as DrawingAnchor, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { duplicateSelected as duplicateDrawingSelected } from "../drawings/commands";
+import { MAX_INSERT_IMAGE_BYTES } from "../drawings/insertImageLimits.js";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
@@ -4982,7 +4983,14 @@ export class SpreadsheetApp {
     try {
       for (let i = 0; i < normalized.length; i += 1) {
         const file = normalized[i]!;
+        const fileSize = typeof file.size === "number" ? file.size : null;
+        if (fileSize != null && fileSize > MAX_INSERT_IMAGE_BYTES) {
+          throw new Error(`File is too large (${fileSize} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
+        }
         const bytes = await readFileBytes(file);
+        if (bytes.byteLength > MAX_INSERT_IMAGE_BYTES) {
+          throw new Error(`File is too large (${bytes.byteLength} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
+        }
         const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
 
         const ext = (() => {
