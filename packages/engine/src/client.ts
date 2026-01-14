@@ -389,6 +389,7 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
   let engine: EngineWorker | null = null;
   let enginePromise: Promise<EngineWorker> | null = null;
   let generation = 0;
+  let connectAbort: AbortController | null = null;
 
   const ensureWorker = () => {
     if (worker) return worker;
@@ -406,13 +407,45 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     const connectGeneration = ++generation;
     const activeWorker = ensureWorker();
 
-    enginePromise = EngineWorker.connect({
+    // If the caller terminates while we're waiting for the worker "ready" handshake,
+    // the underlying EngineWorker.connect() promise can hang forever (it has no
+    // built-in timeout/rejection path). Wrap it so pending `init()`/calls can fail
+    // fast on teardown (important for StrictMode cleanup, tests, and multi-document
+    // flows).
+    connectAbort?.abort();
+    const abortController = new AbortController();
+    connectAbort = abortController;
+
+    const rawConnectPromise = EngineWorker.connect({
       worker: activeWorker,
       wasmModuleUrl,
       wasmBinaryUrl
     });
 
-    void enginePromise
+    enginePromise = new Promise<EngineWorker>((resolve, reject) => {
+      const signal = abortController.signal;
+      const onAbort = () => reject(new Error("engine terminated while connecting"));
+
+      if (signal.aborted) {
+        reject(new Error("engine terminated while connecting"));
+        return;
+      }
+
+      signal.addEventListener("abort", onAbort, { once: true });
+
+      rawConnectPromise.then(
+        (connected) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(connected);
+        },
+        (err) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(err);
+        }
+      );
+    });
+
+    void rawConnectPromise
       .then((connected) => {
         // If the caller terminated/restarted while we were connecting, immediately
         // dispose the stale connection.
@@ -421,6 +454,9 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
           return;
         }
         engine = connected;
+        if (connectAbort === abortController) {
+          connectAbort = null;
+        }
       })
       .catch(() => {
         // Allow retries on the next call.
@@ -429,6 +465,9 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
         }
         enginePromise = null;
         engine = null;
+        if (connectAbort === abortController) {
+          connectAbort = null;
+        }
         worker?.terminate();
         worker = null;
       });
@@ -542,6 +581,12 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       ),
     terminate: () => {
       generation++;
+      try {
+        connectAbort?.abort();
+      } catch {
+        // ignore
+      }
+      connectAbort = null;
       enginePromise = null;
       engine?.terminate();
       engine = null;
