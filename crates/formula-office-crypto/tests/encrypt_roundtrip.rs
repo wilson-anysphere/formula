@@ -182,6 +182,14 @@ fn standard_encrypt_decrypt_round_trip() {
         .expect("encrypt");
         let decrypted = decrypt_encrypted_package_ole(&ole, password).expect("decrypt");
         assert_eq!(decrypted.as_slice(), zip, "key_bits={key_bits}");
+
+        // Wrong password should fail for all Standard AES key sizes.
+        let err =
+            decrypt_encrypted_package_ole(&ole, "wrong-password").expect_err("wrong password");
+        assert!(
+            matches!(err, OfficeCryptoError::InvalidPassword),
+            "expected InvalidPassword for key_bits={key_bits}, got {err:?}"
+        );
     }
 }
 
