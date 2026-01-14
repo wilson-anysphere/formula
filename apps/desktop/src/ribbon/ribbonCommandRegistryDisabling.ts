@@ -132,6 +132,9 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.styles.formatAsTable.medium",
   "home.styles.formatAsTable.dark",
   "home.styles.formatAsTable.newStyle",
+  // Cell Styles are currently handled via `main.ts` (not CommandRegistry yet). Only the
+  // Good/Bad/Neutral submenu is implemented today.
+  "home.styles.cellStyles.goodBadNeutral",
 
   // --- Comments ---------------------------------------------------------------
   "review.comments.newComment",
