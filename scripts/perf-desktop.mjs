@@ -70,8 +70,9 @@ function isSubpath(parentDir, maybeChild) {
 }
 
 function formatLogPath(p) {
-  const rel = path.relative(repoRoot, p);
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return p;
+  const abs = path.resolve(path.isAbsolute(p) ? p : path.resolve(repoRoot, p));
+  const rel = path.relative(repoRoot, abs);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return abs;
   return rel;
 }
 
@@ -486,11 +487,11 @@ function reportSize({ env }) {
     failed = true;
   } else {
     // eslint-disable-next-line no-console
-    console.log(`[desktop-size] wrote binary bloat JSON: ${path.relative(repoRoot, binJsonOut)}`);
+    console.log(`[desktop-size] wrote binary bloat JSON: ${formatLogPath(binJsonOut)}`);
   }
 
   const distDir = path.join(repoRoot, "apps", "desktop", "dist");
-  const distLabel = path.relative(repoRoot, distDir) || distDir;
+  const distLabel = formatLogPath(distDir);
   if (existsSync(distDir)) {
     const total = dirSizeBytes(distDir);
     const totalMb = bytesToMb(total);
@@ -506,7 +507,7 @@ function reportSize({ env }) {
       // eslint-disable-next-line no-console
       console.log("[desktop-size] largest dist assets:");
       for (const f of largest) {
-        const rel = path.relative(repoRoot, f.path);
+        const rel = formatLogPath(f.path);
         // eslint-disable-next-line no-console
         console.log(`  - ${humanBytes(f.size).padStart(10)}  ${rel}`);
       }
