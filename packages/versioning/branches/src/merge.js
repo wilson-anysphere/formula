@@ -235,7 +235,24 @@ function mergeMergedRanges(baseValue, oursValue, theirsValue) {
     const range = parseKey(key);
     if (!range) continue;
 
-    const weight = oursHas ? 2 : theirsHas ? 1 : 0;
+    // Overlap resolution needs to be stable and should generally prefer explicit edits
+    // over base state, even when one side omits the field (which is treated as "no change"
+    // by setting `oursVal/theirsVal = baseVal` in the caller).
+    //
+    // Weight order:
+    // - base/unchanged: 0
+    // - theirs (added relative to base): 1
+    // - ours (added relative to base, or conflict resolution winner): 2
+    //
+    // Note: We intentionally *do not* use `oursHas` alone here, because omissions can
+    // cause base rectangles to appear in `oursSet`, which would incorrectly treat them
+    // as "ours" and make them override actual edits during overlap resolution.
+    let weight = 0;
+    if (!baseHas) {
+      // Rectangle wasn't present in base; treat additions as ours/theirs (prefer ours).
+      weight = oursHas ? 2 : 1;
+    }
+
     chosen.push({ key, weight, range });
   }
 
