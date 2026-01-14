@@ -120,3 +120,35 @@ fn decrypts_xor_with_empty_password() {
     let err = formula_xls::import_xls_path(&fixture_path).expect_err("expected encrypted workbook");
     assert!(matches!(err, formula_xls::ImportError::EncryptedWorkbook));
 }
+
+#[test]
+fn decrypts_xor_with_long_password_truncation() {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("encrypted")
+        .join("biff8_xor_pw_open_long_password.xls");
+
+    // BIFF8 XOR passwords are limited to 15 bytes; extra characters are ignored.
+    let full = "0123456789abcdef"; // 16 chars
+    let truncated = "0123456789abcde"; // first 15 chars
+
+    for password in [full, truncated] {
+        let result = formula_xls::import_xls_path_with_password(&fixture_path, Some(password))
+            .expect("decrypt and import");
+        let sheet1 = result
+            .workbook
+            .sheet_by_name("Sheet1")
+            .expect("Sheet1 missing");
+        assert_eq!(sheet1.value_a1("A1").unwrap(), CellValue::Number(42.0));
+    }
+
+    // A password that differs within the first 15 characters must fail.
+    let wrong = "1123456789abcdef";
+    let err = formula_xls::import_xls_path_with_password(&fixture_path, Some(wrong))
+        .expect_err("expected wrong password to fail");
+    assert!(
+        matches!(&err, formula_xls::ImportError::InvalidPassword),
+        "expected ImportError::InvalidPassword, got {err:?}"
+    );
+}
