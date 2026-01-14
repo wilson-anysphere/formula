@@ -173,6 +173,31 @@ describe("extractWorkbookSchema", () => {
     expect(schema.tables[0].inferredColumnTypes).toEqual(["empty", "number"]);
   });
 
+  it("unwraps typed value encodings for schema inference (t:n/t:b/t:blank/t:e)", () => {
+    const workbook = {
+      id: "wb-typed-values",
+      sheets: [
+        {
+          name: "Sheet1",
+          cells: [
+            ["Num", "Bool", "Blank", "Err"],
+            [
+              { value: { t: "n", v: 1.5 }, display: "1.50" },
+              { value: { t: "b", v: true }, display: "TRUE" },
+              { value: { t: "blank" } },
+              { value: { t: "e", v: "#DIV/0!" } },
+            ],
+          ],
+        },
+      ],
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 3 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables[0].headers).toEqual(["Num", "Bool", "Blank", "Err"]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual(["number", "boolean", "empty", "string"]);
+  });
+
   it("quotes sheet names in generated A1 ranges (tables + named ranges)", () => {
     const workbook = {
       id: "wb-quoted",

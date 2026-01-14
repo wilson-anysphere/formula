@@ -90,6 +90,50 @@ function getSheetCellMap(sheet) {
 }
 
 /**
+ * Formula engine typed-value encoding (see `tools/excel-oracle/value-encoding.md`).
+ *
+ * We support a minimal subset here to improve schema inference:
+ * - {"t":"blank"} => empty
+ * - {"t":"n","v":number} => number
+ * - {"t":"s","v":string} => string
+ * - {"t":"b","v":boolean} => boolean
+ * - {"t":"e","v":"#DIV/0!"} => string (error text)
+ * - {"t":"arr", ...} => "[array]" sentinel string
+ *
+ * @param {unknown} value
+ */
+function isTypedValue(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) && typeof value.t === "string";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function typedValueToScalar(value) {
+  if (!isTypedValue(value)) return value;
+  const v = /** @type {any} */ (value);
+  switch (v.t) {
+    case "blank":
+      return null;
+    case "n":
+      return typeof v.v === "number" ? v.v : v.v == null ? null : Number(v.v);
+    case "s":
+      return v.v == null ? "" : String(v.v);
+    case "b":
+      return Boolean(v.v);
+    case "e":
+      return v.v == null ? "" : String(v.v);
+    case "arr":
+      // Avoid JSON-stringifying potentially large spilled arrays; we only need
+      // something non-empty and stable for type inference.
+      return "[array]";
+    default:
+      return Object.prototype.hasOwnProperty.call(v, "v") ? v.v ?? null : String(value);
+  }
+}
+
+/**
  * Sheets can optionally provide an origin offset when their `cells`/`values` matrices
  * represent a window into a larger absolute sheet.
  *
@@ -150,6 +194,10 @@ function getCellRaw(sheet, row, col) {
  */
 function cellToScalar(raw) {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    // Formula-engine typed values can appear directly in cell matrices; unwrap them
+    // so header/type inference behaves as expected.
+    if (isTypedValue(raw)) return typedValueToScalar(raw);
+
     // Treat `{}` as an empty cell; it's a common sparse representation (notably from
     // `packages/ai-rag` normalization and some SpreadsheetApi adapters).
     if (raw.constructor === Object && Object.keys(raw).length === 0) return null;
@@ -161,7 +209,7 @@ function cellToScalar(raw) {
         const trimmed = formula.trim();
         if (trimmed) return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
       }
-      return raw.v ?? null;
+      return typedValueToScalar(raw.v ?? null);
     }
     // Alternate shape: { value, formula }
     if (Object.prototype.hasOwnProperty.call(raw, "value") || Object.prototype.hasOwnProperty.call(raw, "formula")) {
@@ -170,7 +218,7 @@ function cellToScalar(raw) {
         const trimmed = formula.trim();
         if (trimmed) return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
       }
-      return raw.value ?? null;
+      return typedValueToScalar(raw.value ?? null);
     }
     if (raw instanceof Date) return raw;
   }
