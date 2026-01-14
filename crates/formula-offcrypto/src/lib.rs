@@ -1971,7 +1971,12 @@ pub fn inspect_encryption_info(
     let _size_extra = hr.read_u32_le("EncryptionHeader.sizeExtra")?;
     let alg_id = hr.read_u32_le("EncryptionHeader.algId")?;
     let _alg_id_hash = hr.read_u32_le("EncryptionHeader.algIdHash")?;
-    let key_size = hr.read_u32_le("EncryptionHeader.keySize")?;
+    let mut key_size = hr.read_u32_le("EncryptionHeader.keySize")?;
+    // MS-OFFCRYPTO specifies that Standard/CryptoAPI RC4 uses `keySize=0` to mean 40-bit.
+    // Surface the effective key size so callers don't need special-case handling.
+    if alg_id == CALG_RC4 && key_size == 0 {
+        key_size = 40;
+    }
 
     Ok(EncryptionInfoSummary {
         encryption_type: EncryptionType::Standard,

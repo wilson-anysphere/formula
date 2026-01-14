@@ -285,6 +285,32 @@ fn inspect_encryption_info_accepts_major_4_minor_2() {
 }
 
 #[test]
+fn inspect_encryption_info_reports_rc4_keysize_zero_as_40bit() {
+    let header_flags = StandardEncryptionHeaderFlags::F_CRYPTOAPI;
+    let bytes = build_standard_encryption_info(
+        header_flags,
+        &[],
+        CALG_RC4,
+        CALG_SHA1,
+        0,  // keySize=0 => 40-bit for RC4 (MS-OFFCRYPTO)
+        16, // saltSize
+        20, // verifierHashSize (SHA1)
+        20, // encryptedVerifierHash length for RC4 is exactly verifierHashSize
+    );
+
+    let summary = inspect_encryption_info(&bytes).expect("inspect rc4");
+    assert_eq!(summary.encryption_type, EncryptionType::Standard);
+    assert_eq!(
+        summary.standard,
+        Some(formula_offcrypto::StandardEncryptionInfoSummary {
+            alg_id: StandardAlgId::Rc4,
+            key_size: 40,
+        })
+    );
+    assert_eq!(summary.agile, None);
+}
+
+#[test]
 fn truncation_missing_header_size() {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&3u16.to_le_bytes());
