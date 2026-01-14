@@ -335,11 +335,10 @@ export class YjsVersionStore {
   _orderIndex() {
     const order = this.meta.get("order");
     if (!isYArray(order)) return new Map();
-    const ids = order.toArray();
     /** @type {Map<string, number>} */
     const out = new Map();
-    for (let i = 0; i < ids.length; i += 1) {
-      const id = ids[i];
+    for (let i = 0; i < order.length; i += 1) {
+      const id = order.get(i);
       if (typeof id === "string") out.set(id, i);
     }
     return out;
@@ -559,11 +558,11 @@ export class YjsVersionStore {
       if (!isYArray(chunksArr)) return null;
       const expectedChunks = raw.get("snapshotChunkCountExpected");
       if (typeof expectedChunks === "number" && chunksArr.length < expectedChunks) return null;
-      const chunksRaw = chunksArr.toArray();
+      const chunkCount = chunksArr.length;
       /** @type {Uint8Array[]} */
-      const chunks = [];
-      for (const chunk of chunksRaw) {
-        chunks.push(normalizeSnapshotBytes(chunk));
+      const chunks = new Array(chunkCount);
+      for (let i = 0; i < chunkCount; i += 1) {
+        chunks[i] = normalizeSnapshotBytes(chunksArr.get(i));
       }
       stored = concatChunks(chunks);
     } else {

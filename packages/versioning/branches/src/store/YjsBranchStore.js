@@ -600,10 +600,12 @@ export class YjsBranchStore {
    * @returns {Promise<any>}
    */
   async #decodeJsonFromGzipChunks(chunksArr, label) {
-    const chunksRaw = chunksArr.toArray();
+    const chunkCount = chunksArr.length;
     /** @type {Uint8Array[]} */
-    const chunks = [];
-    for (const chunk of chunksRaw) chunks.push(normalizeBytes(chunk));
+    const chunks = new Array(chunkCount);
+    for (let i = 0; i < chunkCount; i += 1) {
+      chunks[i] = normalizeBytes(chunksArr.get(i));
+    }
     const compressed = concatChunks(chunks);
     const bytes = await gunzipBytes(compressed);
     const json = UTF8_DECODER.decode(bytes);
