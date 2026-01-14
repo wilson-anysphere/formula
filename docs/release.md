@@ -1355,6 +1355,17 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
     uploaded desktop artifacts. You can view them in GitHub’s **Attestations** UI for the workflow
     run, and the raw attestation bundles are attached to the draft GitHub Release as
     `provenance-*.intoto.jsonl` (and also uploaded as workflow artifacts `provenance-*`).
+
+    Quick verify (CLI): after downloading an installer/bundle from the release, you can verify its
+    GitHub attestation with the GitHub CLI:
+
+    ```bash
+    # Example (replace with a specific downloaded asset file):
+    gh attestation verify path/to/Formula-Setup-x64.msi --repo wilson-anysphere/formula
+    ```
+
+    Note: this verifies attestations stored by GitHub (online). The `provenance-*.intoto.jsonl` files
+    attached to the release are the raw Sigstore bundles produced during the workflow run.
 2. Download `latest.json` and confirm `platforms` includes entries for:
    - `darwin-x86_64` (macOS Intel; points at the updater tarball)
    - `darwin-aarch64` (macOS Apple Silicon; points at the updater tarball)
