@@ -71,8 +71,8 @@ pub use editing::{
 };
 pub use engine::{
     BytecodeCompileReason, BytecodeCompileReportEntry, BytecodeCompileStats, Engine, EngineError,
-    EngineInfo, ExternalDataProvider, ExternalValueProvider, NameDefinition, NameScope, PrecedentNode,
-    RecalcMode, RecalcValueChange, SheetId, SheetLifecycleError,
+    EngineInfo, ExternalDataProvider, ExternalValueProvider, NameDefinition, NameScope,
+    PrecedentNode, RecalcMode, RecalcValueChange, SheetId, SheetLifecycleError,
 };
 pub use metadata::FormatRun;
 pub use parser::{
@@ -81,7 +81,6 @@ pub use parser::{
 };
 pub use perf::{run_benchmarks, BenchmarkResult};
 pub use value::{Entity, ErrorKind, Record, Value};
-pub use metadata::FormatRun;
 
 /// Parse a formula into an [`Ast`].
 ///
