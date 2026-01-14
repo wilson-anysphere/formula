@@ -441,6 +441,21 @@ fn cell_implicit_reference_does_not_create_dynamic_dependency_cycles_for_metadat
         sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"prefix\"))"),
         Value::Text(String::new())
     );
+
+    // Format metadata keys consult number format style state, but should still avoid implicit
+    // self-references for dynamic dependency tracing.
+    assert_eq!(
+        sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"format\"))"),
+        Value::Text("G".to_string())
+    );
+    assert_number(
+        &sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"color\"))"),
+        0.0,
+    );
+    assert_number(
+        &sheet.eval("=IF(FALSE,INDIRECT(\"A1\"),CELL(\"parentheses\"))"),
+        0.0,
+    );
 }
 
 #[test]
