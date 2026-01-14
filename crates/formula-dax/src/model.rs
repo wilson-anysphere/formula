@@ -1118,12 +1118,32 @@ impl DataModel {
                         }
                     } else {
                         // Fallback: keep only rows that are still unmatched.
-                        unmatched.retain(|row| {
-                            let v = from_table_ref
-                                .value_by_idx(*row, from_idx)
-                                .unwrap_or(Value::Blank);
-                            v.is_blank() || &v != key
-                        });
+                        let UnmatchedFactRows::Dense { bits, len, count } = unmatched else {
+                            unreachable!("match arm already ensures unmatched fact rows are dense");
+                        };
+                        let len = *len;
+                        let mut new_count = 0usize;
+                        for (word_idx, word) in bits.iter_mut().enumerate() {
+                            let mut w = *word;
+                            let mut new_word = 0u64;
+                            while w != 0 {
+                                let tz = w.trailing_zeros() as usize;
+                                let row = word_idx * 64 + tz;
+                                if row >= len {
+                                    break;
+                                }
+                                let v = from_table_ref
+                                    .value_by_idx(row, from_idx)
+                                    .unwrap_or(Value::Blank);
+                                if v.is_blank() || &v != key {
+                                    new_word |= 1u64 << tz;
+                                    new_count += 1;
+                                }
+                                w &= w - 1;
+                            }
+                            *word = new_word;
+                        }
+                        *count = new_count;
                     }
                 }
             }
