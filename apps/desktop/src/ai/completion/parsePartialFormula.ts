@@ -1,5 +1,6 @@
 import {
   parsePartialFormula as parsePartialFormulaFallback,
+  FunctionRegistry,
   type PartialFormulaContext,
 } from "@formula/ai-completion";
 import { getLocale } from "../../i18n/index.js";
@@ -45,24 +46,34 @@ function casefoldIdent(ident: string): string {
 
 type FunctionTranslationMap = Map<string, string>;
 
-function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationMap {
-  const map: FunctionTranslationMap = new Map();
+type FunctionTranslationTables = {
+  localizedToCanonical: FunctionTranslationMap;
+  canonicalToLocalized: Map<string, string>;
+};
+
+function parseFunctionTranslationsTsv(tsv: string): FunctionTranslationTables {
+  const localizedToCanonical: FunctionTranslationMap = new Map();
+  const canonicalToLocalized: Map<string, string> = new Map();
   for (const rawLine of String(tsv ?? "").split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
     const [canonical, localized] = line.split("\t");
     if (!canonical || !localized) continue;
     const canonUpper = casefoldIdent(canonical.trim());
-    const locUpper = casefoldIdent(localized.trim());
+    const localizedTrimmed = localized.trim();
+    const locUpper = casefoldIdent(localizedTrimmed);
     // Only store translations that differ; identity entries can fall back to `to_ascii_uppercase`.
     if (canonUpper && locUpper && canonUpper !== locUpper) {
-      map.set(locUpper, canonUpper);
+      localizedToCanonical.set(locUpper, canonUpper);
+      // Preserve the exact localized spelling from the TSV (typically already uppercase), so
+      // completion suggestions can emit it without casefold expansions (e.g. ß -> SS).
+      canonicalToLocalized.set(canonUpper, localizedTrimmed);
     }
   }
-  return map;
+  return { localizedToCanonical, canonicalToLocalized };
 }
 
-const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<string, FunctionTranslationMap> = {
+const FUNCTION_TRANSLATIONS_BY_LOCALE: Record<string, FunctionTranslationTables> = {
   "de-DE": parseFunctionTranslationsTsv(DE_DE_FUNCTION_TSV),
   "fr-FR": parseFunctionTranslationsTsv(FR_FR_FUNCTION_TSV),
   "es-ES": parseFunctionTranslationsTsv(ES_ES_FUNCTION_TSV),
@@ -100,8 +111,96 @@ function canonicalizeFunctionNameForLocale(name: string, localeId: string): stri
   const hasPrefix = raw.length >= PREFIX.length && raw.slice(0, PREFIX.length).toLowerCase() === PREFIX;
   const base = hasPrefix ? raw.slice(PREFIX.length) : raw;
   const upper = casefoldIdent(base);
-  const mapped = localeMap.get(upper) ?? upper;
+  const mapped = localeMap.localizedToCanonical.get(upper) ?? upper;
   return hasPrefix ? `${PREFIX}${mapped}` : mapped;
+}
+
+type LocaleAliasMeta = {
+  __formulaLocaleId?: string;
+  __formulaCanonicalName?: string;
+};
+
+/**
+ * Desktop-only `FunctionRegistry` that prefers localized function-name completions when
+ * a locale translation table is available.
+ *
+ * It registers localized aliases (e.g. `SUMME`) alongside canonical names (`SUM`) and
+ * filters `search()` results so:
+ * - callers still get canonical matches when no localized alias matches the prefix
+ * - when a localized alias *does* match, its canonical counterpart is suppressed so the
+ *   localized name wins the completion ranking (important for pure-insertion UX)
+ */
+class LocaleAwareFunctionRegistry extends FunctionRegistry {
+  constructor() {
+    super();
+
+    // Register localized aliases for any locales the WASM engine supports. The desktop UI
+    // may not expose all of these locales yet, but registering them eagerly keeps this
+    // registry future-proof and allows tests to validate the mapping tables.
+    for (const [localeId, tables] of Object.entries(FUNCTION_TRANSLATIONS_BY_LOCALE)) {
+      for (const [canonUpper, localizedName] of tables.canonicalToLocalized.entries()) {
+        // Avoid overriding canonical entries or existing aliases (collisions are possible across locales).
+        if (this.getFunction(localizedName)) continue;
+
+        const spec = this.getFunction(canonUpper);
+        if (!spec) continue;
+
+        const alias: any = {
+          ...spec,
+          name: localizedName,
+          __formulaLocaleId: localeId,
+          __formulaCanonicalName: spec.name,
+        } satisfies LocaleAliasMeta;
+        try {
+          this.register(alias);
+        } catch {
+          // Be defensive: localized alias registration is best-effort and should never
+          // prevent the completion engine from booting.
+        }
+      }
+    }
+  }
+
+  search(prefix: string, options?: { limit?: number }): any[] {
+    const rawLimit = options?.limit ?? 10;
+    // Fetch a larger candidate set, then filter down by locale. This ensures we still return
+    // enough localized results even when the prefix matches many canonical names.
+    const candidateLimit = Math.max(rawLimit * 10, 100);
+
+    const localeId = (() => {
+      try {
+        return getLocale();
+      } catch {
+        return "en-US";
+      }
+    })();
+
+    const candidates: any[] = super.search(prefix, { ...options, limit: candidateLimit } as any);
+
+    /** @type {any[]} */
+    const localized: any[] = [];
+    /** @type {any[]} */
+    const canonical: any[] = [];
+
+    for (const spec of candidates) {
+      const meta = spec as any as LocaleAliasMeta;
+      const isAlias = typeof meta.__formulaLocaleId === "string" && meta.__formulaLocaleId.length > 0;
+      if (isAlias) {
+        if (meta.__formulaLocaleId === localeId) localized.push(spec);
+        continue;
+      }
+      canonical.push(spec);
+    }
+
+    // Prefer localized completions when any match exists. This keeps the formula bar’s "pure insertion"
+    // UX intact while making locale-specific names (often longer than canonical ones) win ranking.
+    if (localized.length > 0) return localized.slice(0, rawLimit);
+    return canonical.slice(0, rawLimit);
+  }
+}
+
+export function createLocaleAwareFunctionRegistry(): FunctionRegistry {
+  return new LocaleAwareFunctionRegistry();
 }
 
 function findOpenParenIndex(prefix: string): number | null {

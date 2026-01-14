@@ -3,7 +3,7 @@ import { evaluateFormula, type SpreadsheetValue } from "./evaluateFormula.js";
 import { AiCellFunctionEngine } from "./AiCellFunctionEngine.js";
 import { normalizeRange, parseA1, rangeToA1, toA1, type CellAddress, type RangeAddress } from "./a1.js";
 import { TabCompletionEngine } from "@formula/ai-completion";
-import { createLocaleAwarePartialFormulaParser } from "../ai/completion/parsePartialFormula.js";
+import { createLocaleAwareFunctionRegistry, createLocaleAwarePartialFormulaParser } from "../ai/completion/parsePartialFormula.js";
 import { getLocale } from "../i18n/index.js";
 
 export type Cell = { input: string; value: SpreadsheetValue };
@@ -15,6 +15,7 @@ export class SpreadsheetModel {
   readonly #cells = new Map<string, Cell>();
   readonly #aiCellFunctions: AiCellFunctionEngine;
   readonly #completion = new TabCompletionEngine({
+    functionRegistry: createLocaleAwareFunctionRegistry(),
     // Mirror the production formula bar adapter: canonicalize localized function names so
     // range-arg heuristics can work in non-en-US locales, and optionally use the WASM
     // engine when available (SpreadsheetModel doesn't provide one, so this remains sync).

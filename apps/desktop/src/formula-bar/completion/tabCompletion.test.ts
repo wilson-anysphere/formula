@@ -63,6 +63,28 @@ describe("Formula bar tab completion", () => {
     }
   });
 
+  it("suggests localized function-name completion in de-DE (SU -> SUMME)", async () => {
+    const prevLocale = getLocale();
+    setLocale("de-DE");
+    try {
+      const sheet = new SpreadsheetModel();
+
+      sheet.selectCell("A1");
+      sheet.beginFormulaEdit();
+      sheet.typeInFormulaBar("=SU", 3);
+
+      await sheet.flushTabCompletion();
+
+      expect(sheet.formulaBar.aiSuggestion()).toBe("=SUMME(");
+      expect(sheet.formulaBar.aiGhostText()).toBe("MME(");
+
+      expect(sheet.formulaBar.acceptAiSuggestion()).toBe(true);
+      expect(sheet.formulaBar.draft).toBe("=SUMME(");
+    } finally {
+      setLocale(prevLocale);
+    }
+  });
+
   it("treats blank-valued formulas as non-empty when suggesting ranges", async () => {
     const initial: Record<string, string> = {};
     for (let row = 1; row <= 10; row += 1) {

@@ -15,7 +15,7 @@ import { getLocale } from "../../i18n/index.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula.js";
-import { createLocaleAwarePartialFormulaParser } from "./parsePartialFormula.js";
+import { createLocaleAwareFunctionRegistry, createLocaleAwarePartialFormulaParser } from "./parsePartialFormula.js";
 
 function normalizeSheetNameToken(sheetName: string): string {
   const raw = String(sheetName ?? "").trim();
@@ -125,6 +125,7 @@ export class FormulaBarTabCompletionController {
     const completionClient =
       opts.completionClient ?? createCursorTabCompletionClientFromEnv() ?? new CursorTabCompletionClient();
     this.#completion = new TabCompletionEngine({
+      functionRegistry: createLocaleAwareFunctionRegistry(),
       completionClient,
       schemaProvider,
       parsePartialFormula: createLocaleAwarePartialFormulaParser({
