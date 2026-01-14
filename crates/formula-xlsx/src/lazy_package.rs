@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
 
@@ -27,18 +28,31 @@ use crate::streaming::patch_xlsx_streaming_workbook_cell_patches_with_part_overr
 #[cfg(not(target_arch = "wasm32"))]
 use tempfile::tempfile;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum Source {
     #[cfg(not(target_arch = "wasm32"))]
-    Path(PathBuf),
+    Path(Arc<PathBuf>),
     Bytes(Arc<Vec<u8>>),
+}
+
+impl fmt::Debug for Source {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Source::Bytes(bytes) => f
+                .debug_struct("Bytes")
+                .field("len", &bytes.len())
+                .finish(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Source::Path(path) => f.debug_tuple("Path").field(path).finish(),
+        }
+    }
 }
 
 impl Source {
     #[cfg(not(target_arch = "wasm32"))]
     fn open_reader(&self) -> Result<SourceReader<'_>, XlsxError> {
         match self {
-            Source::Path(path) => Ok(SourceReader::File(std::fs::File::open(path)?)),
+            Source::Path(path) => Ok(SourceReader::File(std::fs::File::open(path.as_path())?)),
             Source::Bytes(bytes) => Ok(SourceReader::Bytes(Cursor::new(bytes.as_slice()))),
         }
     }
@@ -86,7 +100,7 @@ impl Seek for SourceReader<'_> {
 ///
 /// This is intended for scenarios where callers want to preserve unknown parts (e.g. `customXml/`,
 /// `xl/vbaProject.bin`) while keeping memory usage low for large workbooks.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct XlsxLazyPackage {
     source: Source,
     /// Deterministic map of part overrides keyed by canonical part name (`xl/workbook.xml`, without
@@ -100,7 +114,19 @@ pub struct XlsxLazyPackage {
     /// Optional workbook kind enforcement (used to update `[Content_Types].xml`).
     workbook_kind: Option<WorkbookKind>,
     /// Cached set of part names discovered at open time (canonical, without leading `/`).
-    part_names: Vec<String>,
+    part_names: Arc<Vec<String>>,
+}
+
+impl fmt::Debug for XlsxLazyPackage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("XlsxLazyPackage")
+            .field("source", &self.source)
+            .field("parts", &self.part_names.len())
+            .field("overrides", &self.overrides.len())
+            .field("strip_macros", &self.strip_macros)
+            .field("workbook_kind", &self.workbook_kind)
+            .finish()
+    }
 }
 
 impl XlsxLazyPackage {
@@ -118,9 +144,9 @@ impl XlsxLazyPackage {
     /// contents into memory.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: PathBuf, file: std::fs::File) -> Result<Self, XlsxError> {
-        let part_names = list_part_names(file)?;
+        let part_names = Arc::new(list_part_names(file)?);
         Ok(Self {
-            source: Source::Path(path),
+            source: Source::Path(Arc::new(path)),
             overrides: BTreeMap::new(),
             strip_macros: None,
             workbook_kind: None,
@@ -131,7 +157,7 @@ impl XlsxLazyPackage {
     /// Create a lazy package from owned ZIP bytes.
     pub fn from_vec(bytes: Vec<u8>) -> Result<Self, XlsxError> {
         let cursor = Cursor::new(bytes.as_slice());
-        let part_names = list_part_names(cursor)?;
+        let part_names = Arc::new(list_part_names(cursor)?);
         Ok(Self {
             source: Source::Bytes(Arc::new(bytes)),
             overrides: BTreeMap::new(),
@@ -634,4 +660,53 @@ fn list_part_names<R: Read + Seek>(mut reader: R) -> Result<Vec<String>, XlsxErr
         names.push(canonical);
     }
     Ok(names)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in files {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn clone_shares_source_bytes_and_part_name_cache() {
+        let bytes = build_zip(&[("xl/workbook.xml", b"<workbook/>")]);
+        let pkg = XlsxLazyPackage::from_vec(bytes).expect("pkg");
+        let cloned = pkg.clone();
+
+        match (&pkg.source, &cloned.source) {
+            (Source::Bytes(a), Source::Bytes(b)) => {
+                assert!(
+                    Arc::ptr_eq(a, b),
+                    "expected clones to share the same backing ZIP bytes"
+                );
+            }
+            _ => panic!("expected Source::Bytes"),
+        }
+
+        assert!(
+            Arc::ptr_eq(&pkg.part_names, &cloned.part_names),
+            "expected clones to share the cached part name list"
+        );
+    }
+
+    #[test]
+    fn debug_does_not_dump_zip_payload() {
+        let bytes = build_zip(&[("xl/workbook.xml", b"<workbook/>")]);
+        let pkg = XlsxLazyPackage::from_vec(bytes).expect("pkg");
+        let dbg = format!("{pkg:?}");
+        assert!(dbg.contains("XlsxLazyPackage"));
+        // Avoid printing the entire ZIP payload.
+        assert!(!dbg.contains("<workbook/>"));
+    }
 }

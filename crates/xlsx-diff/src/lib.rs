@@ -1506,7 +1506,9 @@ pub fn roundtrip_zip_copy(original: &Path, out_path: &Path) -> Result<()> {
 /// corpus (they otherwise fail ZIP-based round-trip tests).
 ///
 /// Convention: keep them under `fixtures/xlsx/encrypted/` (or `fixtures/encrypted/ooxml/`) and this
-/// helper will skip the `encrypted/` subtree.
+/// helper will skip the `encrypted/` subtree. As a backstop (for mis-filed fixtures), this helper
+/// also skips any `.xlsx`/`.xlsm`/`.xlsb` file that looks like an OLE/CFB container (magic
+/// `D0 CF 11 E0 A1 B1 1A E1`).
 pub fn collect_fixture_paths(root: &Path) -> Result<Vec<PathBuf>> {
     if !root.exists() {
         return Err(anyhow!("fixtures root {} does not exist", root.display()));
@@ -1527,7 +1529,21 @@ pub fn collect_fixture_paths(root: &Path) -> Result<Vec<PathBuf>> {
             continue;
         }
         match path.extension().and_then(|s| s.to_str()) {
-            Some("xlsx") | Some("xlsm") | Some("xlsb") => files.push(path.to_path_buf()),
+            Some("xlsx") | Some("xlsm") | Some("xlsb") => {
+                // Office-encrypted OOXML "workbooks" are stored as OLE/CFB containers, not ZIPs.
+                // Skip them so ZIP-based diff/round-trip harnesses don't choke on them.
+                let mut file = File::open(path)
+                    .with_context(|| format!("open fixture {}", path.display()))?;
+                let mut magic = [0u8; OLE_MAGIC.len()];
+                let n = file
+                    .read(&mut magic)
+                    .with_context(|| format!("read fixture header {}", path.display()))?;
+                if n == OLE_MAGIC.len() && magic == OLE_MAGIC {
+                    continue;
+                }
+
+                files.push(path.to_path_buf())
+            }
             _ => {}
         }
     }

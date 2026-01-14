@@ -1821,6 +1821,169 @@ fn decode_utf16le_z_lossy(bytes: &[u8]) -> Result<String, formula_offcrypto::Off
     String::from_utf16(&units[..end]).map_err(|_| formula_offcrypto::OffcryptoError::InvalidCspNameUtf16)
 }
 
+#[cfg(feature = "encrypted-workbooks")]
+fn decrypt_standard_cryptoapi_rc4_md5_40bit_padded(
+    info: &formula_offcrypto::StandardEncryptionInfo,
+    encrypted_package_stream: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, formula_offcrypto::OffcryptoError> {
+    use md5::Digest as _;
+
+    // CryptoAPI constants.
+    const CALG_RC4: u32 = 0x0000_6801;
+    const CALG_MD5: u32 = 0x0000_8003;
+
+    if info.header.alg_id != CALG_RC4 {
+        return Err(formula_offcrypto::OffcryptoError::UnsupportedAlgorithm(format!(
+            "algId=0x{:08x}",
+            info.header.alg_id
+        )));
+    }
+    if info.header.alg_id_hash != CALG_MD5 {
+        return Err(formula_offcrypto::OffcryptoError::UnsupportedAlgorithm(format!(
+            "algIdHash=0x{:08x}",
+            info.header.alg_id_hash
+        )));
+    }
+
+    // `formula-offcrypto`'s strict parser normalizes `keySize=0` to 40-bit for RC4, but keep a
+    // defensive fallback for lenient parsing paths.
+    let key_size_bits = if info.header.key_size_bits == 0 {
+        40
+    } else {
+        info.header.key_size_bits
+    };
+    if key_size_bits % 8 != 0 {
+        return Err(formula_offcrypto::OffcryptoError::InvalidKeySizeBits { key_size_bits });
+    }
+    let key_len = (key_size_bits / 8) as usize;
+    // This helper is only for the "40-bit RC4 (keyLen=5) padded to 16 bytes" variant.
+    if key_len != 5 {
+        return Err(formula_offcrypto::OffcryptoError::UnsupportedAlgorithm(format!(
+            "keySize={} unsupported for padded RC4-MD5 variant",
+            info.header.key_size_bits
+        )));
+    }
+
+    // Minimal RC4 implementation (KSA + PRGA).
+    struct Rc4 {
+        s: [u8; 256],
+        i: u8,
+        j: u8,
+    }
+
+    impl Rc4 {
+        fn new(key: &[u8]) -> Self {
+            debug_assert!(!key.is_empty(), "RC4 key must be non-empty");
+            let mut s = [0u8; 256];
+            for (i, v) in s.iter_mut().enumerate() {
+                *v = i as u8;
+            }
+            let mut j: u8 = 0;
+            for i in 0..256usize {
+                j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
+                s.swap(i, j as usize);
+            }
+            Self { s, i: 0, j: 0 }
+        }
+
+        fn apply_keystream(&mut self, data: &mut [u8]) {
+            for b in data {
+                self.i = self.i.wrapping_add(1);
+                self.j = self.j.wrapping_add(self.s[self.i as usize]);
+                self.s.swap(self.i as usize, self.j as usize);
+                let t = self.s[self.i as usize].wrapping_add(self.s[self.j as usize]);
+                let k = self.s[t as usize];
+                *b ^= k;
+            }
+        }
+    }
+
+    // --- Derive base hash H ------------------------------------------------------------
+    let h = formula_offcrypto::cryptoapi::iterated_hash_from_password(
+        password,
+        &info.verifier.salt,
+        formula_offcrypto::cryptoapi::STANDARD_SPIN_COUNT,
+        formula_offcrypto::HashAlgorithm::Md5,
+    )?;
+
+    // --- Verify password via EncryptionVerifier ---------------------------------------
+    //
+    // Some producers (notably CryptoAPI consumers) treat 40-bit RC4 as a 128-bit key with the high
+    // 88 bits set to zero. In practice this means:
+    //   key = H_block[0..5] || 0x00 * 11
+    // rather than using the raw 5-byte key directly.
+    let mut hasher = md5::Md5::new();
+    hasher.update(h.as_slice());
+    hasher.update(0u32.to_le_bytes());
+    let digest0 = hasher.finalize();
+    let mut key0 = [0u8; 16];
+    key0[..5].copy_from_slice(&digest0[..5]);
+
+    let mut rc4 = Rc4::new(&key0);
+    let mut verifier = info.verifier.encrypted_verifier;
+    rc4.apply_keystream(&mut verifier);
+
+    let mut verifier_hash = info.verifier.encrypted_verifier_hash.clone();
+    rc4.apply_keystream(&mut verifier_hash);
+
+    let hash_len = info.verifier.verifier_hash_size as usize;
+    if hash_len == 0 || hash_len > 16 {
+        return Err(formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionVerifier.verifierHashSize invalid for MD5",
+        });
+    }
+    if verifier_hash.len() < hash_len {
+        return Err(formula_offcrypto::OffcryptoError::InvalidEncryptionInfo {
+            context: "decrypted verifierHash shorter than verifierHashSize",
+        });
+    }
+
+    let expected_hash = md5::Md5::digest(&verifier);
+    if !crate::offcrypto::standard::ct_eq(&expected_hash[..hash_len], &verifier_hash[..hash_len]) {
+        return Err(formula_offcrypto::OffcryptoError::InvalidPassword);
+    }
+
+    // --- Decrypt EncryptedPackage ------------------------------------------------------
+    let header = formula_offcrypto::parse_encrypted_package_header(encrypted_package_stream)?;
+    let total_size = header.original_size;
+
+    let output_len = usize::try_from(total_size)
+        .map_err(|_| formula_offcrypto::OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+    isize::try_from(output_len)
+        .map_err(|_| formula_offcrypto::OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
+
+    let ciphertext_len = encrypted_package_stream.len().saturating_sub(8);
+    if ciphertext_len < output_len {
+        return Err(formula_offcrypto::OffcryptoError::EncryptedPackageSizeMismatch {
+            total_size,
+            ciphertext_len,
+        });
+    }
+
+    let mut out = Vec::new();
+    out.try_reserve_exact(output_len)
+        .map_err(|_| formula_offcrypto::OffcryptoError::EncryptedPackageAllocationFailed { total_size })?;
+    out.resize(output_len, 0);
+    out.copy_from_slice(&encrypted_package_stream[8..8 + output_len]);
+
+    // Decrypt in-place, re-keying every 0x200 bytes.
+    for (block_index, chunk) in out.chunks_mut(formula_offcrypto::cryptoapi::RC4_BLOCK_LEN).enumerate()
+    {
+        let mut hasher = md5::Md5::new();
+        hasher.update(h.as_slice());
+        hasher.update((block_index as u32).to_le_bytes());
+        let digest = hasher.finalize();
+
+        let mut key = [0u8; 16];
+        key[..5].copy_from_slice(&digest[..5]);
+        let mut rc4 = Rc4::new(&key);
+        rc4.apply_keystream(chunk);
+    }
+
+    Ok(out)
+}
+
 /// Parse a Standard (CryptoAPI) `EncryptionInfo` stream while being tolerant of missing/incorrect
 /// header flags.
 ///
@@ -2117,15 +2280,50 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
             // Standard/CryptoAPI RC4 (CALG_RC4) uses a different key derivation than Standard AES.
             const CALG_RC4: u32 = 0x0000_6801;
             if info.header.alg_id == CALG_RC4 {
-                let decrypted = formula_offcrypto::standard_rc4::decrypt_encrypted_package(
+                match formula_offcrypto::standard_rc4::decrypt_encrypted_package(
                     &info,
                     &encrypted_package,
                     password,
-                )?;
-                if !decrypted.starts_with(b"PK") {
-                    return Err(formula_offcrypto::OffcryptoError::InvalidPassword);
+                ) {
+                    Ok(decrypted) => {
+                        if !decrypted.starts_with(b"PK") {
+                            return Err(formula_offcrypto::OffcryptoError::InvalidPassword);
+                        }
+                        return Ok(decrypted);
+                    }
+                    Err(formula_offcrypto::OffcryptoError::InvalidPassword) => {
+                        // Compatibility fallback: some producers derive 40-bit RC4 keys as a
+                        // 128-bit key with the high 88 bits zero (i.e. pad the 5-byte key material
+                        // to 16 bytes). This is observed for `algIdHash=CALG_MD5`.
+                        //
+                        // Try this variant before reporting `InvalidPassword`.
+                        const CALG_MD5: u32 = 0x0000_8003;
+                        let key_size_bits = if info.header.key_size_bits == 0 {
+                            40
+                        } else {
+                            info.header.key_size_bits
+                        };
+                        let key_len = key_size_bits / 8;
+                        if info.header.alg_id_hash == CALG_MD5 && key_len == 5 {
+                            match decrypt_standard_cryptoapi_rc4_md5_40bit_padded(
+                                &info,
+                                &encrypted_package,
+                                password,
+                            ) {
+                                Ok(decrypted) => {
+                                    if !decrypted.starts_with(b"PK") {
+                                        return Err(formula_offcrypto::OffcryptoError::InvalidPassword);
+                                    }
+                                    return Ok(decrypted);
+                                }
+                                Err(formula_offcrypto::OffcryptoError::InvalidPassword) => {}
+                                Err(other) => return Err(other),
+                            }
+                        }
+                        return Err(formula_offcrypto::OffcryptoError::InvalidPassword);
+                    }
+                    Err(other) => return Err(other),
                 }
-                return Ok(decrypted);
             }
 
             // --- Derive iterated SHA-1 hash (shared by both key variants) ---
