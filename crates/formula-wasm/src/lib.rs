@@ -5202,9 +5202,9 @@ impl WasmWorkbook {
                 decode_formulas: true,
             };
             let wb = formula_xlsb::XlsbWorkbook::open_from_bytes_with_options(&decrypted, options)
-                .map_err(|err| js_err(err.to_string()))?;
-            let model =
-                xlsb_to_model_workbook(&wb).map_err(|err| js_err(err.to_string()))?;
+                .map_err(|err| js_err(format!("invalid .xlsb workbook: {err}")))?;
+            let model = xlsb_to_model_workbook(&wb)
+                .map_err(|err| js_err(format!("invalid .xlsb workbook: {err}")))?;
             return Self::from_workbook_model(model);
         }
         Err(js_err(
