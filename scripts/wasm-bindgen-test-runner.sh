@@ -11,6 +11,16 @@ set -euo pipefail
 
 WASM_BINDGEN_CLI_VERSION="0.2.106"
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+
+# `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml`. Some environments set it globally
+# (often to `stable`), which would bypass the pinned toolchain and reintroduce drift for cargo
+# installs invoked by this runner.
+if [[ -n "${RUSTUP_TOOLCHAIN:-}" && -f "${repo_root}/rust-toolchain.toml" ]]; then
+  unset RUSTUP_TOOLCHAIN
+fi
+
 cargo_home="${CARGO_HOME:-${HOME:-/root}/.cargo}"
 bin_dir="${cargo_home%/}/bin"
 runner="${bin_dir}/wasm-bindgen-test-runner"
@@ -36,4 +46,3 @@ if [[ ! -x "${runner}" ]]; then
 fi
 
 exec "${runner}" "$@"
-

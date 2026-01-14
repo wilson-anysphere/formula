@@ -4,6 +4,19 @@
 
 set -e
 
+# `RUSTUP_TOOLCHAIN` overrides the repo's `rust-toolchain.toml` pin. Some environments set it
+# globally (often to `stable`), which would bypass the pinned toolchain and reintroduce drift.
+#
+# Clear it when we're inside this repo so subsequent `cargo` invocations (including ones that don't
+# use wrapper scripts) respect `rust-toolchain.toml`.
+if [ -n "${RUSTUP_TOOLCHAIN:-}" ] && command -v git >/dev/null 2>&1; then
+  _formula_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "${_formula_repo_root}" ] && [ -f "${_formula_repo_root}/rust-toolchain.toml" ]; then
+    unset RUSTUP_TOOLCHAIN
+  fi
+  unset _formula_repo_root
+fi
+
 # ============================================================================
 # Memory Limits (CRITICAL)
 # ============================================================================
