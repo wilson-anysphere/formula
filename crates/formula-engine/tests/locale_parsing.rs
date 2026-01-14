@@ -32,6 +32,21 @@ fn canonicalize_and_localize_unicode_case_insensitive_function_names_for_de_de()
 }
 
 #[test]
+fn canonicalize_and_localize_unicode_case_insensitive_function_names_for_es_es() {
+    // Spanish translation uses non-ASCII letters (Ñ); ensure we do Unicode-aware case-folding.
+    for localized in ["=año(1)", "=Año(1)", "=AÑO(1)"] {
+        let canonical = locale::canonicalize_formula(localized, &locale::ES_ES).unwrap();
+        assert_eq!(canonical, "=YEAR(1)");
+    }
+
+    // Reverse translation should use the spelling from `src/locale/data/es-ES.tsv`.
+    assert_eq!(
+        locale::localize_formula("=year(1)", &locale::ES_ES).unwrap(),
+        "=AÑO(1)"
+    );
+}
+
+#[test]
 fn canonicalize_and_localize_more_function_names_for_de_de() {
     fn assert_roundtrip(canonical: &str, localized: &str) {
         assert_eq!(
