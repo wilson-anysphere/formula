@@ -199,8 +199,7 @@ impl<R: Read + Seek> StreamingXlsxPackage<R> {
             Some(found) => (found.to_string(), true),
             None => (canonical_input, false),
         };
-        self.part_overrides
-            .insert(canonical.clone(), PartOverride::Remove);
+        self.part_overrides.insert(canonical.clone(), PartOverride::Remove);
         if !exists_in_source {
             self.added_part_names.remove(&canonical);
         }

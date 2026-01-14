@@ -12,7 +12,6 @@ use crate::util::{
     checked_vec_len, ct_eq, decode_utf16le_nul_terminated, parse_encrypted_package_original_size,
     read_u32_le, EncryptionInfoHeader,
 };
-
 // CryptoAPI algorithm identifiers (MS-OFFCRYPTO Standard / CryptoAPI encryption).
 #[allow(dead_code)]
 const CALG_RC4: u32 = 0x0000_6801;
