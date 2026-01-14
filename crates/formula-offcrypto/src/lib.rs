@@ -2175,6 +2175,44 @@ fn derive_encryption_key(
     Ok(Zeroizing::new(normalize_key_material(&hfinal[..], key_len)))
 }
 
+fn derive_iv_from_salt(
+    salt: &[u8],
+    block_key: &[u8],
+    hash_algorithm: HashAlgorithm,
+) -> Result<[u8; 16], OffcryptoError> {
+    let mut buf = Zeroizing::new(Vec::with_capacity(salt.len() + block_key.len()));
+    buf.extend_from_slice(salt);
+    buf.extend_from_slice(block_key);
+    let digest = hash_digest(hash_algorithm, &buf);
+    let mut iv = [0u8; 16];
+    iv.copy_from_slice(
+        digest
+            .get(..16)
+            .ok_or(OffcryptoError::InvalidEncryptionInfo {
+                context: "hash output shorter than AES block size",
+            })?,
+    );
+    Ok(iv)
+}
+
+fn salt_iv(salt: &[u8]) -> Result<[u8; 16], OffcryptoError> {
+    let mut iv = [0u8; 16];
+    iv.copy_from_slice(
+        salt.get(..16).ok_or(OffcryptoError::InvalidEncryptionInfo {
+            context: "password salt is shorter than AES block size",
+        })?,
+    );
+    Ok(iv)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgilePasswordIvMode {
+    /// Use `iv = passwordSalt` (most common / matches `msoffcrypto-tool` docstring vectors).
+    Salt,
+    /// Use `iv = HASH(passwordSalt || blockKey)[:16]` (observed in some fixtures/tooling).
+    Derived,
+}
+
 fn aes_cbc_decrypt(
     ciphertext: &[u8],
     key: &[u8],
@@ -2272,28 +2310,49 @@ pub fn agile_verify_password_with_options(
         info.password_key_bits,
     )?;
 
-    let verifier_hash_input =
-        aes_cbc_decrypt(&info.encrypted_verifier_hash_input, &key1, &info.password_salt)?;
-    let verifier_hash_value_full =
-        aes_cbc_decrypt(&info.encrypted_verifier_hash_value, &key2, &info.password_salt)?;
-
     let hash_len = match info.password_hash_algorithm {
         HashAlgorithm::Sha1 => 20,
         HashAlgorithm::Sha256 => 32,
         HashAlgorithm::Sha384 => 48,
         HashAlgorithm::Sha512 => 64,
     };
-    let verifier_hash_value = verifier_hash_value_full.get(..hash_len).ok_or(
-        OffcryptoError::InvalidEncryptionInfo {
-            context: "decrypted verifierHashValue shorter than hash output",
-        },
-    )?;
 
-    agile::verify_password(
-        &verifier_hash_input,
-        verifier_hash_value,
-        info.password_hash_algorithm,
-    )
+    let try_mode = |mode: AgilePasswordIvMode| -> Result<(), OffcryptoError> {
+        let iv1 = match mode {
+            AgilePasswordIvMode::Salt => salt_iv(&info.password_salt)?,
+            AgilePasswordIvMode::Derived => derive_iv_from_salt(
+                &info.password_salt,
+                &BLK_KEY_VERIFIER_HASH_INPUT,
+                info.password_hash_algorithm,
+            )?,
+        };
+        let iv2 = match mode {
+            AgilePasswordIvMode::Salt => salt_iv(&info.password_salt)?,
+            AgilePasswordIvMode::Derived => derive_iv_from_salt(
+                &info.password_salt,
+                &BLK_KEY_VERIFIER_HASH_VALUE,
+                info.password_hash_algorithm,
+            )?,
+        };
+
+        let verifier_hash_input = aes_cbc_decrypt(&info.encrypted_verifier_hash_input, &key1, &iv1)?;
+        let verifier_hash_value_full =
+            aes_cbc_decrypt(&info.encrypted_verifier_hash_value, &key2, &iv2)?;
+
+        let verifier_hash_value = verifier_hash_value_full.get(..hash_len).ok_or(
+            OffcryptoError::InvalidEncryptionInfo {
+                context: "decrypted verifierHashValue shorter than hash output",
+            },
+        )?;
+
+        agile::verify_password(&verifier_hash_input, verifier_hash_value, info.password_hash_algorithm)
+    };
+
+    match try_mode(AgilePasswordIvMode::Salt) {
+        Ok(()) => Ok(()),
+        Err(OffcryptoError::InvalidPassword) => try_mode(AgilePasswordIvMode::Derived),
+        Err(other) => Err(other),
+    }
 }
 
 /// Extract the Agile "secret key" by decrypting `encryptedKeyValue`.
@@ -2304,7 +2363,11 @@ pub fn agile_verify_password_with_options(
 /// 1) Compute an iterated hash from `password`, `passwordSalt`, `spinCount`, and `passwordHashAlgorithm`.
 /// 2) Derive `encryption_key = HASH(h || block3).digest()[..keyBits/8]` where
 ///    `block3 = 14 6E 0B E7 AB AC D0 D6`.
-/// 3) `secret_key = AES-CBC-Decrypt(encryptedKeyValue, encryption_key, iv=passwordSalt)`.
+/// 3) Decrypt `encryptedKeyValue` using AES-CBC/NoPadding.
+///
+/// Most files use `iv = passwordSalt` (as in `msoffcrypto-tool`), but some toolchains derive
+/// `iv = HASH(passwordSalt || block3)[:16]`. When verifier fields are present in `info`, this
+/// function attempts both schemes to ensure interoperability.
 pub fn agile_secret_key(
     info: &AgileEncryptionInfo,
     password: &str,
@@ -2328,6 +2391,79 @@ pub fn agile_secret_key_with_options(
         None,
     )?;
 
+    // Select the IV scheme. If verifier fields are missing, fall back to the common `iv = salt`
+    // behavior (used by `msoffcrypto-tool`'s `makekey_from_password` vector).
+    let iv_mode = if info.encrypted_verifier_hash_input.is_empty() || info.encrypted_verifier_hash_value.is_empty()
+    {
+        AgilePasswordIvMode::Salt
+    } else {
+        // Reuse the same verifier logic as `agile_verify_password`, but return which mode succeeded.
+        let key1 = derive_encryption_key(
+            &hfinal,
+            &BLK_KEY_VERIFIER_HASH_INPUT,
+            info.password_hash_algorithm,
+            info.password_key_bits,
+        )?;
+        let key2 = derive_encryption_key(
+            &hfinal,
+            &BLK_KEY_VERIFIER_HASH_VALUE,
+            info.password_hash_algorithm,
+            info.password_key_bits,
+        )?;
+
+        let hash_len = match info.password_hash_algorithm {
+            HashAlgorithm::Sha1 => 20,
+            HashAlgorithm::Sha256 => 32,
+            HashAlgorithm::Sha384 => 48,
+            HashAlgorithm::Sha512 => 64,
+        };
+
+        let verify_with_mode = |mode: AgilePasswordIvMode| -> Result<(), OffcryptoError> {
+            let iv1 = match mode {
+                AgilePasswordIvMode::Salt => salt_iv(&info.password_salt)?,
+                AgilePasswordIvMode::Derived => derive_iv_from_salt(
+                    &info.password_salt,
+                    &BLK_KEY_VERIFIER_HASH_INPUT,
+                    info.password_hash_algorithm,
+                )?,
+            };
+            let iv2 = match mode {
+                AgilePasswordIvMode::Salt => salt_iv(&info.password_salt)?,
+                AgilePasswordIvMode::Derived => derive_iv_from_salt(
+                    &info.password_salt,
+                    &BLK_KEY_VERIFIER_HASH_VALUE,
+                    info.password_hash_algorithm,
+                )?,
+            };
+
+            let verifier_hash_input =
+                aes_cbc_decrypt(&info.encrypted_verifier_hash_input, &key1, &iv1)?;
+            let verifier_hash_value_full =
+                aes_cbc_decrypt(&info.encrypted_verifier_hash_value, &key2, &iv2)?;
+
+            let verifier_hash_value = verifier_hash_value_full.get(..hash_len).ok_or(
+                OffcryptoError::InvalidEncryptionInfo {
+                    context: "decrypted verifierHashValue shorter than hash output",
+                },
+            )?;
+
+            agile::verify_password(
+                &verifier_hash_input,
+                verifier_hash_value,
+                info.password_hash_algorithm,
+            )
+        };
+
+        match verify_with_mode(AgilePasswordIvMode::Salt) {
+            Ok(()) => AgilePasswordIvMode::Salt,
+            Err(OffcryptoError::InvalidPassword) => match verify_with_mode(AgilePasswordIvMode::Derived) {
+                Ok(()) => AgilePasswordIvMode::Derived,
+                Err(err) => return Err(err),
+            },
+            Err(err) => return Err(err),
+        }
+    };
+
     let encryption_key = derive_encryption_key(
         &hfinal[..],
         &BLK_KEY_ENCRYPTED_KEY_VALUE,
@@ -2335,8 +2471,30 @@ pub fn agile_secret_key_with_options(
         info.password_key_bits,
     )?;
 
-    let secret_key =
-        aes_cbc_decrypt(&info.encrypted_key_value, &encryption_key[..], &info.password_salt)?;
+    let iv = match iv_mode {
+        AgilePasswordIvMode::Salt => salt_iv(&info.password_salt)?,
+        AgilePasswordIvMode::Derived => derive_iv_from_salt(
+            &info.password_salt,
+            &BLK_KEY_ENCRYPTED_KEY_VALUE,
+            info.password_hash_algorithm,
+        )?,
+    };
+    let mut secret_key = aes_cbc_decrypt(&info.encrypted_key_value, &encryption_key[..], &iv)?;
+
+    // The decrypted blob may include trailing zero padding; only the first `keyBits/8` bytes are
+    // the actual package key.
+    if info.password_key_bits % 8 != 0 {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "keyBits is not divisible by 8",
+        });
+    }
+    let key_len = info.password_key_bits / 8;
+    if key_len == 0 || key_len > secret_key.len() {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "decrypted encryptedKeyValue shorter than keyBits/8",
+        });
+    }
+    secret_key.truncate(key_len);
     Ok(secret_key)
 }
 
@@ -2349,6 +2507,94 @@ pub fn decrypt_standard_ooxml_from_bytes(
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
     decrypt_from_bytes(&raw_ole, password)
+}
+
+/// Decrypt an Agile-encrypted OOXML package (e.g. `.xlsx`, `.docx`) from a raw OLE/CFB wrapper.
+///
+/// `raw_ole` must be an OLE Compound File containing the `EncryptionInfo` and `EncryptedPackage`
+/// streams.
+pub fn decrypt_agile_ooxml_from_bytes(
+    raw_ole: Vec<u8>,
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    // 1) Parse and validate `EncryptionInfo` (must be Agile 4.4).
+    let encryption_info = read_ole_stream(&raw_ole, "EncryptionInfo")?;
+    let info = match parse_encryption_info(&encryption_info)? {
+        EncryptionInfo::Agile { info, .. } => info,
+        EncryptionInfo::Standard { .. } => {
+            return Err(OffcryptoError::UnsupportedEncryption {
+                encryption_type: EncryptionType::Standard,
+            })
+        }
+        EncryptionInfo::Unsupported { version } => {
+            if version.minor == 3 && matches!(version.major, 3 | 4) {
+                // MS-OFFCRYPTO "Extensible" encryption: known scheme, but not supported by this
+                // Agile-only decryptor.
+                return Err(OffcryptoError::UnsupportedEncryption {
+                    encryption_type: EncryptionType::Extensible,
+                });
+            }
+            return Err(OffcryptoError::UnsupportedVersion {
+                major: version.major,
+                minor: version.minor,
+            });
+        }
+    };
+
+    // 2) Derive secret key (also validates the password via verifier hashes).
+    let secret_key = agile_secret_key(&info, password)?;
+
+    // 3) Decrypt `EncryptedPackage`.
+    let encrypted_package = read_ole_stream(&raw_ole, "EncryptedPackage")?;
+    let decrypted = agile_decrypt_package(&info, &secret_key, &encrypted_package)?;
+
+    // Sanity check: decrypted OOXML packages are ZIP/OPC containers.
+    if decrypted.len() < 2 || &decrypted[..2] != b"PK" {
+        return Err(OffcryptoError::InvalidStructure(
+            "decrypted package does not look like a ZIP (missing PK signature)".to_string(),
+        ));
+    }
+
+    Ok(decrypted)
+}
+
+fn read_ole_stream(raw_ole: &[u8], stream: &'static str) -> Result<Vec<u8>, OffcryptoError> {
+    let cursor = Cursor::new(raw_ole);
+    let mut ole = cfb::CompoundFile::open(cursor).map_err(|e| {
+        OffcryptoError::InvalidStructure(format!("failed to open OLE compound file: {e}"))
+    })?;
+
+    let mut s = match ole.open_stream(stream) {
+        Ok(s) => s,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            // Some writers store streams with a leading `/` even at the root; be permissive.
+            let with_slash = format!("/{stream}");
+            match ole.open_stream(&with_slash) {
+                Ok(s) => s,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(OffcryptoError::InvalidStructure(format!(
+                        "missing `{stream}` stream"
+                    )));
+                }
+                Err(err) => {
+                    return Err(OffcryptoError::InvalidStructure(format!(
+                        "failed to open `{stream}`: {err}"
+                    )));
+                }
+            }
+        }
+        Err(err) => {
+            return Err(OffcryptoError::InvalidStructure(format!(
+                "failed to open `{stream}`: {err}"
+            )))
+        }
+    };
+
+    let mut buf = Vec::new();
+    s.read_to_end(&mut buf).map_err(|e| {
+        OffcryptoError::InvalidStructure(format!("failed to read `{stream}`: {e}"))
+    })?;
+    Ok(buf)
 }
 
 #[cfg(test)]
