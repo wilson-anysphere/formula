@@ -95,14 +95,16 @@ impl HashAlgorithm {
     }
 
     pub(crate) fn from_name(name: &str) -> Result<Self, OfficeCryptoError> {
-        match name {
+        let raw = name.trim();
+        let upper = raw.to_ascii_uppercase();
+        match upper.as_str() {
             "MD5" | "MD-5" => Ok(HashAlgorithm::Md5),
             "SHA1" | "SHA-1" => Ok(HashAlgorithm::Sha1),
             "SHA256" | "SHA-256" => Ok(HashAlgorithm::Sha256),
             "SHA384" | "SHA-384" => Ok(HashAlgorithm::Sha384),
             "SHA512" | "SHA-512" => Ok(HashAlgorithm::Sha512),
-            other => Err(OfficeCryptoError::UnsupportedEncryption(format!(
-                "unsupported hash algorithm {other}"
+            _ => Err(OfficeCryptoError::UnsupportedEncryption(format!(
+                "unsupported hash algorithm {raw}"
             ))),
         }
     }
