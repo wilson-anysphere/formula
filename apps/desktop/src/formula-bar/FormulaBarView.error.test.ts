@@ -107,4 +107,63 @@ describe("FormulaBarView error panel", () => {
 
     host.remove();
   });
+
+  it("closes on Escape and restores focus to the error button", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCancel = vi.fn();
+    new FormulaBarView(host, { onCommit: () => {}, onCancel }).setActiveCell({ address: "A1", input: "=1/0", value: "#DIV/0!" });
+
+    const errorButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-button"]')!;
+    errorButton.click();
+
+    const panel = host.querySelector<HTMLElement>('[data-testid="formula-error-panel"]')!;
+    expect(panel.hidden).toBe(false);
+
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    panel.dispatchEvent(esc);
+
+    expect(esc.defaultPrevented).toBe(true);
+    expect(panel.hidden).toBe(true);
+    expect(errorButton.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(errorButton);
+    expect(onCancel).not.toHaveBeenCalled();
+
+    host.remove();
+  });
+
+  it("Escape in the error panel does not cancel formula bar editing (it only closes the panel)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onCancel });
+    view.setActiveCell({ address: "A1", input: "=1/0", value: "#DIV/0!" });
+
+    // Start editing.
+    view.textarea.focus();
+    expect(view.model.isEditing).toBe(true);
+
+    const errorButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-button"]')!;
+    errorButton.click();
+
+    const panel = host.querySelector<HTMLElement>('[data-testid="formula-error-panel"]')!;
+    expect(panel.hidden).toBe(false);
+    expect(view.model.isEditing).toBe(true);
+
+    const closeButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-close"]')!;
+    closeButton.focus();
+
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    closeButton.dispatchEvent(esc);
+
+    expect(esc.defaultPrevented).toBe(true);
+    expect(panel.hidden).toBe(true);
+    // Edit mode should remain active; Escape only dismissed the error panel.
+    expect(view.model.isEditing).toBe(true);
+    expect(onCancel).not.toHaveBeenCalled();
+
+    host.remove();
+  });
 });
