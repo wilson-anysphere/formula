@@ -272,21 +272,30 @@ jobs:
             process.exit(1);
           }
           const results = JSON.parse(fs.readFileSync(path, 'utf8'));
-          if (!Array.isArray(results)) {
-            console.error(`[perf] ${path} is not a JSON array; got ${typeof results}`);
-            process.exit(1);
-          }
-          const names = new Set(results.map((r) => r && r.name).filter((n) => typeof n === 'string'));
-          const kind = String(process.env.DESKTOP_STARTUP_BENCH_KIND || '').trim().toLowerCase();
-          const required =
-            kind === 'shell'
-              ? ['desktop.shell_startup.window_visible_ms.p95', 'desktop.shell_startup.tti_ms.p95']
-              : ['desktop.startup.window_visible_ms.p95', 'desktop.startup.tti_ms.p95'];
-          const missing = required.filter((n) => !names.has(n));
-          if (missing.length) {
-            console.error(`[perf] Missing desktop startup benchmark metrics: ${missing.join(', ')}`);
-            console.error(
-              `[perf] Startup bench kind=${JSON.stringify(kind || 'full')} (expected metrics: ${required.join(', ')})`,
+           if (!Array.isArray(results)) {
+             console.error(`[perf] ${path} is not a JSON array; got ${typeof results}`);
+             process.exit(1);
+           }
+           const names = new Set(results.map((r) => r && r.name).filter((n) => typeof n === 'string'));
+           const kind = String(process.env.DESKTOP_STARTUP_BENCH_KIND || '').trim().toLowerCase();
+           const prefix = kind === 'shell' ? 'desktop.shell_startup' : 'desktop.startup';
+           const required = [
+             // Explicit cold-start metrics (preferred for CI perf gating).
+             `${prefix}.cold.window_visible_ms.p95`,
+             `${prefix}.cold.tti_ms.p95`,
+             // Legacy aliases (kept for backwards compatibility + stable historical tracking).
+             `${prefix}.window_visible_ms.p95`,
+             `${prefix}.tti_ms.p95`,
+           ];
+           if (kind !== 'shell') {
+             // First render is only recorded for the full app startup benchmark.
+             required.push(`${prefix}.cold.first_render_ms.p95`, `${prefix}.first_render_ms.p95`);
+           }
+           const missing = required.filter((n) => !names.has(n));
+           if (missing.length) {
+             console.error(`[perf] Missing desktop startup benchmark metrics: ${missing.join(', ')}`);
+             console.error(
+               `[perf] Startup bench kind=${JSON.stringify(kind || 'full')} (expected metrics: ${required.join(', ')})`,
             );
             console.error('[perf] Ensure FORMULA_RUN_DESKTOP_STARTUP_BENCH=1 and the desktop binary emits [startup] metrics.');
             process.exit(1);
