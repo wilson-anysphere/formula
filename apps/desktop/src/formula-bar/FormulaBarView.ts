@@ -428,6 +428,11 @@ function firstNonWhitespaceIndex(text: string): number {
   return -1;
 }
 
+function isFormulaText(text: string): boolean {
+  const firstNonWhitespace = firstNonWhitespaceIndex(text);
+  return firstNonWhitespace >= 0 && text[firstNonWhitespace] === "=";
+}
+
 function findCompletionContext(input: string, cursorPosition: number): CompletionContext | null {
   const cursor = clampCursor(input, cursorPosition);
 
@@ -2217,7 +2222,7 @@ export class FormulaBarView {
   }
 
   isFormulaEditing(): boolean {
-    return this.model.isEditing && this.model.draft.trimStart().startsWith("=");
+    return this.model.isEditing && isFormulaText(this.model.draft);
   }
 
   beginRangeSelection(range: RangeAddress, sheetId?: string): void {
@@ -2262,7 +2267,7 @@ export class FormulaBarView {
     this.#callbacks.onBeginEdit?.(this.model.activeCell.address);
     // Best-effort: if we're editing a formula, start loading signature metadata so function
     // hints can show argument names for the full catalog without blocking initial render.
-    if (this.model.draft.trimStart().startsWith("=") && !isFunctionSignatureCatalogReady()) {
+    if (isFormulaText(this.model.draft) && !isFunctionSignatureCatalogReady()) {
       void preloadFunctionSignatureCatalog();
     }
     // Hover overrides are a view-mode affordance and should not leak into editing behavior.
@@ -2290,7 +2295,7 @@ export class FormulaBarView {
 
     this.model.updateDraft(value, start, end);
     // If the user just started typing a formula, begin loading signature metadata in the background.
-    if (value.trimStart().startsWith("=") && !isFunctionSignatureCatalogReady()) {
+    if (isFormulaText(value) && !isFunctionSignatureCatalogReady()) {
       void preloadFunctionSignatureCatalog();
     }
     this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
@@ -2329,7 +2334,7 @@ export class FormulaBarView {
     this.model.updateDraft(value, start, end);
     this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
 
-    const isFormulaEditing = this.model.draft.trimStart().startsWith("=");
+    const isFormulaEditing = isFormulaText(this.model.draft);
     if (isFormulaEditing && start === end) {
       const activeIndex = this.model.activeReferenceIndex();
       const active = activeIndex == null ? null : this.model.coloredReferences()[activeIndex] ?? null;
@@ -2412,7 +2417,7 @@ export class FormulaBarView {
     // Only ask the engine to lex/parse when the draft is actually a formula.
     // This avoids surfacing parse errors while editing plain text values.
     const draft = this.model.draft;
-    if (!draft.trimStart().startsWith("=")) {
+    if (!isFormulaText(draft)) {
       this.#cancelPendingTooling();
       return;
     }
@@ -2464,7 +2469,7 @@ export class FormulaBarView {
     if (this.model.draft !== pending.draft) return;
     const engine = this.#tooling?.getWasmEngine?.() ?? null;
     if (!engine) return;
-    if (!pending.draft.trimStart().startsWith("=")) return;
+    if (!isFormulaText(pending.draft)) return;
 
     try {
       const options: FormulaParseOptions = { localeId: pending.localeId, referenceStyle: pending.referenceStyle };
@@ -2503,7 +2508,7 @@ export class FormulaBarView {
       if (pending.requestId !== this.#toolingRequestId) return;
       if (!this.model.isEditing) return;
       if (this.model.draft !== pending.draft) return;
-    if (!this.model.draft.trimStart().startsWith("=")) return;
+    if (!isFormulaText(this.model.draft)) return;
 
       this.model.applyEngineToolingResult({ formula: pending.draft, localeId: pending.localeId, lexResult, parseResult });
       this.#requestRender({ preserveTextareaValue: true });
@@ -2554,7 +2559,7 @@ export class FormulaBarView {
 
     if (this.#functionAutocomplete.handleKeyDown(e)) return;
 
-    if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && this.model.draft.trimStart().startsWith("=")) {
+    if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && isFormulaText(this.model.draft)) {
       e.preventDefault();
 
       const prevText = this.textarea.value;
@@ -2966,7 +2971,7 @@ export class FormulaBarView {
     const draft = this.model.draft;
     const draftVersion = this.model.draftVersion;
 
-    const isFormulaEditing = this.model.isEditing && draft.trimStart().startsWith("=");
+    const isFormulaEditing = this.model.isEditing && isFormulaText(draft);
     const coloredReferences = isFormulaEditing ? this.model.coloredReferences() : [];
     const activeReferenceIndex = isFormulaEditing ? this.model.activeReferenceIndex() : null;
     const highlightedSpans = this.model.highlightedSpans();
@@ -3551,7 +3556,7 @@ export class FormulaBarView {
 
     // Reference highlight overlay updates can be costly (e.g. SpreadsheetApp recomputes/filters highlights).
     // Only emit when the underlying highlights actually changed.
-    const isFormula = this.model.draft.trimStart().startsWith("=");
+    const isFormula = isFormulaText(this.model.draft);
     const nextMode: ReferenceHighlightMode =
       this.model.isEditing && isFormula ? "editing" : this.#errorPanelReferenceHighlights ? "errorPanel" : "none";
     let highlightsChanged = nextMode !== this.#lastEmittedReferenceHighlightsMode;
@@ -3720,7 +3725,7 @@ export class FormulaBarView {
   }
 
   #inferSelectedReferenceIndex(start: number, end: number): number | null {
-    if (!this.model.isEditing || !this.model.draft.trimStart().startsWith("=")) return null;
+    if (!this.model.isEditing || !isFormulaText(this.model.draft)) return null;
     if (start === end) return null;
     const refs = this.model.coloredReferences();
     let lo = 0;
@@ -3779,7 +3784,7 @@ export class FormulaBarView {
       this.#errorFixAiButton.disabled = fixDisabled;
     }
 
-    const isFormula = this.model.draft.trimStart().startsWith("=");
+    const isFormula = isFormulaText(this.model.draft);
     const isShowingRanges = this.#errorPanelReferenceHighlights != null;
     const showRangesDisabled = !isFormula;
     if (this.#lastErrorShowRangesDisabled !== showRangesDisabled) {
@@ -3800,7 +3805,7 @@ export class FormulaBarView {
   }
 
   #currentReferenceHighlights(): FormulaReferenceHighlight[] {
-    const isFormula = this.model.draft.trimStart().startsWith("=");
+    const isFormula = isFormulaText(this.model.draft);
     if (this.model.isEditing && isFormula) {
       return this.model.referenceHighlights();
     }
@@ -4357,7 +4362,7 @@ function computeReferenceHighlights(
   text: string,
   opts: ExtractFormulaReferencesOptions | null
 ): FormulaReferenceHighlight[] {
-  if (!text.trimStart().startsWith("=")) return [];
+  if (!isFormulaText(text)) return [];
   const { references } = extractFormulaReferences(text, undefined, undefined, opts ?? undefined);
   if (references.length === 0) return [];
   const { colored } = assignFormulaReferenceColors(references, null);

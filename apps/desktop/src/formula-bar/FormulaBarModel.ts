@@ -695,7 +695,7 @@ export class FormulaBarModel {
   }
 
   #updateHoverFromCursor(): void {
-    if (!this.#isEditing || !this.#draft.trimStart().startsWith("=")) {
+    if (!this.#isEditing || !isFormulaText(this.#draft)) {
       this.#hoveredReference = null;
       this.#hoveredReferenceText = null;
       return;
@@ -745,7 +745,7 @@ export class FormulaBarModel {
   }
 
   #updateReferenceHighlights(): void {
-    if (!this.#isEditing || !this.#draft.trimStart().startsWith("=")) {
+    if (!this.#isEditing || !isFormulaText(this.#draft)) {
       this.#coloredReferences = [];
       this.#activeReferenceIndex = null;
       this.#referenceHighlightsCache = null;
@@ -846,6 +846,15 @@ export class FormulaBarModel {
 
 function isWhitespaceChar(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+}
+
+function isFormulaText(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i] ?? "";
+    if (isWhitespaceChar(ch)) continue;
+    return ch === "=";
+  }
+  return false;
 }
 
 function findActiveReferenceIndex(
