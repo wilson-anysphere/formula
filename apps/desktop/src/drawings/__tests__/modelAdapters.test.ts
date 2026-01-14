@@ -172,6 +172,32 @@ describe("drawings/modelAdapters", () => {
     expect(ui1.id).not.toBe(-123);
   });
 
+  it("hashes non-canonical numeric string ids so distinct raw ids do not collide", () => {
+    const makeModel = (id: string) => ({
+      id,
+      kind: { Image: { image_id: "image1.png" } },
+      anchor: {
+        Absolute: {
+          pos: { x_emu: 0, y_emu: 0 },
+          ext: { cx: 10, cy: 20 },
+        },
+      },
+      z_order: 0,
+    });
+
+    const uiLeadingZeros1 = convertModelDrawingObjectToUiDrawingObject(makeModel("001"));
+    const uiLeadingZeros2 = convertModelDrawingObjectToUiDrawingObject(makeModel("001"));
+    expect(Number.isSafeInteger(uiLeadingZeros1.id)).toBe(true);
+    expect(uiLeadingZeros1.id).toBeLessThanOrEqual(-(2 ** 33));
+    expect(uiLeadingZeros1.id).toBe(uiLeadingZeros2.id);
+    expect(uiLeadingZeros1.id).not.toBe(1);
+
+    const uiExponent = convertModelDrawingObjectToUiDrawingObject(makeModel("1e3"));
+    expect(Number.isSafeInteger(uiExponent.id)).toBe(true);
+    expect(uiExponent.id).toBeLessThanOrEqual(-(2 ** 33));
+    expect(uiExponent.id).not.toBe(1000);
+  });
+
   it("does not crash when drawing object ids are missing/undefined", () => {
     const model = {
       // Intentionally omit `id`.

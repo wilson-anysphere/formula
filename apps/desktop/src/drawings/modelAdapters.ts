@@ -147,6 +147,16 @@ function parseIdNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function unwrapSingletonId(value: unknown): unknown {
+  if (Array.isArray(value) && value.length === 1) {
+    return unwrapSingletonId(value[0]);
+  }
+  if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "0")) {
+    return unwrapSingletonId((value as JsonRecord)["0"]);
+  }
+  return value;
+}
+
 function parseSheetId(value: unknown): string | undefined {
   if (value == null) return undefined;
   if (typeof value === "string") {
@@ -203,7 +213,24 @@ function stableStringify(value: unknown): string {
 }
 
 function parseDrawingObjectId(value: unknown): number {
-  const parsed = parseIdNumber(value);
+  const unwrapped = unwrapSingletonId(value);
+  const parsed = (() => {
+    if (typeof unwrapped === "number") return readOptionalNumber(unwrapped);
+    if (typeof unwrapped === "bigint") return readOptionalNumber(unwrapped);
+    if (typeof unwrapped === "string") {
+      const trimmed = unwrapped.trim();
+      if (!trimmed) return undefined;
+      // Only accept canonical base-10 integer strings so distinct raw ids like "001" and "1"
+      // do not collide in the UI layer.
+      if (!/^\d+$/.test(trimmed)) return undefined;
+      const n = Number(trimmed);
+      if (!Number.isFinite(n)) return undefined;
+      // Reject non-canonical numeric strings (leading zeros, +1, 1e3, etc).
+      if (String(n) !== trimmed) return undefined;
+      return n;
+    }
+    return parseIdNumber(unwrapped);
+  })();
   // Drawing object ids must fit in JS's safe integer range since the overlay/hit-test layers treat
   // them as stable numeric keys. If an upstream snapshot stores ids as strings, guard against
   // parsing an unsafe integer (e.g. "9007199254740993") by falling back to a stable hash.
