@@ -165,7 +165,7 @@ describe("DrawingOverlay charts", () => {
     }
   });
 
-  it("scales chart rect by viewport zoom", async () => {
+  it("scales chart rect by viewport zoom", () => {
     const { ctx } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 

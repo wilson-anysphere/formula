@@ -235,7 +235,7 @@ describe("DrawingOverlay viewport transforms", () => {
     expect(handleRects[0]).toEqual([-halfHandle, -halfHandle, RESIZE_HANDLE_SIZE_PX, RESIZE_HANDLE_SIZE_PX]);
   });
 
-  it("renders objects whose transformed AABB intersects the viewport even when the raw rect is offscreen", async () => {
+  it("renders objects whose transformed AABB intersects the viewport even when the raw rect is offscreen", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
     const overlay = new DrawingOverlay(canvas, images, geom);

@@ -185,7 +185,7 @@ describe("ChartRendererAdapter + DrawingOverlay", () => {
     expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
   });
 
-  it("prunes cached chart surfaces when chart objects are removed", async () => {
+  it("prunes cached chart surfaces when chart objects are removed", () => {
     const { ctx } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
