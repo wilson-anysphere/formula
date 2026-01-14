@@ -316,6 +316,57 @@ fn bytecode_custom_sheet_dims_row_out_of_bounds_whole_column_does_not_trigger_ra
 }
 
 #[test]
+fn bytecode_custom_sheet_dims_rows_out_of_bounds_whole_column_returns_ref() {
+    // `ROWS(G:G)` should return `#REF!` when G is out-of-bounds for the current sheet. Ensure the
+    // bytecode backend matches the AST evaluator by validating reference bounds at runtime.
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 100, 5)
+        .expect("set Sheet1 dimensions");
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ROWS(G:G)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formula to compile to bytecode; got report: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Ref)
+    );
+}
+
+#[test]
+fn bytecode_custom_sheet_dims_columns_out_of_bounds_whole_row_returns_ref() {
+    // `COLUMNS(7:7)` should return `#REF!` when row 7 is out-of-bounds for the current sheet.
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 5, 10)
+        .expect("set Sheet1 dimensions");
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COLUMNS(7:7)")
+        .unwrap();
+
+    let report = engine.bytecode_compile_report(10);
+    assert!(
+        report.is_empty(),
+        "expected formula to compile to bytecode; got report: {report:?}"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Ref)
+    );
+}
+
+#[test]
 fn bytecode_custom_sheet_dims_row_sheet_prefixed_full_row_range_does_not_trigger_range_cell_limit()
 {
     // Regression test: `ROW(Sheet2!1:1000)` spans an entire *row range* (all columns), but the

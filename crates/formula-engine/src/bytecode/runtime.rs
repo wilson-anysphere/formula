@@ -2013,8 +2013,8 @@ pub fn call_function(
         Function::Today => fn_today(args),
         Function::Row => fn_row(args, grid, base),
         Function::Column => fn_column(args, grid, base),
-        Function::Rows => fn_rows(args, base),
-        Function::Columns => fn_columns(args, base),
+        Function::Rows => fn_rows(args, grid, base),
+        Function::Columns => fn_columns(args, grid, base),
         Function::Address => fn_address(args, grid, base),
         Function::Offset => fn_offset(args, grid, base),
         Function::Indirect => fn_indirect(args, grid, base),
@@ -4927,15 +4927,27 @@ fn fn_column(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     }
 }
 
-fn fn_rows(args: &[Value], base: CellCoord) -> Value {
+fn fn_rows(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
     match &args[0] {
-        Value::Range(r) => Value::Number(r.resolve(base).rows() as f64),
+        Value::Range(r) => {
+            let resolved = r.resolve(base);
+            if !range_in_bounds(grid, resolved) {
+                return Value::Error(ErrorKind::Ref);
+            }
+            Value::Number(resolved.rows() as f64)
+        }
         Value::MultiRange(r) => match r.areas.as_ref() {
             [] => Value::Error(ErrorKind::Ref),
-            [only] => Value::Number(only.range.resolve(base).rows() as f64),
+            [only] => {
+                let resolved = only.range.resolve(base);
+                if !range_in_bounds_on_sheet(grid, &only.sheet, resolved) {
+                    return Value::Error(ErrorKind::Ref);
+                }
+                Value::Number(resolved.rows() as f64)
+            }
             _ => Value::Error(ErrorKind::Value),
         },
         Value::Array(a) => Value::Number(a.rows as f64),
@@ -4944,15 +4956,27 @@ fn fn_rows(args: &[Value], base: CellCoord) -> Value {
     }
 }
 
-fn fn_columns(args: &[Value], base: CellCoord) -> Value {
+fn fn_columns(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
     match &args[0] {
-        Value::Range(r) => Value::Number(r.resolve(base).cols() as f64),
+        Value::Range(r) => {
+            let resolved = r.resolve(base);
+            if !range_in_bounds(grid, resolved) {
+                return Value::Error(ErrorKind::Ref);
+            }
+            Value::Number(resolved.cols() as f64)
+        }
         Value::MultiRange(r) => match r.areas.as_ref() {
             [] => Value::Error(ErrorKind::Ref),
-            [only] => Value::Number(only.range.resolve(base).cols() as f64),
+            [only] => {
+                let resolved = only.range.resolve(base);
+                if !range_in_bounds_on_sheet(grid, &only.sheet, resolved) {
+                    return Value::Error(ErrorKind::Ref);
+                }
+                Value::Number(resolved.cols() as f64)
+            }
             _ => Value::Error(ErrorKind::Value),
         },
         Value::Array(a) => Value::Number(a.cols as f64),
