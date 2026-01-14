@@ -4334,23 +4334,33 @@ impl WasmWorkbook {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         let sheet = self.inner.require_sheet(sheet)?;
         let range = WorkbookState::parse_range(&range)?;
+        let start_row = range.start.row;
+        let start_col = range.start.col;
 
         // Return a nested JS array (rows -> columns) with a compact per-cell payload:
         //   [input, value]
         // This avoids allocating redundant `{sheet,address}` strings per cell, which the
         // TS backend discards anyway.
         let sheet_cells = self.inner.sheets.get(sheet);
+        let values = self
+            .inner
+            .engine
+            .get_range_values(sheet, range)
+            .map_err(|err| js_err(err.to_string()))?;
 
         let outer = Array::new();
-        for row in range.start.row..=range.end.row {
+        for (row_off, row_values) in values.into_iter().enumerate() {
+            let row = start_row + row_off as u32;
             let inner = Array::new();
-            for col in range.start.col..=range.end.col {
-                let addr = CellRef::new(row, col).to_a1();
-                let input = sheet_cells
-                    .and_then(|cells| cells.get(&addr))
-                    .map(json_scalar_to_js)
-                    .unwrap_or(JsValue::NULL);
-                let value = engine_value_to_js_scalar(self.inner.engine.get_cell_value(sheet, &addr));
+            for (col_off, engine_value) in row_values.into_iter().enumerate() {
+                let col = start_col + col_off as u32;
+                let input = if let Some(cells) = sheet_cells {
+                    let addr = CellRef::new(row, col).to_a1();
+                    cells.get(&addr).map(json_scalar_to_js).unwrap_or(JsValue::NULL)
+                } else {
+                    JsValue::NULL
+                };
+                let value = engine_value_to_js_scalar(engine_value);
 
                 let cell = Array::new();
                 cell.push(&input);

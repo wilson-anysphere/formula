@@ -156,12 +156,22 @@ function normalizeCellDataCompact(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
   // Compact payload shape: [input, value]
   if (value.length < 2) return value;
-  return [normalizeCellScalar(value[0]), normalizeCellScalar(value[1])];
+  // Mutate in place to avoid allocating a second set of arrays before structured-clone.
+  (value as any)[0] = normalizeCellScalar((value as any)[0]);
+  (value as any)[1] = normalizeCellScalar((value as any)[1]);
+  return value;
 }
 
 function normalizeRangeDataCompact(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
-  return value.map((row) => (Array.isArray(row) ? row.map((cell) => normalizeCellDataCompact(cell)) : row));
+  // Mutate in place so callers don't pay for an extra set of arrays prior to postMessage.
+  for (const row of value) {
+    if (!Array.isArray(row)) continue;
+    for (const cell of row) {
+      normalizeCellDataCompact(cell);
+    }
+  }
+  return value;
 }
 
 function normalizeCellChanges(value: unknown): unknown {
