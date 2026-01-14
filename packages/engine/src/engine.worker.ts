@@ -1027,16 +1027,17 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).calculatePivot !== "function") {
                 throw new Error("calculatePivot: WasmWorkbook.calculatePivot is not available in this WASM build");
               }
-              result = normalizePivotCalculation(
-                cloneToPlainData(
-                  (wb as any).calculatePivot(
-                    params.sheet,
-                    params.sourceRangeA1,
-                    params.destinationTopLeftA1,
-                    params.config
-                  )
-                )
-              );
+              // Normalize before cloning so we preserve wasm-bindgen `Option<T>` -> `undefined`
+              // mappings (JSON cloning would drop `undefined` object keys entirely).
+              {
+                const raw = (wb as any).calculatePivot(
+                  params.sheet,
+                  params.sourceRangeA1,
+                  params.destinationTopLeftA1,
+                  params.config
+                );
+                result = cloneToPlainData(normalizePivotCalculation(raw));
+              }
               break;
             default:
               throw new Error(`unknown method: ${req.method}`);
