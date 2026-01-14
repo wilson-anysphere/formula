@@ -460,7 +460,8 @@ impl TableBackend for Table {
         aggs: &[AggregationSpec],
         mask: Option<&BitVec>,
     ) -> Option<Vec<Vec<Value>>> {
-        self.backend().group_by_aggregations_mask(group_by, aggs, mask)
+        self.backend()
+            .group_by_aggregations_mask(group_by, aggs, mask)
     }
 
     fn filter_in(&self, idx: usize, values: &[Value]) -> Option<Vec<usize>> {
@@ -765,8 +766,11 @@ impl UnmatchedFactRowsBuilder {
             UnmatchedFactRows::Dense { bits, count, .. } => {
                 let word = row / 64;
                 let bit = row % 64;
-                bits[word] |= 1u64 << bit;
-                *count += 1;
+                let mask = 1u64 << bit;
+                if (bits[word] & mask) == 0 {
+                    bits[word] |= mask;
+                    *count += 1;
+                }
             }
         }
     }
@@ -2307,6 +2311,35 @@ mod tests {
     }
 
     #[test]
+    fn unmatched_fact_rows_builder_dense_does_not_double_count_duplicates() {
+        // Force the builder into the dense representation quickly.
+        //
+        // For 64 rows, the threshold is `row_count / 64 == 1`, and we switch when
+        // `unmatched_count > threshold`, i.e. on the 2nd push.
+        let mut builder = UnmatchedFactRowsBuilder::new(64);
+        builder.push(0);
+        builder.push(1);
+
+        match &builder.rows {
+            UnmatchedFactRows::Dense { count, .. } => assert_eq!(*count, 2),
+            UnmatchedFactRows::Sparse(_) => panic!("expected dense representation"),
+        }
+
+        // Pushing a duplicate row should not change `count` once in the dense representation.
+        builder.push(1);
+        match &builder.rows {
+            UnmatchedFactRows::Dense { count, .. } => assert_eq!(*count, 2),
+            UnmatchedFactRows::Sparse(_) => panic!("expected dense representation"),
+        }
+
+        let dense = builder.finish();
+        let mut rows = Vec::new();
+        dense.extend_into(&mut rows);
+        rows.sort_unstable();
+        assert_eq!(rows, vec![0, 1]);
+    }
+
+    #[test]
     fn unmatched_fact_rows_retain_updates_count_and_bits() {
         let mut sparse = UnmatchedFactRows::Sparse(vec![0, 1, 2, 3, 4]);
         sparse.retain(|row| *row % 2 == 0);
@@ -2326,7 +2359,7 @@ mod tests {
         bits[1] |= 1u64 << 0; // row 64
         bits[1] |= 1u64 << 1; // row 65
         bits[2] |= 1u64 << 1; // row 129
-        // Out-of-range row (191 >= 130) in the last word.
+                              // Out-of-range row (191 >= 130) in the last word.
         bits[2] |= 1u64 << 63;
 
         let mut dense = UnmatchedFactRows::Dense {
