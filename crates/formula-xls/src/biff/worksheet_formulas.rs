@@ -569,6 +569,16 @@ fn parse_shrfmla_range_best_effort(data: &[u8], expected_cce: usize) -> Option<(
     Some((start, end))
 }
 
+fn parse_table_base_cell_best_effort(data: &[u8]) -> Option<CellRef> {
+    // TABLE record payload (BIFF8) begins with the base cell address:
+    //   [rw: u16][col: u16][...]
+    // See [MS-XLS] 2.4.313.
+    let chunk = data.get(0..4)?;
+    let rw = u16::from_le_bytes([chunk[0], chunk[1]]);
+    let col = u16::from_le_bytes([chunk[2], chunk[3]]) & REF8_COL_MASK;
+    parse_cell_ref_u16(rw, col)
+}
+
 /// Best-effort parsing of a BIFF8 worksheet substream's formula-related records.
 ///
 /// This collects:
@@ -704,18 +714,22 @@ pub(crate) fn parse_biff8_worksheet_formulas(
                 }
             }
             RECORD_TABLE => {
-                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
+                // Unlike `SHRFMLA`/`ARRAY`, `TABLE` records do not start with a Ref structure; they
+                // begin with the base-cell coordinate.
+                let Some(base_cell) = parse_table_base_cell_best_effort(record.data.as_ref())
+                else {
                     warn(
                         &mut out.warnings,
                         format!(
-                            "failed to parse TABLE range at offset {} (len={})",
+                            "failed to parse TABLE base cell at offset {} (len={})",
                             record.offset,
                             record.data.len()
                         ),
                     );
                     continue;
                 };
-                let anchor = range.0;
+                let range = (base_cell, base_cell);
+                let anchor = base_cell;
                 out.table.insert(
                     anchor,
                     Biff8TableRecord {
@@ -1757,7 +1771,10 @@ fn parse_formula_record_for_wide_ptgexp(
 
     let kind = match ptg {
         0x01 => ExpKind::Exp,
-        0x02 => ExpKind::Tbl,
+        // `PtgTbl` formulas are decoded via `parse_biff8_sheet_table_formulas`, which has access to
+        // the worksheet-level `TABLE` record context. Do not collect them here: this wide-payload
+        // recovery pass is intended for shared/array (`PtgExp`) formulas.
+        0x02 => return Ok(None),
         _ => return Ok(None),
     };
 
@@ -1773,11 +1790,14 @@ fn parse_formula_record_for_wide_ptgexp(
     }))
 }
 
-/// Decode formulas for BIFF8 cells whose `FORMULA.rgce` begins with `PtgExp` / `PtgTbl` and uses a
+/// Decode formulas for BIFF8 cells whose `FORMULA.rgce` begins with `PtgExp` and uses a
 /// non-canonical payload width (i.e. `cce != 5`).
 ///
 /// This is intended as a narrow robustness fallback when upstream decoders cannot resolve
-/// wide-payload encodings back to the corresponding SHRFMLA/ARRAY/TABLE record.
+/// wide-payload encodings back to the corresponding SHRFMLA/ARRAY record.
+///
+/// Note: `PtgTbl` (TABLE) formulas have a dedicated worksheet importer path
+/// (`parse_biff8_sheet_table_formulas`) which has access to `TABLE` records.
 pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
     workbook_stream: &[u8],
     start: usize,
@@ -1884,18 +1904,20 @@ pub(crate) fn parse_biff8_worksheet_ptgexp_formulas(
                 }
             }
             RECORD_TABLE => {
-                let Some(range) = parse_ref_any_best_effort(record.data.as_ref()) else {
+                let Some(base_cell) = parse_table_base_cell_best_effort(record.data.as_ref())
+                else {
                     warn_string(
                         &mut out.warnings,
                         format!(
-                            "failed to parse TABLE range at offset {} (len={})",
+                            "failed to parse TABLE base cell at offset {} (len={})",
                             record.offset,
                             record.data.len()
                         ),
                     );
                     continue;
                 };
-                let anchor = range.0;
+                let range = (base_cell, base_cell);
+                let anchor = base_cell;
                 table.insert(
                     anchor,
                     Biff8TableRecord {
@@ -3017,12 +3039,13 @@ mod tests {
         out
     }
 
-    fn table_payload(rw_first: u16, rw_last: u16, col_first: u16, col_last: u16) -> Vec<u8> {
+    fn table_payload(base_row: u16, _base_row_unused: u16, base_col: u16, _base_col_unused: u16) -> Vec<u8> {
+        // TABLE record payload begins with the base-cell coordinate:
+        //   [rw: u16][col: u16][...]
+        // For unit tests we only need the base cell.
         let mut out = Vec::new();
-        out.extend_from_slice(&rw_first.to_le_bytes());
-        out.extend_from_slice(&rw_last.to_le_bytes());
-        out.extend_from_slice(&col_first.to_le_bytes());
-        out.extend_from_slice(&col_last.to_le_bytes());
+        out.extend_from_slice(&base_row.to_le_bytes());
+        out.extend_from_slice(&base_col.to_le_bytes());
         out
     }
 

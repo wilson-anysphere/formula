@@ -2332,7 +2332,10 @@ fn verify_password(
         &info.verifier,
         false,
     )? {
-        return Ok((hash_alg, key_material, false));
+        // 40-bit CryptoAPI RC4 uses a 16-byte RC4 key (5 digest bytes + 11 bytes of padding).
+        // Expose that to downstream decrypt logic via `pad_40_bit_key` so legacy/modern modes share
+        // consistent semantics.
+        return Ok((hash_alg, key_material, key_len == 5));
     }
 
     if key_len == 5
@@ -2402,7 +2405,8 @@ fn verify_password_legacy(
         &info.verifier,
         false,
     )? {
-        return Ok((hash_alg, key_material, false));
+        // 40-bit CryptoAPI RC4 uses a 16-byte RC4 key (5 digest bytes + 11 bytes of padding).
+        return Ok((hash_alg, key_material, key_len == 5));
     }
 
     if key_len == 5

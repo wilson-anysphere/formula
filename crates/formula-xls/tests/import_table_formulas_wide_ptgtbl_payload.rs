@@ -16,6 +16,7 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
 fn imports_biff8_table_formulas_from_wide_ptgtbl_payload() {
     let bytes = xls_fixture_builder::build_table_formula_ptgtbl_wide_payload_fixture_xls();
     let result = import_fixture(&bytes);
+    assert!(result.warnings.is_empty(), "warnings={:?}", result.warnings);
     let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
 
     // The fixture stores a FORMULA record at D21 whose rgce begins with `PtgTbl` but uses a
@@ -25,4 +26,3 @@ fn imports_biff8_table_formulas_from_wide_ptgtbl_payload() {
     assert_eq!(sheet.formula(cell), Some("TABLE(A1,B2)"));
     assert_parseable_formula(sheet.formula(cell).unwrap());
 }
-
