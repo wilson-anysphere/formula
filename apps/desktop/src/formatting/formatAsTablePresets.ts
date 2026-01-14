@@ -88,37 +88,45 @@ export function applyFormatAsTablePreset(doc: DocumentController, sheetId: strin
   let applied = true;
   const label = "Format as Table";
 
-  const okHeader = doc.setRangeFormat(
-    sheetId,
-    header,
-    {
-      font: { bold: true, color: preset.header.fontColor },
-      ...fillPatch(preset.header.fill),
-    },
-    { label },
-  );
-  if (okHeader === false) applied = false;
+  // Ensure this formatting preset is always applied as a single undo step, even if callers
+  // don't explicitly batch (the ribbon command path already batches, but other callers/tests
+  // may invoke this helper directly).
+  doc.beginBatch({ label });
+  try {
+    const okHeader = doc.setRangeFormat(
+      sheetId,
+      header,
+      {
+        font: { bold: true, color: preset.header.fontColor },
+        ...fillPatch(preset.header.fill),
+      },
+      { label },
+    );
+    if (okHeader === false) applied = false;
 
-  if (body) {
-    const okBody = doc.setRangeFormat(sheetId, body, fillPatch(preset.bandedRows.primaryFill), { label });
-    if (okBody === false) applied = false;
+    if (body) {
+      const okBody = doc.setRangeFormat(sheetId, body, fillPatch(preset.bandedRows.primaryFill), { label });
+      if (okBody === false) applied = false;
 
-    // Apply the secondary band to every other row in the body. This is an MVP implementation
-    // (formatting-only, no table metadata), so we keep it simple and optimize for small-medium
-    // selections by using a single pass over alternating rows.
-    for (let row = body.start.row + 1; row <= body.end.row; row += 2) {
-      const rowRange: CellRange = {
-        start: { row, col: body.start.col },
-        end: { row, col: body.end.col },
-      };
-      const okBand = doc.setRangeFormat(sheetId, rowRange, fillPatch(preset.bandedRows.secondaryFill), { label });
-      if (okBand === false) applied = false;
+      // Apply the secondary band to every other row in the body. This is an MVP implementation
+      // (formatting-only, no table metadata), so we keep it simple and optimize for small-medium
+      // selections by using a single pass over alternating rows.
+      for (let row = body.start.row + 1; row <= body.end.row; row += 2) {
+        const rowRange: CellRange = {
+          start: { row, col: body.start.col },
+          end: { row, col: body.end.col },
+        };
+        const okBand = doc.setRangeFormat(sheetId, rowRange, fillPatch(preset.bandedRows.secondaryFill), { label });
+        if (okBand === false) applied = false;
+      }
     }
+
+    applied = applyTableBorders(doc, sheetId, table, preset) && applied;
+
+    return applied;
+  } finally {
+    doc.endBatch();
   }
-
-  applied = applyTableBorders(doc, sheetId, table, preset) && applied;
-
-  return applied;
 }
 
 function applyTableBorders(doc: DocumentController, sheetId: string, table: CellRange, preset: FormatAsTablePreset): boolean {
