@@ -169,16 +169,21 @@ export function reportStartupWebviewLoaded(): void {
  */
 export async function markStartupFirstRender(): Promise<StartupTimings> {
   const store = getStore();
-  const invoke = getTauriInvoke();
-  if (!invoke) return { ...store };
 
   const g = globalThis as any;
   if (g[FIRST_RENDER_REPORTED_KEY]) return { ...store };
-  g[FIRST_RENDER_REPORTED_KEY] = true;
 
   // Give the renderer a frame (or two) to paint the initial grid before reporting.
   await nextFrame();
   await nextFrame();
+
+  const invoke = getTauriInvoke();
+  if (!invoke) return { ...store };
+
+  // Mark as reported only once we're sure the host IPC surface exists; some Tauri builds may
+  // inject `__TAURI__` slightly after the first JS tick.
+  if (g[FIRST_RENDER_REPORTED_KEY]) return { ...store };
+  g[FIRST_RENDER_REPORTED_KEY] = true;
 
   try {
     await invoke("report_startup_first_render");
