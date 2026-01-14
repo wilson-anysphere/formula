@@ -1,5 +1,6 @@
 import type { AIAuditStore } from "./store.ts";
 import type { AIAuditEntry, AIMode, AuditListFilters } from "./types.ts";
+import { stableStringify } from "./stable-json.ts";
 
 export interface IndexedDbAIAuditStoreOptions {
   /**
@@ -56,7 +57,8 @@ export class IndexedDbAIAuditStore implements AIAuditStore {
     const record = normalizeEntry(entry);
 
     await withTransaction(db, this.storeName, "readwrite", async (store) => {
-      await requestToPromise(store.add(record));
+      const request = addWithCloneFallback(store, record);
+      await requestToPromise(request);
     });
 
     await this.enforceRetention(db);
@@ -207,6 +209,33 @@ export class IndexedDbAIAuditStore implements AIAuditStore {
         });
       }
     });
+  }
+}
+
+function addWithCloneFallback(store: IDBObjectStore, value: AIAuditEntry): IDBRequest<IDBValidKey> {
+  try {
+    return store.add(value);
+  } catch (err) {
+    // IndexedDB uses structured clone for values; some inputs (functions, some BigInt
+    // implementations, etc) can throw `DataCloneError`. Fall back to a JSON-safe
+    // clone so audit logging doesn't crash.
+    if (!isDataCloneError(err)) throw err;
+    return store.add(safeJsonClone(value));
+  }
+}
+
+function isDataCloneError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  // `DataCloneError` is usually surfaced as a DOMException.
+  return (err as { name?: unknown }).name === "DataCloneError";
+}
+
+function safeJsonClone(entry: AIAuditEntry): AIAuditEntry {
+  try {
+    const parsed = JSON.parse(stableStringify(entry)) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as AIAuditEntry) : entry;
+  } catch {
+    return entry;
   }
 }
 

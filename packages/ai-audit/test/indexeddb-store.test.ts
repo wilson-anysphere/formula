@@ -86,6 +86,25 @@ describe("IndexedDbAIAuditStore", () => {
     expect(entries.map((e) => e.id)).toEqual(["newest", "middle", "older"]);
   });
 
+  it("falls back to JSON-safe cloning when entries contain uncloneable values (DataCloneError)", async () => {
+    const store = new IndexedDbAIAuditStore({ db_name: `ai_audit_test_${randomUUID()}` });
+
+    await store.logEntry(
+      createEntry({
+        id: "e1",
+        timestamp_ms: Date.now(),
+        session_id: "session-1",
+        mode: "chat",
+        input: { ok: true, fn: () => "nope" } as any,
+      })
+    );
+
+    const entries = await store.listEntries({ session_id: "session-1" });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.id).toBe("e1");
+    expect(entries[0]!.input).toEqual({ ok: true });
+  });
+
   it("filters by after_timestamp_ms (inclusive) and before_timestamp_ms (exclusive)", async () => {
     const store = new IndexedDbAIAuditStore({ db_name: `ai_audit_test_${randomUUID()}` });
 
