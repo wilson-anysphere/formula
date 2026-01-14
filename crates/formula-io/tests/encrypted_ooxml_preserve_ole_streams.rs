@@ -11,7 +11,7 @@ use rand::{rngs::StdRng, SeedableRng as _};
 use zip::write::FileOptions;
 
 use formula_io::{
-    open_workbook_with_password, open_workbook_with_password_and_preserved_ole, Workbook,
+    open_workbook_with_password, open_workbook_with_password_and_preserved_ole, Error, Workbook,
 };
 
 const SUMMARY_INFORMATION: &str = "\u{0005}SummaryInformation";
@@ -97,4 +97,36 @@ fn preserves_extra_ole_metadata_streams_on_encrypt_roundtrip() {
         }
         other => panic!("expected Workbook::Xlsx, got {other:?}"),
     }
+}
+
+#[test]
+fn preserved_ole_open_reports_malformed_encryptedpackage_as_unsupported() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole
+            .create_stream("EncryptionInfo")
+            .expect("create EncryptionInfo stream");
+        // Minimal Agile (4.4) EncryptionInfo header.
+        stream
+            .write_all(&[4, 0, 4, 0, 0, 0, 0, 0])
+            .expect("write EncryptionInfo header");
+    }
+    {
+        // Intentionally create an empty/truncated EncryptedPackage stream.
+        ole.create_stream("EncryptedPackage")
+            .expect("create EncryptedPackage stream");
+    }
+
+    let bytes = ole.into_inner().into_inner();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("malformed.xlsx");
+    std::fs::write(&path, bytes).expect("write fixture");
+
+    let err = open_workbook_with_password_and_preserved_ole(&path, Some("wrong"))
+        .expect_err("expected malformed encrypted container to error");
+    assert!(
+        matches!(err, Error::UnsupportedOoxmlEncryption { .. }),
+        "expected Error::UnsupportedOoxmlEncryption, got {err:?}"
+    );
 }
