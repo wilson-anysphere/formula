@@ -289,7 +289,7 @@ async function waitForTti(child: ChildProcess, timeoutMs: number): Promise<numbe
       resolvePromise(parsed.ttiMs);
     };
 
-    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+    const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
       if (done) return;
       done = true;
       cleanup();
@@ -309,14 +309,17 @@ async function waitForTti(child: ChildProcess, timeoutMs: number): Promise<numbe
     const rlErr = createInterface({ input: child.stderr! });
     rlOut.on('line', onLine);
     rlErr.on('line', onLine);
-    child.on('exit', onExit);
+    // Use `close` (not `exit`) so stdout/stderr are fully drained before we decide whether we
+    // captured the `[startup] ...` line. This avoids false negatives when the process exits
+    // quickly after logging.
+    child.on('close', onClose);
     child.on('error', onError);
 
     const cleanup = () => {
       clearTimeout(deadline);
       rlOut.close();
       rlErr.close();
-      child.off('exit', onExit);
+      child.off('close', onClose);
       child.off('error', onError);
     };
   });
@@ -331,17 +334,17 @@ async function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void
       rejectPromise(new Error(`Timed out after ${timeoutMs}ms waiting for desktop process tree to exit`));
     }, timeoutMs);
 
-    const onExit = () => {
+    const onClose = () => {
       cleanup();
       resolvePromise();
     };
 
     const cleanup = () => {
       clearTimeout(deadline);
-      child.off('exit', onExit);
+      child.off('close', onClose);
     };
 
-    child.on('exit', onExit);
+    child.on('close', onClose);
   });
 }
 
