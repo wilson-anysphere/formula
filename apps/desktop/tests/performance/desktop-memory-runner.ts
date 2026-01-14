@@ -14,6 +14,7 @@ import {
   type StartupMetrics,
   type TerminateProcessTreeMode,
 } from "./desktopStartupUtil.ts";
+import { parseProcChildrenPids } from "./linuxProcUtil.ts";
 
 type Summary = {
   runs: number;
@@ -159,12 +160,8 @@ function readProcChildrenPidsLinux(pid: number): number[] {
   try {
     // `/proc/<pid>/task/<pid>/children` contains whitespace-separated child PIDs.
     // (This is sufficient for our usage here since the xvfb wrapper is single-threaded.)
-    const content = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim();
-    if (!content) return [];
-    return content
-      .split(/\s+/g)
-      .map((token: string) => Number(token))
-      .filter((n: number) => Number.isInteger(n) && n > 0);
+    const content = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8");
+    return parseProcChildrenPids(content);
   } catch {
     return [];
   }
