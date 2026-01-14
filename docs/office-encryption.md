@@ -43,6 +43,9 @@ above exists to enable that future integration.
 ### OOXML: Agile encryption (4.4)
 We implement the password key encryptor subset of Agile (`keyEncryptor uri=".../password"`).
 
+For a focused developer reference on Agile OOXML decryption (especially `dataIntegrity` HMAC target
+bytes and IV/salt pitfalls), see [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
+
 Supported parameters (as enforced by decryptors today):
 
 - `cipherAlgorithm`: `AES`

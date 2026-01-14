@@ -19,6 +19,10 @@ OOXML package (e.g. `xl/workbook.xml` `<workbookProtection>` and `xl/worksheets/
 For maintainer-level implementation notes (supported parameter subsets, KDF nuances, writer
 defaults), see [`docs/office-encryption.md`](./office-encryption.md).
 
+For a deep dive on **Agile (4.4)** OOXML password decryption (including the *exact* `dataIntegrity`
+HMAC target bytes and common IV/salt mixups), see
+[`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
+
 Relevant specs:
 
 - **MS-OFFCRYPTO** (Office document encryption): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
