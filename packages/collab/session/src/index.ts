@@ -2345,7 +2345,8 @@ export class CollabSession {
 
     const cellData = this.cells.get(cellKey);
     const existingCell = getYMapCell(cellData);
-    const existingEnc = existingCell?.get("enc") ?? (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
+    const directEnc = existingCell?.get("enc");
+    const existingEnc = directEnc !== undefined ? directEnc : (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
 
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
     const parsed = needsCellAddress ? parsedMaybe : null;
@@ -2569,7 +2570,8 @@ export class CollabSession {
 
     const cellData = this.cells.get(cellKey);
     const existingCell = getYMapCell(cellData);
-    const existingEnc = existingCell?.get("enc") ?? (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
+    const directEnc = existingCell?.get("enc");
+    const existingEnc = directEnc !== undefined ? directEnc : (parsedMaybe ? this.getEncryptedPayloadForCell(parsedMaybe) : undefined);
 
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
     const parsed = needsCellAddress ? parsedMaybe : null;
@@ -2813,8 +2815,9 @@ export class CollabSession {
     for (const update of planned) {
       const cellData = this.cells.get(update.cellKey);
       const existingCell = getYMapCell(cellData);
+      const directEnc = existingCell?.get("enc");
       const existingEnc =
-        existingCell?.get("enc") ?? (update.parsed ? this.getEncryptedPayloadForCell(update.parsed) : undefined);
+        directEnc !== undefined ? directEnc : (update.parsed ? this.getEncryptedPayloadForCell(update.parsed) : undefined);
 
       const needsCellAddress = this.encryption != null || existingEnc !== undefined;
       const encryptionCell = needsCellAddress ? update.parsed : null;
@@ -2952,8 +2955,8 @@ export class CollabSession {
       for (const update of planned) {
         if (update.shouldEncrypt) continue;
         if (!update.parsed) continue;
-        const encRaw =
-          getYMapCell(this.cells.get(update.cellKey))?.get("enc") ?? this.getEncryptedPayloadForCell(update.parsed);
+        const directEnc = getYMapCell(this.cells.get(update.cellKey))?.get("enc");
+        const encRaw = directEnc !== undefined ? directEnc : this.getEncryptedPayloadForCell(update.parsed);
         if (encRaw !== undefined) {
           throw new Error(`Refusing to write plaintext to encrypted cell ${update.cellKey}`);
         }

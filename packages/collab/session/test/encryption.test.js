@@ -204,6 +204,35 @@ test("CollabSession refuses to overwrite cells when the enc payload schema is un
   doc.destroy();
 });
 
+test("CollabSession setCells refuses to write plaintext when an enc marker is present under a non-canonical key (null enc payload)", async () => {
+  const docId = "collab-session-encryption-null-enc-marker-test-doc";
+  const doc = new Y.Doc({ guid: docId });
+
+  // Simulate a legacy/foreign doc that stores an explicit `enc: null` marker under
+  // a non-canonical key encoding (empty sheetId resolves to defaultSheetId).
+  doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("enc", null);
+    doc.getMap("cells").set(":0:0", cell);
+  });
+
+  const session = createCollabSession({ doc });
+
+  await assert.rejects(
+    session.setCells([{ cellKey: ":0:0", value: "leak" }]),
+    /Missing encryption key/i,
+  );
+
+  const raw = doc.getMap("cells").get(":0:0");
+  assert.ok(raw, "expected Yjs cell map to remain present");
+  assert.equal(raw.get("enc"), null);
+  assert.equal(raw.get("value"), undefined);
+  assert.equal(raw.get("formula"), undefined);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession E2E cell encryption: encryptFormat encrypts per-cell format and removes plaintext `format`", async () => {
   const docId = "collab-session-encryption-test-doc-encryptFormat";
   const docA = new Y.Doc({ guid: docId });
