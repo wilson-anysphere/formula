@@ -1519,6 +1519,26 @@ mod tests {
     }
 
     #[test]
+    fn materializes_ref3d_col_oob_to_referr3d_variants() {
+        // When a `PtgRef3d*` token shifts out of BIFF8 bounds during shared-formula materialization,
+        // the materializer must emit the *3D* error ptg (`PtgRefErr3d*`), preserving token width.
+        for &ptg_ref3d in &[0x3A_u8, 0x5A, 0x7A] {
+            // PtgRef3d payload: [ixti:u16][row:u16][col+flags:u16]
+            // Use col=0x3FFF (14-bit max) with the col-relative flag so shifting by +1 col is OOB.
+            let base: Vec<u8> = vec![
+                ptg_ref3d, // PtgRef3d (ref/value/array class)
+                0x00, 0x00, // ixti=0
+                0x00, 0x00, // row=0
+                0xFF, 0xBF, // col=0x3FFF with COL_RELATIVE_BIT set (0xBFFF)
+            ];
+
+            let out = materialize_biff8_rgce(&base, 0, 0, 0, 1).expect("materialize");
+            assert_eq!(out[0], ptg_ref3d + 0x02, "ptg={ptg_ref3d:02X}");
+            assert_eq!(&out[1..], &base[1..], "payload should be preserved");
+        }
+    }
+
+    #[test]
     fn materializes_area3d_oob_to_areaerr3d_variants() {
         // When a `PtgArea3d*` token shifts out of BIFF8 bounds during shared-formula materialization,
         // the materializer must emit the *3D* error ptg (`PtgAreaErr3d*`).
@@ -1535,6 +1555,29 @@ mod tests {
             base.extend_from_slice(&0x4000u16.to_le_bytes()); // col2=0 + ROW_RELATIVE_BIT
 
             let out = materialize_biff8_rgce(&base, 0, 0, 1, 0).expect("materialize");
+            assert_eq!(out[0], ptg_area3d + 0x02, "ptg={ptg_area3d:02X}");
+            assert_eq!(&out[1..], &base[1..], "payload should be preserved");
+        }
+    }
+
+    #[test]
+    fn materializes_area3d_col_oob_to_areaerr3d_variants() {
+        // When a `PtgArea3d*` token shifts out of BIFF8 bounds during shared-formula materialization,
+        // the materializer must emit the *3D* error ptg (`PtgAreaErr3d*`).
+        for &ptg_area3d in &[0x3B_u8, 0x5B, 0x7B] {
+            // PtgArea3d payload:
+            //   [ixti:u16][row1:u16][row2:u16][col1+flags:u16][col2+flags:u16]
+            // Use col2=0x3FFF (14-bit max) with the col-relative flag so shifting by +1 col is OOB.
+            // Keep col1 in-bounds so we cover the "one endpoint OOB" case.
+            let mut base = Vec::new();
+            base.push(ptg_area3d);
+            base.extend_from_slice(&0u16.to_le_bytes()); // ixti=0
+            base.extend_from_slice(&0u16.to_le_bytes()); // row1=0
+            base.extend_from_slice(&0u16.to_le_bytes()); // row2=0
+            base.extend_from_slice(&0xBFFEu16.to_le_bytes()); // col1=0x3FFE + COL_RELATIVE_BIT
+            base.extend_from_slice(&0xBFFFu16.to_le_bytes()); // col2=0x3FFF + COL_RELATIVE_BIT
+
+            let out = materialize_biff8_rgce(&base, 0, 0, 0, 1).expect("materialize");
             assert_eq!(out[0], ptg_area3d + 0x02, "ptg={ptg_area3d:02X}");
             assert_eq!(&out[1..], &base[1..], "payload should be preserved");
         }
