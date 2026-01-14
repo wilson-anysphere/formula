@@ -572,26 +572,28 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
    Implementation note: `KEEPFILTERS` is supported only inside `CALCULATE` / `CALCULATETABLE`. It affects
    whether the engine clears existing table/column filters before applying the new filter.
 
-5. Column comparisons / membership: `Table[Column] <op> <rhs>` where `<op>` is:
+5. Column comparisons / membership: `<lhs> <op> <rhs>` where `<lhs>` is either a column reference
+   (`Table[Column]`) or a row constructor (`(Table[Col1], Table[Col2], ...)`), and `<op>` is:
    - `=` (direct value filter)
    - `<>`, `<`, `<=`, `>`, `>=` (implemented by scanning rows to compute the set of allowed values)
    - `IN` (value membership) with a one-column table expression, e.g. `Fact[Category] IN { \"A\", \"B\" }` or `Fact[Category] IN VALUES(Dim[Category])`
  
-    Multi-column membership is also supported via a row constructor on the LHS:
- 
-    - `(T[Col1], T[Col2], ...) IN tableExpr`
- 
-    In `CALCULATE`, row-constructor `IN` filters are applied as a **row filter** (not decomposed into
-    independent per-column value filters) to preserve correlation across columns, e.g.:
- 
-    - `CALCULATE(COUNTROWS(Orders), (Orders[OrderId], Orders[CustomerId]) IN {(100,1), (102,2)})`
+   Multi-column membership is also supported via a row constructor on the LHS:
+  
+   - `(T[Col1], T[Col2], ...) IN tableExpr`
+  
+   In `CALCULATE`, row-constructor `IN` filters are applied as a **row filter** (not decomposed into
+   independent per-column value filters) to preserve correlation across columns, e.g.:
+  
+   - `CALCULATE(COUNTROWS(Orders), (Orders[OrderId], Orders[CustomerId]) IN {(100,1), (102,2)})`
 
    Notes:
    - For `=`/`<>`/`<`/`<=`/`>`/`>=`, the RHS is evaluated as a scalar expression.
    - For scalar `IN` (`T[Col] IN tableExpr`), the RHS must evaluate to a one-column table expression.
    - For row-constructor `IN` (`(T[Col1], T[Col2], ...) IN tableExpr`), the RHS must evaluate to a table
-     with the same number of columns. In `CALCULATE` filter arguments, the row constructor must contain
-     only column references and must reference exactly one table.
+     with the same number of columns. Matching is positional (tuple element 1 vs table column 1, etc.)
+     using the normal `=` comparison semantics. In `CALCULATE` filter arguments, the row constructor
+     must contain only column references and must reference exactly one table.
    - Non-equality comparisons currently build a *value set* by scanning rows under the current filters
      (except the column being filtered).
 
