@@ -399,9 +399,11 @@ export function extractWorkbookSchema(workbook, options = {}) {
     const name =
       typeof rawSheet?.name === "string"
         ? rawSheet.name
-        : typeof entry.key === "string"
+        : typeof entry.key === "string" && entry.key
           ? entry.key
-          : "";
+          : typeof rawSheet === "string"
+            ? rawSheet
+            : "";
     if (!name) continue;
 
     const looksLikeSheetObject =

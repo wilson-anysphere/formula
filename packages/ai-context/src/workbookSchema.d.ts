@@ -22,12 +22,22 @@ export interface WorkbookSchemaSheet {
   name: string;
 }
 
-export interface WorkbookSchemaSheetInput extends WorkbookSchemaSheet {
+export interface WorkbookSchemaSheetObjectInput {
+  /**
+   * Sheet name. Optional when the sheet is provided via `Map`/`Record` keyed by name.
+   */
+  name?: string;
   cells?: unknown;
   values?: unknown[][];
   origin?: { row: number; col: number };
   getCell?: (row: number, col: number) => unknown;
 }
+
+export interface WorkbookSchemaCellMapLike {
+  get(key: string): unknown;
+}
+
+export type WorkbookSchemaSheetInput = WorkbookSchemaSheetObjectInput | unknown[][] | WorkbookSchemaCellMapLike | string;
 
 export interface WorkbookSchemaTable {
   name: string;
@@ -56,13 +66,19 @@ export interface WorkbookSchemaSummary {
 }
 
 export interface WorkbookSchemaTableInput {
-  name: string;
+  /**
+   * Table name. Optional when the table is provided via `Map`/`Record` keyed by name.
+   */
+  name?: string;
   sheetName: string;
   rect: WorkbookSchemaRectInput;
 }
 
 export interface WorkbookSchemaNamedRangeInput {
-  name: string;
+  /**
+   * Named range name. Optional when the named range is provided via `Map`/`Record` keyed by name.
+   */
+  name?: string;
   sheetName: string;
   rect: WorkbookSchemaRectInput;
 }
