@@ -25,6 +25,34 @@ EOF
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}"
 
+read_main_binary_name() {
+  local conf="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
+  local val=""
+  if [[ -f "${conf}" ]] && command -v python3 >/dev/null 2>&1; then
+    val="$(
+      python3 - "${conf}" <<'PY' 2>/dev/null || true
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+v = conf.get("mainBinaryName")
+if isinstance(v, str):
+    print(v.strip())
+PY
+    )"
+  elif [[ -f "${conf}" ]] && command -v node >/dev/null 2>&1; then
+    val="$(
+      node -p 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); (conf.mainBinaryName ?? "").trim()' "${conf}" 2>/dev/null || true
+    )"
+  fi
+  if [[ -z "${val}" ]]; then
+    val="formula-desktop"
+  fi
+  printf '%s\n' "${val}"
+}
+
+MAIN_BINARY_NAME="$(read_main_binary_name)"
+
 kind="${1:-all}"
 case "${kind}" in
   deb | rpm | all) ;;
@@ -192,17 +220,21 @@ deb_smoke_test_dir() {
   echo "Mounting: ${deb_dir_abs} -> /mounted"
   docker run --rm \
     ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
+    -e "FORMULA_MAIN_BINARY_NAME=${MAIN_BINARY_NAME}" \
     -v "${deb_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
       export DEBIAN_FRONTEND=noninteractive
+      bin="${FORMULA_MAIN_BINARY_NAME:-formula-desktop}"
       echo "Container OS:"; cat /etc/os-release
       echo "Mounted artifacts:"; ls -lah /mounted
       apt-get update
       # Use --no-install-recommends to ensure runtime requirements are expressed as Depends
       apt-get install -y --no-install-recommends /mounted/*.deb
 
-      test -x /usr/bin/formula-desktop
+      test -x "/usr/bin/${bin}"
+      test -f "/usr/share/doc/${bin}/LICENSE"
+      test -f "/usr/share/doc/${bin}/NOTICE"
 
       # Validate that installer-time MIME integration ran successfully.
       #
@@ -217,9 +249,9 @@ deb_smoke_test_dir() {
         exit 1
       fi
 
-      desktop_file="$(grep -rlE "^[[:space:]]*Exec=.*formula-desktop" /usr/share/applications 2>/dev/null | head -n 1 || true)"
+      desktop_file="$(grep -rlE "^[[:space:]]*Exec=.*${bin}" /usr/share/applications 2>/dev/null | head -n 1 || true)"
       if [ -z "${desktop_file}" ]; then
-        echo "No installed .desktop file found with Exec referencing formula-desktop under /usr/share/applications" >&2
+        echo "No installed .desktop file found with Exec referencing ${bin} under /usr/share/applications" >&2
         ls -lah /usr/share/applications || true
         exit 1
       fi
@@ -230,10 +262,10 @@ deb_smoke_test_dir() {
       grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
       grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
       set +e
-      out="$(ldd /usr/bin/formula-desktop 2>&1)"
+      out="$(ldd "/usr/bin/${bin}" 2>&1)"
       status=$?
       set -e
-      echo "ldd /usr/bin/formula-desktop:"
+      echo "ldd /usr/bin/${bin}:"
       echo "${out}"
       if echo "${out}" | grep -q "not found"; then
         echo "Missing shared libraries:"
@@ -261,9 +293,11 @@ rpm_smoke_test_dir() {
   echo "Mounting: ${rpm_dir_abs} -> /mounted"
   docker run --rm \
     ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} \
+    -e "FORMULA_MAIN_BINARY_NAME=${MAIN_BINARY_NAME}" \
     -v "${rpm_dir_abs}:/mounted:ro" \
     "${image}" \
     bash -euxo pipefail -c '
+      bin="${FORMULA_MAIN_BINARY_NAME:-formula-desktop}"
       echo "Container OS:"; cat /etc/os-release
       echo "Mounted artifacts:"; ls -lah /mounted
       # Install the local RPM using whatever package manager is available in the container.
@@ -284,7 +318,9 @@ rpm_smoke_test_dir() {
         exit 1
       fi
 
-      test -x /usr/bin/formula-desktop
+      test -x "/usr/bin/${bin}"
+      test -f "/usr/share/doc/${bin}/LICENSE"
+      test -f "/usr/share/doc/${bin}/NOTICE"
 
       # Validate that installer-time MIME integration ran successfully.
       test -f /usr/share/mime/packages/app.formula.desktop.xml
@@ -295,9 +331,9 @@ rpm_smoke_test_dir() {
         exit 1
       fi
 
-      desktop_file="$(grep -rlE "^[[:space:]]*Exec=.*formula-desktop" /usr/share/applications 2>/dev/null | head -n 1 || true)"
+      desktop_file="$(grep -rlE "^[[:space:]]*Exec=.*${bin}" /usr/share/applications 2>/dev/null | head -n 1 || true)"
       if [ -z "${desktop_file}" ]; then
-        echo "No installed .desktop file found with Exec referencing formula-desktop under /usr/share/applications" >&2
+        echo "No installed .desktop file found with Exec referencing ${bin} under /usr/share/applications" >&2
         ls -lah /usr/share/applications || true
         exit 1
       fi
@@ -308,10 +344,10 @@ rpm_smoke_test_dir() {
       grep -qi "application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet" "${desktop_file}"
       grep -qi "application/vnd\.apache\.parquet" "${desktop_file}"
       set +e
-      out="$(ldd /usr/bin/formula-desktop 2>&1)"
+      out="$(ldd "/usr/bin/${bin}" 2>&1)"
       status=$?
       set -e
-      echo "ldd /usr/bin/formula-desktop:"
+      echo "ldd /usr/bin/${bin}:"
       echo "${out}"
       if echo "${out}" | grep -q "not found"; then
         echo "Missing shared libraries:"
