@@ -362,17 +362,34 @@ export interface GoalSeekRequest {
   sheet?: string;
   tolerance?: number;
   maxIterations?: number;
+  derivativeStep?: number;
+  minDerivative?: number;
+  maxBracketExpansions?: number;
+  /**
+   * Legacy option kept for API compatibility.
+   *
+   * Note: `crates/formula-wasm` currently ignores this field (it is safe to pass but has no effect).
+   */
   recalcMode?: GoalSeekRecalcMode;
 }
 
-export interface GoalSeekResponse {
-  success: boolean;
-  /** Best-effort status string (e.g. "Converged", "MaxIterationsReached"). */
-  status?: string;
+export interface GoalSeekResult {
+  /**
+   * Goal seek solver status.
+   *
+   * Known values match the Rust `GoalSeekStatus` enum. Treat this as best-effort and be prepared
+   * for additional statuses in future engine versions.
+   */
+  status: "Converged" | "MaxIterationsReached" | "NoBracketFound" | "NumericalFailure" | (string & {});
   solution: number;
   iterations: number;
+  finalOutput: number;
   finalError: number;
-  finalOutput?: number;
+}
+
+export interface GoalSeekResponse {
+  result: GoalSeekResult;
+  changes: CellChange[];
 }
 
 /**

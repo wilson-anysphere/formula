@@ -811,7 +811,24 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).goalSeek !== "function") {
                 throw new Error("goalSeek: WasmWorkbook.goalSeek is not available in this WASM build");
               }
-              result = cloneToPlainData((wb as any).goalSeek(params));
+              {
+                const raw = (wb as any).goalSeek(params);
+                // Goal seek returns `{ result, changes }` where `changes` mirrors the `recalculate()`
+                // payload. Normalize `value` scalars to ensure structured-clone safe null/primitive
+                // values (and to avoid JSON clone dropping `undefined` keys).
+                if (raw && typeof raw === "object") {
+                  const obj = raw as any;
+                  if ("result" in obj || "changes" in obj) {
+                    const normalizedResult =
+                      obj.result && typeof obj.result === "object" ? { ...(obj.result as any) } : obj.result;
+                    result = { result: normalizedResult, changes: normalizeCellChanges(obj.changes) };
+                  } else {
+                    result = cloneToPlainData(raw);
+                  }
+                } else {
+                  result = cloneToPlainData(raw);
+                }
+              }
               break;
             case "getPivotSchema":
               if (typeof (wb as any).getPivotSchema !== "function") {

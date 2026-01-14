@@ -585,7 +585,10 @@ export class EngineWorker {
 
   async goalSeek(request: GoalSeekRequest, options?: RpcOptions): Promise<GoalSeekResponse> {
     await this.flush();
-    return (await this.invoke("goalSeek", request, options)) as GoalSeekResponse;
+    // `serde_wasm_bindgen` does not accept `undefined` values inside structs; prune optional keys
+    // so callers can pass `{ foo?: undefined }` without breaking deserialization.
+    const normalized = pruneUndefinedShallow(request as unknown as Record<string, unknown>) as GoalSeekRequest;
+    return (await this.invoke("goalSeek", normalized, options)) as GoalSeekResponse;
   }
 
   async applyOperation(op: EditOp, options?: RpcOptions): Promise<EditResult> {

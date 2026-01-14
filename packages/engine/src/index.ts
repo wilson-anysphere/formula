@@ -33,6 +33,7 @@ export type {
   EditResult,
   GoalSeekRecalcMode,
   GoalSeekRequest,
+  GoalSeekResult,
   GoalSeekResponse,
   FormulaParseError,
   FormulaParseOptions,
