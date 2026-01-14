@@ -340,7 +340,11 @@ async function main() {
     ];
     console.error("[coi-check] ERROR: could not find a built desktop binary to run.");
     if (explicitBin) {
-      console.error(`[coi-check] --bin was provided but is not a file: ${binary}`);
+      if (!binary || !fs.existsSync(binary)) {
+        console.error(`[coi-check] --bin was provided but does not exist: ${binary ?? "<empty>"}`);
+      } else {
+        console.error(`[coi-check] --bin was provided but is not a file: ${binary}`);
+      }
     } else if (noBuild) {
       console.error("[coi-check] Searched common locations such as:");
       for (const p of searched) console.error(`  - ${p}`);
