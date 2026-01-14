@@ -125,3 +125,24 @@ test("DocumentControllerWorkbookAdapter getValues flattens rich text + in-cell i
 
   workbook.dispose();
 });
+
+test("DocumentControllerWorkbookAdapter throws instead of silently no-oping when canEditCell blocks script writes", () => {
+  const controller = new DocumentController({
+    canEditCell: () => false,
+  });
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.throws(() => sheet.getRange("A1").setValue("blocked"), /Read-only/i);
+  assert.equal(controller.getCell("Sheet1", "A1").value, null);
+
+  assert.throws(() => sheet.getRange("A1:B1").setValues([["x", "y"]]), /Read-only/i);
+  assert.equal(controller.getCell("Sheet1", "A1").value, null);
+  assert.equal(controller.getCell("Sheet1", "B1").value, null);
+
+  assert.throws(() => sheet.getRange("A1").setFormat({ bold: true }), /Read-only/i);
+  assert.equal(controller.getCellFormat("Sheet1", "A1")?.font?.bold, undefined);
+
+  workbook.dispose();
+});

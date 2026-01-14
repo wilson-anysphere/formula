@@ -133,3 +133,35 @@ test("DocumentControllerBridge set_range_values spills matrix writes when the de
   assert.equal(doc.getCell(sheetId, { row: 1, col: 0 }).value, 3);
   assert.equal(doc.getCell(sheetId, { row: 1, col: 1 }).value, 4);
 });
+
+test("DocumentControllerBridge throws instead of silently no-oping when canEditCell blocks writes", () => {
+  const doc = new DocumentController({
+    canEditCell: () => false,
+  });
+  const sheetId = "Sheet1";
+  const bridge = new DocumentControllerBridge(doc, { activeSheetId: sheetId });
+
+  assert.throws(
+    () =>
+      bridge.set_cell_value({
+        range: { sheet_id: sheetId, start_row: 0, end_row: 0, start_col: 0, end_col: 0 },
+        value: "blocked",
+      }),
+    /Read-only/i,
+  );
+  assert.equal(doc.getCell(sheetId, { row: 0, col: 0 }).value, null);
+
+  assert.throws(
+    () =>
+      bridge.set_range_values({
+        range: { sheet_id: sheetId, start_row: 0, end_row: 0, start_col: 0, end_col: 0 },
+        values: [
+          [1, 2],
+          [3, 4],
+        ],
+      }),
+    /Read-only/i,
+  );
+  assert.equal(doc.getCell(sheetId, { row: 0, col: 0 }).value, null);
+  assert.equal(doc.getCell(sheetId, { row: 0, col: 1 }).value, null);
+});

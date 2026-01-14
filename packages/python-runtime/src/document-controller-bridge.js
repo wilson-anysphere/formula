@@ -33,6 +33,35 @@ function assertRangeWithinLimit(range, action) {
   }
 }
 
+function assertCanEditCell(doc, sheetId, row, col, action) {
+  if (typeof doc?.canEditCell !== "function") return;
+  if (doc.canEditCell({ sheetId, row, col })) return;
+  if (action === "format") {
+    throw new Error("Read-only: you don't have permission to change formatting.");
+  }
+  throw new Error("Read-only: you don't have permission to edit cell contents.");
+}
+
+function assertCanEditRange(doc, range, action) {
+  // Always check the anchor cell first so fully read-only sessions fail fast.
+  assertCanEditCell(doc, range.sheet_id, range.start_row, range.start_col, action);
+
+  const { rowCount, colCount } = rangeSize(range);
+  const cellCount = rowCount * colCount;
+  if (!Number.isFinite(cellCount) || cellCount <= 1) return;
+
+  // Avoid O(area) permission scans for giant selections; the anchor check is sufficient to catch
+  // the common "viewer/commenter" case without freezing the host.
+  if (cellCount > DEFAULT_PYTHON_RANGE_CELL_LIMIT) return;
+
+  for (let r = range.start_row; r <= range.end_row; r++) {
+    for (let c = range.start_col; c <= range.end_col; c++) {
+      if (r === range.start_row && c === range.start_col) continue;
+      assertCanEditCell(doc, range.sheet_id, r, c, action);
+    }
+  }
+}
+
 function normalizeSheetNameForCaseInsensitiveCompare(name) {
   // Excel compares sheet names case-insensitively with Unicode NFKC normalization.
   // Match the semantics used by the desktop sheet store / workbook backend.
@@ -220,6 +249,7 @@ export class DocumentControllerBridge {
 
   set_cell_value({ range, value }) {
     ensureSingleCell(range);
+    assertCanEditCell(this.doc, range.sheet_id, range.start_row, range.start_col, "edit");
     this.doc.setCellValue(range.sheet_id, { row: range.start_row, col: range.start_col }, value);
     return null;
   }
@@ -232,6 +262,7 @@ export class DocumentControllerBridge {
 
   set_cell_formula({ range, formula }) {
     ensureSingleCell(range);
+    assertCanEditCell(this.doc, range.sheet_id, range.start_row, range.start_col, "edit");
     this.doc.setCellFormula(range.sheet_id, { row: range.start_row, col: range.start_col }, formula);
     return null;
   }
@@ -280,6 +311,37 @@ export class DocumentControllerBridge {
     // - a CellRange (explicit rectangle).
     //
     // Use start-cell semantics for single-cell ranges so 2D assignments "spill" from the anchor cell.
+    if (typeof this.doc?.canEditCell === "function") {
+      if (isSingleCellRange) {
+        const spillRows = Array.isArray(matrix) ? matrix.length : 0;
+        let spillCols = 0;
+        if (Array.isArray(matrix)) {
+          for (const row of matrix) {
+            if (Array.isArray(row) && row.length > spillCols) spillCols = row.length;
+          }
+        }
+        const endRow = range.start_row + Math.max(0, spillRows - 1);
+        const endCol = range.start_col + Math.max(0, spillCols - 1);
+        if (spillRows > 0 && spillCols > 0) {
+          assertCanEditRange(
+            this.doc,
+            {
+              sheet_id: range.sheet_id,
+              start_row: range.start_row,
+              start_col: range.start_col,
+              end_row: endRow,
+              end_col: endCol,
+            },
+            "edit",
+          );
+        } else {
+          assertCanEditCell(this.doc, range.sheet_id, range.start_row, range.start_col, "edit");
+        }
+      } else {
+        assertCanEditRange(this.doc, range, "edit");
+      }
+    }
+
     this.doc.setRangeValues(
       range.sheet_id,
       isSingleCellRange && Array.isArray(matrix) && Array.isArray(matrix[0])
@@ -294,6 +356,7 @@ export class DocumentControllerBridge {
   }
 
   clear_range({ range }) {
+    assertCanEditCell(this.doc, range.sheet_id, range.start_row, range.start_col, "edit");
     this.doc.clearRange(range.sheet_id, {
       start: { row: range.start_row, col: range.start_col },
       end: { row: range.end_row, col: range.end_col },
@@ -302,6 +365,7 @@ export class DocumentControllerBridge {
   }
 
   set_range_format({ range, format }) {
+    assertCanEditRange(this.doc, range, "format");
     const ok = this.doc.setRangeFormat(
       range.sheet_id,
       {

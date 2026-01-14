@@ -1337,6 +1337,8 @@ class DocumentControllerRangeAdapter {
       );
     }
 
+    this.#assertCanEditRange({ rows, cols }, { action: "edit", kind: "cell" });
+
     this.sheet.workbook.documentController.setRangeValues(this.sheet.sheetId, this.address, values, {
       label: "Script: set values",
     });
@@ -1352,6 +1354,8 @@ class DocumentControllerRangeAdapter {
         `setFormulas expected ${rows}x${cols} matrix for range ${this.address}, got ${formulas.length}x${formulas[0]?.length ?? 0}`,
       );
     }
+
+    this.#assertCanEditRange({ rows, cols }, { action: "edit", kind: "cell" });
 
     const values = formulas.map((row) =>
       row.map((formula) => {
@@ -1381,6 +1385,7 @@ class DocumentControllerRangeAdapter {
     }
 
     const coord = { row: range.startRow, col: range.startCol };
+    this.#assertCanEditCell(coord.row, coord.col, { action: "edit", kind: "cell" });
 
     if (typeof value === "string") {
       if (value.startsWith("'")) {
@@ -1463,13 +1468,18 @@ class DocumentControllerRangeAdapter {
   }
 
   setFormat(format) {
+    const rows = this.coords.endRow - this.coords.startRow + 1;
+    const cols = this.coords.endCol - this.coords.startCol + 1;
+    // Most script formatting calls are small; check every cell so a partially protected range fails
+    // early instead of silently filtering out changes.
+    //
+    // For very large ranges, avoid O(area) permission scans and instead check the anchor cell.
+    this.#assertCanEditRange({ rows, cols }, { action: "format", kind: "format" });
     const patch = docStylePatchFromScriptFormat(format);
     const applied = this.sheet.workbook.documentController.setRangeFormat(this.sheet.sheetId, this.address, patch, {
       label: "Script: set format",
     });
     if (applied === false) {
-      const rows = this.coords.endRow - this.coords.startRow + 1;
-      const cols = this.coords.endCol - this.coords.startCol + 1;
       const area = rows * cols;
       throw new Error(
         `setFormat skipped for range ${this.address} (rows=${rows}, cols=${cols}, area=${area}). ` +
@@ -1488,6 +1498,8 @@ class DocumentControllerRangeAdapter {
         `setFormats expected ${rows}x${cols} matrix for range ${this.address}, got ${formats?.length ?? 0}x${formats?.[0]?.length ?? 0}`,
       );
     }
+
+    this.#assertCanEditRange({ rows, cols }, { action: "format", kind: "format" });
 
     const doc = this.sheet.workbook.documentController;
     const styleTable = doc.styleTable;
@@ -1514,5 +1526,47 @@ class DocumentControllerRangeAdapter {
 
     doc.setRangeValues(this.sheet.sheetId, this.address, values, { label: "Script: set formats" });
     this.sheet.workbook._notifyMutate();
+  }
+
+  /**
+   * @param {number} row
+   * @param {number} col
+   * @param {{ action: string, kind: "cell" | "format" }} params
+   */
+  #assertCanEditCell(row, col, params) {
+    const doc = this.sheet.workbook.documentController;
+    if (typeof doc?.canEditCell !== "function") return;
+    if (doc.canEditCell({ sheetId: this.sheet.sheetId, row, col })) return;
+
+    const address = formatCellAddress({ row, col });
+    if (params.kind === "format") {
+      throw new Error(`Read-only: you don't have permission to change formatting (${address})`);
+    }
+    throw new Error(`Read-only: you don't have permission to edit that cell (${address})`);
+  }
+
+  /**
+   * @param {{ rows: number, cols: number }} size
+   * @param {{ action: string, kind: "cell" | "format" }} params
+   */
+  #assertCanEditRange(size, params) {
+    // Always validate the anchor cell first so read-only users fail quickly even for huge ranges.
+    this.#assertCanEditCell(this.coords.startRow, this.coords.startCol, params);
+
+    const rows = Number(size?.rows);
+    const cols = Number(size?.cols);
+    const cellCount = rows * cols;
+    if (!Number.isFinite(cellCount) || cellCount <= 1) return;
+
+    // Avoid O(area) checks for giant selections; the anchor check is sufficient to catch the common
+    // "viewer/commenter" (all cells blocked) case without freezing the renderer.
+    if (cellCount > DEFAULT_SCRIPT_RANGE_CELL_LIMIT) return;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (r === 0 && c === 0) continue; // already checked anchor
+        this.#assertCanEditCell(this.coords.startRow + r, this.coords.startCol + c, params);
+      }
+    }
   }
 }
