@@ -282,15 +282,14 @@ jobs:
             perf-artifacts/*.log
 
       - name: Publish benchmark results (non-gating)
-        if: github.repository == 'wilson-anysphere/formula' && github.ref == 'refs/heads/main' && success()
+        # Only scheduled runs on main should update gh-pages history.
+        if: github.repository == 'wilson-anysphere/formula' && github.ref == 'refs/heads/main' && github.event_name == 'schedule' && success()
         uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
         with:
           tool: customSmallerIsBetter
           output-file-path: perf-artifacts/benchmark-results.desktop-memory.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # Only scheduled runs should push to gh-pages for historical tracking.
-          # (Manual workflow_dispatch runs are typically for debugging and can be noisy.)
-          auto-push: ${{ github.event_name == 'schedule' }}
+          auto-push: true
           alert-threshold: '120%'
           comment-on-alert: false
           fail-on-alert: false
