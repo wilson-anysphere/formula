@@ -947,6 +947,30 @@ mod tests {
     }
 
     #[test]
+    fn standard_cryptoapi_aes_sha1_cryptderivekey_aes256_vector() {
+        // Worked example from `docs/offcrypto-standard-cryptoapi.md`.
+        //
+        // This test targets the CryptoAPI `CryptDeriveKey` expansion step directly. It regresses
+        // the common implementation bug where implementations pad with 0x36/0x5c but forget to XOR
+        // with the digest bytes.
+        //
+        // H_block0 = SHA1(H_final || LE32(0))
+        let h_block0 = hex_decode("6ad7dedf2da3514b1d85eabee069d47dd058967f");
+        let key = crypt_derive_key_aes(HashAlgorithm::Sha1, &h_block0, 32).expect("derive key");
+        assert_eq!(
+            key.as_slice(),
+            hex_decode("de5451b9dc3fcb383792cbeec80b6bc30795c2705e075039407199f7d299b6e4")
+        );
+
+        // AES-192 uses the same derivation truncated to 24 bytes.
+        let key192 = crypt_derive_key_aes(HashAlgorithm::Sha1, &h_block0, 24).expect("derive key");
+        assert_eq!(
+            key192.as_slice(),
+            hex_decode("de5451b9dc3fcb383792cbeec80b6bc30795c2705e075039")
+        );
+    }
+
+    #[test]
     fn normalize_key_material_pads_with_0x36() {
         assert_eq!(
             normalize_key_material(&[0xAA, 0xBB], 5),
