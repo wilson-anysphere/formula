@@ -253,6 +253,21 @@ fn pivot_field_ref_display_and_canonical_name_handle_dax_quoting_and_escaping() 
 
     let bracketed_measure = PivotFieldRef::DataModelMeasure("My]Measure".to_string());
     assert_eq!(bracketed_measure.to_string(), "[My]]Measure]");
+
+    // Parsing is best-effort but should round-trip DAX escaping for `]`.
+    let parsed_col = PivotFieldRef::from_unstructured("Orders[Gross]]Margin]");
+    assert_eq!(
+        parsed_col,
+        PivotFieldRef::DataModelColumn {
+            table: "Orders".to_string(),
+            column: "Gross]Margin".to_string(),
+        }
+    );
+    assert_eq!(parsed_col.to_string(), "Orders[Gross]]Margin]");
+
+    let parsed_measure = PivotFieldRef::from_unstructured("[My]]Measure]");
+    assert_eq!(parsed_measure, PivotFieldRef::DataModelMeasure("My]Measure".to_string()));
+    assert_eq!(parsed_measure.to_string(), "[My]]Measure]");
 }
 
 #[test]
