@@ -292,3 +292,25 @@ fn semantic_export_formats_sheet_format_pr_f32_without_rounding_noise() {
         "expected no f32 rounding noise in sheetFormatPr attrs: {sheet_xml}"
     );
 }
+
+#[test]
+fn semantic_export_formats_row_height_f32_without_rounding_noise() {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();
+    let sheet = workbook.sheet_mut(sheet_id).unwrap();
+    sheet.set_row_height(0, Some(15.3));
+
+    let mut cursor = Cursor::new(Vec::new());
+    write_workbook_to_writer(&workbook, &mut cursor).expect("write workbook");
+    let bytes = cursor.into_inner();
+
+    let sheet_xml = zip_part(&bytes, "xl/worksheets/sheet1.xml");
+    let doc = roxmltree::Document::parse(&sheet_xml).expect("parse sheet xml");
+    let row = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "row" && n.attribute("r") == Some("1"))
+        .expect("expected first row element");
+
+    assert_eq!(row.attribute("ht"), Some("15.3"));
+    assert_eq!(row.attribute("customHeight"), Some("1"));
+}
