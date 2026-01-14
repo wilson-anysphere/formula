@@ -142,4 +142,32 @@ describe("computeSelectionFormatState", () => {
     expect(state.fontSize).toBe(12);
     expect(state.numberFormat).toBe("0%");
   });
+
+  it("does not resurrect a deleted sheet when called with a stale sheet id", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", 1);
+    doc.setCellValue("Sheet2", "A1", 2);
+    doc.deleteSheet("Sheet2");
+
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+    expect(doc.getSheetMeta("Sheet2")).toBeNull();
+
+    const state = computeSelectionFormatState(doc, "Sheet2", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
+    expect(state).toEqual({
+      bold: false,
+      italic: false,
+      underline: false,
+      strikethrough: false,
+      fontName: null,
+      fontSize: null,
+      fontVariantPosition: null,
+      wrapText: false,
+      align: "left",
+      verticalAlign: "bottom",
+      numberFormat: null,
+    });
+
+    expect(doc.getSheetIds()).toEqual(["Sheet1"]);
+    expect(doc.getSheetMeta("Sheet2")).toBeNull();
+  });
 });

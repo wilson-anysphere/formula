@@ -146,6 +146,39 @@ export function computeSelectionFormatState(
     };
   }
 
+  // Avoid materializing "phantom" sheets when a stale sheet id is passed in (e.g. after a sheet
+  // delete/applyState). DocumentController lazily creates sheets when referenced by
+  // `getCellFormat()` / `getCell()`, but this function is called frequently to drive Ribbon UI
+  // state and should be side-effect free.
+  //
+  // Treat a missing sheet as having default formatting.
+  const anyDoc = doc as any;
+  const model = anyDoc?.model;
+  const sheetMap = model?.sheets;
+  const sheetMeta = anyDoc?.sheetMeta;
+  const canCheckExists =
+    Boolean(sheetMap && typeof sheetMap.has === "function") || Boolean(sheetMeta && typeof sheetMeta.has === "function");
+  if (canCheckExists) {
+    const exists =
+      (sheetMap && typeof sheetMap.has === "function" && sheetMap.has(sheetId)) ||
+      (sheetMeta && typeof sheetMeta.has === "function" && sheetMeta.has(sheetId));
+    if (!exists) {
+      return {
+        bold: false,
+        italic: false,
+        underline: false,
+        strikethrough: false,
+        fontName: null,
+        fontSize: null,
+        fontVariantPosition: null,
+        wrapText: false,
+        align: "left",
+        verticalAlign: "bottom",
+        numberFormat: null,
+      };
+    }
+  }
+
   // Determine whether we can inspect the selection exhaustively.
   let totalCells = 0;
   for (const r of ranges) {
@@ -215,7 +248,6 @@ export function computeSelectionFormatState(
     if (state.fontVariantPosition === undefined) state.fontVariantPosition = value;
     else if (state.fontVariantPosition !== "mixed" && state.fontVariantPosition !== value) state.fontVariantPosition = "mixed";
   };
-  const anyDoc = doc as any;
   const hasGetCellFormat = typeof anyDoc.getCellFormat === "function";
   const hasGetCellFormatStyleIds = typeof anyDoc.getCellFormatStyleIds === "function";
   const effectiveStyleCache = new Map<string, any>();
@@ -244,7 +276,9 @@ export function computeSelectionFormatState(
         return anyDoc.getCellFormat(sheetId, { row, col }) as any;
       }
 
-      return doc.styleTable.get((doc.getCell(sheetId, { row, col }) as any)?.styleId ?? 0) as any;
+      const cell =
+        typeof anyDoc.peekCell === "function" ? (anyDoc.peekCell(sheetId, { row, col }) as any) : (doc.getCell(sheetId, { row, col }) as any);
+      return doc.styleTable.get(cell?.styleId ?? 0) as any;
     })();
 
     const font = style?.font ?? null;

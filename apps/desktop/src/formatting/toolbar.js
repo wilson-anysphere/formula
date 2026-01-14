@@ -179,6 +179,19 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
   const colCount = range.end.col - range.start.col + 1;
   const cellCount = rowCount * colCount;
 
+  // Avoid materializing sheets for read-only toggle state checks.
+  //
+  // The DocumentController lazily creates sheets when referenced. Formatting toolbar helpers
+  // are often called from UI state updates, so treat a missing sheet as having default
+  // formatting instead of creating a "phantom" sheet.
+  const modelForExistenceCheck = doc?.model;
+  const sheetMapForExistenceCheck = modelForExistenceCheck?.sheets;
+  if (sheetMapForExistenceCheck && typeof sheetMapForExistenceCheck.has === "function") {
+    if (!sheetMapForExistenceCheck.has(sheetId)) {
+      return predicate({});
+    }
+  }
+
   // Small rectangles: keep the simple per-cell semantics.
   if (cellCount <= CELL_SCAN_THRESHOLD) {
     for (let row = range.start.row; row <= range.end.row; row++) {
@@ -211,10 +224,6 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
     return true;
   }
 
-  // Ensure the sheet exists (DocumentController is lazily materialized).
-  if (typeof model.getCell === "function") {
-    model.getCell(sheetId, 0, 0);
-  }
   const sheet = model.sheets?.get(sheetId);
   if (!sheet) {
     // No sheet means everything is default.
