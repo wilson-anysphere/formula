@@ -76,6 +76,12 @@ export interface DrawingInteractionCallbacks {
    */
   requestFocus?(): void;
   /**
+   * Optional scroll hook used for Excel-like auto-scroll while dragging/resizing.
+   *
+   * Returns true when scroll offsets changed.
+   */
+  scrollBy?(dx: number, dy: number): boolean;
+  /**
    * Return false to skip handling the pointer down entirely.
    *
    * This is useful for cases where the grid should "win" even when the pointer
@@ -166,6 +172,8 @@ export class DrawingInteractionController {
     }
   })();
   private escapeListenerAttached = false;
+  private autoScrollRaf: number | null = null;
+  private lastPointer: { x: number; y: number; shiftKey: boolean } | null = null;
 
   /**
    * Mark a pointer event as a context-click that hit a drawing object.
@@ -220,6 +228,8 @@ export class DrawingInteractionController {
       // Best-effort: teardown should still remove listeners even if the integration
       // callbacks throw (e.g. partially-initialized test harnesses).
     }
+    this.stopAutoScroll();
+    this.lastPointer = null;
     this.element.removeEventListener("pointerdown", this.onPointerDown, this.listenerOptions);
     this.element.removeEventListener("pointermove", this.onPointerMove, this.listenerOptions);
     this.element.removeEventListener("pointerleave", this.onPointerLeave, this.listenerOptions);
@@ -369,8 +379,9 @@ export class DrawingInteractionController {
     const clampedY = paneLayout.headerOffsetY > 0 ? Math.max(y, paneLayout.headerOffsetY) : y;
     const pointInFrozenCols = clampedX < paneLayout.frozenBoundaryX;
     const pointInFrozenRows = clampedY < paneLayout.frozenBoundaryY;
-    const startSheetX = clampedX - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
-    const startSheetY = clampedY - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
+    const startSheetPoint = this.sheetPointFromLocal({ x: clampedX, y: clampedY }, viewport, paneLayout);
+    const startSheetX = startSheetPoint.x;
+    const startSheetY = startSheetPoint.y;
 
     // Allow grabbing a resize handle for the current selection even when the
     // pointer is slightly outside the object's bounds (handles are centered on
@@ -576,120 +587,16 @@ export class DrawingInteractionController {
       return;
     }
 
-    if (this.resizing) {
-      if (e.pointerId !== this.resizing.pointerId) return;
+    if (this.resizing || this.dragging) {
+      const active = this.resizing ?? this.dragging;
+      if (!active) return;
+      if (e.pointerId !== active.pointerId) return;
       this.stopPointerEvent(e);
       const rect = this.activeRect ?? this.element.getBoundingClientRect();
       const { x, y } = this.getLocalPoint(e, rect);
-
-      const viewport = this.callbacks.getViewport();
-      const zoom = sanitizeZoom(viewport.zoom);
-      const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
-      const clampedX = paneLayout.headerOffsetX > 0 ? Math.max(x, paneLayout.headerOffsetX) : x;
-      const clampedY = paneLayout.headerOffsetY > 0 ? Math.max(y, paneLayout.headerOffsetY) : y;
-      const pointInFrozenCols = clampedX < paneLayout.frozenBoundaryX;
-      const pointInFrozenRows = clampedY < paneLayout.frozenBoundaryY;
-      const sheetX = clampedX - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
-      const sheetY = clampedY - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
-      let dx = sheetX - this.resizing.startSheetX;
-      let dy = sheetY - this.resizing.startSheetY;
-
-      const handle = this.resizing.handle;
-      const isCornerHandle = handle === "nw" || handle === "ne" || handle === "se" || handle === "sw";
-      if (isCornerHandle && e.shiftKey && this.resizing.aspectRatio != null) {
-        const transform = this.resizing.transform;
-        if (hasNonIdentityTransform(transform)) {
-          const local = inverseTransformVector(dx, dy, transform!);
-          const lockedLocal = lockAspectRatioResize({
-            handle,
-            dx: local.x,
-            dy: local.y,
-            startWidthPx: this.resizing.startWidthPx,
-            startHeightPx: this.resizing.startHeightPx,
-            aspectRatio: this.resizing.aspectRatio,
-            minSizePx: 8,
-          });
-          const world = applyTransformVector(lockedLocal.dx, lockedLocal.dy, transform!);
-          dx = world.x;
-          dy = world.y;
-        } else {
-          const locked = lockAspectRatioResize({
-            handle,
-            dx,
-            dy,
-            startWidthPx: this.resizing.startWidthPx,
-            startHeightPx: this.resizing.startHeightPx,
-            aspectRatio: this.resizing.aspectRatio,
-            minSizePx: 8,
-          });
-          dx = locked.dx;
-          dy = locked.dy;
-        }
-      }
-
-      const startObjects = this.resizing.startObjects;
-      const startIndex = this.resizing.startIndex;
-      const base = startObjects[startIndex];
-      const next = startObjects.slice();
-      if (base && base.id === this.resizing.id) {
-        next[startIndex] = {
-          ...base,
-          anchor: resizeAnchor(base.anchor, this.resizing.handle, dx, dy, this.geom, base.transform, zoom),
-        };
-      } else {
-        const fallbackIndex = findObjectIndex(startObjects, this.resizing.id);
-        const fallbackBase = fallbackIndex >= 0 ? startObjects[fallbackIndex]! : null;
-        if (fallbackBase) {
-          next[fallbackIndex] = {
-            ...fallbackBase,
-            anchor: resizeAnchor(fallbackBase.anchor, this.resizing.handle, dx, dy, this.geom, fallbackBase.transform, zoom),
-          };
-        }
-      }
-      this.callbacks.setObjects(next);
-      this.element.style.cursor = cursorForResizeHandleWithTransform(this.resizing.handle, this.resizing.transform);
-      return;
-    }
-
-    if (this.dragging) {
-      if (e.pointerId !== this.dragging.pointerId) return;
-      this.stopPointerEvent(e);
-      const rect = this.activeRect ?? this.element.getBoundingClientRect();
-      const { x, y } = this.getLocalPoint(e, rect);
-
-      const viewport = this.callbacks.getViewport();
-      const zoom = sanitizeZoom(viewport.zoom);
-      const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
-      const clampedX = paneLayout.headerOffsetX > 0 ? Math.max(x, paneLayout.headerOffsetX) : x;
-      const clampedY = paneLayout.headerOffsetY > 0 ? Math.max(y, paneLayout.headerOffsetY) : y;
-      const pointInFrozenCols = clampedX < paneLayout.frozenBoundaryX;
-      const pointInFrozenRows = clampedY < paneLayout.frozenBoundaryY;
-      const sheetX = clampedX - paneLayout.headerOffsetX + (pointInFrozenCols ? 0 : viewport.scrollX);
-      const sheetY = clampedY - paneLayout.headerOffsetY + (pointInFrozenRows ? 0 : viewport.scrollY);
-      const dx = sheetX - this.dragging.startSheetX;
-      const dy = sheetY - this.dragging.startSheetY;
-
-      const startObjects = this.dragging.startObjects;
-      const startIndex = this.dragging.startIndex;
-      const base = startObjects[startIndex];
-      const next = startObjects.slice();
-      if (base && base.id === this.dragging.id) {
-        next[startIndex] = {
-          ...base,
-          anchor: shiftAnchor(base.anchor, dx, dy, this.geom, zoom),
-        };
-      } else {
-        const fallbackIndex = findObjectIndex(startObjects, this.dragging.id);
-        const fallbackBase = fallbackIndex >= 0 ? startObjects[fallbackIndex]! : null;
-        if (fallbackBase) {
-          next[fallbackIndex] = {
-            ...fallbackBase,
-            anchor: shiftAnchor(fallbackBase.anchor, dx, dy, this.geom, zoom),
-          };
-        }
-      }
-      this.callbacks.setObjects(next);
-      this.element.style.cursor = "move";
+      this.lastPointer = { x, y, shiftKey: Boolean(e.shiftKey) };
+      this.applyInteractionAtPointer(this.lastPointer);
+      this.maybeStartAutoScroll();
       return;
     }
 
@@ -707,6 +614,8 @@ export class DrawingInteractionController {
     if (e.pointerId !== active.pointerId) return;
 
     this.stopPointerEvent(e);
+    this.stopAutoScroll();
+    this.lastPointer = null;
 
     const kind: "move" | "resize" | "rotate" = dragging ? "move" : resizing ? "resize" : "rotate";
 
@@ -792,6 +701,204 @@ export class DrawingInteractionController {
     }
   };
 
+  private sheetPointFromLocal(pointer: { x: number; y: number }, viewport: Viewport, paneLayout: PaneLayout): { x: number; y: number } {
+    // Sheet-space coordinates are relative to the A1 origin. Screen-space points
+    // include `headerOffsetX/Y` and are shifted by scroll offsets except when the
+    // pointer is inside a frozen pane.
+    const clampedX = paneLayout.headerOffsetX > 0 ? Math.max(pointer.x, paneLayout.headerOffsetX) : pointer.x;
+    const clampedY = paneLayout.headerOffsetY > 0 ? Math.max(pointer.y, paneLayout.headerOffsetY) : pointer.y;
+    const effectiveScrollX = clampedX < paneLayout.frozenBoundaryX ? 0 : viewport.scrollX;
+    const effectiveScrollY = clampedY < paneLayout.frozenBoundaryY ? 0 : viewport.scrollY;
+    return {
+      x: effectiveScrollX + (clampedX - paneLayout.headerOffsetX),
+      y: effectiveScrollY + (clampedY - paneLayout.headerOffsetY),
+    };
+  }
+
+  private applyInteractionAtPointer(pointer: { x: number; y: number; shiftKey: boolean }): void {
+    const viewport = this.callbacks.getViewport();
+    const zoom = sanitizeZoom(viewport.zoom);
+    const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
+    const sheetPoint = this.sheetPointFromLocal(pointer, viewport, paneLayout);
+
+    if (this.resizing) {
+      let dx = sheetPoint.x - this.resizing.startSheetX;
+      let dy = sheetPoint.y - this.resizing.startSheetY;
+
+      const handle = this.resizing.handle;
+      const isCornerHandle = handle === "nw" || handle === "ne" || handle === "se" || handle === "sw";
+      if (isCornerHandle && pointer.shiftKey && this.resizing.aspectRatio != null) {
+        const transform = this.resizing.transform;
+        if (hasNonIdentityTransform(transform)) {
+          const local = inverseTransformVector(dx, dy, transform!);
+          const lockedLocal = lockAspectRatioResize({
+            handle,
+            dx: local.x,
+            dy: local.y,
+            startWidthPx: this.resizing.startWidthPx,
+            startHeightPx: this.resizing.startHeightPx,
+            aspectRatio: this.resizing.aspectRatio,
+            minSizePx: 8,
+          });
+          const world = applyTransformVector(lockedLocal.dx, lockedLocal.dy, transform!);
+          dx = world.x;
+          dy = world.y;
+        } else {
+          const locked = lockAspectRatioResize({
+            handle,
+            dx,
+            dy,
+            startWidthPx: this.resizing.startWidthPx,
+            startHeightPx: this.resizing.startHeightPx,
+            aspectRatio: this.resizing.aspectRatio,
+            minSizePx: 8,
+          });
+          dx = locked.dx;
+          dy = locked.dy;
+        }
+      }
+
+      const startObjects = this.resizing.startObjects;
+      const startIndex = this.resizing.startIndex;
+      const base = startObjects[startIndex];
+      const next = startObjects.slice();
+      if (base && base.id === this.resizing.id) {
+        next[startIndex] = {
+          ...base,
+          anchor: resizeAnchor(base.anchor, this.resizing.handle, dx, dy, this.geom, base.transform, zoom),
+        };
+      } else {
+        // Defensive fallback: if the cached start index is invalid, fall back to a
+        // linear scan to locate the edited object.
+        const fallbackIndex = findObjectIndex(startObjects, this.resizing.id);
+        const fallbackBase = fallbackIndex >= 0 ? startObjects[fallbackIndex]! : null;
+        if (fallbackBase) {
+          next[fallbackIndex] = {
+            ...fallbackBase,
+            anchor: resizeAnchor(fallbackBase.anchor, this.resizing.handle, dx, dy, this.geom, fallbackBase.transform, zoom),
+          };
+        }
+      }
+      this.callbacks.setObjects(next);
+      this.element.style.cursor = cursorForResizeHandleWithTransform(this.resizing.handle, this.resizing.transform);
+      return;
+    }
+
+    if (this.dragging) {
+      const dx = sheetPoint.x - this.dragging.startSheetX;
+      const dy = sheetPoint.y - this.dragging.startSheetY;
+
+      const startObjects = this.dragging.startObjects;
+      const startIndex = this.dragging.startIndex;
+      const base = startObjects[startIndex];
+      const next = startObjects.slice();
+      if (base && base.id === this.dragging.id) {
+        next[startIndex] = {
+          ...base,
+          anchor: shiftAnchor(base.anchor, dx, dy, this.geom, zoom),
+        };
+      } else {
+        const fallbackIndex = findObjectIndex(startObjects, this.dragging.id);
+        const fallbackBase = fallbackIndex >= 0 ? startObjects[fallbackIndex]! : null;
+        if (fallbackBase) {
+          next[fallbackIndex] = {
+            ...fallbackBase,
+            anchor: shiftAnchor(fallbackBase.anchor, dx, dy, this.geom, zoom),
+          };
+        }
+      }
+      this.callbacks.setObjects(next);
+      this.element.style.cursor = "move";
+    }
+  }
+
+  private computeAutoScrollDelta(pointer: { x: number; y: number }, viewport: Viewport, paneLayout: PaneLayout): { dx: number; dy: number } {
+    const inHeader = pointer.x < paneLayout.headerOffsetX || pointer.y < paneLayout.headerOffsetY;
+    if (inHeader) return { dx: 0, dy: 0 };
+
+    const threshold = 24;
+    const maxSpeed = 20;
+    const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+
+    const pointInFrozenCols = pointer.x < paneLayout.frozenBoundaryX;
+    const pointInFrozenRows = pointer.y < paneLayout.frozenBoundaryY;
+
+    const leftEdge = paneLayout.frozenBoundaryX;
+    const topEdge = paneLayout.frozenBoundaryY;
+    const rightEdge = Math.max(0, viewport.width);
+    const bottomEdge = Math.max(0, viewport.height);
+
+    let dx = 0;
+    if (!pointInFrozenCols) {
+      if (pointer.x >= leftEdge && pointer.x < leftEdge + threshold) {
+        const t = clamp01((leftEdge + threshold - pointer.x) / threshold);
+        dx = -Math.round(t * maxSpeed);
+      } else if (pointer.x > rightEdge - threshold) {
+        const t = clamp01((pointer.x - (rightEdge - threshold)) / threshold);
+        dx = Math.round(t * maxSpeed);
+      }
+    }
+
+    let dy = 0;
+    if (!pointInFrozenRows) {
+      if (pointer.y >= topEdge && pointer.y < topEdge + threshold) {
+        const t = clamp01((topEdge + threshold - pointer.y) / threshold);
+        dy = -Math.round(t * maxSpeed);
+      } else if (pointer.y > bottomEdge - threshold) {
+        const t = clamp01((pointer.y - (bottomEdge - threshold)) / threshold);
+        dy = Math.round(t * maxSpeed);
+      }
+    }
+
+    return { dx, dy };
+  }
+
+  private maybeStartAutoScroll(): void {
+    if (this.autoScrollRaf != null) return;
+    if (!this.dragging && !this.resizing) return;
+    if (!this.lastPointer) return;
+    if (!this.callbacks.scrollBy) return;
+
+    const viewport = this.callbacks.getViewport();
+    const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
+    const { dx, dy } = this.computeAutoScrollDelta(this.lastPointer, viewport, paneLayout);
+    if (dx === 0 && dy === 0) return;
+
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) =>
+            globalThis.setTimeout(() => cb(typeof performance !== "undefined" ? performance.now() : Date.now()), 16);
+
+    const tick = () => {
+      this.autoScrollRaf = null;
+      if (!this.dragging && !this.resizing) return;
+      if (!this.lastPointer) return;
+      const viewport = this.callbacks.getViewport();
+      const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
+      const { dx, dy } = this.computeAutoScrollDelta(this.lastPointer, viewport, paneLayout);
+      if (dx === 0 && dy === 0) return;
+
+      const didScroll = this.callbacks.scrollBy?.(dx, dy) ?? false;
+      if (!didScroll) return;
+
+      // Apply drag/resize again so the object tracks the changing scroll offsets
+      // even when the pointer stays stationary near the edge.
+      this.applyInteractionAtPointer(this.lastPointer);
+
+      this.autoScrollRaf = schedule(tick) as unknown as number;
+    };
+
+    this.autoScrollRaf = schedule(tick) as unknown as number;
+  }
+
+  private stopAutoScroll(): void {
+    if (this.autoScrollRaf == null) return;
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.autoScrollRaf);
+    else globalThis.clearTimeout(this.autoScrollRaf);
+    this.autoScrollRaf = null;
+  }
+
   private readonly onPointerCancel = (e: PointerEvent) => {
     const active = this.dragging ?? this.resizing ?? this.rotating;
     if (!active) return;
@@ -810,6 +917,8 @@ export class DrawingInteractionController {
 
     const startObjects = active.startObjects;
     const pointerId = active.pointerId;
+    this.stopAutoScroll();
+    this.lastPointer = null;
 
     this.dragging = null;
     this.resizing = null;

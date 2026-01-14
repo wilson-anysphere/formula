@@ -1390,6 +1390,8 @@ export class SpreadsheetApp {
   private dragAutoScrollRaf: number | null = null;
 
   private drawingGesture: DrawingGestureState | null = null;
+  private drawingGesturePointerPos: { x: number; y: number; shiftKey: boolean } | null = null;
+  private drawingGestureAutoScrollRaf: number | null = null;
 
   private resizeObserver: ResizeObserver;
   private disposed = false;
@@ -2700,6 +2702,7 @@ export class SpreadsheetApp {
           this.renderDrawings();
         },
         requestFocus: () => this.focus(),
+        scrollBy: (dx, dy) => this.scrollByForDrawingInteractions(dx, dy),
       };
       this.drawingInteractionCallbacks = callbacks;
       const interactionElement = this.root;
@@ -4035,6 +4038,8 @@ export class SpreadsheetApp {
       else globalThis.clearTimeout(this.dragAutoScrollRaf);
       this.dragAutoScrollRaf = null;
     }
+    this.stopDrawingGestureAutoScroll();
+    this.drawingGesturePointerPos = null;
     this.outlineButtons.clear();
     this.chartModels.clear();
     this.dirtyChartIds.clear();
@@ -9159,6 +9164,7 @@ export class SpreadsheetApp {
         this.focus();
       },
       requestFocus: () => this.focus(),
+      scrollBy: (dx, dy) => this.scrollByForDrawingInteractions(dx, dy),
     };
     this.drawingInteractionCallbacks = callbacks;
     const interactionElement = this.root;
@@ -10002,7 +10008,13 @@ export class SpreadsheetApp {
     const hit = hitTestDrawingsInto(index, viewport, x, y, bounds);
     if (!hit) return null;
     const handle = hitTestResizeHandle(bounds, x, y, hit.transform);
-    if (handle) return cursorForResizeHandleWithTransform(handle, hit.transform);
+    if (handle) {
+      // When the drawing is not selected, allow resize cursors when hovering the outline/handle
+      // affordances, but keep the interior "move" cursor so users can drag without fighting
+      // the corner hit targets (Excel-like behavior).
+      const inside = x > bounds.x && x < bounds.x + bounds.width && y > bounds.y && y < bounds.y + bounds.height;
+      if (!inside) return cursorForResizeHandleWithTransform(handle, hit.transform);
+    }
     return "move";
   }
 
@@ -14413,6 +14425,27 @@ export class SpreadsheetApp {
     if (changed) this.refresh("scroll");
   }
 
+  private scrollByForDrawingInteractions(deltaX: number, deltaY: number): boolean {
+    if (!Number.isFinite(deltaX)) deltaX = 0;
+    if (!Number.isFinite(deltaY)) deltaY = 0;
+    if (deltaX === 0 && deltaY === 0) return false;
+
+    // Shared-grid mode should scroll through DesktopSharedGrid so it emits `onScroll`
+    // callbacks and keeps the renderer + overlays aligned.
+    if (this.sharedGrid) {
+      const before = this.sharedGrid.getScroll();
+      this.sharedGrid.scrollBy(deltaX, deltaY);
+      const after = this.sharedGrid.getScroll();
+      this.scrollX = after.x;
+      this.scrollY = after.y;
+      return before.x !== after.x || before.y !== after.y;
+    }
+
+    const changed = this.setScrollInternal(this.scrollX + deltaX, this.scrollY + deltaY);
+    if (changed) this.refresh("scroll");
+    return changed;
+  }
+
   private updateViewportMapping(): void {
     const availableWidth = this.viewportWidth();
     const availableHeight = this.viewportHeight();
@@ -15450,6 +15483,106 @@ export class SpreadsheetApp {
     this.dragAutoScrollRaf = schedule(tick) as unknown as number;
   }
 
+  private computeDrawingGestureAutoScrollDelta(
+    pointer: { x: number; y: number },
+    viewport: DrawingViewport,
+  ): { dx: number; dy: number } {
+    const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+    const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+    const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? Math.max(headerOffsetX, viewport.frozenWidthPx!) : headerOffsetX;
+    const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? Math.max(headerOffsetY, viewport.frozenHeightPx!) : headerOffsetY;
+
+    const inHeader = pointer.x < headerOffsetX || pointer.y < headerOffsetY;
+    if (inHeader) return { dx: 0, dy: 0 };
+
+    const threshold = 24;
+    const maxSpeed = 20;
+    const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+
+    const pointInFrozenCols = pointer.x < frozenBoundaryX;
+    const pointInFrozenRows = pointer.y < frozenBoundaryY;
+
+    const leftEdge = frozenBoundaryX;
+    const topEdge = frozenBoundaryY;
+    const rightEdge = Math.max(0, viewport.width);
+    const bottomEdge = Math.max(0, viewport.height);
+
+    let dx = 0;
+    if (!pointInFrozenCols) {
+      if (pointer.x >= leftEdge && pointer.x < leftEdge + threshold) {
+        const t = clamp01((leftEdge + threshold - pointer.x) / threshold);
+        dx = -Math.round(t * maxSpeed);
+      } else if (pointer.x > rightEdge - threshold) {
+        const t = clamp01((pointer.x - (rightEdge - threshold)) / threshold);
+        dx = Math.round(t * maxSpeed);
+      }
+    }
+
+    let dy = 0;
+    if (!pointInFrozenRows) {
+      if (pointer.y >= topEdge && pointer.y < topEdge + threshold) {
+        const t = clamp01((topEdge + threshold - pointer.y) / threshold);
+        dy = -Math.round(t * maxSpeed);
+      } else if (pointer.y > bottomEdge - threshold) {
+        const t = clamp01((pointer.y - (bottomEdge - threshold)) / threshold);
+        dy = Math.round(t * maxSpeed);
+      }
+    }
+
+    return { dx, dy };
+  }
+
+  private stopDrawingGestureAutoScroll(): void {
+    if (this.drawingGestureAutoScrollRaf == null) return;
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.drawingGestureAutoScrollRaf);
+    else globalThis.clearTimeout(this.drawingGestureAutoScrollRaf);
+    this.drawingGestureAutoScrollRaf = null;
+  }
+
+  private maybeStartDrawingGestureAutoScroll(): void {
+    if (this.disposed) return;
+    if (!this.drawingGesture || !this.drawingGesturePointerPos) return;
+    if (this.editor.isOpen()) return;
+    if (this.drawingGestureAutoScrollRaf != null) return;
+
+    const viewport = this.getDrawingInteractionViewport();
+    const { dx, dy } = this.computeDrawingGestureAutoScrollDelta(this.drawingGesturePointerPos, viewport);
+    if (dx === 0 && dy === 0) return;
+
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) =>
+            globalThis.setTimeout(() => cb(typeof performance !== "undefined" ? performance.now() : Date.now()), 16);
+
+    const tick = () => {
+      this.drawingGestureAutoScrollRaf = null;
+      if (this.disposed) return;
+      if (!this.drawingGesture || !this.drawingGesturePointerPos) return;
+      if (this.editor.isOpen()) return;
+
+      const viewport = this.getDrawingInteractionViewport();
+      const { dx, dy } = this.computeDrawingGestureAutoScrollDelta(this.drawingGesturePointerPos, viewport);
+      if (dx === 0 && dy === 0) return;
+
+      const didScroll = this.setScrollInternal(this.scrollX + dx, this.scrollY + dy);
+      if (!didScroll) return;
+
+      // Keep the underlying grid and overlays aligned with the new scroll offsets.
+      this.renderGrid();
+      this.renderCharts(false);
+      this.renderReferencePreview();
+
+      // Apply the drag/resize again so the drawing tracks the changing scroll offsets
+      // even if the pointer remains stationary near the edge.
+      this.applyDrawingGestureAtPointer(this.drawingGesturePointerPos);
+
+      this.drawingGestureAutoScrollRaf = schedule(tick) as unknown as number;
+    };
+
+    this.drawingGestureAutoScrollRaf = schedule(tick) as unknown as number;
+  }
+
   private onPointerDown(e: PointerEvent): void {
     const editorWasOpen = this.editor.isOpen();
 
@@ -15792,6 +15925,81 @@ export class SpreadsheetApp {
     this.focus();
   }
 
+  private applyDrawingGestureAtPointer(pointer: { x: number; y: number; shiftKey: boolean }): void {
+    const gesture = this.drawingGesture;
+    if (!gesture) return;
+    if (this.editor.isOpen()) return;
+
+    const viewport = this.getDrawingInteractionViewport();
+    const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
+    const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+    const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+    const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? Math.max(headerOffsetX, viewport.frozenWidthPx!) : headerOffsetX;
+    const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? Math.max(headerOffsetY, viewport.frozenHeightPx!) : headerOffsetY;
+    const clampedX = Math.max(pointer.x, headerOffsetX);
+    const clampedY = Math.max(pointer.y, headerOffsetY);
+    const pointInFrozenCols = clampedX < frozenBoundaryX;
+    const pointInFrozenRows = clampedY < frozenBoundaryY;
+    // Absolute anchors always scroll; oneCell/twoCell anchors use the frozen pane under the pointer.
+    const alwaysScroll = gesture.startAnchor.type === "absolute";
+    const scrollX = alwaysScroll ? viewport.scrollX : pointInFrozenCols ? 0 : viewport.scrollX;
+    const scrollY = alwaysScroll ? viewport.scrollY : pointInFrozenRows ? 0 : viewport.scrollY;
+    const sheetX = clampedX - headerOffsetX + scrollX;
+    const sheetY = clampedY - headerOffsetY + scrollY;
+
+    let dxPx = sheetX - gesture.startSheetX;
+    let dyPx = sheetY - gesture.startSheetY;
+
+    const nextAnchor = (() => {
+      if (gesture.mode !== "resize") {
+        return shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
+      }
+
+      const transform = gesture.transform;
+      const hasNonIdentityTransform = !!(transform && (transform.rotationDeg !== 0 || transform.flipH || transform.flipV));
+
+      if (pointer.shiftKey && gesture.aspectRatio != null) {
+        if (hasNonIdentityTransform) {
+          const local = inverseTransformVector(dxPx, dyPx, transform!);
+          const lockedLocal = lockAspectRatioResize({
+            handle: gesture.handle,
+            dx: local.x,
+            dy: local.y,
+            startWidthPx: gesture.startWidthPx,
+            startHeightPx: gesture.startHeightPx,
+            aspectRatio: gesture.aspectRatio,
+            minSizePx: 8,
+          });
+          const world = applyTransformVector(lockedLocal.dx, lockedLocal.dy, transform!);
+          dxPx = world.x;
+          dyPx = world.y;
+        } else {
+          const locked = lockAspectRatioResize({
+            handle: gesture.handle,
+            dx: dxPx,
+            dy: dyPx,
+            startWidthPx: gesture.startWidthPx,
+            startHeightPx: gesture.startHeightPx,
+            aspectRatio: gesture.aspectRatio,
+            minSizePx: 8,
+          });
+          dxPx = locked.dx;
+          dyPx = locked.dy;
+        }
+      }
+
+      return resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, transform, zoom);
+    })();
+
+    const objects = this.listDrawingObjectsForSheet();
+    const nextObjects = objects.map((obj) => (obj.id === gesture.objectId ? { ...obj, anchor: nextAnchor } : obj));
+    const doc = this.document as any;
+    const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
+    this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
+    this.renderDrawings();
+    this.renderSelection();
+  }
+
   private onPointerMove(e: PointerEvent): void {
     if (this.scrollbarDrag) {
       this.onScrollbarThumbPointerMove(e);
@@ -15801,83 +16009,11 @@ export class SpreadsheetApp {
     if (this.drawingGesture) {
       if (e.pointerId !== this.drawingGesture.pointerId) return;
       if (this.editor.isOpen()) return;
-
       const x = e.clientX - this.rootLeft;
       const y = e.clientY - this.rootTop;
-
-      const viewport = this.getDrawingInteractionViewport();
-      const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
-      const gesture = this.drawingGesture;
-      const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
-      const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
-      const frozenBoundaryX = Number.isFinite(viewport.frozenWidthPx) ? Math.max(headerOffsetX, viewport.frozenWidthPx!) : headerOffsetX;
-      const frozenBoundaryY = Number.isFinite(viewport.frozenHeightPx) ? Math.max(headerOffsetY, viewport.frozenHeightPx!) : headerOffsetY;
-      const clampedX = Math.max(x, headerOffsetX);
-      const clampedY = Math.max(y, headerOffsetY);
-      const pointInFrozenCols = clampedX < frozenBoundaryX;
-      const pointInFrozenRows = clampedY < frozenBoundaryY;
-      // Absolute anchors always scroll; oneCell/twoCell anchors use the frozen pane under the pointer.
-      const alwaysScroll = gesture.startAnchor.type === "absolute";
-      const scrollX = alwaysScroll ? viewport.scrollX : pointInFrozenCols ? 0 : viewport.scrollX;
-      const scrollY = alwaysScroll ? viewport.scrollY : pointInFrozenRows ? 0 : viewport.scrollY;
-      const sheetX = clampedX - headerOffsetX + scrollX;
-      const sheetY = clampedY - headerOffsetY + scrollY;
-
-      let dxPx = sheetX - gesture.startSheetX;
-      let dyPx = sheetY - gesture.startSheetY;
-
-      const nextAnchor = (() => {
-        if (gesture.mode !== "resize") {
-          return shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom, zoom);
-        }
-
-        const transform = gesture.transform;
-        const hasNonIdentityTransform = !!(
-          transform &&
-          (transform.rotationDeg !== 0 || transform.flipH || transform.flipV)
-        );
-
-        if (e.shiftKey && gesture.aspectRatio != null) {
-          if (hasNonIdentityTransform) {
-            const local = inverseTransformVector(dxPx, dyPx, transform!);
-            const lockedLocal = lockAspectRatioResize({
-              handle: gesture.handle,
-              dx: local.x,
-              dy: local.y,
-              startWidthPx: gesture.startWidthPx,
-              startHeightPx: gesture.startHeightPx,
-              aspectRatio: gesture.aspectRatio,
-              minSizePx: 8,
-            });
-            const world = applyTransformVector(lockedLocal.dx, lockedLocal.dy, transform!);
-            dxPx = world.x;
-            dyPx = world.y;
-          } else {
-            const locked = lockAspectRatioResize({
-              handle: gesture.handle,
-              dx: dxPx,
-              dy: dyPx,
-              startWidthPx: gesture.startWidthPx,
-              startHeightPx: gesture.startHeightPx,
-              aspectRatio: gesture.aspectRatio,
-              minSizePx: 8,
-            });
-            dxPx = locked.dx;
-            dyPx = locked.dy;
-          }
-        }
-
-        return resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom, transform, zoom);
-      })();
-
-      const objects = this.listDrawingObjectsForSheet();
-      const nextObjects = objects.map((obj) => (obj.id === gesture.objectId ? { ...obj, anchor: nextAnchor } : obj));
-      const doc = this.document as any;
-      const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
-      this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
-      this.renderDrawings();
-
-      this.renderSelection();
+      this.drawingGesturePointerPos = { x, y, shiftKey: Boolean(e.shiftKey) };
+      this.applyDrawingGestureAtPointer(this.drawingGesturePointerPos);
+      this.maybeStartDrawingGestureAutoScroll();
       return;
     }
 
@@ -16059,6 +16195,8 @@ export class SpreadsheetApp {
     if (this.drawingGesture) {
       if (e.pointerId !== this.drawingGesture.pointerId) return;
       const gesture = this.drawingGesture;
+      this.stopDrawingGestureAutoScroll();
+      this.drawingGesturePointerPos = null;
 
       const x = e.clientX - this.rootLeft;
       const y = e.clientY - this.rootTop;
