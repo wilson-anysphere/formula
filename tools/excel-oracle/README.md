@@ -12,6 +12,20 @@ The intent is to continuously compare our formula engine against Excel across a 
 - A lightweight **compatibility gate** that runs the engine + comparison on a bounded subset (`compat_gate.py`)
 - A GitHub Actions workflow (`.github/workflows/excel-compat.yml`) wired to run on `windows-latest`
 
+## Unified compatibility scorecard (corpus + Excel-oracle)
+
+The Excel-oracle harness measures **calculation fidelity (L2)**. The compatibility corpus (`tools/corpus`) measures
+**read (L1)** and **round-trip preservation (L4)**.
+
+To merge both into a single markdown scorecard, run:
+
+```bash
+python tools/compat_scorecard.py --out-md compat_scorecard.md
+```
+
+In CI, the repo also includes a workflow-run aggregator (`.github/workflows/compat-scorecard.yml`) that downloads the
+corpus + oracle artifacts and uploads a unified `compat-scorecard` report.
+
 ## Prerequisites (local generation)
 
 To generate oracle data locally you must have:
