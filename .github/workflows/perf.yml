@@ -233,6 +233,9 @@ jobs:
         env:
           # Enable the real desktop startup benchmark (Tauri shell) only when we've built it.
           FORMULA_RUN_DESKTOP_STARTUP_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && steps.build_desktop_binary.outcome == 'success' && '1' || '0' }}
+          # Keep the metric names stable for CI gating by explicitly using cold-start mode
+          # (which also produces the legacy `desktop.startup.*` aliases).
+          FORMULA_DESKTOP_STARTUP_MODE: cold
           # Enable the optional desktop idle-memory benchmark only when the desktop
           # binary + assets were built in this job.
           FORMULA_RUN_DESKTOP_MEMORY_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && steps.desktop_bench.outputs.kind == 'full' && steps.build_desktop_binary.outcome == 'success' && '1' || '0' }}
