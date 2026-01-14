@@ -350,38 +350,6 @@ fn normalize_chart_ex_kind_hint(raw: &str) -> Option<String> {
     Some(lowercase_first(base))
 }
 
-fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
-    // This helper only feeds diagnostics when ChartEx kind detection fails.
-    // Keep output small + stable, but include enough context to extend detection later.
-    const MAX_HINTS: usize = 12;
-
-    let mut out: Vec<String> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-
-    for node in doc.descendants().filter(|n| n.is_element()) {
-        for attr in ["layoutId", "chartType"] {
-            let Some(raw) = attribute_case_insensitive(node, attr) else {
-                continue;
-            };
-            let raw = raw.trim();
-            if raw.is_empty() {
-                continue;
-            }
-
-            let hint = normalize_chart_ex_kind_hint(raw)
-                .map(|normalized| format!("{attr}={normalized}"))
-                .unwrap_or_else(|| format!("{attr}={raw}"));
-            if seen.insert(hint.clone()) {
-                out.push(hint);
-                if out.len() >= MAX_HINTS {
-                    return out;
-                }
-            }
-        }
-    }
-    out
-}
-
 #[derive(Debug, Clone, Default)]
 struct ChartExDataDefinition {
     categories: Option<SeriesTextData>,
