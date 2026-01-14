@@ -450,8 +450,14 @@ Writers should follow MS-OFFCRYPTO/Excel (authenticate the stream bytes). If we 
    - IVs are derived from `keyData/@saltValue` and constant blocks:
       - HMAC key block: `5F B2 AD 01 0C B9 E1 F6`
       - HMAC value block: `A0 67 7F 02 B2 2C 84 33`
-   - The decrypted `hmacKey` / `hmacValue` buffers can include AES-CBC block padding; use only the
-     digest-length prefix when computing/comparing.
+   - The decrypted `hmacKey` / `hmacValue` buffers can include AES-CBC block padding (e.g. SHA1
+     `hashSize=20` padded to a 32-byte plaintext block).
+     - When comparing `hmacValue`, compare only the first `hashSize` bytes.
+     - When using `hmacKey`, ignore any bytes beyond `hashSize` (treat them as padding).
+     - Some producers emit a decrypted `hmacKey` that is *shorter* than `hashSize`. HMAC accepts any
+       key length, so Formula treats this as valid as long as the computed digest matches
+       `hmacValue` (compare using the `hashSize` digest prefix). In other words:
+       `keyLen = min(hashSize, decryptedHmacKey.len())`, and `keyLen` must be non-zero.
 3. Compute:
 
 ```text
@@ -563,6 +569,9 @@ implementations as oracles:
   Excel.
   - Notable real-world quirk: Excel (and `ms-offcrypto-writer`) use an HMAC key whose length matches
     the hash digest length (e.g. **64 bytes for SHA-512**) even when `keyData/@saltSize` is 16.
+  - Some non-Excel producers have been observed to emit a shorter `encryptedHmacKey` (after
+    decryption) than the hash digest length. Formula accepts this as long as the HMAC output matches
+    `encryptedHmacValue` (digest prefix).
 
 These tools are useful for answering “is our implementation wrong, or is the file weird?” quickly.
 
