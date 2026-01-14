@@ -978,6 +978,20 @@ export class CanvasGridRenderer {
       this.unsubscribeProvider();
       this.unsubscribeProvider = undefined;
     }
+    if (this.viewportListeners.size > 0) {
+      for (const entry of this.viewportListeners) {
+        if (entry.rafId !== null) {
+          globalThis.cancelAnimationFrame?.(entry.rafId);
+          entry.rafId = null;
+        }
+        if (entry.timeoutId !== null) {
+          clearTimeout(entry.timeoutId);
+          entry.timeoutId = null;
+        }
+        entry.pendingReason = null;
+      }
+      this.viewportListeners.clear();
+    }
     this.clearImageCache();
   }
 
