@@ -180,6 +180,7 @@ if [ -z "${CARGO_HOME:-}" ] || {
   fi
   export CARGO_HOME="${_formula_repo_root}/target/cargo-home"
 fi
+export CARGO_HOME
 unset _formula_default_global_cargo_home
 unset _formula_cargo_home_norm
 unset _formula_default_global_cargo_home_norm
@@ -191,7 +192,13 @@ mkdir -p "$CARGO_HOME/bin"
 # Ensure `$CARGO_HOME/bin` is the *first* PATH entry, even if it already exists
 # later in the PATH (e.g. from a login shell's profile).
 _formula_path_without_cargo_bin=""
-_formula_old_ifs="${IFS}"
+_formula_ifs_was_set=0
+if [ "${IFS+x}" = "x" ]; then
+  _formula_ifs_was_set=1
+  _formula_old_ifs="${IFS}"
+else
+  _formula_old_ifs=""
+fi
 IFS=:
 for _formula_entry in ${PATH:-}; do
   if [ "${_formula_entry}" = "${CARGO_HOME}/bin" ]; then
@@ -203,8 +210,13 @@ for _formula_entry in ${PATH:-}; do
     _formula_path_without_cargo_bin="${_formula_path_without_cargo_bin}:${_formula_entry}"
   fi
 done
-IFS="${_formula_old_ifs}"
+if [ "${_formula_ifs_was_set}" -eq 1 ]; then
+  IFS="${_formula_old_ifs}"
+else
+  unset IFS
+fi
 unset _formula_old_ifs
+unset _formula_ifs_was_set
 unset _formula_entry
 
 if [ -n "${_formula_path_without_cargo_bin}" ]; then

@@ -162,6 +162,20 @@ test('agent-init preserves an existing CARGO_HOME override', { skip: !hasBash },
   assert.equal(cargoHome, override);
 });
 
+test('agent-init exports CARGO_HOME when set without export (bash)', { skip: !hasBash }, () => {
+  const override = mkdtempSync(resolve(tmpdir(), 'formula-cargo-home-unexported-'));
+  const out = runBash(
+    [
+      `CARGO_HOME="${override}"`,
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'env | grep "^CARGO_HOME="',
+    ].join(' && '),
+  );
+
+  assert.equal(out, `CARGO_HOME=${override}`);
+});
+
 test('agent-init prepends CARGO_HOME/bin to PATH', { skip: !hasBash }, () => {
   const out = runBash(
     [
@@ -266,6 +280,25 @@ test('agent-init can be sourced with nounset enabled and DISPLAY unset (bash)', 
       'unset DISPLAY',
       'source scripts/agent-init.sh >/dev/null',
       'printf "ok"',
+    ].join(' && '),
+  );
+
+  assert.equal(out, 'ok');
+});
+
+test('agent-init can be sourced with nounset enabled and IFS unset (bash)', { skip: !hasBash }, () => {
+  const stubDir = mkdtempSync(resolve(tmpdir(), 'formula-xvfb-stub-'));
+  const stubPath = resolve(stubDir, 'Xvfb');
+  writeFileSync(stubPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+  const out = runBash(
+    [
+      `export PATH="${stubDir}:$PATH"`,
+      'set -u',
+      'unset DISPLAY',
+      'unset IFS',
+      'source scripts/agent-init.sh >/dev/null',
+      'if [ -z "${IFS+x}" ]; then printf "ok"; else printf "leak"; fi',
     ].join(' && '),
   );
 
@@ -395,6 +428,21 @@ test('agent-init does not leak REPO_ROOT helper variable under /bin/sh', { skip:
   assert.equal(stdout, 'ok');
 });
 
+test('agent-init exports CARGO_HOME when set without export under /bin/sh', { skip: !hasSh }, () => {
+  const override = mkdtempSync(resolve(tmpdir(), 'formula-cargo-home-unexported-'));
+  const { stdout, stderr } = runSh(
+    [
+      `CARGO_HOME="${override}"`,
+      'export DISPLAY=:99',
+      '. scripts/agent-init.sh >/dev/null',
+      'env | grep "^CARGO_HOME="',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, `CARGO_HOME=${override}`);
+});
+
 test('agent-init exports FORMULA_CARGO_JOBS when set without export under /bin/sh', { skip: !hasSh }, () => {
   const { stdout, stderr } = runSh(
     [
@@ -449,6 +497,26 @@ test('agent-init can be sourced with nounset enabled and DISPLAY unset under /bi
       'unset DISPLAY',
       '. scripts/agent-init.sh >/dev/null',
       'printf "ok"',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, 'ok');
+});
+
+test('agent-init can be sourced with nounset enabled and IFS unset under /bin/sh', { skip: !hasSh }, () => {
+  const stubDir = mkdtempSync(resolve(tmpdir(), 'formula-xvfb-stub-'));
+  const stubPath = resolve(stubDir, 'Xvfb');
+  writeFileSync(stubPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+  const { stdout, stderr } = runSh(
+    [
+      `export PATH="${stubDir}:$PATH"`,
+      'set -u',
+      'unset DISPLAY',
+      'unset IFS',
+      '. scripts/agent-init.sh >/dev/null',
+      'if [ -z "${IFS+x}" ]; then printf "ok"; else printf "leak"; fi',
     ].join(' && '),
   );
 
