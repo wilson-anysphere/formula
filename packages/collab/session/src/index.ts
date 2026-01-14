@@ -2801,8 +2801,11 @@ export class CollabSession {
   }
 
   async safeSetCellValue(cellKey: string, value: unknown): Promise<boolean> {
+    if (typeof cellKey !== "string" || cellKey.length === 0) {
+      throw new Error(`Invalid cellKey: ${String(cellKey)}`);
+    }
     const parsed = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
-    if (!parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
+    if (!parsed) throw new Error(`Invalid cellKey: ${String(cellKey)}`);
     if (!this.canEditCell(parsed)) return false;
 
     await this.setCellValue(makeCellKey(parsed), value);
@@ -2810,8 +2813,11 @@ export class CollabSession {
   }
 
   async safeSetCellFormula(cellKey: string, formula: string | null): Promise<boolean> {
+    if (typeof cellKey !== "string" || cellKey.length === 0) {
+      throw new Error(`Invalid cellKey: ${String(cellKey)}`);
+    }
     const parsed = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
-    if (!parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
+    if (!parsed) throw new Error(`Invalid cellKey: ${String(cellKey)}`);
     if (!this.canEditCell(parsed)) return false;
 
     await this.setCellFormula(makeCellKey(parsed), formula);
