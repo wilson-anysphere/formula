@@ -170,3 +170,21 @@ test("cache deltas do not break mergeKey-based undo merging for user edits", () 
   // Should still be merged into the first undo entry.
   assert.deepEqual(doc.getStackDepths(), { undo: 1, redo: 0 });
 });
+
+test("applyExternalImageCacheDeltas ignores invalid entries (non-Uint8Array bytes)", () => {
+  const doc = new DocumentController();
+
+  doc.applyExternalImageCacheDeltas(
+    [
+      {
+        imageId: "img1",
+        before: null,
+        // Invalid bytes payload.
+        after: { bytes: "not-bytes", mimeType: "image/png" },
+      },
+    ],
+    { source: "hydration" },
+  );
+
+  assert.equal(doc.getImage("img1"), null);
+});

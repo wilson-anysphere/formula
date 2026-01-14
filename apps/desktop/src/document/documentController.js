@@ -6634,14 +6634,25 @@ export class DocumentController {
   applyExternalImageCacheDeltas(deltas, options = {}) {
     if (!Array.isArray(deltas) || deltas.length === 0) return;
 
+    const normalizeImageEntryInput = (raw) => {
+      if (!raw) return null;
+      if (!raw.bytes || !(raw.bytes instanceof Uint8Array)) return null;
+      /** @type {ImageEntry} */
+      const out = { bytes: raw.bytes };
+      if (raw && Object.prototype.hasOwnProperty.call(raw, "mimeType")) {
+        out.mimeType = raw.mimeType ?? null;
+      }
+      return out;
+    };
+
     /** @type {ImageDelta[]} */
     const filtered = [];
     for (const delta of deltas) {
       if (!delta) continue;
       const imageId = String(delta.imageId ?? "").trim();
       if (!imageId) continue;
-      const before = delta.before ?? null;
-      const after = delta.after ?? null;
+      const before = normalizeImageEntryInput(delta.before);
+      const after = normalizeImageEntryInput(delta.after);
       if (imageEntryEquals(before, after)) continue;
       filtered.push({ imageId, before, after });
     }
