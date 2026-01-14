@@ -44,6 +44,45 @@ fn encrypt_zip_with_password(plain_zip: &[u8], password: &str) -> Vec<u8> {
     cursor.into_inner()
 }
 
+fn wrap_plain_zip_in_encrypted_ooxml_ole(plain_zip: &[u8]) -> Vec<u8> {
+    // Create an OOXML-in-OLE wrapper that *looks* like an encrypted workbook (has `EncryptionInfo`
+    // and `EncryptedPackage` streams) but whose EncryptedPackage payload is actually a plaintext
+    // ZIP/OPC package.
+    //
+    // This shape appears in:
+    // - synthetic fixtures, and
+    // - already-decrypted pipelines that preserve the outer OLE structure.
+    //
+    // `formula-io` supports opening this when a password is provided (the password is not used).
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create OLE container");
+
+    {
+        // Minimal Agile (4.4) header; the contents are not interpreted for the plaintext fast path,
+        // but the stream must exist to mark the file as an encrypted OOXML wrapper.
+        let mut stream = ole
+            .create_stream("EncryptionInfo")
+            .expect("create EncryptionInfo stream");
+        stream
+            .write_all(&[4, 0, 4, 0, 0, 0, 0, 0])
+            .expect("write EncryptionInfo header");
+    }
+    {
+        let mut stream = ole
+            .create_stream("EncryptedPackage")
+            .expect("create EncryptedPackage stream");
+        let len = plain_zip.len() as u64;
+        stream
+            .write_all(&len.to_le_bytes())
+            .expect("write EncryptedPackage size prefix");
+        stream
+            .write_all(plain_zip)
+            .expect("write EncryptedPackage plaintext bytes");
+    }
+
+    ole.into_inner().into_inner()
+}
+
 fn strip_data_integrity_from_encryption_info(encryption_info: &[u8]) -> Vec<u8> {
     assert!(
         encryption_info.len() >= 8,
@@ -310,6 +349,41 @@ fn open_workbook_model_with_password_decrypts_agile_encrypted_xlsb() {
         CellValue::Number(42.5)
     );
     assert_eq!(sheet.formula(CellRef::from_a1("C1").unwrap()), Some("B1*2"));
+}
+
+#[test]
+fn opens_plaintext_ooxml_wrapped_in_encrypted_ole_container() {
+    let plain_xlsx = build_tiny_xlsx();
+    let wrapped = wrap_plain_zip_in_encrypted_ooxml_ole(&plain_xlsx);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("wrapped.xlsx");
+    std::fs::write(&path, wrapped).expect("write wrapper file");
+
+    // Without a password, we should still treat this as an encrypted workbook wrapper and require a
+    // password (even though the inner payload is plaintext).
+    let err = open_workbook_with_password(&path, None).expect_err("expected PasswordRequired");
+    assert!(
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
+    );
+
+    // With any password, the wrapper should open and the inner package should parse.
+    let wb = open_workbook_with_password(&path, Some("any-password"))
+        .expect("open plaintext package inside encrypted wrapper");
+    match wb {
+        Workbook::Xlsx(package) => {
+            let bytes = package.write_to_bytes().expect("serialize package bytes");
+            let model = formula_io::xlsx::read_workbook_from_reader(Cursor::new(bytes))
+                .expect("parse decrypted package bytes");
+            assert_expected_contents(&model);
+        }
+        other => panic!("expected Workbook::Xlsx, got {other:?}"),
+    }
+
+    let model = open_workbook_model_with_password(&path, Some("any-password"))
+        .expect("open plaintext package inside encrypted wrapper as model");
+    assert_expected_contents(&model);
 }
 
 fn fixture_path(rel: &str) -> PathBuf {
