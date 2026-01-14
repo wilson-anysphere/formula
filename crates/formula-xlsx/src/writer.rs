@@ -429,10 +429,16 @@ fn trim_float(value: f64) -> String {
 fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
     let mut attrs = String::new();
     if let Some(v) = sheet.default_row_height {
-        attrs.push_str(&format!(r#" defaultRowHeight="{v}""#));
+        attrs.push_str(&format!(
+            r#" defaultRowHeight="{}""#,
+            trim_float(v as f64)
+        ));
     }
     if let Some(v) = sheet.default_col_width {
-        attrs.push_str(&format!(r#" defaultColWidth="{v}""#));
+        attrs.push_str(&format!(
+            r#" defaultColWidth="{}""#,
+            trim_float(v as f64)
+        ));
     }
     if let Some(v) = sheet.base_col_width {
         attrs.push_str(&format!(r#" baseColWidth="{v}""#));
@@ -712,30 +718,6 @@ fn render_cols(sheet: &Worksheet, outline: &Outline, style_to_xf: &HashMap<u32, 
 
     out.push_str("</cols>");
     out
-}
-
-fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
-    if sheet.default_row_height.is_none()
-        && sheet.default_col_width.is_none()
-        && sheet.base_col_width.is_none()
-    {
-        return String::new();
-    }
-
-    let mut attrs = String::new();
-    if let Some(base) = sheet.base_col_width {
-        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
-    }
-    if let Some(width) = sheet.default_col_width {
-        let width = trim_float(width as f64);
-        attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
-    }
-    if let Some(height) = sheet.default_row_height {
-        let height = trim_float(height as f64);
-        attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
-    }
-
-    format!(r#"<sheetFormatPr{attrs}/>"#)
 }
 
 fn render_col_range(start_col_1: u32, end_col_1: u32, props: &ColXmlProps) -> String {
