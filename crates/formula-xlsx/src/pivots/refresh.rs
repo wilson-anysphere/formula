@@ -93,7 +93,8 @@ impl XlsxPackage {
             .ok_or_else(|| XlsxError::MissingPart(cache_definition_part.to_string()))?
             .to_vec();
 
-        let worksheet_source = parse_worksheet_source_from_cache_definition(&cache_definition_bytes)?;
+        let worksheet_source =
+            parse_worksheet_source_from_cache_definition(&cache_definition_bytes)?;
         let (worksheet_part, range) = resolve_source_worksheet_and_range(self, &worksheet_source)?;
         let worksheet_xml = self
             .part(&worksheet_part)
@@ -216,9 +217,9 @@ fn parse_worksheet_source_from_cache_definition(xml: &[u8]) -> Result<WorksheetS
     }
 
     let mut sheet = sheet;
-    let mut reference = reference
-        .or(name)
-        .ok_or(XlsxError::MissingAttr("worksheetSource@ref or worksheetSource@name"))?;
+    let mut reference = reference.or(name).ok_or(XlsxError::MissingAttr(
+        "worksheetSource@ref or worksheetSource@name",
+    ))?;
 
     // Some non-standard producers omit `worksheetSource@sheet` and embed the sheet name in the
     // ref (e.g. `Sheet1!A1:C5` or `'Sheet 1'!A1:C5`).
@@ -270,7 +271,9 @@ fn resolve_source_worksheet_and_range(
     if let Some((defined_sheet, range)) = resolve_defined_name_reference(
         package,
         token,
-        sheet_from_ref.as_deref().or_else(|| worksheet_source.sheet.as_deref()),
+        sheet_from_ref
+            .as_deref()
+            .or_else(|| worksheet_source.sheet.as_deref()),
     )? {
         let sheet_name = defined_sheet
             .as_deref()
@@ -325,10 +328,7 @@ fn split_sheet_qualified_reference(input: &str) -> (Option<String>, &str) {
                     return (None, s);
                 }
                 _ => {
-                    let ch = s[i..]
-                        .chars()
-                        .next()
-                        .expect("i always at char boundary");
+                    let ch = s[i..].chars().next().expect("i always at char boundary");
                     sheet.push(ch);
                     i += ch.len_utf8();
                     continue;
@@ -378,11 +378,8 @@ fn resolve_defined_name_reference(
                     match local_name(attr.key.as_ref()) {
                         b"name" => dn_name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
-                            local_sheet_id = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .parse::<u32>()
-                                .ok();
+                            local_sheet_id =
+                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
                         _ => {}
                     }
@@ -410,11 +407,8 @@ fn resolve_defined_name_reference(
                     match local_name(attr.key.as_ref()) {
                         b"name" => dn_name = Some(attr.unescape_value()?.into_owned()),
                         b"localSheetId" => {
-                            local_sheet_id = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .parse::<u32>()
-                                .ok();
+                            local_sheet_id =
+                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
                         _ => {}
                     }
@@ -437,12 +431,13 @@ fn resolve_defined_name_reference(
             }
             Event::CData(e) if current.is_some() => {
                 if let Some(ref mut dn) = current {
-                    dn.value.push_str(std::str::from_utf8(e.as_ref()).map_err(|err| {
-                        XlsxError::Invalid(format!(
-                            "defined name {name:?} contains invalid utf-8: {err}",
-                            name = dn.name
-                        ))
-                    })?);
+                    dn.value
+                        .push_str(std::str::from_utf8(e.as_ref()).map_err(|err| {
+                            XlsxError::Invalid(format!(
+                                "defined name {name:?} contains invalid utf-8: {err}",
+                                name = dn.name
+                            ))
+                        })?);
                 }
             }
             Event::End(e) if local_name(e.name().as_ref()) == b"definedName" => {
@@ -543,7 +538,8 @@ fn resolve_table_reference(
         let Ok(table) = parse_table(xml) else {
             continue;
         };
-        if !table.name.eq_ignore_ascii_case(name) && !table.display_name.eq_ignore_ascii_case(name) {
+        if !table.name.eq_ignore_ascii_case(name) && !table.display_name.eq_ignore_ascii_case(name)
+        {
             continue;
         }
 
@@ -659,13 +655,47 @@ fn resolve_cache_records_part(
     let rels_error = if let Some(rels_bytes) = package.part(&rels_part) {
         match parse_relationships(rels_bytes) {
             Ok(rels) => {
-                if let Some(rel) = rels
-                    .into_iter()
-                    .find(|r| r.type_uri.ends_with("/pivotCacheRecords"))
-                {
-                    return Ok(resolve_target(cache_definition_part, &rel.target));
+                let mut pivot_rel_seen = false;
+                let mut pivot_rel_error: Option<String> = None;
+
+                for rel in rels {
+                    if !rel.type_uri.ends_with("/pivotCacheRecords") {
+                        continue;
+                    }
+                    pivot_rel_seen = true;
+
+                    if rel
+                        .target_mode
+                        .as_deref()
+                        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                    {
+                        pivot_rel_error.get_or_insert_with(|| {
+                            format!(
+                                "pivotCacheRecords relationship in {rels_part:?} is marked External"
+                            )
+                        });
+                        continue;
+                    }
+
+                    let target = resolve_target(cache_definition_part, &rel.target);
+                    if package.part(&target).is_some() {
+                        return Ok(target);
+                    }
+
+                    pivot_rel_error.get_or_insert_with(|| {
+                        format!(
+                            "pivotCacheRecords relationship in {rels_part:?} targets missing part {target:?}"
+                        )
+                    });
                 }
-                format!("{rels_part:?} does not contain a pivotCacheRecords relationship")
+
+                if pivot_rel_seen {
+                    pivot_rel_error.unwrap_or_else(|| {
+                        format!("{rels_part:?} does not contain a usable pivotCacheRecords relationship")
+                    })
+                } else {
+                    format!("{rels_part:?} does not contain a pivotCacheRecords relationship")
+                }
             }
             Err(err) => format!("failed to parse {rels_part:?}: {err}"),
         }
@@ -1449,7 +1479,9 @@ fn build_record_element(ns: Option<String>, record: &[PivotCacheValue]) -> XmlEl
                 build_value_element(ns.clone(), "b", Some(if *b { "1" } else { "0" }))
             }
             PivotCacheValue::Error(e) => build_value_element(ns.clone(), "e", Some(e.as_str())),
-            PivotCacheValue::DateTime(dt) => build_value_element(ns.clone(), "d", Some(dt.as_str())),
+            PivotCacheValue::DateTime(dt) => {
+                build_value_element(ns.clone(), "d", Some(dt.as_str()))
+            }
             PivotCacheValue::Index(idx) => {
                 let idx_str = idx.to_string();
                 build_value_element(ns.clone(), "x", Some(idx_str.as_str()))
@@ -1487,8 +1519,8 @@ fn build_value_element(ns: Option<String>, tag: &str, value: Option<&str>) -> Xm
 mod tests {
     use super::*;
     use crate::XlsxPackage;
-    use std::io::{Cursor, Write};
     use roxmltree::Document;
+    use std::io::{Cursor, Write};
 
     #[test]
     fn parse_inline_string_ignores_phonetic_text() {
@@ -1662,8 +1694,11 @@ mod tests {
             .unwrap();
         zip.write_all(cache_definition_xml.as_bytes()).unwrap();
 
-        zip.start_file("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels", options)
-            .unwrap();
+        zip.start_file(
+            "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+            options,
+        )
+        .unwrap();
         zip.write_all(cache_definition_rels.as_bytes()).unwrap();
 
         zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
@@ -1907,8 +1942,11 @@ mod tests {
             .unwrap();
         zip.write_all(cache_definition_xml.as_bytes()).unwrap();
 
-        zip.start_file("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels", options)
-            .unwrap();
+        zip.start_file(
+            "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+            options,
+        )
+        .unwrap();
         zip.write_all(cache_definition_rels.as_bytes()).unwrap();
 
         zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
@@ -2077,8 +2115,11 @@ mod tests {
             .unwrap();
         zip.write_all(cache_definition_xml.as_bytes()).unwrap();
 
-        zip.start_file("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels", options)
-            .unwrap();
+        zip.start_file(
+            "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+            options,
+        )
+        .unwrap();
         zip.write_all(cache_definition_rels.as_bytes()).unwrap();
 
         zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
@@ -2119,18 +2160,15 @@ mod tests {
             .collect();
         assert_eq!(records.len(), 2);
 
-        let expected_dt = excel_serial_to_pivot_datetime(45123.0, DateSystem::V1900).expect("serial");
-        let first_values: Vec<_> = records[0]
-            .children()
-            .filter(|n| n.is_element())
-            .collect();
+        let expected_dt =
+            excel_serial_to_pivot_datetime(45123.0, DateSystem::V1900).expect("serial");
+        let first_values: Vec<_> = records[0].children().filter(|n| n.is_element()).collect();
         assert_eq!(first_values.len(), 2);
         assert_eq!(first_values[0].tag_name().name(), "d");
         assert_eq!(first_values[0].attribute("v"), Some(expected_dt.as_str()));
         assert_eq!(first_values[1].tag_name().name(), "s");
         assert_eq!(first_values[1].attribute("v"), Some("Alpha"));
     }
-
 
     #[test]
     fn split_sheet_qualified_reference_handles_unicode_quoted_sheet_names() {
@@ -2360,11 +2398,113 @@ mod tests {
             .unwrap();
         zip.write_all(cache_definition_xml.as_bytes()).unwrap();
 
-        zip.start_file("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels", options)
-            .unwrap();
+        zip.start_file(
+            "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+            options,
+        )
+        .unwrap();
         // Intentionally malformed.
         zip.write_all(b"this is not xml").unwrap();
 
+        zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
+            .unwrap();
+        zip.write_all(cache_records_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+            .expect("refresh");
+
+        let updated_records =
+            std::str::from_utf8(pkg.part("xl/pivotCache/pivotCacheRecords1.xml").unwrap()).unwrap();
+        let doc = Document::parse(updated_records).expect("parse updated cache records");
+        let root = doc.root_element();
+        assert_eq!(root.attribute("count"), Some("2"));
+        let record_count = root
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "r")
+            .count();
+        assert_eq!(record_count, 2);
+    }
+
+    #[test]
+    fn refresh_pivot_cache_falls_back_to_records_filename_when_rels_target_missing() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        // Cache source range is A1:B3 (header + 2 records).
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Header1</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Header2</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>1</v></c>
+      <c r="B2" t="inlineStr"><is><t>Alpha</t></is></c>
+    </row>
+    <row r="3">
+      <c r="A3"><v>2</v></c>
+      <c r="B3" t="inlineStr"><is><t>Beta</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="0">
+  <cacheSource type="worksheet">
+    <worksheetSource sheet="Sheet1" ref="A1:B3"/>
+  </cacheSource>
+  <cacheFields count="0"/>
+</pivotCacheDefinition>"#;
+
+        // Relationship part exists, but points to a non-existent records part.
+        let cache_definition_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords" Target="pivotCacheRecords999.xml"/>
+</Relationships>"#;
+
+        let cache_records_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheDefinition1.xml", options)
+            .unwrap();
+        zip.write_all(cache_definition_xml.as_bytes()).unwrap();
+
+        zip.start_file(
+            "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+            options,
+        )
+        .unwrap();
+        zip.write_all(cache_definition_rels.as_bytes()).unwrap();
+
+        // Store the records file under the conventional name (the rels points elsewhere).
         zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
             .unwrap();
         zip.write_all(cache_records_xml.as_bytes()).unwrap();

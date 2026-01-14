@@ -825,7 +825,11 @@ fn render_conditional_formatting(sheet: &Worksheet, local_to_global_dxf: Option<
     out
 }
 
-fn render_cf_rule(rule: &CfRule, priority: u32, local_to_global_dxf: Option<&[u32]>) -> Option<String> {
+fn render_cf_rule(
+    rule: &CfRule,
+    priority: u32,
+    local_to_global_dxf: Option<&[u32]>,
+) -> Option<String> {
     let mut attrs = String::new();
 
     if let Some(id) = rule.id.as_deref() {
