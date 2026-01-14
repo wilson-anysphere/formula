@@ -2014,8 +2014,13 @@ export class FormulaBarView {
     this.model.updateRangeSelection(range, sheetId);
     this.#mouseDownSelectedReferenceIndex = null;
     this.#selectedReferenceIndex = null;
-    this.#render({ preserveTextareaValue: false });
+    // Range selection can update rapidly while the user drags; avoid forcing a full
+    // highlight rebuild on every event. Update the textarea value/selection immediately
+    // so commits reflect the latest range, and coalesce the expensive highlight render
+    // to the next animation frame.
+    this.textarea.value = this.model.draft;
     this.#setTextareaSelectionFromModel();
+    this.#requestRender({ preserveTextareaValue: true });
     this.#emitOverlays();
     this.#scheduleEngineTooling();
   }
