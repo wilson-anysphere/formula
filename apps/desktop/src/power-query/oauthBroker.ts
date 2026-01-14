@@ -144,6 +144,13 @@ export class DesktopOAuthBroker implements OAuthBroker {
       throw new Error(`Refusing to open OAuth auth URL with untrusted protocol "${protocol}:"`);
     }
 
+    // Security: disallow URLs containing userinfo (`https://user:pass@example.com/...`). OAuth
+    // auth endpoints should never rely on HTTP basic auth credentials, and allowing userinfo can
+    // be used to construct misleading URLs (e.g. `https://evil.com@example.com/...`).
+    if (parsed.username !== "" || parsed.password !== "") {
+      throw new Error("Refusing to open OAuth auth URL containing a username/password");
+    }
+
     // Used to gate buffering of early redirects. We only expect redirects very
     // shortly after opening an auth URL (PKCE flow), so avoid holding onto deep
     // links indefinitely if they're delivered at unrelated times.

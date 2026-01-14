@@ -97,6 +97,15 @@ describe("DesktopOAuthBroker.openAuthUrl", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it("rejects auth URLs containing userinfo", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const broker = new DesktopOAuthBroker();
+    await expect(broker.openAuthUrl("https://user:pass@example.com/auth")).rejects.toThrow(/username\\/password/i);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["127.0.0.1", "http://127.0.0.1:4242/oauth/callback"],
     ["localhost", "http://localhost:4242/oauth/callback"],
