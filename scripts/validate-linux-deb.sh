@@ -293,6 +293,16 @@ assert_contains_any() {
 validate_desktop_integration_extracted() {
   local package_root="$1"
 
+  local mime_xml="$package_root/usr/share/mime/packages/app.formula.desktop.xml"
+  if [[ ! -f "$mime_xml" ]]; then
+    err "Extracted payload missing shared-mime-info definition file: usr/share/mime/packages/app.formula.desktop.xml"
+    return 1
+  fi
+  if ! grep -Fq 'application/vnd.apache.parquet' "$mime_xml" || ! grep -Fq '*.parquet' "$mime_xml"; then
+    err "Extracted Parquet MIME definition file is missing expected content: ${mime_xml#${package_root}/}"
+    return 1
+  fi
+
   local applications_dir="$package_root/usr/share/applications"
   if [[ ! -d "$applications_dir" ]]; then
     err "Extracted payload missing /usr/share/applications (expected at: ${applications_dir})"
@@ -510,6 +520,8 @@ validate_container() {
     fi
     # Ensure deep link scheme handler is advertised.
     grep -R "x-scheme-handler/formula" /usr/share/applications/*.desktop
+    test -f /usr/share/mime/packages/app.formula.desktop.xml
+    grep -F "application/vnd.apache.parquet" /usr/share/mime/packages/app.formula.desktop.xml
   '
 
   rm -rf "${mount_dir}" >/dev/null 2>&1 || true

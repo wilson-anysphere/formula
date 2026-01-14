@@ -173,10 +173,18 @@ set -euo pipefail
 # Drain stdin so pipes don't break unexpectedly.
 cat >/dev/null || true
 
-mkdir -p usr/share/applications
+mkdir -p usr/share/applications usr/share/mime/packages
 cat > usr/share/applications/formula.desktop <<'DESKTOP'
 ${desktopLines.join("\n")}
 DESKTOP
+
+cat > usr/share/mime/packages/app.formula.desktop.xml <<'XML'
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.apache.parquet">
+    <glob pattern="*.parquet" />
+  </mime-type>
+</mime-info>
+XML
 exit 0
 `;
   const cpioPath = join(binDir, "cpio");

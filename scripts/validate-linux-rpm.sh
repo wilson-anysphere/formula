@@ -262,6 +262,19 @@ validate_desktop_mime_associations_extracted() {
     return 1
   }
 
+  # Ensure we ship a shared-mime-info definition for Parquet so `*.parquet` resolves to the
+  # advertised MIME type (`application/vnd.apache.parquet`) on distros whose shared-mime-info DB
+  # does not include a Parquet glob by default.
+  local mime_xml="$tmpdir/usr/share/mime/packages/app.formula.desktop.xml"
+  if [ ! -f "$mime_xml" ]; then
+    err "RPM payload missing Parquet shared-mime-info definition after extraction: usr/share/mime/packages/app.formula.desktop.xml"
+    return 1
+  fi
+  if ! grep -Fq 'application/vnd.apache.parquet' "$mime_xml" || ! grep -Fq '*.parquet' "$mime_xml"; then
+    err "RPM Parquet shared-mime-info definition file is missing expected content: ${mime_xml#${tmpdir}/}"
+    return 1
+  fi
+
   declare -a desktop_files=()
   local applications_dir="$tmpdir/usr/share/applications"
   if [ -d "$applications_dir" ]; then
