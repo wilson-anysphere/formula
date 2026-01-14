@@ -348,6 +348,22 @@ test("validate-linux-appimage fails when NOTICE is missing", { skip: !hasBash },
   assert.match(proc.stderr, /NOTICE/i);
 });
 
+test("validate-linux-appimage fails when Parquet shared-mime-info definition is missing", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, {
+    withDesktopFile: true,
+    withXlsxMime: true,
+    withParquetMimeDefinition: false,
+    appImageVersion: expectedVersion,
+  });
+
+  const proc = runValidator(appImagePath);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Parquet/i);
+  assert.match(proc.stderr, /shared-mime-info/i);
+});
+
 test("validate-linux-appimage fails when X-AppImage-Version does not match tauri.conf.json", { skip: !hasBash }, () => {
   const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
   const appImagePath = join(tmp, "Formula.AppImage");
