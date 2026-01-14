@@ -849,8 +849,14 @@ class FormulaBarFunctionAutocompleteController {
       return;
     }
 
-    const start = this.#textarea.selectionStart ?? this.#textarea.value.length;
-    const end = this.#textarea.selectionEnd ?? this.#textarea.value.length;
+    // FormulaBarView keeps the model draft in sync with the textarea value and registers its
+    // own input/selection listeners *before* constructing this controller. Prefer the model's
+    // cached draft string over repeatedly reading `textarea.value` (which can allocate/copy a
+    // very large string for long formulas).
+    const draft = this.#formulaBar.model.draft;
+    const draftLen = draft.length;
+    const start = this.#textarea.selectionStart ?? draftLen;
+    const end = this.#textarea.selectionEnd ?? draftLen;
     if (start !== end) {
       this.close();
       return;
@@ -867,7 +873,7 @@ class FormulaBarFunctionAutocompleteController {
       return;
     }
 
-    const input = this.#textarea.value;
+    const input = draft;
     const localeId = this.#formulaBar.currentLocaleId();
     const ctx = findCompletionContext(input, start, localeId);
     if (!ctx) {
@@ -984,7 +990,8 @@ class FormulaBarFunctionAutocompleteController {
       return;
     }
 
-    const input = this.#textarea.value;
+    // Reuse the model draft to avoid repeatedly reading `textarea.value` for long formulas.
+    const input = this.#formulaBar.model.draft;
     // Preserve the user-typed casing for the function name portion while keeping
     // any `_xlfn.` qualifier prefix intact (Excel compatibility).
     const typedNamePrefix = ctx.typedPrefix.slice(ctx.qualifier.length);
