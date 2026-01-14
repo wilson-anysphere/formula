@@ -54,6 +54,7 @@ export class SecondaryGridView {
   readonly provider: DocumentCellProvider;
   readonly grid: DesktopSharedGrid;
 
+  private disposed = false;
   private readonly document: DocumentController;
   private readonly getSheetId: () => string;
   private readonly getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
@@ -438,6 +439,12 @@ export class SecondaryGridView {
   }
 
   destroy(): void {
+    this.disposed = true;
+    // Cancel any in-flight drawing renders and release cached ImageBitmaps.
+    this.drawingsOverlay?.destroy?.();
+    this.drawingsRenderQueued = false;
+    this.drawingsRenderInProgress = false;
+    this.drawingsRenderPromise = null;
     this.flushPersistence();
     this.resizeObserver.disconnect();
     for (const dispose of this.disposeFns) dispose();
@@ -519,6 +526,7 @@ export class SecondaryGridView {
   }
 
   private resizeToContainer(): void {
+    if (this.disposed) return;
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
     const dpr = window.devicePixelRatio || 1;
@@ -924,6 +932,7 @@ export class SecondaryGridView {
   }
 
   private async renderDrawings(): Promise<void> {
+    if (this.disposed) return;
     if (this.drawingsRenderInProgress) {
       this.drawingsRenderQueued = true;
       return this.drawingsRenderPromise ?? Promise.resolve();
@@ -933,6 +942,7 @@ export class SecondaryGridView {
     const run = (async () => {
       try {
         do {
+          if (this.disposed) return;
           this.drawingsRenderQueued = false;
           const sheetId = this.getSheetId();
           const objects = this.getDrawingObjects(sheetId);

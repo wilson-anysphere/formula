@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SecondaryGridView } from "../secondaryGridView";
 import { DocumentController } from "../../../document/documentController.js";
 import type { DrawingObject, ImageStore } from "../../../drawings/types";
+import { ImageBitmapCache } from "../../../drawings/imageBitmapCache";
 import { pxToEmu } from "../../../drawings/overlay";
 
 function createMockCanvasContext(): CanvasRenderingContext2D {
@@ -149,5 +150,38 @@ describe("SecondaryGridView drawings overlay", () => {
     gridView.destroy();
     container.remove();
   });
-});
 
+  it("releases drawing overlay bitmap caches on destroy()", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+    document.body.appendChild(container);
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: () => createMockCanvasContext(),
+    });
+
+    const clearSpy = vi.spyOn(ImageBitmapCache.prototype, "clear");
+
+    const doc = new DocumentController();
+    const images: ImageStore = { get: () => undefined, set: () => {} };
+
+    const view = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      rowCount: 20,
+      colCount: 20,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
+    });
+
+    view.destroy();
+    expect(clearSpy).toHaveBeenCalled();
+
+    container.remove();
+  });
+});
