@@ -152,4 +152,45 @@ describe("AI chat panel", () => {
     },
     TEST_TIMEOUT_MS
   );
+
+  it(
+    "persists include_formula_values toggle to localStorage and recreates orchestrator",
+    async () => {
+      const doc = new DocumentController();
+      const getDocumentController = vi.fn(() => doc);
+
+      const renderer = createPanelBodyRenderer({ getDocumentController });
+
+      const body = document.createElement("div");
+      document.body.appendChild(body);
+
+      await act(async () => {
+        renderer.renderPanelBody(PanelIds.AI_CHAT, body);
+      });
+
+      const checkbox = body.querySelector('[data-testid="ai-include-formula-values"]') as HTMLInputElement | null;
+      expect(checkbox).toBeInstanceOf(HTMLInputElement);
+      expect(checkbox?.checked).toBe(false);
+      expect(window.localStorage.getItem("formula.ai.includeFormulaValues")).toBeNull();
+
+      const priorCalls = mocks.createAiChatOrchestrator.mock.calls.length;
+
+      await act(async () => {
+        checkbox!.click();
+      });
+
+      expect(window.localStorage.getItem("formula.ai.includeFormulaValues")).toBe("true");
+      expect(mocks.createAiChatOrchestrator.mock.calls.length).toBeGreaterThan(priorCalls);
+
+      const lastCall = mocks.createAiChatOrchestrator.mock.calls.at(-1)?.[0] as any;
+      expect(lastCall?.toolExecutorOptions?.include_formula_values).toBe(true);
+
+      const orchestrator = mocks.createAiChatOrchestrator.mock.results.at(-1)?.value as any;
+      act(() => {
+        renderer.cleanup([]);
+      });
+      expect(orchestrator.dispose).toHaveBeenCalled();
+    },
+    TEST_TIMEOUT_MS
+  );
 });
