@@ -390,24 +390,18 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     app.getDocument().setSheetDrawings(sheetId, [drawing]);
     app.selectDrawing(drawing.id);
     await app.whenIdle();
-    const bitmapCallsBeforeCopy = createImageBitmapMock.mock.calls.length;
 
     // The drawings overlay may attempt best-effort decoding when `createImageBitmap` is available.
     // This test specifically asserts that the clipboard copy path does not invoke `createImageBitmap`
     // when the stored bytes already look like a PNG, even if the mimeType metadata is wrong.
-    await app.whenIdle();
-    createImageBitmapMock.mockClear();
-
-    // The drawings overlay may attempt to decode the picture bytes for rendering; this test is
-    // specifically asserting that the *copy* path does not require createImageBitmap to
-    // transcode incorrect mimeType metadata.
-    await app.whenIdle();
+    // Clear any incidental decode attempts from selection/initialization; the assertions below
+    // are scoped to the `copy()` path.
     createImageBitmapMock.mockClear();
 
     app.copy();
     await app.whenIdle();
     expect(write).toHaveBeenCalledWith({ text: "", imagePng: pngBytes });
-    expect(createImageBitmapMock).toHaveBeenCalledTimes(bitmapCallsBeforeCopy);
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
 
     app.destroy();
     root.remove();
