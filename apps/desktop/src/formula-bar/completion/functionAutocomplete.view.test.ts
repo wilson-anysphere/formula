@@ -55,7 +55,7 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     }
   });
 
-  it("uses the provided getLocaleId() for signature previews (even if document.lang differs)", () => {
+  it("uses the provided getLocaleId() for signature previews (even if document.lang differs)", async () => {
     const prevLang = document.documentElement.lang;
     document.documentElement.lang = "en-US";
 
@@ -63,7 +63,11 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     document.body.appendChild(host);
 
     try {
-      const view = new FormulaBarView(host, { onCommit: () => {} }, { getLocaleId: () => "de-DE" });
+      // Ensure we don't rely on prior test ordering / shared module caches.
+      vi.resetModules();
+      const { FormulaBarView: FreshFormulaBarView } = await import("../FormulaBarView.js");
+
+      const view = new FreshFormulaBarView(host, { onCommit: () => {} }, { getLocaleId: () => "de-DE" });
       view.setActiveCell({ address: "A1", input: "", value: null });
 
       view.focus({ cursor: "end" });
