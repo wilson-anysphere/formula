@@ -236,16 +236,21 @@ describe("WasmWorkbookBackend", () => {
     });
 
     const backend = new WasmWorkbookBackend(engine);
-    const got = await backend.getRange({ sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
+    const params = { sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+    const got = await backend.getRange(params);
+    const got2 = await backend.getRange(params);
 
     expect(got).toEqual({
       start_row: 0,
       start_col: 0,
       values: [[{ value: 1, formula: null, display_value: "1" }]],
     });
+    expect(got2).toEqual(got);
 
+    // Once we've observed a missing compact API error, the backend should stop trying
+    // (avoids paying for exceptions on every range read).
     expect(engine.getRangeCompact!).toHaveBeenCalledTimes(1);
-    expect(engine.getRange).toHaveBeenCalledTimes(1);
+    expect(engine.getRange).toHaveBeenCalledTimes(2);
   });
 
   it("loads a workbook from XLSX bytes (and clears used range tracking)", async () => {

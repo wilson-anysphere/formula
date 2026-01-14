@@ -61,6 +61,7 @@ type EngineWorkbookInfo = {
 export class WasmWorkbookBackend implements WorkbookBackend {
   private readonly usedRanges = new Map<string, UsedRangeState>();
   private workbookInfo: WorkbookInfo | null = null;
+  private supportsRangeCompact: boolean | null = null;
   private readonly engine: EngineClient;
 
   constructor(engine: EngineClient) {
@@ -181,9 +182,10 @@ export class WasmWorkbookBackend implements WorkbookBackend {
     const getRangeCompact = (this.engine as EngineClient).getRangeCompact;
 
     let compact: CellDataCompact[][] | null = null;
-    if (typeof getRangeCompact === "function") {
+    if (this.supportsRangeCompact !== false && typeof getRangeCompact === "function") {
       try {
         compact = await getRangeCompact(range, params.sheetId);
+        this.supportsRangeCompact = true;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         // Backward compatibility: older WASM builds (or older worker bundles) may not
@@ -194,6 +196,7 @@ export class WasmWorkbookBackend implements WorkbookBackend {
         if (!isMissingCompactApi) {
           throw err;
         }
+        this.supportsRangeCompact = false;
       }
     }
 
