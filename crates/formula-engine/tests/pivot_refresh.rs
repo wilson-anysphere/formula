@@ -291,6 +291,139 @@ fn engine_pivot_infers_dates_from_range_run_number_formats_when_cell_styles_inhe
 }
 
 #[test]
+fn engine_pivot_infers_dates_from_sheet_default_number_formats_when_cell_styles_inherit_num_fmt() {
+    use chrono::NaiveDate;
+    use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+
+    let mut engine = Engine::new();
+
+    // Source data: a date serial column.
+    engine.set_cell_value("Sheet1", "A1", "Date").unwrap();
+
+    // Apply the date number format via the sheet default style.
+    let date_style_id = engine.intern_style(Style {
+        number_format: Some("m/d/yyyy".to_string()),
+        ..Style::default()
+    });
+    engine.set_sheet_default_style_id("Sheet1", Some(date_style_id));
+
+    // Simulate an additional cell-level style (e.g. bold) that does *not* set a number format.
+    // Pivot typing should still treat the serial as a date by inheriting the sheet default format.
+    let bold_style_id = engine.intern_style(Style {
+        font: Some(Font {
+            bold: true,
+            ..Font::default()
+        }),
+        ..Style::default()
+    });
+
+    let date1_serial =
+        ymd_to_serial(ExcelDate::new(2024, 1, 15), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+    let date2_serial =
+        ymd_to_serial(ExcelDate::new(2024, 2, 1), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+
+    engine.set_cell_value("Sheet1", "A2", date1_serial).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A2", bold_style_id)
+        .unwrap();
+
+    engine.set_cell_value("Sheet1", "A3", date2_serial).unwrap();
+    engine
+        .set_cell_style_id("Sheet1", "A3", bold_style_id)
+        .unwrap();
+
+    engine.recalculate();
+
+    let range = formula_model::Range::from_a1("A1:A3").unwrap();
+    let cache = engine.pivot_cache_from_range("Sheet1", range).unwrap();
+    assert_eq!(cache.records.len(), 2);
+    assert_eq!(
+        cache.records[0][0],
+        PivotValue::Date(NaiveDate::from_ymd_opt(2024, 1, 15).unwrap())
+    );
+    assert_eq!(
+        cache.records[1][0],
+        PivotValue::Date(NaiveDate::from_ymd_opt(2024, 2, 1).unwrap())
+    );
+}
+
+#[test]
+fn engine_pivot_infers_dates_from_cell_number_format_overrides_cell_style() {
+    use chrono::NaiveDate;
+    use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", "Date").unwrap();
+
+    let serial =
+        ymd_to_serial(ExcelDate::new(2024, 1, 15), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
+    engine.set_cell_value("Sheet1", "A2", serial).unwrap();
+
+    // Apply a conflicting numeric format via style id...
+    let number_style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A2", number_style_id)
+        .unwrap();
+
+    // ...but override it with an explicit per-cell number format pattern.
+    engine
+        .set_cell_number_format("Sheet1", "A2", Some("m/d/yyyy".to_string()))
+        .unwrap();
+
+    engine.recalculate();
+
+    let range = formula_model::Range::from_a1("A1:A2").unwrap();
+    let cache = engine.pivot_cache_from_range("Sheet1", range).unwrap();
+    assert_eq!(cache.records.len(), 1);
+    assert_eq!(
+        cache.records[0][0],
+        PivotValue::Date(NaiveDate::from_ymd_opt(2024, 1, 15).unwrap())
+    );
+}
+
+#[test]
+fn engine_pivot_infers_dates_from_spill_origin_number_formats() {
+    use chrono::NaiveDate;
+
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", "Date").unwrap();
+
+    // Spill two sequential dates down column A.
+    engine
+        .set_cell_formula("Sheet1", "A2", "=SEQUENCE(2,1,DATE(2024,1,15),1)")
+        .unwrap();
+
+    // Apply the date number format to the spill origin only; spilled outputs should inherit
+    // the origin's formatting semantics.
+    let date_style_id = engine.intern_style(Style {
+        number_format: Some("m/d/yyyy".to_string()),
+        ..Style::default()
+    });
+    engine
+        .set_cell_style_id("Sheet1", "A2", date_style_id)
+        .unwrap();
+
+    engine.recalculate();
+
+    let range = formula_model::Range::from_a1("A1:A3").unwrap();
+    let cache = engine.pivot_cache_from_range("Sheet1", range).unwrap();
+    assert_eq!(cache.records.len(), 2);
+    assert_eq!(
+        cache.records[0][0],
+        PivotValue::Date(NaiveDate::from_ymd_opt(2024, 1, 15).unwrap())
+    );
+    assert_eq!(
+        cache.records[1][0],
+        PivotValue::Date(NaiveDate::from_ymd_opt(2024, 1, 16).unwrap())
+    );
+}
+
+#[test]
 fn engine_pivot_prefers_row_number_format_over_column_date_format() {
     use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 
