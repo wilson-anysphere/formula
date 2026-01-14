@@ -334,11 +334,16 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
     // Explicit table-qualified form: `Table[@[Column Name]]`.
     expect(evalPreview("TableThisRow[@[Total Amount]]")).toBe(200);
     expect(evalPreview("SUM(TableThisRow[@[Total Amount]], 5)")).toBe(205);
+    // Implicit selector-qualified refs (table name omitted) should resolve in table context.
+    expect(evalPreview("[[#This Row],[Amount]]")).toBe(20);
+    expect(evalPreview("SUM([[#This Row],[Amount]], 5)")).toBe(25);
+    expect(evalPreview("SUM([[#All],[Amount]])")).toBe(60);
     // Whole-row refs: `[@]` / `Table[@]` should resolve to the current row's values.
     expect(evalPreview("SUM([@])")).toBe(220);
     expect(evalPreview("SUM(TableThisRow[@])")).toBe(220);
 
     const bar = (app as any).formulaBar;
+    expect(bar?.model?.resolveReferenceText?.("[[#All],[Amount]]")).toEqual({ start: { row: 0, col: 0 }, end: { row: 3, col: 0 } });
     expect(bar?.model?.resolveReferenceText?.("[@]")).toEqual({ start: { row: 2, col: 0 }, end: { row: 2, col: 1 } });
     expect(bar?.model?.resolveReferenceText?.("TableThisRow[@]")).toEqual({
       start: { row: 2, col: 0 },

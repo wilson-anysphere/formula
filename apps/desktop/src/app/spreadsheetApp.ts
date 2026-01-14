@@ -19397,6 +19397,80 @@ export class SpreadsheetApp {
       };
     };
 
+    const resolveImplicitSelectorColumn = (tableName: string, selector: string, columnName: string) => {
+      const name = String(tableName ?? "").trim();
+      const colName = String(columnName ?? "").trim();
+      if (!name || !colName) return null;
+      const table: any = this.searchWorkbook.getTable(name);
+      if (!table) return null;
+
+      const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+      const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+      const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+      const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+      if (startRow == null || startCol == null || endRow == null || endCol == null) return null;
+      if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) return null;
+
+      const baseStartRow = Math.min(startRow, endRow);
+      const baseEndRow = Math.max(startRow, endRow);
+      const baseStartCol = Math.min(startCol, endCol);
+      const baseEndCol = Math.max(startCol, endCol);
+
+      const columns = Array.isArray(table.columns) ? (table.columns as unknown[]) : [];
+      const targetColName = colName.toUpperCase();
+      let colIdx: number | null = null;
+      for (let i = 0; i < columns.length; i += 1) {
+        const c = String(columns[i] ?? "").trim();
+        if (!c) continue;
+        if (c.toUpperCase() === targetColName) {
+          colIdx = i;
+          break;
+        }
+      }
+      if (colIdx == null) return null;
+
+      const col = baseStartCol + colIdx;
+      if (col < baseStartCol || col > baseEndCol) return null;
+
+      const tableSheet =
+        typeof table.sheetName === "string" && table.sheetName.trim()
+          ? table.sheetName.trim()
+          : typeof table.sheet === "string" && table.sheet.trim()
+            ? table.sheet.trim()
+            : editTarget.sheetId;
+      const resolvedTableSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
+      if (resolvedTableSheetId && resolvedTableSheetId.toLowerCase() !== editTarget.sheetId.toLowerCase()) return null;
+
+      let refStartRow = baseStartRow;
+      let refEndRow = baseEndRow;
+
+      switch (selector) {
+        case "#headers":
+          refEndRow = refStartRow;
+          break;
+        case "#totals":
+          refStartRow = baseEndRow;
+          refEndRow = baseEndRow;
+          break;
+        case "#all":
+          break;
+        case "#data":
+        default:
+          if (refEndRow > refStartRow) {
+            refStartRow = refStartRow + 1;
+          }
+          break;
+      }
+
+      return {
+        sheet: tableSheet || undefined,
+        startRow: Math.min(refStartRow, refEndRow),
+        endRow: Math.max(refStartRow, refEndRow),
+        startCol: col,
+        endCol: col,
+      };
+    };
+
     const findContainingTableName = (): string | null => {
       for (const entry of this.searchWorkbook.tables.values()) {
         const table: any = entry as any;
@@ -19473,11 +19547,14 @@ export class SpreadsheetApp {
     const implicitQualified = qualifiedImplicitRe.exec(trimmed);
     if (implicitQualified) {
       const selector = normalizeSelector(unescapeStructuredRefItem(implicitQualified[1]!.trim()));
-      if (selector !== "#this row") return null;
       const columnName = unescapeStructuredRefItem(implicitQualified[2]!.trim());
       const tableName = findContainingTableName();
       if (!tableName) return null;
-      return resolveThisRowCell(tableName, columnName);
+      if (selector === "#this row") return resolveThisRowCell(tableName, columnName);
+      if (selector === "#all" || selector === "#headers" || selector === "#totals" || selector === "#data") {
+        return resolveImplicitSelectorColumn(tableName, selector, columnName);
+      }
+      return null;
     }
 
     const implicitNested = implicitAtNestedRe.exec(trimmed);
@@ -19571,6 +19648,56 @@ export class SpreadsheetApp {
       return null;
     };
 
+    // Many structured-reference forms are table-qualified (e.g. `Table1[Amount]`), and can be
+    // resolved using the workbook table metadata alone. However, calculated-column formulas can
+    // also use *implicit* table references (no table prefix), such as:
+    //   - `[@Amount]`
+    //   - `[[#This Row],[Amount]]`
+    //   - `[[#All],[Amount]]`
+    // These require inferring the table name from the current edit target.
+    let cachedContainingTableName: string | null | undefined = undefined;
+    const containingTableNameForEditTarget = (): string | null => {
+      if (cachedContainingTableName !== undefined) return cachedContainingTableName;
+      cachedContainingTableName = (() => {
+        for (const entry of this.searchWorkbook.tables.values()) {
+          const table: any = entry as any;
+          const name = typeof table?.name === "string" ? table.name.trim() : "";
+          if (!name) continue;
+
+          const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+          const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+          const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+          const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+          if (startRow == null || startCol == null || endRow == null || endCol == null) continue;
+          if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) continue;
+
+          const baseStartRow = Math.min(startRow, endRow);
+          const baseEndRow = Math.max(startRow, endRow);
+          const baseStartCol = Math.min(startCol, endCol);
+          const baseEndCol = Math.max(startCol, endCol);
+
+          const tableSheet =
+            typeof table.sheetName === "string" && table.sheetName.trim()
+              ? table.sheetName.trim()
+              : typeof table.sheet === "string" && table.sheet.trim()
+                ? table.sheet.trim()
+                : sheetId;
+          const resolvedSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
+          if (resolvedSheetId && resolvedSheetId.toLowerCase() !== sheetId.toLowerCase()) continue;
+
+          const row = editTarget.cell.row;
+          const col = editTarget.cell.col;
+          const dataStartRow = baseStartRow + 1;
+          if (row < dataStartRow || row > baseEndRow) continue;
+          if (col < baseStartCol || col > baseEndCol) continue;
+
+          return name;
+        }
+        return null;
+      })();
+      return cachedContainingTableName;
+    };
+
     const resolveStructuredRefToReference = (refText: string): string | null => {
       const trimmed = String(refText ?? "").trim();
       // Excel structured refs are never sheet-qualified in formula text.
@@ -19647,6 +19774,15 @@ export class SpreadsheetApp {
         return `${prefix}${addr}`;
       };
 
+      // Fast-path: resolve implicit selector-qualified structured refs like `[[#All],[Amount]]` by
+      // inferring the table name from the edit target and then delegating back to the table-qualified
+      // resolver logic.
+      if (trimmed.startsWith("[[")) {
+        const tableName = containingTableNameForEditTarget();
+        if (!tableName) return null;
+        return resolveStructuredRefToReference(`${tableName}${trimmed}`);
+      }
+
       // Fast-path: resolve `Table1[[#This Row],[Column]]` and `Table1[@Column]` without going through
       // `extractFormulaReferences` (which would otherwise approximate #This Row as a whole-column ref).
       const escapedItem = "((?:[^\\]]|\\]\\])+)"; // match non-] or escaped `]]`
@@ -19710,44 +19846,7 @@ export class SpreadsheetApp {
 
       // Resolve the table name from the edit target (implicit `[@...]` refs are only meaningful
       // inside a table). If we can't identify a containing table, skip rewriting.
-      const tableName = (() => {
-        for (const entry of this.searchWorkbook.tables.values()) {
-          const table: any = entry as any;
-          const name = typeof table?.name === "string" ? table.name.trim() : "";
-          if (!name) continue;
-
-          const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
-          const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
-          const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
-          const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
-          if (startRow == null || startCol == null || endRow == null || endCol == null) continue;
-          if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) continue;
-
-          const baseStartRow = Math.min(startRow, endRow);
-          const baseEndRow = Math.max(startRow, endRow);
-          const baseStartCol = Math.min(startCol, endCol);
-          const baseEndCol = Math.max(startCol, endCol);
-
-          const tableSheet =
-            typeof table.sheetName === "string" && table.sheetName.trim()
-              ? table.sheetName.trim()
-              : typeof table.sheet === "string" && table.sheet.trim()
-                ? table.sheet.trim()
-                : sheetId;
-          const resolvedSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
-          if (resolvedSheetId && resolvedSheetId.toLowerCase() !== sheetId.toLowerCase()) continue;
-
-          const row = editTarget.cell.row;
-          const col = editTarget.cell.col;
-          const dataStartRow = baseStartRow + 1;
-          if (row < dataStartRow || row > baseEndRow) continue;
-          if (col < baseStartCol || col > baseEndCol) continue;
-
-          return name;
-        }
-        return null;
-      })();
-
+      const tableName = containingTableNameForEditTarget();
       if (!tableName) return null;
 
       const isWhitespaceChar = (ch: string): boolean => ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
