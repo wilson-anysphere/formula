@@ -760,12 +760,12 @@ async function main() {
           } else if (key === "macos" && (lower.includes("dmg") || lower.includes("macos")) && !artifacts.dmg) {
             skipReason =
               "No local .dmg bundles found under target/**/release/bundle/dmg/*.dmg (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
-          } else if (key === "windows" && (lower.includes("msi") || lower.includes("windows")) && !artifacts.msi) {
+          } else if (key === "windows" && lower.includes("msi") && !artifacts.msi) {
             skipReason =
               "No local .msi bundles found under target/**/release/bundle/msi/*.msi (build with: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)";
           } else if (
             key === "windows" &&
-            (lower.includes("nsis") || lower.includes("exe") || lower.includes("windows")) &&
+            (lower.includes("nsis") || lower.includes("exe")) &&
             !artifacts.exe
           ) {
             skipReason =
