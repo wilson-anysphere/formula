@@ -58,6 +58,50 @@ describe("bindSheetViewToCollabSession (drawings)", () => {
     binder.destroy();
   });
 
+  it("hydrates drawings stored as a Y.Array (legacy/experimental encoding)", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    sheets.push([sheetMap]);
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    const yDrawings = new Y.Array<any>();
+    yDrawings.push([
+      {
+        id: "drawing-yarray",
+        zOrder: 0,
+        kind: { type: "shape", label: "From Y.Array" },
+        anchor: { type: "absolute", pos: { xEmu: 1, yEmu: 2 }, size: { cx: 3, cy: 4 } },
+      },
+    ]);
+
+    doc.transact(() => {
+      // Use the top-level key to simulate older docs that didn't nest under `view`.
+      sheetMap.set("drawings", yDrawings);
+    });
+
+    expect((document as any).getSheetDrawings(sheetId)).toEqual([
+      {
+        id: "drawing-yarray",
+        zOrder: 0,
+        kind: { type: "shape", label: "From Y.Array" },
+        anchor: { type: "absolute", pos: { xEmu: 1, yEmu: 2 }, size: { cx: 3, cy: 4 } },
+      },
+    ]);
+
+    binder.destroy();
+  });
+
   it("ignores remote drawings with excessively long ids (defensive)", () => {
     const doc = new Y.Doc();
     const sheets = doc.getArray<Y.Map<any>>("sheets");
