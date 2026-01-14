@@ -916,6 +916,58 @@ test(
 );
 
 test(
+  "validate-macos-bundle fails when codesign metadata does not advertise hardened runtime",
+  { skip: !hasBash },
+  () => {
+    const tmp = mkdtempSync(join(tmpdir(), "formula-macos-bundle-test-"));
+    const binDir = join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+
+    const mountPoint = join(tmp, "mnt");
+    const devEntry = "/dev/disk99s1";
+    mkdirSync(mountPoint, { recursive: true });
+    writeFakeMacOsTooling(binDir, { mountPoint, devEntry });
+
+    const logPath = join(tmp, "invocations.log");
+    writeFakeTool(
+      binDir,
+      "codesign",
+      `#!/usr/bin/env bash\nset -euo pipefail\necho \"codesign $*\" >> \"${logPath}\"\n# Simulate a signature that exists but is missing hardened runtime metadata.\nif [[ \"${"$"}*\" == *\"-dv\"* ]]; then\n  echo \"CodeDirectory v=20500 size=0 flags=0x0 hashes=0 location=embedded\" >&2\nfi\nexit 0\n`,
+    );
+    writeFakeTool(
+      binDir,
+      "spctl",
+      `#!/usr/bin/env bash\nset -euo pipefail\necho \"spctl $*\" >> \"${logPath}\"\nexit 0\n`,
+    );
+
+    const appRoot = join(mountPoint, "Formula.app", "Contents");
+    const macosDir = join(appRoot, "MacOS");
+    mkdirSync(macosDir, { recursive: true });
+    writeFileSync(join(macosDir, "formula-desktop"), "stub", { encoding: "utf8" });
+    chmodSync(join(macosDir, "formula-desktop"), 0o755);
+    writeComplianceResources(appRoot);
+
+    writeInfoPlist(join(appRoot, "Info.plist"), {
+      identifier: expectedIdentifier,
+      version: expectedVersion,
+    });
+
+    const dmgPath = join(tmp, "Formula.dmg");
+    writeFileSync(dmgPath, "not-a-real-dmg", { encoding: "utf8" });
+
+    const proc = runValidator({
+      dmgPath,
+      binDir,
+      env: {
+        APPLE_CERTIFICATE: "dummy",
+      },
+    });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /hardened runtime/i);
+  },
+);
+
+test(
   "validate-macos-bundle runs stapler validation when notarization env vars are set",
   { skip: !hasBash },
   () => {
