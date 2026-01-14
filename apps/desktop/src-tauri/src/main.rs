@@ -403,7 +403,21 @@ fn emit_open_file_event(app: &tauri::AppHandle, paths: Vec<String>) {
     show_main_window(app);
 
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.emit(OPEN_FILE_EVENT, paths);
+        match window.url() {
+            Ok(window_url) if desktop::ipc_origin::is_trusted_app_origin(&window_url) => {
+                let _ = window.emit(OPEN_FILE_EVENT, paths);
+            }
+            Ok(window_url) => {
+                eprintln!(
+                    "[open-file] blocked event delivery to untrusted origin: {window_url}"
+                );
+            }
+            Err(err) => {
+                eprintln!(
+                    "[open-file] blocked event delivery because window URL could not be read: {err}"
+                );
+            }
+        }
     } else {
         let _ = app.emit(OPEN_FILE_EVENT, paths);
     }
@@ -418,7 +432,21 @@ fn emit_oauth_redirect_event(app: &tauri::AppHandle, url: String) {
     show_main_window(app);
 
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
+        match window.url() {
+            Ok(window_url) if desktop::ipc_origin::is_trusted_app_origin(&window_url) => {
+                let _ = window.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
+            }
+            Ok(window_url) => {
+                eprintln!(
+                    "[oauth-redirect] blocked event delivery to untrusted origin: {window_url}"
+                );
+            }
+            Err(err) => {
+                eprintln!(
+                    "[oauth-redirect] blocked event delivery because window URL could not be read: {err}"
+                );
+            }
+        }
     } else {
         let _ = app.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
     }
@@ -2277,7 +2305,24 @@ fn main() {
             // Queue `open-file` requests until the frontend has installed its event listeners.
             if let Some(window) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
+                let window_for_listener = window.clone();
                 window.listen(OPEN_FILE_READY_EVENT, move |_event| {
+                    let window_url = match window_for_listener.url() {
+                        Ok(url) => url,
+                        Err(err) => {
+                            eprintln!(
+                                "[open-file] ignored ready signal because window URL could not be read: {err}"
+                            );
+                            return;
+                        }
+                    };
+                    if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+                        eprintln!(
+                            "[open-file] ignored ready signal from untrusted origin: {window_url}"
+                        );
+                        return;
+                    }
+
                     let state = handle.state::<SharedOpenFileState>().inner().clone();
                     let pending = {
                         let mut guard = state.lock().unwrap();
@@ -2294,7 +2339,24 @@ fn main() {
             // Queue `oauth-redirect` requests until the frontend has installed its event listeners.
             if let Some(window) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
+                let window_for_listener = window.clone();
                 window.listen(OAUTH_REDIRECT_READY_EVENT, move |_event| {
+                    let window_url = match window_for_listener.url() {
+                        Ok(url) => url,
+                        Err(err) => {
+                            eprintln!(
+                                "[oauth-redirect] ignored ready signal because window URL could not be read: {err}"
+                            );
+                            return;
+                        }
+                    };
+                    if !desktop::ipc_origin::is_trusted_app_origin(&window_url) {
+                        eprintln!(
+                            "[oauth-redirect] ignored ready signal from untrusted origin: {window_url}"
+                        );
+                        return;
+                    }
+
                     let state = handle.state::<SharedOauthRedirectState>().inner().clone();
                     let pending = {
                         let mut guard = state.lock().unwrap();
