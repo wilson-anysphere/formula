@@ -263,38 +263,6 @@ fn format_dax_table_identifier(raw: &str) -> Cow<'_, str> {
     Cow::Borrowed(raw)
 }
 
-fn dax_identifier_requires_quotes(raw: &str) -> bool {
-    // DAX table identifiers can be unquoted when they are "simple" identifiers.
-    // For display formatting, be conservative: quote anything that isn't ASCII
-    // `[A-Za-z_][A-Za-z0-9_]*`.
-    let mut chars = raw.chars();
-    let Some(first) = chars.next() else {
-        return true;
-    };
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return true;
-    }
-    for ch in chars {
-        if !(ch.is_ascii_alphanumeric() || ch == '_') {
-            return true;
-        }
-    }
-    false
-}
-
-fn quote_dax_identifier(raw: &str) -> String {
-    // DAX quotes identifiers using single quotes, escaping embedded `'` as `''`.
-    let mut out = String::with_capacity(raw.len().saturating_add(2));
-    out.push('\'');
-    for ch in raw.chars() {
-        if ch == '\'' {
-            out.push('\'');
-        }
-        out.push(ch);
-    }
-    out.push('\'');
-    out
-}
 fn escape_dax_bracket_identifier(raw: &str) -> String {
     // In DAX, `]` is escaped as `]]` within `[...]`.
     raw.replace(']', "]]")
