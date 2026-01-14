@@ -2512,6 +2512,7 @@ export class SpreadsheetApp {
               if (nextChartId != null && this.selectedDrawingId != null) {
                 this.selectedDrawingId = null;
                 this.drawingInteractionController?.setSelectedId(null);
+                this.dispatchDrawingSelectionChanged();
               }
 
               this.selectedChartId = nextChartId;
@@ -5209,6 +5210,7 @@ export class SpreadsheetApp {
 
     if (!Array.isArray(entries)) {
       this.renderDrawings();
+      this.dispatchDrawingsChanged();
       return;
     }
 
@@ -5588,10 +5590,14 @@ export class SpreadsheetApp {
       const insertedObjects = prepared.map((p) => p.drawing);
       const lastInsertedId = insertedObjects[insertedObjects.length - 1]!.id;
       this.setDrawingObjectsForSheet([...existingObjects, ...insertedObjects]);
+      const prevSelected = this.selectedDrawingId;
       this.selectedDrawingId = lastInsertedId;
       this.drawingOverlay.setSelectedId(lastInsertedId);
       if (this.gridMode === "shared") {
         this.ensureDrawingInteractionController().setSelectedId(lastInsertedId);
+      }
+      if (prevSelected !== lastInsertedId) {
+        this.dispatchDrawingSelectionChanged();
       }
     }
 
@@ -7108,6 +7114,7 @@ export class SpreadsheetApp {
     }
 
     this.selectedDrawingId = null;
+    this.dispatchDrawingSelectionChanged();
     this.drawingOverlay.setSelectedId(null);
     this.drawingInteractionController?.setSelectedId(null);
     this.drawingObjectsCache = null;
@@ -10372,6 +10379,7 @@ export class SpreadsheetApp {
     // double-render and split-view panes can mirror a single "active object" selection.
     if (next != null && this.selectedDrawingId != null) {
       this.selectedDrawingId = null;
+      this.dispatchDrawingSelectionChanged();
       this.renderDrawings();
     }
     if (next === this.selectedChartId) return;
@@ -13676,7 +13684,11 @@ export class SpreadsheetApp {
         if (editorWasOpen) {
           this.editor.commit("command");
         }
+        const prevSelected = this.selectedDrawingId;
         this.selectedDrawingId = hit.object.id;
+        if (prevSelected !== hit.object.id) {
+          this.dispatchDrawingSelectionChanged();
+        }
         this.renderSelection();
         this.focus();
 
@@ -13734,6 +13746,7 @@ export class SpreadsheetApp {
     // Clicking outside any drawing clears drawing selection.
     if (primaryButton && this.selectedDrawingId != null) {
       this.selectedDrawingId = null;
+      this.dispatchDrawingSelectionChanged();
     }
 
     // Right/middle clicks should not start drag selection, but we still want right-click to
@@ -16187,6 +16200,7 @@ export class SpreadsheetApp {
     }
 
     this.selectedDrawingId = null;
+    this.dispatchDrawingSelectionChanged();
     this.refresh();
     this.focus();
   }
@@ -16421,9 +16435,13 @@ export class SpreadsheetApp {
     }
 
     this.drawingObjectsCache = null;
+    const prevSelected = this.selectedDrawingId;
     this.selectedDrawingId = drawingId;
     this.drawingOverlay.setSelectedId(drawingId);
     this.drawingInteractionController?.setSelectedId(drawingId);
+    if (prevSelected !== drawingId) {
+      this.dispatchDrawingSelectionChanged();
+    }
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
     this.focus();
     return true;
