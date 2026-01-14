@@ -720,15 +720,15 @@ export function MergeBranchPanel({
                   <div className="branch-merge__conflict-grid">
                     <div>
                       <div className="branch-merge__conflict-label">{t("branchMerge.conflict.base")}</div>
-                      <div className="branch-merge__conflict-value">{jsonSummary(c.base)}</div>
+                      <div className="branch-merge__conflict-value">{c.base == null ? <EmptyMarker /> : jsonSummary(c.base)}</div>
                     </div>
                     <div>
                       <div className="branch-merge__conflict-label">{t("branchMerge.conflict.ours")}</div>
-                      <div className="branch-merge__conflict-value">{jsonSummary(c.ours)}</div>
+                      <div className="branch-merge__conflict-value">{c.ours == null ? <EmptyMarker /> : jsonSummary(c.ours)}</div>
                     </div>
                     <div>
                       <div className="branch-merge__conflict-label">{t("branchMerge.conflict.theirs")}</div>
-                      <div className="branch-merge__conflict-value">{jsonSummary(c.theirs)}</div>
+                      <div className="branch-merge__conflict-value">{c.theirs == null ? <EmptyMarker /> : jsonSummary(c.theirs)}</div>
                     </div>
                   </div>
                 )}
