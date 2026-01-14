@@ -82,21 +82,6 @@ pub struct EngineInfo {
     pub origin_by_sheet: HashMap<SheetId, String>,
 }
 
-/// A compressed formatting segment applied to a single column.
-///
-/// This mirrors the document model's `formatRunsByCol` representation:
-/// - Each run covers rows `[start_row, end_row_exclusive)`.
-/// - `style_id` references the workbook [`StyleTable`] (`0` is the default/empty style).
-///
-/// When computing effective formatting, these runs have precedence:
-/// `sheet < col < row < range-run < cell`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FormatRun {
-    pub start_row: u32,
-    pub end_row_exclusive: u32,
-    pub style_id: u32,
-}
-
 #[derive(Debug, Error)]
 pub enum EngineError {
     #[error(transparent)]
