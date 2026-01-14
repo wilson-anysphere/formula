@@ -254,6 +254,9 @@ export default defineConfig({
       // Small sheet/address helpers also use `.test.ts`; include them so they run under the
       // desktop-scoped Vitest config.
       "src/sheet/**/*.test.ts",
+      // Clipboard + extension helpers have a few small `.test.ts` suites as well.
+      "src/clipboard/**/__tests__/**/*.test.ts",
+      "src/extensions/**/*.test.ts",
       "src/layout/__tests__/**/*.test.ts",
       "src/ai/tools/**/*.test.ts",
       "src/ai/dlp/__tests__/**/*.test.ts",
