@@ -14,7 +14,7 @@ Note: this directory currently vendors encrypted `.xlsx`/`.xlsm` samples only. F
 ## Passwords
 
 - `agile.xlsx` / `standard.xlsx` / `standard-4.2.xlsx` / `standard-rc4.xlsx` / `agile-large.xlsx` / `standard-large.xlsx`: `password`
-- `agile.xlsm` / `standard.xlsm` / `agile-basic.xlsm` / `standard-basic.xlsm` / `basic-password.xlsm`: `password`
+- `agile-basic.xlsm` / `standard-basic.xlsm` / `basic-password.xlsm`: `password`
 - `agile-empty-password.xlsx`: empty string (`""`)
 - `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
 - `agile-unicode-excel.xlsx`: `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
@@ -30,9 +30,6 @@ stable known password) can live under `fixtures/xlsx/encrypted/`, which is expli
   - Copied from `fixtures/xlsx/basic/basic.xlsx`.
 - `plaintext-excel.xlsx` – unencrypted ZIP-based workbook produced by Microsoft Excel (starts with `PK`).
   - Copied from `crates/formula-offcrypto/tests/fixtures/outputs/example.xlsx`.
-- `plaintext.xlsm` – unencrypted ZIP-based macro-enabled workbook (starts with `PK`).
-  - Copied from `fixtures/xlsx/macros/basic.xlsm` (includes `xl/vbaProject.bin`). (Identical to
-    `plaintext-basic.xlsm`; kept for naming symmetry with `plaintext.xlsx`.)
 - `agile.xlsx` – Agile encrypted OOXML.
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `password`
@@ -51,12 +48,6 @@ stable known password) can live under `fixtures/xlsx/encrypted/`, which is expli
   - `EncryptionInfo` header version **Major 3 / Minor 2**
   - `EncryptionHeader.algId` = `CALG_RC4` (`0x00006801`)
   - Decrypts to `plaintext.xlsx` with password `password`
-- `agile.xlsm` – Agile encrypted OOXML (macro-enabled workbook package).
-  - `EncryptionInfo` header version **Major 4 / Minor 4**
-  - Decrypts to `plaintext.xlsm` with password `password`
-- `standard.xlsm` – Standard encrypted OOXML (macro-enabled workbook package).
-  - `EncryptionInfo` header version **Major 3 / Minor 2**
-  - Decrypts to `plaintext.xlsm` with password `password`
 - `agile-empty-password.xlsx` – Agile encrypted OOXML with an **empty** open password.
     - `EncryptionInfo` header version **Major 4 / Minor 4**
     - Decrypts to `plaintext.xlsx` with password `""`
@@ -123,7 +114,7 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
 - `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` (behind `formula-io` feature `encrypted-workbooks`):
   end-to-end decryption for Standard + Agile fixtures (including `standard.xlsx` / `standard-4.2.xlsx` / `standard-rc4.xlsx` / `standard-unicode.xlsx` and `agile.xlsx` / `agile-empty-password.xlsx` / `agile-unicode.xlsx`) against `plaintext.xlsx`, plus `agile-unicode-excel.xlsx` against `plaintext-excel.xlsx`,
   plus large-package coverage (`agile-large.xlsx` / `standard-large.xlsx` against `plaintext-large.xlsx`, exercising multi-segment decryption for Agile),
-  plus macro-enabled `.xlsm` fixture coverage (`agile-basic.xlsm` / `standard-basic.xlsm` against `plaintext-basic.xlsm`, and `agile.xlsm` / `standard.xlsm` against `plaintext.xlsm`), validating `xl/vbaProject.bin` preservation and `.xlsm` format detection,
+  plus macro-enabled `.xlsm` fixture coverage (`agile-basic.xlsm` / `standard-basic.xlsm` / `basic-password.xlsm` against `plaintext-basic.xlsm`), validating `xl/vbaProject.bin` preservation and `.xlsm` format detection,
   plus on-the-fly Agile encryption/decryption (via `ms_offcrypto_writer`) for
   `open_workbook_with_password` / `open_workbook_model_with_password`.
   Includes coverage that a **missing** password is distinct from an **empty** password (`""`), and
@@ -134,9 +125,11 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
 - `crates/formula-xlsx/tests/encrypted_ooxml_decrypt.rs`:
   end-to-end decryption for `agile-large.xlsx` + `standard-large.xlsx` against `plaintext-large.xlsx`
   (exercises multi-segment decryption for Agile, and larger-package coverage for Standard), plus
-  macro-enabled `.xlsm` fixtures (including `agile.xlsm` / `standard.xlsm`).
+  macro-enabled `.xlsm` fixtures (`agile-basic.xlsm` / `standard-basic.xlsm` / `basic-password.xlsm`).
 - `crates/formula-xlsx/tests/encrypted_ooxml_empty_password.rs`:
   decrypts `agile-empty-password.xlsx` and asserts empty password `""` is distinct from a missing password.
+- `crates/formula-office-crypto/tests/decrypt.rs` and `crates/formula-office-crypto/tests/fixtures.rs`:
+  end-to-end decryption for Standard + Agile `.xlsx`/`.xlsm` fixtures in this directory (including RC4, large, Unicode passwords, and the Excel-produced `basic-password.xlsm`).
 - `crates/xlsx-diff/tests/encrypted_ooxml_diff.rs`:
   asserts the OPC-level diff tool can decrypt and compare encrypted `.xlsx`/`.xlsm` fixtures against the
   corresponding plaintext packages (and also exercises an on-the-fly encrypted `.xlsb` wrapper).
@@ -173,8 +166,6 @@ You can inspect an encrypted OOXML container (and confirm Agile vs Standard) wit
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-rc4.xlsx
-bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile.xlsm
-bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard.xlsm
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-empty-password.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-unicode.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-unicode-excel.xlsx
@@ -199,8 +190,8 @@ The committed fixture binaries were generated using a mix of tooling:
 
 - `agile.xlsx` and `standard.xlsx` were generated using Python and
   [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) **5.4.2**.
-- `agile.xlsm` and `standard.xlsm` were generated using Python and
-  [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) **5.4.2** (from `plaintext.xlsm`).
+- `agile-basic.xlsm` and `standard-basic.xlsm` were generated using Python and
+  [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) **5.4.2** (from `plaintext-basic.xlsm`).
 - `standard-large.xlsx` is a synthetic fixture aligned with `crates/formula-xlsx::offcrypto`’s
   Standard decrypt behavior (see `docs/office-encryption.md`).
 - `basic-password.xlsm` was generated in Excel (starting from `fixtures/xlsx/macros/basic.xlsm`)
