@@ -910,15 +910,18 @@ where
     Ok(out)
 }
 
-fn read_xls_blocking(path: &Path) -> anyhow::Result<Workbook> {
-    let imported = match formula_xls::import_xls_path(path) {
+fn read_xls_blocking_with_password(path: &Path, password: Option<&str>) -> anyhow::Result<Workbook> {
+    let imported = match formula_xls::import_xls_path_with_password(path, password) {
         Ok(imported) => imported,
         // Keep the desktop-facing error message user-actionable (the UI can prompt for a
         // password) without exposing internal Rust API names.
         Err(formula_xls::ImportError::EncryptedWorkbook) => anyhow::bail!(
-            "password required: workbook `{}` is password-protected/encrypted; provide the password to open it",
+            "{PASSWORD_REQUIRED_PREFIX} workbook `{}` is password-protected; supply a password to open it",
             path.display()
         ),
+        Err(formula_xls::ImportError::InvalidPassword) => {
+            anyhow::bail!("{INVALID_PASSWORD_PREFIX} invalid password")
+        }
         Err(other) => {
             return Err(anyhow::anyhow!(other)).with_context(|| format!("import xls {:?}", path));
         }
@@ -1186,7 +1189,7 @@ pub fn read_workbook_blocking_with_password(
 
     if let Some(format) = sniff_workbook_format(path) {
         return match format {
-            SniffedWorkbookFormat::Xls => read_xls_blocking(path),
+            SniffedWorkbookFormat::Xls => read_xls_blocking_with_password(path, password),
             SniffedWorkbookFormat::Xlsx => read_xlsx_or_xlsm_blocking(path),
             SniffedWorkbookFormat::Xlsb => read_xlsb_blocking(path),
         };
@@ -1245,7 +1248,7 @@ pub fn read_xlsx_blocking_with_password(
     if !matches!(extension.as_deref(), Some("csv")) {
         if let Some(format) = sniff_workbook_format(path) {
             match format {
-                SniffedWorkbookFormat::Xls => return read_xls_blocking(path),
+                SniffedWorkbookFormat::Xls => return read_xls_blocking_with_password(path, password),
                 SniffedWorkbookFormat::Xlsx => return read_xlsx_or_xlsm_blocking(path),
                 SniffedWorkbookFormat::Xlsb => return read_xlsb_blocking(path),
             }
@@ -1267,7 +1270,7 @@ pub fn read_xlsx_blocking_with_password(
         extension.as_deref(),
         Some("xls") | Some("xlt") | Some("xla")
     ) {
-        return read_xls_blocking(path);
+        return read_xls_blocking_with_password(path, password);
     }
 
     let mut workbook =
@@ -4430,8 +4433,8 @@ mod tests {
     fn read_xls_blocking_errors_on_encrypted_filepass_container() {
         // Minimal OLE/CFB container with a BIFF workbook stream containing FILEPASS.
         //
-        // The desktop app does not yet implement `.xls` password prompting, but it should surface
-        // an actionable "password required" error rather than leaking internal Rust API guidance.
+        // The desktop app should surface a structured "password required" prefix so the UI can
+        // prompt for a password without leaking internal Rust API guidance.
         let tmp = tempfile::tempdir().expect("temp dir");
 
         fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
@@ -4468,12 +4471,14 @@ mod tests {
         let path = tmp.path().join("encrypted.xls");
         std::fs::write(&path, &bytes).expect("write encrypted fixture");
 
-        let err = read_xls_blocking(&path).expect_err("expected encrypted workbook to error");
-        let msg = err.to_string().to_lowercase();
+        let err = read_xls_blocking_with_password(&path, None)
+            .expect_err("expected encrypted workbook to error");
+        let msg = err.to_string();
         assert!(
-            msg.contains("password required"),
-            "expected error to mention password required, got: {msg}"
+            msg.starts_with(PASSWORD_REQUIRED_PREFIX),
+            "expected password-required error prefix, got: {msg}"
         );
+        let msg = msg.to_lowercase();
         assert!(
             !msg.contains("import_xls_path_with_password"),
             "desktop error should not mention internal Rust APIs, got: {msg}"
@@ -4577,6 +4582,39 @@ mod tests {
             cell.computed_value,
             CellScalar::Text("You can't see me".to_string())
         );
+    }
+
+    #[test]
+    fn read_workbook_blocking_opens_password_protected_xls_fixture_with_password() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xls/tests/fixtures/encrypted/biff8_rc4_standard_pw_open.xls"
+        );
+        let path = std::path::Path::new(fixture);
+
+        let err = read_workbook_blocking_with_password(path, None)
+            .expect_err("expected missing password to error");
+        assert!(
+            err.to_string().starts_with(PASSWORD_REQUIRED_PREFIX),
+            "expected password-required error, got: {err}"
+        );
+
+        let err = read_workbook_blocking_with_password(path, Some("wrong-password"))
+            .expect_err("expected wrong password to error");
+        assert!(
+            err.to_string().starts_with(INVALID_PASSWORD_PREFIX),
+            "expected invalid-password prefix, got: {err}"
+        );
+
+        let workbook = read_workbook_blocking_with_password(path, Some("password"))
+            .expect("open encrypted xls");
+        let sheet = workbook
+            .sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("Sheet1 should exist");
+        let cell_a1 = sheet.get_cell(0, 0);
+        assert_eq!(cell_a1.computed_value, CellScalar::Number(42.0));
     }
 
     #[test]
