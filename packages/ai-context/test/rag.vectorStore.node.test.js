@@ -23,3 +23,28 @@ test("InMemoryVectorStore.search: returns deterministic id ordering when similar
   );
 });
 
+test("InMemoryVectorStore.search: treats non-finite topK (NaN) as 'all results'", async () => {
+  const store = new InMemoryVectorStore();
+  const embedding = [1, 0, 0];
+
+  await store.add([
+    { id: "chunk-b", embedding, metadata: null, text: "b" },
+    { id: "chunk-a", embedding, metadata: null, text: "a" },
+  ]);
+
+  const results = await store.search([1, 0, 0], Number.NaN);
+  assert.deepStrictEqual(
+    results.map((r) => r.item.id),
+    ["chunk-a", "chunk-b"],
+  );
+});
+
+test("InMemoryVectorStore.search: returns an empty result set when topK <= 0", async () => {
+  const store = new InMemoryVectorStore();
+  const embedding = [1, 0, 0];
+
+  await store.add([{ id: "chunk-a", embedding, metadata: null, text: "a" }]);
+
+  assert.deepStrictEqual(await store.search([1, 0, 0], 0), []);
+  assert.deepStrictEqual(await store.search([1, 0, 0], -1), []);
+});

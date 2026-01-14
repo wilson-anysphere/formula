@@ -150,10 +150,12 @@ export class InMemoryVectorStore {
    */
   async search(queryEmbedding, topK, options = {}) {
     const signal = options.signal;
+    throwIfAborted(signal);
     const count = this.items.size;
     // Mirror `Array.prototype.slice`'s ToInteger behavior for common cases.
     const k = Number.isFinite(topK) ? Math.trunc(topK) : count;
- 
+    if (k <= 0) return [];
+  
     /**
      * Score-descending, id-ascending ordering.
      *
@@ -201,7 +203,7 @@ export class InMemoryVectorStore {
     throwIfAborted(signal);
     scored.sort(compareScored);
     throwIfAborted(signal);
-    return scored.slice(0, topK);
+    return scored.slice(0, k);
   }
 
   /**
