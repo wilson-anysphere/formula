@@ -120,12 +120,11 @@ fn bytecode_indirect_external_cell_ref_evaluates_via_provider() {
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")+1"#)
         .unwrap();
 
-    // Bytecode INDIRECT currently only resolves local sheet names, so external workbook references
-    // fall back to AST evaluation so we can consult the `ExternalValueProvider`.
+    // Ensure we compile to bytecode (no AST fallback).
     assert_eq!(
         engine.bytecode_program_count(),
-        0,
-        "expected INDIRECT external workbook refs to fall back from bytecode (stats={:?}, report={:?})",
+        1,
+        "expected INDIRECT external workbook refs to compile to bytecode (stats={:?}, report={:?})",
         engine.bytecode_compile_stats(),
         engine.bytecode_compile_report(32)
     );

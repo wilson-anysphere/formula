@@ -5208,19 +5208,25 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     fn resolve_sheet(
         grid: &dyn Grid,
         sheet: &crate::eval::SheetReference<String>,
-    ) -> Option<usize> {
+    ) -> Option<SheetId> {
         match sheet {
-            crate::eval::SheetReference::Current => Some(thread_current_sheet_id() as usize),
-            crate::eval::SheetReference::Sheet(name) => grid.resolve_sheet_name(name),
+            crate::eval::SheetReference::Current => {
+                Some(SheetId::Local(thread_current_sheet_id() as usize))
+            }
+            crate::eval::SheetReference::Sheet(name) => {
+                Some(SheetId::Local(grid.resolve_sheet_name(name)?))
+            }
             crate::eval::SheetReference::SheetRange(start, end) => {
                 let start_id = grid.resolve_sheet_name(start)?;
                 let end_id = grid.resolve_sheet_name(end)?;
-                (start_id == end_id).then_some(start_id)
+                (start_id == end_id).then_some(SheetId::Local(start_id))
             }
-            crate::eval::SheetReference::External(_) => {
-                // Match `functions::builtins_reference::INDIRECT`: Excel's INDIRECT does not
-                // support external workbook references, so reject them here as well.
-                None
+            crate::eval::SheetReference::External(key) => {
+                // Mirror `functions::builtins_reference::INDIRECT`: allow single-sheet external
+                // workbook references (e.g. `[Book.xlsx]Sheet1!A1`), but reject external 3D spans
+                // (`[Book.xlsx]Sheet1:Sheet3!A1`) which require sheet-order expansion.
+                crate::eval::is_valid_external_sheet_key(key)
+                    .then_some(SheetId::External(Arc::from(key.as_str())))
             }
         }
     }
@@ -5234,8 +5240,8 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     }
 
     let make_range_value =
-        |sheet: usize, start: crate::eval::CellAddr, end: crate::eval::CellAddr| -> Value {
-            let (rows, cols) = grid.bounds_on_sheet(&SheetId::Local(sheet));
+        |sheet: SheetId, start: crate::eval::CellAddr, end: crate::eval::CellAddr| -> Value {
+            let (rows, cols) = grid.bounds_on_sheet(&sheet);
             if rows <= 0 || cols <= 0 {
                 return Value::Error(ErrorKind::Ref);
             }
@@ -5264,12 +5270,11 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Ref::new(end_row, end_col, true, true),
             );
 
-            if sheet == current_sheet {
-                Value::Range(range)
-            } else {
-                Value::MultiRange(MultiRangeRef::new(
-                    vec![SheetRangeRef::new(SheetId::Local(sheet), range)].into(),
-                ))
+            match sheet {
+                SheetId::Local(sheet_id) if sheet_id == current_sheet => Value::Range(range),
+                other_sheet => Value::MultiRange(MultiRangeRef::new(
+                    vec![SheetRangeRef::new(other_sheet, range)].into(),
+                )),
             }
         };
 
