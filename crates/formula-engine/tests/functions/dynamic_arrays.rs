@@ -217,6 +217,35 @@ fn sort_orders_field_error_by_error_code() {
 }
 
 #[test]
+fn sort_record_display_field_error_is_an_error_key() {
+    let mut engine = Engine::new();
+
+    let mut record_field_err = RecordValue::new("aaa").field("Name", Value::Error(ErrorKind::Field));
+    record_field_err.display_field = Some("Name".to_string());
+    let record_field_err = Value::Record(record_field_err);
+
+    let mut record_value_err = RecordValue::new("zzz").field("Name", Value::Error(ErrorKind::Value));
+    record_value_err.display_field = Some("Name".to_string());
+    let record_value_err = Value::Record(record_value_err);
+
+    engine
+        .set_cell_value("Sheet1", "A1", record_field_err.clone())
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", record_value_err.clone())
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SORT(A1:A2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // Sorting should use the display_field-derived errors (VALUE before FIELD), not the fallback
+    // record.display ("aaa"/"zzz").
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), record_value_err);
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), record_field_err);
+}
+
+#[test]
 fn sort_by_col_sorts_columns() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 3.0).unwrap();
@@ -351,6 +380,41 @@ fn unique_uses_record_display_field_for_deduping() {
     assert_eq!(end, parse_a1("C1").unwrap());
 
     // UNIQUE should use the `Name` field value ("Same") to dedupe, keeping the first occurrence.
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), record_a);
+}
+
+#[test]
+fn unique_record_display_field_numeric_is_locale_aware() {
+    let mut engine = Engine::new();
+    // Use a locale with a different decimal separator to ensure we use the workbook locale when
+    // stringifying numeric display_field values.
+    assert!(engine.set_value_locale_id("de-DE"));
+
+    let mut record_a = RecordValue::new("display_a").field("Name", 1.5);
+    record_a.display_field = Some("Name".to_string());
+    let record_a = Value::Record(record_a);
+
+    // In de-DE, 1.5 is formatted as "1,5" under General.
+    let mut record_b = RecordValue::new("display_b").field("Name", "1,5");
+    record_b.display_field = Some("Name".to_string());
+
+    engine
+        .set_cell_value("Sheet1", "A1", record_a.clone())
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", Value::Record(record_b))
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=UNIQUE(A1:A2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
+    assert_eq!(start, parse_a1("C1").unwrap());
+    assert_eq!(end, parse_a1("C1").unwrap());
+
+    // If numeric stringification were not locale-aware, we'd get "1.5" and the two records would
+    // not dedupe. With locale-aware General formatting, they dedupe and keep the first record.
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), record_a);
 }
 
