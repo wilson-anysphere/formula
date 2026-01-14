@@ -210,3 +210,27 @@ fn roundtrip_patching_preserves_sheet_format_pr_and_unknown_attrs() {
     );
 }
 
+#[test]
+fn semantic_export_formats_sheet_format_pr_f32_without_rounding_noise() {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();
+    let sheet = workbook.sheet_mut(sheet_id).unwrap();
+    sheet.default_row_height = Some(0.1);
+    sheet.default_col_width = Some(0.1);
+
+    let mut cursor = Cursor::new(Vec::new());
+    write_workbook_to_writer(&workbook, &mut cursor).expect("write workbook");
+    let bytes = cursor.into_inner();
+
+    let sheet_xml = zip_part(&bytes, "xl/worksheets/sheet1.xml");
+    assert!(
+        sheet_xml.contains(r#"defaultRowHeight="0.1""#)
+            && sheet_xml.contains(r#"defaultColWidth="0.1""#),
+        "expected short f32 formatting for sheetFormatPr attrs: {sheet_xml}"
+    );
+    assert!(
+        !sheet_xml.contains(r#"defaultRowHeight="0.100000"#)
+            && !sheet_xml.contains(r#"defaultColWidth="0.100000"#),
+        "expected no f32 rounding noise in sheetFormatPr attrs: {sheet_xml}"
+    );
+}
