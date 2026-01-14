@@ -26,7 +26,7 @@ test("FunctionRegistry falls back to curated defaults when catalog is missing/in
   const missingCatalog = new FunctionRegistry(undefined, { catalog: null });
   assert.ok(missingCatalog.getFunction("SUM"), "Expected SUM to exist in fallback registry");
   assert.equal(
-    missingCatalog.getFunction("ACOTH"),
+    missingCatalog.getFunction("RANDBETWEEN"),
     undefined,
     "Expected catalog-only functions to be absent when catalog is missing"
   );
@@ -34,7 +34,7 @@ test("FunctionRegistry falls back to curated defaults when catalog is missing/in
   const invalidCatalog = new FunctionRegistry(undefined, { catalog: { functions: [{ nope: true }] } });
   assert.ok(invalidCatalog.getFunction("SUM"), "Expected SUM to exist in fallback registry");
   assert.equal(
-    invalidCatalog.getFunction("ACOTH"),
+    invalidCatalog.getFunction("RANDBETWEEN"),
     undefined,
     "Expected catalog-only functions to be absent when catalog is invalid"
   );
@@ -142,6 +142,7 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("COTH", 0), "value", "Expected COTH number to be value-like");
   assert.equal(registry.getArgType("ASINH", 0), "value", "Expected ASINH number to be value-like");
   assert.equal(registry.getArgType("ACOSH", 0), "value", "Expected ACOSH number to be value-like");
+  assert.equal(registry.getArgType("ACOTH", 0), "value", "Expected ACOTH number to be value-like");
   assert.equal(registry.getArgType("ATANH", 0), "value", "Expected ATANH number to be value-like");
   assert.equal(registry.getArgType("ACOT", 0), "value", "Expected ACOT number to be value-like");
 
@@ -324,6 +325,12 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("PERCENTRANK", 1), "value", "Expected PERCENTRANK x to be value-like");
   assert.equal(registry.getArgType("PERCENTRANK.INC", 1), "value", "Expected PERCENTRANK.INC x to be value-like");
   assert.equal(registry.getArgType("PERCENTRANK.EXC", 1), "value", "Expected PERCENTRANK.EXC x to be value-like");
+  assert.equal(registry.getArgType("STANDARDIZE", 0), "value", "Expected STANDARDIZE x to be value-like");
+  assert.equal(registry.getArgType("CONFIDENCE", 0), "value", "Expected CONFIDENCE alpha to be value-like");
+  assert.equal(registry.getArgType("CONFIDENCE.NORM", 0), "value", "Expected CONFIDENCE.NORM alpha to be value-like");
+  assert.equal(registry.getArgType("CONFIDENCE.T", 0), "value", "Expected CONFIDENCE.T alpha to be value-like");
+  assert.equal(registry.getArgType("CRITBINOM", 0), "value", "Expected CRITBINOM trials to be value-like");
+  assert.equal(registry.getArgType("LOGINV", 0), "value", "Expected LOGINV probability to be value-like");
 
   // Dynamic array helpers
   assert.ok(registry.isRangeArg("BYROW", 0), "Expected BYROW array to be a range");
@@ -560,6 +567,7 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("PMT", 0), "value", "Expected PMT rate to be value-like");
   assert.equal(registry.getArgType("RATE", 5), "value", "Expected RATE guess to be value-like");
   assert.equal(registry.getArgType("IRR", 1), "value", "Expected IRR guess to be value-like");
+  assert.equal(registry.getArgType("PDURATION", 0), "value", "Expected PDURATION rate to be value-like");
   assert.equal(registry.getArgType("XNPV", 0), "value", "Expected XNPV rate to be value-like");
   assert.equal(registry.getArgType("XIRR", 2), "value", "Expected XIRR guess to be value-like");
   assert.equal(registry.getArgType("CUMIPMT", 5), "number", "Expected CUMIPMT type to be a number");

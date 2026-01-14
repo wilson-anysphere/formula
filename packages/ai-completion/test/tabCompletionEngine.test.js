@@ -3920,14 +3920,18 @@ test("SUBSTITUTE instance_num suggests 1 and 2", async () => {
   );
 });
 
-test("Text start_num args suggest 1 and 2 (FIND/SEARCH/MID/REPLACE)", async () => {
+test("Text start_num args suggest 1 and 2 (FIND/SEARCH/MID/REPLACE + *B variants)", async () => {
   const engine = new TabCompletionEngine();
 
   const cases = [
     '=FIND("x", A1, ',
+    '=FINDB("x", A1, ',
     '=SEARCH("x", A1, ',
+    '=SEARCHB("x", A1, ',
     "=MID(A1, ",
+    "=MIDB(A1, ",
     "=REPLACE(A1, ",
+    "=REPLACEB(A1, ",
   ];
 
   for (const currentInput of cases) {
@@ -5602,6 +5606,24 @@ test("BITLSHIFT shift_amount suggests a left-cell reference (value-like arg)", a
   assert.ok(
     suggestions.some((s) => s.text === "=BITLSHIFT(A1, B1"),
     `Expected BITLSHIFT to suggest B1 for shift_amount, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("ACOTH number suggests a left-cell reference (value-like arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ACOTH(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Place the caret in B1 so the left-cell heuristic suggests A1.
+    cellRef: { row: 0, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=ACOTH(A1"),
+    `Expected ACOTH to suggest A1 for number, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 

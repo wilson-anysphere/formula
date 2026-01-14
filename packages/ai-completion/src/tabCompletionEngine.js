@@ -1805,7 +1805,15 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     // start_num
     2: START_NUM_ENUM_1_2,
   },
+  FINDB: {
+    // start_num
+    2: START_NUM_ENUM_1_2,
+  },
   SEARCH: {
+    // start_num
+    2: START_NUM_ENUM_1_2,
+  },
+  SEARCHB: {
     // start_num
     2: START_NUM_ENUM_1_2,
   },
@@ -1813,7 +1821,15 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     // start_num
     1: START_NUM_ENUM_1_2,
   },
+  MIDB: {
+    // start_num
+    1: START_NUM_ENUM_1_2,
+  },
   REPLACE: {
+    // start_num
+    1: START_NUM_ENUM_1_2,
+  },
+  REPLACEB: {
     // start_num
     1: START_NUM_ENUM_1_2,
   },

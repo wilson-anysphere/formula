@@ -614,6 +614,13 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ACOTH",
+    description: "Returns the inverse hyperbolic cotangent of a number.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
     name: "ATAN",
     description: "Returns the arctangent of a number.",
     args: [
@@ -1680,6 +1687,42 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "STANDARDIZE",
+    description: "Returns a normalized value from a distribution characterized by a mean and standard deviation.",
+    args: [
+      { name: "x", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "standard_dev", type: "value" },
+    ],
+  },
+  {
+    name: "CONFIDENCE",
+    description: "Returns the confidence interval for a population mean (legacy).",
+    args: [
+      { name: "alpha", type: "value" },
+      { name: "standard_dev", type: "value" },
+      { name: "size", type: "value" },
+    ],
+  },
+  {
+    name: "CONFIDENCE.NORM",
+    description: "Returns the confidence interval for a population mean using a normal distribution.",
+    args: [
+      { name: "alpha", type: "value" },
+      { name: "standard_dev", type: "value" },
+      { name: "size", type: "value" },
+    ],
+  },
+  {
+    name: "CONFIDENCE.T",
+    description: "Returns the confidence interval for a population mean using a Student's t distribution.",
+    args: [
+      { name: "alpha", type: "value" },
+      { name: "standard_dev", type: "value" },
+      { name: "size", type: "value" },
+    ],
+  },
+  {
     name: "BINOM.DIST",
     description: "Returns the individual term binomial distribution probability.",
     args: [
@@ -1712,6 +1755,15 @@ const CURATED_FUNCTIONS = [
   {
     name: "BINOM.INV",
     description: "Returns the smallest value for which the cumulative binomial distribution is less than or equal to a criterion value.",
+    args: [
+      { name: "trials", type: "value" },
+      { name: "probability_s", type: "value" },
+      { name: "alpha", type: "value" },
+    ],
+  },
+  {
+    name: "CRITBINOM",
+    description: "Returns the smallest value for which the cumulative binomial distribution is less than or equal to a criterion value (legacy).",
     args: [
       { name: "trials", type: "value" },
       { name: "probability_s", type: "value" },
@@ -1804,6 +1856,15 @@ const CURATED_FUNCTIONS = [
   {
     name: "LOGNORM.INV",
     description: "Returns the inverse of the lognormal cumulative distribution.",
+    args: [
+      { name: "probability", type: "value" },
+      { name: "mean", type: "value" },
+      { name: "standard_dev", type: "value" },
+    ],
+  },
+  {
+    name: "LOGINV",
+    description: "Returns the inverse of the lognormal cumulative distribution (legacy).",
     args: [
       { name: "probability", type: "value" },
       { name: "mean", type: "value" },
@@ -2518,6 +2579,15 @@ const CURATED_FUNCTIONS = [
     description: "Returns an equivalent interest rate for the growth of an investment.",
     args: [
       { name: "nper", type: "value" },
+      { name: "pv", type: "value" },
+      { name: "fv", type: "value" },
+    ],
+  },
+  {
+    name: "PDURATION",
+    description: "Returns the number of periods required for an investment to reach a specified value.",
+    args: [
+      { name: "rate", type: "value" },
       { name: "pv", type: "value" },
       { name: "fv", type: "value" },
     ],
