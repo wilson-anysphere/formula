@@ -679,6 +679,42 @@ test("verify-desktop-release-assets: verifyUpdaterManifestSignature rejects mini
   );
 });
 
+test("tauri-minisign: parseTauriUpdaterPubkey rejects minisign comment key id mismatches", async () => {
+  const keypair = await readJsonFixture("test-keypair.json");
+  const rawPubkey = Buffer.from(keypair.publicKeyBase64, "base64");
+
+  const payloadKeyIdLe = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
+  const payloadKeyIdHex = Buffer.from(payloadKeyIdLe).reverse().toString("hex").toUpperCase();
+  const commentKeyIdLe = Buffer.from([9, 9, 9, 9, 9, 9, 9, 9]);
+  const commentKeyIdHex = Buffer.from(commentKeyIdLe).reverse().toString("hex").toUpperCase();
+
+  const payload = Buffer.concat([Buffer.from([0x45, 0x64]), payloadKeyIdLe, rawPubkey]);
+  const pubkeyText = `untrusted comment: minisign public key: ${commentKeyIdHex}\n${payload.toString("base64")}\n`;
+  const pubkeyBase64 = Buffer.from(pubkeyText, "utf8").toString("base64");
+
+  assert.throws(() => parseTauriUpdaterPubkey(pubkeyBase64), /comment key id.*does not match payload/i);
+  assert.match(payloadKeyIdHex, /^[0-9A-F]{16}$/);
+});
+
+test("tauri-minisign: parseTauriUpdaterSignature rejects minisign comment key id mismatches", async () => {
+  const signatureText = (await readTextFixture("latest.multi-platform.json.sig")).trim();
+  const signatureBytes = Buffer.from(signatureText, "base64");
+
+  const payloadKeyIdLe = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
+  const payloadKeyIdHex = Buffer.from(payloadKeyIdLe).reverse().toString("hex").toUpperCase();
+  const commentKeyIdLe = Buffer.from([9, 9, 9, 9, 9, 9, 9, 9]);
+  const commentKeyIdHex = Buffer.from(commentKeyIdLe).reverse().toString("hex").toUpperCase();
+
+  const payload = Buffer.concat([Buffer.from([0x45, 0x64]), payloadKeyIdLe, signatureBytes]);
+  const sigFileText = `untrusted comment: minisign signature: ${commentKeyIdHex}\n${payload.toString("base64")}\n`;
+
+  assert.throws(
+    () => parseTauriUpdaterSignature(sigFileText, "mismatch.sig"),
+    /comment key id.*does not match payload/i,
+  );
+  assert.match(payloadKeyIdHex, /^[0-9A-F]{16}$/);
+});
+
 test("tauri-updater-manifest: verifyTauriManifestSignature supports minisign key/signature formats", async () => {
   const manifestText = await readTextFixture("latest.multi-platform.json");
   const keypair = await readJsonFixture("test-keypair.json");
