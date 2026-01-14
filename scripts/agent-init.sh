@@ -64,6 +64,23 @@ if [ -n "${RUSTUP_TOOLCHAIN:-}" ]; then
     _formula_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   fi
   if [ -z "${_formula_repo_root}" ]; then
+    _formula_search_dir="$(pwd)"
+    while true; do
+      if [ -f "${_formula_search_dir}/rust-toolchain.toml" ]; then
+        _formula_repo_root="${_formula_search_dir}"
+        break
+      fi
+      if [ "${_formula_search_dir}" = "/" ]; then
+        break
+      fi
+      _formula_search_dir="${_formula_search_dir%/*}"
+      if [ -z "${_formula_search_dir}" ]; then
+        _formula_search_dir="/"
+      fi
+    done
+    unset _formula_search_dir
+  fi
+  if [ -z "${_formula_repo_root}" ]; then
     _formula_repo_root="$(pwd)"
   fi
   if [ -f "${_formula_repo_root}/rust-toolchain.toml" ]; then
@@ -197,6 +214,23 @@ if [ -z "${CARGO_HOME:-}" ] || {
   fi
   if [ -z "${_formula_repo_root}" ] && [ -n "${BASH_VERSION:-}" ]; then
     _formula_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+  if [ -z "${_formula_repo_root}" ]; then
+    _formula_search_dir="$(pwd)"
+    while true; do
+      if [ -f "${_formula_search_dir}/rust-toolchain.toml" ]; then
+        _formula_repo_root="${_formula_search_dir}"
+        break
+      fi
+      if [ "${_formula_search_dir}" = "/" ]; then
+        break
+      fi
+      _formula_search_dir="${_formula_search_dir%/*}"
+      if [ -z "${_formula_search_dir}" ]; then
+        _formula_search_dir="/"
+      fi
+    done
+    unset _formula_search_dir
   fi
   if [ -z "${_formula_repo_root}" ]; then
     _formula_repo_root="$(pwd)"

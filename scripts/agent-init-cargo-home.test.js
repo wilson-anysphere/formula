@@ -587,6 +587,31 @@ test(
   },
 );
 
+test(
+  'agent-init resolves repo root without git when sourced from a subdir under /bin/sh',
+  { skip: !hasSh },
+  () => {
+    const { stdout, stderr } = runSh(
+      [
+        // Force `git rev-parse` to fail so agent-init must fall back to scanning for rust-toolchain.
+        'export GIT_DIR=/dev/null',
+        'export RUSTUP_TOOLCHAIN=stable',
+        'unset CARGO_HOME',
+        'cd crates/formula-engine',
+        // Prevent agent-init from spawning Xvfb during this test.
+        'export DISPLAY=:99',
+        '. ../../scripts/agent-init.sh >/dev/null',
+        'printf "%s\\nRUSTUP_TOOLCHAIN_SET=%s" "$CARGO_HOME" "${RUSTUP_TOOLCHAIN+x}"',
+      ].join(' && '),
+    );
+
+    assert.equal(stderr, '');
+    const [cargoHome, toolchainLine] = stdout.split('\n');
+    assert.equal(cargoHome, resolve(repoRoot, 'target', 'cargo-home'));
+    assert.equal(toolchainLine, 'RUSTUP_TOOLCHAIN_SET=', 'expected RUSTUP_TOOLCHAIN to be unset');
+  },
+);
+
 test('agent-init does not leak REPO_ROOT helper variable under /bin/sh', { skip: !hasSh }, () => {
   const { stdout, stderr } = runSh(
     [
