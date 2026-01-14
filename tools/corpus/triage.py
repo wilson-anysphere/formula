@@ -9,6 +9,7 @@ import io
 import inspect
 import json
 import os
+import sys
 import shutil
 import subprocess
 import tempfile
@@ -1201,6 +1202,20 @@ def _build_rust_helper() -> Path:
             env=env,
             check=True,
         )
+    except subprocess.CalledProcessError as e:
+        # In high-churn dev environments the Rust workspace can temporarily fail to build due to
+        # unrelated merge conflicts/regressions. If we already have a previously-built helper
+        # binary available, prefer using it for local tooling so users can continue minimizing
+        # corpora without waiting on the workspace to compile again.
+        #
+        # In CI, always treat build failures as fatal to avoid masking real regressions.
+        if exe.exists() and not env.get("CI"):
+            print(
+                f"warning: failed to build Rust triage helper (exit {e.returncode}); using existing binary: {exe}",
+                file=sys.stderr,
+            )
+            return exe
+        raise
     except FileNotFoundError as e:  # noqa: PERF203 (CI signal)
         raise RuntimeError("cargo not found; Rust toolchain is required for corpus triage") from e
 
