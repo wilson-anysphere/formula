@@ -1,5 +1,4 @@
-use md5::Md5;
-use sha1::Digest as _;
+use md5::{Digest as _, Md5};
 
 use crate::ct::ct_eq;
 
@@ -59,10 +58,9 @@ pub(crate) fn derive_biff8_rc4_key(
 ) -> Vec<u8> {
     assert!(key_len > 0, "key_len must be > 0");
 
-    let pw_bytes: Vec<u8> = password
-        .encode_utf16()
-        .flat_map(|c| c.to_le_bytes())
-        .collect();
+    // Excel 97-2003 Standard Encryption only considers the first 15 UTF-16 code units of the
+    // password.
+    let pw_bytes = super::password_to_utf16le(password);
 
     // H0 = MD5(password_utf16le)
     let mut md5 = Md5::new();

@@ -24,6 +24,8 @@ use super::{records, BiffVersion};
 pub(crate) mod cryptoapi;
 pub(crate) mod rc4;
 pub(crate) mod xor;
+
+use rc4::Rc4;
 /// BIFF8 RC4 encryption uses 1024-byte blocks for the record-data byte stream.
 ///
 /// Record headers (record id + length) are not encrypted and must not contribute to the block
@@ -460,48 +462,6 @@ struct FilePassRc4 {
     encrypted_verifier: [u8; 16],
     /// Encrypted verifier hash (16 bytes, MD5).
     encrypted_verifier_hash: [u8; 16],
-}
-
-/// Minimal RC4 stream cipher implementation (KSA + PRGA).
-///
-/// We implement this locally to avoid pulling in a full crypto dependency just for legacy XLS
-/// decryption.
-#[derive(Clone)]
-struct Rc4 {
-    s: [u8; 256],
-    i: u8,
-    j: u8,
-}
-
-impl Rc4 {
-    fn new(key: &[u8]) -> Self {
-        debug_assert!(!key.is_empty());
-
-        let mut s = [0u8; 256];
-        for (idx, slot) in s.iter_mut().enumerate() {
-            *slot = idx as u8;
-        }
-
-        let mut j: u8 = 0;
-        for i in 0u16..=255 {
-            let key_byte = key[i as usize % key.len()];
-            j = j.wrapping_add(s[i as usize]).wrapping_add(key_byte);
-            s.swap(i as usize, j as usize);
-        }
-
-        Self { s, i: 0, j: 0 }
-    }
-
-    fn apply_keystream(&mut self, data: &mut [u8]) {
-        for b in data {
-            self.i = self.i.wrapping_add(1);
-            self.j = self.j.wrapping_add(self.s[self.i as usize]);
-            self.s.swap(self.i as usize, self.j as usize);
-            let idx = self.s[self.i as usize].wrapping_add(self.s[self.j as usize]);
-            let k = self.s[idx as usize];
-            *b ^= k;
-        }
-    }
 }
 
 fn parse_filepass_rc4(payload: &[u8]) -> Result<FilePassRc4, DecryptError> {
@@ -1673,6 +1633,55 @@ mod tests {
             crate::decrypt::decrypt_biff8_workbook_stream_rc4_cryptoapi(&encrypted, password)
                 .expect("decrypt");
         assert_eq!(decrypted, plain);
+    }
+
+    #[test]
+    fn rc4_standard_password_is_truncated_to_15_utf16_code_units() {
+        // Excel 97-2003 Standard Encryption only considers the first 15 UTF-16 code units of the
+        // password.
+        let base = "0123456789ABCDE"; // 15 ASCII chars = 15 UTF-16 code units
+        let password = format!("{base}X"); // 16th char should be ignored by the cipher
+        let password_same_prefix = format!("{base}Y");
+        let wrong_password = "0123456789ABCDZ"; // differs in the first 15 code units
+
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+
+        // BIFF8 RC4 FILEPASS placeholder (Standard Encryption / major=1, minor=2 => 128-bit key).
+        let mut filepass_placeholder = vec![0u8; 6 + 16 + 16 + 16];
+        filepass_placeholder[0..2].copy_from_slice(&BIFF8_ENCRYPTION_TYPE_RC4.to_le_bytes());
+        filepass_placeholder[2..4].copy_from_slice(&1u16.to_le_bytes()); // major
+        filepass_placeholder[4..6].copy_from_slice(&2u16.to_le_bytes()); // minor (128-bit)
+
+        // Chosen so record2 crosses the 1024-byte block boundary: 1000 + 80.
+        let r1 = record(0x00FC, &dummy_payload(1000, 0x70));
+        let r2 = record(0x00FD, &dummy_payload(80, 0x80));
+
+        let mut plain = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_placeholder),
+            r1,
+            r2,
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut encrypted = plain.clone();
+        encrypt_workbook_stream_for_test(&mut encrypted, &password).expect("encrypt");
+
+        // FILEPASS is plaintext and populated by the encryption helper; patch the expected plaintext
+        // stream so we can compare full bytes after decryption.
+        let range = filepass_payload_range(&plain);
+        plain[range.clone()].copy_from_slice(&encrypted[range.clone()]);
+
+        for candidate in [password.as_str(), password_same_prefix.as_str(), base] {
+            let mut decrypted = encrypted.clone();
+            decrypt_workbook_stream(&mut decrypted, candidate).expect("decrypt");
+            assert_eq!(decrypted, plain);
+        }
+
+        let mut buf = encrypted.clone();
+        let err = decrypt_workbook_stream(&mut buf, wrong_password).expect_err("wrong password");
+        assert_eq!(err, DecryptError::WrongPassword);
     }
 }
 
