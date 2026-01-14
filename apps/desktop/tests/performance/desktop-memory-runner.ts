@@ -215,11 +215,12 @@ function processTreeWorkingSetBytesWindows(rootPid: number): number {
     'Write-Output $total',
   ].join('\n');
 
-  const proc = spawnSync('powershell', ['-NoProfile', '-Command', script], {
+  const proc = spawnSync('powershell.exe', ['-NoProfile', '-Command', script], {
     encoding: 'utf8',
     cwd: repoRoot,
     maxBuffer: 1024 * 1024,
     timeout: 15000,
+    windowsHide: true,
   });
   if (proc.error) throw proc.error;
   if (proc.status !== 0) {
