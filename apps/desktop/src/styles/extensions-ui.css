@@ -29,7 +29,7 @@ dialog.extensions-ui {
 .extensions-ui .dialog__field:focus,
 .extensions-ui .dialog__field:focus-visible {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .extensions-ui textarea.dialog__field {
@@ -78,7 +78,7 @@ dialog.extensions-ui {
 
 .extensions-ui .quick-pick__item:focus-visible {
   border-color: var(--selection-border);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .extensions-ui .quick-pick__label {
