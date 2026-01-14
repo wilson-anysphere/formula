@@ -14778,7 +14778,10 @@ export class SpreadsheetApp {
 
     this.drawingObjectsCache = null;
     this.selectedDrawingId = drawingId;
+    this.drawingOverlay.setSelectedId(drawingId);
+    this.drawingInteractionController?.setSelectedId(drawingId);
     this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    this.focus();
     return true;
   }
 
