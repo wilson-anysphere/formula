@@ -4055,16 +4055,6 @@ mod tests {
     }
 
     #[test]
-    fn print_settings_parser_is_reexported_from_print_settings_module() {
-        let reexport = super::super::parse_biff_sheet_print_settings as usize;
-        let direct = super::super::print_settings::parse_biff_sheet_print_settings as usize;
-        assert_eq!(
-            reexport, direct,
-            "biff::parse_biff_sheet_print_settings should re-export biff::print_settings::parse_biff_sheet_print_settings"
-        );
-    }
-
-    #[test]
     fn sheet_hyperlink_scan_caps_output_and_stops_early() {
         fn internal_hlink_payload(location: &str) -> Vec<u8> {
             let mut data = Vec::new();
