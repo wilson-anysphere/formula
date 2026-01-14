@@ -3884,6 +3884,136 @@ fn is_ident_cont_char(c: char) -> bool {
     ) || (!c.is_ascii() && c.is_alphanumeric())
 }
 
+fn find_workbook_prefix_end(src: &str, start: usize) -> Option<usize> {
+    // External workbook prefixes escape literal `]` characters by doubling them: `]]` -> `]`.
+    //
+    // Workbook names may also contain `[` characters; treat them as plain text (no nesting).
+    let bytes = src.as_bytes();
+    if bytes.get(start) != Some(&b'[') {
+        return None;
+    }
+
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b']' {
+            if bytes.get(i + 1) == Some(&b']') {
+                i += 2;
+                continue;
+            }
+            return Some(i + 1);
+        }
+
+        // Advance by UTF-8 char boundaries so we don't accidentally interpret `[` / `]` bytes
+        // inside a multi-byte sequence as actual bracket characters.
+        let ch = src[i..].chars().next()?;
+        i += ch.len_utf8();
+    }
+
+    None
+}
+
+fn skip_ws(src: &str, mut i: usize) -> usize {
+    while i < src.len() {
+        let Some(ch) = src[i..].chars().next() else {
+            break;
+        };
+        if !ch.is_whitespace() {
+            break;
+        }
+        i += ch.len_utf8();
+    }
+    i
+}
+
+fn scan_quoted_sheet_name(src: &str, start: usize) -> Option<usize> {
+    // Quoted sheet names escape apostrophes by doubling them: `''` -> `'`.
+    let bytes = src.as_bytes();
+    if bytes.get(start) != Some(&b'\'') {
+        return None;
+    }
+
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\'' {
+            if bytes.get(i + 1) == Some(&b'\'') {
+                i += 2;
+                continue;
+            }
+            return Some(i + 1);
+        }
+        let ch = src[i..].chars().next()?;
+        i += ch.len_utf8();
+    }
+    None
+}
+
+fn scan_unquoted_name(src: &str, start: usize) -> Option<usize> {
+    // Match the engine's identifier lexer rules for unquoted sheet names / defined names.
+    let first = src[start..].chars().next()?;
+    if !is_ident_start_char(first) {
+        return None;
+    }
+    let mut i = start + first.len_utf8();
+    while i < src.len() {
+        let ch = src[i..].chars().next()?;
+        if is_ident_cont_char(ch) {
+            i += ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+    Some(i)
+}
+
+fn scan_sheet_name_token(src: &str, start: usize) -> Option<usize> {
+    let i = skip_ws(src, start);
+    if i >= src.len() {
+        return None;
+    }
+    match src[i..].chars().next()? {
+        '\'' => scan_quoted_sheet_name(src, i),
+        _ => scan_unquoted_name(src, i),
+    }
+}
+
+fn find_workbook_prefix_end_if_valid(src: &str, start: usize) -> Option<usize> {
+    let end = find_workbook_prefix_end(src, start)?;
+
+    // Heuristic: only treat this as an external workbook prefix if it is immediately followed by:
+    // - a sheet spec and `!` (e.g. `[Book.xlsx]Sheet1!A1`), OR
+    // - a defined name identifier (e.g. `[Book.xlsx]MyName`).
+    //
+    // This avoids incorrectly treating nested structured references (which *are* nested) as
+    // workbook prefixes while still supporting workbook names that contain `[` characters (Excel
+    // treats `[` as plain text within workbook ids).
+    let i = skip_ws(src, end);
+    if let Some(mut sheet_end) = scan_sheet_name_token(src, i) {
+        sheet_end = skip_ws(src, sheet_end);
+
+        // `[Book.xlsx]Sheet1:Sheet3!A1` (external 3D span)
+        if sheet_end < src.len() && src[sheet_end..].starts_with(':') {
+            sheet_end += 1;
+            sheet_end = skip_ws(src, sheet_end);
+            sheet_end = scan_sheet_name_token(src, sheet_end)?;
+            sheet_end = skip_ws(src, sheet_end);
+        }
+
+        if sheet_end < src.len() && src[sheet_end..].starts_with('!') {
+            return Some(end);
+        }
+    }
+
+    // Workbook-scoped external defined name `[Book.xlsx]MyName`.
+    // Note: defined names are not quoted with `'` in formula text, so we only scan the unquoted
+    // identifier form here.
+    let name_start = skip_ws(src, end);
+    if scan_unquoted_name(src, name_start).is_some() {
+        return Some(end);
+    }
+
+    None
+}
+
 #[derive(Debug)]
 struct FallbackFunctionFrame {
     name: String,
@@ -3996,6 +4126,14 @@ fn scan_fallback_function_context(
 
                 match ch {
                     '[' => {
+                        // Workbook prefixes are *not* nesting, even if the workbook name contains `[` characters
+                        // (e.g. `=[A1[Name.xlsx]Sheet1!A1`). Prefer a non-nesting scan when the bracket segment
+                        // is followed by a sheet name and `!` or a defined name.
+                        if let Some(end) = find_workbook_prefix_end_if_valid(formula_prefix, i) {
+                            i = end;
+                            continue;
+                        }
+
                         bracket_depth += 1;
                         i += ch_len;
                     }
@@ -7208,6 +7346,16 @@ mod tests {
     fn fallback_context_scanner_ignores_commas_in_brackets_with_escaped_close() {
         let ctx = scan_fallback_function_context("=FOO([a]],b],1", ',').unwrap();
         assert_eq!(ctx.name, "FOO");
+        assert_eq!(ctx.arg_index, 1);
+    }
+
+    #[test]
+    fn fallback_context_scanner_ignores_commas_in_external_workbook_prefixes_with_brackets_in_workbook_name() {
+        // Workbook names may contain literal `[` characters, but workbook prefixes are not nested.
+        // The scanner should still treat the comma after the external name reference as the argument
+        // separator.
+        let ctx = scan_fallback_function_context("=SUM([A1[Name.xlsx]MyName,1", ',').unwrap();
+        assert_eq!(ctx.name, "SUM");
         assert_eq!(ctx.arg_index, 1);
     }
 
