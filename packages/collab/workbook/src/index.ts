@@ -227,17 +227,40 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
               const winnerVal = winner.get(key);
               const entryVal = entry.get(key);
 
-              if (winnerVal === undefined) {
-                if (entryVal !== undefined) {
-                  if (key === "drawings") {
-                    const sanitized = sanitizeDrawingsValue(entryVal);
-                    winner.set(key, sanitized ?? cloneYjsValue(entryVal, cloneCtors));
-                  } else {
-                    winner.set(key, cloneYjsValue(entryVal, cloneCtors));
+                if (winnerVal === undefined) {
+                  if (entryVal !== undefined) {
+                    if (key === "drawings") {
+                      const sanitized = sanitizeDrawingsValue(entryVal);
+                      winner.set(key, sanitized ?? cloneYjsValue(entryVal, cloneCtors));
+                    } else if (key === "view") {
+                      const viewMap = getYMap(entryVal);
+                      if (viewMap) {
+                        const cloned = cloneYjsValue(entryVal, cloneCtors);
+                        const clonedMap = getYMap(cloned);
+                        if (clonedMap) {
+                          const drawings = clonedMap.get("drawings");
+                          const sanitized = sanitizeDrawingsValue(drawings);
+                          if (sanitized) clonedMap.set("drawings", sanitized);
+                        }
+                        winner.set(key, cloned);
+                      } else {
+                        const json = yjsValueToJson(entryVal);
+                        if (isRecord(json) && Object.prototype.hasOwnProperty.call(json, "drawings")) {
+                          const sanitized = sanitizeDrawingsJson((json as any).drawings);
+                          winner.set(
+                            key,
+                            sanitized ? { ...json, drawings: sanitized } : json,
+                          );
+                        } else {
+                          winner.set(key, json);
+                        }
+                      }
+                    } else {
+                      winner.set(key, cloneYjsValue(entryVal, cloneCtors));
+                    }
                   }
+                  continue;
                 }
-                continue;
-              }
 
               // For legacy numeric view keys, prefer non-zero values over 0.
               if (key === "frozenRows" || key === "frozenCols") {
