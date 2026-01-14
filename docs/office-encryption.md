@@ -446,15 +446,20 @@ To identify the scheme without full parsing:
   * `minor == 2` and `major ∈ {2,3,4}` ⇒ Standard (CryptoAPI; commonly 3.2)
 
 ### Defaults for *writing* encrypted OOXML (`formula-office-crypto`)
-With the `formula-io/encrypted-workbooks` feature enabled, Formula can decrypt Office-encrypted
-workbooks to an in-memory ZIP package and (optionally) **re-encrypt** on save while preserving
-non-encryption OLE streams/storages (see
-`formula_io::open_workbook_with_password_and_preserved_ole` +
-`OpenedWorkbookWithPreservedOle::save_preserving_encryption`).
+`formula-io` does not automatically preserve Office encryption when you call `save_workbook`: it will
+write a plaintext `.xlsx`/`.xlsm` unless you explicitly opt into re-encryption.
+
+With the `formula-io/encrypted-workbooks` feature enabled, callers that want to preserve Office
+encryption for an encrypted OOXML OLE/CFB container can use:
+
+- `formula_io::open_workbook_with_password_and_preserved_ole(..)` to capture non-encryption OLE
+  streams/storages (e.g. `\u{0005}SummaryInformation`), and
+- `OpenedWorkbookWithPreservedOle::save_preserving_encryption(..)` to re-encrypt the workbook **in
+  memory** and write a new OLE wrapper (with fresh `EncryptionInfo` + `EncryptedPackage` streams).
 
 The underlying writer lives in `crates/formula-office-crypto`
-(`formula_office_crypto::encrypt_package_to_ole`) and is used for round-trip tests. Its defaults
-are the repo’s current “recommended writer settings” unless a compatibility requirement dictates
+(`formula_office_crypto::encrypt_package_to_ole`) and is used for round-trip tests. Its defaults are
+the repo’s current “recommended writer settings” unless a compatibility requirement dictates
 otherwise:
 
 - **Agile (default; `EncryptOptions::default()`):**
@@ -469,12 +474,14 @@ otherwise:
   - Generate a random 16-byte verifier input (`verifierHashInput`).
   - Emit `dataIntegrity` (HMAC) in the XML descriptor (note: not all decrypt paths validate it yet).
 
-- **Standard writer:** supported via `EncryptOptions { scheme: Standard, .. }` with:
-  - SHA-1 (`CALG_SHA1`) and a fixed `spinCount=50,000`
-  - AES-128/192/256 (`CALG_AES_128`/`_192`/`_256`) + **AES-ECB** `EncryptedPackage` (no IV)
-  - `EncryptionInfo` header version **3.2** (commonly accepted by Office tooling)
-  - `EncryptedPackage` is zero-padded to 16-byte blocks, and plaintext is truncated to the 8-byte
-    `orig_size` prefix after decrypting (see `docs/offcrypto-standard-encryptedpackage.md`).
+- **Standard (supported; `scheme=Standard`):**
+  - CryptoAPI **AES** only (key sizes: 128/192/256 via `key_bits`)
+  - `hash_algorithm=SHA1` and `spin_count=50_000` (Standard/CryptoAPI constraints; enforced by the writer)
+  - `EncryptionInfo` header version: `3.2` (commonly accepted by Office tooling)
+  - `EncryptedPackage` encryption: **AES-ECB** (no IV). Ciphertext is block-aligned (pad plaintext to
+    16-byte blocks when encrypting), and plaintext is truncated to the 8-byte `orig_size` prefix
+    after decrypting (see `docs/offcrypto-standard-encryptedpackage.md`).
+  - Note: Standard/CryptoAPI **RC4** writing is not currently supported by this writer.
 
 These defaults are intended for **interoperability** with Excel, not for novel cryptographic
 design.

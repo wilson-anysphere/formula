@@ -617,27 +617,43 @@ back into a generic “encrypted workbook” error:
 
 Opening an encrypted workbook inherently produces a **decrypted in-memory representation**.
 
+### Default save behavior
+
 Unless the caller explicitly re-wraps the output workbook with a new `EncryptionInfo` +
-`EncryptedPackage` (OOXML) (or re-emits BIFF encryption structures for legacy `.xls`), a “save”
+`EncryptedPackage` (OOXML) (or re-emits BIFF encryption structures for legacy `.xls`), a save
 operation will write a **decrypted** file.
 
-Current limitation (core library export paths):
+### Preserving OOXML encryption on save (encrypted `.xlsx`/`.xlsm`)
 
-- **Editing + saving an encrypted workbook may drop encryption** unless/until re-encryption is
-  enabled on save.
+With the `formula-io/encrypted-workbooks` feature enabled, `formula-io` provides an opt-in API to
+round-trip Office-encrypted OOXML **OLE/CFB** containers while preserving extra OLE metadata streams:
 
-Current desktop behavior:
+- Open + capture preserved OLE entries:
+  `open_workbook_with_password_and_preserved_ole(path, Some(password))`
+- Save with encryption preserved:
+  `OpenedWorkbookWithPreservedOle::save_preserving_encryption(out_path, password)`
+
+Notes:
+
+- This path re-wraps the decrypted OOXML package with freshly generated `EncryptionInfo` +
+  `EncryptedPackage` streams using `crates/formula-office-crypto`.
+  - Today, `formula-io` uses `formula_office_crypto::EncryptOptions::default()` for output, which
+    means the saved file is typically re-encrypted as **Agile (4.4)** (even if the input used Standard).
+- The password is required at save time because `OpenedWorkbookWithPreservedOle` does not store it.
+- Encrypted `.xlsb` is still unsupported (`Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb" }`).
+- Legacy `.xls` `FILEPASS` encryption is not preserved on save.
+
+### Desktop app behavior
 
 - The desktop save command supports writing an **encrypted** `.xlsx`/`.xlsm` when a `password` is
-  provided (it encrypts the plaintext ZIP package into an OLE/CFB wrapper via
-  `formula_office_crypto::encrypt_package_to_ole`).
+  provided (it encrypts the plaintext OOXML package into an OLE/CFB wrapper via
+  `formula_office_crypto::encrypt_package_to_ole` / `OpenedWorkbookWithPreservedOle::save_preserving_encryption`).
 - Saving encrypted `.xlsb` is currently rejected (save as `.xlsx` instead).
 
-Mitigations:
+Product/UX mitigations (if the caller is *not* using the preserve-encryption save path):
 
-- UI warning before saving if the origin workbook was encrypted.
-- “Save As” flows that default to a new filename/extension to make the change explicit.
-- Optional support for “re-encrypt on save” once implemented.
+- Warn before saving if the origin workbook was encrypted.
+- Use “Save As” flows that default to a new filename/extension to make the change explicit.
 
 ---
 

@@ -181,7 +181,11 @@ full mapping table and remediation suggestions.
 
 - **Not all encryption schemes are supported.** Files using unknown `EncryptionInfo` versions or
   unsupported legacy `.xls` `FILEPASS` variants will return an “unsupported encryption” error.
-- **Encryption may be dropped on save** unless the caller explicitly re-encrypts the output. In
-  general, Formula operates on plaintext workbook bytes once opened; callers must opt into
-  re-encryption for the output file. See
-  [`docs/21-encrypted-workbooks.md#saving--round-trip-limitations`](./21-encrypted-workbooks.md#saving--round-trip-limitations).
+- **Encryption is not automatically preserved on save.** In general, Formula operates on plaintext
+  workbook bytes once opened; callers must opt into re-encryption for the output file.
+  - For Office-encrypted OOXML inputs, callers that want to preserve encryption should use
+    `open_workbook_with_password_and_preserved_ole(..)` and then
+    `OpenedWorkbookWithPreservedOle::save_preserving_encryption(..)` (requires
+    `formula-io/encrypted-workbooks`).
+  - This re-encrypts using `crates/formula-office-crypto` (currently with Agile defaults). See
+    [`docs/21-encrypted-workbooks.md#saving--round-trip-limitations`](./21-encrypted-workbooks.md#saving--round-trip-limitations).
