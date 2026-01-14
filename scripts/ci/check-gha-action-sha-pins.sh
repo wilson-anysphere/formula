@@ -47,6 +47,11 @@ while IFS= read -r match; do
   line="${match#*:*:}"
 
   value="${line#*uses:}"
+  comment=""
+  if [[ "$value" == *"#"* ]]; then
+    comment="${value#*#}"
+    comment="$(trim "$comment")"
+  fi
   value="${value%%#*}" # strip comment
   value="$(trim "$value")"
   value="${value%$'\r'}"
@@ -84,6 +89,16 @@ while IFS= read -r match; do
     echo "  Found: uses: ${value}" >&2
     echo "  Fix: replace the ref after '@' with an immutable commit SHA, and keep a trailing comment with the original tag (e.g. # v4)." >&2
     fail=1
+  else
+    # Maintainability: require a trailing comment indicating the original tag/branch.
+    # Example:
+    #   uses: actions/checkout@<sha> # v4.3.1
+    if [ -z "$comment" ]; then
+      echo "error: ${file}:${line_no} pins an action to a SHA but is missing a trailing version comment:" >&2
+      echo "  Found: uses: ${value}" >&2
+      echo "  Fix: add a trailing comment with the original upstream ref (e.g. # v4)." >&2
+      fail=1
+    fi
   fi
 done <<<"$(grep -nHE '^[[:space:]]*-?[[:space:]]*uses:' "$workflow" || true)"
 
