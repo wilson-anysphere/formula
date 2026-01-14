@@ -41,6 +41,12 @@ pub struct StreamingXlsxPackage {
     /// - if the part does not exist in the source ZIP (new part), the key is the canonical name
     ///   (`/` separators, no leading `/`).
     part_overrides: HashMap<String, PartOverride>,
+    /// Canonical part names that do not exist in the source archive but have been added via
+    /// [`Self::set_part`].
+    ///
+    /// This is tracked separately so [`Self::part_names`] can produce the effective part-name view
+    /// without cloning all source part names (important for large workbooks).
+    added_part_names: BTreeSet<String>,
 }
 
 impl std::fmt::Debug for StreamingXlsxPackage {
@@ -48,6 +54,7 @@ impl std::fmt::Debug for StreamingXlsxPackage {
         f.debug_struct("StreamingXlsxPackage")
             .field("source_part_names", &self.source_part_names)
             .field("part_overrides", &self.part_overrides)
+            .field("added_part_names", &self.added_part_names)
             .finish()
     }
 }
@@ -92,6 +99,7 @@ impl StreamingXlsxPackage {
             source_part_name_to_zip_key,
             source_part_name_to_index,
             part_overrides: HashMap::new(),
+            added_part_names: BTreeSet::new(),
         })
     }
 
@@ -110,29 +118,41 @@ impl StreamingXlsxPackage {
     /// [`PartOverride::Add`].
     pub fn set_part(&mut self, name: &str, bytes: Vec<u8>) {
         let canonical = canonical_part_name(name);
+        let exists_in_source = self.source_part_names.contains(&canonical);
         let override_key = self
             .source_part_name_to_zip_key
             .get(&canonical)
             .cloned()
             .unwrap_or_else(|| canonical.clone());
-        let op = if self.source_part_names.contains(&canonical) {
+        let op = if exists_in_source {
             PartOverride::Replace(bytes)
         } else {
             PartOverride::Add(bytes)
         };
         self.part_overrides.insert(override_key, op);
+        if !exists_in_source {
+            self.added_part_names.insert(canonical);
+        } else {
+            // Defensive: if callers previously added a part before we indexed the source correctly,
+            // ensure we don't keep treating it as "added" once we know it's actually a source part.
+            self.added_part_names.remove(&canonical);
+        }
     }
 
     /// Remove a part from the output package.
     pub fn remove_part(&mut self, name: &str) {
         let canonical = canonical_part_name(name);
+        let exists_in_source = self.source_part_names.contains(&canonical);
         let override_key = self
             .source_part_name_to_zip_key
             .get(&canonical)
             .cloned()
-            .unwrap_or(canonical);
+            .unwrap_or_else(|| canonical.clone());
         self.part_overrides
             .insert(override_key, PartOverride::Remove);
+        if !exists_in_source {
+            self.added_part_names.remove(&canonical);
+        }
     }
 
     /// Access the raw part override map (useful for debugging/testing).
@@ -143,8 +163,12 @@ impl StreamingXlsxPackage {
     /// Iterate the effective part names in the package (source parts plus overrides).
     ///
     /// Part names are returned in canonical form (no leading `/`, `/` separators).
-    pub fn part_names(&self) -> impl Iterator<Item = String> {
-        effective_part_names(&self.source_part_names, &self.part_overrides).into_iter()
+    pub fn part_names(&self) -> impl Iterator<Item = &str> + '_ {
+        self.source_part_names
+            .iter()
+            .filter(|name| !self.is_source_part_removed(name.as_str()))
+            .map(String::as_str)
+            .chain(self.added_part_names.iter().map(String::as_str))
     }
 
     /// Detect whether the effective package contains any macro-capable content.
@@ -158,8 +182,7 @@ impl StreamingXlsxPackage {
         };
 
         for name in self.part_names() {
-            let name = name.strip_prefix('/').unwrap_or(name.as_str());
-            let name = name.replace('\\', "/");
+            let name = name.strip_prefix('/').unwrap_or(name);
             if name == "xl/vbaProject.bin" {
                 presence.has_vba = true;
             }
@@ -256,25 +279,18 @@ impl StreamingXlsxPackage {
         )?;
         Ok(())
     }
-}
 
-fn effective_part_names(
-    source_part_names: &BTreeSet<String>,
-    part_overrides: &HashMap<String, PartOverride>,
-) -> BTreeSet<String> {
-    let mut out = source_part_names.clone();
-    for (name, op) in part_overrides {
-        let canonical_name = canonical_part_name(name);
-        match op {
-            PartOverride::Remove => {
-                out.remove(&canonical_name);
-            }
-            PartOverride::Replace(_) | PartOverride::Add(_) => {
-                out.insert(canonical_name);
-            }
-        }
+    fn is_source_part_removed(&self, canonical_name: &str) -> bool {
+        let override_key = self
+            .source_part_name_to_zip_key
+            .get(canonical_name)
+            .map(String::as_str)
+            .unwrap_or(canonical_name);
+        matches!(
+            self.part_overrides.get(override_key),
+            Some(PartOverride::Remove)
+        )
     }
-    out
 }
 
 fn canonical_part_name(name: &str) -> String {

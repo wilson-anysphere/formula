@@ -184,9 +184,9 @@ fn streaming_package_normalizes_backslashes_and_leading_slash() {
         Some(b"old".as_slice())
     );
     // Canonical part names should be surfaced through part_names().
-    let names: Vec<String> = pkg.part_names().collect();
-    assert!(names.iter().any(|n| n == "xl/workbook.xml"));
-    assert!(names.iter().any(|n| n == "xl/keep.txt"));
+    let names: Vec<&str> = pkg.part_names().collect();
+    assert!(names.contains(&"xl/workbook.xml"));
+    assert!(names.contains(&"xl/keep.txt"));
 
     pkg.set_part("/xl/workbook.xml", b"new".to_vec());
     pkg.remove_part("xl/keep.txt");
