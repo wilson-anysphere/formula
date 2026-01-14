@@ -145,7 +145,7 @@ test("Formulas → Formula Auditing ribbon commands are registered in CommandReg
   assert.doesNotMatch(
     main,
     /\bcase\s+["']view\.toggleShowFormulas["']:/,
-    "Expected main.ts to not handle view.toggleShowFormulas via switch case (should be dispatched by createRibbonActionsFromCommands)",
+    "Expected main.ts to not handle view.toggleShowFormulas via switch case (should be routed via the ribbon command router)",
   );
 
   assert.match(

@@ -143,13 +143,13 @@ test("Desktop main.ts does not handle legacy Freeze Panes ribbon ids directly", 
     assert.doesNotMatch(main, new RegExp(escapeRegExp(id)), `Expected main.ts to not mention legacy id ${id}`);
   }
 
-  // Canonical ids should be dispatched via the CommandRegistry bridge (`createRibbonActionsFromCommands`),
+  // Canonical ids should be routed via the ribbon command router (CommandRegistry bridge),
   // not handled by `handleRibbonCommand` switch cases.
   for (const id of CANONICAL_FREEZE_PANES_IDS) {
     assert.doesNotMatch(
       main,
       new RegExp(`\\bcase\\s+[\"']${escapeRegExp(id)}[\"']:`),
-      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+      `Expected main.ts to not handle ${id} via switch case (should be routed via the ribbon command router)`,
     );
   }
 
