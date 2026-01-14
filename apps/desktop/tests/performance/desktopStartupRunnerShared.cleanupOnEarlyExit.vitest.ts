@@ -50,7 +50,11 @@ describe('desktopStartupRunnerShared cleanup on early exit', () => {
     try {
       const metrics = await runOnce({
         binPath: process.execPath,
-        timeoutMs: 5000,
+        // This harness runs inside the full monorepo Vitest suite where CPU contention can be
+        // high (Rust/WASM builds, multiple Vitest workers). Keep this generous to avoid flaky
+        // timeouts in CI/sandboxes—this "desktop" process is just a tiny Node script and
+        // normally reports metrics almost immediately.
+        timeoutMs: 15_000,
         xvfb: false,
         profileDir,
         argv: ['-e', code],
