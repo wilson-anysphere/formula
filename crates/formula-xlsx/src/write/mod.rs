@@ -5924,11 +5924,15 @@ fn cols_xml_props_from_sheet(
         if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
             continue;
         }
+        // Preserve `style="0"` when the workbook's xf index 0 maps to a non-default style
+        // (some producers place custom xfs at index 0).
+        //
+        // When xf 0 truly represents the default style, the style_id will be 0 and filtered out
+        // above, so we won't emit a redundant `style="0"` in that case.
         let style_xf = props
             .style_id
             .filter(|style_id| *style_id != 0)
-            .and_then(|style_id| style_to_xf.get(&style_id).copied())
-            .filter(|xf| *xf != 0);
+            .and_then(|style_id| style_to_xf.get(&style_id).copied());
         col_xml_props.insert(
             col_1,
             ColXmlProps {
