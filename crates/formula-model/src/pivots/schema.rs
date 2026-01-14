@@ -621,4 +621,33 @@ mod tests {
         assert_eq!(measure.display_string(), "[Total Sales]");
         assert_eq!(measure.to_string(), "[Total Sales]");
     }
+
+    #[test]
+    fn grand_totals_defaults_missing_fields_to_true() {
+        let decoded: GrandTotals = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(
+            decoded,
+            GrandTotals {
+                rows: true,
+                columns: true
+            }
+        );
+
+        let decoded: GrandTotals =
+            serde_json::from_value(serde_json::json!({ "rows": false })).unwrap();
+        assert_eq!(decoded.rows, false);
+        assert_eq!(decoded.columns, true);
+
+        let decoded: GrandTotals =
+            serde_json::from_value(serde_json::json!({ "columns": false })).unwrap();
+        assert_eq!(decoded.rows, true);
+        assert_eq!(decoded.columns, false);
+
+        // Ensure nested defaults work when decoding a pivot config.
+        let decoded: PivotConfig =
+            serde_json::from_value(serde_json::json!({ "grandTotals": { "rows": false } }))
+                .unwrap();
+        assert_eq!(decoded.grand_totals.rows, false);
+        assert_eq!(decoded.grand_totals.columns, true);
+    }
 }
