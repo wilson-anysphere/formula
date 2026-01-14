@@ -4,6 +4,7 @@ use crate::functions::array_lift;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
+use std::collections::HashSet;
 
 const VAR_ARGS: usize = 255;
 
@@ -51,10 +52,18 @@ fn concat_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             }
             ArgValue::ReferenceUnion(ranges) => {
+                // Excel reference unions behave like set union: overlapping cells should only be
+                // visited once. Preserve stable ordering by iterating ranges in `eval_arg` order
+                // and skipping already-seen `(sheet, cell)` pairs.
+                let mut seen: HashSet<(crate::functions::SheetId, crate::eval::CellAddr)> =
+                    HashSet::new();
                 for r in ranges {
                     let r = r.normalized();
                     ctx.record_reference(&r);
                     for addr in r.iter_cells() {
+                        if !seen.insert((r.sheet_id.clone(), addr)) {
+                            continue;
+                        }
                         let v = ctx.get_cell_value(&r.sheet_id, addr);
                         match v.coerce_to_string_with_ctx(ctx) {
                             Ok(s) => out.push_str(&s),

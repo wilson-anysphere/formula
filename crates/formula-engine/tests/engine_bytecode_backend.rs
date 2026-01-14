@@ -6898,6 +6898,49 @@ fn bytecode_backend_reference_union_sum_error_precedence_matches_ast() {
 }
 
 #[test]
+fn bytecode_backend_reference_union_concat_dedups_overlaps_and_preserves_row_major_order() {
+    let mut engine = Engine::new();
+
+    // First union area: C1:C10 (vertical strip).
+    for row in 1..=10 {
+        engine
+            .set_cell_value("Sheet1", &format!("C{row}"), row as f64)
+            .unwrap();
+    }
+
+    // Second union area: A2:D3 overlaps C2:C3 with the first area. Populate the unique cells with
+    // distinct text so both overlap-dedup and row-major visitation order are observable.
+    engine.set_cell_value("Sheet1", "A2", "A2").unwrap();
+    engine.set_cell_value("Sheet1", "B2", "B2").unwrap();
+    engine.set_cell_value("Sheet1", "D2", "D2").unwrap();
+    engine.set_cell_value("Sheet1", "A3", "A3").unwrap();
+    engine.set_cell_value("Sheet1", "B3", "B3").unwrap();
+    engine.set_cell_value("Sheet1", "D3", "D3").unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "E11", "=CONCAT((C1:C10,A2:D3))")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected CONCAT + union formula to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=CONCAT((C1:C10,A2:D3))", "E11");
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E11"),
+        Value::Text("12345678910A2B2D2A3B3D3".into())
+    );
+}
+
+#[test]
 fn bytecode_backend_reference_algebra_accepts_let_single_cell_reference_locals() {
     let mut engine = Engine::new();
 

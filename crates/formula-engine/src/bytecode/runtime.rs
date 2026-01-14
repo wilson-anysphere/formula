@@ -5831,6 +5831,13 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                         .then_with(|| a_range.col_end.cmp(&b_range.col_end))
                 });
 
+                // Excel reference unions behave like set union: overlapping cells should only be
+                // visited once. For multi-area references on the *same* sheet (reference unions),
+                // we deduplicate by tracking visited `(sheet, cell)` pairs while scanning each
+                // area row-major. (This also preserves AST-like ordering for cases where overlap
+                // removal would yield disjoint rectangles that must be interleaved row-by-row.)
+                let mut seen: HashSet<(SheetId, CellCoord)> = HashSet::new();
+
                 for (area, range) in areas {
                     if !range_in_bounds_on_sheet(grid, &area.sheet, range) {
                         return Value::Error(ErrorKind::Ref);
@@ -5851,6 +5858,9 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
                     for row in range.row_start..=range.row_end {
                         for col in range.col_start..=range.col_end {
+                            if !seen.insert((area.sheet.clone(), CellCoord { row, col })) {
+                                continue;
+                            }
                             let v = grid.get_value_on_sheet(&area.sheet, CellCoord { row, col });
                             let s = match coerce_to_cow_str(&v) {
                                 Ok(s) => s,
