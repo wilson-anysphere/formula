@@ -178,6 +178,23 @@ def _validate_against_function_catalog(payload: dict[str, Any], *, allow_volatil
                     continue
                 used_input_formulas.update(_extract_function_names(cell_input.get("formula")))
 
+    used_any = used_case_formulas | used_input_formulas
+
+    # Allow a small set of intentionally-unknown function names used to exercise error paths
+    # (e.g. "#NAME?"/unknown-function behavior). If additional unknown-function cases are added,
+    # update this allowlist explicitly so we don't silently accept typos.
+    allowed_unknown = {"NO_SUCH_FUNCTION"}
+    unknown_used = sorted(used_any.difference(catalog_nonvolatile | catalog_volatile | allowed_unknown))
+    if unknown_used:
+        preview = ", ".join(unknown_used[:25])
+        suffix = "" if len(unknown_used) <= 25 else f" (+{len(unknown_used) - 25} more)"
+        raise SystemExit(
+            "Oracle corpus references function names that are not present in shared/functionCatalog.json. "
+            "If this is intentional (e.g. an unknown-function error case), add it to the allowlist in "
+            "tools/excel-oracle/generate_cases.py::_validate_against_function_catalog. "
+            f"Unknown ({len(unknown_used)}): {preview}{suffix}"
+        )
+
     missing_nonvolatile = sorted(catalog_nonvolatile.difference(used_case_formulas))
     if missing_nonvolatile:
         preview = ", ".join(missing_nonvolatile[:25])
@@ -188,7 +205,6 @@ def _validate_against_function_catalog(payload: dict[str, Any], *, allow_volatil
             f"Missing ({len(missing_nonvolatile)}): {preview}{suffix}"
         )
 
-    used_any = used_case_formulas | used_input_formulas
     present_volatile = sorted(catalog_volatile.intersection(used_any))
     if present_volatile and not allow_volatile:
         raise SystemExit(
