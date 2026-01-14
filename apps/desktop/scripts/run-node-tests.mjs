@@ -576,6 +576,7 @@ async function filterExternalDependencyTests(files, opts) {
   // Support `require.resolve("pkg")` and `require.resolve("pkg", { ... })` (options arg).
   const requireResolveRe = /\brequire\.resolve\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
   const createRequireAssignRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*createRequire\s*\(/g;
+  const importMetaResolveRe = /\bimport\.meta\.resolve\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
   // Some modules are loaded indirectly via Worker thread entrypoints:
   //   const WORKER_URL = new URL("./sandbox-worker.node.js", import.meta.url)
   // These should be treated as dependencies when deciding which node:test files can run
@@ -919,6 +920,9 @@ async function filterExternalDependencyTests(files, opts) {
       for (const match of text.matchAll(aliasRequireCallRe)) specifiers.push(match[1]);
       for (const match of text.matchAll(aliasRequireResolveRe)) specifiers.push(match[1]);
     }
+    for (const match of text.matchAll(importMetaResolveRe)) {
+      specifiers.push(match[1]);
+    }
     for (const match of text.matchAll(importMetaUrlRe)) {
       const specifier = match[1];
       if (!specifier) continue;
@@ -1092,6 +1096,7 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
   const requireRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
   const requireResolveRe = /\brequire\s*\.\s*resolve\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
   const createRequireAssignRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*createRequire\s*\(/g;
+  const importMetaResolveRe = /\bimport\.meta\.resolve\(\s*["']([^"']+)["']\s*(?:\)|,)/g;
   const candidateExtensions = opts.canExecuteTsx
     ? [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"]
     : [".js", ".ts", ".mjs", ".cjs", ".jsx", ".json"];
@@ -1524,6 +1529,10 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
       if (specifier) imports.push({ specifier, typeOnly: false });
     }
     for (const match of text.matchAll(requireResolveRe)) {
+      const specifier = match[1];
+      if (specifier) imports.push({ specifier, typeOnly: false });
+    }
+    for (const match of text.matchAll(importMetaResolveRe)) {
       const specifier = match[1];
       if (specifier) imports.push({ specifier, typeOnly: false });
     }
