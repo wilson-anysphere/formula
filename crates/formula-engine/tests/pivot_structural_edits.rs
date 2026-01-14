@@ -264,6 +264,58 @@ fn insert_rows_shifts_pivot_registry_when_edit_uses_display_name_and_sheet_has_s
 }
 
 #[test]
+fn insert_cells_shift_down_shifts_pivot_registry_when_edit_uses_display_name_and_sheet_has_stable_key(
+) {
+    let mut engine = Engine::new();
+    seed_sales_data_on(&mut engine, "sheet1_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
+
+    let pivot_id = engine.add_pivot_table(PivotTableDefinition {
+        id: 0,
+        name: "Sales by Region".to_string(),
+        source: PivotSource::Range {
+            sheet: "Sheet1".to_string(),
+            range: Some(range("A1:B5")),
+        },
+        destination: PivotDestination {
+            sheet: "Sheet1".to_string(),
+            cell: cell("D1"),
+        },
+        config: sum_sales_by_region_config(),
+        apply_number_formats: true,
+        last_output_range: None,
+        needs_refresh: true,
+    });
+
+    engine.refresh_pivot_table(pivot_id).unwrap();
+
+    let registry_id = format!("engine-pivot-{pivot_id}");
+    let entry = engine
+        .pivot_registry_entries()
+        .iter()
+        .find(|e| e.pivot_id == registry_id)
+        .expect("expected pivot registry entry");
+    assert_eq!(entry.destination.start.to_a1(), "D1");
+    assert_eq!(entry.destination.end.to_a1(), "E4");
+
+    // Range-map edit that shifts the first row down across columns that include the pivot output.
+    engine
+        .apply_operation(EditOp::InsertCellsShiftDown {
+            sheet: "Sheet1".to_string(),
+            range: range("A1:E1"),
+        })
+        .unwrap();
+
+    let entry = engine
+        .pivot_registry_entries()
+        .iter()
+        .find(|e| e.pivot_id == registry_id)
+        .expect("expected pivot registry entry after edit");
+    assert_eq!(entry.destination.start.to_a1(), "D2");
+    assert_eq!(entry.destination.end.to_a1(), "E5");
+}
+
+#[test]
 fn insert_rows_matches_sheet_names_case_insensitively_for_unicode_text() {
     let mut engine = Engine::new();
 
