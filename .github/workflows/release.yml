@@ -1275,14 +1275,28 @@ jobs:
             echo "::endgroup::"
 
             # Ensure key runtime deps are declared (at least: WebKitGTK + GTK + AppIndicator).
-            depends_line="$(grep -i '^ Depends:' dpkg-info.txt | head -n 1 || true)"
-            if [[ -z "${depends_line}" ]]; then
-              echo "::error::Could not find 'Depends:' in dpkg -I output for ${deb}" >&2
+            depends="$(awk '
+              BEGIN { in_dep=0; out="" }
+              /^[[:space:]]*Depends:/ {
+                in_dep=1
+                sub(/^[[:space:]]*Depends:[[:space:]]*/, "", $0)
+                out=$0
+                next
+              }
+              in_dep==1 {
+                if ($0 ~ /^[[:space:]]+[A-Za-z0-9-]+:/) { exit }
+                sub(/^[[:space:]]+/, "", $0)
+                if (out == "") out=$0; else out=out " " $0
+              }
+              END { print out }
+            ' dpkg-info.txt)"
+            if [[ -z "${depends// }" ]]; then
+              echo "::error::Could not parse Depends from dpkg -I output for ${deb}" >&2
               exit 1
             fi
-            echo "dpkg Depends: ${depends_line# Depends: }"
+            echo "dpkg Depends: ${depends}"
             for needle in "webkit2gtk" "libgtk-3" "appindicator"; do
-              if ! grep -qi "$needle" <<<"${depends_line}"; then
+              if ! grep -qi "$needle" <<<"${depends}"; then
                 echo "::error::Expected runtime dependency '$needle' missing from dpkg Depends for ${deb}" >&2
                 exit 1
               fi
