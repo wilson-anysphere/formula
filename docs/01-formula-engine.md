@@ -359,6 +359,9 @@ restrictions (notably: no `]`), so this split is unambiguous.
     available, external 3D spans (e.g. `[Book.xlsx]Sheet1:Sheet3!A1`) are expanded for invalidation
     so `mark_external_sheet_dirty("[Book.xlsx]Sheet2")` will refresh dependents. Without `sheet_order`
     (or when span endpoints are missing), invalidating the whole workbook may still be required.
+  * External structured refs (table refs) are currently treated as volatile regardless of
+    `set_external_refs_volatile`, since external table metadata is not represented in the explicit
+    invalidation index yet.
 * **Auditing APIs:** `Engine::precedents(...)` reports external single-sheet references
   (`[Book.xlsx]Sheet1!A1`).
   * For external-workbook 3D spans (`[Book.xlsx]Sheet1:Sheet3!A1`), `precedents(...)` expands into
@@ -629,6 +632,9 @@ Hosts can opt into explicit invalidation semantics by disabling external volatil
 
 - `Engine::mark_external_sheet_dirty("[Book.xlsx]Sheet1")` (canonical external sheet key)
 - `Engine::mark_external_workbook_dirty("Book.xlsx")` (workbook id inside `[...]`)
+
+Note: external structured refs (table refs) currently remain volatile regardless of
+`set_external_refs_volatile`, and do not participate in explicit invalidation.
 
 ## Dependency Graph
 
