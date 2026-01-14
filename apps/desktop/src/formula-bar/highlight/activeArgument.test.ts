@@ -182,4 +182,19 @@ describe("getActiveArgumentSpan", () => {
       argText: "",
     });
   });
+
+  it("treats escaped closing brackets inside structured refs as plain text (does not end bracket context)", () => {
+    // Regression: column names may contain escaped `]` (written as `]]`). When the escaped
+    // `]` is followed by function-like text, we must not treat it as a nested call.
+    const structuredRef = "Table1[[#All],[A]]SUM(1,2)]]";
+    const formula = `=IF(${structuredRef}, 1, 2)`;
+    const cursorInsideNestedFunctionText = formula.indexOf("SUM(1,2)") + "SUM(".length; // on the `1`
+
+    expect(getActiveArgumentSpan(formula, cursorInsideNestedFunctionText)).toEqual({
+      fnName: "IF",
+      argIndex: 0,
+      argText: structuredRef,
+      span: { start: formula.indexOf(structuredRef), end: formula.indexOf(structuredRef) + structuredRef.length },
+    });
+  });
 });
