@@ -1439,17 +1439,12 @@ export class FormulaBarView {
 
     if (
       (this.#isComposing || e.isComposing) &&
-      e.key === "Tab"
-    ) {
-      // While IME composition is active, do not commit/accept suggestions on Tab,
-      // but still prevent browser focus traversal out of the formula bar.
-      e.preventDefault();
-      return;
-    }
-
-    if (
-      (this.#isComposing || e.isComposing) &&
-      (e.key === "Enter" || e.key === "Escape" || e.key === "F4" || e.key === "ArrowDown" || e.key === "ArrowUp")
+      (e.key === "Enter" ||
+        e.key === "Escape" ||
+        e.key === "Tab" ||
+        e.key === "F4" ||
+        e.key === "ArrowDown" ||
+        e.key === "ArrowUp")
     ) {
       return;
     }
