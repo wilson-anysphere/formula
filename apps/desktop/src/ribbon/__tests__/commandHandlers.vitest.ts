@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../document/documentController.js";
 import { handleRibbonCommand, type RibbonCommandHandlerContext } from "../commandHandlers.js";
@@ -81,5 +81,19 @@ describe("handleRibbonCommand", () => {
 
     expect(handleRibbonCommand(ctx, "home.alignment.mergeCenter.unmergeCells")).toBe(true);
     expect(doc.getMergedRanges("Sheet1")).toEqual([]);
+  });
+
+  it("routes sort commands through ctx.sortSelection", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+    const sortSelection = vi.fn();
+    ctx.sortSelection = sortSelection;
+
+    expect(handleRibbonCommand(ctx, "data.sortFilter.sortAtoZ")).toBe(true);
+    expect(sortSelection).toHaveBeenCalledWith({ order: "ascending" });
+
+    sortSelection.mockClear();
+    expect(handleRibbonCommand(ctx, "data.sortFilter.sortZtoA")).toBe(true);
+    expect(sortSelection).toHaveBeenCalledWith({ order: "descending" });
   });
 });

@@ -49,7 +49,10 @@ import { computeRibbonDisabledByIdFromCommandRegistry } from "./ribbon/ribbonCom
 import { getRibbonUiStateSnapshot, setRibbonUiState } from "./ribbon/ribbonUiState.js";
 import { deriveRibbonAriaKeyShortcutsById, deriveRibbonShortcutById } from "./ribbon/ribbonShortcuts.js";
 import { MAX_AXIS_RESIZE_INDICES, promptAndApplyAxisSizing, selectedColIndices, selectedRowIndices } from "./ribbon/axisSizing.js";
-import { handleRibbonCommand as handleRibbonFormattingCommand } from "./ribbon/commandHandlers.js";
+import {
+  handleRibbonCommand as handleRibbonFormattingCommand,
+  handleRibbonToggle as handleRibbonFormattingToggle,
+} from "./ribbon/commandHandlers.js";
 import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "./ribbon/ribbonEditingDisabledById.js";
 import { resolveHomeEditingClearCommandTarget } from "./ribbon/homeEditingClearCommandRouting.js";
 
@@ -8124,6 +8127,13 @@ const ribbonCommandHandlersCtx = {
 const ribbonActions = createRibbonActionsFromCommands({
   commandRegistry,
   onCommandError: onRibbonCommandError,
+  onUnknownToggle: (commandId, pressed) => {
+    if (handleRibbonFormattingToggle(ribbonCommandHandlersCtx, commandId, pressed)) return;
+    // `createRibbonActionsFromCommands` suppresses the follow-up `onCommand` callback whenever
+    // `onUnknownToggle` is provided, so forward unhandled toggle ids to the normal command
+    // dispatch path to preserve existing behavior (toasts + `main.ts` fallbacks).
+    handleRibbonCommand(commandId);
+  },
   commandOverrides: {
     // File tab ribbon schema uses `file.*` ids for UI compatibility. Route them to the
     // canonical `workbench.*` / `view.*` / `pageLayout.*` commands so ribbon, keybindings,
