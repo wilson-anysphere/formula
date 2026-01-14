@@ -63,6 +63,14 @@ test("Home → Cells ribbon commands are registered in CommandRegistry and not h
       `Did not expect ribbonCommandRegistryDisabling.ts to exempt implemented command id ${id}`,
     );
   }
+  // Organize Sheets should remain unavailable in read-only sessions (viewers/commenters).
+  const organizeIdx = commands.indexOf('"home.cells.format.organizeSheets"');
+  assert.notEqual(organizeIdx, -1, "Expected registerDesktopCommands.ts to include Organize Sheets command registration");
+  assert.match(
+    commands.slice(organizeIdx, organizeIdx + 400),
+    /\bisReadOnly\(\)/,
+    "Expected Organize Sheets command handler to guard read-only mode",
+  );
 
   const insertDeleteCellsIds = ["home.cells.insert.insertCells", "home.cells.delete.deleteCells"];
   for (const id of insertDeleteCellsIds) {

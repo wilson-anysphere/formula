@@ -645,7 +645,7 @@ export function registerDesktopCommands(params: {
     "home.cells.format.organizeSheets",
     "Organize Sheets…",
     async () => {
-      if (isEditingFn()) return;
+      if (isEditingFn() || isReadOnly()) return;
       const handler = sheetStructureHandlers?.openOrganizeSheets;
       if (!handler) {
         safeShowToast("Organize Sheets is not available in this environment.", "warning");
