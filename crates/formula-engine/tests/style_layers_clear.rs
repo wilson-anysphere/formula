@@ -138,4 +138,45 @@ fn sheet_default_style_persists_across_structural_edits() {
         .expect("delete cells shift up");
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.0));
+
+    // Non-structural edit ops should also preserve the sheet default style layer.
+    engine
+        .apply_operation(EditOp::MoveRange {
+            sheet: "Sheet1".to_string(),
+            src: a1,
+            dst_top_left: CellRef::new(9, 0), // A10
+        })
+        .expect("move range");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A10"), Value::Number(0.0));
+
+    engine
+        .apply_operation(EditOp::MoveRange {
+            sheet: "Sheet1".to_string(),
+            src: Range::new(CellRef::new(9, 0), CellRef::new(9, 0)),
+            dst_top_left: CellRef::new(0, 0),
+        })
+        .expect("move range back");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.0));
+
+    engine
+        .apply_operation(EditOp::CopyRange {
+            sheet: "Sheet1".to_string(),
+            src: a1,
+            dst_top_left: CellRef::new(1, 0), // A2
+        })
+        .expect("copy range");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(0.0));
+
+    engine
+        .apply_operation(EditOp::Fill {
+            sheet: "Sheet1".to_string(),
+            src: a1,
+            dst: Range::new(CellRef::new(0, 0), CellRef::new(0, 2)), // A1:C1
+        })
+        .expect("fill");
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(0.0));
 }
