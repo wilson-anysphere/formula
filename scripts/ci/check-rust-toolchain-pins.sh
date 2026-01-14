@@ -44,7 +44,11 @@ fail=0
 #   2 = error
 set +e
 # Scan all tracked workflow files (supports both `.yml` and `.yaml`).
-matches="$(git grep -n "uses: dtolnay/rust-toolchain@" -- .github/workflows 2>/dev/null)"
+# Match both quoted and unquoted YAML action refs:
+#   uses: dtolnay/rust-toolchain@...
+#   uses: "dtolnay/rust-toolchain@..."
+#   uses: 'dtolnay/rust-toolchain@...'
+matches="$(git grep -n -E "uses:[[:space:]]*['\"]?dtolnay/rust-toolchain@" -- .github/workflows 2>/dev/null)"
 status=$?
 set -e
 
