@@ -287,6 +287,29 @@ Therefore:
 
 ## 4) How to use
 
+### Choosing a store (`createDefaultAIAuditStore`)
+
+Most hosts should use the default store factory instead of constructing a backend directly:
+
+```ts
+import { createDefaultAIAuditStore } from "@formula/ai-audit";
+
+const store = await createDefaultAIAuditStore({
+  max_entries: 10_000,
+  max_age_ms: 30 * 24 * 60 * 60 * 1000,
+  // `bounded` is enabled by default (per-entry size cap defense-in-depth).
+  // bounded: false,
+  // prefer: "indexeddb" | "localstorage" | "memory",
+});
+```
+
+Default selection behavior:
+
+- **Browser-like runtimes** (`window` exists): `IndexedDbAIAuditStore` → `LocalStorageAIAuditStore` → `MemoryAIAuditStore`.
+- **Node runtimes** (no `window`): defaults to `MemoryAIAuditStore` (to avoid pulling in `sql.js` unless explicitly requested).
+  - Use the Node entrypoint (`@formula/ai-audit/node`) with `prefer: "sqlite"` to opt into persistence.
+  - Note: `prefer: "sqlite"` is not supported in the default/browser entrypoint.
+
 ### Recording a run with `AIAuditRecorder`
 
 `AIAuditRecorder` builds an `AIAuditEntry` incrementally and writes it once at the end.
