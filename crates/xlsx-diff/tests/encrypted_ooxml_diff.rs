@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 const PASSWORD: &str = "password";
+const UNICODE_PASSWORD: &str = "pässwörd";
+const UNICODE_PASSWORD_WITH_EMOJI: &str = "pässwörd🔒";
 
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -67,10 +69,32 @@ fn diff_agile_fixture_against_plain_no_differences() -> Result<()> {
 #[test]
 fn diff_standard_fixture_against_plain_no_differences() -> Result<()> {
     let plain = fixture_path("plaintext.xlsx");
-    for encrypted in ["standard.xlsx", "standard-4.2.xlsx"] {
+    for encrypted in ["standard.xlsx", "standard-4.2.xlsx", "standard-rc4.xlsx"] {
         let encrypted = fixture_path(encrypted);
         assert_diff_empty(&plain, &encrypted, None, Some(PASSWORD))?;
     }
+    Ok(())
+}
+
+#[test]
+fn diff_unicode_password_fixtures_against_plain_no_differences() -> Result<()> {
+    let plain = fixture_path("plaintext.xlsx");
+
+    let agile_unicode = fixture_path("agile-unicode.xlsx");
+    assert_diff_empty(&plain, &agile_unicode, None, Some(UNICODE_PASSWORD))?;
+
+    let standard_unicode = fixture_path("standard-unicode.xlsx");
+    assert_diff_empty(&plain, &standard_unicode, None, Some(UNICODE_PASSWORD_WITH_EMOJI))?;
+
+    let excel_plain = fixture_path("plaintext-excel.xlsx");
+    let agile_unicode_excel = fixture_path("agile-unicode-excel.xlsx");
+    assert_diff_empty(
+        &excel_plain,
+        &agile_unicode_excel,
+        None,
+        Some(UNICODE_PASSWORD_WITH_EMOJI),
+    )?;
+
     Ok(())
 }
 
@@ -110,10 +134,9 @@ fn diff_large_fixtures_against_plain_large_no_differences() -> Result<()> {
     let plain = fixture_path("plaintext-large.xlsx");
 
     // `agile-large.xlsx` exercises multi-segment (4096-byte) decryption.
-    // Note: `standard-large.xlsx` is covered by `crates/formula-xlsx`’s encrypted fixture tests.
-    // `xlsx-diff` decrypts encrypted inputs via `formula-office-crypto` and currently only uses the
-    // Agile large fixture here.
-    for encrypted in ["agile-large.xlsx"] {
+    // Include the Standard fixture as well to cover larger-package CryptoAPI decryption through the
+    // `xlsx-diff` tool's end-to-end path.
+    for encrypted in ["agile-large.xlsx", "standard-large.xlsx"] {
         let encrypted = fixture_path(encrypted);
         assert_diff_empty(&plain, &encrypted, None, Some(PASSWORD))?;
     }
