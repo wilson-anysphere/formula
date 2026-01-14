@@ -3048,20 +3048,44 @@ fn format_external_workbook_name(workbook: &str) -> String {
     // rendering we want a best-effort workbook *basename*.
     //
     // Some producers may also already include brackets; normalize to a single set.
+    //
+    // Workbook names may contain literal `[` characters (non-nesting), and literal `]` characters
+    // must be escaped in Excel formula text as `]]`. Ensure the formatted workbook prefix is both
+    // parseable and round-trips through our formula engine.
     let without_nuls = workbook.replace('\0', "");
-    let basename = without_nuls
+    let trimmed_full = without_nuls.trim();
+    let has_wrapper_brackets = trimmed_full.starts_with('[') && trimmed_full.ends_with(']');
+
+    let basename = trimmed_full
         .rsplit(['\\', '/'])
         .next()
-        .unwrap_or(&without_nuls);
-    let trimmed = basename.trim();
+        .unwrap_or(trimmed_full);
+    let mut inner = basename.trim();
+
     // Be permissive about bracket placement: we sometimes see values like:
     // - "[Book.xlsx]"
     // - "Book.xlsx"
     // - "[C:\\path\\Book.xlsx]" (bracketed full path; the `[` is lost when taking the basename)
-    let mut inner = trimmed;
-    inner = inner.strip_prefix('[').unwrap_or(inner);
-    inner = inner.strip_suffix(']').unwrap_or(inner);
-    format!("[{inner}]")
+    //
+    // Only strip a leading/trailing bracket when the *full* input appears to be wrapped, so we
+    // don't drop legitimate `[` / `]` characters that are part of the workbook name.
+    if has_wrapper_brackets {
+        if let Some(stripped) = inner.strip_prefix('[') {
+            inner = stripped;
+        }
+        if let Some(stripped) = inner.strip_suffix(']') {
+            inner = stripped;
+        }
+    }
+
+    // Escape literal `]` characters inside the workbook name by doubling them (`]]`), matching
+    // Excel's external workbook prefix syntax.
+    let escaped = if inner.contains(']') {
+        inner.replace(']', "]]")
+    } else {
+        inner.to_string()
+    };
+    format!("[{escaped}]")
 }
 
 fn quote_sheet_name_if_needed(name: &str) -> String {
@@ -3545,6 +3569,39 @@ mod tests {
         assert_eq!(format_cell_ref_no_dollars(0, 0), "A1");
         assert_eq!(format_cell_ref_no_dollars(1, 1), "B2");
         assert_eq!(format_cell_ref_no_dollars(0, 26), "AA1");
+    }
+
+    #[test]
+    fn formats_external_workbook_names_with_literal_brackets() {
+        // Workbook names may contain literal `[` characters without escaping.
+        assert_eq!(
+            format_external_workbook_name("A1[Name.xls"),
+            "[A1[Name.xls]"
+        );
+        assert_parseable("=[A1[Name.xls]Sheet1!A1");
+
+        // Leading `[` characters are preserved (they are not treated as nested prefixes).
+        assert_eq!(
+            format_external_workbook_name("[LeadingBracket.xls"),
+            "[[LeadingBracket.xls]"
+        );
+        assert_parseable("=[[LeadingBracket.xls]Sheet1!A1");
+
+        // Literal `]` characters inside the workbook name are escaped in Excel formulas as `]]`.
+        assert_eq!(
+            format_external_workbook_name("Book[Name].xls"),
+            "[Book[Name]].xls]"
+        );
+        assert_parseable("=[Book[Name]].xls]Sheet1!A1");
+
+        // Preserve trailing `]` characters (which must become `]]` inside the prefix).
+        assert_eq!(format_external_workbook_name("Book.xls]"), "[Book.xls]]]");
+
+        // Some producers wrap full paths in brackets. Drop the path and normalize the wrapper.
+        assert_eq!(
+            format_external_workbook_name("[C:\\path\\Book[Name].xls]"),
+            "[Book[Name]].xls]"
+        );
     }
 
     const BIFF8_MAX_ROW: u16 = 0xFFFF;
