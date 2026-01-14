@@ -176,6 +176,30 @@ function Get-ExpectedWixUpgradeCode {
   return $v.Trim()
 }
 
+function Get-ExpectedProductName {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot
+  )
+ 
+  $tauriConfPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+  if (-not (Test-Path -LiteralPath $tauriConfPath)) {
+    return ""
+  }
+ 
+  try {
+    $conf = Get-Content -Raw -LiteralPath $tauriConfPath | ConvertFrom-Json
+  } catch {
+    return ""
+  }
+ 
+  $v = [string]$conf.productName
+  if ([string]::IsNullOrWhiteSpace($v)) {
+    return ""
+  }
+  return $v.Trim()
+}
+
 function Normalize-Version {
   param(
     [Parameter(Mandatory = $true)]
@@ -1419,6 +1443,12 @@ try {
 
   $expectedVersion = Get-ExpectedTauriVersion -RepoRoot $repoRoot
   Write-Host ("Expected desktop version (tauri.conf.json): {0}" -f $expectedVersion)
+  $expectedProductName = Get-ExpectedProductName -RepoRoot $repoRoot
+  if (-not [string]::IsNullOrWhiteSpace($expectedProductName)) {
+    Write-Host ("Expected product name (tauri.conf.json productName): {0}" -f $expectedProductName)
+  } else {
+    Write-Warning "No productName found in tauri.conf.json. Skipping MSI ProductName validation."
+  }
   $expectedUpgradeCode = Get-ExpectedWixUpgradeCode -RepoRoot $repoRoot
   if (-not [string]::IsNullOrWhiteSpace($expectedUpgradeCode)) {
     Write-Host ("Expected WiX UpgradeCode (tauri.conf.json): {0}" -f $expectedUpgradeCode)
@@ -1470,6 +1500,19 @@ try {
         Write-Host ("upgradeCode: OK (.msi) {0}" -f $installer.FullName)
       } else {
         Write-Warning ("Unable to read MSI UpgradeCode for {0}. Skipping MSI UpgradeCode check because Windows Installer COM query failed." -f $installer.FullName)
+      }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($expectedProductName)) {
+      $msiProductName = Get-MsiProperty -MsiPath $installer.FullName -PropertyName "ProductName"
+      if ($null -ne $msiProductName -and -not [string]::IsNullOrWhiteSpace([string]$msiProductName)) {
+        $found = ([string]$msiProductName).Trim()
+        if ($found -ne $expectedProductName) {
+          throw "MSI ProductName mismatch detected.`n- MSI: $($installer.FullName)`n- Expected (tauri.conf.json productName): $expectedProductName`n- Found (MSI ProductName): $msiProductName"
+        }
+        Write-Host ("productName: OK (.msi) {0}" -f $installer.FullName)
+      } else {
+        Write-Warning ("Unable to read MSI ProductName for {0}. Skipping MSI ProductName check because Windows Installer COM query failed." -f $installer.FullName)
       }
     }
   }

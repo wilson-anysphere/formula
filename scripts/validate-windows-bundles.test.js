@@ -95,3 +95,16 @@ test("validate-windows-bundles.ps1 validates MSI UpgradeCode against tauri.conf.
     "Expected validator to normalize GUID formatting when comparing UpgradeCode values.",
   );
 });
+
+test("validate-windows-bundles.ps1 validates MSI ProductName against tauri.conf.json productName", () => {
+  assert.match(
+    text,
+    /Get-ExpectedProductName/,
+    "Expected validator to read productName from tauri.conf.json.",
+  );
+  assert.match(
+    text,
+    /PropertyName\s+\"ProductName\"/,
+    "Expected validator to query the MSI Property table for ProductName.",
+  );
+});
