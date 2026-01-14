@@ -707,7 +707,9 @@ def main() -> int:
                     entry["actualAddress"] = actual_address
                 actual_display = _maybe_nonempty_str(act.get("displayText"))
                 if actual_display is not None:
-                    entry["actualDisplayText"] = actual_display
+                    entry["actualDisplayText"] = (
+                        _redact_text(actual_display, privacy_mode=args.privacy_mode) or actual_display
+                    )
 
             mismatches.append(entry)
             reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
@@ -738,7 +740,10 @@ def main() -> int:
                     entry["expectedAddress"] = expected_address
                 expected_display = _maybe_nonempty_str(exp.get("displayText"))
                 if expected_display is not None:
-                    entry["expectedDisplayText"] = expected_display
+                    entry["expectedDisplayText"] = (
+                        _redact_text(expected_display, privacy_mode=args.privacy_mode)
+                        or expected_display
+                    )
 
             mismatches.append(entry)
             reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
@@ -785,14 +790,20 @@ def main() -> int:
                         entry["expectedAddress"] = expected_address
                     expected_display = _maybe_nonempty_str(exp.get("displayText"))
                     if expected_display is not None:
-                        entry["expectedDisplayText"] = expected_display
+                        entry["expectedDisplayText"] = (
+                            _redact_text(expected_display, privacy_mode=args.privacy_mode)
+                            or expected_display
+                        )
                 if isinstance(act, dict):
                     actual_address = _maybe_nonempty_str(act.get("address"))
                     if actual_address is not None:
                         entry["actualAddress"] = actual_address
                     actual_display = _maybe_nonempty_str(act.get("displayText"))
                     if actual_display is not None:
-                        entry["actualDisplayText"] = actual_display
+                        entry["actualDisplayText"] = (
+                            _redact_text(actual_display, privacy_mode=args.privacy_mode)
+                            or actual_display
+                        )
 
                 exp_result = exp.get("result")
                 act_result = act.get("result")

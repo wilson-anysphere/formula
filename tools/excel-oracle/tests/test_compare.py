@@ -619,7 +619,14 @@ class ComparePrivacyModeTests(unittest.TestCase):
                 "generatedAt": "unit-test",
                 "source": {"kind": "excel"},
                 "caseSet": {"path": str(cases_path), "count": 1},
-                "results": [{"caseId": "case-a", "result": {"t": "s", "v": secret_value}}],
+                "results": [
+                    {
+                        "caseId": "case-a",
+                        "result": {"t": "s", "v": secret_value},
+                        "address": "C1",
+                        "displayText": secret_value,
+                    }
+                ],
             }
             expected_path.write_text(
                 json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
@@ -632,7 +639,14 @@ class ComparePrivacyModeTests(unittest.TestCase):
                 "generatedAt": "unit-test",
                 "source": {"kind": "engine"},
                 "caseSet": {"path": str(cases_path), "count": 1},
-                "results": [{"caseId": "case-a", "result": {"t": "s", "v": other_value}}],
+                "results": [
+                    {
+                        "caseId": "case-a",
+                        "result": {"t": "s", "v": other_value},
+                        "address": "C1",
+                        "displayText": other_value,
+                    }
+                ],
             }
             actual_path.write_text(
                 json.dumps(actual_payload, ensure_ascii=False, indent=2) + "\n",
@@ -676,6 +690,8 @@ class ComparePrivacyModeTests(unittest.TestCase):
 
             self.assertEqual(m.get("expected"), {"t": "s", "v": f"sha256={secret_hash}"})
             self.assertEqual(m.get("actual"), {"t": "s", "v": f"sha256={other_hash}"})
+            self.assertEqual(m.get("expectedDisplayText"), f"sha256={secret_hash}")
+            self.assertEqual(m.get("actualDisplayText"), f"sha256={other_hash}")
 
             inputs = m.get("inputs")
             self.assertIsInstance(inputs, list)
