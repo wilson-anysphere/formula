@@ -1,8 +1,6 @@
 import { explainFormulaError, type ErrorExplanation } from "./errors.js";
 import { getFunctionCallContext } from "./highlight/functionContext.js";
 import { getFunctionSignature, signatureParts, type FunctionSignature } from "./highlight/functionSignatures.js";
-import { highlightFormula } from "./highlight/highlightFormula.js";
-import type { HighlightSpan } from "./highlight/types.js";
 import { rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
 import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
 import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
@@ -14,6 +12,7 @@ import {
   type FormulaReference,
   type FormulaReferenceRange,
 } from "@formula/spreadsheet-frontend";
+import { tokenizeFormula, type FormulaTokenType } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
 import type {
   FormulaParseError,
   FormulaPartialLexResult,
@@ -38,6 +37,20 @@ type FunctionHint = {
   context: { name: string; argIndex: number };
   signature: FunctionSignature;
   parts: Array<{ text: string; kind: "name" | "param" | "paramActive" | "punct" }>;
+};
+
+type HighlightSpan = {
+  kind: FormulaTokenType;
+  text: string;
+  start: number;
+  end: number;
+  /**
+   * Optional CSS class applied to the rendered <span>.
+   *
+   * Used by the WASM-backed editor tooling integration to surface parse errors
+   * with an exact span highlight.
+   */
+  className?: string;
 };
 
 export class FormulaBarModel {
@@ -680,6 +693,15 @@ function inferArgSeparator(localeId: string): string {
   } catch {
     return ", ";
   }
+}
+
+function highlightFormula(input: string): HighlightSpan[] {
+  return tokenizeFormula(input).map((token) => ({
+    kind: token.type,
+    text: token.text,
+    start: token.start,
+    end: token.end,
+  }));
 }
 
 function highlightFromEngineTokens(formula: string, tokens: EngineFormulaToken[]): HighlightSpan[] {
