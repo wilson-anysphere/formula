@@ -638,10 +638,14 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (disposed) return;
     if (changeFlushScheduled) return;
     changeFlushScheduled = true;
-    Promise.resolve().then(() => {
-      changeFlushScheduled = false;
-      startFlushWorksheetChanges();
-    });
+    void Promise.resolve()
+      .then(() => {
+        changeFlushScheduled = false;
+        startFlushWorksheetChanges();
+      })
+      .catch(() => {
+        // Best-effort: avoid unhandled rejections from the microtask scheduler.
+      });
   }
 
   function startFlushWorksheetChanges(): void {
@@ -762,7 +766,11 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
           return;
         }
 
-        Promise.resolve().then(() => startFlushSelectionChange());
+        void Promise.resolve()
+          .then(() => startFlushSelectionChange())
+          .catch(() => {
+            // Best-effort: avoid unhandled rejections from the microtask scheduler.
+          });
       });
   }
 

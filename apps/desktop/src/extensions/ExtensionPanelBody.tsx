@@ -126,7 +126,11 @@ const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
   // the initial script executes (best-effort defense-in-depth).
   scrubTauriGlobals();
   try {
-    Promise.resolve().then(scrubTauriGlobals);
+    Promise.resolve()
+      .then(scrubTauriGlobals)
+      .catch(() => {
+        // Best-effort: avoid unhandled rejections if the scrub callback throws.
+      });
   } catch {
     // Ignore.
   }
