@@ -4,6 +4,8 @@ import process from "node:process";
 const EXPECTED_CI_WORKFLOW_PATH = ".github/workflows/ci.yml";
 const DEFAULT_WORKFLOW_NAME = "CI";
 const DEFAULT_PER_PAGE = 100;
+const GITHUB_API_BASE_URL = (process.env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/$/, "");
+const GITHUB_SERVER_BASE_URL = (process.env.GITHUB_SERVER_URL ?? "https://github.com").replace(/\/$/, "");
 
 function usage() {
   console.log(`Usage: node scripts/check-tag-ci-status.mjs [options]
@@ -135,7 +137,7 @@ async function githubGetJson(url, opts) {
  * @param {{ owner: string; repo: string; workflowName: string; token: string }}
  */
 async function resolveCiWorkflow({ owner, repo, workflowName, token }) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/actions/workflows?per_page=${DEFAULT_PER_PAGE}`;
+  const url = `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/actions/workflows?per_page=${DEFAULT_PER_PAGE}`;
   /** @type {{ workflows?: Array<{ id: number; name: string; path: string }> }} */
   const data = await githubGetJson(url, { token });
   const workflows = Array.isArray(data?.workflows) ? data.workflows : [];
@@ -202,7 +204,7 @@ async function findNewestSuccessfulRun({ owner, repo, workflowId, sha, token }) 
 
   for (let page = 1; page <= 20; page++) {
     const url =
-      `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflowId}/runs` +
+      `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/actions/workflows/${workflowId}/runs` +
       `?head_sha=${encodeURIComponent(sha)}` +
       `&status=completed` +
       `&per_page=${DEFAULT_PER_PAGE}` +
@@ -273,7 +275,7 @@ async function main() {
 
   if (!successfulRun) {
     const header = `Release preflight failed: no successful "${workflowName}" workflow run found for commit ${sha}.`;
-    const workflowUrl = `https://github.com/${owner}/${repoName}/actions/workflows/${workflow.path}`;
+    const workflowUrl = `${GITHUB_SERVER_BASE_URL}/${owner}/${repoName}/actions/workflows/${workflow.path}`;
 
     if (!newestCompletedRun) {
       fatal(
