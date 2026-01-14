@@ -148,6 +148,7 @@ jobs:
 
       - name: Run desktop startup benchmark (cold, 5 runs)
         id: startup-cold
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -162,6 +163,7 @@ jobs:
 
       - name: Run desktop startup benchmark (warm, 5 runs)
         id: startup-warm
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -175,6 +177,7 @@ jobs:
             --allow-ci 2>&1 | tee perf-artifacts/desktop-startup-warm.log
 
       - name: Run idle memory benchmark (3 runs)
+        id: memory
         shell: bash
         run: |
           set -euo pipefail
@@ -320,3 +323,23 @@ jobs:
           path: |
             perf-artifacts/*.json
             perf-artifacts/*.log
+
+      - name: Fail job if perf runners failed
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          if [ "${{ steps.startup-cold.outcome }}" != "success" ]; then
+            echo "::error::desktop startup cold runner failed (outcome=${{ steps.startup-cold.outcome }})"
+            failed=1
+          fi
+          if [ "${{ steps.startup-warm.outcome }}" != "success" ]; then
+            echo "::error::desktop startup warm runner failed (outcome=${{ steps.startup-warm.outcome }})"
+            failed=1
+          fi
+          if [ "${{ steps.memory.outcome }}" != "success" ]; then
+            echo "::error::desktop memory runner failed (outcome=${{ steps.memory.outcome }})"
+            failed=1
+          fi
+          exit "$failed"
