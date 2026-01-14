@@ -5077,6 +5077,25 @@ pub fn build_autofilter_criteria_text_ops_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture like [`build_autofilter_criteria_fixture_xls`], but with an
+/// `AUTOFILTER` record that encodes a legacy Top10 filter (via `AUTOFILTER.grbit` flags).
+///
+/// The sheet is named `FilterCriteriaTop10` and the `_xlnm._FilterDatabase` defined name points at
+/// `$A$1:$A$5`.
+pub fn build_autofilter_criteria_top10_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_autofilter_criteria_top10_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture like [`build_autofilter_criteria_fixture_xls`], but where the
 /// `AUTOFILTER.iEntry` field stores an **absolute worksheet column index** (observed in some
 /// producers) instead of an index relative to the AutoFilter range start.
@@ -17458,6 +17477,89 @@ fn build_autofilter_criteria_text_ops_workbook_stream() -> Vec<u8> {
         RECORD_AUTOFILTER,
         &autofilter_record(2, false, &doper1, &doper2),
     );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_autofilter_criteria_top10_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "FilterCriteriaTop10");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // `_xlnm._FilterDatabase` (built-in name id 0x0D) scoped to the sheet (`itab=1`): $A$1:$A$5.
+    let filter_db_rgce = ptg_area(0, 4, 0, 0);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x0D, &filter_db_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 5) cols [0, 1) so A1:A5 exists.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&5u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: a single General cell so calamine populates a range for the sheet.
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, xf_general, 1.0),
+    );
+
+    // AUTOFILTERINFO: cEntries = 1 (A).
+    push_record(&mut sheet, RECORD_AUTOFILTERINFO, &1u16.to_le_bytes());
+
+    // AUTOFILTER record: Top10 filter.
+    // BIFF grbit flags: fTop10 (0x0008), fTop (0x0010), fPercent (0x0020).
+    let grbit_top10: u16 = 0x0008 | 0x0010 | 0x0020;
+    let doper1 = autofilter_doper_number(AUTOFILTER_OP_NONE, 5.0);
+    let doper2 = autofilter_doper_none();
+    let mut autofilter = Vec::new();
+    autofilter.extend_from_slice(&0u16.to_le_bytes()); // iEntry (A)
+    autofilter.extend_from_slice(&grbit_top10.to_le_bytes());
+    autofilter.extend_from_slice(&doper1.bytes);
+    autofilter.extend_from_slice(&doper2.bytes);
+    push_record(&mut sheet, RECORD_AUTOFILTER, &autofilter);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
 
