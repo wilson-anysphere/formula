@@ -1335,26 +1335,38 @@ async function activateExtension() {
   }
 }
 
-parentPort.on("message", async (message) => {
-  if (!message || typeof message !== "object") return;
-
-  if (message.type === "activate") {
-    try {
-      await activateExtension();
-      parentPort.postMessage({ type: "activate_result", id: message.id });
-    } catch (error) {
-      parentPort.postMessage({
-        type: "activate_error",
-        id: message.id,
-        error: serializeErrorForTransport(error)
-      });
-    }
-    return;
-  }
-
+function safeParentPostMessage(payload) {
   try {
-    formulaApi.__handleMessage(toSandbox(message));
+    parentPort.postMessage(payload);
   } catch {
     // ignore
   }
+}
+
+parentPort.on("message", (message) => {
+  void (async () => {
+    if (!message || typeof message !== "object") return;
+
+    if (message.type === "activate") {
+      try {
+        await activateExtension();
+        safeParentPostMessage({ type: "activate_result", id: message.id });
+      } catch (error) {
+        safeParentPostMessage({
+          type: "activate_error",
+          id: message.id,
+          error: serializeErrorForTransport(error)
+        });
+      }
+      return;
+    }
+
+    try {
+      await Promise.resolve(formulaApi.__handleMessage(toSandbox(message)));
+    } catch {
+      // ignore
+    }
+  })().catch(() => {
+    // ignore
+  });
 });

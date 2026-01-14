@@ -31,107 +31,165 @@ async function cleanup() {
 
 function forwardToSandbox(message) {
   if (!sandboxWorker) return;
-  sandboxWorker.postMessage(message);
+  try {
+    sandboxWorker.postMessage(message);
+  } catch {
+    // ignore
+  }
 }
 
-parentPort.on("message", async (message) => {
-  if (!message || typeof message !== "object") return;
+parentPort.on("message", (message) => {
+  void (async () => {
+    if (!message || typeof message !== "object") return;
 
-  if (message.type === "cancel") {
+    if (message.type === "cancel") {
+      if (settled) return;
+      settled = true;
+      try {
+        parentPort.postMessage({
+          type: "error",
+          error: { name: "AbortError", message: "Script execution cancelled" },
+        });
+      } catch {
+        // ignore
+      }
+      void cleanup().catch(() => {});
+      return;
+    }
+
+    if (message.type === "rpcResult" || message.type === "rpcError" || message.type === "event") {
+      forwardToSandbox(message);
+      return;
+    }
+
+    if (message.type !== "run") return;
     if (settled) return;
-    settled = true;
-    parentPort.postMessage({
-      type: "error",
-      error: { name: "AbortError", message: "Script execution cancelled" },
-    });
-    await cleanup();
-    return;
-  }
 
-  if (message.type === "rpcResult" || message.type === "rpcError" || message.type === "event") {
-    forwardToSandbox(message);
-    return;
-  }
+    const { code, activeSheetName, selection, principal, permissions, timeoutMs = 10_000, memoryMb = 64 } = message;
 
-  if (message.type !== "run") return;
-  if (settled) return;
+    try {
+      const { bootstrap, ts, moduleKind, kind } = buildSandboxedScript({
+        code: String(code ?? ""),
+        activeSheetName: String(activeSheetName),
+        selection,
+      });
 
-  const { code, activeSheetName, selection, principal, permissions, timeoutMs = 10_000, memoryMb = 64 } = message;
+      const { js } = transpileTypeScript(ts, { moduleKind });
+      const userScript = kind === "module" ? buildModuleRunnerJavaScript({ moduleJs: js }) : js;
+      const fullScript = `${bootstrap}\n${userScript}`;
 
-  try {
-    const { bootstrap, ts, moduleKind, kind } = buildSandboxedScript({
-      code: String(code ?? ""),
-      activeSheetName: String(activeSheetName),
-      selection,
-    });
-
-    const { js } = transpileTypeScript(ts, { moduleKind });
-    const userScript = kind === "module" ? buildModuleRunnerJavaScript({ moduleJs: js }) : js;
-    const fullScript = `${bootstrap}\n${userScript}`;
-
-    sandboxWorker = new Worker(SECURITY_WORKER_URL, {
-      type: "module",
-      resourceLimits: {
-        maxOldGenerationSizeMb: Math.max(16, Math.floor(memoryMb)),
-        maxYoungGenerationSizeMb: Math.max(16, Math.min(64, Math.floor(memoryMb / 4))),
-      },
-    });
-    parentPort.postMessage({
-      type: "audit",
-      event: {
-        eventType: "scripting.sandbox.spawn",
-        actor: principal,
-        success: true,
-        metadata: { memoryMb, resourceLimits: sandboxWorker.resourceLimits ?? null },
-      },
-    });
-
-    sandboxWorker.on("message", (innerMessage) => {
-      if (!innerMessage || typeof innerMessage !== "object") return;
-
-      if (innerMessage.type === "result" || innerMessage.type === "error") {
-        if (settled) return;
-        settled = true;
-        parentPort.postMessage(innerMessage);
-        cleanup();
-        return;
+      sandboxWorker = new Worker(SECURITY_WORKER_URL, {
+        type: "module",
+        resourceLimits: {
+          maxOldGenerationSizeMb: Math.max(16, Math.floor(memoryMb)),
+          maxYoungGenerationSizeMb: Math.max(16, Math.min(64, Math.floor(memoryMb / 4))),
+        },
+      });
+      try {
+        parentPort.postMessage({
+          type: "audit",
+          event: {
+            eventType: "scripting.sandbox.spawn",
+            actor: principal,
+            success: true,
+            metadata: { memoryMb, resourceLimits: sandboxWorker.resourceLimits ?? null },
+          },
+        });
+      } catch {
+        // ignore
       }
 
-      // console / audit / rpc messages are forwarded verbatim.
-      parentPort.postMessage(innerMessage);
-    });
+      sandboxWorker.on("message", (innerMessage) => {
+        if (!innerMessage || typeof innerMessage !== "object") return;
 
-    sandboxWorker.on("error", async (err) => {
-      if (settled) return;
-      settled = true;
-      parentPort.postMessage({ type: "error", error: serializeError(err) });
-      await cleanup();
-    });
+        if (innerMessage.type === "result" || innerMessage.type === "error") {
+          if (settled) return;
+          settled = true;
+          try {
+            parentPort.postMessage(innerMessage);
+          } catch {
+            // ignore
+          }
+          void cleanup().catch(() => {});
+          return;
+        }
 
-    sandboxWorker.on("exit", async (code) => {
-      if (settled) return;
-      settled = true;
-      parentPort.postMessage({
-        type: "error",
-        error: { name: "SandboxWorkerExitError", message: `Sandbox worker exited with code ${code}` },
+        // console / audit / rpc messages are forwarded verbatim.
+        try {
+          parentPort.postMessage(innerMessage);
+        } catch {
+          // ignore
+        }
       });
-      await cleanup();
-    });
 
-    sandboxWorker.postMessage({
-      type: "run",
-      principal,
-      permissions,
-      timeoutMs,
-      code: fullScript,
-      enableHostRpc: true,
-      captureConsole: true,
-      wrapAsyncIife: false,
-    });
-  } catch (err) {
+      sandboxWorker.on("error", (err) => {
+        void (async () => {
+          if (settled) return;
+          settled = true;
+          try {
+            parentPort.postMessage({ type: "error", error: serializeError(err) });
+          } catch {
+            // ignore
+          }
+          await cleanup();
+        })().catch(() => {});
+      });
+
+      sandboxWorker.on("exit", (code) => {
+        void (async () => {
+          if (settled) return;
+          settled = true;
+          try {
+            parentPort.postMessage({
+              type: "error",
+              error: { name: "SandboxWorkerExitError", message: `Sandbox worker exited with code ${code}` },
+            });
+          } catch {
+            // ignore
+          }
+          await cleanup();
+        })().catch(() => {});
+      });
+
+      try {
+        sandboxWorker.postMessage({
+          type: "run",
+          principal,
+          permissions,
+          timeoutMs,
+          code: fullScript,
+          enableHostRpc: true,
+          captureConsole: true,
+          wrapAsyncIife: false,
+        });
+      } catch (err) {
+        if (settled) return;
+        settled = true;
+        try {
+          parentPort.postMessage({ type: "error", error: serializeError(err) });
+        } catch {
+          // ignore
+        }
+        void cleanup().catch(() => {});
+      }
+    } catch (err) {
+      if (settled) return;
+      settled = true;
+      try {
+        parentPort.postMessage({ type: "error", error: serializeError(err) });
+      } catch {
+        // ignore
+      }
+      void cleanup().catch(() => {});
+    }
+  })().catch((err) => {
     if (settled) return;
     settled = true;
-    parentPort.postMessage({ type: "error", error: serializeError(err) });
-    await cleanup();
-  }
+    try {
+      parentPort.postMessage({ type: "error", error: serializeError(err) });
+    } catch {
+      // ignore
+    }
+    void cleanup().catch(() => {});
+  });
 });

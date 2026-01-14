@@ -86,46 +86,51 @@ export class NativePythonRuntime {
       rejectPromise = rejectOnce;
 
       const stdoutLines = createInterface({ input: child.stdout });
-      stdoutLines.on("line", async (line) => {
-        if (done) return;
-        if (!line.trim()) return;
+      stdoutLines.on("line", (line) => {
+        void (async () => {
+          if (done) return;
+          if (!line.trim()) return;
 
-        let msg;
-        try {
-          msg = JSON.parse(line);
-        } catch (err) {
-          rejectOnce(new Error(`Python runtime protocol error (non-JSON line): ${line}`));
-          killWith("SIGKILL");
-          return;
-        }
-
-        if (msg.type === "rpc") {
-          const { id, method, params } = msg;
+          let msg;
           try {
-            const rpcResult = await dispatchRpc(api, method, params);
-            child.stdin.write(JSON.stringify({ type: "rpc_response", id, result: rpcResult, error: null }) + "\n");
-          } catch (rpcErr) {
-            child.stdin.write(
-              JSON.stringify({
-                type: "rpc_response",
-                id,
-                result: null,
-                error: rpcErr instanceof Error ? rpcErr.message : String(rpcErr),
-              }) + "\n",
-            );
+            msg = JSON.parse(line);
+          } catch (err) {
+            rejectOnce(new Error(`Python runtime protocol error (non-JSON line): ${line}`));
+            killWith("SIGKILL");
+            return;
           }
-          return;
-        }
 
-        if (msg.type === "result") {
-          done = true;
-          resolve(msg);
-          killWith("SIGTERM");
-          return;
-        }
+          if (msg.type === "rpc") {
+            const { id, method, params } = msg;
+            try {
+              const rpcResult = await dispatchRpc(api, method, params);
+              child.stdin.write(JSON.stringify({ type: "rpc_response", id, result: rpcResult, error: null }) + "\n");
+            } catch (rpcErr) {
+              child.stdin.write(
+                JSON.stringify({
+                  type: "rpc_response",
+                  id,
+                  result: null,
+                  error: rpcErr instanceof Error ? rpcErr.message : String(rpcErr),
+                }) + "\n",
+              );
+            }
+            return;
+          }
 
-        rejectOnce(new Error(`Python runtime protocol error (unknown message type "${msg.type}")`));
-        killWith("SIGKILL");
+          if (msg.type === "result") {
+            done = true;
+            resolve(msg);
+            killWith("SIGTERM");
+            return;
+          }
+
+          rejectOnce(new Error(`Python runtime protocol error (unknown message type "${msg.type}")`));
+          killWith("SIGKILL");
+        })().catch((err) => {
+          rejectOnce(err);
+          killWith("SIGKILL");
+        });
       });
 
       child.on("error", (err) => {

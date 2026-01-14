@@ -152,123 +152,170 @@ function makeHostRpc() {
   });
 }
 
-parentPort.on("message", async (message) => {
-  if (!message || typeof message !== "object") return;
+parentPort.on("message", (message) => {
+  void (async () => {
+    if (!message || typeof message !== "object") return;
 
-  if (message.type === "rpcResult") {
-    const pending = pendingRpc.get(message.id);
-    if (!pending) return;
-    pendingRpc.delete(message.id);
-    pending.resolve(message.result);
-    return;
-  }
+    if (message.type === "rpcResult") {
+      const pending = pendingRpc.get(message.id);
+      if (!pending) return;
+      pendingRpc.delete(message.id);
+      pending.resolve(message.result);
+      return;
+    }
 
-  if (message.type === "rpcError") {
-    const pending = pendingRpc.get(message.id);
-    if (!pending) return;
-    pendingRpc.delete(message.id);
-    pending.reject(deserializeHostError(message.error));
-    return;
-  }
+    if (message.type === "rpcError") {
+      const pending = pendingRpc.get(message.id);
+      if (!pending) return;
+      pendingRpc.delete(message.id);
+      pending.reject(deserializeHostError(message.error));
+      return;
+    }
 
-  if (message.type === "event") {
-    if (!currentContext) return;
+    if (message.type === "event") {
+      if (!currentContext) return;
+      try {
+        const dispatch = currentContext.__formulaDispatchEvent;
+        if (typeof dispatch === "function") {
+          dispatch(message.eventType, message.payload);
+        }
+      } catch (error) {
+        try {
+          parentPort.postMessage({ type: "error", error: serializeError(error) });
+        } catch {
+          // ignore
+        }
+      }
+      return;
+    }
+
+    if (message.type !== "run") return;
+
+    const {
+      principal,
+      permissions,
+      code,
+      timeoutMs,
+      memoryMb,
+      enableHostRpc = false,
+      captureConsole = true,
+      wrapAsyncIife = true
+    } = message;
+
+    /** @type {ReturnType<typeof createSandboxTimers> | null} */
+    let timers = null;
+    let memoryInterval = null;
+    let memoryLimitSent = false;
+
     try {
-      const dispatch = currentContext.__formulaDispatchEvent;
-      if (typeof dispatch === "function") {
-        dispatch(message.eventType, message.payload);
+      const auditLogger = {
+        log(event) {
+          sendAudit(event);
+          return "";
+        }
+      };
+
+      const secureApis = createSandboxSecureApis({
+        principal,
+        permissionSnapshot: permissions,
+        auditLogger
+      });
+
+      const consoleShim = captureConsole ? createSandboxConsole() : console;
+      timers = createSandboxTimers();
+
+      if (Number.isFinite(memoryMb) && memoryMb > 0) {
+        const memoryLimitBytes = memoryMb * 1024 * 1024;
+        const triggerBytes = Math.floor(memoryLimitBytes * 0.9);
+        memoryInterval = setInterval(() => {
+          if (memoryLimitSent) return;
+          const { heapUsed, external } = process.memoryUsage();
+          const usedBytes = heapUsed + external;
+          if (usedBytes > triggerBytes) {
+            memoryLimitSent = true;
+            try {
+              parentPort.postMessage({
+                type: "limit",
+                limit: "memory",
+                memoryMb,
+                usedMb: Math.round(usedBytes / 1024 / 1024),
+                heapUsedMb: Math.round(heapUsed / 1024 / 1024),
+                externalMb: Math.round(external / 1024 / 1024)
+              });
+            } catch {
+              // ignore
+            }
+          }
+        }, 25);
+        memoryInterval.unref();
+      }
+
+      const sandbox = Object.create(null);
+      sandbox.SecureApis = secureApis;
+      sandbox.fetch = secureApis.fetch;
+      sandbox.fs = secureApis.fs;
+      sandbox.console = consoleShim;
+      sandbox.setTimeout = timers.setTimeout;
+      sandbox.clearTimeout = timers.clearTimeout;
+
+      if (enableHostRpc) {
+        sandbox.__hostRpc = makeHostRpc();
+      }
+
+      const context = vm.createContext(sandbox, {
+        name: "formula-sandbox",
+        codeGeneration: { strings: false, wasm: false }
+      });
+
+      currentContext = context;
+      try {
+        const source = wrapAsyncIife ? `(async () => {\n${code}\n})()` : String(code);
+        const script = new vm.Script(source, { filename: "sandboxed-script.js" });
+
+        // vm's timeout only applies to the initial synchronous execution of the script.
+        // The parent thread additionally enforces an overall timeout and will terminate
+        // the worker if the promise does not settle.
+        const result = await script.runInContext(context, { timeout: timeoutMs });
+        try {
+          parentPort.postMessage({ type: "result", result });
+        } catch {
+          // ignore
+        }
+      } catch (error) {
+        try {
+          parentPort.postMessage({ type: "error", error: serializeError(error) });
+        } catch {
+          // ignore
+        }
+      } finally {
+        currentContext = null;
       }
     } catch (error) {
-      parentPort.postMessage({ type: "error", error: serializeError(error) });
-    }
-    return;
-  }
-
-  if (message.type !== "run") return;
-
-  const {
-    principal,
-    permissions,
-    code,
-    timeoutMs,
-    memoryMb,
-    enableHostRpc = false,
-    captureConsole = true,
-    wrapAsyncIife = true
-  } = message;
-
-  const auditLogger = {
-    log(event) {
-      sendAudit(event);
-      return "";
-    }
-  };
-
-  const secureApis = createSandboxSecureApis({
-    principal,
-    permissionSnapshot: permissions,
-    auditLogger
-  });
-
-  const consoleShim = captureConsole ? createSandboxConsole() : console;
-  const timers = createSandboxTimers();
-
-  let memoryInterval = null;
-  let memoryLimitSent = false;
-  if (Number.isFinite(memoryMb) && memoryMb > 0) {
-    const memoryLimitBytes = memoryMb * 1024 * 1024;
-    const triggerBytes = Math.floor(memoryLimitBytes * 0.9);
-    memoryInterval = setInterval(() => {
-      if (memoryLimitSent) return;
-      const { heapUsed, external } = process.memoryUsage();
-      const usedBytes = heapUsed + external;
-      if (usedBytes > triggerBytes) {
-        memoryLimitSent = true;
-        parentPort.postMessage({
-          type: "limit",
-          limit: "memory",
-          memoryMb,
-          usedMb: Math.round(usedBytes / 1024 / 1024),
-          heapUsedMb: Math.round(heapUsed / 1024 / 1024),
-          externalMb: Math.round(external / 1024 / 1024)
-        });
+      try {
+        parentPort.postMessage({ type: "error", error: serializeError(error) });
+      } catch {
+        // ignore
       }
-    }, 25);
-    memoryInterval.unref();
-  }
-
-  const sandbox = Object.create(null);
-  sandbox.SecureApis = secureApis;
-  sandbox.fetch = secureApis.fetch;
-  sandbox.fs = secureApis.fs;
-  sandbox.console = consoleShim;
-  sandbox.setTimeout = timers.setTimeout;
-  sandbox.clearTimeout = timers.clearTimeout;
-
-  if (enableHostRpc) {
-    sandbox.__hostRpc = makeHostRpc();
-  }
-
-  const context = vm.createContext(sandbox, {
-    name: "formula-sandbox",
-    codeGeneration: { strings: false, wasm: false }
+      currentContext = null;
+    } finally {
+      try {
+        timers?.cleanup?.();
+      } catch {
+        // ignore
+      }
+      try {
+        if (memoryInterval) clearInterval(memoryInterval);
+      } catch {
+        // ignore
+      }
+    }
+  })().catch((error) => {
+    // Message handlers ignore returned promises; swallow errors so we never
+    // produce unhandled rejections in the worker.
+    try {
+      parentPort.postMessage({ type: "error", error: serializeError(error) });
+    } catch {
+      // ignore
+    }
   });
-
-  currentContext = context;
-  try {
-    const source = wrapAsyncIife ? `(async () => {\n${code}\n})()` : String(code);
-    const script = new vm.Script(source, { filename: "sandboxed-script.js" });
-
-    // vm's timeout only applies to the initial synchronous execution of the script.
-    // The parent thread additionally enforces an overall timeout and will terminate
-    // the worker if the promise does not settle.
-    const result = await script.runInContext(context, { timeout: timeoutMs });
-    parentPort.postMessage({ type: "result", result });
-  } catch (error) {
-    parentPort.postMessage({ type: "error", error: serializeError(error) });
-  } finally {
-    currentContext = null;
-    timers.cleanup();
-    if (memoryInterval) clearInterval(memoryInterval);
-  }
 });
