@@ -235,6 +235,7 @@ def _render_markdown(
     bin_size_bytes: int | None,
     limit_mb: int | None,
     enforce: bool,
+    cargo_bloat_version: str | None,
     build_cmd: list[str] | None,
     crates_cmd: list[str] | None,
     crates_out: CmdResult | None,
@@ -262,6 +263,8 @@ def _render_markdown(
     lines.append(f"- Binary path: `{_relpath(bin_path, repo_root)}`")
     if bin_size_bytes is not None:
         lines.append(f"- Binary size: **{_human_bytes(bin_size_bytes)}** ({bin_size_bytes} bytes)")
+    if cargo_bloat_version:
+        lines.append(f"- cargo-bloat: `{cargo_bloat_version}`")
     if limit_mb is None:
         lines.append(f"- Size limit: _(not set)_ (set `{ENV_SIZE_LIMIT_MB}=...` to enable)")
         lines.append(
@@ -313,7 +316,8 @@ def _render_markdown(
         lines.append("")
 
     if llvm_size_cmd and llvm_size_out:
-        lines.append("### Section sizes (llvm-size)")
+        tool_label = Path(llvm_size_cmd[0]).name
+        lines.append(f"### Section sizes ({tool_label})")
         lines.append("")
         lines.append("Command:")
         lines.append(f"`{_render_cmd(llvm_size_cmd)}`")
@@ -456,6 +460,7 @@ def main() -> int:
                 bin_size_bytes=bin_path.stat().st_size if bin_path.exists() else None,
                 limit_mb=limit_mb,
                 enforce=enforce,
+                cargo_bloat_version=None,
                 build_cmd=build_cmd,
                 crates_cmd=None,
                 crates_out=None,
@@ -491,6 +496,7 @@ def main() -> int:
             bin_size_bytes=None,
             limit_mb=limit_mb,
             enforce=enforce,
+            cargo_bloat_version=None,
             build_cmd=build_cmd,
             crates_cmd=None,
             crates_out=None,
@@ -519,6 +525,11 @@ def main() -> int:
     # Preferred: cargo-bloat.
     cargo_bloat_probe = _run_capture(["cargo", "bloat", "--version"], cwd=repo_root)
     has_cargo_bloat = cargo_bloat_probe.returncode == 0
+    cargo_bloat_version: str | None = None
+    if has_cargo_bloat:
+        combined = (cargo_bloat_probe.stdout + ("\n" + cargo_bloat_probe.stderr if cargo_bloat_probe.stderr else "")).strip()
+        if combined:
+            cargo_bloat_version = combined.splitlines()[0].strip() or None
 
     crates_cmd: list[str] | None = None
     crates_out: CmdResult | None = None
@@ -605,6 +616,7 @@ def main() -> int:
         bin_size_bytes=bin_size_bytes,
         limit_mb=limit_mb,
         enforce=enforce,
+        cargo_bloat_version=cargo_bloat_version,
         build_cmd=build_cmd,
         crates_cmd=crates_cmd,
         crates_out=crates_out,
