@@ -618,10 +618,8 @@ fn fill_group_key(
                                 ok = false;
                                 break;
                             }
-                            let rows = hop
-                                .to_table
-                                .filter_eq(hop.to_idx, &key)
-                                .unwrap_or_else(|| {
+                            let rows =
+                                hop.to_table.filter_eq(hop.to_idx, &key).unwrap_or_else(|| {
                                     let mut out = Vec::new();
                                     for row in 0..hop.to_table.row_count() {
                                         let v = hop
@@ -1825,9 +1823,8 @@ fn pivot_columnar_star_schema_group_by(
                                 if !keys.contains(&fk) {
                                     None
                                 } else {
-                                    let rows = to_table
-                                        .filter_eq(*to_idx, &fk)
-                                        .unwrap_or_else(|| {
+                                    let rows =
+                                        to_table.filter_eq(*to_idx, &fk).unwrap_or_else(|| {
                                             let mut out = Vec::new();
                                             for row in 0..to_table.row_count() {
                                                 let v = to_table
@@ -2766,6 +2763,18 @@ mod tests {
     }
 
     #[test]
+    fn measures_from_value_fields_escapes_brackets_in_column_identifiers() {
+        let value_fields = vec![ValueFieldSpec {
+            source_field: "Amount]USD".into(),
+            name: "Sum of Amount]USD".into(),
+            aggregation: ValueFieldAggregation::Sum,
+        }];
+
+        let measures = measures_from_value_fields("Fact", &value_fields).unwrap();
+        assert_eq!(measures[0].expression, "SUM(Fact[Amount]]USD])");
+    }
+
+    #[test]
     fn measures_from_value_fields_errors_on_unsupported_aggs() {
         let value_fields = vec![ValueFieldSpec {
             source_field: "Amount".into(),
@@ -2800,6 +2809,40 @@ mod tests {
 
         let measures = measures_from_pivot_model_value_fields("Fact", &value_fields).unwrap();
         assert_eq!(measures[0].expression, "COUNTA(Fact[Amount])");
+    }
+
+    #[cfg(feature = "pivot-model")]
+    #[test]
+    fn measures_from_pivot_model_value_fields_escapes_brackets_in_identifiers() {
+        use formula_model::pivots::{AggregationType, PivotFieldRef, ValueField};
+
+        let value_fields = vec![
+            ValueField {
+                source_field: PivotFieldRef::DataModelMeasure("Total]USD".to_string()),
+                name: "Total Measure".into(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            },
+            ValueField {
+                source_field: PivotFieldRef::DataModelColumn {
+                    table: "Orders".to_string(),
+                    column: "Amount]USD".to_string(),
+                },
+                name: "Sum Amount".into(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            },
+        ];
+
+        let measures = measures_from_pivot_model_value_fields("Orders", &value_fields).unwrap();
+        assert_eq!(measures[0].expression, "[Total]]USD]");
+        assert_eq!(measures[1].expression, "SUM('Orders'[Amount]]USD])");
     }
 
     #[test]
