@@ -86,7 +86,7 @@ describe("DrawingOverlay perf guards", () => {
     expect(getComputedStyleSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("does not sort objects on render() when already zOrder-sorted", async () => {
+  it("does not sort objects on render() when already zOrder-sorted", () => {
     const getPropertyValue = vi.fn(() => "");
     const getComputedStyleSpy = vi.fn(() => ({ getPropertyValue }) as any);
 
