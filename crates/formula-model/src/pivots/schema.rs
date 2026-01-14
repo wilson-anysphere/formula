@@ -74,6 +74,14 @@ impl PivotFieldRef {
         }
         PivotFieldRef::CacheFieldName(raw.to_string())
     }
+
+    /// Best-effort parse of an untyped field identifier.
+    ///
+    /// Alias for [`PivotFieldRef::from_unstructured`]; kept for backward compatibility with
+    /// earlier pivot APIs that accepted free-form strings.
+    pub fn from_untyped(raw: &str) -> Self {
+        Self::from_unstructured(raw)
+    }
 }
 
 impl fmt::Display for PivotFieldRef {
