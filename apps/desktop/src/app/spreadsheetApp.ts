@@ -110,6 +110,7 @@ import {
 import { formatValueWithNumberFormat } from "../formatting/numberFormat.ts";
 import { getStyleNumberFormat } from "../formatting/styleFieldAccess.js";
 import { dateToExcelSerial } from "../shared/valueParsing.js";
+import { parseImageCellValue } from "../shared/imageCellValue.js";
 import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
 import { DlpViolationError } from "../../../../packages/security/dlp/src/errors.js";
@@ -1206,6 +1207,10 @@ export class SpreadsheetApp {
 
   // Workbook-level drawing image reference counting + garbage collection.
   private readonly workbookImageManager: WorkbookImageManager;
+  // Cached set of `imageId`s referenced by stored cell values (Excel "place in cell" pictures /
+  // rich values). These act as external references for WorkbookImageManager so image bytes are
+  // not garbage-collected while still referenced by at least one cell.
+  private workbookCellImageIds = new Set<string>();
 
   private wasmEngine: EngineClient | null = null;
   /**
@@ -3800,12 +3805,31 @@ export class SpreadsheetApp {
         // Keep workbook-wide drawing-image reference counts up to date even when the active sheet
         // isn't affected. This is important for collaboration and background sheet edits: an image
         // can be re-referenced on another sheet while a GC timer is pending.
+        const cellDeltas: any[] = Array.isArray(payload?.deltas) ? payload.deltas : [];
+        let cellImageValuesChanged = false;
+        if (cellDeltas.length > 0) {
+          // Bound work on normal edits: only resync workbook image refs when a delta touches an
+          // in-cell image value (Excel "place in cell" pictures / rich values).
+          for (const delta of cellDeltas) {
+            const beforeValue = (delta as any)?.before?.value;
+            if (beforeValue && typeof beforeValue === "object" && parseImageCellValue(beforeValue)) {
+              cellImageValuesChanged = true;
+              break;
+            }
+            const afterValue = (delta as any)?.after?.value;
+            if (afterValue && typeof afterValue === "object" && parseImageCellValue(afterValue)) {
+              cellImageValuesChanged = true;
+              break;
+            }
+          }
+        }
         const shouldSyncWorkbookImageRefs =
           source === "applyState" ||
           payload?.drawingsChanged === true ||
           (Array.isArray(payload?.drawingDeltas) && payload.drawingDeltas.length > 0) ||
           (Array.isArray(payload?.sheetMetaDeltas) && payload.sheetMetaDeltas.length > 0) ||
-          (Array.isArray(payload?.sheetViewDeltas) && payload.sheetViewDeltas.length > 0);
+          (Array.isArray(payload?.sheetViewDeltas) && payload.sheetViewDeltas.length > 0) ||
+          cellImageValuesChanged;
         if (shouldSyncWorkbookImageRefs) {
           this.syncWorkbookImageRefCountsFromDocument(payload);
         }
@@ -16587,10 +16611,53 @@ export class SpreadsheetApp {
     return false;
   }
 
+  private recomputeWorkbookCellImageIdsFromStoredCells(): boolean {
+    const docAny = this.document as any;
+    const modelSheets: unknown = docAny?.model?.sheets;
+    if (!(modelSheets instanceof Map)) return false;
+
+    const next = new Set<string>();
+    try {
+      for (const sheetId of this.document.getSheetIds()) {
+        const sheet = (modelSheets as Map<string, any>).get(sheetId);
+        const cells: unknown = sheet?.cells;
+        if (!(cells instanceof Map)) continue;
+        for (const cell of (cells as Map<string, any>).values()) {
+          const value = cell?.value;
+          if (!value || typeof value !== "object") continue;
+          const image = parseImageCellValue(value);
+          if (image) next.add(image.imageId);
+        }
+      }
+    } catch {
+      // Best-effort: if we fail to scan, preserve the previous set so we do not
+      // accidentally drop references and GC bytes still needed by cells.
+      return false;
+    }
+
+    const prev = this.workbookCellImageIds;
+    let changed = prev.size !== next.size;
+    if (!changed) {
+      for (const id of prev) {
+        if (!next.has(id)) {
+          changed = true;
+          break;
+        }
+      }
+    }
+
+    this.workbookCellImageIds = next;
+    return changed;
+  }
+
   private listWorkbookExternalImageIds(): string[] {
     const ids: string[] = [];
     for (const sheetId of this.document.getSheetIds()) {
       const id = this.getSheetBackgroundImageId(sheetId);
+      const normalized = typeof id === "string" ? id.trim() : "";
+      if (normalized) ids.push(normalized);
+    }
+    for (const id of this.workbookCellImageIds) {
       const normalized = typeof id === "string" ? id.trim() : "";
       if (normalized) ids.push(normalized);
     }
@@ -16613,6 +16680,7 @@ export class SpreadsheetApp {
 
     // Unknown/global updates: recompute from scratch.
     if (!payload || source === "applyState" || drawingsChanged) {
+      this.recomputeWorkbookCellImageIdsFromStoredCells();
       const drawingsBySheetId = new Map<string, DrawingObject[]>();
       for (const sheetId of this.document.getSheetIds()) {
         drawingsBySheetId.set(sheetId, this.listDrawingObjectsForSheet(sheetId));
@@ -16621,6 +16689,21 @@ export class SpreadsheetApp {
         externalImageIds: this.listWorkbookExternalImageIds(),
       });
       return;
+    }
+
+    const cellDeltas: any[] = Array.isArray(payload?.deltas) ? payload.deltas : [];
+    let cellImageValuesChanged = false;
+    for (const delta of cellDeltas) {
+      const beforeValue = (delta as any)?.before?.value;
+      if (beforeValue && typeof beforeValue === "object" && parseImageCellValue(beforeValue)) {
+        cellImageValuesChanged = true;
+        break;
+      }
+      const afterValue = (delta as any)?.after?.value;
+      if (afterValue && typeof afterValue === "object" && parseImageCellValue(afterValue)) {
+        cellImageValuesChanged = true;
+        break;
+      }
     }
 
     // Sheet-level background images are stored on sheet view state. Ensure our external image refs stay
@@ -16643,20 +16726,23 @@ export class SpreadsheetApp {
             : null;
       return String(beforeId ?? "").trim() !== String(afterId ?? "").trim();
     });
-    if (backgroundImageChanged) {
-      this.workbookImageManager.setExternalImageIds(this.listWorkbookExternalImageIds());
-    }
 
     const deletedSheetIds = sheetMetaDeltas
       .filter((d) => d && typeof d.sheetId === "string" && (d.after == null || d.after === undefined))
       .map((d) => String(d.sheetId ?? "").trim())
       .filter(Boolean);
 
+    // In-cell image references live in stored cell values. When a delta touches an image value (or a
+    // sheet is deleted), rescan stored cells to refresh our external ref set.
+    const shouldRescanCellImageIds = cellImageValuesChanged || deletedSheetIds.length > 0;
+    if (shouldRescanCellImageIds) {
+      this.recomputeWorkbookCellImageIdsFromStoredCells();
+    }
+
     if (deletedSheetIds.length > 0) {
       for (const sheetId of deletedSheetIds) {
         this.workbookImageManager.deleteSheet(sheetId);
       }
-      this.workbookImageManager.setExternalImageIds(this.listWorkbookExternalImageIds());
     }
 
     const imageIdCountsForRawDrawings = (raw: unknown, sheetId: string): Map<string, number> => {
@@ -16725,11 +16811,17 @@ export class SpreadsheetApp {
       recordIfImageRefsChanged(delta?.sheetId, delta?.before?.drawings, delta?.after?.drawings);
     }
 
-    if (updatedSheets.size === 0) return;
-
     for (const [sheetId, afterDrawings] of updatedSheets.entries()) {
+      if (deletedSheetIds.includes(sheetId)) continue;
       const objects = convertDocumentSheetDrawingsToUiDrawingObjects(afterDrawings, { sheetId });
       this.workbookImageManager.setSheetDrawings(sheetId, objects);
+    }
+
+    // Update external refs when sheet backgrounds and/or in-cell image references change.
+    // (Do this after any sheet deletions so `listWorkbookExternalImageIds()` reflects the latest
+    // sheet set.)
+    if (backgroundImageChanged || cellImageValuesChanged || deletedSheetIds.length > 0) {
+      this.workbookImageManager.setExternalImageIds(this.listWorkbookExternalImageIds());
     }
   }
 
