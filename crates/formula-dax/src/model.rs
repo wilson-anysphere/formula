@@ -1091,11 +1091,11 @@ impl DataModel {
                 .get(&from_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(from_table_name.clone()))?;
             match unmatched {
-                UnmatchedFactRows::Sparse(rows) => {
+                UnmatchedFactRows::Sparse(_) => {
                     // When the unmatched set is sparse, scanning it is cheaper than finding all
                     // matches and removing them.
                     let key = &key_for_updates;
-                    rows.retain(|row| {
+                    unmatched.retain(|row| {
                         let v = from_table_ref
                             .value_by_idx(*row, from_idx)
                             .unwrap_or(Value::Blank);
