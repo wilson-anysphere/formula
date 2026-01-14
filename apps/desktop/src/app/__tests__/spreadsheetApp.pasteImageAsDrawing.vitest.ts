@@ -7,6 +7,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpreadsheetApp } from "../spreadsheetApp";
 import * as ui from "../../extensions/ui.js";
 
+function createPngHeaderBytes(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  // 13-byte IHDR chunk length.
+  bytes[8] = 0x00;
+  bytes[9] = 0x00;
+  bytes[10] = 0x00;
+  bytes[11] = 0x0d;
+  // IHDR chunk type.
+  bytes[12] = 0x49;
+  bytes[13] = 0x48;
+  bytes[14] = 0x44;
+  bytes[15] = 0x52;
+
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width, false);
+  view.setUint32(20, height, false);
+  return bytes;
+}
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -255,6 +275,34 @@ describe("SpreadsheetApp paste image clipboard", () => {
 
     expect(app.getDrawingObjects()).toHaveLength(0);
     expect(toastSpy).toHaveBeenCalledWith("Image too large (>5MB). Choose a smaller file.", "warning");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("shows a toast and no-ops when a PNG has extremely large dimensions", async () => {
+    const toastSpy = vi.spyOn(ui, "showToast").mockImplementation(() => {});
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+
+    const pngBytes = createPngHeaderBytes(10_001, 1);
+    const provider = {
+      read: vi.fn(async () => ({ imagePng: pngBytes })),
+      write: vi.fn(async () => {}),
+    };
+    (app as any).clipboardProviderPromise = Promise.resolve(provider);
+
+    await app.pasteClipboardToSelection();
+
+    expect(app.getDrawingObjects()).toHaveLength(0);
+    expect(toastSpy).toHaveBeenCalledWith("Image dimensions too large (10001x1). Choose a smaller image.", "warning");
 
     app.destroy();
     root.remove();
