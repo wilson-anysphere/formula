@@ -113,10 +113,10 @@ pub fn verify_ed25519_signature(
     public_key_pem: String,
 ) -> Result<bool, String> {
     use crate::ipc_origin::Verb;
+    use tauri::Manager as _;
 
     crate::ipc_origin::ensure_main_window(window.label(), "ed25519 verification", Verb::Is)?;
     crate::ipc_origin::ensure_stable_origin(&window, "ed25519 verification", Verb::Is)?;
-
     let url = window.url().map_err(|err| err.to_string())?;
     crate::ipc_origin::ensure_trusted_origin(&url, "ed25519 verification", Verb::Is)?;
 

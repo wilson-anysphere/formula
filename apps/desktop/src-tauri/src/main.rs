@@ -512,6 +512,8 @@ fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
 }
 
 fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {
+    // Keep the URL filtering logic in the `desktop` crate so it can be unit-tested without
+    // requiring the full `desktop` (Tauri/WebView) feature set.
     desktop::oauth_redirect::normalize_oauth_redirect_request_urls(urls)
 }
 
@@ -815,6 +817,9 @@ async fn oauth_loopback_listen(
     let mut listeners: Vec<TcpListener> = Vec::new();
     let mut listener_errors: Vec<String> = Vec::new();
 
+    // `localhost` can resolve to either IPv4 or IPv6 depending on platform and user configuration.
+    // Bind both loopback addresses when the redirect URI uses `localhost` so we reliably capture
+    // the redirect regardless of which address the browser chooses.
     let wants_ipv4 = matches!(
         host_kind,
         desktop::oauth_loopback::LoopbackHostKind::Ipv4Loopback
