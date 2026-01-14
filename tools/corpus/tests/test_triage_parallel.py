@@ -154,6 +154,59 @@ class TriageParallelSchedulingTests(unittest.TestCase):
         finally:
             triage_mod.triage_workbook = original_triage_workbook  # type: ignore[assignment]
 
+    def test_parallel_progress_logs_do_not_leak_raw_filenames_in_private_mode(self) -> None:
+        """Defense-in-depth: even if a report is missing display_name, private mode should avoid leaks.
+
+        Progress logs are printed by the parent process in `_triage_paths` for parallel runs. These logs
+        may be captured by CI and uploaded alongside artifacts, so they must not include raw filenames
+        for private corpora.
+        """
+
+        import tools.corpus.triage as triage_mod
+
+        original_triage_workbook = triage_mod.triage_workbook
+        try:
+            # Return a minimal report *without* display_name so `_display_name_for_report` must use its
+            # privacy-mode fallback logic.
+            triage_mod.triage_workbook = (  # type: ignore[assignment]
+                lambda wb, **_kwargs: {
+                    "sha256": sha256_hex(wb.data),
+                    "result": {"open_ok": True, "round_trip_ok": True},
+                }
+            )
+
+            with tempfile.TemporaryDirectory() as td:
+                corpus_dir = Path(td) / "corpus"
+                corpus_dir.mkdir(parents=True)
+                (corpus_dir / "sensitive-a.xlsx").write_bytes(b"a")
+                (corpus_dir / "sensitive-b.xlsx").write_bytes(b"b")
+
+                paths = list(triage_mod.iter_workbook_paths(corpus_dir))
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    out = triage_mod._triage_paths(
+                        paths,
+                        rust_exe="noop",
+                        diff_ignore=set(),
+                        diff_limit=0,
+                        recalc=False,
+                        render_smoke=False,
+                        leak_scan=False,
+                        fernet_key=None,
+                        jobs=2,
+                        privacy_mode="private",
+                        executor_cls=ThreadPoolExecutor,
+                    )
+
+                self.assertIsInstance(out, list)
+
+                stdout = buf.getvalue()
+                self.assertNotIn("sensitive-a.xlsx", stdout)
+                self.assertNotIn("sensitive-b.xlsx", stdout)
+                self.assertIn("workbook-", stdout)
+        finally:
+            triage_mod.triage_workbook = original_triage_workbook  # type: ignore[assignment]
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -174,6 +174,65 @@ class TriageInputScopeTests(unittest.TestCase):
             triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
             triage_mod._triage_paths = original_triage_paths  # type: ignore[assignment]
 
+    def test_main_private_mode_anonymizes_index_display_name_when_report_missing(self) -> None:
+        """Defense-in-depth: ensure index.json does not fall back to raw filenames in private mode."""
+
+        import tools.corpus.triage as triage_mod
+        from tools.corpus.util import sha256_hex
+
+        original_build_rust_helper = triage_mod._build_rust_helper
+        original_triage_paths = triage_mod._triage_paths
+        try:
+            triage_mod._build_rust_helper = lambda: Path("noop")  # type: ignore[assignment]
+
+            def _fake_triage_paths(paths, **_kwargs):  # type: ignore[no-untyped-def]
+                # Return reports without `display_name` so main() must compute it for index.json.
+                out = []
+                for p in paths:
+                    out.append(
+                        {
+                            "sha256": sha256_hex(p.read_bytes()),
+                            "result": {"open_ok": True, "round_trip_ok": True},
+                        }
+                    )
+                return out
+
+            triage_mod._triage_paths = _fake_triage_paths  # type: ignore[assignment]
+
+            with tempfile.TemporaryDirectory() as tmp:
+                corpus_dir = Path(tmp) / "corpus"
+                corpus_dir.mkdir(parents=True)
+                (corpus_dir / "sensitive-filename.xlsx").write_bytes(b"dummy")
+
+                out_dir = Path(tmp) / "out"
+
+                argv = sys.argv
+                try:
+                    sys.argv = [
+                        "tools.corpus.triage",
+                        "--corpus-dir",
+                        str(corpus_dir),
+                        "--out-dir",
+                        str(out_dir),
+                        "--privacy-mode",
+                        "private",
+                    ]
+                    with mock.patch("sys.stdout", new=io.StringIO()):
+                        rc = triage_mod.main()
+                finally:
+                    sys.argv = argv
+
+                self.assertEqual(rc, 0)
+                index = json.loads((out_dir / "index.json").read_text(encoding="utf-8"))
+                self.assertEqual(index["report_count"], 1)
+                name = index["reports"][0]["display_name"]
+                expected_sha = sha256_hex(b"dummy")
+                self.assertEqual(name, f"workbook-{expected_sha[:16]}.xlsx")
+                self.assertNotIn("sensitive-filename.xlsx", json.dumps(index))
+        finally:
+            triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
+            triage_mod._triage_paths = original_triage_paths  # type: ignore[assignment]
+
     def test_expectations_are_skipped_when_input_is_scoped(self) -> None:
         import tools.corpus.triage as triage_mod
 
