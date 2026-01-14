@@ -154,6 +154,15 @@ export function createDeleteActiveSheetCommand(params: {
 
       const deletedName = sheet.name;
       const sheetOrder = store.listAll().map((s) => s.name);
+      const nextActiveId = (() => {
+        // Mirror Excel: when deleting the active sheet, activate the next visible sheet to the right
+        // if possible; otherwise fall back to the previous visible sheet.
+        const allSheets = store.listAll();
+        const visibleSheets = allSheets.filter((s) => s.visibility === "visible");
+        const idx = visibleSheets.findIndex((s) => s.id === activeId);
+        if (idx === -1) return null;
+        return visibleSheets[idx + 1]?.id ?? visibleSheets[idx - 1]?.id ?? null;
+      })();
 
       try {
         // In local mode, this routes the sheet delete through the existing sheet-store -> DocumentController
@@ -182,7 +191,8 @@ export function createDeleteActiveSheetCommand(params: {
 
       // If the app is still pointing at the deleted sheet, switch to a remaining visible sheet.
       if (app.getCurrentSheetId() === activeId) {
-        const next = store.listVisible().at(0)?.id ?? store.listAll().at(0)?.id ?? null;
+        const fallback = store.listVisible().at(0)?.id ?? store.listAll().at(0)?.id ?? null;
+        const next = nextActiveId ?? fallback;
         if (next && next !== activeId) {
           app.activateSheet(next);
         }

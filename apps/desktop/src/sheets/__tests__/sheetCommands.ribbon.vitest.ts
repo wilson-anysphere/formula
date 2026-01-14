@@ -58,7 +58,7 @@ describe("ribbon sheet commands", () => {
     activeSheetId = "Sheet2";
     await handleDeleteSheet();
     expect(store.listAll().map((s) => s.id)).toEqual(["Sheet1", "Sheet3"]);
-    expect(activeSheetId).toBe("Sheet1");
+    expect(activeSheetId).toBe("Sheet3");
     expect(restoreFocusAfterSheetNavigation).toHaveBeenCalledTimes(2);
 
     // Formula rewrite: direct references to deleted Sheet2 become #REF!.
@@ -327,7 +327,7 @@ describe("ribbon sheet commands", () => {
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(store.listAll().map((s) => s.name)).toEqual(["Sheet1", "Sheet3"]);
     expect(session.sheets.toArray().map((s: CollabSheet) => s.name)).toEqual(["Sheet1", "Sheet3"]);
-    expect(activeSheetId).toBe("sheet_a");
+    expect(activeSheetId).toBe("sheet_c");
 
     expect(doc.getCell("sheet_a", { row: 0, col: 0 }).formula).toBe("=#REF!");
     expect(showToast).not.toHaveBeenCalled();
