@@ -1,0 +1,106 @@
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+
+import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+test("Ribbon schema includes Sort & Filter command ids (Home/Data tabs)", () => {
+  const schema = readRibbonSchemaSource(["homeTab.ts", "dataTab.ts"]);
+
+  const ids = [
+    "data.sortFilter.sortAtoZ",
+    "data.sortFilter.sortZtoA",
+    "home.editing.sortFilter.customSort",
+    "data.sortFilter.sort.customSort",
+    "data.sortFilter.filter",
+    "data.sortFilter.clear",
+    "data.sortFilter.reapply",
+    "data.sortFilter.advanced.clearFilter",
+  ];
+
+  for (const id of ids) {
+    assert.match(schema, new RegExp(`\\bid:\\s*["']${escapeRegExp(id)}["']`), `Expected ribbon schema to include ${id}`);
+  }
+});
+
+test("Sort & Filter ribbon commands are registered in CommandRegistry (no exemptions / no main.ts switch cases)", () => {
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const main = fs.readFileSync(mainPath, "utf8");
+
+  const desktopCommandsPath = path.join(__dirname, "..", "src", "commands", "registerDesktopCommands.ts");
+  const desktopCommands = fs.readFileSync(desktopCommandsPath, "utf8");
+
+  const sortFilterCommandsPath = path.join(__dirname, "..", "src", "commands", "registerSortFilterCommands.ts");
+  const sortFilterCommands = fs.readFileSync(sortFilterCommandsPath, "utf8");
+
+  const disablingPath = path.join(__dirname, "..", "src", "ribbon", "ribbonCommandRegistryDisabling.ts");
+  const disabling = fs.readFileSync(disablingPath, "utf8");
+
+  // MVP AutoFilter commands are registered directly in registerDesktopCommands (via injected handlers from main.ts).
+  const autoFilterIds = [
+    "data.sortFilter.filter",
+    "data.sortFilter.clear",
+    "data.sortFilter.reapply",
+    "data.sortFilter.advanced.clearFilter",
+  ];
+  for (const id of autoFilterIds) {
+    assert.match(
+      desktopCommands,
+      new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
+      `Expected registerDesktopCommands.ts to register ${id}`,
+    );
+    assert.doesNotMatch(
+      disabling,
+      new RegExp(`["']${escapeRegExp(id)}["']`),
+      `Did not expect ribbonCommandRegistryDisabling.ts to exempt implemented command id ${id}`,
+    );
+    assert.doesNotMatch(
+      main,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+    );
+  }
+
+  // Sort + Custom Sort commands are registered via registerSortFilterCommands (invoked by registerDesktopCommands).
+  assert.match(
+    desktopCommands,
+    /\bregisterSortFilterCommands\(/,
+    "Expected registerDesktopCommands.ts to invoke registerSortFilterCommands",
+  );
+
+  const sortFilterIds = [
+    ["sortAtoZ", "data.sortFilter.sortAtoZ"],
+    ["sortZtoA", "data.sortFilter.sortZtoA"],
+    ["homeCustomSort", "home.editing.sortFilter.customSort"],
+    ["dataCustomSort", "data.sortFilter.sort.customSort"],
+  ];
+  for (const [key, id] of sortFilterIds) {
+    assert.match(
+      sortFilterCommands,
+      new RegExp(`\\b${escapeRegExp(key)}\\s*:\\s*["']${escapeRegExp(id)}["']`),
+      `Expected registerSortFilterCommands.ts to define ${key} as ${id}`,
+    );
+    assert.doesNotMatch(
+      disabling,
+      new RegExp(`["']${escapeRegExp(id)}["']`),
+      `Did not expect ribbonCommandRegistryDisabling.ts to exempt implemented command id ${id}`,
+    );
+    assert.doesNotMatch(
+      main,
+      new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`),
+      `Expected main.ts to not handle ${id} via switch case (should be dispatched by createRibbonActionsFromCommands)`,
+    );
+  }
+
+  // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
+  assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
+});
+
