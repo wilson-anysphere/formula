@@ -1809,6 +1809,24 @@ fn consume_rgcb_arrays_in_subexpression(
         i += 1;
 
         match ptg {
+            // PtgExp / PtgTbl: [row: u16][col: u16]
+            //
+            // These tokens are used for shared formulas / data tables and can appear inside
+            // non-printing `PtgMem*` subexpressions. We don't decode them to text here, but we
+            // must skip their payload to keep scanning aligned so we can still find any nested
+            // `PtgArray` tokens.
+            0x01 | 0x02 => {
+                if !has_remaining(rgce, i, 4) {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 4,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 4;
+            }
+
             // PtgArray (any class): [unused: 7 bytes] + array constant in rgcb.
             0x20 | 0x40 | 0x60 => {
                 if !has_remaining(rgce, i, 7) {
