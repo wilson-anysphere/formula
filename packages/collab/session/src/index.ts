@@ -656,6 +656,7 @@ export class CollabSession {
   private providerStatusListener: ((event: any) => void) | null = null;
   private providerSyncListener: ((isSynced: boolean) => void) | null = null;
   private commentsMigrationPermissionsUnsubscribe: (() => void) | null = null;
+  private commentsMigrationSyncHandler: ((isSynced: boolean) => void) | null = null;
   private commentsUndoScopePermissionsUnsubscribe: (() => void) | null = null;
   private commentsUndoScopeSyncHandler: ((isSynced: boolean) => void) | null = null;
 
@@ -1344,11 +1345,23 @@ export class CollabSession {
     if (provider && typeof provider.on === "function") {
       const handler = (isSynced: boolean) => {
         if (!isSynced) return;
-        if (typeof provider.off === "function") provider.off("sync", handler);
+        try {
+          if (typeof provider.off === "function") provider.off("sync", handler);
+        } catch {
+          // ignore
+        }
+        if (this.commentsMigrationSyncHandler === handler) {
+          this.commentsMigrationSyncHandler = null;
+        }
         hydrationReady = true;
         queueMicrotask(tryMigrate);
       };
-      provider.on("sync", handler);
+      this.commentsMigrationSyncHandler = handler;
+      try {
+        provider.on("sync", handler);
+      } catch {
+        // ignore; if the provider refuses the listener we'll still fall back to persistence/no-provider logic.
+      }
       if (provider.synced) handler(true);
     } else if (!this.hasLocalPersistence) {
       // No persistence + no sync provider: the caller-provided doc is already in
@@ -1667,6 +1680,16 @@ export class CollabSession {
         // ignore
       }
       this.commentsMigrationPermissionsUnsubscribe = null;
+    }
+    if (this.provider && this.commentsMigrationSyncHandler && typeof this.provider.off === "function") {
+      try {
+        this.provider.off("sync", this.commentsMigrationSyncHandler);
+      } catch {
+        // ignore
+      }
+      this.commentsMigrationSyncHandler = null;
+    } else {
+      this.commentsMigrationSyncHandler = null;
     }
     if (this.commentsUndoScopePermissionsUnsubscribe) {
       try {
