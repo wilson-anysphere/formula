@@ -2190,16 +2190,16 @@ export function registerBuiltinCommands(params: {
 
     commandRegistry.registerBuiltinCommand(
       "view.appearance.theme",
-      "Theme…",
+      t("command.view.appearance.theme"),
       async () => {
         const picked = await showQuickPick(
           [
-            { label: "System", value: "view.appearance.theme.system" },
-            { label: "Light", value: "view.appearance.theme.light" },
-            { label: "Dark", value: "view.appearance.theme.dark" },
-            { label: "High Contrast", value: "view.appearance.theme.highContrast" },
+            { label: t("ribbon.theme.system"), value: "view.appearance.theme.system" },
+            { label: t("ribbon.theme.light"), value: "view.appearance.theme.light" },
+            { label: t("ribbon.theme.dark"), value: "view.appearance.theme.dark" },
+            { label: t("ribbon.theme.highContrast"), value: "view.appearance.theme.highContrast" },
           ],
-          { placeHolder: "Theme" },
+          { placeHolder: t("quickPick.theme.placeholder") },
         );
         if (!picked) return;
         await commandRegistry.executeCommand(picked);
@@ -2207,7 +2207,7 @@ export function registerBuiltinCommands(params: {
       {
         category: categoryView,
         icon: null,
-        description: "Choose an application theme",
+        description: t("commandDescription.view.appearance.theme"),
         keywords: ["theme", "appearance", "dark mode", "light mode"],
       },
     );

@@ -87,6 +87,20 @@ test("ribbon theme option strings are localizable", () => {
   assert.equal(t("ribbon.theme.highContrast"), "تباين عالٍ");
 });
 
+test("theme quick-pick strings are localizable", () => {
+  setLocale("en-US");
+  assert.equal(t("command.view.appearance.theme"), "Theme…");
+  assert.equal(t("quickPick.theme.placeholder"), "Theme");
+
+  setLocale("de-DE");
+  assert.equal(t("command.view.appearance.theme"), "Design…");
+  assert.equal(t("quickPick.theme.placeholder"), "Design");
+
+  setLocale("ar");
+  assert.equal(t("command.view.appearance.theme"), "السمة…");
+  assert.equal(t("quickPick.theme.placeholder"), "السمة");
+});
+
 test("rtl locale exposes rtl direction hook", () => {
   setLocale("ar");
   assert.equal(getDirection(), "rtl");
