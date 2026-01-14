@@ -1775,6 +1775,20 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
 
             let info = formula_offcrypto::StandardEncryptionInfo { header, verifier };
 
+            // Standard/CryptoAPI RC4 (CALG_RC4) uses a different key derivation than Standard AES.
+            const CALG_RC4: u32 = 0x0000_6801;
+            if info.header.alg_id == CALG_RC4 {
+                let decrypted = formula_offcrypto::standard_rc4::decrypt_encrypted_package(
+                    &info,
+                    &encrypted_package,
+                    password,
+                )?;
+                if !decrypted.starts_with(b"PK") {
+                    return Err(formula_offcrypto::OffcryptoError::InvalidPassword);
+                }
+                return Ok(decrypted);
+            }
+
             // --- Derive iterated SHA-1 hash (shared by both key variants) ---
             let key_len_u32 = info
                 .header
