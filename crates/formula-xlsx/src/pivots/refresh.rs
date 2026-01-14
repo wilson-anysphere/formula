@@ -727,7 +727,10 @@ fn resolve_styles_part_name(package: &XlsxPackage) -> Result<Option<String>, Xls
         Some(bytes) => bytes,
         None => return Ok(None),
     };
-    let rels = parse_relationships(rels_bytes)?;
+    let rels = match parse_relationships(rels_bytes) {
+        Ok(rels) => rels,
+        Err(_) => return Ok(None),
+    };
     Ok(rels
         .into_iter()
         .find(|rel| {
@@ -939,7 +942,10 @@ fn resolve_shared_strings_part_name(package: &XlsxPackage) -> Result<Option<Stri
         Some(bytes) => bytes,
         None => return Ok(None),
     };
-    let rels = parse_relationships(rels_bytes)?;
+    let rels = match parse_relationships(rels_bytes) {
+        Ok(rels) => rels,
+        Err(_) => return Ok(None),
+    };
     Ok(rels
         .into_iter()
         .find(|rel| {
@@ -1781,5 +1787,180 @@ mod tests {
                 ],
             ]
         );
+    }
+
+    #[test]
+    fn refresh_pivot_cache_falls_back_to_default_styles_and_shared_strings_when_workbook_rels_malformed(
+    ) {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        // Malformed: triggers `parse_relationships` failure.
+        let workbook_rels = "<Relationships";
+
+        let shared_strings_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="4" uniqueCount="4">
+  <si><t>Date</t></si>
+  <si><t>Name</t></si>
+  <si><t>Alpha</t></si>
+  <si><t>Beta</t></si>
+</sst>"#;
+
+        // Custom numFmtId so date detection depends on styles.xml (not built-in formats).
+        let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1">
+    <numFmt numFmtId="164" formatCode="m/d/yyyy"/>
+  </numFmts>
+</styleSheet>"#;
+
+        // Table range is A1:B3 (header + 2 records).
+        // Header + string values use shared strings (`t="s"`), so refresh requires sharedStrings.xml.
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="s"><v>0</v></c>
+      <c r="B1" t="s"><v>1</v></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>45123</v></c>
+      <c r="B2" t="s"><v>2</v></c>
+    </row>
+    <row r="3">
+      <c r="A3"><v>45124</v></c>
+      <c r="B3" t="s"><v>3</v></c>
+    </row>
+  </sheetData>
+  <tableParts count="1">
+    <tablePart r:id="rIdTable1"/>
+  </tableParts>
+</worksheet>"#;
+
+        let worksheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdTable1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+
+        let table_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Table1" displayName="Table1" ref="A1:B3" headerRowCount="1" totalsRowCount="0">
+  <tableColumns count="2">
+    <tableColumn id="1" name="Date"/>
+    <tableColumn id="2" name="Name"/>
+  </tableColumns>
+</table>"#;
+
+        // `worksheetSource/@ref` points at the table name (not an A1 range) so worksheet lookup
+        // does not depend on workbook.xml.rels.
+        let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="0">
+  <cacheSource type="worksheet">
+    <worksheetSource ref="Table1"/>
+  </cacheSource>
+  <cacheFields count="2">
+    <cacheField name="OldDate" numFmtId="164"/>
+    <cacheField name="OldName" numFmtId="0"/>
+  </cacheFields>
+</pivotCacheDefinition>"#;
+
+        let cache_definition_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords" Target="pivotCacheRecords1.xml"/>
+</Relationships>"#;
+
+        let cache_records_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/sharedStrings.xml", options).unwrap();
+        zip.write_all(shared_strings_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/styles.xml", options).unwrap();
+        zip.write_all(styles_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options)
+            .unwrap();
+        zip.write_all(worksheet_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/tables/table1.xml", options).unwrap();
+        zip.write_all(table_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheDefinition1.xml", options)
+            .unwrap();
+        zip.write_all(cache_definition_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels", options)
+            .unwrap();
+        zip.write_all(cache_definition_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
+            .unwrap();
+        zip.write_all(cache_records_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+            .expect("refresh");
+
+        let updated_def =
+            std::str::from_utf8(pkg.part("xl/pivotCache/pivotCacheDefinition1.xml").unwrap())
+                .unwrap();
+        let doc = Document::parse(updated_def).expect("parse updated cache definition");
+        let root = doc.root_element();
+        assert_eq!(root.attribute("recordCount"), Some("2"));
+        let cache_fields = root
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "cacheFields")
+            .expect("cacheFields");
+        let field_names: Vec<_> = cache_fields
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "cacheField")
+            .filter_map(|n| n.attribute("name"))
+            .collect();
+        assert_eq!(field_names, vec!["Date", "Name"]);
+
+        let updated_records =
+            std::str::from_utf8(pkg.part("xl/pivotCache/pivotCacheRecords1.xml").unwrap()).unwrap();
+        let doc = Document::parse(updated_records).expect("parse updated cache records");
+        let root = doc.root_element();
+        assert_eq!(root.attribute("count"), Some("2"));
+        let records: Vec<_> = root
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "r")
+            .collect();
+        assert_eq!(records.len(), 2);
+
+        let expected_dt =
+            excel_serial_to_pivot_datetime(45123.0, DateSystem::V1900).expect("serial");
+        let first_values: Vec<_> = records[0]
+            .children()
+            .filter(|n| n.is_element())
+            .collect();
+        assert_eq!(first_values.len(), 2);
+        assert_eq!(first_values[0].tag_name().name(), "d");
+        assert_eq!(first_values[0].attribute("v"), Some(expected_dt.as_str()));
+        assert_eq!(first_values[1].tag_name().name(), "s");
+        assert_eq!(first_values[1].attribute("v"), Some("Alpha"));
     }
 }
