@@ -1095,18 +1095,10 @@ impl Engine {
     }
     /// Insert (or reuse) a style in the workbook's style table, returning its stable id.
     pub fn intern_style(&mut self, style: Style) -> u32 {
-        let before_len = self.workbook.styles.len();
-        let id = self.workbook.styles.intern(style);
-        if self.workbook.styles.len() != before_len {
-            // Style-table mutations can affect worksheet metadata functions like CELL("protect"),
-            // even though they are not represented as cell values. Conservatively refresh compiled
-            // formula results.
-            self.mark_all_compiled_cells_dirty();
-            if self.calc_settings.calculation_mode != CalculationMode::Manual {
-                self.recalculate();
-            }
-        }
-        id
+        // Inserting a new style does not affect existing cell/row/col style ids, so it should not
+        // invalidate formula results on its own. Callers that apply the returned id (e.g. via
+        // `set_cell_style_id`) will trigger any necessary recalculation.
+        self.workbook.styles.intern(style)
     }
 
     /// Set the style id for a cell.

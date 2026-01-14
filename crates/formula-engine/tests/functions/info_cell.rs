@@ -1348,6 +1348,13 @@ fn metadata_setters_trigger_auto_recalc_in_automatic_mode() {
     engine.set_col_hidden("Sheet1", 1, true);
     assert_number(&engine.get_cell_value("Sheet1", "B2"), 0.0);
     assert_eq!(engine.get_cell_value("Sheet1", "B3"), tick_before);
+
+    // Pure style-table growth should not force recalculation.
+    let _unused_style_id = engine.intern_style(Style {
+        number_format: Some("0.00".to_string()),
+        ..Style::default()
+    });
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), tick_before);
 }
 
 #[test]
