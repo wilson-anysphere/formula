@@ -1162,11 +1162,11 @@ pub fn build_shared_formula_ptgarray_fixture_xls() -> Vec<u8> {
 /// - the shared formula definition (`SHRFMLA`) includes a `PtgArray` constant stored in trailing
 ///   `rgcb` bytes, and
 /// - the follower cell (`B2`) uses a **wide** non-standard `PtgExp` payload layout (row u32 + col
-///   u16, 6 bytes).
+///   u16, 6 bytes; `cce=7`).
 ///
-/// This exercises the `.xls` importer's wide-payload `PtgExp` recovery path
-/// (`worksheet_formulas::parse_biff8_worksheet_ptgexp_formulas`) and ensures it preserves and uses
-/// `rgcb` so array constants decode to `{...}` literals rather than `#UNKNOWN!`.
+/// This exercises the `.xls` importer's wide-payload `PtgExp` recovery path and ensures it
+/// preserves and uses SHRFMLA trailing `rgcb` so array constants decode to `{...}` literals rather
+/// than `#UNKNOWN!`.
 pub fn build_shared_formula_ptgarray_wide_ptgexp_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_shared_formula_ptgarray_wide_ptgexp_workbook_stream();
 
@@ -9305,8 +9305,14 @@ fn build_shared_formula_ptgarray_sheet_stream(xf_cell: u16) -> Vec<u8> {
 }
 
 fn build_shared_formula_ptgarray_wide_ptgexp_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Shared formula range B1:B2.
+    //
     // Like `build_shared_formula_ptgarray_sheet_stream`, but the follower cell `B2` stores a
-    // non-standard wide `PtgExp` payload width (row u32 + col u16).
+    // non-standard wide `PtgExp` payload width (row u32 + col u16, `cce=7`).
+    //
+    // Expected decoded formulas:
+    // - B1: `A1+SUM({1,2;3,4})`
+    // - B2: `A2+SUM({1,2;3,4})`
     let mut sheet = Vec::<u8>::new();
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
 
@@ -9358,6 +9364,7 @@ fn build_shared_formula_ptgarray_wide_ptgexp_sheet_stream(xf_cell: u16) -> Vec<u
         v
     };
 
+    // rgcb payload for the array constant `{1,2;3,4}`.
     let rgcb = rgcb_array_constant_numbers_2x2(&[1.0, 2.0, 3.0, 4.0]);
     push_record(
         &mut sheet,

@@ -25,17 +25,37 @@ fn imports_shared_formula_with_ptgarray_and_wide_ptgexp_payload() {
         .sheet_by_name("SharedArrayWide")
         .expect("SharedArrayWide missing");
 
-    let b2 = CellRef::from_a1("B2").expect("valid ref");
-    let formula = sheet.formula(b2).expect("expected formula in SharedArrayWide!B2");
+    let b1 = CellRef::from_a1("B1").unwrap();
+    let b2 = CellRef::from_a1("B2").unwrap();
+
+    let f1 = sheet.formula(b1).expect("B1 formula missing");
+    let f2 = sheet.formula(b2).expect("B2 formula missing");
 
     assert!(
-        formula.contains("{1,2;3,4}"),
-        "expected B2 formula to contain array literal, got {formula:?}"
+        f1.contains("{1,2;3,4}"),
+        "expected B1 formula to contain array literal, got {f1:?}"
     );
     assert!(
-        !formula.contains("#UNKNOWN!"),
-        "expected formula to decode without #UNKNOWN!, got {formula:?}"
+        f2.contains("{1,2;3,4}"),
+        "expected B2 formula to contain array literal, got {f2:?}"
     );
-    assert_parseable_formula(formula);
+
+    assert!(
+        !f1.contains("#UNKNOWN!") && !f2.contains("#UNKNOWN!"),
+        "expected formulas to decode without #UNKNOWN!, B1={f1:?}, B2={f2:?}"
+    );
+
+    // Ensure shared-formula materialization occurred and `PtgRefN(col_off=-1)` was decoded relative
+    // to each cell (B1 => A1, B2 => A2).
+    assert!(
+        f1.contains("A1"),
+        "expected B1 formula to reference A1, got {f1:?}"
+    );
+    assert!(
+        f2.contains("A2"),
+        "expected B2 formula to reference A2, got {f2:?}"
+    );
+
+    assert_parseable_formula(f1);
+    assert_parseable_formula(f2);
 }
-
