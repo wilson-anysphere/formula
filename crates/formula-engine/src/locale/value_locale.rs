@@ -42,6 +42,13 @@ impl ValueLocaleConfig {
         Self::new(Locale::en_us(), DateOrder::MDY)
     }
 
+    /// British English uses the same separators as `en-US`, but dates are typically interpreted as
+    /// day-month-year when parsing ambiguous numeric dates.
+    #[must_use]
+    pub const fn en_gb() -> Self {
+        Self::new(Locale::en_us(), DateOrder::DMY)
+    }
+
     #[must_use]
     pub const fn de_de() -> Self {
         Self::new(Locale::de_de(), DateOrder::DMY)
@@ -59,11 +66,19 @@ impl ValueLocaleConfig {
 
     #[must_use]
     pub fn for_locale_id(id: &str) -> Option<Self> {
-        match super::normalize_locale_id(id)? {
-            "en-US" => Some(Self::en_us()),
-            "de-DE" => Some(Self::de_de()),
-            "fr-FR" => Some(Self::fr_fr()),
-            "es-ES" => Some(Self::es_es()),
+        let key = super::normalize_locale_key(id)?;
+        let parts = super::parse_locale_key(&key)?;
+
+        match parts.lang {
+            "en" => match parts.region {
+                // Note: the formula parsing locale still maps `en-GB` to `en-US` (English function
+                // names + `,` argument separators), but value parsing needs the date-order tweak.
+                Some("gb") | Some("uk") => Some(Self::en_gb()),
+                _ => Some(Self::en_us()),
+            },
+            "de" => Some(Self::de_de()),
+            "fr" => Some(Self::fr_fr()),
+            "es" => Some(Self::es_es()),
             _ => None,
         }
     }
