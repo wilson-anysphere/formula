@@ -5214,13 +5214,6 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Some(SheetId::Local(thread_current_sheet_id() as usize))
             }
             crate::eval::SheetReference::Sheet(name) => {
-                // Excel's INDIRECT cannot resolve references into external workbooks. The engine's
-                // sheet-name resolver can intern bracketed external sheet keys (e.g.
-                // `"[Book.xlsx]Sheet1"`) when an external value provider is configured, so block
-                // those keys here to keep INDIRECT consistent with the AST evaluator.
-                if name.starts_with('[') {
-                    return None;
-                }
                 Some(SheetId::Local(grid.resolve_sheet_name(name)?))
             }
             crate::eval::SheetReference::SheetRange(start, end) => {
@@ -5228,9 +5221,13 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 let end_id = grid.resolve_sheet_name(end)?;
                 (start_id == end_id).then_some(SheetId::Local(start_id))
             }
-            // Excel-compatible behavior: `INDIRECT` does not resolve references into other
-            // workbooks (even if an external value provider is configured).
-            crate::eval::SheetReference::External(_) => None,
+            crate::eval::SheetReference::External(key) => {
+                // Match `functions::builtins_reference::INDIRECT`: allow single-sheet external
+                // workbook references (e.g. `"[Book.xlsx]Sheet1"`), but reject external 3D spans
+                // like `"[Book.xlsx]Sheet1:Sheet3"`.
+                crate::eval::is_valid_external_sheet_key(key)
+                    .then_some(SheetId::External(Arc::from(key.clone())))
+            }
         }
     }
 
