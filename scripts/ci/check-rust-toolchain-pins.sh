@@ -98,6 +98,8 @@ for workflow in "${workflow_files[@]}"; do
       if (s ~ /tools\.corpus\.triage/) return 1
       if (s ~ /tools\/corpus\/triage\.py/) return 1
       if (s ~ /scripts\/security\/ci\.sh/) return 1
+      if (s ~ /desktop_size_report\.py/) return 1
+      if (s ~ /desktop_binary_size_report\.py/) return 1
       if (s ~ /(^|[[:space:];&|()])cargo([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustup([[:space:]]|$)/) return 1
       if (s ~ /(^|[[:space:];&|()])rustc([[:space:]]|$)/) return 1
