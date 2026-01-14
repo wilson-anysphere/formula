@@ -327,3 +327,22 @@ fn crossfilter_conflicting_modifiers_in_one_calculate_error() {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn crossfilter_nested_calculate_can_override_outer_modifier() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    // Outer CALCULATE enables bidirectional propagation and applies a fact-side filter. The inner
+    // CALCULATE disables the relationship, so the fact-side filter should no longer shrink the
+    // Customers table for the inner evaluation.
+    let result = engine
+        .evaluate(
+            &model,
+            "CALCULATE(CALCULATE(COUNTROWS(Customers), CROSSFILTER(Orders[CustomerId], Customers[CustomerId], NONE)), Orders[Amount] = 20, CROSSFILTER(Orders[CustomerId], Customers[CustomerId], BOTH))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(result, 3.into());
+}
