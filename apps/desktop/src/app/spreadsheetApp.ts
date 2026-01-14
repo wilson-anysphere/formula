@@ -107,6 +107,7 @@ import { wheelDeltaToPixels } from "@formula/grid";
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../grid/shared/desktopSharedGrid.js";
+import { DesktopImageStore } from "../images/imageStore.js";
 import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
@@ -706,6 +707,7 @@ export class SpreadsheetApp {
     (changes) => this.applyComputedChanges(changes)
   );
   private readonly document = new DocumentController({ engine: this.engine });
+  private readonly imageStore = new DesktopImageStore();
   private readonly sharedGridImageResolver: CanvasGridImageResolver = async (imageId) => this.document.getImageBlob(imageId);
   /**
    * In collaborative mode, keyboard undo/redo must use Yjs UndoManager semantics
