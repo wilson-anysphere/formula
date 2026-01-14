@@ -836,7 +836,9 @@ def main() -> int:
                 entry["outputCell"] = output_cell
             description = _maybe_nonempty_str(case.get("description"))
             if description is not None:
-                entry["description"] = description
+                entry["description"] = (
+                    _redact_text(description, privacy_mode=args.privacy_mode) or description
+                )
 
             if isinstance(act, dict):
                 # When the expected dataset is missing a case (common when new deterministic cases
@@ -878,7 +880,9 @@ def main() -> int:
                 entry["outputCell"] = output_cell
             description = _maybe_nonempty_str(case.get("description"))
             if description is not None:
-                entry["description"] = description
+                entry["description"] = (
+                    _redact_text(description, privacy_mode=args.privacy_mode) or description
+                )
 
             if isinstance(exp, dict):
                 expected_address = _maybe_nonempty_str(exp.get("address"))
@@ -926,7 +930,9 @@ def main() -> int:
                     entry["outputCell"] = output_cell
                 description = _maybe_nonempty_str(case.get("description"))
                 if description is not None:
-                    entry["description"] = description
+                    entry["description"] = (
+                        _redact_text(description, privacy_mode=args.privacy_mode) or description
+                    )
                 if mismatch_detail is not None:
                     entry["mismatchDetail"] = mismatch_detail
 
