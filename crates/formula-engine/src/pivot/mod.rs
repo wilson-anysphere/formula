@@ -1765,7 +1765,9 @@ impl PivotEngine {
             }
             Layout::Outline | Layout::Tabular => {
                 for f in &cfg.row_fields {
-                    row.push(PivotValue::Text(f.source_field.display_string()));
+                    row.push(PivotValue::Text(
+                        pivot_field_ref_name(&f.source_field).into_owned(),
+                    ));
                 }
             }
         }
