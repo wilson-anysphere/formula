@@ -5032,19 +5032,19 @@ impl Engine {
                     CompiledFormula::Bytecode(bc) => {
                         let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                         let slice_mode = slice_mode_for_program(&bc.program);
-                        let grid = EngineBytecodeGrid {
-                            snapshot: &snapshot,
-                            sheet_id: k.sheet,
-                            cols,
-                            cols_by_sheet: &column_cache.by_sheet,
-                            slice_mode,
-                            trace: None,
-                            external_sheets: &external_sheets,
-                        };
-                        let base = bytecode::CellCoord {
-                            row: k.addr.row as i32,
-                            col: k.addr.col as i32,
-                        };
+                         let grid = EngineBytecodeGrid {
+                             snapshot: &snapshot,
+                             sheet_id: k.sheet,
+                             cols,
+                             cols_by_sheet: &column_cache.by_sheet,
+                             slice_mode,
+                             trace: None,
+                             external_sheets: &external_sheets,
+                         };
+                         let base = bytecode::CellCoord {
+                             row: k.addr.row as i32,
+                             col: k.addr.col as i32,
+                         };
                         let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
                         bytecode_value_to_engine(v)
                     }
@@ -5095,19 +5095,19 @@ impl Engine {
                         used_bytecode_trace = true;
                         let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                         let slice_mode = slice_mode_for_program(&bc.program);
-                        let grid = EngineBytecodeGrid {
-                            snapshot: &snapshot,
-                            sheet_id: k.sheet,
-                            cols,
-                            cols_by_sheet: &column_cache.by_sheet,
-                            slice_mode,
-                            trace: Some(&bytecode_trace),
-                            external_sheets: &external_sheets,
-                        };
-                        let base = bytecode::CellCoord {
-                            row: k.addr.row as i32,
-                            col: k.addr.col as i32,
-                        };
+                         let grid = EngineBytecodeGrid {
+                             snapshot: &snapshot,
+                             sheet_id: k.sheet,
+                             cols,
+                             cols_by_sheet: &column_cache.by_sheet,
+                             slice_mode,
+                             trace: Some(&bytecode_trace),
+                             external_sheets: &external_sheets,
+                         };
+                         let base = bytecode::CellCoord {
+                             row: k.addr.row as i32,
+                             col: k.addr.col as i32,
+                         };
                         let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
                         bytecode_value_to_engine(v)
                     }
@@ -8840,6 +8840,84 @@ struct PrefixLowerErrorFlags {
     unknown_sheet: bool,
 }
 
+fn canonical_expr_contains_workbook_prefix(expr: &crate::Expr) -> bool {
+    match expr {
+        crate::Expr::NameRef(nref) => nref.workbook.is_some(),
+        crate::Expr::CellRef(r) => r.workbook.is_some(),
+        crate::Expr::ColRef(r) => r.workbook.is_some(),
+        crate::Expr::RowRef(r) => r.workbook.is_some(),
+        crate::Expr::StructuredRef(r) => r.workbook.is_some(),
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_contains_workbook_prefix(access.base.as_ref())
+        }
+        crate::Expr::FunctionCall(call) => call
+            .args
+            .iter()
+            .any(|arg| canonical_expr_contains_workbook_prefix(arg)),
+        crate::Expr::Call(call) => {
+            canonical_expr_contains_workbook_prefix(call.callee.as_ref())
+                || call
+                    .args
+                    .iter()
+                    .any(|arg| canonical_expr_contains_workbook_prefix(arg))
+        }
+        crate::Expr::Unary(u) => canonical_expr_contains_workbook_prefix(&u.expr),
+        crate::Expr::Postfix(p) => canonical_expr_contains_workbook_prefix(&p.expr),
+        crate::Expr::Binary(b) => {
+            canonical_expr_contains_workbook_prefix(&b.left)
+                || canonical_expr_contains_workbook_prefix(&b.right)
+        }
+        crate::Expr::Array(arr) => arr
+            .rows
+            .iter()
+            .flatten()
+            .any(|el| canonical_expr_contains_workbook_prefix(el)),
+        crate::Expr::Number(_)
+        | crate::Expr::String(_)
+        | crate::Expr::Boolean(_)
+        | crate::Expr::Error(_)
+        | crate::Expr::Missing => false,
+    }
+}
+
+fn canonical_expr_indirect_literal_is_external_workbook_ref(call: &crate::FunctionCall) -> bool {
+    if call.name.name_upper.as_str() != "INDIRECT" {
+        return false;
+    }
+    let Some(crate::Expr::String(text)) = call.args.first() else {
+        return false;
+    };
+    let a1 = match call.args.get(1) {
+        None => true,
+        Some(crate::Expr::Boolean(v)) => *v,
+        // If the caller provides a non-constant second argument, we can't determine which
+        // reference style Excel will use at runtime.
+        _ => return false,
+    };
+    let ref_text = text.trim();
+    if ref_text.is_empty() {
+        return false;
+    }
+
+    let parsed = crate::parse_formula(
+        ref_text,
+        crate::ParseOptions {
+            locale: crate::LocaleConfig::en_us(),
+            reference_style: if a1 {
+                crate::ReferenceStyle::A1
+            } else {
+                crate::ReferenceStyle::R1C1
+            },
+            normalize_relative_to: None,
+        },
+    );
+    let Ok(parsed) = parsed else {
+        return false;
+    };
+
+    canonical_expr_contains_workbook_prefix(&parsed.expr)
+}
+
 fn canonical_expr_depends_on_lowering_prefix_error(
     expr: &crate::Expr,
     current_sheet: SheetId,
@@ -8922,6 +9000,14 @@ fn canonical_expr_collect_sheet_prefix_errors(
             );
         }
         crate::Expr::FunctionCall(call) => {
+            // Bytecode INDIRECT currently only resolves local sheet names at runtime. When an
+            // external workbook reference is provided as a compile-time constant string, reject
+            // bytecode compilation so evaluation falls back to the AST engine and can consult
+            // `ExternalValueProvider`.
+            if !flags.external_reference && canonical_expr_indirect_literal_is_external_workbook_ref(call)
+            {
+                flags.external_reference = true;
+            }
             for arg in &call.args {
                 canonical_expr_collect_sheet_prefix_errors(arg, current_sheet, workbook, flags);
             }
@@ -11344,38 +11430,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             bytecode::SheetId::Local(sheet_id) => {
                 let sheet_id = *sheet_id;
                 if !self.snapshot.sheets.contains(&sheet_id) {
-                    // Synthetic external sheet id produced by `INDIRECT` runtime parsing.
-                    let sheet_key = {
-                        let guard = match self.external_sheets.lock() {
-                            Ok(g) => g,
-                            Err(poisoned) => poisoned.into_inner(),
-                        };
-                        guard.key_for_id(sheet_id)
-                    };
-                    let Some(sheet_key) = sheet_key else {
-                        return bytecode::Value::Error(bytecode::ErrorKind::Ref);
-                    };
-
-                    if coord.row < 0
-                        || coord.col < 0
-                        || coord.row >= EXCEL_MAX_ROWS_I32
-                        || coord.col >= EXCEL_MAX_COLS_I32
-                    {
-                        return bytecode::Value::Error(bytecode::ErrorKind::Ref);
-                    }
-                    let addr = CellAddr {
-                        row: coord.row as u32,
-                        col: coord.col as u32,
-                    };
-
-                    let Some(provider) = self.snapshot.external_value_provider.as_ref() else {
-                        return bytecode::Value::Error(bytecode::ErrorKind::Ref);
-                    };
-                    return provider
-                        .get(sheet_key.as_ref(), addr)
-                        .as_ref()
-                        .map(engine_value_to_bytecode)
-                        .unwrap_or(bytecode::Value::Error(bytecode::ErrorKind::Ref));
+                    return bytecode::Value::Error(bytecode::ErrorKind::Ref);
                 }
 
                 let (rows, cols) = self.bounds_on_sheet(sheet);
@@ -11647,31 +11702,18 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         match sheet {
             bytecode::SheetId::Local(sheet_id) => {
                 let sheet_id = *sheet_id;
-                if self.snapshot.sheets.contains(&sheet_id) {
-                    let (rows, cols) = self
-                        .snapshot
-                        .sheet_dimensions
-                        .get(sheet_id)
-                        .copied()
-                        .unwrap_or((0, 0));
-                    let rows = i32::try_from(rows).unwrap_or(i32::MAX);
-                    let cols = i32::try_from(cols).unwrap_or(i32::MAX);
-                    (rows, cols)
-                } else {
-                    // Synthetic external sheet id (from INDIRECT): treat as Excel default bounds.
-                    let key = {
-                        let guard = match self.external_sheets.lock() {
-                            Ok(g) => g,
-                            Err(poisoned) => poisoned.into_inner(),
-                        };
-                        guard.key_for_id(sheet_id)
-                    };
-                    if key.is_some() {
-                        (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32)
-                    } else {
-                        (0, 0)
-                    }
+                if !self.snapshot.sheets.contains(&sheet_id) {
+                    return (0, 0);
                 }
+                let (rows, cols) = self
+                    .snapshot
+                    .sheet_dimensions
+                    .get(sheet_id)
+                    .copied()
+                    .unwrap_or((0, 0));
+                let rows = i32::try_from(rows).unwrap_or(i32::MAX);
+                let cols = i32::try_from(cols).unwrap_or(i32::MAX);
+                (rows, cols)
             }
             bytecode::SheetId::External(_) => (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32),
         }
@@ -11699,22 +11741,6 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
                 });
         if local.is_some() {
             return local;
-        }
-
-        // Runtime-only external workbook sheet key used by INDIRECT.
-        if name.starts_with('[') {
-            if self.snapshot.external_value_provider.is_none() {
-                return None;
-            }
-            if !crate::eval::is_valid_external_sheet_key(name) {
-                return None;
-            }
-
-            let mut guard = match self.external_sheets.lock() {
-                Ok(g) => g,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            return Some(guard.get_or_intern(name));
         }
         None
     }

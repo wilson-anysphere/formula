@@ -120,8 +120,8 @@ fn bytecode_indirect_external_cell_ref_evaluates_via_provider() {
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")+1"#)
         .unwrap();
 
-    // INDIRECT is evaluated via the canonical parser/compiler at runtime, so it is not currently
-    // bytecode-lowered.
+    // Bytecode INDIRECT currently only resolves local sheet names, so external workbook references
+    // fall back to AST evaluation so we can consult the `ExternalValueProvider`.
     assert_eq!(
         engine.bytecode_program_count(),
         0,

@@ -50,7 +50,10 @@ impl PivotFieldRef {
             _ => None,
         }
     }
-
+    /// Backward-compatible alias for [`Self::as_cache_field_name`].
+    pub fn cache_field_name(&self) -> Option<&str> {
+        self.as_cache_field_name()
+    }
     /// Best-effort, human-friendly string representation of this ref.
     ///
     /// This is intended for diagnostics and UI; it is not a stable serialization format.
@@ -90,14 +93,8 @@ impl PivotFieldRef {
 impl fmt::Display for PivotFieldRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            // Keep cache field refs backward compatible: display the field name itself.
             PivotFieldRef::CacheFieldName(name) => f.write_str(name),
-            PivotFieldRef::DataModelColumn { table, column } => {
-                // Prefer a DAX-like display shape to make debugging/logging consistent with Excel.
-                // Always quote the table name to avoid ambiguity (spaces, special chars, etc).
-                let escaped_table = table.replace('\'', "''");
-                write!(f, "'{escaped_table}'[{column}]")
-            }
+            PivotFieldRef::DataModelColumn { table, column } => write!(f, "{table}[{column}]"),
             PivotFieldRef::DataModelMeasure(name) => write!(f, "[{name}]"),
         }
     }
@@ -171,9 +168,7 @@ impl<'de> Deserialize<'de> for PivotFieldRef {
                 }
                 Ok(PivotFieldRef::CacheFieldName(raw))
             }
-            Helper::Column { table, column } => {
-                Ok(PivotFieldRef::DataModelColumn { table, column })
-            }
+            Helper::Column { table, column } => Ok(PivotFieldRef::DataModelColumn { table, column }),
             Helper::Measure { measure } => Ok(PivotFieldRef::DataModelMeasure(measure)),
             Helper::MeasureName { name } => Ok(PivotFieldRef::DataModelMeasure(name)),
         }
@@ -349,7 +344,6 @@ pub enum Layout {
 
 impl Default for Layout {
     fn default() -> Self {
-        // Keep the default stable for serialization/back-compat.
         Self::Tabular
     }
 }
@@ -358,8 +352,6 @@ impl Default for Layout {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SubtotalPosition {
-    /// Excel default behavior.
-    Automatic,
     None,
     Top,
     Bottom,
@@ -367,7 +359,7 @@ pub enum SubtotalPosition {
 
 impl Default for SubtotalPosition {
     fn default() -> Self {
-        Self::Automatic
+        Self::None
     }
 }
 
@@ -498,8 +490,8 @@ impl PivotConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::super::PivotField;
     use super::*;
+    use super::super::PivotField;
 
     use pretty_assertions::assert_eq;
 
