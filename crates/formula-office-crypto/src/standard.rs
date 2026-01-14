@@ -460,8 +460,9 @@ fn verify_password_standard_with_key_ecb_only(
             let verifier_hash_plain_full =
                 aes_ecb_decrypt(key0, &verifier.encrypted_verifier_hash)?;
 
-            let verifier_hash_plain =
-                verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {
+            let verifier_hash_plain = verifier_hash_plain_full
+                .get(..expected_hash_len)
+                .ok_or_else(|| {
                     OfficeCryptoError::InvalidFormat(format!(
                         "decrypted verifier hash shorter than verifierHashSize (got {}, need {})",
                         verifier_hash_plain_full.len(),
