@@ -3924,7 +3924,9 @@ export class SpreadsheetApp {
       const sheetOrderDelta = payload?.sheetOrderDelta ?? null;
       const afterOrder = Array.isArray(sheetOrderDelta?.after) ? sheetOrderDelta.after : null;
       if (source !== "applyState" && afterOrder && afterOrder.length > 0) {
-        const normalized = afterOrder.filter((id: unknown) => typeof id === "string" && id.trim() !== "");
+        const normalized = afterOrder
+          .map((id: unknown) => (typeof id === "string" ? id.trim() : ""))
+          .filter((id) => id !== "");
         if (normalized.length > 0) {
           this.lastKnownSheetOrder = normalized;
         }
@@ -7299,19 +7301,24 @@ export class SpreadsheetApp {
             : null;
 
       try {
-        if (chartId && chartId.trim() !== "") {
-          this.formulaChartModelStore.setFormulaModelChartModel(chartId, model);
+        const normalizedChartId = typeof chartId === "string" ? chartId.trim() : "";
+        const normalizedStableChartId = typeof stableChartId === "string" ? stableChartId.trim() : "";
+        const normalizedSheetObjectChartId = typeof sheetObjectChartId === "string" ? sheetObjectChartId.trim() : "";
+        const normalizedRelId = typeof relId === "string" ? relId.trim() : "";
+
+        if (normalizedChartId) {
+          this.formulaChartModelStore.setFormulaModelChartModel(normalizedChartId, model);
         }
-        if (stableChartId && stableChartId.trim() !== "" && stableChartId !== chartId) {
-          this.formulaChartModelStore.setFormulaModelChartModel(stableChartId, model);
+        if (normalizedStableChartId && normalizedStableChartId !== normalizedChartId) {
+          this.formulaChartModelStore.setFormulaModelChartModel(normalizedStableChartId, model);
         }
-        if (sheetObjectChartId && sheetObjectChartId.trim() !== "" && sheetObjectChartId !== chartId) {
-          this.formulaChartModelStore.setFormulaModelChartModel(sheetObjectChartId, model);
+        if (normalizedSheetObjectChartId && normalizedSheetObjectChartId !== normalizedChartId) {
+          this.formulaChartModelStore.setFormulaModelChartModel(normalizedSheetObjectChartId, model);
         }
         // Back-compat: some drawing adapters may identify charts by the drawing relationship id
         // (`rId*`) when sheet/object context isn't available.
-        if (relId && relId.trim() !== "" && relId !== chartId) {
-          this.formulaChartModelStore.setFormulaModelChartModel(relId, model);
+        if (normalizedRelId && normalizedRelId !== normalizedChartId) {
+          this.formulaChartModelStore.setFormulaModelChartModel(normalizedRelId, model);
         }
       } catch {
         // Best-effort: ignore malformed chart models so other charts still render.
@@ -16329,7 +16336,11 @@ export class SpreadsheetApp {
 
   private setSelectedChartId(id: string | null): void {
     const prevSelected = this.getSelectedDrawingId();
-    const next = id && String(id).trim() !== "" ? String(id) : null;
+    const next = (() => {
+      if (id == null) return null;
+      const trimmed = String(id).trim();
+      return trimmed !== "" ? trimmed : null;
+    })();
     // Selecting a chart should clear any drawing selection so selection handles don't
     // double-render and split-view panes can mirror a single "active object" selection.
     const clearedDrawingSelection = next != null && this.selectedDrawingId != null;
@@ -24283,7 +24294,8 @@ export class SpreadsheetApp {
     content: unknown,
     options?: { sheetId?: string; baseCell?: { row: number; col: number } },
   ): Promise<boolean> {
-    const sheetId = typeof options?.sheetId === "string" && options.sheetId.trim() !== "" ? String(options.sheetId) : this.sheetId;
+    const sheetId =
+      typeof options?.sheetId === "string" && options.sheetId.trim() !== "" ? options.sheetId.trim() : this.sheetId;
     const maxBytes = Number(CLIPBOARD_LIMITS?.maxImageBytes) > 0 ? Number(CLIPBOARD_LIMITS.maxImageBytes) : 5 * 1024 * 1024;
     const mb = Math.round(maxBytes / 1024 / 1024);
     const anyContent = content as any;
@@ -26187,7 +26199,10 @@ export class SpreadsheetApp {
     const resolved = this.sheetNameResolver?.getSheetNameById(sheetId) ?? null;
     if (resolved) return resolved;
     const metaName = (this.document as any)?.getSheetMeta?.(sheetId)?.name;
-    if (typeof metaName === "string" && metaName.trim() !== "") return metaName;
+    if (typeof metaName === "string") {
+      const trimmed = metaName.trim();
+      if (trimmed !== "") return trimmed;
+    }
     return sheetId;
   }
 

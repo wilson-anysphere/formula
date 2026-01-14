@@ -10,7 +10,7 @@ describe("collabLink", () => {
       {
         wsUrl: "ws://127.0.0.1:1234",
         docId: "doc-123",
-        token: "secret-token",
+        token: " secret-token ",
       },
       { baseUrl: "http://localhost:4174/" },
     );
@@ -41,4 +41,3 @@ describe("collabLink", () => {
     expect(parsed).toEqual({ wsUrl: "ws://example.com:1234", docId: "my-doc", token: "my-token" });
   });
 });
-

@@ -5819,7 +5819,9 @@ export class DocumentController {
   getSheetBackgroundImageId(sheetId) {
     const view = this.model.getSheetView(sheetId);
     const id = view?.backgroundImageId;
-    return typeof id === "string" && id.trim() !== "" ? id : null;
+    if (typeof id !== "string") return null;
+    const trimmed = id.trim();
+    return trimmed !== "" ? trimmed : null;
   }
 
   /**

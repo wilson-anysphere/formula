@@ -48,7 +48,7 @@ export function serializeCollabShareLink(
 ): string {
   const wsUrl = String(payload.wsUrl ?? "").trim();
   const docId = String(payload.docId ?? "").trim();
-  const token = typeof payload.token === "string" ? payload.token : undefined;
+  const token = typeof payload.token === "string" ? payload.token.trim() : "";
   if (!wsUrl) throw new Error("serializeCollabShareLink requires wsUrl");
   if (!docId) throw new Error("serializeCollabShareLink requires docId");
 
@@ -63,7 +63,7 @@ export function serializeCollabShareLink(
   // Put tokens in the URL hash rather than query params. This keeps tokens out of
   // server logs (hash fragments are not sent to the server) and makes it easier
   // to scrub them from browser history via `history.replaceState`.
-  if (token && token.trim() !== "") {
+  if (token) {
     const hash = parseHashParams(url.hash);
     hash.set("token", token);
     url.hash = hash.toString();
@@ -130,4 +130,3 @@ export function collabConnectionOptionsFromShareLink(
     ...(parsed.disableBc ? { disableBc: true } : {}),
   };
 }
-

@@ -1204,8 +1204,9 @@ export class CanvasGridRenderer {
   }
 
   invalidateImage(imageId: string): void {
-    if (typeof imageId !== "string" || imageId.trim() === "") return;
-    const existing = this.imageBitmapCache.get(imageId);
+    const normalizedId = typeof imageId === "string" ? imageId.trim() : "";
+    if (normalizedId === "") return;
+    const existing = this.imageBitmapCache.get(normalizedId);
     if (existing?.state === "ready") {
       this.imageBitmapCacheReadyCount = Math.max(0, this.imageBitmapCacheReadyCount - 1);
       const bitmap = existing.bitmap as any;
@@ -1217,7 +1218,7 @@ export class CanvasGridRenderer {
         }
       }
     }
-    this.imageBitmapCache.delete(imageId);
+    this.imageBitmapCache.delete(normalizedId);
     this.markContentDirtyForImageUpdate();
   }
 
@@ -1260,18 +1261,19 @@ export class CanvasGridRenderer {
   }
 
   private getOrRequestImageBitmap(imageId: string): CanvasImageSource | null {
-    if (typeof imageId !== "string" || imageId.trim() === "") return null;
+    const normalizedId = typeof imageId === "string" ? imageId.trim() : "";
+    if (normalizedId === "") return null;
 
-    const existing = this.imageBitmapCache.get(imageId);
+    const existing = this.imageBitmapCache.get(normalizedId);
     if (existing?.state === "ready") {
       // Touch for LRU eviction.
-      this.imageBitmapCache.delete(imageId);
-      this.imageBitmapCache.set(imageId, existing);
+      this.imageBitmapCache.delete(normalizedId);
+      this.imageBitmapCache.set(normalizedId, existing);
       return existing.bitmap;
     }
     if (existing?.state === "error") {
       if (existing.expiresAtMs <= Date.now()) {
-        this.imageBitmapCache.delete(imageId);
+        this.imageBitmapCache.delete(normalizedId);
       } else {
         return null;
       }
@@ -1279,7 +1281,7 @@ export class CanvasGridRenderer {
       return null;
     }
 
-    this.requestImageBitmap(imageId);
+    this.requestImageBitmap(normalizedId);
     return null;
   }
 
@@ -3827,8 +3829,9 @@ export class CanvasGridRenderer {
       };
 
       const image = cell.image;
-      if (image && typeof image.imageId === "string" && image.imageId.trim() !== "") {
-        const bitmap = this.getOrRequestImageBitmap(image.imageId);
+      const imageId = typeof image?.imageId === "string" ? image.imageId.trim() : "";
+      if (image && imageId !== "") {
+        const bitmap = this.getOrRequestImageBitmap(imageId);
 
         const availableWidth = Math.max(0, width - paddingX * 2);
         const availableHeight = Math.max(0, height - paddingY * 2);

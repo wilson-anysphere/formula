@@ -15,6 +15,7 @@ import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
 import type { GridLimits, Range } from "../selection/types";
 import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize, normalizeSelectionRange } from "../formatting/selectionSizeGuard.js";
+import { getStyleNumberFormat } from "../formatting/styleFieldAccess.js";
 import {
   setFillColor,
   setFontColor,
@@ -416,8 +417,8 @@ export function registerBuiltinCommands(params: {
       const cell = (app as any).getActiveCell?.();
       const docAny = (app as any).getDocument?.();
       if (!sheetId || !cell || !docAny) return null;
-      const format = docAny.getCellFormat?.(sheetId, cell)?.numberFormat;
-      return typeof format === "string" && format.trim() ? format : null;
+      const style = docAny.getCellFormat?.(sheetId, cell);
+      return getStyleNumberFormat(style);
     } catch {
       return null;
     }

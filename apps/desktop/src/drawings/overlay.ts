@@ -1777,7 +1777,7 @@ function drawShape(
     ctx.globalAlpha = 0.8;
     const size =
       typeof spec.labelFontSizePx === "number" && Number.isFinite(spec.labelFontSizePx) ? spec.labelFontSizePx * scale : 12 * scale;
-    const family = spec.labelFontFamily?.trim() ? spec.labelFontFamily : "sans-serif";
+    const family = spec.labelFontFamily?.trim() || "sans-serif";
     const weight = spec.labelBold ? "bold " : "";
     ctx.font = `${weight}${size}px ${family}`;
     const align = spec.labelAlign ?? "left";

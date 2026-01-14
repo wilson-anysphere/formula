@@ -1428,7 +1428,7 @@ openMarketplacePanelButtonEl.addEventListener("click", (e) => {
 });
 
 const docIdParam = new URL(window.location.href).searchParams.get("docId");
-const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
+const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam.trim() : null;
 const workbookId = docId ?? "local-workbook";
 
 // Best-effort: hydrate any persisted collaboration token from the desktop secure store

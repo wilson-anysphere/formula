@@ -301,7 +301,7 @@ describe("CanvasGridRenderer image cells", () => {
               row,
               col,
               value: null,
-              image: { imageId: "img1", width: 100, height: 50 }
+              image: { imageId: " img1 ", width: 100, height: 50 }
             }
           : null
     };
@@ -343,6 +343,7 @@ describe("CanvasGridRenderer image cells", () => {
     renderer.renderImmediately();
 
     expect(imageResolver).toHaveBeenCalledTimes(1);
+    expect(imageResolver).toHaveBeenCalledWith("img1");
     expect(content.rec.drawImages.length).toBeGreaterThan(0);
 
     const args = content.rec.drawImages[content.rec.drawImages.length - 1]!;
