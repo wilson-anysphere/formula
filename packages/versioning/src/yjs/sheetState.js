@@ -499,21 +499,26 @@ export function mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData) {
  */
 export function sheetFormatLayersFromSheetEntry(sheetEntry) {
   const view = sheetEntry ? readSheetEntryField(sheetEntry, "view") : null;
-  const viewJson = view != null ? yjsValueToJson(view) : null;
 
   const rawDefaultFormat = sheetEntry != null ? readSheetEntryField(sheetEntry, "defaultFormat") : undefined;
   const rawRowFormats = sheetEntry != null ? readSheetEntryField(sheetEntry, "rowFormats") : undefined;
   const rawColFormats = sheetEntry != null ? readSheetEntryField(sheetEntry, "colFormats") : undefined;
   const rawFormatRunsByCol = sheetEntry != null ? readSheetEntryField(sheetEntry, "formatRunsByCol") : undefined;
 
+  // Older snapshots stored formatting defaults nested under `sheet.view`. Avoid converting
+  // the full `view` object to JSON (it can contain large unrelated payloads); instead, only
+  // read the formatting keys we care about.
+  const viewDefaultFormat = rawDefaultFormat !== undefined ? rawDefaultFormat : readSheetEntryField(view, "defaultFormat");
+  const viewRowFormats = rawRowFormats !== undefined ? rawRowFormats : readSheetEntryField(view, "rowFormats");
+  const viewColFormats = rawColFormats !== undefined ? rawColFormats : readSheetEntryField(view, "colFormats");
+  const viewFormatRunsByCol =
+    rawFormatRunsByCol !== undefined ? rawFormatRunsByCol : readSheetEntryField(view, "formatRunsByCol");
+
   const sheetDefaultFormat =
-    extractStyleObject(yjsValueToJson(rawDefaultFormat !== undefined ? rawDefaultFormat : viewJson?.defaultFormat)) ??
-    null;
-  const rowFormats = parseIndexedFormats(rawRowFormats !== undefined ? rawRowFormats : viewJson?.rowFormats, "row");
-  const colFormats = parseIndexedFormats(rawColFormats !== undefined ? rawColFormats : viewJson?.colFormats, "col");
-  const formatRunsByCol = parseFormatRunsByCol(
-    rawFormatRunsByCol !== undefined ? rawFormatRunsByCol : viewJson?.formatRunsByCol,
-  );
+    extractStyleObject(yjsValueToJson(viewDefaultFormat)) ?? null;
+  const rowFormats = parseIndexedFormats(viewRowFormats, "row");
+  const colFormats = parseIndexedFormats(viewColFormats, "col");
+  const formatRunsByCol = parseFormatRunsByCol(viewFormatRunsByCol);
 
   return { sheetDefaultFormat, rowFormats, colFormats, formatRunsByCol };
 }
@@ -598,11 +603,6 @@ export function sheetStateFromYjsDoc(doc, opts = {}) {
   const targetSheetId = opts.sheetId ?? null;
   const cellsMap = getMapRoot(doc, "cells");
 
-  // Layered formatting defaults (Task 44): sheet/row/col formats can be stored on the
-  // `sheets` metadata root. We only compute effective formats for the requested sheet.
-  const sheetEntry = targetSheetId != null ? findSheetEntryById(doc, targetSheetId) : null;
-  const formatLayers = sheetFormatLayersFromSheetEntry(sheetEntry);
-
   /** @type {Map<string, any>} */
   const cells = new Map();
   cellsMap.forEach((cellData, rawKey) => {
@@ -612,8 +612,16 @@ export function sheetStateFromYjsDoc(doc, opts = {}) {
     mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData);
   });
 
-  if (targetSheetId != null && sheetHasLayeredFormats(formatLayers)) {
-    applyLayeredFormatsToCells(cells, formatLayers);
+  if (targetSheetId != null && cells.size > 0) {
+    // Layered formatting defaults (Task 44): sheet/row/col formats can be stored on the
+    // `sheets` metadata root. Only compute effective formats when the sheet has cells.
+    const sheetEntry = findSheetEntryById(doc, targetSheetId);
+    if (sheetEntry) {
+      const formatLayers = sheetFormatLayersFromSheetEntry(sheetEntry);
+      if (sheetHasLayeredFormats(formatLayers)) {
+        applyLayeredFormatsToCells(cells, formatLayers);
+      }
+    }
   }
 
   return { cells };
