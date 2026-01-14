@@ -50,7 +50,13 @@ type WasmWorkbookInstance = {
   getSheetDimensions?: (sheet: string) => { rows: number; cols: number };
   renameSheet?: (oldName: string, newName: string) => boolean;
   setWorkbookFileMetadata?: (directory: string | null, filename: string | null) => void;
-  setCellStyleId?: (address: string, styleId: number, sheet?: string) => void;
+  // `crates/formula-wasm` has historically used both a sheet-first and sheet-last signature for
+  // `setCellStyleId`. The worker prefers the modern sheet-first form and falls back at runtime
+  // when it detects the legacy ordering.
+  setCellStyleId?: {
+    (sheet: string, address: string, styleId: number): void;
+    (address: string, styleId: number, sheet?: string): void;
+  };
   setRowStyleId?: (sheet: string, row: number, styleId?: number) => void;
   setColStyleId?: (sheet: string, col: number, styleId?: number) => void;
   setSheetDefaultStyleId?: (sheet: string, styleId?: number) => void;
