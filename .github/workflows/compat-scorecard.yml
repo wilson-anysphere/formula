@@ -181,8 +181,10 @@ jobs:
           GITHUB_RUN_ID: ${{ steps.runs.outputs.excel_run_id }}
         run: |
           CORPUS_SUMMARY="artifacts/corpus/tools/corpus/out/public/summary.json"
+          PRIVACY_FLAGS=()
           if [ -f artifacts/corpus/tools/corpus/out/private/summary.json ]; then
             CORPUS_SUMMARY="artifacts/corpus/tools/corpus/out/private/summary.json"
+            PRIVACY_FLAGS+=(--privacy-mode private)
           fi
 
           python tools/compat_scorecard.py \
@@ -190,7 +192,8 @@ jobs:
             --oracle-report artifacts/excel/tests/compatibility/excel-oracle/reports/mismatch-report.json \
             --out-md artifacts/compat_scorecard.md \
             --out-json artifacts/compat_scorecard.json \
-            --allow-missing-inputs
+            --allow-missing-inputs \
+            "${PRIVACY_FLAGS[@]}"
 
           if [ -f artifacts/compat_scorecard.md ]; then
             cat artifacts/compat_scorecard.md >> "$GITHUB_STEP_SUMMARY"

@@ -17,10 +17,12 @@ Output:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +45,39 @@ def _github_run_url() -> str | None:
     if server and repo and run_id:
         return f"{server}/{repo}/actions/runs/{run_id}"
     return None
+
+
+_PRIVACY_PUBLIC = "public"
+_PRIVACY_PRIVATE = "private"
+
+_SAFE_RUN_URL_HOST_SUFFIXES = {
+    "github.com",
+}
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _is_safe_run_url_host(host: str | None) -> bool:
+    if not host:
+        return False
+    host = host.casefold()
+    return any(
+        host == allowed or host.endswith(f".{allowed}") for allowed in _SAFE_RUN_URL_HOST_SUFFIXES
+    )
+
+
+def _redact_run_url(url: str | None, *, privacy_mode: str) -> str | None:
+    if not url or privacy_mode != _PRIVACY_PRIVATE:
+        return url
+    if isinstance(url, str) and url.startswith("sha256="):
+        return url
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme in ("http", "https") and parsed.netloc and _is_safe_run_url_host(parsed.hostname):
+        return url
+    return f"sha256={_sha256_text(url)}"
 
 
 def _git_commit_sha(repo_root: Path) -> str | None:
@@ -348,6 +383,15 @@ def main() -> int:
         help="Optional path to write the scorecard as JSON (default: disabled)",
     )
     parser.add_argument(
+        "--privacy-mode",
+        choices=[_PRIVACY_PUBLIC, _PRIVACY_PRIVATE],
+        default=_PRIVACY_PUBLIC,
+        help=(
+            "Control redaction of outputs. `public` preserves run URLs; `private` hashes non-"
+            "`github.com` run URLs (e.g. GitHub Enterprise Server domains)."
+        ),
+    )
+    parser.add_argument(
         "--target-read",
         type=float,
         default=1.0,
@@ -478,6 +522,7 @@ def main() -> int:
     if not commit:
         commit = _git_commit_sha(repo_root)
     run_url = _github_run_url() or (corpus.run_url if corpus else None)
+    run_url = _redact_run_url(run_url, privacy_mode=args.privacy_mode)
 
     out_md = Path(args.out_md)
     if not out_md.is_absolute():
@@ -501,8 +546,9 @@ def main() -> int:
             corpus_meta_parts.append(f"timestamp: `{corpus.timestamp}`")
         if corpus.commit:
             corpus_meta_parts.append(f"commit: `{corpus.commit}`")
-        if corpus.run_url:
-            corpus_meta_parts.append(f"run: {corpus.run_url}")
+        corpus_run_url = _redact_run_url(corpus.run_url, privacy_mode=args.privacy_mode)
+        if corpus_run_url:
+            corpus_meta_parts.append(f"run: {corpus_run_url}")
         extra = f" ({', '.join(corpus_meta_parts)})" if corpus_meta_parts else ""
         lines.append(f"- Corpus summary: `{_fmt_path(repo_root, corpus.path)}`{extra}")
     else:
@@ -603,7 +649,9 @@ def main() -> int:
                     "label": corpus_label,
                     "timestamp": corpus.timestamp if corpus else None,
                     "commit": corpus.commit if corpus else None,
-                    "runUrl": corpus.run_url if corpus else None,
+                    "runUrl": _redact_run_url(corpus.run_url, privacy_mode=args.privacy_mode)
+                    if corpus
+                    else None,
                 },
                 "oracle": {
                     "includeTags": oracle.include_tags if oracle else None,
