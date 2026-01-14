@@ -815,6 +815,8 @@ a:visited {
 
 .formula-range-preview-tooltip__grid {
   border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
   background: var(--formula-grid-bg, var(--bg-primary));
   color: var(--formula-grid-cell-text, var(--text-primary));
 }
@@ -822,8 +824,7 @@ a:visited {
 .formula-range-preview-tooltip__grid td {
   border: 1px solid var(--formula-grid-line, var(--border));
   padding: var(--space-2) var(--space-3);
-  min-width: 54px;
-  max-width: 120px;
+  min-width: 0;
   background: var(--formula-grid-bg, var(--bg-primary));
   white-space: nowrap;
   overflow: hidden;
