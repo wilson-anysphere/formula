@@ -57,6 +57,7 @@ Examples of real command ids already in use:
 
 - `clipboard.copy`, `clipboard.paste`, `clipboard.pasteSpecial.values` (registered in `apps/desktop/src/commands/registerBuiltinCommands.ts`)
 - `edit.undo`, `edit.redo` (registered in `apps/desktop/src/commands/registerBuiltinCommands.ts`)
+- `edit.clearContents` (registered in `apps/desktop/src/commands/registerBuiltinCommands.ts`, bound to Delete/Backspace in `apps/desktop/src/commands/builtinKeybindings.ts`)
 - `format.toggleBold` (registered in `apps/desktop/src/commands/registerBuiltinCommands.ts` via `registerDesktopCommands.ts`)
 - `format.numberFormat.currency` (registered in `apps/desktop/src/commands/registerNumberFormatCommands.ts` via `registerDesktopCommands.ts`)
 - Data → Queries & Connections ribbon actions (currently non-canonical ribbon ids, but registered as commands):\
@@ -100,6 +101,23 @@ Why:
 
 - Avoids a duplicate “Freeze Panes” entry in the command palette (trigger + action).
 - Keeps command palette recents/telemetry consistent by executing the canonical `view.*` command ids.
+
+Example (Home → Editing → Clear):
+
+- Trigger id: `home.editing.clear` (menu opener; *not* a CommandRegistry command)
+- Menu item ids (canonical):
+  - `format.clearAll`
+  - `format.clearFormats`
+  - `edit.clearContents`
+- Menu item ids (placeholders / currently unimplemented and intentionally unregistered):
+  - `home.editing.clear.clearComments`
+  - `home.editing.clear.clearHyperlinks`
+
+Important:
+
+- If a menu item id is unimplemented, prefer leaving it **unregistered** so it is disabled by default via
+  `computeRibbonDisabledByIdFromCommandRegistry` (rather than adding it to `COMMAND_REGISTRY_EXEMPT_IDS`).
+- Once implemented, register a real CommandRegistry command under that id so the ribbon, command palette, and keybindings stay consistent.
 
 ### Guideline: use `testId` for stable E2E hooks
 
