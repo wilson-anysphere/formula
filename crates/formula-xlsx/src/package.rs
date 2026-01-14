@@ -1977,6 +1977,37 @@ mod tests {
     }
 
     #[test]
+    fn apply_cell_patches_to_bytes_tolerates_backslash_worksheet_part_names() {
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+
+        let bytes = build_package(&[("xl\\worksheets\\sheet1.xml", worksheet_xml.as_bytes())]);
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read test pkg");
+
+        let patched = pkg
+            .apply_cell_patches_to_bytes(&[CellPatch::for_worksheet_part(
+                "xl/worksheets/sheet1.xml",
+                CellRef::new(0, 0),
+                CellValue::Number(42.0),
+                None,
+            )])
+            .expect("apply cell patches");
+
+        let mut zip = zip::ZipArchive::new(Cursor::new(patched)).expect("open patched zip");
+        let mut file = zip
+            .by_name("xl\\worksheets\\sheet1.xml")
+            .expect("worksheet part preserved with backslashes");
+        let mut out = Vec::new();
+        file.read_to_end(&mut out).expect("read patched sheet");
+
+        let xml = String::from_utf8(out).expect("sheet xml is utf-8");
+        assert!(xml.contains(r#"r="A1""#), "expected cell A1 in {xml}");
+        assert!(xml.contains("<v>42</v>"), "expected value 42 in {xml}");
+    }
+
+    #[test]
     fn extract_cell_images_resolves_media_relationships() {
         let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
