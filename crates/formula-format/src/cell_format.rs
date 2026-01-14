@@ -175,11 +175,18 @@ fn bracket_is_currency(content: &str) -> bool {
     let Some(after) = content.strip_prefix('$') else {
         return false;
     };
-    // We only treat `[$<sym>-<lcid>]` as currency when `<sym>` is non-empty.
-    let Some((symbol, _lcid)) = after.split_once('-') else {
+    // Bracket currency/locale tokens are encoded as `[$<currency>-<lcid>]`.
+    //
+    // Real-world OOXML often embeds 3-letter currency codes (e.g. `USD`) or multi-character
+    // symbols (e.g. `R$`, `kr`), so `<currency>` may contain multiple characters. We also want to
+    // avoid treating locale-only overrides like `[$-409]` as currency.
+    //
+    // Parse the LCID suffix from the *last* `-` so we don't assume the currency portion is a
+    // single character.
+    let Some((currency, _lcid)) = after.rsplit_once('-') else {
         return false;
     };
-    !symbol.is_empty()
+    !currency.is_empty() && currency.chars().any(|c| c != '-')
 }
 
 fn scan_outside_quotes(pattern: &str, pred: impl Fn(char) -> bool) -> bool {
