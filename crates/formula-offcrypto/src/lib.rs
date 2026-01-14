@@ -87,7 +87,9 @@ fn check_spin_count(spin_count: u32, limits: &DecryptLimits) -> Result<(), Offcr
 }
 
 pub mod encrypted_package;
-pub use encrypted_package::{agile_decrypt_package, decrypt_encrypted_package};
+pub use encrypted_package::{
+    agile_decrypt_package, decrypt_encrypted_package, decrypt_standard_encrypted_package,
+};
 
 const PASSWORD_KEY_ENCRYPTOR_NS: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
@@ -2250,6 +2252,57 @@ pub fn standard_verify_key(info: &StandardEncryptionInfo, key: &[u8]) -> Result<
 const BLK_KEY_VERIFIER_HASH_INPUT: [u8; 8] = [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B, 0x9E, 0x79];
 const BLK_KEY_VERIFIER_HASH_VALUE: [u8; 8] = [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x34, 0x4E];
 const BLK_KEY_ENCRYPTED_KEY_VALUE: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
+
+/// Decrypt an Office-encrypted OOXML package using Standard (CryptoAPI) encryption.
+///
+/// Inputs:
+/// - `encryption_info`: the `EncryptionInfo` stream bytes
+/// - `encrypted_package`: the `EncryptedPackage` stream bytes
+/// - `password`: user-provided password (UTF-8)
+///
+/// On success, returns the decrypted raw OOXML ZIP bytes (should start with `PK`).
+pub fn decrypt_ooxml_standard(
+    encryption_info: &[u8],
+    encrypted_package: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let parsed = parse_encryption_info(encryption_info)?;
+    let (header, verifier) = match parsed {
+        EncryptionInfo::Standard { header, verifier, .. } => (header, verifier),
+        EncryptionInfo::Agile { .. } => {
+            return Err(OffcryptoError::UnsupportedEncryption {
+                encryption_type: EncryptionType::Agile,
+            });
+        }
+        EncryptionInfo::Unsupported { version } => {
+            if version.minor == 3 && matches!(version.major, 3 | 4) {
+                // MS-OFFCRYPTO "Extensible" encryption: known scheme, but not supported by this
+                // Standard-only decryptor.
+                return Err(OffcryptoError::UnsupportedEncryption {
+                    encryption_type: EncryptionType::Extensible,
+                });
+            }
+            return Err(OffcryptoError::UnsupportedVersion {
+                major: version.major,
+                minor: version.minor,
+            });
+        }
+    };
+
+    let info = StandardEncryptionInfo { header, verifier };
+    let key = standard_derive_key(&info, password)?;
+    standard_verify_key(&info, &key)?;
+    let decrypted = decrypt_standard_encrypted_package(&key, encrypted_package)?;
+
+    // Standard encryption verifier checks protect against wrong passwords, but in practice we see
+    // files in the wild that require additional validation (e.g. different schemes). The decrypted
+    // output should be an OOXML ZIP/OPC package beginning with `PK`.
+    if decrypted.len() < 2 || &decrypted[..2] != b"PK" {
+        return Err(OffcryptoError::InvalidPassword);
+    }
+
+    Ok(decrypted)
+}
 
 fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
     if bytes.len() >= out_len {

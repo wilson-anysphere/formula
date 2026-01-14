@@ -206,6 +206,20 @@ pub fn agile_decrypt_package(
     })
 }
 
+/// Decrypt a Standard (CryptoAPI) `EncryptedPackage` stream using AES-ECB.
+///
+/// The key is the output of `standard_derive_key`.
+pub fn decrypt_standard_encrypted_package(
+    key: &[u8],
+    encrypted_package: &[u8],
+) -> Result<Vec<u8>, OffcryptoError> {
+    crate::validate_standard_encrypted_package_stream(encrypted_package)?;
+    decrypt_encrypted_package(encrypted_package, |_idx, ct, pt| {
+        pt.copy_from_slice(ct);
+        crate::aes_ecb_decrypt_in_place(key, pt)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
