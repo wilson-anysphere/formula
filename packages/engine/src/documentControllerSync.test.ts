@@ -47,7 +47,7 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     doc.setCellValue("sheet_2", "A1", 2);
 
     expect(exportDocumentToEngineWorkbookJson(doc)).toEqual({
-      sheetOrder: ["Sheet1", "Budget"],
+      sheetOrder: ["Sheet1", "sheet_2"],
       sheets: {
         Sheet1: { cells: { A1: 1 } },
         sheet_2: { cells: { A1: 2 } },
@@ -66,7 +66,7 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     doc.reorderSheets(["sheet_3", "Sheet1", "sheet_2"]);
 
     const json = exportDocumentToEngineWorkbookJson(doc);
-    expect(json.sheetOrder).toEqual(["Costs", "Sheet1", "Budget"]);
+    expect(json.sheetOrder).toEqual(["sheet_3", "Sheet1", "sheet_2"]);
   });
 
   it("includes localeId in exported workbook JSON when provided", () => {
