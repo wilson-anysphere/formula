@@ -51,6 +51,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const tauriConfigRelativePath = "apps/desktop/src-tauri/tauri.conf.json";
 const tauriConfigPath = path.join(repoRoot, tauriConfigRelativePath);
 const PLACEHOLDER_PUBKEY = "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY";
+const GITHUB_API_BASE = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, "");
 
 /**
  * @param {string} value
@@ -657,7 +658,7 @@ function parseArgs(argv) {
 function buildReleaseByTagApiUrl(repo, tag) {
   const normalizedTag = tag.startsWith("refs/tags/") ? tag.slice("refs/tags/".length) : tag;
   // Tag is a path component; encode for safety (e.g. v1.2.3-beta).
-  return `https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(normalizedTag)}`;
+  return `${GITHUB_API_BASE}/repos/${repo}/releases/tags/${encodeURIComponent(normalizedTag)}`;
 }
 
 /**
@@ -666,7 +667,7 @@ function buildReleaseByTagApiUrl(repo, tag) {
  * @param {number} page
  */
 function buildReleaseAssetsApiUrl(repo, releaseId, page) {
-  return `https://api.github.com/repos/${repo}/releases/${releaseId}/assets?per_page=100&page=${page}`;
+  return `${GITHUB_API_BASE}/repos/${repo}/releases/${releaseId}/assets?per_page=100&page=${page}`;
 }
 
 /**
