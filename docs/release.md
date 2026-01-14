@@ -1045,7 +1045,7 @@ wired to the correct **updater-consumed** artifacts:
    - Then inspect:
    - `jq -r '.platforms | to_entries[] | "\(.key)\t\(.value.url)"' latest.json`
 3. Confirm each `platforms[*].url` points at the expected **updater** asset type (not a manual-only installer):
-   - macOS: `*.app.tar.gz` (or `*.tar.gz`; **not** `.dmg`)
+   - macOS: `*.app.tar.gz` (**not** `.dmg`)
    - Windows: `.msi`
    - Linux: `*.AppImage` (**not** `.deb`/`.rpm`)
 4. Confirm each URL filename matches an actual Release asset (no broken/missing assets).
@@ -1105,10 +1105,11 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
    - `linux-x86_64` (Linux x86_64)
    - `linux-aarch64` (Linux ARM64)
 
-   Note: tagged-release CI is intentionally **strict** about these platform key names (see
-   `docs/desktop-updater-target-mapping.md`). If `latest.json` ever ships with additional/unexpected
-   keys (due to a Tauri/tauri-action upgrade), CI is expected to fail loudly with an expected vs
-   actual diff so we update the docs + validator together.
+   Note: tagged-release CI is intentionally **strict** about the required `{os}-{arch}` platform key
+   names (see `docs/desktop-updater-target-mapping.md`). `latest.json` may also include additional
+   installer-specific keys, and CI validates those entries reference real release assets. If a
+   Tauri/tauri-action upgrade changes the required `{os}-{arch}` key set, CI is expected to fail
+   loudly with an expected vs actual diff so we update the docs + validators together.
 
    Quick check (after downloading `latest.json` to your current directory):
 
@@ -1122,7 +1123,7 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
     ```
 
    Also confirm each platform entry points at the **updater-consumed** asset type:
-   - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive
+   - `darwin-*` → `*.app.tar.gz` (universal updater archive; **not** `.dmg`)
    - `windows-*` → `*.msi` (updater runs the Windows Installer; this repo requires the manifest to reference the MSI)
    - `linux-*` → `*.AppImage`
 
