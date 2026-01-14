@@ -26036,8 +26036,16 @@ export class SpreadsheetApp {
       })();
       if (visibleStartRow == null || visibleEndRow == null || visibleStartCol == null || visibleEndCol == null) return;
 
-      const startRect = this.getCellRect({ row: visibleStartRow, col: visibleStartCol });
-      const endRect = this.getCellRect({ row: visibleEndRow, col: visibleEndCol });
+      const cellScratch = this.overlayCellRectScratch;
+      const rectA = this.overlayCellBoundsScratchA;
+      const rectB = this.overlayCellBoundsScratchB;
+
+      cellScratch.row = visibleStartRow;
+      cellScratch.col = visibleStartCol;
+      const startRect = this.getCellRect(cellScratch, rectA);
+      cellScratch.row = visibleEndRow;
+      cellScratch.col = visibleEndCol;
+      const endRect = this.getCellRect(cellScratch, rectB);
       if (!startRect || !endRect) return;
 
       const x = startRect.x;
