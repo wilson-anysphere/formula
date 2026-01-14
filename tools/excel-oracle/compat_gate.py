@@ -22,6 +22,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -139,17 +140,28 @@ def _redact_path_str(path: Path, *, privacy_mode: str, repo_root: Path | None) -
     if privacy_mode != _PRIVACY_PRIVATE:
         return raw
 
-    if repo_root is not None:
+    if raw.startswith("sha256="):
+        return raw
+
+    # `Path` parsing is OS-dependent. On non-Windows platforms, strings like `C:\Users\Alice\...`
+    # and `file:///home/alice/...` are treated as *relative* paths and will resolve under the
+    # current working directory (often the repo root), which would incorrectly bypass redaction.
+    #
+    # Only attempt repo-root relativization for *true* absolute filesystem paths.
+    if repo_root is not None and path.is_absolute():
         try:
             rel = path.resolve().relative_to(repo_root.resolve())
             return rel.as_posix()
         except Exception:
             pass
 
+    parsed = urllib.parse.urlparse(raw)
     looks_abs = bool(
         raw.startswith(("/", "\\", "~"))
         or raw.startswith("//")
         or re.match(r"^[A-Za-z]:[\\/]", raw)
+        # urlparse treats `C:\foo` as scheme "c" on non-Windows too; that's fine (it is a path).
+        or (parsed.scheme and ":" in raw)
     )
     return f"sha256={_sha256_text(raw)}" if looks_abs else raw
 
@@ -236,7 +248,12 @@ def _print_expected_dataset_synthetic_warning(
     sys.stderr.flush()
 
 
-def _print_expected_dataset_patch_summary(*, expected_path: Path) -> None:
+def _print_expected_dataset_patch_summary(
+    *,
+    expected_path: Path,
+    privacy_mode: str = _PRIVACY_PUBLIC,
+    repo_root: Path | None = None,
+) -> None:
     """
     Best-effort reporting for mixed synthetic+Excel datasets.
 
@@ -294,7 +311,12 @@ def _print_expected_dataset_patch_summary(*, expected_path: Path) -> None:
         suffix_text = ", ".join(suffix)
 
         if case_path:
-            print(f"  - Excel {version} build {build} ({os_name}): {case_path} ({suffix_text})")
+            case_path_out = _redact_path_str(
+                Path(case_path), privacy_mode=privacy_mode, repo_root=repo_root
+            )
+            print(
+                f"  - Excel {version} build {build} ({os_name}): {case_path_out} ({suffix_text})"
+            )
         else:
             print(f"  - Excel {version} build {build} ({os_name}) ({suffix_text})")
         shown += 1
@@ -624,7 +646,11 @@ def main() -> int:
                     "Expected dataset appears to be real Excel (no source.syntheticSource).",
                     flush=True,
                 )
-    _print_expected_dataset_patch_summary(expected_path=expected_path)
+    _print_expected_dataset_patch_summary(
+        expected_path=expected_path,
+        privacy_mode=args.privacy_mode,
+        repo_root=repo_root,
+    )
 
     include_tags = _effective_include_tags(tier=args.tier, user_include_tags=args.include_tag)
     exclude_tags = _normalize_tags(args.exclude_tag)

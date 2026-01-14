@@ -249,6 +249,48 @@ class CompatGatePrivacyModeTests(unittest.TestCase):
         self.assertIn("private", cmd)
 
 
+class CompatGatePathRedactionTests(unittest.TestCase):
+    def _load_compat_gate(self):
+        compat_gate_py = Path(__file__).resolve().parents[1] / "compat_gate.py"
+        self.assertTrue(compat_gate_py.is_file(), f"compat_gate.py not found at {compat_gate_py}")
+
+        spec = importlib.util.spec_from_file_location(
+            "excel_oracle_compat_gate_redact_path", compat_gate_py
+        )
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    def test_private_mode_hashes_windows_drive_paths_even_when_resolved_under_repo_root(self) -> None:
+        compat_gate = self._load_compat_gate()
+        repo_root = Path(__file__).resolve().parents[3]
+
+        p = Path(r"C:\Users\alice\secret.xlsx")
+        raw = str(p)
+        out = compat_gate._redact_path_str(p, privacy_mode="private", repo_root=repo_root)
+        self.assertEqual(out, f"sha256={hashlib.sha256(raw.encode('utf-8')).hexdigest()}")
+
+    def test_private_mode_hashes_file_scheme_paths(self) -> None:
+        compat_gate = self._load_compat_gate()
+        repo_root = Path(__file__).resolve().parents[3]
+
+        p = Path("file:///home/alice/secret.xlsx")
+        raw = str(p)
+        out = compat_gate._redact_path_str(p, privacy_mode="private", repo_root=repo_root)
+        self.assertEqual(out, f"sha256={hashlib.sha256(raw.encode('utf-8')).hexdigest()}")
+
+    def test_private_mode_preserves_repo_relative_paths_for_absolute_repo_paths(self) -> None:
+        compat_gate = self._load_compat_gate()
+        repo_root = Path(__file__).resolve().parents[3]
+
+        p = repo_root / "tests" / "compatibility" / "excel-oracle" / "cases.json"
+        out = compat_gate._redact_path_str(p, privacy_mode="private", repo_root=repo_root)
+        self.assertEqual(out, p.relative_to(repo_root).as_posix())
+
+
 class CompatGateDryRunTests(unittest.TestCase):
     def _load_compat_gate(self):
         compat_gate_py = Path(__file__).resolve().parents[1] / "compat_gate.py"
