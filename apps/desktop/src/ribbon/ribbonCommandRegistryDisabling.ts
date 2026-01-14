@@ -112,9 +112,7 @@ export const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "insert.illustrations.onlinePictures",
 
   // --- Page Layout / Arrange --------------------------------------------------
-  // Drawing arrangement is currently handled directly by `main.ts` (not CommandRegistry).
-  "pageLayout.arrange.bringForward",
-  "pageLayout.arrange.sendBackward",
+  // (Removed: these ids are now registered commands; they should not be exempt.)
 ]);
 
 function isExemptViaPattern(_commandId: string): boolean {
