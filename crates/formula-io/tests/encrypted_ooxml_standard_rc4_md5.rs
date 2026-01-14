@@ -10,7 +10,7 @@ use std::io::{Cursor, Write as _};
 
 use formula_io::offcrypto::cryptoapi::{hash_password_fixed_spin, password_to_utf16le, HashAlg};
 use formula_io::offcrypto::{CALG_MD5, CALG_RC4};
-use formula_io::{open_workbook_with_password, Workbook};
+use formula_io::{open_workbook_with_password, Error, Workbook};
 
 const F_CRYPTOAPI: u32 = 0x0000_0004;
 
@@ -178,6 +178,12 @@ fn open_workbook_with_password_decrypts_standard_cryptoapi_rc4_md5() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("standard-rc4-md5.xlsx");
     std::fs::write(&path, &ole_bytes).expect("write encrypted file");
+
+    let wrong = open_workbook_with_password(&path, Some("wrong-password"));
+    assert!(
+        matches!(wrong, Err(Error::InvalidPassword { .. })),
+        "wrong password should return InvalidPassword, got {wrong:?}"
+    );
 
     let wb = open_workbook_with_password(&path, Some(password)).expect("decrypt + open");
     let Workbook::Xlsx(pkg) = wb else {
