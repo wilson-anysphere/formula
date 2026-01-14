@@ -49,7 +49,7 @@ TAURI_CONF_PATH="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
 EXPECTED_DESKTOP_VERSION=""
 EXPECTED_PACKAGE_NAME=""
 EXPECTED_IDENTIFIER=""
-PARQUET_ASSOCIATION=0
+PARQUET_ASSOCIATION=""
 if [[ -f "${TAURI_CONF_PATH}" ]]; then
   if command -v python3 >/dev/null 2>&1; then
     EXPECTED_DESKTOP_VERSION="$(
