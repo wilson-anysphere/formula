@@ -407,7 +407,9 @@ export class VersionManager extends SimpleEventEmitter {
     if (this._destroyed) return;
     if (this._timer) return;
     this._timer = setInterval(() => {
-      void this._autoSnapshotTick();
+      void this._autoSnapshotTick().catch(() => {
+        // Best-effort: autosnapshot should never surface as an unhandled rejection.
+      });
     }, this.autoSnapshotIntervalMs);
   }
 
