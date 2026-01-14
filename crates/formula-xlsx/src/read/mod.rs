@@ -817,12 +817,10 @@ fn part_bytes_tolerant<'a>(parts: &'a BTreeMap<String, Vec<u8>>, name: &str) -> 
         return Some(bytes.as_slice());
     }
 
-    // Case-insensitive fallback; normalize path separators and strip a leading `/` for comparison.
-    let target = normalized.to_ascii_lowercase();
+    // Best-effort fallback: tolerate case, path separators, leading `/`, and percent-encoded names
+    // (relationship targets are URIs and may be encoded differently than the underlying ZIP entry).
     parts.iter().find_map(|(key, bytes)| {
-        let key = key.strip_prefix('/').unwrap_or(key.as_str());
-        let key = key.replace('\\', "/").to_ascii_lowercase();
-        (key == target).then_some(bytes.as_slice())
+        crate::zip_util::zip_part_names_equivalent(key, name).then_some(bytes.as_slice())
     })
 }
 

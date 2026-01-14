@@ -55,3 +55,54 @@ fn xlsx_document_resolves_worksheet_targets_with_dot_segments() -> Result<(), Bo
     Ok(())
 }
 
+/// Some producers percent-encode relationship targets differently than the underlying ZIP entry
+/// names (e.g. `sheet%31.xml` vs `sheet1.xml`). Ensure `load_from_bytes` can still locate the
+/// referenced parts.
+#[test]
+fn xlsx_document_resolves_worksheet_targets_with_percent_encoding() -> Result<(), Box<dyn std::error::Error>>
+{
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/styles/styles.xlsx");
+    let fixture_bytes = std::fs::read(fixture)?;
+
+    let mut archive = ZipArchive::new(Cursor::new(&fixture_bytes))?;
+    let mut out = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(&mut out);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        if file.is_dir() {
+            continue;
+        }
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+        let name = file.name().to_string();
+
+        if name == "xl/_rels/workbook.xml.rels" {
+            let xml = String::from_utf8(buf)?;
+            // Encode the `1` in `sheet1.xml` as `%31`.
+            let updated = xml.replace(
+                r#"Target="worksheets/sheet1.xml""#,
+                r#"Target="worksheets/sheet%31.xml""#,
+            );
+            buf = updated.into_bytes();
+        }
+
+        zip.start_file(name, options)?;
+        zip.write_all(&buf)?;
+    }
+    zip.finish()?;
+
+    let modified_bytes = out.into_inner();
+    let doc = formula_xlsx::load_from_bytes(&modified_bytes)?;
+
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc.workbook.sheet(sheet_id).unwrap();
+    assert_eq!(
+        sheet.value(CellRef::from_a1("A1")?),
+        CellValue::String("Bold".to_string())
+    );
+
+    Ok(())
+}
