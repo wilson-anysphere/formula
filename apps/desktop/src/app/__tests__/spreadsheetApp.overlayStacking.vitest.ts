@@ -114,33 +114,50 @@ function expectOverlayZOrder(root: HTMLElement): void {
   const selectionLayer = root.querySelector(".grid-canvas--selection");
   const chartSelectionLayer = root.querySelector(".chart-selection-canvas");
   const outlineLayer = root.querySelector(".outline-layer");
+  const vScrollbarTrack = root.querySelector('[data-testid="scrollbar-track-y"]');
+  const hScrollbarTrack = root.querySelector('[data-testid="scrollbar-track-x"]');
+  const cellEditor = root.querySelector(".cell-editor");
 
   expect(drawingLayer).toBeTruthy();
   expect(chartLayer).toBeTruthy();
   expect(selectionLayer).toBeTruthy();
   expect(chartSelectionLayer).toBeTruthy();
   expect(outlineLayer).toBeTruthy();
+  expect(vScrollbarTrack).toBeTruthy();
+  expect(hScrollbarTrack).toBeTruthy();
+  expect(cellEditor).toBeTruthy();
 
   const drawingZ = zIndexNumber(getComputedStyle(drawingLayer as Element).zIndex);
   const chartZ = zIndexNumber(getComputedStyle(chartLayer as Element).zIndex);
   const selectionZ = zIndexNumber(getComputedStyle(selectionLayer as Element).zIndex);
   const chartSelectionZ = zIndexNumber(getComputedStyle(chartSelectionLayer as Element).zIndex);
   const outlineZ = zIndexNumber(getComputedStyle(outlineLayer as Element).zIndex);
+  const vScrollbarZ = zIndexNumber(getComputedStyle(vScrollbarTrack as Element).zIndex);
+  const hScrollbarZ = zIndexNumber(getComputedStyle(hScrollbarTrack as Element).zIndex);
+  const editorZ = zIndexNumber(getComputedStyle(cellEditor as Element).zIndex);
 
   // Overlay stacking (low → high):
   //   - chart canvas (z=2)
   //   - drawings/images overlay (z=3)
   //   - selection + chart selection handles + outline (z=4)
+  //   - scrollbars (z=5)
+  //   - cell editor (z=10)
   expect(chartZ).toBe(2);
   expect(drawingZ).toBe(3);
   expect(selectionZ).toBe(4);
   expect(chartSelectionZ).toBe(4);
   expect(outlineZ).toBe(4);
+  expect(vScrollbarZ).toBe(5);
+  expect(hScrollbarZ).toBe(5);
+  expect(editorZ).toBe(10);
 
   expect(chartZ).toBeLessThan(drawingZ);
   expect(drawingZ).toBeLessThan(selectionZ);
   expect(chartSelectionZ).toBeGreaterThanOrEqual(selectionZ);
   expect(outlineZ).toBeGreaterThanOrEqual(selectionZ);
+  expect(vScrollbarZ).toBeGreaterThan(selectionZ);
+  expect(hScrollbarZ).toBeGreaterThan(selectionZ);
+  expect(editorZ).toBeGreaterThan(vScrollbarZ);
 
   // Selection, chart selection handles, and outline overlays share the same z-index, so ensure
   // DOM insertion order preserves the visual stacking when z-index ties.
