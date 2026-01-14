@@ -381,6 +381,27 @@ describe("engine.worker workbook metadata RPCs", () => {
     }
   });
 
+  it("returns a clear error when the wasm workbook does not support setFormatRunsByCol", async () => {
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookNoMetadata.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+      const resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setFormatRunsByCol",
+        params: { sheet: "Sheet1", col: 0, runs: [] }
+      });
+      expect(resp.ok).toBe(false);
+      expect((resp as RpcResponseErr).error).toMatch(
+        /setFormatRunsByCol: WasmWorkbook\.setFormatRunsByCol is not available/i
+      );
+    } finally {
+      dispose();
+    }
+  });
+
   it("defaults blank sheet names to Sheet1 for sheet-scoped metadata RPCs", async () => {
     (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;

@@ -4,8 +4,8 @@ use formula_engine::calc_settings::{CalcSettings, CalculationMode, IterativeCalc
 use formula_engine::{
     metadata::FormatRun as EngineFormatRun,
     CellAddr, Coord, EditError as EngineEditError, EditOp as EngineEditOp,
-    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, NameDefinition, NameScope,
-    ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
+    EditResult as EngineEditResult, Engine, EngineInfo, ErrorKind, NameDefinition,
+    NameScope, ParseOptions, Span as EngineSpan, Token, TokenKind, Value as EngineValue,
 };
 use formula_engine::editing::rewrite::rewrite_formula_for_copy_delta;
 use formula_engine::locale::{

@@ -699,6 +699,14 @@ export type RpcMethod =
  */
 export type WorkbookStyleDto = Record<string, unknown>;
 
+export interface SetFormatRunsByColParams {
+  sheet: string;
+  col: number;
+  runs: FormatRun[];
+}
+
+export type SetFormatRunsByColResult = null;
+
 export interface InitMessage {
   type: "init";
   port: MessagePort;

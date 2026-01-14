@@ -50,6 +50,8 @@ export type {
   FormatRun,
   RpcMethod,
   WorkbookStyleDto,
+  SetFormatRunsByColParams,
+  SetFormatRunsByColResult,
   RewriteFormulaForCopyDeltaRequest,
   RpcOptions,
 } from "./protocol.ts";
