@@ -239,13 +239,11 @@ jobs:
         run: node scripts/check-desktop-url-scheme.mjs
 
       - name: Validate Tauri updater signing secrets
-        # Forks/dry-runs often do not configure release secrets. We always validate updater
-        # signing secrets in the upstream repo (so official releases can't ship without
-        # auto-update signatures), and validate in forks only when the user has configured their
-        # own updater keys.
-        #
         # Only enforce when we're publishing to a GitHub Release (tag push or workflow_dispatch upload=true).
-        if: steps.params.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
+        #
+        # If plugins.updater.active=true but updater signing secrets are missing, the release would upload
+        # unsigned updater metadata (missing `latest.json.sig`) and auto-update would not work.
+        if: steps.params.outputs.upload == 'true'
         run: node scripts/check-updater-signing-secrets.mjs
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
