@@ -149,7 +149,7 @@ tools/corpus/            # Real-world file corpus tools
 bash scripts/cargo_agent.sh run -p xlsx-diff -- original.xlsx roundtripped.xlsx
 
 # Run corpus tests
-bash scripts/cargo_agent.sh test -p formula-xlsx --test roundtrip
+bash scripts/cargo_agent.sh test -p formula-xlsx --test roundtrip_fixtures
 ```
 
 ---
