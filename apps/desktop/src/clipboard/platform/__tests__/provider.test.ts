@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createClipboardProvider } from "../provider.js";
+import { CLIPBOARD_LIMITS, createClipboardProvider } from "../provider.js";
 
 type ClipboardMocks = {
   readText?: ReturnType<typeof vi.fn>;
@@ -123,6 +123,28 @@ describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => 
 
     expect(content).toEqual({ html: "<p>native</p>", rtf: rtfPayload, imagePng: pngBytes });
     expect(read).toHaveBeenCalledTimes(1);
+    expect(readText).not.toHaveBeenCalled();
+  });
+
+  it("read() preserves the oversized image marker when web rich-only merge skips image/png", async () => {
+    const invoke = vi.fn().mockResolvedValue({ html: "<p>native</p>" });
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const getType = vi.fn(async (_type: string) => {
+      // Avoid allocating a real 5MB+ Blob: `readClipboardItemPng` bails out based on `size` alone.
+      return { size: CLIPBOARD_LIMITS.maxImageBytes + 1 } as any;
+    });
+
+    const read = vi.fn().mockResolvedValue([{ types: ["image/png"], getType }]);
+    const readText = vi.fn().mockResolvedValue("web-fallback");
+    setMockNavigatorClipboard({ read, readText });
+
+    const provider = await createClipboardProvider();
+    const content = await provider.read();
+
+    expect(content).toEqual({ html: "<p>native</p>" });
+    expect((content as any).skippedOversizedImagePng).toBe(true);
+    expect(Object.prototype.propertyIsEnumerable.call(content, "skippedOversizedImagePng")).toBe(false);
     expect(readText).not.toHaveBeenCalled();
   });
 
