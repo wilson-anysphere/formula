@@ -421,6 +421,40 @@ describe("engine.worker workbook metadata RPCs", () => {
     }
   });
 
+  it("trims sheet ids for setSheetDisplayName", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      let resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setSheetDisplayName",
+        params: { sheetId: "  Sheet2  ", name: "Budget" }
+      });
+      expect(resp.ok).toBe(true);
+
+      resp = await sendRequest(port, {
+        type: "request",
+        id: 2,
+        method: "setSheetDisplayName",
+        params: { sheetId: "   ", name: "Main" }
+      });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["setSheetDisplayName", "Sheet2", "Budget"],
+        ["setSheetDisplayName", "Sheet1", "Main"]
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
   it("treats blank sheet names as missing for sheet-optional cell edit RPCs", async () => {
     (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;

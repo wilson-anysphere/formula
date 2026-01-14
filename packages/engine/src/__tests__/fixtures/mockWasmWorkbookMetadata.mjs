@@ -88,6 +88,10 @@ export class WasmWorkbook {
     recordCall("setColWidthChars", sheet, col, widthChars);
   }
 
+  setSheetDisplayName(sheetId, name) {
+    recordCall("setSheetDisplayName", sheetId, name);
+  }
+
   setColHidden(sheet, col, hidden) {
     recordCall("setColHidden", sheet, col, hidden);
   }

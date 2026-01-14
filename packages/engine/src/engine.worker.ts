@@ -784,7 +784,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               if (typeof (wb as any).setSheetDisplayName !== "function") {
                 throw new Error("setSheetDisplayName: not available in this WASM build");
               }
-              (wb as any).setSheetDisplayName(params.sheetId, params.name);
+              (wb as any).setSheetDisplayName(sheetNameOrDefault(params.sheetId), params.name);
               result = null;
               break;
             case "setCells":
