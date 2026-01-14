@@ -364,6 +364,21 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
+
+      # Ensure all Cargo builds (including `cargo tauri build`) emit artifacts under the
+      # expected path `apps/desktop/src-tauri/target/**`. This keeps release assertions
+      # deterministic and matches docs/CI checks that look under src-tauri/target.
+      - name: Set CARGO_TARGET_DIR for desktop builds (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $targetDir = Join-Path $env:GITHUB_WORKSPACE 'apps/desktop/src-tauri/target'
+          "CARGO_TARGET_DIR=$targetDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Set CARGO_TARGET_DIR for desktop builds (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/apps/desktop/src-tauri/target" >> "$GITHUB_ENV"
       - name: Setup pnpm
         uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
         with:
