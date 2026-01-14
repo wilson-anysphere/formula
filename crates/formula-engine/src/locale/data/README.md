@@ -60,6 +60,14 @@ node scripts/normalize-locale-function-sources.js
 pnpm normalize:locale-function-sources
 ```
 
+To verify that the committed sources are normalized (CI-style check), run:
+
+```bash
+node scripts/normalize-locale-function-sources.js --check
+# or:
+pnpm check:locale-function-sources
+```
+
 Note: after normalization, the JSON will typically contain **fewer entries** than
 `shared/functionCatalog.json`, since identity mappings are omitted.
 
