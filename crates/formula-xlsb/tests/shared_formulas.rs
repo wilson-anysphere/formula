@@ -296,6 +296,127 @@ fn materializes_shared_formulas_with_ptgexp_candidate_fallback_to_biff8_layout()
 }
 
 #[test]
+fn materializes_shared_formulas_with_ptgexp_u32_row_above_u16_max() {
+    // Ensure shared-formula materialization works when the `PtgExp` base row exceeds the BIFF8
+    // u16 row limit (65535). In those cases, the u16/u16 interpretation should *not* match an
+    // anchor, and we rely on the u32-based candidate.
+
+    // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
+    const WORKSHEET_BEGIN: u32 = 0x0081;
+    const WORKSHEET_END: u32 = 0x0082;
+    const SHEETDATA_BEGIN: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
+    const DIMENSION: u32 = 0x0094;
+
+    const ROW: u32 = 0x0000;
+    const FMLA_NUM: u32 = 0x0009;
+    const SHR_FMLA: u32 = 0x0010;
+
+    let base_row: u32 = 70_000;
+    let dep_row: u32 = base_row + 1;
+    let base_col: u32 = 1; // column B
+
+    let mut sheet = Vec::new();
+    push_record(&mut sheet, WORKSHEET_BEGIN, &[]);
+
+    // BrtWsDim: cover B{base_row+1}:B{dep_row+1}.
+    let mut dim = Vec::new();
+    dim.extend_from_slice(&base_row.to_le_bytes());
+    dim.extend_from_slice(&dep_row.to_le_bytes());
+    dim.extend_from_slice(&base_col.to_le_bytes());
+    dim.extend_from_slice(&base_col.to_le_bytes());
+    push_record(&mut sheet, DIMENSION, &dim);
+
+    push_record(&mut sheet, SHEETDATA_BEGIN, &[]);
+
+    // Base row.
+    push_record(&mut sheet, ROW, &base_row.to_le_bytes());
+
+    // Shared formula over B{base_row+1}:B{dep_row+1}:
+    //   B{base_row+1}: A{base_row+1}+1
+    //   B{dep_row+1}:  A{dep_row+1}+1
+    let mut shr_fmla = Vec::new();
+    shr_fmla.extend_from_slice(&base_row.to_le_bytes()); // r1
+    shr_fmla.extend_from_slice(&dep_row.to_le_bytes()); // r2
+    shr_fmla.extend_from_slice(&base_col.to_le_bytes()); // c1
+    shr_fmla.extend_from_slice(&base_col.to_le_bytes()); // c2
+
+    let base_rgce: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x2C); // PtgRefN
+        v.extend_from_slice(&0i32.to_le_bytes());
+        v.extend_from_slice(&(-1i16).to_le_bytes());
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+    shr_fmla.extend_from_slice(&(base_rgce.len() as u32).to_le_bytes());
+    shr_fmla.extend_from_slice(&base_rgce);
+    push_record(&mut sheet, SHR_FMLA, &shr_fmla);
+
+    // Base cell B{base_row+1} full formula (PtgRef A{base_row+1} + 1 +)
+    let full_rgce: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x24); // PtgRef
+        v.extend_from_slice(&base_row.to_le_bytes()); // row (u32)
+        v.extend_from_slice(&0xC000u16.to_le_bytes()); // col=0 (A), row+col relative
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+    let mut b_base = Vec::new();
+    b_base.extend_from_slice(&base_col.to_le_bytes());
+    b_base.extend_from_slice(&0u32.to_le_bytes()); // style
+    b_base.extend_from_slice(&0.0f64.to_le_bytes()); // cached value
+    b_base.extend_from_slice(&0u16.to_le_bytes()); // flags
+    b_base.extend_from_slice(&(full_rgce.len() as u32).to_le_bytes());
+    b_base.extend_from_slice(&full_rgce);
+    push_record(&mut sheet, FMLA_NUM, &b_base);
+
+    // Dependent row.
+    push_record(&mut sheet, ROW, &dep_row.to_le_bytes());
+
+    // Dependent cell uses PtgExp with the u32/u16 payload layout: [row u32][col u16]
+    let ptgexp_u32_u16: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x01); // PtgExp
+        v.extend_from_slice(&base_row.to_le_bytes());
+        v.extend_from_slice(&(base_col as u16).to_le_bytes());
+        v
+    };
+    let mut b_dep = Vec::new();
+    b_dep.extend_from_slice(&base_col.to_le_bytes());
+    b_dep.extend_from_slice(&0u32.to_le_bytes()); // style
+    b_dep.extend_from_slice(&0.0f64.to_le_bytes()); // cached value
+    b_dep.extend_from_slice(&0u16.to_le_bytes()); // flags
+    b_dep.extend_from_slice(&(ptgexp_u32_u16.len() as u32).to_le_bytes());
+    b_dep.extend_from_slice(&ptgexp_u32_u16);
+    push_record(&mut sheet, FMLA_NUM, &b_dep);
+
+    push_record(&mut sheet, SHEETDATA_END, &[]);
+    push_record(&mut sheet, WORKSHEET_END, &[]);
+
+    let parsed = parse_sheet_bin(&mut Cursor::new(sheet), &[]).expect("parse synthetic sheet");
+    let mut cells: HashMap<(u32, u32), _> =
+        parsed.cells.iter().map(|c| ((c.row, c.col), c)).collect();
+
+    let b_base = cells.remove(&(base_row, base_col)).expect("base cell present");
+    assert_eq!(
+        b_base.formula.as_ref().and_then(|f| f.text.as_deref()),
+        Some("A70001+1")
+    );
+
+    let b_dep = cells.remove(&(dep_row, base_col)).expect("dependent cell present");
+    assert_eq!(
+        b_dep.formula.as_ref().and_then(|f| f.text.as_deref()),
+        Some("A70002+1")
+    );
+    assert_eq!(b_dep.formula.as_ref().unwrap().rgce.first().copied(), Some(0x24)); // PtgRef
+}
+
+#[test]
 fn materializes_shared_formulas_via_ptgexp() {
     // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
     const WORKSHEET_BEGIN: u32 = 0x0081;
