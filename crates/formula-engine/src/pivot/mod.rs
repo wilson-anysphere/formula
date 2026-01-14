@@ -520,12 +520,19 @@ impl CreatePivotTableRequest {
                 .value_fields
                 .into_iter()
                 .map(|vf| {
-                    let field = vf.field;
+                    let raw_field = vf.field;
+                    let source_field = pivot_field_ref_from_legacy_string(raw_field.clone());
                     let name = vf
                         .name
-                        .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, &field));
+                        .unwrap_or_else(|| {
+                            format!(
+                                "{:?} of {}",
+                                vf.aggregation,
+                                pivot_field_ref_name(&source_field)
+                            )
+                        });
                     ValueField {
-                        source_field: pivot_field_ref_from_legacy_string(field),
+                        source_field,
                         name,
                         aggregation: vf.aggregation,
                         number_format: None,
@@ -3549,7 +3556,7 @@ mod tests {
     #[test]
     fn pivot_header_renders_data_model_columns_using_display_string() {
         let data = vec![
-            pv_row(&["Sales Table[Region]".into(), "Sales".into()]),
+            pv_row(&["'Sales Table'[Region]".into(), "Sales".into()]),
             pv_row(&["East".into(), 100.into()]),
             pv_row(&["West".into(), 200.into()]),
         ];
@@ -3588,7 +3595,7 @@ mod tests {
         let result = PivotEngine::calculate(&cache, &cfg).unwrap();
         assert_eq!(
             result.data[0][0],
-            PivotValue::Text("Sales Table[Region]".to_string())
+            PivotValue::Text("'Sales Table'[Region]".to_string())
         );
     }
 
