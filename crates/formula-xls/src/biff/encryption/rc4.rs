@@ -15,7 +15,9 @@ pub(crate) struct Rc4 {
 
 impl Rc4 {
     pub(crate) fn new(key: &[u8]) -> Self {
-        assert!(!key.is_empty(), "RC4 key must be non-empty");
+        // A well-formed BIFF `FILEPASS` record never results in an empty RC4 key, but this module
+        // is used on untrusted input. Avoid panicking in case of malformed headers.
+        let key = if key.is_empty() { &[0u8][..] } else { key };
 
         let mut s = [0u8; 256];
         for (i, v) in s.iter_mut().enumerate() {
@@ -69,8 +71,26 @@ pub(crate) fn derive_biff8_rc4_key(
     block_index: u32,
     key_len: usize,
 ) -> Zeroizing<Vec<u8>> {
-    assert!(key_len > 0, "key_len must be > 0");
+    if key_len == 0 {
+        return Zeroizing::new(Vec::new());
+    }
 
+    let intermediate_key = derive_biff8_rc4_intermediate_key(password, salt);
+    let block_key = derive_biff8_rc4_block_key(&*intermediate_key, block_index);
+    drop(intermediate_key);
+
+    let key = block_key[..key_len.min(block_key.len())].to_vec();
+    drop(block_key);
+    Zeroizing::new(key)
+}
+
+/// Derive the BIFF8 RC4 "intermediate key" (MD5-based) from `password` and `salt`.
+///
+/// This corresponds to `H1 = MD5(MD5(password_utf16le) || salt)` in [MS-OFFCRYPTO].
+pub(crate) fn derive_biff8_rc4_intermediate_key(
+    password: &str,
+    salt: &[u8; 16],
+) -> Zeroizing<[u8; 16]> {
     // Excel 97-2003 Standard Encryption only considers the first 15 UTF-16 code units of the
     // password.
     let pw_bytes = super::password_to_utf16le(password);
@@ -85,19 +105,31 @@ pub(crate) fn derive_biff8_rc4_key(
     let mut md5 = Md5::new();
     md5.update(&h0);
     md5.update(salt);
-    let mut h1 = md5.finalize();
+    let mut digest = md5.finalize();
     h0.as_mut_slice().zeroize();
 
-    // H2 = MD5(H1 || block_index_le)
-    let mut md5 = Md5::new();
-    md5.update(&h1);
-    md5.update(&block_index.to_le_bytes());
-    let mut h2 = md5.finalize();
-    h1.as_mut_slice().zeroize();
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&digest);
+    digest.as_mut_slice().zeroize();
+    Zeroizing::new(out)
+}
 
-    let key = h2[..key_len.min(h2.len())].to_vec();
-    h2.as_mut_slice().zeroize();
-    Zeroizing::new(key)
+/// Derive the BIFF8 RC4 per-block key (16 bytes).
+///
+/// This corresponds to `H2 = MD5(intermediate_key || block_index_le32)`.
+pub(crate) fn derive_biff8_rc4_block_key(
+    intermediate_key: &[u8; 16],
+    block_index: u32,
+) -> Zeroizing<[u8; 16]> {
+    let mut md5 = Md5::new();
+    md5.update(intermediate_key);
+    md5.update(&block_index.to_le_bytes());
+    let mut digest = md5.finalize();
+
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&digest);
+    digest.as_mut_slice().zeroize();
+    Zeroizing::new(out)
 }
 
 /// Decrypt the legacy RC4 verifier and verifier hash.

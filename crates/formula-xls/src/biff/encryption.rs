@@ -14,6 +14,7 @@
 
 #![allow(dead_code)]
 
+#[cfg(test)]
 use md5::{Digest as _, Md5};
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
@@ -49,6 +50,10 @@ const BIFF8_ENCRYPTION_TYPE_RC4: u16 = 0x0001;
 // - 0x0002 => RC4 CryptoAPI
 const BIFF8_RC4_SUBTYPE_RC4: u16 = 0x0001;
 const BIFF8_RC4_SUBTYPE_CRYPTOAPI: u16 = 0x0002;
+// Some BIFF8 RC4 CryptoAPI workbooks use an older FILEPASS layout where the second field is
+// `wEncryptionInfo == 0x0004` rather than `wEncryptionSubType == 0x0002`; treat it as CryptoAPI
+// for dispatch.
+const BIFF8_RC4_ENCRYPTION_INFO_CRYPTOAPI_LEGACY: u16 = 0x0004;
 
 // BIFF record ids used by the legacy XOR obfuscation scheme that are either not encrypted or
 // partially encrypted even when they appear after `FILEPASS`.
@@ -170,9 +175,11 @@ pub(crate) fn parse_filepass_record(
                         BIFF8_RC4_SUBTYPE_RC4 => Ok(BiffEncryption::Biff8Rc4 {
                             filepass_payload: data.to_vec(),
                         }),
-                        BIFF8_RC4_SUBTYPE_CRYPTOAPI => Ok(BiffEncryption::Biff8Rc4CryptoApi {
-                            filepass_payload: data.to_vec(),
-                        }),
+                        BIFF8_RC4_SUBTYPE_CRYPTOAPI | BIFF8_RC4_ENCRYPTION_INFO_CRYPTOAPI_LEGACY => {
+                            Ok(BiffEncryption::Biff8Rc4CryptoApi {
+                                filepass_payload: data.to_vec(),
+                            })
+                        }
                         _ => Err(DecryptError::UnsupportedEncryption(format!(
                             "BIFF8 RC4 FILEPASS has unsupported subType=0x{sub_type:04X}"
                         ))),
@@ -887,41 +894,6 @@ fn password_to_utf16le(password: &str) -> Zeroizing<Vec<u8>> {
     out
 }
 
-fn derive_rc4_intermediate_key(password: &str, salt: &[u8; 16]) -> Zeroizing<[u8; 16]> {
-    // [MS-OFFCRYPTO] "Standard Encryption" key derivation (Excel 97-2003 RC4):
-    // - password_hash = MD5(UTF16LE(password))
-    // - intermediate_key = MD5(password_hash + salt)
-    let password_bytes = password_to_utf16le(password);
-    let mut md5 = Md5::new();
-    md5.update(&password_bytes[..]);
-    let mut digest = md5.finalize();
-    drop(password_bytes);
-    let mut password_hash = Zeroizing::new([0u8; 16]);
-    password_hash.copy_from_slice(&digest);
-    digest.as_mut_slice().zeroize();
-
-    let mut h = Md5::new();
-    h.update(&*password_hash);
-    h.update(salt);
-    let mut digest = h.finalize();
-    let mut out = [0u8; 16];
-    out.copy_from_slice(&digest);
-    digest.as_mut_slice().zeroize();
-    Zeroizing::new(out)
-}
-
-fn derive_rc4_block_key(intermediate_key: &[u8; 16], block: u32) -> Zeroizing<[u8; 16]> {
-    // block_key = MD5(intermediate_key + block_index_le32)
-    let mut h = Md5::new();
-    h.update(intermediate_key);
-    h.update(block.to_le_bytes());
-    let mut digest = h.finalize();
-    let mut out = [0u8; 16];
-    out.copy_from_slice(&digest);
-    digest.as_mut_slice().zeroize();
-    Zeroizing::new(out)
-}
-
 /// Applies BIFF8 RC4 encryption/decryption to a byte stream representing *record data* (not record
 /// headers).
 ///
@@ -936,7 +908,7 @@ struct Rc4BiffStream {
 
 impl Rc4BiffStream {
     fn new(intermediate_key: Zeroizing<[u8; 16]>, key_len: usize) -> Self {
-        let block_key = derive_rc4_block_key(&intermediate_key, 0);
+        let block_key = rc4::derive_biff8_rc4_block_key(&*intermediate_key, 0);
         let cipher = Rc4::new(&block_key[..key_len]);
         drop(block_key);
         Self {
@@ -949,7 +921,7 @@ impl Rc4BiffStream {
     }
 
     fn rekey(&mut self) {
-        let block_key = derive_rc4_block_key(&self.intermediate_key, self.block);
+        let block_key = rc4::derive_biff8_rc4_block_key(&*self.intermediate_key, self.block);
         self.cipher = Rc4::new(&block_key[..self.key_len]);
         drop(block_key);
     }
@@ -984,30 +956,17 @@ fn verify_rc4_password(
     filepass: &FilePassRc4,
     password: &str,
 ) -> Result<Zeroizing<[u8; 16]>, DecryptError> {
-    let intermediate_key = derive_rc4_intermediate_key(password, &filepass.salt);
-    let block_key = derive_rc4_block_key(&*intermediate_key, 0);
-    let mut rc4 = Rc4::new(&block_key[..filepass.key_len]);
-    drop(block_key);
-
-    // Decrypt verifier + verifier hash.
-    let mut buf = Zeroizing::new([0u8; 32]);
-    buf[0..16].copy_from_slice(&filepass.encrypted_verifier);
-    buf[16..32].copy_from_slice(&filepass.encrypted_verifier_hash);
-    rc4.apply_keystream(&mut buf[..]);
-
-    let verifier = &buf[0..16];
-    let verifier_hash = &buf[16..32];
-    let mut md5 = Md5::new();
-    md5.update(verifier);
-    let mut expected_hash = md5.finalize();
-    let ok = ct_eq(verifier_hash, expected_hash.as_slice());
-    expected_hash.as_mut_slice().zeroize();
-
-    if !ok {
+    if !rc4::validate_biff8_rc4_password(
+        password,
+        &filepass.salt,
+        &filepass.encrypted_verifier,
+        &filepass.encrypted_verifier_hash,
+        filepass.key_len,
+    ) {
         return Err(DecryptError::WrongPassword);
     }
 
-    Ok(intermediate_key)
+    Ok(rc4::derive_biff8_rc4_intermediate_key(password, &filepass.salt))
 }
 
 fn decrypt_biff8_rc4_standard(
@@ -1217,9 +1176,10 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 let verifier: [u8; 16] = core::array::from_fn(|i| 0xA0u8.wrapping_add(i as u8));
                 let verifier_hash: [u8; 16] = Md5::digest(verifier).into();
 
-                let intermediate_key = derive_rc4_intermediate_key(password, &salt);
-                let block_key = derive_rc4_block_key(&intermediate_key, 0);
+                let intermediate_key = rc4::derive_biff8_rc4_intermediate_key(password, &salt);
+                let block_key = rc4::derive_biff8_rc4_block_key(&*intermediate_key, 0);
                 let mut rc4 = Rc4::new(&block_key[..key_len]);
+                drop(block_key);
                 let mut buf = [0u8; 32];
                 buf[..16].copy_from_slice(&verifier);
                 buf[16..].copy_from_slice(&verifier_hash);
@@ -1241,8 +1201,9 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                 let blocks = total.div_ceil(RC4_BLOCK_SIZE).max(1);
                 let mut keystreams = Vec::<[u8; RC4_BLOCK_SIZE]>::with_capacity(blocks);
                 for b in 0..blocks {
-                    let block_key = derive_rc4_block_key(&intermediate_key, b as u32);
+                    let block_key = rc4::derive_biff8_rc4_block_key(&*intermediate_key, b as u32);
                     let mut rc4 = Rc4::new(&block_key[..key_len]);
+                    drop(block_key);
                     let mut ks = [0u8; RC4_BLOCK_SIZE];
                     rc4.apply_keystream(&mut ks);
                     keystreams.push(ks);
@@ -1312,7 +1273,7 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                     SPIN_COUNT,
                     0,
                     key_len,
-                );
+                )?;
                 let mut rc4 = Rc4::new(&key0);
                 let mut verifier_buf = [0u8; 36];
                 verifier_buf[..16].copy_from_slice(&verifier_plain);
@@ -1380,7 +1341,7 @@ pub(crate) fn encrypt_workbook_stream_for_test(
                         SPIN_COUNT,
                         b as u32,
                         key_len,
-                    );
+                    )?;
                     let mut rc4 = Rc4::new(&key);
                     let mut ks = [0u8; RC4_BLOCK_SIZE];
                     rc4.apply_keystream(&mut ks);
@@ -1434,9 +1395,10 @@ mod tests {
             .unwrap();
         let verifier_hash: [u8; 16] = Md5::digest(verifier).into();
 
-        let intermediate_key = derive_rc4_intermediate_key(password, &salt);
-        let block_key = derive_rc4_block_key(&intermediate_key, 0);
+        let intermediate_key = rc4::derive_biff8_rc4_intermediate_key(password, &salt);
+        let block_key = rc4::derive_biff8_rc4_block_key(&*intermediate_key, 0);
         let mut rc4 = Rc4::new(&block_key[..key_len]);
+        drop(block_key);
 
         let mut buf = [0u8; 32];
         buf[0..16].copy_from_slice(&verifier);
@@ -1466,7 +1428,7 @@ mod tests {
         // Manual encryption reference: apply RC4 stream to record payload bytes only.
         let mut block: u32 = 0;
         let mut pos_in_block: usize = 0;
-        let mut block_key = derive_rc4_block_key(intermediate_key, block);
+        let mut block_key = rc4::derive_biff8_rc4_block_key(intermediate_key, block);
         let mut cipher = Rc4::new(&block_key[..key_len]);
 
         let mut offset = encrypted_start;
@@ -1487,7 +1449,7 @@ mod tests {
                 if pos_in_block == RC4_BLOCK_SIZE {
                     block = block.wrapping_add(1);
                     pos_in_block = 0;
-                    block_key = derive_rc4_block_key(intermediate_key, block);
+                    block_key = rc4::derive_biff8_rc4_block_key(intermediate_key, block);
                     cipher = Rc4::new(&block_key[..key_len]);
                 }
                 let remaining_in_block = RC4_BLOCK_SIZE - pos_in_block;
@@ -1651,7 +1613,7 @@ mod tests {
         ]) as usize;
         let encrypted_start = filepass_offset + 4 + filepass_len;
 
-        let intermediate_key = derive_rc4_intermediate_key(password, &salt);
+        let intermediate_key = rc4::derive_biff8_rc4_intermediate_key(password, &salt);
         encrypt_record_payloads_in_place(&mut encrypted, encrypted_start, &*intermediate_key, key_len)
             .expect("encrypt");
 
@@ -1862,7 +1824,7 @@ mod tests {
         ]) as usize;
         let encrypted_start = filepass_offset + 4 + filepass_len;
 
-        let intermediate_key = derive_rc4_intermediate_key(password, &salt);
+        let intermediate_key = rc4::derive_biff8_rc4_intermediate_key(password, &salt);
         encrypt_record_payloads_in_place(
             &mut encrypted,
             encrypted_start,
@@ -1915,7 +1877,7 @@ mod tests {
             encrypted[filepass_offset + 3],
         ]) as usize;
         let encrypted_start = filepass_offset + 4 + filepass_len;
-        let intermediate_key = derive_rc4_intermediate_key(password, &salt);
+        let intermediate_key = rc4::derive_biff8_rc4_intermediate_key(password, &salt);
         encrypt_record_payloads_in_place(
             &mut encrypted,
             encrypted_start,
@@ -1950,7 +1912,7 @@ mod tests {
             encrypted[filepass_offset + 3],
         ]) as usize;
         let encrypted_start = filepass_offset + 4 + filepass_len;
-        let intermediate_key = derive_rc4_intermediate_key(password, &salt);
+        let intermediate_key = rc4::derive_biff8_rc4_intermediate_key(password, &salt);
         encrypt_record_payloads_in_place(
             &mut encrypted,
             encrypted_start,
