@@ -195,6 +195,35 @@ fn assert_streaming_patch_requires_rgcb(new_rgce: Vec<u8>) {
     );
 }
 
+fn assert_streaming_patch_does_not_require_rgcb(new_rgce: Vec<u8>) {
+    // Create a minimal worksheet with a single numeric formula that has no trailing `rgcb` bytes.
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_formula_num(0, 0, 1.0, vec![0x1E, 0x01, 0x00], vec![]);
+
+    let xlsb_bytes = builder.build_bytes();
+    let sheet_bin = read_sheet1_bin_from_fixture(&xlsb_bytes);
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(1.0),
+        new_style: None,
+        clear_formula: false,
+        new_formula: Some(new_rgce),
+        new_rgcb: None,
+        new_formula_flags: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("expected streaming patch to succeed without rgcb bytes");
+
+    assert_eq!(patched_stream, patched_in_mem);
+}
+
 #[test]
 fn rgce_references_rgcb_detects_ptgarray_inside_memfunc() {
     let rgce = rgce_memfunc_with_array();
@@ -231,6 +260,12 @@ fn patch_sheet_bin_streaming_errors_when_formula_requires_rgcb_but_new_rgcb_is_n
     assert_streaming_patch_requires_rgcb(rgce_memfunc_with_array());
     assert_streaming_patch_requires_rgcb(rgce_extend_list_then_array());
     assert_streaming_patch_requires_rgcb(rgce_referr_then_array());
+}
+
+#[test]
+fn patch_sheet_bin_streaming_allows_missing_rgcb_when_ptgarray_bytes_only_in_attr_choose_payload() {
+    assert_streaming_patch_does_not_require_rgcb(rgce_attr_choose_with_ptgarray_bytes_in_jump_table());
+    assert_streaming_patch_does_not_require_rgcb(rgce_str_literal_with_ptgarray_byte_sequence());
 }
 
 #[test]
