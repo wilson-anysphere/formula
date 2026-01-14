@@ -79,6 +79,9 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
   assert.match(css, /--grid-z-selection-overlay\s*:/);
   assert.match(css, /--grid-z-outline-overlay\s*:/);
 
+  // Presence canvas participates in the same overlay stack so it stays above charts/drawings.
+  assert.match(css, /\.grid-canvas--presence\s*\{/);
+
   assert.match(css, /\.drawing-layer--shared\s*\{/);
   assert.match(css, /\.grid-canvas--shared-drawings\s*\{/);
   assert.match(css, /\.grid-canvas--shared-chart\s*\{/);
