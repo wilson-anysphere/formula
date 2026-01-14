@@ -8,7 +8,12 @@ import { formatA1Range, type CellAddress, type RangeAddress } from "../../../../
 import type { CellEntry, SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.ts";
 import { isCellEmpty, type CellData, type CellFormat } from "../../../../../packages/ai-tools/src/spreadsheet/types.ts";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
-import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula";
+
+// Keep the local computed-value evaluator narrow and dependency-free:
+// - This module is imported from Node-based unit tests (node:test) which run without Vite loaders.
+// - Avoid importing `apps/desktop/src/spreadsheet/evaluateFormula.ts` here because it uses `?raw`
+//   imports for TSV locale tables, which Node's test loader does not currently support.
+type SpreadsheetValue = string | number | boolean | null;
 
 type DocumentControllerStyle = Record<string, any>;
 
@@ -466,6 +471,464 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
       }
     };
 
+    type EvalValue = SpreadsheetValue | SpreadsheetValue[];
+    const MAX_RANGE_CELLS = 200_000;
+
+    const isErrorCode = (value: SpreadsheetValue): value is string => {
+      return typeof value === "string" && value.startsWith("#");
+    };
+
+    const coerceNumber = (value: SpreadsheetValue): number | null => {
+      if (value == null) return 0;
+      if (typeof value === "number") return Number.isFinite(value) ? value : null;
+      if (typeof value === "boolean") return value ? 1 : 0;
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed === "") return 0;
+        const n = Number(trimmed);
+        return Number.isFinite(n) ? n : null;
+      }
+      return null;
+    };
+
+    const toScalar = (value: EvalValue): SpreadsheetValue => {
+      return Array.isArray(value) ? "#VALUE!" : value;
+    };
+
+    const flattenToNumbers = (value: EvalValue): number[] => {
+      const out: number[] = [];
+      const items = Array.isArray(value) ? value : [value];
+      for (const v of items) {
+        if (isErrorCode(v)) continue;
+        const n = coerceNumber(v);
+        if (n == null) continue;
+        out.push(n);
+      }
+      return out;
+    };
+
+    /**
+     * Best-effort local formula evaluator used for PreviewEngine clones.
+     *
+     * This intentionally supports only a small subset of Excel formulas:
+     * - arithmetic (+, -, *, /) with parentheses
+     * - cell references (A1, Sheet1!A1, 'My Sheet'!A1)
+     * - basic aggregations: SUM / AVERAGE / MIN / MAX
+     *
+     * Unsupported syntax yields an error code (usually `#VALUE!` / `#NAME?`).
+     */
+    const evaluateLocalFormula = (formulaText: string, baseSheetId: string): SpreadsheetValue => {
+      const text = String(formulaText ?? "").trim();
+      if (!text) return null;
+      if (!text.startsWith("=")) return coerceScalar(text);
+      const input = text.slice(1);
+      let i = 0;
+
+      const peek = () => input[i] ?? "";
+      const consumeWs = () => {
+        while (i < input.length && /\s/.test(input[i]!)) i += 1;
+      };
+
+      const parseIdentifier = (): string | null => {
+        consumeWs();
+        const start = i;
+        const first = input[i];
+        if (!first || !/[A-Za-z_]/.test(first)) return null;
+        i += 1;
+        while (i < input.length && /[A-Za-z0-9_.]/.test(input[i]!)) i += 1;
+        return input.slice(start, i);
+      };
+
+      const parseQuotedSheetName = (): string | null => {
+        consumeWs();
+        const start = i;
+        if (input[i] !== "'") return null;
+        i += 1;
+        let name = "";
+        while (i < input.length) {
+          const ch = input[i]!;
+          if (ch === "'") {
+            const next = input[i + 1];
+            if (next === "'") {
+              name += "'";
+              i += 2;
+              continue;
+            }
+            i += 1;
+            if (input[i] !== "!") {
+              i = start;
+              return null;
+            }
+            i += 1;
+            return name;
+          }
+          name += ch;
+          i += 1;
+        }
+        i = start;
+        return null;
+      };
+
+      const parseA1CellRef = (): { row0: number; col0: number } | null => {
+        consumeWs();
+        const start = i;
+        if (input[i] === "$") i += 1;
+        let letters = "";
+        while (i < input.length && /[A-Za-z]/.test(input[i]!) && letters.length < 3) {
+          letters += input[i]!;
+          i += 1;
+        }
+        if (!letters) {
+          i = start;
+          return null;
+        }
+        if (input[i] === "$") i += 1;
+        let digits = "";
+        while (i < input.length && /[0-9]/.test(input[i]!)) {
+          digits += input[i]!;
+          i += 1;
+        }
+        if (!digits) {
+          i = start;
+          return null;
+        }
+        const row = Number(digits);
+        if (!Number.isInteger(row) || row <= 0) {
+          i = start;
+          return null;
+        }
+        let col = 0;
+        const upper = letters.toUpperCase();
+        for (let idx = 0; idx < upper.length; idx += 1) {
+          col = col * 26 + (upper.charCodeAt(idx) - 64);
+        }
+        if (col <= 0) {
+          i = start;
+          return null;
+        }
+        return { row0: row - 1, col0: col - 1 };
+      };
+
+      const parseReference = (): { sheetId: string | null; start: { row0: number; col0: number }; end: { row0: number; col0: number } } | null => {
+        consumeWs();
+        const start = i;
+
+        let sheetToken: string | null = null;
+        const quoted = parseQuotedSheetName();
+        if (quoted != null) {
+          sheetToken = quoted;
+        } else {
+          const identStart = i;
+          const ident = parseIdentifier();
+          consumeWs();
+          if (ident != null && input[i] === "!") {
+            sheetToken = ident;
+            i += 1;
+          } else {
+            i = identStart;
+          }
+        }
+
+        const cell1 = parseA1CellRef();
+        if (!cell1) {
+          i = start;
+          return null;
+        }
+
+        consumeWs();
+        let cell2 = cell1;
+        if (input[i] === ":") {
+          i += 1;
+          const parsed2 = parseA1CellRef();
+          if (!parsed2) {
+            i = start;
+            return null;
+          }
+          cell2 = parsed2;
+        }
+
+        const resolvedSheetId = sheetToken ? resolveSheetIdOrNull(sheetToken) : baseSheetId;
+        return { sheetId: resolvedSheetId, start: cell1, end: cell2 };
+      };
+
+      const parseNumber = (): number | null => {
+        consumeWs();
+        const start = i;
+        const slice = input.slice(i);
+        const match = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(slice);
+        if (!match) return null;
+        i += match[0].length;
+        const n = Number(match[0]);
+        if (!Number.isFinite(n)) {
+          i = start;
+          return null;
+        }
+        return n;
+      };
+
+      const parseStringLiteral = (): string | null => {
+        consumeWs();
+        const start = i;
+        if (input[i] !== '"') return null;
+        i += 1;
+        let out = "";
+        while (i < input.length) {
+          const ch = input[i]!;
+          if (ch === '"') {
+            const next = input[i + 1];
+            if (next === '"') {
+              out += '"';
+              i += 2;
+              continue;
+            }
+            i += 1;
+            return out;
+          }
+          out += ch;
+          i += 1;
+        }
+        i = start;
+        return null;
+      };
+
+      const parsePrimary = (): EvalValue => {
+        consumeWs();
+        const ch = peek();
+        if (!ch) return null;
+
+        if (ch === "(") {
+          i += 1;
+          const value = parseComparison();
+          consumeWs();
+          if (peek() !== ")") return "#VALUE!";
+          i += 1;
+          return value;
+        }
+
+        const str = parseStringLiteral();
+        if (str != null) return str;
+
+        const ref = parseReference();
+        if (ref) {
+          if (!ref.sheetId) return "#REF!";
+          const r0 = Math.min(ref.start.row0, ref.end.row0);
+          const r1 = Math.max(ref.start.row0, ref.end.row0);
+          const c0 = Math.min(ref.start.col0, ref.end.col0);
+          const c1 = Math.max(ref.start.col0, ref.end.col0);
+          const count = (r1 - r0 + 1) * (c1 - c0 + 1);
+          if (count > MAX_RANGE_CELLS) return "#VALUE!";
+          if (r0 === r1 && c0 === c1) {
+            return computeCellValue(ref.sheetId, { row: r0, col: c0 });
+          }
+          const values: SpreadsheetValue[] = [];
+          for (let r = r0; r <= r1; r += 1) {
+            for (let c = c0; c <= c1; c += 1) {
+              values.push(computeCellValue(ref.sheetId, { row: r, col: c }));
+            }
+          }
+          return values;
+        }
+
+        const num = parseNumber();
+        if (num != null) return num;
+
+        const identStart = i;
+        const ident = parseIdentifier();
+        if (ident) {
+          const upper = ident.toUpperCase();
+          consumeWs();
+          if (peek() === "(") {
+            i += 1;
+            const args: EvalValue[] = [];
+            consumeWs();
+            if (peek() !== ")") {
+              while (true) {
+                const arg = parseComparison();
+                args.push(arg);
+                consumeWs();
+                if (peek() === ",") {
+                  i += 1;
+                  continue;
+                }
+                break;
+              }
+            }
+            consumeWs();
+            if (peek() !== ")") return "#VALUE!";
+            i += 1;
+
+            switch (upper) {
+              case "SUM": {
+                const nums = args.flatMap((a) => flattenToNumbers(a));
+                const sum = nums.reduce((acc, n) => acc + n, 0);
+                return sum;
+              }
+              case "AVERAGE": {
+                const nums = args.flatMap((a) => flattenToNumbers(a));
+                if (nums.length === 0) return "#DIV/0!";
+                const sum = nums.reduce((acc, n) => acc + n, 0);
+                return sum / nums.length;
+              }
+              case "MIN": {
+                const nums = args.flatMap((a) => flattenToNumbers(a));
+                if (nums.length === 0) return "#VALUE!";
+                return Math.min(...nums);
+              }
+              case "MAX": {
+                const nums = args.flatMap((a) => flattenToNumbers(a));
+                if (nums.length === 0) return "#VALUE!";
+                return Math.max(...nums);
+              }
+              case "IF": {
+                const condScalar = toScalar(args[0] ?? null);
+                if (isErrorCode(condScalar)) return condScalar;
+                const condNum = coerceNumber(condScalar);
+                const cond = condScalar === true || (condScalar !== false && condNum != null && condNum !== 0);
+                const chosen = cond ? args[1] ?? null : args[2] ?? null;
+                return toScalar(chosen);
+              }
+              default:
+                return "#NAME?";
+            }
+          }
+
+          // Boolean literals.
+          if (upper === "TRUE") return true;
+          if (upper === "FALSE") return false;
+
+          // Unknown identifier / named range / unsupported structured reference.
+          return "#NAME?";
+        }
+
+        return "#VALUE!";
+      };
+
+      const parseUnary = (): EvalValue => {
+        consumeWs();
+        const ch = peek();
+        if (ch === "+" || ch === "-") {
+          i += 1;
+          const value = parseUnary();
+          const scalar = toScalar(value);
+          if (isErrorCode(scalar)) return scalar;
+          const n = coerceNumber(scalar);
+          if (n == null) return "#VALUE!";
+          return ch === "-" ? -n : n;
+        }
+        return parsePrimary();
+      };
+
+      const parseMulDiv = (): EvalValue => {
+        let left = parseUnary();
+        while (true) {
+          consumeWs();
+          const op = peek();
+          if (op !== "*" && op !== "/") break;
+          i += 1;
+          const right = parseUnary();
+          const leftScalar = toScalar(left);
+          const rightScalar = toScalar(right);
+          if (isErrorCode(leftScalar)) return leftScalar;
+          if (isErrorCode(rightScalar)) return rightScalar;
+          const ln = coerceNumber(leftScalar);
+          const rn = coerceNumber(rightScalar);
+          if (ln == null || rn == null) return "#VALUE!";
+          if (op === "*") left = ln * rn;
+          else {
+            if (rn === 0) left = "#DIV/0!";
+            else left = ln / rn;
+          }
+        }
+        return left;
+      };
+
+      const parseAddSub = (): EvalValue => {
+        let left = parseMulDiv();
+        while (true) {
+          consumeWs();
+          const op = peek();
+          if (op !== "+" && op !== "-") break;
+          i += 1;
+          const right = parseMulDiv();
+          const leftScalar = toScalar(left);
+          const rightScalar = toScalar(right);
+          if (isErrorCode(leftScalar)) return leftScalar;
+          if (isErrorCode(rightScalar)) return rightScalar;
+          const ln = coerceNumber(leftScalar);
+          const rn = coerceNumber(rightScalar);
+          if (ln == null || rn == null) return "#VALUE!";
+          left = op === "+" ? ln + rn : ln - rn;
+        }
+        return left;
+      };
+
+      const parseComparison = (): EvalValue => {
+        let left = parseAddSub();
+        while (true) {
+          consumeWs();
+          const start = i;
+          let op = "";
+          const ch = peek();
+          const next = input[i + 1] ?? "";
+          if ((ch === ">" || ch === "<") && next === "=") {
+            op = `${ch}=`;
+            i += 2;
+          } else if (ch === "<" && next === ">") {
+            op = "<>";
+            i += 2;
+          } else if (ch === "=" || ch === ">" || ch === "<") {
+            op = ch;
+            i += 1;
+          } else {
+            i = start;
+            break;
+          }
+
+          const right = parseAddSub();
+          const leftScalar = toScalar(left);
+          const rightScalar = toScalar(right);
+          if (isErrorCode(leftScalar)) return leftScalar;
+          if (isErrorCode(rightScalar)) return rightScalar;
+          const ln = coerceNumber(leftScalar);
+          const rn = coerceNumber(rightScalar);
+          if (ln == null || rn == null) return "#VALUE!";
+          switch (op) {
+            case "=":
+              left = ln === rn;
+              break;
+            case "<>":
+              left = ln !== rn;
+              break;
+            case ">":
+              left = ln > rn;
+              break;
+            case "<":
+              left = ln < rn;
+              break;
+            case ">=":
+              left = ln >= rn;
+              break;
+            case "<=":
+              left = ln <= rn;
+              break;
+            default:
+              left = "#VALUE!";
+              break;
+          }
+        }
+        return left;
+      };
+
+      try {
+        const value = parseComparison();
+        consumeWs();
+        if (i < input.length) return "#VALUE!";
+        return toScalar(value);
+      } catch {
+        return "#VALUE!";
+      }
+    };
+
     const computeCellValue = (sheetId: string, coord: { row: number; col: number }): SpreadsheetValue => {
       const key = coord.row * COORD_COL_STRIDE + coord.col;
       const memo = memoBySheet.get(sheetId) ?? (() => {
@@ -494,36 +957,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
             memo.set(key, result);
             return result;
           }
-          const getCellValue = (address: string): SpreadsheetValue => {
-            // EvaluateFormula passes sheet-qualified refs as `Sheet!A1` (sheet name is unquoted).
-            // Treat unqualified refs as being on the same (stable-id) sheet.
-            try {
-              const bang = address.lastIndexOf("!");
-              const rawSheet = bang === -1 ? sheetId : address.slice(0, bang).trim();
-              const cellRef = bang === -1 ? address : address.slice(bang + 1);
-              const resolvedSheetId = bang === -1 ? sheetId : resolveSheetIdOrNull(rawSheet);
-              if (!resolvedSheetId) return "#REF!";
-              // A1 refs are 1-based; convert to 0-based coords.
-              const match = /^\$?([A-Za-z]{1,3})\$?([1-9]\d*)$/.exec(String(cellRef).trim());
-              if (!match) return "#REF!";
-              // Minimal A1 -> (row0,col0) conversion (avoid importing UI a1 helpers into the adapter).
-              const letters = match[1]!.toUpperCase();
-              let col = 0;
-              for (let i = 0; i < letters.length; i += 1) {
-                col = col * 26 + (letters.charCodeAt(i) - 64);
-              }
-              const row = Number(match[2]);
-              if (!Number.isInteger(row) || row <= 0 || col <= 0) return "#REF!";
-              return computeCellValue(resolvedSheetId, { row: row - 1, col: col - 1 });
-            } catch {
-              return "#REF!";
-            }
-          };
-          try {
-            result = evaluateFormula(formulaText, getCellValue);
-          } catch {
-            result = "#VALUE!";
-          }
+          result = evaluateLocalFormula(formulaText, sheetId);
         } else {
           result = coerceScalar(cellState?.value);
         }
