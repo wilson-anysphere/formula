@@ -67,10 +67,20 @@ VALIDATE_ALL=0
 EXEC_CHECK_ENABLED=0
 EXEC_CHECK_TIMEOUT_SECS="${FORMULA_VALIDATE_APPIMAGE_EXEC_TIMEOUT_SECS:-20}"
 
-if [ -n "${FORMULA_VALIDATE_ALL_APPIMAGES:-}" ]; then
+is_truthy() {
+  # Treat common "false" values as disabled; treat any other non-empty string as enabled.
+  local v="${1:-}"
+  v="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')"
+  case "$v" in
+    "" | 0 | false | no | n | off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+if is_truthy "${FORMULA_VALIDATE_ALL_APPIMAGES:-}"; then
   VALIDATE_ALL=1
 fi
-if [ -n "${FORMULA_VALIDATE_APPIMAGE_EXEC_CHECK:-}" ]; then
+if is_truthy "${FORMULA_VALIDATE_APPIMAGE_EXEC_CHECK:-}"; then
   EXEC_CHECK_ENABLED=1
 fi
 
