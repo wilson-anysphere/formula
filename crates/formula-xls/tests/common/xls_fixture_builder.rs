@@ -117,6 +117,7 @@ const WSBOOL_OPTION_FIT_TO_PAGE: u16 = 0x0100;
 //
 // Operator codes follow `AutoFilterOp::from_biff_code` in `autofilter_criteria.rs`.
 const AUTOFILTER_OP_NONE: u8 = 0;
+const AUTOFILTER_OP_BETWEEN: u8 = 1;
 const AUTOFILTER_OP_EQUAL: u8 = 3;
 const AUTOFILTER_OP_GREATER_THAN: u8 = 5;
 const AUTOFILTER_OP_LESS_THAN: u8 = 6;
@@ -4729,9 +4730,11 @@ pub fn build_autofilter_fixture_xls() -> Vec<u8> {
 
 /// Build a BIFF8 `.xls` fixture containing a single sheet named `FilterCriteria` with:
 /// - a sheet-scoped `_xlnm._FilterDatabase` defined name referencing `$A$1:$C$5`, and
-/// - a BIFF8 `AUTOFILTER` record storing a simple text equality filter criterion for column A.
+/// - BIFF8 `AUTOFILTER` records storing simple per-column filter criteria (e.g. column A equals
+///   "Alice").
 ///
-/// This exercises import of legacy BIFF8 AutoFilter criteria into `SheetAutoFilter.filter_columns`.
+/// This exercises end-to-end import of `SheetAutoFilter.filter_columns` from legacy BIFF8
+/// `AUTOFILTER (0x009E)` records.
 pub fn build_autofilter_criteria_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_autofilter_criteria_workbook_stream();
 
@@ -15929,8 +15932,8 @@ fn build_autofilter_criteria_workbook_stream() -> Vec<u8> {
     push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
     let boundsheet_offset_pos = boundsheet_start + 4;
 
-    // `_xlnm._FilterDatabase` (built-in name id 0x0D) scoped to the sheet (`itab=1`).
-    let filter_db_rgce = ptg_area(0, 4, 0, 2); // $A$1:$C$5
+    // `_xlnm._FilterDatabase` (built-in name id 0x0D) scoped to the sheet (`itab=1`): $A$1:$C$5.
+    let filter_db_rgce = ptg_area(0, 4, 0, 2);
     push_record(
         &mut globals,
         RECORD_NAME,
