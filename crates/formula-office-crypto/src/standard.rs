@@ -249,7 +249,9 @@ fn parse_encryption_verifier(
 
     let verifier_hash_size = read_u32_le(bytes, offset)?;
     offset = offset.checked_add(4).ok_or_else(|| {
-        OfficeCryptoError::InvalidFormat("EncryptionVerifier verifierHashSize offset overflow".to_string())
+        OfficeCryptoError::InvalidFormat(
+            "EncryptionVerifier verifierHashSize offset overflow".to_string(),
+        )
     })?;
     let hash_size = verifier_hash_size as usize;
     if hash_size > crate::MAX_STANDARD_VERIFIER_HASH_SIZE_BYTES {
@@ -307,7 +309,9 @@ fn padded_aes_len(len: usize) -> Result<usize, OfficeCryptoError> {
         Ok(len)
     } else {
         len.checked_add(16 - rem).ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat("length overflow while padding to AES block".to_string())
+            OfficeCryptoError::InvalidFormat(
+                "length overflow while padding to AES block".to_string(),
+            )
         })
     }
 }
@@ -344,8 +348,12 @@ fn derive_standard_aes_key0_and_mode(
             derivation,
         );
         let key0 = deriver.derive_key_for_block(0)?;
-        match verify_password_standard_with_key_and_mode(header, verifier, hash_alg, key0.as_slice())
-        {
+        match verify_password_standard_with_key_and_mode(
+            header,
+            verifier,
+            hash_alg,
+            key0.as_slice(),
+        ) {
             Ok(mode) => return Ok((key0, mode)),
             Err(OfficeCryptoError::InvalidPassword) => continue,
             Err(other) => return Err(other),
@@ -406,7 +414,12 @@ pub(crate) fn verify_password_standard(
                 StandardKeyDerivation::Rc4,
             );
             let key0 = deriver.derive_key_for_block(0)?;
-            let _ = verify_password_standard_rc4_key_style(header, verifier, hash_alg, key0.as_slice())?;
+            let _ = verify_password_standard_rc4_key_style(
+                header,
+                verifier,
+                hash_alg,
+                key0.as_slice(),
+            )?;
             Ok(())
         }
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
@@ -440,7 +453,9 @@ fn verify_password_standard_rc4_key_style(
                     padded_key.as_slice(),
                 ) {
                     Ok(_) => Ok(Rc4KeyStyle::Padded40Bit),
-                    Err(OfficeCryptoError::InvalidPassword) => Err(OfficeCryptoError::InvalidPassword),
+                    Err(OfficeCryptoError::InvalidPassword) => {
+                        Err(OfficeCryptoError::InvalidPassword)
+                    }
                     Err(e) => Err(e),
                 }
             } else {
@@ -703,13 +718,11 @@ pub(crate) fn decrypt_standard_encrypted_package(
             let padded_len = if expected_len == 0 {
                 0usize
             } else {
-                expected_len
-                    .checked_add(15)
-                    .ok_or_else(|| {
-                        OfficeCryptoError::InvalidFormat(
-                            "EncryptedPackage expected length overflow".to_string(),
-                        )
-                    })? / 16
+                expected_len.checked_add(15).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat(
+                        "EncryptedPackage expected length overflow".to_string(),
+                    )
+                })? / 16
                     * 16
             };
             if ciphertext.len() < padded_len {
@@ -720,8 +733,12 @@ pub(crate) fn decrypt_standard_encrypted_package(
                 )));
             }
 
-            let (key0, mode) =
-                derive_standard_aes_key0_and_mode(&info.header, &info.verifier, hash_alg, password)?;
+            let (key0, mode) = derive_standard_aes_key0_and_mode(
+                &info.header,
+                &info.verifier,
+                hash_alg,
+                password,
+            )?;
 
             let to_decrypt = &ciphertext[..padded_len];
             let mut plain = Vec::new();
@@ -793,8 +810,12 @@ fn decrypt_standard_encrypted_package_rc4(
         StandardKeyDerivation::Rc4,
     );
     let key0 = deriver.derive_key_for_block(0)?;
-    let key_style =
-        verify_password_standard_rc4_key_style(&info.header, &info.verifier, hash_alg, key0.as_slice())?;
+    let key_style = verify_password_standard_rc4_key_style(
+        &info.header,
+        &info.verifier,
+        hash_alg,
+        key0.as_slice(),
+    )?;
 
     // Password is valid; decrypt the package. Standard RC4 has no padding; treat trailing bytes
     // (OLE sector slack) as irrelevant.
@@ -905,16 +926,20 @@ fn decrypt_standard_with_scheme(
             StandardScheme::Ecb => unreachable!("guarded by !matches!(scheme, Ecb)"),
         };
 
-        let verifier_plain =
-            aes_cbc_decrypt(key0.as_slice(), &verifier_iv, &info.verifier.encrypted_verifier)?;
+        let verifier_plain = aes_cbc_decrypt(
+            key0.as_slice(),
+            &verifier_iv,
+            &info.verifier.encrypted_verifier,
+        )?;
         let verifier_hash_plain_full = aes_cbc_decrypt(
             key0.as_slice(),
             &verifier_iv,
             &info.verifier.encrypted_verifier_hash,
         )?;
 
-        let verifier_hash_plain =
-            verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {
+        let verifier_hash_plain = verifier_hash_plain_full
+            .get(..expected_hash_len)
+            .ok_or_else(|| {
                 OfficeCryptoError::InvalidFormat(format!(
                     "decrypted verifier hash shorter than verifierHashSize (got {}, need {})",
                     verifier_hash_plain_full.len(),
@@ -947,14 +972,11 @@ fn decrypt_standard_with_scheme(
             let padded_len = if expected_len == 0 {
                 0usize
             } else {
-                expected_len
-                    .checked_add(15)
-                    .ok_or_else(|| {
-                        OfficeCryptoError::InvalidFormat(
-                            "EncryptedPackage expected length overflow".to_string(),
-                        )
-                    })?
-                    / 16
+                expected_len.checked_add(15).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat(
+                        "EncryptedPackage expected length overflow".to_string(),
+                    )
+                })? / 16
                     * 16
             };
             if ciphertext.len() < padded_len {
@@ -976,14 +998,18 @@ fn decrypt_standard_with_scheme(
             plain.truncate(expected_len);
             Ok(plain)
         }
-        StandardScheme::PerBlockKeyIvZero => decrypt_segmented(ciphertext, total_size, expected_len, |block| {
-            let key = deriver.derive_key_for_block(block)?;
-            Ok((key, vec![0u8; 16]))
-        }),
-        StandardScheme::ConstKeyPerBlockIvHash => decrypt_segmented(ciphertext, total_size, expected_len, |block| {
-            let iv = derive_iv(hash_alg, &info.verifier.salt, &block.to_le_bytes(), 16);
-            Ok((key0.clone(), iv))
-        }),
+        StandardScheme::PerBlockKeyIvZero => {
+            decrypt_segmented(ciphertext, total_size, expected_len, |block| {
+                let key = deriver.derive_key_for_block(block)?;
+                Ok((key, vec![0u8; 16]))
+            })
+        }
+        StandardScheme::ConstKeyPerBlockIvHash => {
+            decrypt_segmented(ciphertext, total_size, expected_len, |block| {
+                let iv = derive_iv(hash_alg, &info.verifier.salt, &block.to_le_bytes(), 16);
+                Ok((key0.clone(), iv))
+            })
+        }
         StandardScheme::ConstKeyIvSaltStream => {
             let iv = info.verifier.salt.get(..16).ok_or_else(|| {
                 OfficeCryptoError::InvalidFormat("EncryptionVerifier salt too short".to_string())
@@ -1424,7 +1450,8 @@ pub(crate) mod tests {
             encrypted_verifier_hash: verifier_buf[16..].to_vec(),
         };
 
-        let err = verify_password_standard(&header, &verifier, wrong_password).expect_err("wrong pw");
+        let err =
+            verify_password_standard(&header, &verifier, wrong_password).expect_err("wrong pw");
         assert!(matches!(err, OfficeCryptoError::InvalidPassword));
         assert!(
             ct_eq_call_count() > 0,
@@ -1436,7 +1463,8 @@ pub(crate) mod tests {
     fn decrypt_rejects_oversized_encrypted_package_original_size() {
         let info_bytes = standard_encryption_info_fixture();
         let hdr = parse_encryption_info_header(&info_bytes).expect("header");
-        let info = super::parse_standard_encryption_info(&info_bytes, &hdr).expect("parse standard");
+        let info =
+            super::parse_standard_encryption_info(&info_bytes, &hdr).expect("parse standard");
 
         let mut encrypted_package = Vec::new();
         encrypted_package
