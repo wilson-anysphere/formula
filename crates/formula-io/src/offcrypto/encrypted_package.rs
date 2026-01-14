@@ -1,3 +1,5 @@
+use std::io::{Read, Write};
+
 use sha1::{Digest, Sha1};
 
 use formula_xlsx::offcrypto::{decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError};
@@ -57,6 +59,35 @@ pub enum EncryptedPackageError {
     Rc4InvalidKeyLength { key_len: usize },
 }
 
+/// Errors returned by [`decrypt_encrypted_package_standard_aes_to_writer`].
+#[derive(Debug, thiserror::Error)]
+pub enum EncryptedPackageToWriterError {
+    #[error(transparent)]
+    Crypto(#[from] EncryptedPackageError),
+
+    #[error("failed to read `EncryptedPackage` original size prefix: {source}")]
+    ReadOrigSize {
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error(
+        "failed to read `EncryptedPackage` ciphertext for segment {segment_index} (needed {needed} bytes): {source}"
+    )]
+    ReadCiphertext {
+        segment_index: u32,
+        needed: usize,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to write decrypted `EncryptedPackage` bytes: {source}")]
+    WritePlaintext {
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 fn derive_segment_iv(salt: &[u8], segment_index: u32) -> [u8; AES_BLOCK_LEN] {
     let mut hasher = Sha1::new();
     hasher.update(salt);
@@ -66,6 +97,87 @@ fn derive_segment_iv(salt: &[u8], segment_index: u32) -> [u8; AES_BLOCK_LEN] {
     let mut iv = [0u8; AES_BLOCK_LEN];
     iv.copy_from_slice(&digest[..AES_BLOCK_LEN]);
     iv
+}
+
+fn padded_aes_len(len: usize) -> usize {
+    // `len` is at most 4096 bytes, so this cannot overflow.
+    let rem = len % AES_BLOCK_LEN;
+    if rem == 0 {
+        len
+    } else {
+        len + (AES_BLOCK_LEN - rem)
+    }
+}
+
+/// Decrypt a Standard (CryptoAPI) AES `EncryptedPackage` stream to an arbitrary writer.
+///
+/// This API is **sequential**:
+/// - It does **not** require `Seek`.
+/// - It never allocates a buffer proportional to the package size.
+/// - It stops after writing exactly `orig_size` bytes (truncating any padding).
+///
+/// The caller must provide:
+/// - `key`: the AES key bytes (16/24/32 bytes for AES-128/192/256).
+/// - `salt`: the verifier salt used to derive per-segment IVs.
+///
+/// Returns the number of plaintext bytes written (always `orig_size` on success).
+pub fn decrypt_encrypted_package_standard_aes_to_writer<R: Read, W: Write>(
+    mut reader: R,
+    key: &[u8],
+    salt: &[u8],
+    mut out: W,
+) -> Result<u64, EncryptedPackageToWriterError> {
+    let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
+    reader
+        .read_exact(&mut size_bytes)
+        .map_err(|source| EncryptedPackageToWriterError::ReadOrigSize { source })?;
+    let orig_size = u64::from_le_bytes(size_bytes);
+
+    if orig_size == 0 {
+        return Ok(0);
+    }
+
+    let mut remaining = orig_size;
+    let mut segment_index: u32 = 0;
+    let mut scratch = [0u8; ENCRYPTED_PACKAGE_SEGMENT_LEN];
+
+    while remaining > 0 {
+        let plain_len = remaining.min(ENCRYPTED_PACKAGE_SEGMENT_LEN as u64) as usize;
+        let cipher_len = padded_aes_len(plain_len);
+
+        reader
+            .read_exact(&mut scratch[..cipher_len])
+            .map_err(|source| EncryptedPackageToWriterError::ReadCiphertext {
+                segment_index,
+                needed: cipher_len,
+                source,
+            })?;
+
+        let iv = derive_segment_iv(salt, segment_index);
+        decrypt_aes_cbc_no_padding_in_place(key, &iv, &mut scratch[..cipher_len]).map_err(|err| {
+            match err {
+                AesCbcDecryptError::UnsupportedKeyLength(key_len) => {
+                    EncryptedPackageError::InvalidAesKeyLength { key_len }
+                }
+                AesCbcDecryptError::InvalidIvLength(_) => {
+                    EncryptedPackageError::SegmentDecryptFailed { segment_index }
+                }
+                AesCbcDecryptError::InvalidCiphertextLength(ciphertext_len) => {
+                    EncryptedPackageError::CiphertextLenNotBlockAligned { ciphertext_len }
+                }
+            }
+        })?;
+
+        out.write_all(&scratch[..plain_len])
+            .map_err(|source| EncryptedPackageToWriterError::WritePlaintext { source })?;
+
+        remaining -= plain_len as u64;
+        segment_index = segment_index
+            .checked_add(1)
+            .ok_or(EncryptedPackageError::SegmentIndexOverflow)?;
+    }
+
+    Ok(orig_size)
 }
 
 /// Decrypt an MS-OFFCRYPTO "Standard" (CryptoAPI) `EncryptedPackage` stream.
