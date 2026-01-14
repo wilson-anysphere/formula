@@ -5,6 +5,8 @@ import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { stripHtmlComments } from "../apps/desktop/test/sourceTextUtils.js";
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const scriptPath = resolve(repoRoot, "scripts", "report-function-parity.mjs");
 
@@ -70,7 +72,8 @@ test("report-function-parity script runs and produces deterministic sorted lists
   assert.ok(begin !== -1 && end !== -1 && begin < end, "expected parity doc markers to be present");
 
   const between = doc.slice(begin + beginMarker.length, end);
-  const match = between.match(/```text\n([\s\S]*?)\n```/);
+  // Strip HTML comments so commented-out snapshots cannot satisfy assertions.
+  const match = stripHtmlComments(between).match(/```text\n([\s\S]*?)\n```/);
   assert.ok(match, "expected a ```text code block between parity doc markers");
   const docSummary = match[1].trimEnd();
 
