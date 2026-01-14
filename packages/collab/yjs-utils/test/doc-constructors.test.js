@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import * as Y from "yjs";
 
-import { getDocTypeConstructors } from "@formula/collab-yjs-utils";
+import { getArrayRoot, getDocTypeConstructors, getMapRoot, getTextRoot } from "@formula/collab-yjs-utils";
 import { requireYjsCjs } from "./require-yjs-cjs.js";
 
 test("collab-yjs-utils: getDocTypeConstructors returns local constructors for an ESM doc", () => {
@@ -35,4 +35,24 @@ test("collab-yjs-utils: getDocTypeConstructors returns foreign constructors for 
   assert.equal(map instanceof Ycjs.Map, true);
   assert.equal(arr instanceof Ycjs.Array, true);
   assert.equal(text instanceof Ycjs.Text, true);
+});
+
+test("collab-yjs-utils: root helpers do not replace roots when the whole doc is foreign (CJS Doc)", () => {
+  const Ycjs = requireYjsCjs();
+  const doc = new Ycjs.Doc();
+
+  const map = getMapRoot(doc, "cells");
+  assert.equal(map instanceof Y.Map, false);
+  assert.equal(map instanceof Ycjs.Map, true);
+  assert.equal(doc.share.get("cells"), map);
+
+  const arr = getArrayRoot(doc, "items");
+  assert.equal(arr instanceof Y.Array, false);
+  assert.equal(arr instanceof Ycjs.Array, true);
+  assert.equal(doc.share.get("items"), arr);
+
+  const text = getTextRoot(doc, "title");
+  assert.equal(text instanceof Y.Text, false);
+  assert.equal(text instanceof Ycjs.Text, true);
+  assert.equal(doc.share.get("title"), text);
 });
