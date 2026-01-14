@@ -76,18 +76,25 @@ fn decrypt_agile_package_key_from_password(
     iv_derivation: PasswordKeyIvDerivation,
 ) -> Result<Vec<u8>> {
     let password_key = &info.password_key;
-    let salt_iv = password_key
-        .salt_value
-        .get(..password_key.block_size)
-        .ok_or_else(|| OffCryptoError::InvalidAttribute {
-            element: "p:encryptedKey".to_string(),
-            attr: "saltValue".to_string(),
-            reason: "saltValue shorter than blockSize".to_string(),
-        })?;
-
+    let salt_iv = match iv_derivation {
+        PasswordKeyIvDerivation::SaltValue => Some(
+            password_key
+                .salt_value
+                .get(..password_key.block_size)
+                .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                    element: "p:encryptedKey".to_string(),
+                    attr: "saltValue".to_string(),
+                    reason: "saltValue shorter than blockSize".to_string(),
+                })?
+                .to_vec(),
+        ),
+        PasswordKeyIvDerivation::Derived => None,
+    };
     let iv_for = |block_key: &[u8]| -> Result<Vec<u8>> {
         match iv_derivation {
-            PasswordKeyIvDerivation::SaltValue => Ok(salt_iv.to_vec()),
+            PasswordKeyIvDerivation::SaltValue => Ok(salt_iv
+                .clone()
+                .expect("salt iv initialized for SaltValue derivation")),
             PasswordKeyIvDerivation::Derived => derive_iv_or_err(
                 &password_key.salt_value,
                 block_key,
@@ -178,13 +185,15 @@ fn decrypt_agile_package_key_from_password(
             password_key.hash_algorithm,
         )?;
         let decrypted =
-            decrypt_aes_cbc_no_padding(&k, &verifier_iv, &password_key.encrypted_key_value).map_err(|e| {
+            decrypt_aes_cbc_no_padding(&k, &verifier_iv, &password_key.encrypted_key_value).map_err(
+                |e| {
                 OffCryptoError::InvalidAttribute {
                     element: "p:encryptedKey".to_string(),
                     attr: "encryptedKeyValue".to_string(),
                     reason: e.to_string(),
                 }
-            })?;
+                },
+            )?;
         decrypted
             .get(..package_key_len)
             .ok_or_else(|| OffCryptoError::InvalidAttribute {
