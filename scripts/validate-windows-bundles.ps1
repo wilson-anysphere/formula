@@ -346,6 +346,287 @@ try {
     throw "No Windows installer artifacts were found (.exe and .msi are both missing). Ensure the release build produces installers under release/bundle/(nsis|nsis-web|msi)."
   }
 
+  # Validate file association metadata is present in the produced installers.
+  #
+  # On Windows, `.xlsx` file associations are typically registered via MSI tables
+  # (Extension/ProgId/Verb). This is the most reliable thing to validate in CI.
+  #
+  # For NSIS `.exe` installers, reliable inspection tooling is not always available on
+  # GitHub-hosted runners. We do a best-effort string scan for registry paths that
+  # indicate file association registration. If an MSI is present, MSI validation is
+  # authoritative; the EXE scan is treated as a warning.
+  function Get-ExpectedFileAssociationSpec {
+    param(
+      [Parameter(Mandatory = $true)]
+      [string]$RepoRoot
+    )
+
+    $configPath = Join-Path $RepoRoot "apps/desktop/src-tauri/tauri.conf.json"
+    $default = [pscustomobject]@{
+      Extensions = @("xlsx")
+      XlsxMimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+
+    if (-not (Test-Path -LiteralPath $configPath)) {
+      return $default
+    }
+
+    try {
+      $conf = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    } catch {
+      Write-Warning "Failed to parse tauri.conf.json for file association expectations: $($_.Exception.Message)"
+      return $default
+    }
+
+    $bundleProp = $conf.PSObject.Properties["bundle"]
+    if ($null -eq $bundleProp -or $null -eq $bundleProp.Value) {
+      return $default
+    }
+    $bundle = $bundleProp.Value
+
+    $assocProp = $bundle.PSObject.Properties["fileAssociations"]
+    if ($null -eq $assocProp) {
+      return $default
+    }
+    $fileAssociations = $assocProp.Value
+    if ($null -eq $fileAssociations) {
+      return $default
+    }
+
+    $xlsxEntry = @(
+      $fileAssociations |
+        Where-Object {
+          ($_.PSObject.Properties.Name -contains "ext") -and ($_.ext -contains "xlsx" -or $_.ext -contains ".xlsx")
+        }
+    ) | Select-Object -First 1
+    $mime = $default.XlsxMimeType
+    if (
+      $null -ne $xlsxEntry -and
+      ($xlsxEntry.PSObject.Properties.Name -contains "mimeType") -and
+      -not [string]::IsNullOrWhiteSpace($xlsxEntry.mimeType)
+    ) {
+      $mime = ($xlsxEntry.mimeType).ToString()
+    }
+
+    return [pscustomobject]@{
+      Extensions = @("xlsx")
+      XlsxMimeType = $mime
+    }
+  }
+
+  function Get-MsiTableNames {
+    param(
+      [Parameter(Mandatory = $true)]
+      [string]$MsiPath
+    )
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $db = $installer.OpenDatabase($MsiPath, 0)
+    $view = $db.OpenView('SELECT `Name` FROM `_Tables`')
+    $view.Execute()
+    $names = @()
+    while ($true) {
+      $rec = $view.Fetch()
+      if ($null -eq $rec) { break }
+      $names += $rec.StringData(1)
+    }
+    return $names
+  }
+
+  function Get-MsiRows {
+    param(
+      [Parameter(Mandatory = $true)]
+      [string]$MsiPath,
+      [Parameter(Mandatory = $true)]
+      [string]$Query,
+      [Parameter(Mandatory = $true)]
+      [int]$ColumnCount
+    )
+
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $db = $installer.OpenDatabase($MsiPath, 0)
+    $view = $db.OpenView($Query)
+    $view.Execute()
+
+    $rows = @()
+    while ($true) {
+      $rec = $view.Fetch()
+      if ($null -eq $rec) { break }
+
+      $values = @()
+      for ($i = 1; $i -le $ColumnCount; $i++) {
+        $values += $rec.StringData($i)
+      }
+      $rows += ,$values
+    }
+    return $rows
+  }
+
+  function Assert-MsiDeclaresFileAssociation {
+    param(
+      [Parameter(Mandatory = $true)]
+      [System.IO.FileInfo]$Msi,
+      [Parameter(Mandatory = $true)]
+      [string]$ExtensionNoDot
+    )
+
+    Write-Host "File association check (MSI): $($Msi.FullName)"
+
+    $tables = @()
+    try {
+      $tables = Get-MsiTableNames -MsiPath $Msi.FullName
+    } catch {
+      throw "Failed to open MSI for inspection: $($Msi.FullName)`n$($_.Exception.Message)"
+    }
+
+    if (-not ($tables -contains "Extension")) {
+      throw "MSI is missing the Extension table; cannot verify file associations for '.$ExtensionNoDot'. (Check bundle.fileAssociations in tauri.conf.json and the Windows bundler output.)"
+    }
+
+    $extRows = Get-MsiRows -MsiPath $Msi.FullName -Query 'SELECT `Extension`, `ProgId_`, `MIME_` FROM `Extension`' -ColumnCount 3
+    $foundRow = $null
+    foreach ($row in $extRows) {
+      if ($row.Count -lt 1) { continue }
+      $extVal = if ($null -ne $row[0]) { $row[0] } else { "" }
+      $ext = $extVal.Trim().TrimStart(".")
+      if ($ext -ieq $ExtensionNoDot) {
+        $foundRow = $row
+        break
+      }
+    }
+
+    if ($null -eq $foundRow) {
+      $present = @(
+        $extRows |
+          ForEach-Object {
+            $v = if ($null -ne $_[0]) { $_[0] } else { "" }
+            $v.Trim()
+          } |
+          Where-Object { $_ -and $_.Trim().Length -gt 0 } |
+          Sort-Object -Unique
+      )
+      $presentText = if ($present.Count -gt 0) { $present -join ", " } else { "(none)" }
+      throw "MSI did not declare a file association for '.$ExtensionNoDot'. Expected to find an Extension table row for '$ExtensionNoDot'. Present extensions: $presentText"
+    }
+
+    $progIdVal = if ($null -ne $foundRow[1]) { $foundRow[1] } else { "" }
+    $progId = $progIdVal.Trim()
+    if ([string]::IsNullOrWhiteSpace($progId)) {
+      throw "MSI Extension table row for '$ExtensionNoDot' exists but ProgId_ is empty. This suggests file association wiring is incomplete."
+    }
+
+    if ($tables -contains "ProgId") {
+      $progRows = Get-MsiRows -MsiPath $Msi.FullName -Query 'SELECT `ProgId` FROM `ProgId`' -ColumnCount 1
+      $hasProgId = $false
+      foreach ($r in $progRows) {
+        $v = if ($null -ne $r[0]) { $r[0] } else { "" }
+        if ($v.Trim() -ieq $progId) { $hasProgId = $true; break }
+      }
+      if (-not $hasProgId) {
+        Write-Warning "MSI Extension row ProgId_ '$progId' did not appear in the ProgId table. Installer may still work via Registry table entries, but this is unexpected."
+      }
+    } else {
+      Write-Warning "MSI does not include a ProgId table; skipping ProgId validation."
+    }
+
+    if ($tables -contains "Verb") {
+      # Best-effort: ensure at least one verb is declared for this extension.
+      try {
+        $verbRows = Get-MsiRows -MsiPath $Msi.FullName -Query 'SELECT `Extension_`, `Verb` FROM `Verb`' -ColumnCount 2
+        $hasVerb = $false
+        foreach ($r in $verbRows) {
+          $v = if ($null -ne $r[0]) { $r[0] } else { "" }
+          $ext = $v.Trim().TrimStart(".")
+          if ($ext -ieq $ExtensionNoDot) { $hasVerb = $true; break }
+        }
+        if (-not $hasVerb) {
+          Write-Warning "MSI contains a Verb table but no entries for extension '$ExtensionNoDot'. File association may be incomplete."
+        }
+      } catch {
+        Write-Warning "Failed to query MSI Verb table for $($Msi.Name): $($_.Exception.Message)"
+      }
+    }
+  }
+
+  function Test-StringContainsIgnoreCase {
+    param(
+      [Parameter(Mandatory = $true)] [string]$Haystack,
+      [Parameter(Mandatory = $true)] [string]$Needle
+    )
+    return $Haystack.IndexOf($Needle, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+  }
+
+  function Test-ExeHasFileAssociationHints {
+    param(
+      [Parameter(Mandatory = $true)]
+      [System.IO.FileInfo]$Exe,
+      [Parameter(Mandatory = $true)]
+      [string]$ExtensionNoDot
+    )
+
+    Write-Host "File association check (NSIS/EXE, best-effort): $($Exe.FullName)"
+
+    # TODO: Replace this with a structured NSIS inspection (if/when reliable tooling becomes
+    # available on GH runners). For now, scan for registry path strings that strongly suggest
+    # file association registration.
+    $dotExt = "." + $ExtensionNoDot
+    $strongNeedles = @(
+      "Software\\Classes\\$dotExt",
+      "Software\Classes\$dotExt",
+      "HKEY_CLASSES_ROOT\\$dotExt",
+      "HKEY_CLASSES_ROOT\$dotExt",
+      "HKCR\\$dotExt",
+      "HKCR $dotExt"
+    )
+    $contextNeedles = @("Software\Classes", "HKEY_CLASSES_ROOT", "HKCR", "WriteRegStr", "OpenWithProgids")
+
+    $bytes = [System.IO.File]::ReadAllBytes($Exe.FullName)
+    $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
+    $unicode = [System.Text.Encoding]::Unicode.GetString($bytes)
+
+    foreach ($n in $strongNeedles) {
+      if (Test-StringContainsIgnoreCase -Haystack $ascii -Needle $n) { return $true }
+      if (Test-StringContainsIgnoreCase -Haystack $unicode -Needle $n) { return $true }
+    }
+
+    $hasContext =
+      ($contextNeedles | Where-Object { Test-StringContainsIgnoreCase -Haystack $ascii -Needle $_ }).Count -gt 0 -or
+      ($contextNeedles | Where-Object { Test-StringContainsIgnoreCase -Haystack $unicode -Needle $_ }).Count -gt 0
+    $hasExt =
+      (Test-StringContainsIgnoreCase -Haystack $ascii -Needle $dotExt) -or
+      (Test-StringContainsIgnoreCase -Haystack $unicode -Needle $dotExt)
+
+    return ($hasContext -and $hasExt)
+  }
+
+  $assocSpec = Get-ExpectedFileAssociationSpec -RepoRoot $repoRoot
+  $requiredExtension = ($assocSpec.Extensions | Select-Object -First 1)
+  if ([string]::IsNullOrWhiteSpace($requiredExtension)) {
+    $requiredExtension = "xlsx"
+  }
+  $requiredExtensionNoDot = $requiredExtension.Trim().TrimStart(".")
+
+  if ($msiInstallers.Count -gt 0) {
+    foreach ($msi in $msiInstallers) {
+      Assert-MsiDeclaresFileAssociation -Msi $msi -ExtensionNoDot $requiredExtensionNoDot
+    }
+  } else {
+    Write-Warning "No MSI installers found; falling back to best-effort EXE inspection for file association metadata."
+  }
+
+  if ($exeInstallers.Count -gt 0) {
+    foreach ($exe in $exeInstallers) {
+      $ok = Test-ExeHasFileAssociationHints -Exe $exe -ExtensionNoDot $requiredExtensionNoDot
+      if (-not $ok) {
+        $msg = "EXE installer did not contain obvious file association registry strings for '.$requiredExtensionNoDot'."
+        if ($msiInstallers.Count -gt 0) {
+          Write-Warning "$msg MSI validation passed, so this is non-fatal. If users rely on the EXE installer, investigate NSIS file association wiring."
+        } else {
+          throw "$msg Without an MSI, we cannot reliably confirm Windows file associations are present."
+        }
+      }
+    }
+  }
+
   $signingConfigured = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)
   if ($signingConfigured) {
     Write-Host "Signing configuration detected (WINDOWS_CERTIFICATE is set). Verifying Authenticode signatures..."

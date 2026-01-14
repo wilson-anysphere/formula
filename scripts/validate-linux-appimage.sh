@@ -256,25 +256,75 @@ validate_appimage() {
     die "No .desktop files found under squashfs-root/usr/share/applications/"
   fi
 
-  # 4) Validate spreadsheet (xlsx) integration exists in at least one desktop file.
-  local xlsx_pattern
-  xlsx_pattern='xlsx|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet'
-  local has_xlsx_integration=0
+  # 4) Validate the bundle advertises spreadsheet file associations via desktop metadata.
+  #
+  # On Linux, file associations are driven by the `MimeType=` field in the `.desktop`
+  # entry. We require:
+  #  - at least one `.desktop` file includes a `MimeType=` entry
+  #  - it includes the xlsx MIME type or another clearly-spreadsheet MIME type
+  local required_xlsx_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  local spreadsheet_mime_regex
+  spreadsheet_mime_regex='application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application/vnd\.ms-excel|application/vnd\.ms-excel\.sheet\.macroEnabled\.12|application/vnd\.ms-excel\.sheet\.binary\.macroEnabled\.12|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.template|application/vnd\.ms-excel\.template\.macroEnabled\.12|application/vnd\.ms-excel\.addin\.macroEnabled\.12|text/csv'
+
+  local has_any_mimetype=0
+  local has_spreadsheet_mime=0
+  local has_xlsx_mime=0
+
   local desktop_file
   for desktop_file in "${desktop_files[@]}"; do
-    if grep -Eqi "$xlsx_pattern" "$desktop_file"; then
-      has_xlsx_integration=1
-      break
+    local mime_line
+    mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+    if [ -z "$mime_line" ]; then
+      continue
+    fi
+
+    has_any_mimetype=1
+
+    local mime_value
+    mime_value="$(printf '%s' "$mime_line" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//")"
+
+    if printf '%s' "$mime_value" | grep -Fqi "$required_xlsx_mime"; then
+      has_xlsx_mime=1
+    fi
+    if printf '%s' "$mime_value" | grep -Eqi "$spreadsheet_mime_regex"; then
+      has_spreadsheet_mime=1
     fi
   done
 
-  if [ "$has_xlsx_integration" -ne 1 ]; then
-    echo "${SCRIPT_NAME}: error: No .desktop file advertised .xlsx support for AppImage: $appimage_path" >&2
-    echo "${SCRIPT_NAME}: error: Expected to find substring 'xlsx' or MIME 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' in:" >&2
+  if [ "$has_any_mimetype" -ne 1 ]; then
+    echo "${SCRIPT_NAME}: error: No .desktop file contained a MimeType= entry for AppImage: $appimage_path" >&2
+    echo "${SCRIPT_NAME}: error: This usually means Linux file associations were not included in the bundle." >&2
+    echo "${SCRIPT_NAME}: error: Check apps/desktop/src-tauri/tauri.conf.json → bundle.fileAssociations." >&2
+    echo "${SCRIPT_NAME}: error: .desktop files inspected:" >&2
     for desktop_file in "${desktop_files[@]}"; do
       echo "  - ${desktop_file#$appdir/}" >&2
     done
     exit 1
+  fi
+
+  if [ "$has_spreadsheet_mime" -ne 1 ]; then
+    echo "${SCRIPT_NAME}: error: No .desktop MimeType= entry advertised spreadsheet (xlsx) support for AppImage: $appimage_path" >&2
+    echo "${SCRIPT_NAME}: error: Expected MimeType= to include '${required_xlsx_mime}' (xlsx) or another spreadsheet MIME type." >&2
+    echo "${SCRIPT_NAME}: error: MimeType entries found:" >&2
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#$appdir/}"
+      local lines
+      lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" || true)"
+      if [ -n "$lines" ]; then
+        # Print the raw line(s) for debugging.
+        while IFS= read -r l; do
+          echo "  - ${rel}: ${l}" >&2
+        done <<<"$lines"
+      else
+        echo "  - ${rel}: (no MimeType= entry)" >&2
+      fi
+    done
+    exit 1
+  fi
+
+  if [ "$has_xlsx_mime" -ne 1 ]; then
+    info "warn: No .desktop file explicitly listed xlsx MIME '${required_xlsx_mime}'. Spreadsheet MIME types were present, but .xlsx double-click integration may be incomplete."
   fi
 
   # Cleanup this AppImage extraction dir early (otherwise only happens on EXIT).

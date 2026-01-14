@@ -21,7 +21,10 @@ const hasBash = (() => {
  * The validator under test executes the AppImage from its own temp dir and expects
  * `./squashfs-root/...` to appear there.
  */
-function writeFakeAppImage(appImagePath, { withDesktopFile = true, withXlsxMime = true } = {}) {
+function writeFakeAppImage(
+  appImagePath,
+  { withDesktopFile = true, withXlsxMime = true, withMimeTypeEntry = true } = {},
+) {
   const desktopMime = withXlsxMime
     ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;"
     : "text/plain;";
@@ -33,7 +36,7 @@ function writeFakeAppImage(appImagePath, { withDesktopFile = true, withXlsxMime 
         "[Desktop Entry]",
         "Name=Formula",
         "Exec=formula-desktop %U",
-        `MimeType=${desktopMime}`,
+        ...(withMimeTypeEntry ? [`MimeType=${desktopMime}`] : []),
         "DESKTOP",
       ].join("\n")
     : "mkdir -p squashfs-root/usr/share/applications";
@@ -75,7 +78,11 @@ function runValidator(appImagePath) {
     {
       cwd: repoRoot,
       encoding: "utf8",
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        // Keep tests stable even if `mainBinaryName` changes or python isn't available.
+        FORMULA_APPIMAGE_MAIN_BINARY: "formula-desktop",
+      },
     },
   );
   if (proc.error) throw proc.error;
@@ -108,5 +115,15 @@ test("validate-linux-appimage fails when .desktop lacks xlsx integration", { ski
 
   const proc = runValidator(appImagePath);
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
-  assert.match(proc.stderr, /xlsx support/i);
+  assert.match(proc.stderr, /MimeType=.*xlsx|spreadsheet/i);
+});
+
+test("validate-linux-appimage fails when .desktop lacks a MimeType entry", { skip: !hasBash }, () => {
+  const tmp = mkdtempSync(join(tmpdir(), "formula-appimage-test-"));
+  const appImagePath = join(tmp, "Formula.AppImage");
+  writeFakeAppImage(appImagePath, { withDesktopFile: true, withMimeTypeEntry: false });
+
+  const proc = runValidator(appImagePath);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /MimeType=/i);
 });

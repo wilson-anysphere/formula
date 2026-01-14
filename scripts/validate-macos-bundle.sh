@@ -5,7 +5,7 @@
 # This script is intended for CI release pipelines to catch broken bundles early:
 # - Missing `.dmg` artifacts
 # - DMG does not contain the expected `.app`
-# - Missing/incorrect Info.plist metadata (URL scheme)
+# - Missing/incorrect Info.plist metadata (URL scheme, file associations)
 # - Invalid code signing / Gatekeeper assessment when signing is enabled
 # - Missing stapled notarization tickets when notarization is configured
 #
@@ -168,6 +168,73 @@ PY
   fi
 }
 
+validate_plist_file_associations() {
+  local plist_path="$1"
+  local required_extension="$2"
+  shift 2
+  local optional_extensions=("$@")
+
+  [ -f "$plist_path" ] || die "missing Info.plist at $plist_path"
+
+  local output
+  set +e
+  output="$(
+    python3 - "$plist_path" "$required_extension" "${optional_extensions[@]}" <<'PY'
+import plistlib
+import sys
+
+plist_path = sys.argv[1]
+required_ext = sys.argv[2].lower().lstrip(".")
+optional_exts = [arg.lower().lstrip(".") for arg in sys.argv[3:]]
+
+try:
+    with open(plist_path, "rb") as f:
+        data = plistlib.load(f)
+except Exception as e:
+    # Exit code 2 is reserved for parse failures; exit code 1 is "valid plist, but missing extension".
+    print(str(e))
+    raise SystemExit(2)
+
+doc_types = data.get("CFBundleDocumentTypes")
+if not doc_types:
+    print("CFBundleDocumentTypes is missing or empty")
+    raise SystemExit(1)
+
+found_exts = set()
+for doc in doc_types or []:
+    if not isinstance(doc, dict):
+        continue
+    exts = doc.get("CFBundleTypeExtensions") or []
+    if isinstance(exts, (list, tuple)):
+        for ext in exts:
+            if isinstance(ext, str) and ext.strip():
+                found_exts.add(ext.strip().lower().lstrip("."))
+
+if required_ext not in found_exts:
+    found = ", ".join(sorted(found_exts)) if found_exts else "(none)"
+    print(f"missing required extension '{required_ext}'. Found extensions: {found}")
+    raise SystemExit(1)
+
+missing_optional = [ext for ext in optional_exts if ext and ext not in found_exts]
+if missing_optional:
+    # Return a human-readable warning string for the caller.
+    print("missing optional extensions: " + ", ".join(missing_optional))
+PY
+  )"
+  local status=$?
+  set -e
+
+  if [ "$status" -eq 2 ]; then
+    die "failed to parse Info.plist at ${plist_path}: ${output}"
+  elif [ "$status" -ne 0 ]; then
+    die "Info.plist is missing file association metadata for '.${required_extension}'. Details: ${output}. (Check apps/desktop/src-tauri/Info.plist and bundle.fileAssociations in apps/desktop/src-tauri/tauri.conf.json)"
+  fi
+
+  if [ -n "$output" ]; then
+    warn "Info.plist file association metadata: ${output}"
+  fi
+}
+
 validate_app_bundle() {
   local app_path="$1"
 
@@ -178,6 +245,9 @@ validate_app_bundle() {
 
   validate_plist_url_scheme "$plist_path" "$EXPECTED_URL_SCHEME"
   echo "bundle: Info.plist OK (URL scheme '${EXPECTED_URL_SCHEME}')"
+
+  validate_plist_file_associations "$plist_path" "xlsx" "xls" "csv"
+  echo "bundle: Info.plist OK (file associations include .xlsx)"
 
   validate_codesign "$app_path"
   validate_app_notarization "$app_path"

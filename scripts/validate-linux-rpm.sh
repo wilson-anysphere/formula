@@ -119,6 +119,13 @@ abs_path() {
   fi
 }
 
+# Spreadsheet file association metadata we expect the Linux desktop entry to advertise.
+# `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` is the canonical
+# xlsx MIME type; we allow a small set of other spreadsheet-ish MIME types as a
+# fallback to avoid false negatives across distros.
+REQUIRED_XLSX_MIME="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+SPREADSHEET_MIME_REGEX='application/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application/vnd\.ms-excel|application/vnd\.ms-excel\.sheet\.macroEnabled\.12|application/vnd\.ms-excel\.sheet\.binary\.macroEnabled\.12|application/vnd\.openxmlformats-officedocument\.spreadsheetml\.template|application/vnd\.ms-excel\.template\.macroEnabled\.12|application/vnd\.ms-excel\.addin\.macroEnabled\.12|text/csv'
+
 find_rpms() {
   local -a rpms=()
 
@@ -255,6 +262,56 @@ validate_container() {
   # validates runtime deps/installability rather than signature policy.
   container_cmd+=$'dnf -y install --nogpgcheck --setopt=install_weak_deps=False /rpms/*.rpm\n'
   container_cmd+=$'test -x /usr/bin/formula-desktop\n'
+  container_cmd+=$'\n'
+  container_cmd+=$'# Validate file association metadata is present in the installed .desktop entry.\n'
+  container_cmd+=$'required_xlsx_mime="'"${REQUIRED_XLSX_MIME}"$'"\n'
+  container_cmd+=$'spreadsheet_mime_regex="'"${SPREADSHEET_MIME_REGEX}"$'"\n'
+  container_cmd+=$'desktop_files=(/usr/share/applications/*.desktop)\n'
+  container_cmd+=$'if [ ! -e "${desktop_files[0]}" ]; then\n'
+  container_cmd+=$'  echo "No .desktop files found under /usr/share/applications after RPM install." >&2\n'
+  container_cmd+=$'  exit 1\n'
+  container_cmd+=$'fi\n'
+  container_cmd+=$'has_any_mimetype=0\n'
+  container_cmd+=$'has_spreadsheet_mime=0\n'
+  container_cmd+=$'has_xlsx_mime=0\n'
+  container_cmd+=$'for f in "${desktop_files[@]}"; do\n'
+  container_cmd+=$'  mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" | head -n 1 || true)"\n'
+  container_cmd+=$'  if [ -z "${mime_line}" ]; then\n'
+  container_cmd+=$'    continue\n'
+  container_cmd+=$'  fi\n'
+  container_cmd+=$'  has_any_mimetype=1\n'
+  container_cmd+=$'  mime_value="$(printf "%s" "${mime_line}" | sed -E "s/^[[:space:]]*MimeType[[:space:]]*=[[:space:]]*//")"\n'
+  container_cmd+=$'  if printf "%s" "${mime_value}" | grep -Fqi "${required_xlsx_mime}"; then\n'
+  container_cmd+=$'    has_xlsx_mime=1\n'
+  container_cmd+=$'  fi\n'
+  container_cmd+=$'  if printf "%s" "${mime_value}" | grep -Eqi "${spreadsheet_mime_regex}"; then\n'
+  container_cmd+=$'    has_spreadsheet_mime=1\n'
+  container_cmd+=$'  fi\n'
+  container_cmd+=$'done\n'
+  container_cmd+=$'if [ "${has_any_mimetype}" -ne 1 ]; then\n'
+  container_cmd+=$'  echo "No installed .desktop file contained a MimeType= entry (file associations missing)." >&2\n'
+  container_cmd+=$'  echo "Expected MimeType to include spreadsheet MIME types (tauri.conf.json bundle.fileAssociations)." >&2\n'
+  container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
+  container_cmd+=$'    echo "  - ${f}" >&2\n'
+  container_cmd+=$'  done\n'
+  container_cmd+=$'  exit 1\n'
+  container_cmd+=$'fi\n'
+  container_cmd+=$'if [ "${has_spreadsheet_mime}" -ne 1 ]; then\n'
+  container_cmd+=$'  echo "No installed .desktop MimeType= entry advertised spreadsheet/xlsx support (file associations missing)." >&2\n'
+  container_cmd+=$'  echo "Expected MimeType= to include ${required_xlsx_mime} (xlsx) or another spreadsheet MIME type." >&2\n'
+  container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
+  container_cmd+=$'    lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" || true)"\n'
+  container_cmd+=$'    if [ -n "${lines}" ]; then\n'
+  container_cmd+=$'      while IFS= read -r l; do echo "  - ${f}: ${l}" >&2; done <<<"${lines}"\n'
+  container_cmd+=$'    else\n'
+  container_cmd+=$'      echo "  - ${f}: (no MimeType= entry)" >&2\n'
+  container_cmd+=$'    fi\n'
+  container_cmd+=$'  done\n'
+  container_cmd+=$'  exit 1\n'
+  container_cmd+=$'fi\n'
+  container_cmd+=$'if [ "${has_xlsx_mime}" -ne 1 ]; then\n'
+  container_cmd+=$'  echo "WARN: No installed .desktop file explicitly listed xlsx MIME ${required_xlsx_mime}." >&2\n'
+  container_cmd+=$'fi\n'
   container_cmd+=$'set +e\n'
   container_cmd+=$'ldd_out="$(ldd /usr/bin/formula-desktop 2>&1)"\n'
   container_cmd+=$'ldd_status=$?\n'
