@@ -227,6 +227,7 @@ describe("WasmWorkbookBackend", () => {
       recalculate: vi.fn(async () => []),
       setSheetDimensions: vi.fn(async () => {}),
       getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
+      setColWidthChars: vi.fn(async () => {}),
       applyOperation: vi.fn(async () => ({ changedCells: [], movedRanges: [], formulaRewrites: [] })),
       rewriteFormulasForCopyDelta: vi.fn(async () => []),
       lexFormula: vi.fn(async () => []),
