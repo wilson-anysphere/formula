@@ -343,6 +343,10 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(document.activeElement).toBe(view.textarea);
     expect(view.model.isEditing).toBe(false);
 
+    const tab = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
+    view.textarea.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(false);
+
     const enter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
     view.textarea.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(false);
