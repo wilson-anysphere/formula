@@ -115,6 +115,41 @@ def _excel_serial_1900(year: int, month: int, day: int) -> int:
 _FUNC_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\s*\(")
 
 
+def _strip_excel_string_literals(formula: str) -> str:
+    """
+    Return a copy of `formula` with Excel string literal contents replaced by spaces.
+
+    This keeps `_extract_function_names` from mis-identifying function-like tokens inside quoted
+    strings (e.g. `\"SUM(1)\"` should not count as a `SUM` usage).
+
+    Excel string literals use double quotes; embedded quotes are escaped by doubling (`\"\"`).
+    """
+
+    out: list[str] = []
+    in_string = False
+    i = 0
+    n = len(formula)
+    while i < n:
+        ch = formula[i]
+        if ch == '"':
+            if in_string:
+                # Escaped quote inside a string literal.
+                if i + 1 < n and formula[i + 1] == '"':
+                    out.append(" ")
+                    out.append(" ")
+                    i += 2
+                    continue
+                in_string = False
+            else:
+                in_string = True
+            out.append(" ")
+            i += 1
+            continue
+        out.append(" " if in_string else ch)
+        i += 1
+    return "".join(out)
+
+
 def _extract_function_names(formula: str | None) -> list[str]:
     if not formula:
         return []
@@ -122,6 +157,7 @@ def _extract_function_names(formula: str | None) -> list[str]:
     if raw.startswith("="):
         raw = raw[1:]
 
+    raw = _strip_excel_string_literals(raw)
     out: list[str] = []
     for match in _FUNC_RE.finditer(raw):
         name = match.group(1).upper()
