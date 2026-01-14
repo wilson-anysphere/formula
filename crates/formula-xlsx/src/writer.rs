@@ -434,7 +434,9 @@ fn trim_float(value: f64) -> String {
 
     let s = format!("{value:.15}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() {
+    // Rust formats very small negative values as `-0.000…` at fixed precision; normalize this to
+    // `0` to avoid emitting `-0` in generated XML.
+    if s.is_empty() || s == "-0" {
         "0".to_string()
     } else {
         s.to_string()
@@ -448,6 +450,12 @@ mod trim_float_tests {
     fn negative_zero_is_serialized_as_zero() {
         assert_eq!(trim_float(-0.0), "0");
         assert_eq!(trim_float(0.0), "0");
+    }
+
+    #[test]
+    fn tiny_negative_values_that_round_to_zero_do_not_emit_negative_zero() {
+        assert_eq!(trim_float(-1e-20), "0");
+        assert_eq!(trim_float(-1e-16), "0");
     }
 }
 fn workbook_defined_names_xml(workbook: &Workbook) -> String {
