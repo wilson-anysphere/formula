@@ -9,6 +9,7 @@ import type { ThemeController } from "../theme/themeController.js";
 import { NUMBER_FORMATS, toggleStrikethrough, toggleSubscript, toggleSuperscript, type CellRange } from "../formatting/toolbar.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
+import { registerAxisSizingCommands } from "./registerAxisSizingCommands.js";
 import { registerBuiltinFormatFontCommands } from "./registerBuiltinFormatFontCommands.js";
 import { registerFormatPainterCommand } from "./formatPainterCommand.js";
 import { registerFormatAlignmentCommands } from "./registerFormatAlignmentCommands.js";
@@ -41,6 +42,13 @@ export function registerDesktopCommands(params: {
   commandRegistry: CommandRegistry;
   app: SpreadsheetApp;
   layoutController: LayoutController | null;
+  /**
+   * Optional "editing mode" guard for commands that should not run while editing.
+   *
+   * The desktop shell uses a custom guard (`isSpreadsheetEditing`) that includes
+   * split-view secondary editor state, so callers should pass that in when available.
+   */
+  isEditing?: (() => boolean) | null;
   focusAfterSheetNavigation?: (() => void) | null;
   getVisibleSheetIds?: (() => string[]) | null;
   ensureExtensionsLoaded?: (() => Promise<void>) | null;
@@ -66,6 +74,7 @@ export function registerDesktopCommands(params: {
     commandRegistry,
     app,
     layoutController,
+    isEditing = null,
     focusAfterSheetNavigation = null,
     getVisibleSheetIds = null,
     ensureExtensionsLoaded = null,
@@ -85,6 +94,8 @@ export function registerDesktopCommands(params: {
   } = params;
 
   const commandCategoryFormat = t("commandCategory.format");
+
+  registerAxisSizingCommands({ commandRegistry, app, isEditing, category: commandCategoryFormat });
 
   commandRegistry.registerBuiltinCommand(
     "format.toggleStrikethrough",
