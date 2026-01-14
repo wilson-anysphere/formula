@@ -42,6 +42,12 @@ Desktop wires a locale-aware parser by injecting `parsePartialFormula` when cons
 - The WASM partial parser returns **canonical (English)** function names in its `context` (even when the user types a localized name).
   - Desktop also canonicalizes the JS fallback parse so range-arg metadata lookup stays correct when WASM is unavailable.
 
+Desktop also injects a locale-aware `FunctionRegistry` so **function-name completion** can prefer localized names when available:
+- Example (de-DE): typing `=SU` suggests `=SUMME(`.
+- Implementation: `apps/desktop/src/ai/completion/parsePartialFormula.ts` (`createLocaleAwareFunctionRegistry()`).
+  - Localized aliases are derived from the engine’s TSV translation tables.
+  - Aliases apply a small `FunctionSpec.completionBoost` so localized names win ranking when multiple functions share a prefix (e.g. `SUMME(` beats `SUMIF(` for `SU`).
+
 See: `apps/desktop/src/ai/completion/parsePartialFormula.ts`.
 
 ### Inputs

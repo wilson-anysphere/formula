@@ -135,6 +135,10 @@ const partial = await engine.parseFormulaPartial(formula, cursor, { localeId });
   `parsePartialFormula` implementation (sync or async). The UI can provide an adapter that delegates to
   `engine.parseFormulaPartial(formula, cursor, { localeId })` (with a fallback to the existing lightweight JS parser when
   WASM is unavailable) so completion logic stays consistent with the engine and the current locale.
+- **Localized function-name completion:** the UI may also inject a locale-aware `FunctionRegistry` that registers localized
+  aliases (e.g. de-DE `SUMME`) alongside canonical names, so function-name completion suggests localized spellings by
+  default. Desktop does this in `apps/desktop/src/ai/completion/parsePartialFormula.ts` (`createLocaleAwareFunctionRegistry()`).
+  `@formula/ai-completion` supports an optional `FunctionSpec.completionBoost` to bias name-completion ranking when needed.
 
 ### Mode 2: Inline Edit (Cmd/Ctrl+K)
 
