@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use formula_model::{
@@ -59,6 +60,40 @@ pub fn update_worksheet_conditional_formatting_xml(
     rules: &[CfRule],
 ) -> Result<String, XlsxError> {
     let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(sheet_xml)?;
+
+    // x14 conditional formatting requires `cfRule/@id` so the base rule can link to the x14
+    // extension rule. If callers haven't assigned ids yet, generate deterministic ones so writer
+    // output is stable across runs (important for tests and reproducible fixtures).
+    //
+    // Note: ids are only required for `CfRuleSchema::X14`. We intentionally avoid synthesizing ids
+    // for Office 2007 rules because Excel typically omits them, and adding them would introduce
+    // noisy diffs in patched worksheets.
+    let rules: Cow<'_, [CfRule]> = if rules.iter().any(|r| {
+        r.schema == CfRuleSchema::X14 && r.id.as_deref().map(|s| s.is_empty()).unwrap_or(true)
+    }) {
+        let mut owned = rules.to_vec();
+        let had_id: Vec<bool> = owned
+            .iter()
+            .map(|r| r.id.as_deref().filter(|s| !s.is_empty()).is_some())
+            .collect();
+
+        // We don't have a stable worksheet identity here, so we use a fixed seed. Callers that
+        // care about per-sheet uniqueness can call `ensure_rule_ids` themselves with a
+        // sheet-derived seed before invoking this function.
+        super::ensure_rule_ids(&mut owned, 0);
+
+        for (rule, had_id) in owned.iter_mut().zip(had_id) {
+            if rule.schema != CfRuleSchema::X14 && !had_id {
+                rule.id = None;
+            }
+        }
+
+        Cow::Owned(owned)
+    } else {
+        Cow::Borrowed(rules)
+    };
+    let rules: &[CfRule] = rules.as_ref();
+
     let needs_base_cf = !rules.is_empty();
     let needs_x14 = rules.iter().any(|r| r.schema == CfRuleSchema::X14);
 
@@ -763,6 +798,35 @@ mod tests {
         }
     }
 
+    fn x14_data_bar_rule_missing_id(range: &str) -> CfRule {
+        let mut rule = x14_data_bar_rule(range);
+        rule.id = None;
+        rule
+    }
+
+    fn is_excel_guid(s: &str) -> bool {
+        if s.len() != 38 {
+            return false;
+        }
+        let bytes = s.as_bytes();
+        if bytes[0] != b'{' || bytes[37] != b'}' {
+            return false;
+        }
+        if bytes[9] != b'-' || bytes[14] != b'-' || bytes[19] != b'-' || bytes[24] != b'-' {
+            return false;
+        }
+        for (i, &b) in bytes.iter().enumerate() {
+            if matches!(i, 0 | 9 | 14 | 19 | 24 | 37) {
+                continue;
+            }
+            let is_hex_upper = (b'0'..=b'9').contains(&b) || (b'A'..=b'F').contains(&b);
+            if !is_hex_upper {
+                return false;
+            }
+        }
+        true
+    }
+
     #[test]
     fn x14_data_bar_writer_uses_model_direction_and_colors() {
         let rule = CfRule {
@@ -927,6 +991,59 @@ mod tests {
             .find(|n| n.is_element() && n.tag_name().name() == "axisColor" && n.tag_name().namespace() == Some(NS_X14))
             .expect("x14:axisColor");
         assert_eq!(axis_color.attribute("rgb"), Some("FF445566"));
+    }
+
+    #[test]
+    fn x14_rules_without_ids_get_deterministic_generated_ids_for_linking() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+        let rules = vec![x14_data_bar_rule_missing_id("B1:B3")];
+
+        let updated1 = update_worksheet_conditional_formatting_xml(xml, &rules).unwrap();
+        let updated2 = update_worksheet_conditional_formatting_xml(xml, &rules).unwrap();
+        assert_eq!(updated1, updated2, "output must be deterministic across runs");
+
+        let doc = Document::parse(&updated1).expect("valid xml");
+        let main_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+        let base_rule = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "cfRule" && n.tag_name().namespace() == Some(main_ns))
+            .expect("base cfRule should exist");
+        let x14_rule = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "cfRule" && n.tag_name().namespace() == Some(NS_X14))
+            .expect("x14 cfRule should exist");
+
+        let base_id = base_rule.attribute("id").expect("base cfRule should have id");
+        let x14_id = x14_rule.attribute("id").expect("x14 cfRule should have id");
+
+        assert_eq!(base_id, x14_id, "base and x14 ids must match for linking");
+        assert!(is_excel_guid(base_id), "expected Excel GUID format, got {base_id}");
+    }
+
+    #[test]
+    fn id_generation_does_not_add_ids_to_office2007_rules() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+        let rules = vec![expr_rule("A1:A1", "A1>0"), x14_data_bar_rule_missing_id("B1:B3")];
+        let updated = update_worksheet_conditional_formatting_xml(xml, &rules).unwrap();
+
+        let doc = Document::parse(&updated).expect("valid xml");
+        let main_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+        let expr_cf = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "cfRule"
+                    && n.tag_name().namespace() == Some(main_ns)
+                    && n.attribute("type") == Some("expression")
+            })
+            .expect("expression cfRule exists");
+        assert_eq!(
+            expr_cf.attribute("id"),
+            None,
+            "office2007 expression rules should not have synthesized ids"
+        );
     }
 
     fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
