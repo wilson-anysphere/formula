@@ -111,7 +111,7 @@ fn bytecode_missing_external_cell_ref_is_ref_error() {
 }
 
 #[test]
-fn bytecode_indirect_external_cell_ref_compiles_and_is_ref_error() {
+fn bytecode_indirect_external_cell_ref_compiles_and_evaluates_via_provider() {
     let mut engine = Engine::new();
     let provider = Arc::new(Provider::new());
     engine.set_external_value_provider(Some(provider.clone()));
@@ -120,9 +120,6 @@ fn bytecode_indirect_external_cell_ref_compiles_and_is_ref_error() {
         .set_cell_formula("Sheet1", "A1", r#"=INDIRECT("[Book.xlsx]Sheet1!A1")"#)
         .unwrap();
 
-    // Excel semantics: INDIRECT does not resolve references into external workbooks (even if an
-    // external value provider is configured).
-    //
     // Ensure we compile to bytecode (no AST fallback).
     assert_eq!(
         engine.bytecode_program_count(),
@@ -133,19 +130,15 @@ fn bytecode_indirect_external_cell_ref_compiles_and_is_ref_error() {
     );
 
     engine.recalculate_single_threaded();
-    assert_eq!(
-        engine.get_cell_value("Sheet1", "A1"),
-        Value::Error(ErrorKind::Ref)
-    );
-    assert_eq!(
-        provider.calls(),
-        0,
-        "expected INDIRECT to reject external workbook refs without consulting the provider"
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+    assert!(
+        provider.calls() > 0,
+        "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
     );
 }
 
 #[test]
-fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_returns_ref_error() {
+fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_evaluates_via_provider() {
     let mut engine = Engine::new();
     let provider = Arc::new(Provider::new());
     engine.set_external_value_provider(Some(provider.clone()));
@@ -170,13 +163,10 @@ fn bytecode_indirect_dynamic_external_cell_ref_compiles_and_returns_ref_error() 
     );
 
     engine.recalculate_single_threaded();
-    assert_eq!(
-        engine.get_cell_value("Sheet1", "A1"),
-        Value::Error(ErrorKind::Ref)
-    );
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(42.0));
     assert!(
-        provider.calls() == 0,
-        "expected INDIRECT to reject external workbook refs without consulting the provider"
+        provider.calls() > 0,
+        "expected INDIRECT to consult the external provider when dereferencing external workbook refs"
     );
 }
 

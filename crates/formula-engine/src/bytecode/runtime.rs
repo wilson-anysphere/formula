@@ -5260,10 +5260,12 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 let end_id = grid.resolve_sheet_name(end)?;
                 (start_id == end_id).then_some(SheetId::Local(start_id))
             }
-            crate::eval::SheetReference::External(_) => {
-                // Excel semantics: INDIRECT does not resolve references into external workbooks
-                // (even if the grid is configured with an external value provider).
-                None
+            crate::eval::SheetReference::External(key) => {
+                // Match `functions::builtins_reference::INDIRECT`: allow single-sheet external
+                // workbook references (e.g. `"[Book.xlsx]Sheet1"`), but reject external 3D spans
+                // like `"[Book.xlsx]Sheet1:Sheet3"`.
+                crate::eval::is_valid_external_sheet_key(key)
+                    .then_some(SheetId::External(Arc::from(key.clone())))
             }
         }
     }

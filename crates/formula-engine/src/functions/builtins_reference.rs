@@ -596,12 +596,11 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
             match ctx.eval_arg(&compiled) {
                 ArgValue::Reference(r) => {
-                    // AST INDIRECT supports single-sheet external workbook references like
+                    // INDIRECT supports single-sheet external workbook references like
                     // `"[Book.xlsx]Sheet1"`, but rejects external 3D spans like
                     // `"[Book.xlsx]Sheet1:Sheet3"`.
                     //
-                    // Note: the bytecode backend currently rejects external workbook references
-                    // for INDIRECT (Excel semantics).
+                    // This matches the bytecode runtime's `INDIRECT` behavior.
                     match &r.sheet_id {
                         crate::functions::SheetId::External(key)
                             if !crate::eval::is_valid_external_sheet_key(key) =>
