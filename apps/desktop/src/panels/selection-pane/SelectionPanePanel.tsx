@@ -222,8 +222,10 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
         </div>
       ) : (
         <ul className="selection-pane__list" role="listbox" aria-label="Selection Pane objects">
-          {items.map(({ obj, label }) => {
+          {items.map(({ obj, label }, index) => {
             const selected = obj.id === selectedId;
+            const canBringForward = index > 0;
+            const canSendBackward = index < items.length - 1;
             return (
               <li
                 key={obj.id}
@@ -255,6 +257,7 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
                     className="selection-pane__action"
                     aria-label={`Bring forward ${label}`}
                     data-testid={`selection-pane-bring-forward-${obj.id}`}
+                    disabled={!canBringForward}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -271,6 +274,7 @@ export function SelectionPanePanel({ app }: { app: SelectionPaneApp }) {
                     className="selection-pane__action"
                     aria-label={`Send backward ${label}`}
                     data-testid={`selection-pane-send-backward-${obj.id}`}
+                    disabled={!canSendBackward}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();

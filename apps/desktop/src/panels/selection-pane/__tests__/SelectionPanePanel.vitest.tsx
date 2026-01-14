@@ -200,6 +200,14 @@ describe("Selection Pane panel", () => {
     expect(itemEls[1]?.getAttribute("data-testid")).toBe("selection-pane-item-2");
     expect(itemEls[2]?.getAttribute("data-testid")).toBe("selection-pane-item-1");
 
+    // Topmost object cannot be brought forward; backmost object cannot be sent backward.
+    const bringForward3 = panelBody.querySelector<HTMLButtonElement>('[data-testid="selection-pane-bring-forward-3"]');
+    expect(bringForward3).toBeInstanceOf(HTMLButtonElement);
+    expect(bringForward3!.disabled).toBe(true);
+    const sendBackward1 = panelBody.querySelector<HTMLButtonElement>('[data-testid="selection-pane-send-backward-1"]');
+    expect(sendBackward1).toBeInstanceOf(HTMLButtonElement);
+    expect(sendBackward1!.disabled).toBe(true);
+
     await act(async () => {
       (itemEls[2] as HTMLElement).click();
     });
@@ -434,13 +442,14 @@ describe("Selection Pane panel", () => {
     });
     expect(app.getSelectedDrawingId()).toBe(2);
 
-    const bringForward2 = panelBody.querySelector<HTMLButtonElement>('[data-testid="selection-pane-bring-forward-2"]');
-    expect(bringForward2).toBeInstanceOf(HTMLButtonElement);
-    bringForward2!.focus();
-    expect(document.activeElement).toBe(bringForward2);
+    // Use an enabled action button; item 2 is topmost so Bring Forward is disabled.
+    const sendBackward2 = panelBody.querySelector<HTMLButtonElement>('[data-testid="selection-pane-send-backward-2"]');
+    expect(sendBackward2).toBeInstanceOf(HTMLButtonElement);
+    sendBackward2!.focus();
+    expect(document.activeElement).toBe(sendBackward2);
 
     await act(async () => {
-      bringForward2!.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+      sendBackward2!.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
     });
 
     const raw = (app.getDocument() as any).getSheetDrawings(sheetId);

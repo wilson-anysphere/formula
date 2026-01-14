@@ -72,3 +72,13 @@
   background: var(--bg-tertiary);
   color: var(--text-primary);
 }
+
+.selection-pane__action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.selection-pane__action:disabled:hover {
+  background: transparent;
+  color: var(--text-secondary);
+}
