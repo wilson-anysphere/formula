@@ -1141,9 +1141,12 @@ fn open_workbook_model_from_decrypted_ooxml_zip_bytes(
 /// - For password-protected legacy `.xls` workbooks (BIFF `FILEPASS`), this will attempt to decrypt
 ///   the workbook stream using `formula-xls` when `password` is provided.
 /// - For Office-encrypted OOXML workbooks stored in an OLE container (`EncryptionInfo` +
-///   `EncryptedPackage`), decryption is not yet supported; this function returns
-///   [`Error::PasswordRequired`] when `password` is `None` and [`Error::InvalidPassword`] when
-///   `password` is `Some`.
+///   `EncryptedPackage`), this returns:
+///   - [`Error::PasswordRequired`] when `password` is `None`, and
+///   - [`Error::InvalidPassword`] when a password is provided but decryption fails.
+///
+/// With the `formula-io/encrypted-workbooks` feature enabled, this function will attempt to decrypt
+/// and open supported encrypted OOXML workbooks in memory (without persisting plaintext to disk).
 pub fn open_workbook_model_with_password(
     path: impl AsRef<Path>,
     password: Option<&str>,
@@ -1196,9 +1199,12 @@ pub fn open_workbook_model_with_password(
 /// - For password-protected legacy `.xls` workbooks (BIFF `FILEPASS`), this will attempt to decrypt
 ///   the workbook stream using `formula-xls` when `password` is provided.
 /// - For Office-encrypted OOXML workbooks stored in an OLE container (`EncryptionInfo` +
-///   `EncryptedPackage`), decryption is not yet supported; this function returns
-///   [`Error::PasswordRequired`] when `password` is `None` and [`Error::InvalidPassword`] when
-///   `password` is `Some`.
+///   `EncryptedPackage`), this returns:
+///   - [`Error::PasswordRequired`] when `password` is `None`, and
+///   - [`Error::InvalidPassword`] when a password is provided but decryption fails.
+///
+/// With the `formula-io/encrypted-workbooks` feature enabled, this function will attempt to decrypt
+/// and open supported encrypted OOXML workbooks in memory (without persisting plaintext to disk).
 pub fn open_workbook_with_password(
     path: impl AsRef<Path>,
     password: Option<&str>,
@@ -1669,16 +1675,20 @@ fn maybe_read_plaintext_ooxml_package_from_encrypted_ole(
             path: path.to_path_buf(),
             source,
         })?
-        .ok_or_else(|| Error::EncryptedWorkbook {
+        .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
             path: path.to_path_buf(),
+            version_major: 0,
+            version_minor: 0,
         })?;
     let encrypted_package = read_ole_stream_best_effort(&mut ole, "EncryptedPackage")
         .map_err(|source| Error::OpenIo {
             path: path.to_path_buf(),
             source,
         })?
-        .ok_or_else(|| Error::EncryptedWorkbook {
+        .ok_or_else(|| Error::UnsupportedOoxmlEncryption {
             path: path.to_path_buf(),
+            version_major: 0,
+            version_minor: 0,
         })?;
 
     if let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) {
@@ -1693,9 +1703,15 @@ fn maybe_read_plaintext_ooxml_package_from_encrypted_ole(
     }
 
     // Not a plaintext ZIP payload; surface the usual encryption-related error.
-    Err(encrypted_ooxml_error(&mut ole, path, password).unwrap_or(Error::EncryptedWorkbook {
-        path: path.to_path_buf(),
-    }))
+    Err(
+        encrypted_ooxml_error(&mut ole, path, password).unwrap_or(
+            Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
+            },
+        ),
+    )
 }
 
 /// Returns an OOXML-encryption related error when the given OLE compound file is an encrypted
