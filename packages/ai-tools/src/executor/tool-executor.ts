@@ -1354,7 +1354,8 @@ export class ToolExecutor {
     const measures: string[] = params.measures ?? [];
     const requested = new Set(measures);
 
-    const needsDistributionValues = requested.has("median") || requested.has("mode") || requested.has("quartiles");
+    const wantsMode = requested.has("mode");
+    const needsDistributionValues = requested.has("median") || requested.has("quartiles");
 
     const wantsCount = requested.has("count");
     const wantsSum = requested.has("sum");
@@ -1379,6 +1380,7 @@ export class ToolExecutor {
       this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW)
     );
     const values: number[] | null = needsDistributionValues ? [] : null;
+    const modeCounts = wantsMode ? new Map<number, number>() : null;
     let redactedCellCount = 0;
 
     // Basic streaming aggregates.
@@ -1431,6 +1433,9 @@ export class ToolExecutor {
         if (numeric === null) continue;
 
         if (values) values.push(numeric);
+        if (modeCounts) {
+          modeCounts.set(numeric, (modeCounts.get(numeric) ?? 0) + 1);
+        }
 
         if (needsMinMax) {
           if (!hasMinMax) {
@@ -1474,10 +1479,18 @@ export class ToolExecutor {
       }
     }
 
-    const wantsMode = requested.has("mode");
-    // `mode()` tie-breaking depends on original scan order (Map insertion order). If we need to sort
-    // values for median/quartiles, compute mode first.
-    const modeValue = wantsMode && values && values.length ? mode(values) : null;
+    const modeValue = (() => {
+      if (!modeCounts) return null;
+      let maxCount = 0;
+      let nextMode: number | null = null;
+      for (const [value, count] of modeCounts.entries()) {
+        if (count > maxCount) {
+          maxCount = count;
+          nextMode = value;
+        }
+      }
+      return maxCount > 1 ? nextMode : null;
+    })();
 
     if (values && values.length > 1 && (requested.has("median") || requested.has("quartiles"))) {
       // Sort once in-place so median/quartiles don't need to allocate extra copies.
