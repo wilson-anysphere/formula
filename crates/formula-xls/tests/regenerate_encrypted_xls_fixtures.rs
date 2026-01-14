@@ -367,7 +367,7 @@ fn build_filepass_rc4_standard_payload(password: &str) -> (Vec<u8>, [u8; 16]) {
 }
 
 fn derive_cryptoapi_key_material(password: &str, salt: &[u8; 16]) -> [u8; 20] {
-    // Matches `crates/formula-xls/src/decrypt.rs`.
+    // Matches `crates/formula-xls/src/biff/encryption/cryptoapi.rs` (CryptoAPI RC4, SHA-1).
     const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
 
     let pw_bytes = utf16le_bytes(password);
@@ -382,7 +382,7 @@ fn derive_cryptoapi_key_material(password: &str, salt: &[u8; 16]) -> [u8; 20] {
 }
 
 fn derive_cryptoapi_key_material_md5(password: &str, salt: &[u8; 16]) -> [u8; 16] {
-    // Matches `crates/formula-xls/src/decrypt.rs` for AlgIDHash=CALG_MD5.
+    // Matches `crates/formula-xls/src/biff/encryption/cryptoapi.rs` (CryptoAPI RC4, MD5).
     const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
 
     let pw_bytes = utf16le_bytes(password);
@@ -477,7 +477,7 @@ fn apply_cryptoapi_legacy_keystream_by_offset(
     key_len: usize,
 ) {
     // Symmetric encrypt/decrypt helper matching `decrypt_range_by_offset` in
-    // `crates/formula-xls/src/decrypt.rs`.
+    // `crates/formula-xls/src/biff/encryption/cryptoapi.rs`.
     const BLOCK_SIZE: usize = 1024;
 
     let mut stream_pos = start_offset;
@@ -993,7 +993,7 @@ fn build_filepass_cryptoapi_legacy_payload(
     csp_name: Option<&str>,
 ) -> (Vec<u8>, [u8; 20]) {
     // Legacy BIFF8 RC4 CryptoAPI FILEPASS layout ("wEncryptionInfo=0x0004") supported by
-    // `crates/formula-xls/src/decrypt.rs`.
+    // `crates/formula-xls/src/biff/encryption/cryptoapi.rs`.
     //
     // FILEPASS payload layout:
     // - u16 wEncryptionType = 0x0001 (RC4)
@@ -1104,7 +1104,7 @@ fn encrypt_payloads_after_filepass_cryptoapi_legacy(
 ) {
     // Legacy BIFF8 CryptoAPI RC4 encrypts record payloads using an absolute-offset stream position
     // that includes record headers. Mirror the decryptor's behavior in
-    // `crates/formula-xls/src/decrypt.rs` so regenerated fixtures remain decryptable.
+    // `crates/formula-xls/src/biff/encryption/cryptoapi.rs` so regenerated fixtures remain decryptable.
     let mut offset = filepass_data_end;
     let mut stream_pos = filepass_data_end;
 
