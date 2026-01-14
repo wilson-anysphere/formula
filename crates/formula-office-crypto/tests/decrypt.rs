@@ -150,6 +150,49 @@ fn decrypts_standard_rc4_encrypted_package_when_size_header_high_dword_is_reserv
 }
 
 #[test]
+fn standard_rc4_unsupported_algidhash_returns_unsupported_encryption() {
+    // Requirement: Unsupported `algIdHash` values should return UnsupportedEncryption (not
+    // InvalidPassword).
+    //
+    // Mutate the Standard/CryptoAPI RC4 fixture to use an unknown AlgIDHash and ensure the error
+    // is surfaced as UnsupportedEncryption.
+    let cursor = Cursor::new(STANDARD_RC4_FIXTURE.to_vec());
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open cfb");
+
+    {
+        let mut stream = ole
+            .open_stream("EncryptionInfo")
+            .or_else(|_| ole.open_stream("/EncryptionInfo"))
+            .expect("open EncryptionInfo");
+
+        // Standard EncryptionInfo layout:
+        // - 8-byte version header
+        // - 4-byte headerSize
+        // - EncryptionHeader (starts at offset 12)
+        // Within EncryptionHeader, algIdHash is a DWORD at offset 12.
+        let alg_id_hash_offset = 12u64 + 12u64;
+        stream
+            .seek(SeekFrom::Start(alg_id_hash_offset))
+            .expect("seek to algIdHash");
+        stream
+            .write_all(&0xDEAD_BEEFu32.to_le_bytes())
+            .expect("write algIdHash");
+    }
+
+    let ole_bytes = ole.into_inner().into_inner();
+    let err = decrypt_encrypted_package(&ole_bytes, "password").expect_err("expected failure");
+    match err {
+        OfficeCryptoError::UnsupportedEncryption(msg) => {
+            assert!(
+                msg.contains("AlgIDHash"),
+                "expected UnsupportedEncryption message to mention AlgIDHash, got: {msg}"
+            );
+        }
+        other => panic!("expected UnsupportedEncryption, got {other:?}"),
+    }
+}
+
+#[test]
 fn wrong_password_returns_invalid_password() {
     let err = decrypt_encrypted_package(AGILE_FIXTURE, "wrong").expect_err("expected error");
     assert!(
