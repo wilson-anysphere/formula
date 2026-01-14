@@ -320,21 +320,35 @@ def main() -> int:
     target_calc = 0.999  # 99.9% calc fidelity target.
     target_round_trip = 0.97
 
-    read_rate = corpus.open_rate if corpus else None
-    read_pass = corpus.open_ok if corpus else None
     read_total = corpus.total_workbooks if corpus else None
+    read_pass = corpus.open_ok if corpus else None
+    read_rate = corpus.open_rate if corpus and corpus.total_workbooks > 0 else None
 
-    rt_rate = corpus.round_trip_rate if corpus else None
-    rt_pass = corpus.round_trip_ok if corpus else None
     rt_total = corpus.total_workbooks if corpus else None
+    rt_pass = corpus.round_trip_ok if corpus else None
+    rt_rate = corpus.round_trip_rate if corpus and corpus.total_workbooks > 0 else None
 
     corpus_label = corpus.path.parent.name if corpus else None
+    corpus_notes_parts: list[str] = []
+    if corpus_label:
+        corpus_notes_parts.append(f"corpus={corpus_label}")
+    if corpus is not None and corpus.total_workbooks == 0:
+        corpus_notes_parts.append("no workbooks")
+    corpus_notes = ", ".join(corpus_notes_parts) if corpus_notes_parts else "—"
 
     calc_total = oracle.total_cases if oracle else None
     calc_mismatches = oracle.mismatches if oracle else None
     calc_mismatch_rate = oracle.mismatch_rate if oracle else None
-    calc_pass_rate = (1.0 - calc_mismatch_rate) if calc_mismatch_rate is not None else None
-    calc_passes = (calc_total - calc_mismatches) if calc_total is not None and calc_mismatches is not None else None
+    calc_pass_rate = (
+        (1.0 - calc_mismatch_rate)
+        if calc_mismatch_rate is not None and calc_total is not None and calc_total > 0
+        else None
+    )
+    calc_passes = (
+        (calc_total - calc_mismatches)
+        if calc_total is not None and calc_mismatches is not None
+        else None
+    )
 
     commit = _github_commit_sha() or (corpus.commit if corpus else None)
     if not commit:
@@ -388,15 +402,18 @@ def main() -> int:
         + " | "
         + _fmt_pct(target_read)
         + " | "
-        + (f"corpus={corpus_label}" if corpus_label else "—")
+        + corpus_notes
         + " |"
     )
 
     calc_notes_parts: list[str] = []
     if oracle is not None:
-        calc_notes_parts.append(f"mismatch rate={_fmt_pct(calc_mismatch_rate)}")
-        if calc_mismatches is not None and calc_total is not None:
-            calc_notes_parts.append(f"mismatches={calc_mismatches}/{calc_total}")
+        if calc_total == 0:
+            calc_notes_parts.append("no cases")
+        else:
+            calc_notes_parts.append(f"mismatch rate={_fmt_pct(calc_mismatch_rate)}")
+            if calc_mismatches is not None and calc_total is not None:
+                calc_notes_parts.append(f"mismatches={calc_mismatches}/{calc_total}")
         if oracle.max_mismatch_rate is not None:
             calc_notes_parts.append(f"max={_fmt_pct(oracle.max_mismatch_rate)}")
     calc_notes = ", ".join(calc_notes_parts) if calc_notes_parts else "—"
@@ -424,7 +441,7 @@ def main() -> int:
         + " | "
         + _fmt_pct(target_round_trip)
         + " | "
-        + (f"corpus={corpus_label}" if corpus_label else "—")
+        + corpus_notes
         + " |"
     )
     lines.append("")
