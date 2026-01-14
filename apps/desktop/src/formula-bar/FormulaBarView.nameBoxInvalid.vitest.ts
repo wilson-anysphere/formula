@@ -26,6 +26,8 @@ describe("FormulaBarView name box invalid reference feedback", () => {
     expect(onGoTo).toHaveBeenCalledWith("NotARef");
     expect(address!.getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(address);
+    expect(address!.selectionStart).toBe(0);
+    expect(address!.selectionEnd).toBe("NotARef".length);
 
     address!.value = "B3";
     address!.dispatchEvent(new Event("input", { bubbles: true }));
