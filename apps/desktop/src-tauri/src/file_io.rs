@@ -11,6 +11,7 @@ use formula_model::{
     DateSystem as WorkbookDateSystem, SheetVisibility, TabColor, WorksheetId,
 };
 use formula_offcrypto::{decrypt_ooxml_from_ole_bytes, OffcryptoError};
+use formula_xlsb::biff12_varint;
 use formula_xlsb::{
     CellEdit as XlsbCellEdit, CellValue as XlsbCellValue, OpenOptions as XlsbOpenOptions,
     XlsbWorkbook,
@@ -1478,6 +1479,201 @@ pub fn read_parquet_blocking(path: &Path) -> anyhow::Result<Workbook> {
     Ok(out)
 }
 
+fn discard_xlsb_record_payload(reader: &mut impl Read, mut len: u32) -> anyhow::Result<()> {
+    // Avoid allocations when skipping BIFF12 payloads; XLSB worksheet records are attacker-controlled.
+    let mut buf = [0u8; 8192];
+    while len > 0 {
+        let n = (len as usize).min(buf.len());
+        reader.read_exact(&mut buf[..n])?;
+        len -= n as u32;
+    }
+    Ok(())
+}
+
+fn parse_xlsb_col_info_payload(payload: &[u8]) -> Option<(u32, u32, formula_model::ColProperties)> {
+    // Column indices in XLSB are 0-based, matching cell records and our in-memory model.
+    //
+    // BrtColInfo layouts observed in the wild:
+    // - Common (MS-XLSB): [colFirst: u32][colLast: u32][width: u32 (1/256 chars)][xf: u32][grbit: u16][reserved: u16]
+    // - Some writers may use u16 column indices + u16 width (BIFF8-like).
+
+    if payload.len() < 4 {
+        return None;
+    }
+
+    let (col_first, col_last, base_offset) = if payload.len() >= 8 {
+        let c1 = u32::from_le_bytes(payload[0..4].try_into().ok()?);
+        let c2 = u32::from_le_bytes(payload[4..8].try_into().ok()?);
+        if c1 < formula_model::EXCEL_MAX_COLS && c2 < formula_model::EXCEL_MAX_COLS && c1 <= c2 {
+            (c1, c2, 8)
+        } else {
+            let c1 = u16::from_le_bytes(payload[0..2].try_into().ok()?) as u32;
+            let c2 = u16::from_le_bytes(payload[2..4].try_into().ok()?) as u32;
+            if c1 < formula_model::EXCEL_MAX_COLS
+                && c2 < formula_model::EXCEL_MAX_COLS
+                && c1 <= c2
+            {
+                (c1, c2, 4)
+            } else {
+                return None;
+            }
+        }
+    } else {
+        let c1 = u16::from_le_bytes(payload[0..2].try_into().ok()?) as u32;
+        let c2 = u16::from_le_bytes(payload[2..4].try_into().ok()?) as u32;
+        if c1 < formula_model::EXCEL_MAX_COLS && c2 < formula_model::EXCEL_MAX_COLS && c1 <= c2 {
+            (c1, c2, 4)
+        } else {
+            return None;
+        }
+    };
+
+    let hidden = if payload.len() >= 4 {
+        // Many BIFF layouts encode the column visibility in a `grbit` field near the end.
+        let off = payload.len().saturating_sub(4);
+        let options = u16::from_le_bytes(payload[off..off + 2].try_into().ok()?);
+        (options & 0x0001) != 0
+    } else {
+        false
+    };
+
+    let mut width: Option<f32> = None;
+
+    if payload.len() >= base_offset + 4 {
+        let raw = u32::from_le_bytes(payload[base_offset..base_offset + 4].try_into().ok()?);
+        let candidate = (raw as f32) / 256.0;
+        if candidate.is_finite() && candidate > 0.0 && candidate <= 255.0 {
+            width = Some(candidate);
+        }
+    }
+
+    if width.is_none() && payload.len() >= base_offset + 2 {
+        let raw = u16::from_le_bytes(payload[base_offset..base_offset + 2].try_into().ok()?);
+        let candidate = (raw as f32) / 256.0;
+        if candidate.is_finite() && candidate > 0.0 && candidate <= 255.0 {
+            width = Some(candidate);
+        }
+    }
+
+    if width.is_none() && payload.len() >= base_offset + 8 {
+        // Best-effort fallback for alternative encodings; treat the next 8 bytes as f64 chars.
+        let raw = f64::from_le_bytes(payload[base_offset..base_offset + 8].try_into().ok()?);
+        if raw.is_finite() && raw > 0.0 && raw <= 255.0 {
+            width = Some(raw as f32);
+        }
+    }
+
+    if width.is_none() && !hidden {
+        return None;
+    }
+
+    let mut props = formula_model::ColProperties::default();
+    props.width = width;
+    props.hidden = hidden;
+
+    Some((col_first, col_last, props))
+}
+
+fn read_xlsb_col_properties_for_sheet(
+    path: &Path,
+    part_path: &str,
+) -> anyhow::Result<BTreeMap<u32, formula_model::ColProperties>> {
+    // Stream the worksheet's BIFF12 record stream only until we hit the sheetData block.
+    // Column info records appear before sheetData and can be extracted without scanning the
+    // potentially enormous cell grid.
+    //
+    // We cap the amount scanned to avoid pathological packages that omit sheetData and force a
+    // full scan of a large worksheet stream.
+    const SHEETDATA_RECORD_ID: u32 = 0x0091;
+    const BEGIN_COL_INFOS_RECORD_ID: u32 = 0x0186;
+    const END_COL_INFOS_RECORD_ID: u32 = 0x0187;
+
+    const MAX_SCAN_PAYLOAD_BYTES: u64 = 8 * 1024 * 1024; // 8 MiB
+    const MAX_COL_INFO_RECORD_BYTES: u32 = 1024; // Defensive; BrtColInfo records are tiny.
+
+    let file = std::fs::File::open(path)?;
+    let mut zip = zip::ZipArchive::new(file).with_context(|| format!("open xlsb zip {:?}", path))?;
+
+    let Some(entry_name) = zip
+        .file_names()
+        .find(|candidate| zip_entry_name_matches(candidate, part_path))
+        .map(str::to_owned)
+    else {
+        return Ok(BTreeMap::new());
+    };
+
+    let mut sheet = zip
+        .by_name(&entry_name)
+        .with_context(|| format!("open xlsb worksheet part {entry_name}"))?;
+
+    let mut out: BTreeMap<u32, formula_model::ColProperties> = BTreeMap::new();
+    let mut in_col_infos = false;
+    let mut scanned_payload_bytes: u64 = 0;
+
+    while let Some(id) = biff12_varint::read_record_id(&mut sheet)? {
+        let Some(len) = biff12_varint::read_record_len(&mut sheet)? else {
+            break;
+        };
+
+        let next_scanned = scanned_payload_bytes.saturating_add(len as u64);
+        if next_scanned > MAX_SCAN_PAYLOAD_BYTES {
+            break;
+        }
+        scanned_payload_bytes = next_scanned;
+
+        match id {
+            SHEETDATA_RECORD_ID => {
+                discard_xlsb_record_payload(&mut sheet, len)?;
+                break;
+            }
+            BEGIN_COL_INFOS_RECORD_ID => {
+                in_col_infos = true;
+                discard_xlsb_record_payload(&mut sheet, len)?;
+            }
+            END_COL_INFOS_RECORD_ID => {
+                in_col_infos = false;
+                discard_xlsb_record_payload(&mut sheet, len)?;
+            }
+            _ if in_col_infos => {
+                if len > MAX_COL_INFO_RECORD_BYTES {
+                    discard_xlsb_record_payload(&mut sheet, len)?;
+                    continue;
+                }
+
+                let mut payload = vec![0u8; len as usize];
+                sheet.read_exact(&mut payload)?;
+
+                // BrtColInfo is typically record id 0x003C, but be tolerant and attempt to parse
+                // any record inside the colInfos block when it matches the expected shape.
+                if let Some((start_col, end_col, props)) = parse_xlsb_col_info_payload(&payload) {
+                    for col in start_col..=end_col {
+                        if col >= formula_model::EXCEL_MAX_COLS {
+                            break;
+                        }
+                        let entry = out
+                            .entry(col)
+                            .or_insert_with(formula_model::ColProperties::default);
+                        if props.width.is_some() {
+                            entry.width = props.width;
+                        }
+                        if props.hidden {
+                            entry.hidden = true;
+                        }
+                    }
+                }
+            }
+            _ => {
+                discard_xlsb_record_payload(&mut sheet, len)?;
+            }
+        }
+    }
+
+    // Keep the map sparse.
+    out.retain(|_, p| p.width.is_some() || p.hidden || p.style_id.is_some());
+
+    Ok(out)
+}
+
 fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
     // Open XLSB with minimal preservation to reduce memory usage and exposure to
     // potentially-large/unsupported OPC parts (e.g. embedded media). The desktop app's XLSB save
@@ -1535,6 +1731,11 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
     for (idx, sheet_meta) in wb.sheet_metas().iter().enumerate() {
         let mut sheet = Sheet::new(sheet_meta.name.clone(), sheet_meta.name.clone());
         sheet.origin_ordinal = Some(idx);
+        // Best-effort: extract per-column metadata (width/hidden) without materializing the full
+        // worksheet part. This enables Excel-compatible `CELL("width")` behavior for XLSB inputs.
+        if let Ok(props) = read_xlsb_col_properties_for_sheet(path, &sheet_meta.part_path) {
+            sheet.col_properties = props;
+        }
         let styles = wb.styles();
         let mut undecoded_formula_cells: Vec<(usize, usize, CellScalar, Option<String>)> =
             Vec::new();
@@ -3556,6 +3757,153 @@ mod tests {
         let formula_cell = sheet.get_cell(0, 2);
         assert_eq!(formula_cell.formula.as_deref(), Some("=B1*2"));
         assert_eq!(formula_cell.computed_value, CellScalar::Number(85.0));
+    }
+
+    #[test]
+    fn xlsb_column_properties_propagate_to_cell_width() {
+        const SHEETDATA_RECORD_ID: u32 = 0x0091;
+        const BEGIN_COL_INFOS_RECORD_ID: u32 = 0x0186;
+        const END_COL_INFOS_RECORD_ID: u32 = 0x0187;
+        const COL_INFO_RECORD_ID: u32 = 0x003C;
+
+        fn write_record(out: &mut Vec<u8>, id: u32, payload: &[u8]) {
+            biff12_varint::write_record_id(out, id).expect("write record id");
+            biff12_varint::write_record_len(out, payload.len() as u32).expect("write record len");
+            out.extend_from_slice(payload);
+        }
+
+        fn col_info_payload(col_first: u32, col_last: u32, width_chars: f32, hidden: bool) -> Vec<u8> {
+            // MS-XLSB BrtColInfo (common layout):
+            // [colFirst: u32][colLast: u32][width: u32 (1/256 chars)][xf: u32][grbit: u16][reserved: u16]
+            let width_raw = (width_chars * 256.0) as u32;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&col_first.to_le_bytes());
+            payload.extend_from_slice(&col_last.to_le_bytes());
+            payload.extend_from_slice(&width_raw.to_le_bytes());
+            payload.extend_from_slice(&0u32.to_le_bytes()); // xf/style
+            let options: u16 = if hidden { 0x0001 } else { 0 };
+            payload.extend_from_slice(&options.to_le_bytes());
+            payload.extend_from_slice(&0u16.to_le_bytes()); // reserved
+            payload
+        }
+
+        fn insert_col_infos(sheet_bin: &[u8]) -> Vec<u8> {
+            let mut cursor = Cursor::new(sheet_bin);
+            loop {
+                let record_start = cursor.position() as usize;
+                let Some(id) = biff12_varint::read_record_id(&mut cursor)
+                    .expect("read record id")
+                else {
+                    panic!("expected to find BrtBeginSheetData");
+                };
+                let Some(len) = biff12_varint::read_record_len(&mut cursor)
+                    .expect("read record len")
+                else {
+                    panic!("expected to read record len");
+                };
+
+                if id == SHEETDATA_RECORD_ID {
+                    let mut patch = Vec::new();
+                    write_record(&mut patch, BEGIN_COL_INFOS_RECORD_ID, &[]);
+                    // Column A: width override 20.
+                    write_record(
+                        &mut patch,
+                        COL_INFO_RECORD_ID,
+                        &col_info_payload(0, 0, 20.0, false),
+                    );
+                    // Column B: hidden.
+                    write_record(
+                        &mut patch,
+                        COL_INFO_RECORD_ID,
+                        &col_info_payload(1, 1, 8.0, true),
+                    );
+                    write_record(&mut patch, END_COL_INFOS_RECORD_ID, &[]);
+
+                    let mut out = Vec::with_capacity(sheet_bin.len() + patch.len());
+                    out.extend_from_slice(&sheet_bin[..record_start]);
+                    out.extend_from_slice(&patch);
+                    out.extend_from_slice(&sheet_bin[record_start..]);
+                    return out;
+                }
+
+                cursor.set_position(cursor.position() + len as u64);
+            }
+        }
+
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        );
+        let fixture_bytes = std::fs::read(fixture_path).expect("read xlsb fixture bytes");
+
+        // Patch the worksheet stream to include BrtColInfo records.
+        let mut input = ZipArchive::new(Cursor::new(fixture_bytes)).expect("open xlsb zip");
+        let mut output = ZipWriter::new(Cursor::new(Vec::<u8>::new()));
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+
+        for i in 0..input.len() {
+            let mut entry = input.by_index(i).expect("open zip entry");
+            let name = entry.name().to_string();
+
+            let mut contents = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut contents).expect("read zip entry");
+
+            let contents = if zip_entry_name_matches(&name, "xl/worksheets/sheet1.bin") {
+                insert_col_infos(&contents)
+            } else {
+                contents
+            };
+
+            if entry.is_dir() {
+                output
+                    .add_directory(name, options)
+                    .expect("write directory");
+            } else {
+                output.start_file(name, options).expect("start file");
+                output.write_all(&contents).expect("write file");
+            }
+        }
+
+        let patched_bytes = output.finish().expect("finish zip").into_inner();
+
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".xlsb")
+            .tempfile()
+            .expect("temp xlsb");
+        tmp.write_all(&patched_bytes).expect("write patched xlsb");
+        tmp.flush().expect("flush patched xlsb");
+
+        let workbook = read_xlsb_blocking(tmp.path()).expect("read patched xlsb workbook");
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        // Column A width override is propagated into the engine.
+        state
+            .set_cell(
+                &sheet_id,
+                0,
+                2,
+                None,
+                Some("=CELL(\"width\",A1)".to_string()),
+            )
+            .expect("set CELL(width) formula for A1");
+        let c1 = state.get_cell(&sheet_id, 0, 2).expect("read C1");
+        assert_eq!(c1.value, CellScalar::Number(20.0));
+
+        // Hidden columns report width=0.
+        state
+            .set_cell(
+                &sheet_id,
+                1,
+                2,
+                None,
+                Some("=CELL(\"width\",B1)".to_string()),
+            )
+            .expect("set CELL(width) formula for B1");
+        let c2 = state.get_cell(&sheet_id, 1, 2).expect("read C2");
+        assert_eq!(c2.value, CellScalar::Number(0.0));
     }
 
     #[test]
