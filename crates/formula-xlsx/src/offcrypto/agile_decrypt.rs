@@ -158,9 +158,9 @@ fn decrypt_agile_package_key_from_password(
             &password_key.encrypted_verifier_hash_input,
         )
         .map_err(|e| OffCryptoError::InvalidAttribute {
-                element: "p:encryptedKey".to_string(),
-                attr: "encryptedVerifierHashInput".to_string(),
-                reason: e.to_string(),
+            element: "p:encryptedKey".to_string(),
+            attr: "encryptedVerifierHashInput".to_string(),
+            reason: e.to_string(),
         })?;
         decrypted
             .get(..password_key.block_size)
@@ -186,9 +186,9 @@ fn decrypt_agile_package_key_from_password(
             &password_key.encrypted_verifier_hash_value,
         )
         .map_err(|e| OffCryptoError::InvalidAttribute {
-                element: "p:encryptedKey".to_string(),
-                attr: "encryptedVerifierHashValue".to_string(),
-                reason: e.to_string(),
+            element: "p:encryptedKey".to_string(),
+            attr: "encryptedVerifierHashValue".to_string(),
+            reason: e.to_string(),
         })?;
         decrypted
             .get(..password_key.hash_size)

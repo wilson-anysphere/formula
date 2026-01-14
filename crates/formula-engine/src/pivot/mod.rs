@@ -365,7 +365,7 @@ impl PivotValueRef<'_> {
 pub trait PivotRecordSource {
     fn row_count(&self) -> usize;
     fn column_count(&self) -> usize;
-    fn field_index(&self, name: &str) -> Option<usize>;
+    fn field_index(&self, field_name: &str) -> Option<usize>;
     fn value(&self, row: usize, col: usize) -> PivotValueRef<'_>;
     #[inline]
     fn as_pivot_cache(&self) -> Option<&PivotCache> {
@@ -382,8 +382,8 @@ impl PivotRecordSource for PivotCache {
         self.fields.len()
     }
 
-    fn field_index(&self, name: &str) -> Option<usize> {
-        PivotCache::field_index(self, name)
+    fn field_index(&self, field_name: &str) -> Option<usize> {
+        PivotCache::field_index(self, field_name)
     }
 
     fn value(&self, row: usize, col: usize) -> PivotValueRef<'_> {
@@ -422,8 +422,10 @@ impl PivotRecordSource for ColumnarTable {
         ColumnarTable::column_count(self)
     }
 
-    fn field_index(&self, name: &str) -> Option<usize> {
-        self.schema().iter().position(|c| c.name == name)
+    fn field_index(&self, field_name: &str) -> Option<usize> {
+        self.schema()
+            .iter()
+            .position(|c| c.name.as_str() == field_name)
     }
 
     fn value(&self, row: usize, col: usize) -> PivotValueRef<'_> {
