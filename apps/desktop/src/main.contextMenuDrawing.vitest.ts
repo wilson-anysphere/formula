@@ -419,4 +419,48 @@ describe("Drawing context menu (main wiring helper)", () => {
       document.querySelector('[data-testid="context-menu-drawing-z-order-with-charts"]')?.remove();
     }
   });
+
+  it("treats hashed (far-negative) drawing ids as workbook drawings, not canvas charts", () => {
+    const contextMenu = new ContextMenu({ testId: "context-menu-drawing-hashed-id" });
+    const hashedId = -0x200000000; // -2^33 (hashed drawing id namespace floor)
+    let selectedId: number | null = hashedId;
+    const app = {
+      hitTestDrawingAtClientPoint: vi.fn(() => ({ id: hashedId })),
+      getSelectedDrawingId: vi.fn(() => selectedId),
+      // Topmost-first ordering: charts first (negative small magnitude), then workbook drawings.
+      listDrawingsForSheet: vi.fn(() => [{ id: -1 }, { id: -2 }, { id: hashedId }, { id: 1 }]),
+      isSelectedDrawingImage: vi.fn(() => false),
+      selectDrawingById: vi.fn((id: number | null) => {
+        selectedId = id;
+      }),
+      cut: vi.fn(),
+      copy: vi.fn(),
+      deleteDrawingById: vi.fn(),
+      bringSelectedDrawingForward: vi.fn(),
+      sendSelectedDrawingBackward: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    try {
+      tryOpenDrawingContextMenuAtClientPoint({
+        app,
+        contextMenu,
+        clientX: 10,
+        clientY: 20,
+        isEditing: false,
+      });
+
+      const overlay = document.querySelector<HTMLElement>('[data-testid="context-menu-drawing-hashed-id"]');
+      const buttons = Array.from(overlay?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+      const buttonByLabel = (label: string) =>
+        buttons.find((btn) => (btn.querySelector(".context-menu__label")?.textContent ?? "").trim() === label) ?? null;
+
+      // The hashed drawing is topmost within the workbook drawings stack (but not within the chart stack).
+      expect(buttonByLabel("Bring Forward")?.disabled).toBe(true);
+      expect(buttonByLabel("Send Backward")?.disabled).toBe(false);
+    } finally {
+      contextMenu.close();
+      document.querySelector('[data-testid="context-menu-drawing-hashed-id"]')?.remove();
+    }
+  });
 });
