@@ -11,7 +11,10 @@ describe("openFileIpc wiring", () => {
     const source = readFileSync(mainUrl, "utf8");
 
     // Ensure the helper is imported (as an actual import statement, not just mentioned in a comment).
-    expect(source).toMatch(/^\s*import\s+\{[^}]*\binstallOpenFileIpc\b[^}]*\}\s+from\s+["']\.\/tauri\/openFileIpc["']/m);
+    // Allow optional `.ts`/`.js` extensions so this guardrail doesn't break on harmless specifier refactors.
+    expect(source).toMatch(
+      /^\s*import\s+\{[^}]*\binstallOpenFileIpc\b[^}]*\}\s+from\s+["']\.\/tauri\/openFileIpc(?:\.(?:ts|js))?["']/m,
+    );
 
     // Ensure the helper is actually used. This guards against a regression where the helper
     // remains in the tree but the startup wiring is removed.
