@@ -21912,6 +21912,43 @@ export class SpreadsheetApp {
       return resolveThisRowCell(tableName, columnName);
     }
 
+    // Multi-column `#This Row` structured refs are valid Excel syntax:
+    //   - Table1[[#This Row],[Col1],[Col2]]   (list; union in Excel)
+    //   - Table1[[#This Row],[Col1]:[Col3]]   (range)
+    // and their implicit equivalents inside a table context:
+    //   - [[#This Row],[Col1],[Col2]]
+    //
+    // For list-mode refs, Excel returns a union; the formula bar highlight stack can only
+    // represent a single rectangle, so we only resolve the reference when the selected columns
+    // are contiguous (matching the shared structured-ref resolver behavior for #All/#Data).
+    const thisRowSelectorBracketRe = /\[\s*#\s*this\s+row\s*\]/i;
+    if (thisRowSelectorBracketRe.test(trimmed)) {
+      const firstBracket = trimmed.indexOf("[");
+      if (firstBracket >= 0) {
+        const suffix = trimmed.slice(firstBracket).trimStart();
+        if (suffix.startsWith("[[")) {
+          const explicitTableName = trimmed.slice(0, firstBracket).trim();
+          const tableName = explicitTableName || findContainingTableName();
+          if (!tableName) return null;
+
+          const rowRange = resolveThisRowRow(tableName);
+          if (!rowRange) return null;
+
+          const fullRef = explicitTableName ? trimmed : `${tableName}${trimmed}`;
+          // Delegate column-span parsing + contiguity checks to the shared resolver by rewriting
+          // the selector to `#All` (rows are later clamped to the current edit row).
+          const rewritten = fullRef.replace(/\[\s*#\s*this\s+row\s*\]/gi, "[#All]");
+          const { references } = extractFormulaReferences(rewritten, undefined, undefined, { tables: this.searchWorkbook.tables as any });
+          const first = references[0];
+          if (!first) return null;
+          if (first.start !== 0 || first.end !== rewritten.length) return null;
+          const r = first.range;
+          if (r.startCol < rowRange.startCol || r.endCol > rowRange.endCol) return null;
+          return { sheet: rowRange.sheet, startRow: rowRange.startRow, endRow: rowRange.endRow, startCol: r.startCol, endCol: r.endCol };
+        }
+      }
+    }
+
     // Fallback: handle implicit selector-qualified structured refs that select multiple columns,
     // e.g. `[[#All],[Col1],[Col2]]` or `[[Col1]:[Col3]]`. These are valid inside a table context,
     // but the table name is omitted. Infer the containing table and delegate to the shared
@@ -22162,6 +22199,69 @@ export class SpreadsheetApp {
           const resolved = resolveThisRowStructuredRef(simpleMatch[1]!, columnName);
           if (resolved) return resolved;
           return null;
+        }
+      }
+
+      // Multi-column `#This Row` structured refs (contiguous columns only):
+      //   Table1[[#This Row],[Col1],[Col2]]
+      //   Table1[[#This Row],[Col1]:[Col3]]
+      //
+      // Resolve the column span using the shared structured-ref resolver by rewriting
+      // `#This Row` -> `#All`, then clamp the result to the current edit row.
+      if (/\[\s*#\s*this\s+row\s*\]/i.test(trimmed)) {
+        const firstBracket = trimmed.indexOf("[");
+        const tableName = firstBracket > 0 ? trimmed.slice(0, firstBracket).trim() : "";
+        const suffix = firstBracket >= 0 ? trimmed.slice(firstBracket).trimStart() : "";
+        if (tableName && suffix.startsWith("[[")) {
+          const table: any = this.searchWorkbook.getTable(tableName);
+          if (table) {
+            const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+            const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+            const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+            const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+            if (startRow != null && startCol != null && endRow != null && endCol != null) {
+              const baseStartRow = Math.min(startRow, endRow);
+              const baseEndRow = Math.max(startRow, endRow);
+              const baseStartCol = Math.min(startCol, endCol);
+              const baseEndCol = Math.max(startCol, endCol);
+
+              const tableSheet =
+                typeof table.sheetName === "string" && table.sheetName.trim()
+                  ? table.sheetName.trim()
+                  : typeof table.sheet === "string" && table.sheet.trim()
+                    ? table.sheet.trim()
+                    : sheetId;
+              const resolvedSheetId = tableSheet ? this.resolveSheetIdByName(tableSheet) ?? tableSheet : "";
+              if (resolvedSheetId && resolvedSheetId.toLowerCase() !== sheetId.toLowerCase()) return null;
+              if (resolvedSheetId && !sheetExists(resolvedSheetId)) return null;
+
+              const row = editTarget.cell.row;
+              const col = editTarget.cell.col;
+              const dataStartRow = baseStartRow + 1;
+              if (row < dataStartRow || row > baseEndRow) return null;
+              // Keep this conservative: only resolve `#This Row` semantics when the edit cell
+              // is actually inside the table's column span.
+              if (col < baseStartCol || col > baseEndCol) return null;
+
+              const rewritten = trimmed.replace(/\[\s*#\s*this\s+row\s*\]/gi, "[#All]");
+              const { references } = extractFormulaReferences(rewritten, undefined, undefined, { tables: this.searchWorkbook.tables as any });
+              const first = references[0];
+              if (!first) return null;
+              if (first.start !== 0 || first.end !== rewritten.length) return null;
+              const r = first.range;
+              if (r.startCol < baseStartCol || r.endCol > baseEndCol) return null;
+
+              let addr = "";
+              try {
+                addr = rangeToA1({ startRow: row, endRow: row, startCol: r.startCol, endCol: r.endCol });
+              } catch {
+                return null;
+              }
+              const sheetToken = tableSheet ? formatSheetNameForA1(tableSheet) : "";
+              const prefix = sheetToken ? `${sheetToken}!` : "";
+              return `${prefix}${addr}`;
+            }
+          }
         }
       }
 

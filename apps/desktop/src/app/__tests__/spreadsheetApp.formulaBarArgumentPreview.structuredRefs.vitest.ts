@@ -340,6 +340,12 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
     expect(evalPreview("SUM([[#All],[Amount]])")).toBe(60);
     // Multi-column implicit structured refs (contiguous columns) should resolve in table context.
     expect(evalPreview("SUM([[#All],[Amount],[Total Amount]])")).toBe(660);
+    // Multi-column `#This Row` structured refs (contiguous columns only).
+    expect(evalPreview("SUM(TableThisRow[[#This Row],[Amount],[Total Amount]])")).toBe(220);
+    expect(evalPreview("SUM(TableThisRow[[#This Row],[Amount]:[Total Amount]])")).toBe(220);
+    expect(evalPreview("SUM([[#This Row],[Amount],[Total Amount]])")).toBe(220);
+    // Bracketed column-range shorthand used in calculated columns.
+    expect(evalPreview("SUM([@[Amount]:[Total Amount]])")).toBe(220);
     // Whole-row refs: `[@]` / `Table[@]` should resolve to the current row's values.
     expect(evalPreview("SUM([@])")).toBe(220);
     expect(evalPreview("SUM(TableThisRow[@])")).toBe(220);
@@ -353,6 +359,18 @@ describe("SpreadsheetApp formula-bar argument preview evaluation (structured ref
     expect(bar?.model?.resolveReferenceText?.("[[Amount]:[Total Amount]]")).toEqual({
       start: { row: 1, col: 0 },
       end: { row: 3, col: 1 },
+    });
+    expect(bar?.model?.resolveReferenceText?.("TableThisRow[[#This Row],[Amount],[Total Amount]]")).toEqual({
+      start: { row: 2, col: 0 },
+      end: { row: 2, col: 1 },
+    });
+    expect(bar?.model?.resolveReferenceText?.("[[#This Row],[Amount],[Total Amount]]")).toEqual({
+      start: { row: 2, col: 0 },
+      end: { row: 2, col: 1 },
+    });
+    expect(bar?.model?.resolveReferenceText?.("[[#This Row],[Amount]:[Total Amount]]")).toEqual({
+      start: { row: 2, col: 0 },
+      end: { row: 2, col: 1 },
     });
     expect(bar?.model?.resolveReferenceText?.("[@]")).toEqual({ start: { row: 2, col: 0 }, end: { row: 2, col: 1 } });
     expect(bar?.model?.resolveReferenceText?.("TableThisRow[@]")).toEqual({

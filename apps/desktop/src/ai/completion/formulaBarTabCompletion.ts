@@ -663,6 +663,50 @@ function createPreviewEvaluator(params: {
         return resolveThisRowCell(tableName, column);
       }
 
+      // Multi-column `#This Row` structured refs (`Table1[[#This Row],[Col1],[Col2]]`, etc).
+      //
+      // Delegate column-span parsing + contiguity checks to the shared structured-ref resolver
+      // by rewriting the selector to `#All`, then clamp to the active edit row.
+      const thisRowSelectorBracketRe = /\[\s*#\s*this\s+row\s*\]/i;
+      if (thisRowSelectorBracketRe.test(trimmed)) {
+        const firstBracket = trimmed.indexOf("[");
+        if (firstBracket >= 0) {
+          const suffix = trimmed.slice(firstBracket).trimStart();
+          if (suffix.startsWith("[[")) {
+            const explicitTableName = trimmed.slice(0, firstBracket).trim();
+            const tableName = explicitTableName || findContainingTableName();
+            if (!tableName) return null;
+
+            const key = tableName.trim().toUpperCase();
+            const table = tables.get(key);
+            if (!table) return null;
+            if (!isActiveCellInTable(table)) return null;
+
+            const bounds = tableBounds(table);
+            if (!bounds) return null;
+
+            const fullRef = explicitTableName ? trimmed : `${tableName}${trimmed}`;
+            const rewritten = fullRef.replace(/\[\s*#\s*this\s+row\s*\]/gi, "[#All]");
+            const { references } = extractFormulaReferences(rewritten, undefined, undefined, { tables: structuredTables });
+            const first = references[0];
+            if (!first) return null;
+            if (first.start !== 0 || first.end !== rewritten.length) return null;
+
+            const r = first.range;
+            if (r.startCol < bounds.startCol || r.endCol > bounds.endCol) return null;
+
+            const sheet = typeof table.sheetName === "string" && table.sheetName.trim() ? table.sheetName.trim() : undefined;
+            return {
+              sheet,
+              startRow: activeCellCoord.row,
+              endRow: activeCellCoord.row,
+              startCol: r.startCol,
+              endCol: r.endCol,
+            };
+          }
+        }
+      }
+
       return null;
     };
 
