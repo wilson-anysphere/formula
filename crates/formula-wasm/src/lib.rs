@@ -1504,11 +1504,6 @@ struct WorkbookState {
     ///
     /// This is stored separately from `sheets` to keep legacy scalar IO (`toJson`/`getCell`) stable.
     sheets_rich: BTreeMap<String, BTreeMap<String, CellValue>>,
-    /// Optional per-sheet default style id (formatting metadata).
-    ///
-    /// Note: This is currently stored only in the WASM wrapper layer; the core `formula-engine`
-    /// model does not yet have a sheet-level default style id.
-    sheet_default_style_ids: HashMap<String, u32>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1625,7 +1620,6 @@ impl WorkbookState {
             col_widths_chars: BTreeMap::new(),
             pending_spill_clears: BTreeSet::new(),
             pending_formula_baselines: BTreeMap::new(),
-            sheet_default_style_ids: HashMap::new(),
         }
     }
 
@@ -3290,37 +3284,29 @@ impl WasmWorkbook {
 
     /// Set (or clear) the default style id for all cells in a row.
     ///
-    /// `row` is 0-indexed (engine coordinates). `style_id=0` clears the override.
+    /// `row` is 0-indexed (engine coordinates). `style_id=None` (or `Some(0)`) clears the override.
     #[wasm_bindgen(js_name = "setRowStyleId")]
-    pub fn set_row_style_id(&mut self, sheet: String, row: u32, style_id: u32) {
+    pub fn set_row_style_id(&mut self, sheet: String, row: u32, style_id: Option<u32>) {
         let sheet = self.inner.ensure_sheet(&sheet);
-        let style_id = if style_id == 0 { None } else { Some(style_id) };
         self.inner.engine.set_row_style_id(&sheet, row, style_id);
     }
 
     /// Set (or clear) the default style id for all cells in a column.
     ///
-    /// `col` is 0-indexed (engine coordinates). `style_id=0` clears the override.
+    /// `col` is 0-indexed (engine coordinates). `style_id=None` (or `Some(0)`) clears the override.
     #[wasm_bindgen(js_name = "setColStyleId")]
-    pub fn set_col_style_id(&mut self, sheet: String, col: u32, style_id: u32) {
+    pub fn set_col_style_id(&mut self, sheet: String, col: u32, style_id: Option<u32>) {
         let sheet = self.inner.ensure_sheet(&sheet);
-        let style_id = if style_id == 0 { None } else { Some(style_id) };
         self.inner.engine.set_col_style_id(&sheet, col, style_id);
     }
 
     /// Set (or clear) the default style id for an entire sheet.
     ///
-    /// Note: this metadata is stored only in the WASM wrapper layer today. It will be consulted
-    /// by formatting-aware functions like `CELL("protect")` once sheet-level style precedence is
-    /// implemented in the core engine.
+    /// `style_id=None` (or `Some(0)`) resets the default style id to `0`.
     #[wasm_bindgen(js_name = "setSheetDefaultStyleId")]
-    pub fn set_sheet_default_style_id(&mut self, sheet: String, style_id: u32) {
+    pub fn set_sheet_default_style_id(&mut self, sheet: String, style_id: Option<u32>) {
         let sheet = self.inner.ensure_sheet(&sheet);
-        if style_id == 0 {
-            self.inner.sheet_default_style_ids.remove(&sheet);
-        } else {
-            self.inner.sheet_default_style_ids.insert(sheet, style_id);
-        }
+        self.inner.engine.set_sheet_default_style_id(&sheet, style_id);
     }
 
     #[wasm_bindgen(js_name = "getCalcSettings")]
@@ -3832,24 +3818,6 @@ impl WasmWorkbook {
             .engine
             .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
         Ok(())
-    }
-
-    #[wasm_bindgen(js_name = "setRowStyleId")]
-    pub fn set_row_style_id(&mut self, sheet_name: String, row: u32, style_id: Option<u32>) {
-        let sheet = self.inner.ensure_sheet(&sheet_name);
-        self.inner.engine.set_row_style_id(&sheet, row, style_id);
-    }
-
-    #[wasm_bindgen(js_name = "setColStyleId")]
-    pub fn set_col_style_id(&mut self, sheet_name: String, col: u32, style_id: Option<u32>) {
-        let sheet = self.inner.ensure_sheet(&sheet_name);
-        self.inner.engine.set_col_style_id(&sheet, col, style_id);
-    }
-
-    #[wasm_bindgen(js_name = "setSheetDefaultStyleId")]
-    pub fn set_sheet_default_style_id(&mut self, sheet_name: String, style_id: Option<u32>) {
-        let sheet = self.inner.ensure_sheet(&sheet_name);
-        self.inner.engine.set_sheet_default_style_id(&sheet, style_id);
     }
 
     #[wasm_bindgen(js_name = "toJson")]
