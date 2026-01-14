@@ -80,16 +80,22 @@ pub(crate) enum BiffEncryption {
     /// BIFF8 RC4 encryption (legacy non-CryptoAPI).
     ///
     /// The full FILEPASS payload is preserved so decryptors can parse algorithm details.
-    Biff8Rc4 { filepass_payload: Vec<u8> },
+    Biff8Rc4 {
+        filepass_payload: Zeroizing<Vec<u8>>,
+    },
     /// BIFF8 RC4 encryption using CryptoAPI.
     ///
     /// The full FILEPASS payload is preserved so decryptors can parse algorithm details.
-    Biff8Rc4CryptoApi { filepass_payload: Vec<u8> },
+    Biff8Rc4CryptoApi {
+        filepass_payload: Zeroizing<Vec<u8>>,
+    },
     /// BIFF8 RC4 encryption using CryptoAPI with a legacy FILEPASS layout (`wEncryptionInfo=0x0004`).
     ///
     /// This variant uses different RC4 stream-position semantics than the standard CryptoAPI
     /// encoding.
-    Biff8Rc4CryptoApiLegacy { filepass_payload: Vec<u8> },
+    Biff8Rc4CryptoApiLegacy {
+        filepass_payload: Zeroizing<Vec<u8>>,
+    },
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -197,14 +203,14 @@ pub(crate) fn parse_filepass_record(
                     let sub_type = read_u16(data, 2, "subType")?;
                     match sub_type {
                         BIFF8_RC4_SUBTYPE_RC4 => Ok(BiffEncryption::Biff8Rc4 {
-                            filepass_payload: data.to_vec(),
+                            filepass_payload: Zeroizing::new(data.to_vec()),
                         }),
                         BIFF8_RC4_SUBTYPE_CRYPTOAPI => Ok(BiffEncryption::Biff8Rc4CryptoApi {
-                            filepass_payload: data.to_vec(),
+                            filepass_payload: Zeroizing::new(data.to_vec()),
                         }),
                         BIFF8_RC4_ENCRYPTION_INFO_CRYPTOAPI_LEGACY => {
                             Ok(BiffEncryption::Biff8Rc4CryptoApiLegacy {
-                                filepass_payload: data.to_vec(),
+                                filepass_payload: Zeroizing::new(data.to_vec()),
                             })
                         }
                         _ => Err(DecryptError::UnsupportedEncryption(format!(
@@ -847,6 +853,15 @@ struct FilePassRc4 {
     /// Encrypted verifier hash (16 bytes, MD5).
     encrypted_verifier_hash: [u8; 16],
 }
+
+impl Drop for FilePassRc4 {
+    fn drop(&mut self) {
+        self.key_len = 0;
+        self.salt.zeroize();
+        self.encrypted_verifier.zeroize();
+        self.encrypted_verifier_hash.zeroize();
+    }
+}
 fn parse_filepass_rc4(payload: &[u8]) -> Result<FilePassRc4, DecryptError> {
     // FILEPASS payload begins with wEncryptionType (u16).
     if payload.len() < 2 {
@@ -1026,8 +1041,11 @@ fn decrypt_biff8_rc4_standard(
     filepass_payload: &[u8],
 ) -> Result<(), DecryptError> {
     let filepass = parse_filepass_rc4(filepass_payload)?;
-    let mut rc4_stream =
-        Rc4BiffStream::new(verify_rc4_password(&filepass, password)?, filepass.key_len);
+    let key_len = filepass.key_len;
+    let intermediate_key = verify_rc4_password(&filepass, password)?;
+    drop(filepass);
+
+    let mut rc4_stream = Rc4BiffStream::new(intermediate_key, key_len);
 
     // Decrypt record payloads after FILEPASS.
     let mut offset = encrypted_start;
@@ -1581,7 +1599,7 @@ mod tests {
         assert_eq!(
             parsed,
             BiffEncryption::Biff8Rc4 {
-                filepass_payload: payload.to_vec()
+                filepass_payload: Zeroizing::new(payload.to_vec())
             }
         );
     }
@@ -1597,7 +1615,7 @@ mod tests {
         assert_eq!(
             parsed,
             BiffEncryption::Biff8Rc4CryptoApi {
-                filepass_payload: payload.to_vec()
+                filepass_payload: Zeroizing::new(payload.to_vec())
             }
         );
     }
@@ -1615,7 +1633,7 @@ mod tests {
         assert_eq!(
             parsed,
             BiffEncryption::Biff8Rc4CryptoApiLegacy {
-                filepass_payload: payload.to_vec()
+                filepass_payload: Zeroizing::new(payload.to_vec()),
             }
         );
     }
