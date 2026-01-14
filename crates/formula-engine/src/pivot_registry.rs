@@ -90,10 +90,27 @@ impl PivotRegistryEntry {
         let mut cache_field_indices: HashMap<String, usize> = HashMap::new();
         let mut cache_field_names: HashMap<String, String> = HashMap::new();
         for f in &pivot.cache.fields {
+            // Store lookups for both the raw cache header and a normalized "Data Model" label.
+            //
+            // This lets `GETPIVOTDATA` resolve fields by either:
+            // - the literal cache header (e.g. `"'Dim Product'[Category]"`)
+            // - the unquoted DAX-like form (e.g. `"Dim Product[Category]"`)
+            //
+            // Note: `normalize_pivot_cache_field_name` is best-effort and may cause collisions if a
+            // cache contains multiple headers that normalize to the same string. In that case we
+            // preserve the first inserted mapping; callers can still match by exact raw header.
+            let raw_key = crate::value::casefold(&f.name);
+            cache_field_indices.entry(raw_key.clone()).or_insert(f.index);
+            cache_field_names.entry(raw_key).or_insert(f.name.clone());
+
             let normalized = normalize_pivot_cache_field_name(&f.name);
-            let key = crate::value::casefold(normalized.as_ref());
-            cache_field_indices.insert(key.clone(), f.index);
-            cache_field_names.insert(key, f.name.clone());
+            let normalized_key = crate::value::casefold(normalized.as_ref());
+            cache_field_indices
+                .entry(normalized_key.clone())
+                .or_insert(f.index);
+            cache_field_names
+                .entry(normalized_key)
+                .or_insert(f.name.clone());
         }
 
         let resolve_cache_field = |field: &formula_model::pivots::PivotFieldRef,
@@ -129,45 +146,72 @@ impl PivotRegistryEntry {
         let mut field_indices: HashMap<String, usize> = HashMap::new();
 
         for (idx, f) in pivot.config.row_fields.iter().enumerate() {
-            let key = crate::value::casefold(f.source_field.canonical_name().as_ref());
-            let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &key)?;
-            cache_field_names.insert(key.clone(), cache_name);
-            field_positions.insert(
-                key.clone(),
-                PivotFieldPosition {
-                    axis: PivotAxis::Row,
-                    index: idx,
-                },
-            );
-            field_indices.insert(key, cache_idx);
+            let canonical = f.source_field.canonical_name();
+            let canonical_key = crate::value::casefold(canonical.as_ref());
+            let normalized = normalize_pivot_cache_field_name(canonical.as_ref());
+            let normalized_key = crate::value::casefold(normalized.as_ref());
+
+            let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
+            let pos = PivotFieldPosition {
+                axis: PivotAxis::Row,
+                index: idx,
+            };
+
+            cache_field_names.insert(canonical_key.clone(), cache_name.clone());
+            field_positions.insert(canonical_key.clone(), pos);
+            field_indices.insert(canonical_key.clone(), cache_idx);
+
+            if normalized_key != canonical_key {
+                cache_field_names.insert(normalized_key.clone(), cache_name.clone());
+                field_positions.insert(normalized_key.clone(), pos);
+                field_indices.insert(normalized_key, cache_idx);
+            }
         }
 
         for (idx, f) in pivot.config.column_fields.iter().enumerate() {
-            let key = crate::value::casefold(f.source_field.canonical_name().as_ref());
-            let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &key)?;
-            cache_field_names.insert(key.clone(), cache_name);
-            field_positions.insert(
-                key.clone(),
-                PivotFieldPosition {
-                    axis: PivotAxis::Column,
-                    index: idx,
-                },
-            );
-            field_indices.insert(key, cache_idx);
+            let canonical = f.source_field.canonical_name();
+            let canonical_key = crate::value::casefold(canonical.as_ref());
+            let normalized = normalize_pivot_cache_field_name(canonical.as_ref());
+            let normalized_key = crate::value::casefold(normalized.as_ref());
+
+            let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
+            let pos = PivotFieldPosition {
+                axis: PivotAxis::Column,
+                index: idx,
+            };
+
+            cache_field_names.insert(canonical_key.clone(), cache_name.clone());
+            field_positions.insert(canonical_key.clone(), pos);
+            field_indices.insert(canonical_key.clone(), cache_idx);
+
+            if normalized_key != canonical_key {
+                cache_field_names.insert(normalized_key.clone(), cache_name.clone());
+                field_positions.insert(normalized_key.clone(), pos);
+                field_indices.insert(normalized_key, cache_idx);
+            }
         }
 
         for (idx, f) in pivot.config.filter_fields.iter().enumerate() {
-            let key = crate::value::casefold(f.source_field.canonical_name().as_ref());
-            let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &key)?;
-            cache_field_names.insert(key.clone(), cache_name);
-            field_positions.insert(
-                key.clone(),
-                PivotFieldPosition {
-                    axis: PivotAxis::Filter,
-                    index: idx,
-                },
-            );
-            field_indices.insert(key, cache_idx);
+            let canonical = f.source_field.canonical_name();
+            let canonical_key = crate::value::casefold(canonical.as_ref());
+            let normalized = normalize_pivot_cache_field_name(canonical.as_ref());
+            let normalized_key = crate::value::casefold(normalized.as_ref());
+
+            let (cache_idx, cache_name) = resolve_cache_field(&f.source_field, &canonical_key)?;
+            let pos = PivotFieldPosition {
+                axis: PivotAxis::Filter,
+                index: idx,
+            };
+
+            cache_field_names.insert(canonical_key.clone(), cache_name.clone());
+            field_positions.insert(canonical_key.clone(), pos);
+            field_indices.insert(canonical_key.clone(), cache_idx);
+
+            if normalized_key != canonical_key {
+                cache_field_names.insert(normalized_key.clone(), cache_name.clone());
+                field_positions.insert(normalized_key.clone(), pos);
+                field_indices.insert(normalized_key, cache_idx);
+            }
         }
 
         let mut value_field_indices: HashMap<String, usize> = HashMap::new();

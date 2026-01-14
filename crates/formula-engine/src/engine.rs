@@ -4698,7 +4698,9 @@ impl Engine {
 
     pub fn apply_operation(&mut self, op: EditOp) -> Result<EditResult, EditError> {
         let before = self.workbook.clone();
-        let pivot_registry_before = self.pivot_registry.clone();
+        // We only need to snapshot the pivot registry if the edit can shift worksheet coordinates.
+        // Avoid cloning on operations that don't touch pivot destinations (e.g. CopyRange/Fill).
+        let mut pivot_registry_before: Option<crate::pivot_registry::PivotRegistry> = None;
         let op_clone = op.clone();
         let mut formula_rewrites = Vec::new();
         let mut moved_ranges = Vec::new();
@@ -4724,6 +4726,9 @@ impl Engine {
                 };
                 self.rewrite_defined_names_structural(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                if pivot_registry_before.is_none() {
+                    pivot_registry_before = Some(self.pivot_registry.clone());
+                }
                 self.pivot_registry
                     .apply_structural_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_structural(
@@ -4749,6 +4754,9 @@ impl Engine {
                 };
                 self.rewrite_defined_names_structural(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                if pivot_registry_before.is_none() {
+                    pivot_registry_before = Some(self.pivot_registry.clone());
+                }
                 self.pivot_registry
                     .apply_structural_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_structural(
@@ -4775,6 +4783,9 @@ impl Engine {
                 };
                 self.rewrite_defined_names_structural(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                if pivot_registry_before.is_none() {
+                    pivot_registry_before = Some(self.pivot_registry.clone());
+                }
                 self.pivot_registry
                     .apply_structural_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_structural(
@@ -4801,6 +4812,9 @@ impl Engine {
                 };
                 self.rewrite_defined_names_structural(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                if pivot_registry_before.is_none() {
+                    pivot_registry_before = Some(self.pivot_registry.clone());
+                }
                 self.pivot_registry
                     .apply_structural_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_structural(
@@ -4834,6 +4848,9 @@ impl Engine {
                 };
                 self.rewrite_defined_names_range_map(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                if pivot_registry_before.is_none() {
+                    pivot_registry_before = Some(self.pivot_registry.clone());
+                }
                 self.pivot_registry
                     .apply_range_map_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
@@ -4867,6 +4884,9 @@ impl Engine {
                 };
                 self.rewrite_defined_names_range_map(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                if pivot_registry_before.is_none() {
+                    pivot_registry_before = Some(self.pivot_registry.clone());
+                }
                 self.pivot_registry
                     .apply_range_map_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
@@ -4906,6 +4926,9 @@ impl Engine {
                 };
                 self.rewrite_defined_names_range_map(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                if pivot_registry_before.is_none() {
+                    pivot_registry_before = Some(self.pivot_registry.clone());
+                }
                 self.pivot_registry
                     .apply_range_map_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
@@ -4945,6 +4968,9 @@ impl Engine {
                 };
                 self.rewrite_defined_names_range_map(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                if pivot_registry_before.is_none() {
+                    pivot_registry_before = Some(self.pivot_registry.clone());
+                }
                 self.pivot_registry
                     .apply_range_map_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
@@ -4991,6 +5017,9 @@ impl Engine {
                 };
                 self.rewrite_defined_names_range_map(&sheet_names, &edit)
                     .map_err(|e| EditError::Engine(e.to_string()))?;
+                if pivot_registry_before.is_none() {
+                    pivot_registry_before = Some(self.pivot_registry.clone());
+                }
                 self.pivot_registry
                     .apply_range_map_edit(&edit, &sheet_names);
                 formula_rewrites.extend(rewrite_all_formulas_range_map(
@@ -5051,7 +5080,9 @@ impl Engine {
             // dependency graph after the edit succeeds. If we hit a bounds error here, roll back
             // the workbook so the engine does not end up with mismatched workbook/graph state.
             self.workbook = before;
-            self.pivot_registry = pivot_registry_before;
+            if let Some(pivot_registry_before) = pivot_registry_before {
+                self.pivot_registry = pivot_registry_before;
+            }
             return Err(err);
         }
 
