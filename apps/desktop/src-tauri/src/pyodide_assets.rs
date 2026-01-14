@@ -319,11 +319,33 @@ async fn download_to_path_with_progress(
         ));
     }
 
-    // Replace any existing file (Windows rename doesn't overwrite).
-    let _ = tokio::fs::remove_file(dest_path).await;
-    tokio::fs::rename(&tmp_path, dest_path)
-        .await
-        .map_err(|e| e.to_string())?;
+    // Replace any existing destination entry (Windows rename doesn't overwrite).
+    //
+    // Defense-in-depth: treat pre-existing directories as corrupt cache entries and remove them so
+    // we can recover by downloading a fresh file.
+    match tokio::fs::symlink_metadata(dest_path).await {
+        Ok(meta) => {
+            let res = if meta.is_dir() {
+                tokio::fs::remove_dir_all(dest_path).await
+            } else {
+                tokio::fs::remove_file(dest_path).await
+            };
+            if let Err(err) = res {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Err(err.to_string());
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(err.to_string());
+        }
+    }
+
+    if let Err(err) = tokio::fs::rename(&tmp_path, dest_path).await {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return Err(err.to_string());
+    }
 
     Ok(())
 }
@@ -612,6 +634,33 @@ mod tests {
             !meta.file_type().is_symlink(),
             "expected cached asset symlink to be replaced with a real file"
         );
+    }
+
+    #[tokio::test]
+    async fn directory_cached_assets_are_treated_as_missing_and_replaced() {
+        let files = vec![("a.txt".to_string(), b"hello".to_vec())];
+        let base_url = serve_files_once(files.clone()).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        // Simulate a corrupted cache entry where a directory exists at the expected file path.
+        let bad_entry = cache_dir.join("a.txt");
+        std::fs::create_dir_all(&bad_entry).unwrap();
+
+        let expected_sha = sha256_bytes(b"hello");
+        let specs = vec![PyodideAssetSpec {
+            file_name: "a.txt",
+            sha256: expected_sha.as_str(),
+        }];
+
+        let ok = ensure_pyodide_assets_in_dir(&cache_dir, &base_url, &specs, true, |_| {})
+            .await
+            .unwrap();
+        assert!(ok);
+        assert!(bad_entry.is_file(), "expected cached directory to be replaced");
+        assert_eq!(std::fs::read(&bad_entry).unwrap(), b"hello");
     }
 
     #[tokio::test]
