@@ -125,11 +125,11 @@
 .query-editor-container__refresh-policy {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
   font-size: 12px;
   color: var(--text-muted);
   flex: 0 0 auto;
-  white-space: nowrap;
 }
 
 .query-editor-container__toolbar button {
@@ -140,6 +140,8 @@
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
+  min-width: 0;
+  max-width: 100%;
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
     border-color var(--motion-duration-fast) var(--motion-ease),
@@ -219,6 +221,8 @@
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
+  min-width: 0;
+  max-width: 100%;
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
     border-color var(--motion-duration-fast) var(--motion-ease),
