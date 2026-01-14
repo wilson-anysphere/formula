@@ -92,8 +92,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "runs=5" >> "$GITHUB_OUTPUT"
-            # Lightweight shell benchmark (uses `--startup-bench`; does not require apps/desktop/dist).
-            echo "kind=shell" >> "$GITHUB_OUTPUT"
+            # Full end-to-end startup benchmark (requires built frontend assets).
+            echo "kind=full" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
