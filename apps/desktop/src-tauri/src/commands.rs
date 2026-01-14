@@ -7920,6 +7920,109 @@ mod tests {
         );
     }
 
+    struct SizeHintSeqDeserializer {
+        len: usize,
+    }
+
+    struct SizeHintSeqAccess {
+        len: usize,
+    }
+
+    impl<'de> de::SeqAccess<'de> for SizeHintSeqAccess {
+        type Error = de::value::Error;
+
+        fn next_element_seed<T>(&mut self, _seed: T) -> Result<Option<T::Value>, Self::Error>
+        where
+            T: de::DeserializeSeed<'de>,
+        {
+            panic!("unexpected element deserialization (size_hint guard should have failed first)");
+        }
+
+        fn size_hint(&self) -> Option<usize> {
+            Some(self.len)
+        }
+    }
+
+    impl<'de> serde::Deserializer<'de> for SizeHintSeqDeserializer {
+        type Error = de::value::Error;
+
+        fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: de::Visitor<'de>,
+        {
+            self.deserialize_seq(visitor)
+        }
+
+        fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: de::Visitor<'de>,
+        {
+            visitor.visit_seq(SizeHintSeqAccess { len: self.len })
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes byte_buf option unit
+            unit_struct newtype_struct tuple tuple_struct map struct enum identifier ignored_any
+        }
+    }
+
+    #[test]
+    fn apply_sheet_formatting_deltas_request_rejects_too_many_row_format_deltas() {
+        let max = crate::resource_limits::MAX_SHEET_FORMATTING_ROW_DELTAS;
+        let err = <LimitedSheetRowFormatDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
+            len: max + 1,
+        })
+        .expect_err("expected size_hint guard to reject oversized row deltas")
+        .to_string();
+        assert!(
+            err.contains("rowFormats") && err.contains(&max.to_string()),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn apply_sheet_formatting_deltas_request_rejects_too_many_col_format_deltas() {
+        let max = crate::resource_limits::MAX_SHEET_FORMATTING_COL_DELTAS;
+        let err = <LimitedSheetColFormatDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
+            len: max + 1,
+        })
+        .expect_err("expected size_hint guard to reject oversized col deltas")
+        .to_string();
+        assert!(
+            err.contains("colFormats") && err.contains(&max.to_string()),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn apply_sheet_formatting_deltas_request_rejects_too_many_cell_format_deltas() {
+        let max = crate::resource_limits::MAX_SHEET_FORMATTING_CELL_DELTAS;
+        let err = <LimitedSheetCellFormatDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
+            len: max + 1,
+        })
+        .expect_err("expected size_hint guard to reject oversized cell deltas")
+        .to_string();
+        assert!(
+            err.contains("cellFormats") && err.contains(&max.to_string()),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn apply_sheet_formatting_deltas_request_rejects_too_many_run_columns() {
+        let max = crate::resource_limits::MAX_SHEET_FORMATTING_RUN_COLS;
+        let err =
+            <LimitedSheetFormatRunsByColDeltas as Deserialize>::deserialize(SizeHintSeqDeserializer {
+                len: max + 1,
+            })
+            .expect_err("expected size_hint guard to reject oversized run columns")
+            .to_string();
+        assert!(
+            err.contains("formatRunsByCol") && err.contains(&max.to_string()),
+            "unexpected error message: {err}"
+        );
+    }
+
     #[test]
     fn apply_sheet_formatting_deltas_request_rejects_too_many_runs_per_column() {
         let max = crate::resource_limits::MAX_SHEET_FORMATTING_RUNS_PER_COL;
