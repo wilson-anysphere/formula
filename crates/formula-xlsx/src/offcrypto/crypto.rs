@@ -116,19 +116,15 @@ pub enum CryptoError {
     InvalidParameter(&'static str),
 }
 
-fn normalize_key_material_vec(mut bytes: Vec<u8>, out_len: usize) -> Vec<u8> {
-    if bytes.len() >= out_len {
-        bytes.truncate(out_len);
-    } else {
-        // MS-OFFCRYPTO `TruncateHash`/normalization uses `0x36` for expansion, matching common
-        // implementations (e.g. `msoffcrypto-tool`).
-        bytes.resize(out_len, 0x36);
-    }
-    bytes
-}
-
 fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
-    normalize_key_material_vec(bytes.to_vec(), out_len)
+    if bytes.len() >= out_len {
+        return bytes[..out_len].to_vec();
+    }
+
+    // MS-OFFCRYPTO `TruncateHash` expansion: append 0x36 bytes (matches `msoffcrypto-tool`).
+    let mut out = vec![0x36u8; out_len];
+    out[..bytes.len()].copy_from_slice(bytes);
+    out
 }
 
 /// MS-OFFCRYPTO Agile: block key used for deriving the "verifierHashInput" key.
@@ -236,17 +232,9 @@ pub fn derive_key(
 
     // Avoid allocating a temporary `H || blockKey` buffer: update the digest twice.
     let mut digest = [0u8; MAX_DIGEST_LEN];
-    hash_alg.hash_two_into(h, block_key, &mut digest);
+    hash_alg.hash_two_into(h, block_key, &mut digest[..digest_len]);
 
-    if key_len <= digest_len {
-        Ok(digest[..key_len].to_vec())
-    } else {
-        // MS-OFFCRYPTO `TruncateHash`/normalization uses `0x36` for expansion, matching common
-        // implementations (e.g. `msoffcrypto-tool`).
-        let mut out = vec![0x36u8; key_len];
-        out[..digest_len].copy_from_slice(&digest[..digest_len]);
-        Ok(out)
-    }
+    Ok(normalize_key_material(&digest[..digest_len], key_len))
 }
 
 /// Derive an IV of `iv_len` bytes per MS-OFFCRYPTO Agile.
@@ -271,17 +259,9 @@ pub fn derive_iv(
 
     // Avoid allocating a temporary `salt || blockKey` buffer: update the digest twice.
     let mut digest = [0u8; MAX_DIGEST_LEN];
-    hash_alg.hash_two_into(salt, block_key, &mut digest);
+    hash_alg.hash_two_into(salt, block_key, &mut digest[..digest_len]);
 
-    if iv_len <= digest_len {
-        Ok(digest[..iv_len].to_vec())
-    } else {
-        // MS-OFFCRYPTO `TruncateHash`/normalization uses `0x36` for expansion, matching common
-        // implementations (e.g. `msoffcrypto-tool`).
-        let mut out = vec![0x36u8; iv_len];
-        out[..digest_len].copy_from_slice(&digest[..digest_len]);
-        Ok(out)
-    }
+    Ok(normalize_key_material(&digest[..digest_len], iv_len))
 }
 
 /// Block key for `EncryptedPackage` segment IV derivation.

@@ -206,21 +206,14 @@ pub(crate) fn hash_password(
     Zeroizing::new(out)
 }
 
-#[cfg(test)]
-fn normalize_key_material_in_place(bytes: &mut Vec<u8>, out_len: usize) {
-    if bytes.len() >= out_len {
-        bytes.truncate(out_len);
-    } else {
-        // MS-OFFCRYPTO's `TruncateHash` expands by appending 0x36 bytes, matching common
-        // implementations such as `msoffcrypto-tool`'s `_normalize_key`.
-        bytes.resize(out_len, 0x36);
-    }
-}
-
-#[cfg(test)]
 fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
-    let mut out = bytes.to_vec();
-    normalize_key_material_in_place(&mut out, out_len);
+    if bytes.len() >= out_len {
+        return bytes[..out_len].to_vec();
+    }
+
+    // MS-OFFCRYPTO `TruncateHash` expansion: append 0x36 bytes (matches `msoffcrypto-tool`).
+    let mut out = vec![0x36u8; out_len];
+    out[..bytes.len()].copy_from_slice(bytes);
     out
 }
 
@@ -241,11 +234,7 @@ pub(crate) fn derive_agile_key(
     let mut digest: Zeroizing<[u8; MAX_DIGEST_LEN]> = Zeroizing::new([0u8; MAX_DIGEST_LEN]);
     hash_alg.digest_two_into(&h, block_key, &mut digest[..digest_len]);
 
-    // MS-OFFCRYPTO `TruncateHash` expansion: append 0x36 bytes (matches `msoffcrypto-tool`).
-    let mut key: Zeroizing<Vec<u8>> = Zeroizing::new(vec![0x36u8; key_bytes]);
-    let take = key_bytes.min(digest_len);
-    key[..take].copy_from_slice(&digest[..take]);
-    key
+    Zeroizing::new(normalize_key_material(&digest[..digest_len], key_bytes))
 }
 
 pub(crate) fn derive_iv(
@@ -261,14 +250,7 @@ pub(crate) fn derive_iv(
     let mut digest = [0u8; MAX_DIGEST_LEN];
     hash_alg.digest_two_into(salt, block_key, &mut digest[..digest_len]);
 
-    if iv_len <= digest_len {
-        return digest[..iv_len].to_vec();
-    }
-
-    // MS-OFFCRYPTO `TruncateHash` expansion: append 0x36 bytes (matches `msoffcrypto-tool`).
-    let mut out = vec![0x36u8; iv_len];
-    out[..digest_len].copy_from_slice(&digest[..digest_len]);
-    out
+    normalize_key_material(&digest[..digest_len], iv_len)
 }
 
 pub(crate) fn aes_cbc_decrypt(
