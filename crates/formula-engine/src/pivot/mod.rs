@@ -60,6 +60,7 @@ fn pivot_field_ref_caption(field: &PivotFieldRef) -> Cow<'_, str> {
     }
 }
 
+#[allow(dead_code)]
 fn pivot_field_ref_from_legacy_string(raw: String) -> PivotFieldRef {
     PivotFieldRef::from_unstructured_owned(raw)
 }
