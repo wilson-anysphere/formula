@@ -21,6 +21,7 @@ class ExtractErrorLiteralsScriptTests(unittest.TestCase):
         )
         self.assertIn(".PARAMETER OutPath", text)
         self.assertIn(".PARAMETER Visible", text)
+        self.assertIn(".PARAMETER MaxErrors", text)
 
         # Parameter block (CmdletBinding param()).
         # Accept either `$Locale` or `$LocaleId` (some scripts use LocaleId for consistency).
@@ -30,6 +31,7 @@ class ExtractErrorLiteralsScriptTests(unittest.TestCase):
         )
         self.assertIn("[string]$OutPath", text)
         self.assertIn("[switch]$Visible", text)
+        self.assertIn("[int]$MaxErrors", text)
 
         # The extractor should stay tied to the canonical error literal source and the core
         # COM round-tripping mechanism for localization.
@@ -41,4 +43,3 @@ class ExtractErrorLiteralsScriptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
