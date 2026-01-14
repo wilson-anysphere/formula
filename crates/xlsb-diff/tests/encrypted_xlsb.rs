@@ -206,3 +206,68 @@ fn cli_errors_without_password_for_encrypted_xlsb() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn cli_errors_with_wrong_password_for_encrypted_xlsb() -> Result<()> {
+    let fixture_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../formula-xlsb/tests/fixtures/simple.xlsb"
+    ));
+    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
+    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+
+    let tmp = tempfile::tempdir().context("tempdir")?;
+    let plain_path = tmp.path().join("plain.xlsb");
+    let encrypted_path = tmp.path().join("encrypted.xlsb");
+    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsb_diff"))
+        .arg(&plain_path)
+        .arg(&encrypted_path)
+        .arg("--password")
+        .arg("wrong-password")
+        .output()
+        .context("run xlsb-diff")?;
+
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit status when password is incorrect\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    assert!(
+        stderr.contains("password") || stderr.contains("decrypt"),
+        "expected error message to mention password/decryption, got:\n{stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn library_errors_without_password_for_encrypted_xlsb() -> Result<()> {
+    let fixture_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../formula-xlsb/tests/fixtures/simple.xlsb"
+    ));
+    let plaintext = std::fs::read(fixture_path).context("read base xlsb fixture")?;
+    let encrypted = encrypt_ooxml_with_password(&plaintext, PASSWORD)?;
+
+    let tmp = tempfile::tempdir().context("tempdir")?;
+    let plain_path = tmp.path().join("plain.xlsb");
+    let encrypted_path = tmp.path().join("encrypted.xlsb");
+    std::fs::write(&plain_path, &plaintext).context("write plain xlsb")?;
+    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb")?;
+
+    let err = xlsb_diff::diff_workbooks(&encrypted_path, &plain_path)
+        .expect_err("expected encrypted input to require a password");
+    let msg = err.to_string().to_ascii_lowercase();
+    assert!(
+        msg.contains("password") || msg.contains("encrypted"),
+        "expected error message to mention password/encryption, got: {msg}"
+    );
+
+    Ok(())
+}
