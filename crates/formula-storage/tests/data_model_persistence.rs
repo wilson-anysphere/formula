@@ -372,6 +372,25 @@ fn data_model_round_trip_columnar_calculated_columns() {
         .load_data_model_schema(workbook.id)
         .expect("schema-only load");
     assert_eq!(schema.calculated_columns.len(), 2);
+    let fact_schema = schema
+        .tables
+        .iter()
+        .find(|t| t.name == "FactSales")
+        .expect("fact table schema");
+    assert!(
+        fact_schema
+            .columns
+            .iter()
+            .any(|c| c.name == "Double Amount" && c.column_type == ColumnType::Number),
+        "expected schema-only load to include Double Amount as a typed table column"
+    );
+    assert!(
+        fact_schema
+            .columns
+            .iter()
+            .any(|c| c.name == "Category From Dim" && c.column_type == ColumnType::String),
+        "expected schema-only load to include Category From Dim as a typed table column"
+    );
     assert!(
         schema
             .calculated_columns
