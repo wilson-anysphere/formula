@@ -48,7 +48,6 @@ impl PivotFieldRef {
             _ => None,
         }
     }
-
     /// Backward-compatible alias for [`Self::cache_field_name`].
     pub fn as_cache_field_name(&self) -> Option<&str> {
         self.cache_field_name()
