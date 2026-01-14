@@ -149,8 +149,6 @@ describe("SpreadsheetApp drawings teardown", () => {
     const clearSpy = vi.spyOn(ImageBitmapCache.prototype, "clear");
     const selectSpy = vi.spyOn(DrawingOverlay.prototype, "setSelectedId");
     const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
-    const interactionTarget =
-      ((app as any).drawingInteractionController as { element?: EventTarget } | null)?.element ?? root;
 
     // Ensure the insert-image input (if created) is cleaned up on dispose.
     const input = (app as any).ensureInsertImageInput?.() as HTMLInputElement | undefined;
