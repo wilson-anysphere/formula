@@ -138,6 +138,8 @@ Behavior:
 - `CELL("filename", reference)` uses the referenced cell’s sheet name component.
   - For local sheets, this is the sheet’s **display name** (tab name) as configured via `setSheetDisplayName` (or `renameSheet`).
   - For external references, the engine returns the canonical external sheet key (e.g. `"[Book.xlsx]Sheet1"`), which already includes the workbook + sheet.
+- The sheet name portion is **not quoted** in the output (even if the sheet name contains spaces), matching Excel:
+  - `[Book.xlsx]Other Sheet` (not `[Book.xlsx]'Other Sheet'`)
 
 In this repo, hosts can inject this metadata via:
 
