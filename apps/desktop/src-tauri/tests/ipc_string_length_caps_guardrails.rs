@@ -99,6 +99,6 @@ fn privileged_ipc_commands_have_string_length_caps() {
     assert_fn_has_ipc_string_cap(
         main_src,
         "async fn oauth_loopback_listen",
-        &["MAX_IPC_URL_BYTES"],
+        &["MAX_OAUTH_REDIRECT_URI_BYTES"],
     );
 }
