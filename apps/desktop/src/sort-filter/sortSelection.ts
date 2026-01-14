@@ -92,7 +92,7 @@ export function sortRangeRowsInDocument(
   sheetId: string,
   range: Range,
   activeCell: CellCoord,
-  options: { order: SortOrder; maxCells?: number } = { order: "ascending" },
+  options: { order: SortOrder; maxCells?: number; getCellValue?: GetSortValue } = { order: "ascending" },
 ): SortRangeRowsResult {
   const { startRow, endRow, startCol, endCol } = normalizeSelectionRange(range);
   if (startRow < 0 || startCol < 0) return { applied: false, reason: "invalidRange" };
@@ -113,6 +113,7 @@ export function sortRangeRowsInDocument(
 
   const rows: CellSnapshot[][] = [];
   const keys: unknown[] = [];
+  const getCellValue = options.getCellValue;
 
   for (let row = startRow; row <= endRow; row += 1) {
     const rowCells: CellSnapshot[] = [];
@@ -122,7 +123,7 @@ export function sortRangeRowsInDocument(
     }
     rows.push(rowCells);
     const keyCell = rowCells[keyCol - startCol];
-    keys.push(effectiveCellValue(keyCell!));
+    keys.push(getCellValue ? getCellValue({ row, col: keyCol }) : effectiveCellValue(keyCell!));
   }
 
   const order = options.order;
@@ -200,7 +201,10 @@ export function sortSelection(app: SpreadsheetApp, options: { order: SortOrder }
   const sheetId = app.getCurrentSheetId();
   const doc = app.getDocument();
 
-  const result = sortRangeRowsInDocument(doc, sheetId, range, activeCell, { order: options.order });
+  const result = sortRangeRowsInDocument(doc, sheetId, range, activeCell, {
+    order: options.order,
+    getCellValue: (cell) => app.getCellComputedValueForSheet(sheetId, cell),
+  });
   if (!result.applied) {
     if (result.reason === "tooLarge") {
       showToast(

@@ -44,6 +44,93 @@ describe("sortRangeRowsInDocument", () => {
     expect(doc.getCell(sheetId, { row: 2, col: 1 })).toMatchObject({ value: null, formula: "=1+1", styleId: 202 });
   });
 
+  it("sorts formula cells using caller-provided computed values (instead of formula text)", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+    // A1:B3 (key column A contains formulas; column B is a payload to verify row movement)
+    doc.setRangeValues(sheetId, { row: 0, col: 0 }, [
+      [
+        { formula: "=2", styleId: 1 },
+        { value: "two", styleId: 2 },
+      ],
+      [
+        { formula: "=10", styleId: 3 },
+        { value: "ten", styleId: 4 },
+      ],
+      [
+        { formula: "=1", styleId: 5 },
+        { value: "one", styleId: 6 },
+      ],
+    ]);
+
+    const computedByRow = new Map<number, number>([
+      [0, 2],
+      [1, 10],
+      [2, 1],
+    ]);
+
+    const result = sortRangeRowsInDocument(
+      doc,
+      sheetId,
+      { startRow: 0, endRow: 2, startCol: 0, endCol: 1 },
+      { row: 0, col: 0 },
+      {
+        order: "ascending",
+        getCellValue: ({ row }) => computedByRow.get(row) ?? null,
+      },
+    );
+    expect(result.applied).toBe(true);
+
+    // Computed sort keys: [2,10,1] => sorted order should be [1,2,10]
+    expect(doc.getCell(sheetId, { row: 0, col: 0 })).toMatchObject({ value: null, formula: "=1", styleId: 5 });
+    expect(doc.getCell(sheetId, { row: 0, col: 1 })).toMatchObject({ value: "one", styleId: 6 });
+
+    expect(doc.getCell(sheetId, { row: 1, col: 0 })).toMatchObject({ value: null, formula: "=2", styleId: 1 });
+    expect(doc.getCell(sheetId, { row: 1, col: 1 })).toMatchObject({ value: "two", styleId: 2 });
+
+    expect(doc.getCell(sheetId, { row: 2, col: 0 })).toMatchObject({ value: null, formula: "=10", styleId: 3 });
+    expect(doc.getCell(sheetId, { row: 2, col: 1 })).toMatchObject({ value: "ten", styleId: 4 });
+  });
+
+  it("falls back to comparing formula text when getCellValue is omitted (regression)", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+    // A1:B3 (same fixture as above, but we intentionally omit `getCellValue`)
+    doc.setRangeValues(sheetId, { row: 0, col: 0 }, [
+      [
+        { formula: "=2", styleId: 1 },
+        { value: "two", styleId: 2 },
+      ],
+      [
+        { formula: "=10", styleId: 3 },
+        { value: "ten", styleId: 4 },
+      ],
+      [
+        { formula: "=1", styleId: 5 },
+        { value: "one", styleId: 6 },
+      ],
+    ]);
+
+    const result = sortRangeRowsInDocument(
+      doc,
+      sheetId,
+      { startRow: 0, endRow: 2, startCol: 0, endCol: 1 },
+      { row: 0, col: 0 },
+      { order: "ascending" },
+    );
+    expect(result.applied).toBe(true);
+
+    // Formula text sort keys: ["=2", "=10", "=1"] => ["=1", "=10", "=2"]
+    expect(doc.getCell(sheetId, { row: 0, col: 0 })).toMatchObject({ value: null, formula: "=1", styleId: 5 });
+    expect(doc.getCell(sheetId, { row: 0, col: 1 })).toMatchObject({ value: "one", styleId: 6 });
+
+    expect(doc.getCell(sheetId, { row: 1, col: 0 })).toMatchObject({ value: null, formula: "=10", styleId: 3 });
+    expect(doc.getCell(sheetId, { row: 1, col: 1 })).toMatchObject({ value: "ten", styleId: 4 });
+
+    expect(doc.getCell(sheetId, { row: 2, col: 0 })).toMatchObject({ value: null, formula: "=2", styleId: 1 });
+    expect(doc.getCell(sheetId, { row: 2, col: 1 })).toMatchObject({ value: "two", styleId: 2 });
+  });
+
   it("keeps blanks last (even for descending sort)", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
