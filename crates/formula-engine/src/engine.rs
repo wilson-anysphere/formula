@@ -31,6 +31,7 @@ use formula_model::{
     rewrite_table_names_in_formula, validate_table_name, CellId, CellRef, ColProperties, Range,
     RowProperties, Style, StyleTable, Table, TableError, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
+use formula_model::table::TableColumn;
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 use std::cell::RefCell;
@@ -3001,6 +3002,17 @@ impl Engine {
         Ok(rewrites)
     }
 
+    /// Returns the current set of tables for `sheet`.
+    ///
+    /// This is primarily intended for inspection/testing (e.g. verifying structured reference
+    /// metadata). Callers should treat table definitions as immutable workbook metadata and use
+    /// [`Engine::set_sheet_tables`] to replace them.
+    pub fn get_sheet_tables(&self, sheet: &str) -> Option<&[Table]> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let sheet = self.workbook.sheets.get(sheet_id)?;
+        Some(sheet.tables.as_slice())
+    }
+
     fn recompile_all_formula_cells(&mut self) -> Result<(), EngineError> {
         let tables_by_sheet: Vec<Vec<Table>> = self
             .workbook
@@ -3925,6 +3937,7 @@ impl Engine {
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
                 edited_sheet_id = sheet_id;
                 shift_cols(&mut self.workbook.sheets[sheet_id], col, count, true);
+                update_tables_for_insert_cols(&mut self.workbook.sheets[sheet_id], col, count);
                 let edit = StructuralEdit::InsertCols {
                     sheet: sheet.clone(),
                     col,
@@ -3948,6 +3961,7 @@ impl Engine {
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
                 edited_sheet_id = sheet_id;
                 shift_cols(&mut self.workbook.sheets[sheet_id], col, count, false);
+                update_tables_for_delete_cols(&mut self.workbook.sheets[sheet_id], col, count);
                 let edit = StructuralEdit::DeleteCols {
                     sheet: sheet.clone(),
                     col,
@@ -7725,6 +7739,171 @@ fn shift_cols(sheet: &mut Sheet, col: u32, count: u32, insert: bool) {
         }
     }
     sheet.col_properties = new_props;
+}
+
+/// Ensure `table.columns.len()` matches `table.range.width()`.
+///
+/// When a table needs additional columns, we generate Excel-like default names (`Column1`,
+/// `Column2`, ...) by picking the lowest positive integer that does not collide with an existing
+/// column name (case-insensitive). This mirrors the behavior of
+/// [`formula_model::table::Table::set_range`].
+fn normalize_table_columns(table: &mut Table) {
+    let target = table.range.width() as usize;
+    let current = table.columns.len();
+    if current == target {
+        return;
+    }
+    if target < current {
+        table.columns.truncate(target);
+        return;
+    }
+
+    let mut used_names: HashSet<String> = table
+        .columns
+        .iter()
+        .map(|c| c.name.to_ascii_lowercase())
+        .collect();
+    let mut next_id = table.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+    let mut next_default_num: u32 = 1;
+
+    for _ in current..target {
+        let name = loop {
+            let candidate = format!("Column{next_default_num}");
+            next_default_num += 1;
+            if used_names.insert(candidate.to_ascii_lowercase()) {
+                break candidate;
+            }
+        };
+        table.columns.push(TableColumn {
+            id: next_id,
+            name,
+            formula: None,
+            totals_formula: None,
+        });
+        next_id += 1;
+    }
+}
+
+fn insert_default_table_columns(table: &mut Table, insert_idx: usize, count: u32) {
+    if count == 0 {
+        return;
+    }
+
+    let mut used_names: HashSet<String> = table
+        .columns
+        .iter()
+        .map(|c| c.name.to_ascii_lowercase())
+        .collect();
+    let mut next_id = table.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+    let mut next_default_num: u32 = 1;
+
+    let mut inserted: Vec<TableColumn> = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let name = loop {
+            let candidate = format!("Column{next_default_num}");
+            next_default_num += 1;
+            if used_names.insert(candidate.to_ascii_lowercase()) {
+                break candidate;
+            }
+        };
+        inserted.push(TableColumn {
+            id: next_id,
+            name,
+            formula: None,
+            totals_formula: None,
+        });
+        next_id += 1;
+    }
+
+    let idx = insert_idx.min(table.columns.len());
+    table.columns.splice(idx..idx, inserted);
+}
+
+fn update_tables_for_insert_cols(sheet: &mut Sheet, col: u32, count: u32) {
+    if count == 0 {
+        return;
+    }
+
+    for table in &mut sheet.tables {
+        // Keep invariants explicit: table column metadata should always match the table's width.
+        normalize_table_columns(table);
+
+        let start_col = table.range.start.col;
+        let end_col = table.range.end.col;
+
+        if col < start_col {
+            // Inserting strictly before the table shifts its range, but doesn't add new table
+            // columns.
+            table.range.start.col = start_col.saturating_add(count);
+            table.range.end.col = end_col.saturating_add(count);
+        } else if col <= end_col {
+            // Inserting within the table adds columns to the table at the insertion point.
+            let insert_idx = (col - start_col) as usize;
+            insert_default_table_columns(table, insert_idx, count);
+            table.range.end.col = end_col.saturating_add(count);
+        }
+
+        normalize_table_columns(table);
+    }
+}
+
+fn update_tables_for_delete_cols(sheet: &mut Sheet, col: u32, count: u32) {
+    if count == 0 {
+        return;
+    }
+
+    let del_end = col.saturating_add(count.saturating_sub(1));
+
+    sheet.tables.retain_mut(|table| {
+        normalize_table_columns(table);
+
+        let start_col = table.range.start.col;
+        let end_col = table.range.end.col;
+
+        if del_end < start_col {
+            // Deleting strictly before the table shifts it left without removing columns.
+            table.range.start.col = start_col.saturating_sub(count);
+            table.range.end.col = end_col.saturating_sub(count);
+            normalize_table_columns(table);
+            return true;
+        }
+
+        if col > end_col {
+            // Deleting strictly after the table does not affect it.
+            normalize_table_columns(table);
+            return true;
+        }
+
+        // Deletion overlaps the table's columns.
+        let overlap_start = col.max(start_col);
+        let overlap_end = del_end.min(end_col);
+        let overlap_count = overlap_end.saturating_sub(overlap_start) + 1;
+        let old_width = end_col.saturating_sub(start_col) + 1;
+        let new_width = old_width.saturating_sub(overlap_count);
+
+        // Deterministic behavior: if all columns are deleted, drop the table metadata.
+        if new_width == 0 {
+            return false;
+        }
+
+        let rel_start = (overlap_start - start_col) as usize;
+        let rel_end_exclusive = (overlap_end - start_col + 1) as usize;
+        let drain_end = rel_end_exclusive.min(table.columns.len());
+        if rel_start < drain_end {
+            table.columns.drain(rel_start..drain_end);
+        }
+
+        let deleted_before = if col < start_col {
+            (start_col - col).min(count)
+        } else {
+            0
+        };
+        table.range.start.col = start_col.saturating_sub(deleted_before);
+        table.range.end.col = table.range.start.col.saturating_add(new_width - 1);
+
+        normalize_table_columns(table);
+        true
+    });
 }
 
 fn insert_cells_shift_right(sheet: &mut Sheet, range: Range, width: u32) {
