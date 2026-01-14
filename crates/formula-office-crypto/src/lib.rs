@@ -57,6 +57,19 @@ pub const MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE: u64 = 512 * 1024 * 1024; // 512Mi
 /// Default maximum plaintext bytes cached by [`EncryptedPackageReader`].
 pub const DEFAULT_MAX_CACHE_BYTES: usize = 16 * 1024 * 1024; // 16MiB
 
+/// Maximum allowed size for a single non-encryption OLE stream preserved for round-trip.
+///
+/// Office-encrypted OOXML wrappers can contain additional metadata streams (e.g.
+/// `\u{0005}SummaryInformation`). These are typically small; keeping a cap prevents malicious OLE
+/// containers from forcing unbounded allocations when callers opt into preservation.
+pub const MAX_OLE_PRESERVED_STREAM_BYTES: usize = 16 * 1024 * 1024; // 16MiB
+
+/// Maximum allowed total size of all preserved non-encryption OLE streams.
+pub const MAX_OLE_PRESERVED_TOTAL_BYTES: usize = 64 * 1024 * 1024; // 64MiB
+
+/// Maximum number of OLE directory entries we will process when extracting preserved entries.
+pub const MAX_OLE_PRESERVED_ENTRIES: usize = 100_000;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum EncryptionScheme {
     Agile,

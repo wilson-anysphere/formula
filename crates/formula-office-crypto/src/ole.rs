@@ -1,8 +1,11 @@
 use std::collections::BTreeSet;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use crate::error::OfficeCryptoError;
+use crate::{
+    MAX_OLE_PRESERVED_ENTRIES, MAX_OLE_PRESERVED_STREAM_BYTES, MAX_OLE_PRESERVED_TOTAL_BYTES,
+};
 
 /// A preserved OLE stream (path + bytes).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,7 +62,15 @@ pub fn extract_ole_entries<R: Read + Seek>(
     let mut storages: Vec<PathBuf> = Vec::new();
     let mut stream_paths: Vec<PathBuf> = Vec::new();
 
+    let mut entry_count = 0usize;
     for entry in ole.walk() {
+        entry_count = entry_count.saturating_add(1);
+        if entry_count > MAX_OLE_PRESERVED_ENTRIES {
+            return Err(OfficeCryptoError::InvalidFormat(format!(
+                "too many OLE entries: {entry_count} exceeds limit {MAX_OLE_PRESERVED_ENTRIES}"
+            )));
+        }
+
         let path = entry.path().to_path_buf();
         if entry.is_storage() {
             // Skip the root entry.
@@ -74,10 +85,32 @@ pub fn extract_ole_entries<R: Read + Seek>(
     }
 
     let mut streams: Vec<OleStream> = Vec::with_capacity(stream_paths.len());
+    let mut total_bytes: usize = 0;
     for path in stream_paths {
         let mut stream = ole.open_stream(&path)?;
+        let len_u64 = stream.seek(SeekFrom::End(0))?;
+        stream.seek(SeekFrom::Start(0))?;
+        let len = usize::try_from(len_u64).map_err(|_| {
+            OfficeCryptoError::InvalidFormat("OLE stream size overflow".to_string())
+        })?;
+        if len > MAX_OLE_PRESERVED_STREAM_BYTES {
+            return Err(OfficeCryptoError::SizeLimitExceeded {
+                context: "OLE preserved stream",
+                limit: MAX_OLE_PRESERVED_STREAM_BYTES,
+            });
+        }
+        let next_total = total_bytes.saturating_add(len);
+        if next_total > MAX_OLE_PRESERVED_TOTAL_BYTES {
+            return Err(OfficeCryptoError::SizeLimitExceeded {
+                context: "OLE preserved streams total",
+                limit: MAX_OLE_PRESERVED_TOTAL_BYTES,
+            });
+        }
+
         let mut bytes = Vec::new();
-        stream.read_to_end(&mut bytes)?;
+        bytes.resize(len, 0);
+        stream.read_exact(&mut bytes)?;
+        total_bytes = next_total;
         streams.push(OleStream { path, bytes });
     }
 
