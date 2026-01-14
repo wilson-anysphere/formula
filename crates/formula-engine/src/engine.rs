@@ -13608,6 +13608,7 @@ mod tests {
             &engine.spills,
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
+            engine.info.clone(),
         );
         let column_cache =
             BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
