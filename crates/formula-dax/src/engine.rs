@@ -4353,30 +4353,6 @@ impl DaxEngine {
                                         rows.push(row);
                                     }
                                 });
-                            } else if let Some(from_index) = rel.from_index.as_ref() {
-                                for (fk, candidates) in from_index {
-                                    if fk.is_blank() || !rel.to_index.contains_key(fk) {
-                                        for &row in candidates {
-                                            if row < allowed.len() && allowed.get(row) {
-                                                rows.push(row);
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                // Fallback: scan the fact table to preserve blank-member semantics.
-                                let from_table_ref =
-                                    model.table(target_table).ok_or_else(|| {
-                                        DaxError::UnknownTable(target_table.to_string())
-                                    })?;
-                                for row in allowed.iter_ones() {
-                                    let v = from_table_ref
-                                        .value_by_idx(row, rel.from_idx)
-                                        .unwrap_or(Value::Blank);
-                                    if v.is_blank() || !rel.to_index.contains_key(&v) {
-                                        rows.push(row);
-                                    }
-                                }
                             }
                         } else if let Some(from_index) = rel.from_index.as_ref() {
                             if let Some(candidates) = from_index.get(&key) {
@@ -4460,12 +4436,6 @@ impl DaxEngine {
                             if include_blank {
                                 if let Some(unmatched) = rel_info.unmatched_fact_rows.as_ref() {
                                     unmatched.extend_into(&mut next_rows);
-                                } else {
-                                    for (fk, candidates) in from_index {
-                                        if fk.is_blank() || !rel_info.to_index.contains_key(fk) {
-                                            next_rows.extend(candidates.iter().copied());
-                                        }
-                                    }
                                 }
 
                                 // In snowflake schemas, the "blank row" can cascade: an unmatched
@@ -4517,15 +4487,6 @@ impl DaxEngine {
                             if include_blank {
                                 if let Some(unmatched) = rel_info.unmatched_fact_rows.as_ref() {
                                     unmatched.extend_into(&mut next_rows);
-                                } else {
-                                    for row in 0..from_table_ref.row_count() {
-                                        let v = from_table_ref
-                                            .value_by_idx(row, rel_info.from_idx)
-                                            .unwrap_or(Value::Blank);
-                                        if v.is_blank() || !rel_info.to_index.contains_key(&v) {
-                                            next_rows.push(row);
-                                        }
-                                    }
                                 }
 
                                 if blank_row_allowed(filter, &rel_info.rel.from_table)
@@ -5016,6 +4977,10 @@ fn propagate_filter(
                 relationship
                     .to_index
                     .iter()
+                    // Fact rows whose FK is BLANK always belong to the relationship-generated blank
+                    // member, even if a physical BLANK key exists on the dimension side. Therefore,
+                    // do not treat BLANK as a matchable key during propagation.
+                    .filter(|(key, _)| !key.is_blank())
                     .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key.clone()))
                     .collect()
             } else {
@@ -5068,10 +5033,6 @@ fn propagate_filter(
                     }
                 }
             };
-            // The relationship-generated blank/unknown member is distinct from a *physical* BLANK
-            // key on the `to_table` side. Fact rows with BLANK foreign keys should belong to the
-            // blank member, not match a physical BLANK key value. Therefore, do not treat BLANK as
-            // a matchable relationship key during propagation.
             allowed_keys.retain(|v| !v.is_blank());
             let from_set = sets
                 .get(from_table_name)
@@ -5152,17 +5113,6 @@ fn propagate_filter(
                                 next.set(row, true);
                             }
                         });
-                    } else {
-                        // Shouldn't happen for columnar relationships, but keep semantics by
-                        // scanning if needed.
-                        for row in from_set.iter_ones() {
-                            let v = from_table
-                                .value_by_idx(row, relationship.from_idx)
-                                .unwrap_or(Value::Blank);
-                            if v.is_blank() || !relationship.to_index.contains_key(&v) {
-                                next.set(row, true);
-                            }
-                        }
                     }
                 }
             }
