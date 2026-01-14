@@ -160,6 +160,23 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(mgr.list()).toMatchObject([{ id, sheetId: "sheet-123" }]);
   });
 
+  it("manager update canonicalizes stable sheet id casing when possible", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map<unknown>();
+    sheet.set("id", "Sheet-ABC");
+    sheet.set("name", "Budget");
+    sheets.push([sheet]);
+
+    const mgr = new EncryptedRangeManager({ doc });
+    const id = mgr.add({ sheetId: "other-sheet", startRow: 0, startCol: 0, endRow: 0, endCol: 0, keyId: "k1" });
+    mgr.update(id, { sheetId: "sheet-abc" });
+
+    expect(mgr.list()).toMatchObject([{ id, sheetId: "Sheet-ABC" }]);
+  });
+
   it("manager update validates and applies patches", () => {
     const doc = new Y.Doc();
     ensureWorkbookSchema(doc, { createDefaultSheet: false });
