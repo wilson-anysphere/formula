@@ -807,9 +807,22 @@ export function bindSheetViewToCollabSession(options: {
                 viewMap.set("backgroundImageId", nextBackgroundImageId);
                 // Back-compat mirror (similar to other sheet view keys).
                 sheet.set("backgroundImageId", nextBackgroundImageId);
+                // Converge legacy key names to the canonical one.
+                viewMap.delete("background_image_id");
+                sheet.delete("background_image_id");
+                viewMap.delete("backgroundImage");
+                sheet.delete("backgroundImage");
+                viewMap.delete("background_image");
+                sheet.delete("background_image");
               } else {
                 viewMap.delete("backgroundImageId");
                 sheet.delete("backgroundImageId");
+                viewMap.delete("background_image_id");
+                sheet.delete("background_image_id");
+                viewMap.delete("backgroundImage");
+                sheet.delete("backgroundImage");
+                viewMap.delete("background_image");
+                sheet.delete("background_image");
               }
             }
 
@@ -822,6 +835,8 @@ export function bindSheetViewToCollabSession(options: {
               } else {
                 viewMap.delete("colWidths");
               }
+              // Converge legacy top-level encoding to the nested `view.colWidths` map.
+              sheet.delete("colWidths");
             }
 
             const beforeRowHeights = before?.rowHeights;
@@ -833,6 +848,8 @@ export function bindSheetViewToCollabSession(options: {
               } else {
                 viewMap.delete("rowHeights");
               }
+              // Converge legacy top-level encoding to the nested `view.rowHeights` map.
+              sheet.delete("rowHeights");
             }
 
             if (!nextMergedRanges) {

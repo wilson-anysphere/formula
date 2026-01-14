@@ -108,6 +108,44 @@ describe("bindSheetViewToCollabSession (backgroundImageId)", () => {
     binder.destroy();
   });
 
+  it("clears legacy background image keys when cleared locally (converges schema)", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    const viewMap = new Y.Map<any>();
+    viewMap.set("background_image_id", "legacy-bg.png");
+    viewMap.set("background_image", "legacy-bg.png");
+    sheetMap.set("view", viewMap);
+    sheetMap.set("background_image_id", "legacy-bg.png");
+    sheetMap.set("background_image", "legacy-bg.png");
+    sheets.push([sheetMap]);
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    expect(document.getSheetBackgroundImageId(sheetId)).toBe("legacy-bg.png");
+
+    document.setSheetBackgroundImageId(sheetId, null);
+
+    expect(document.getSheetBackgroundImageId(sheetId)).toBe(null);
+    expect(viewMap.get("backgroundImageId")).toBe(undefined);
+    expect(viewMap.get("background_image_id")).toBe(undefined);
+    expect(viewMap.get("background_image")).toBe(undefined);
+    expect(sheetMap.get("backgroundImageId")).toBe(undefined);
+    expect(sheetMap.get("background_image_id")).toBe(undefined);
+    expect(sheetMap.get("background_image")).toBe(undefined);
+
+    binder.destroy();
+  });
+
   it("does not remove a provided origin token from session.localOrigins on destroy", () => {
     const doc = new Y.Doc();
     const sheets = doc.getArray<Y.Map<any>>("sheets");

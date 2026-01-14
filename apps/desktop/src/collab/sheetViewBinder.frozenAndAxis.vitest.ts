@@ -205,6 +205,45 @@ describe("bindSheetViewToCollabSession (frozen + axis overrides)", () => {
     binder.destroy();
   });
 
+  it("clears legacy top-level axis override keys when the last override is removed locally", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    sheetMap.set("colWidths", { "1": 100 });
+    sheetMap.set("rowHeights", { "0": 25 });
+    sheets.push([sheetMap]);
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    expect(document.getSheetView(sheetId).colWidths).toEqual({ "1": 100 });
+    expect(document.getSheetView(sheetId).rowHeights).toEqual({ "0": 25 });
+
+    // Remove the last overrides; binder should clear both nested + legacy top-level encodings.
+    document.resetColWidth(sheetId, 1);
+    document.resetRowHeight(sheetId, 0);
+
+    expect(document.getSheetView(sheetId).colWidths).toBe(undefined);
+    expect(document.getSheetView(sheetId).rowHeights).toBe(undefined);
+
+    const viewMap = sheetMap.get("view") as Y.Map<any>;
+    expect(viewMap).toBeInstanceOf(Y.Map);
+    expect(viewMap.get("colWidths")).toBe(undefined);
+    expect(viewMap.get("rowHeights")).toBe(undefined);
+    expect(sheetMap.get("colWidths")).toBe(undefined);
+    expect(sheetMap.get("rowHeights")).toBe(undefined);
+
+    binder.destroy();
+  });
+
   it("migrates legacy axis overrides into nested Y.Maps when applying unrelated view changes", () => {
     const doc = new Y.Doc();
     const sheets = doc.getArray<Y.Map<any>>("sheets");
