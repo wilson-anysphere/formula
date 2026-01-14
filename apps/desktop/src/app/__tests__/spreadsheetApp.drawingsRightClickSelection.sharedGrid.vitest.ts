@@ -151,6 +151,8 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
       activeValue: document.createElement("div"),
     };
 
+    // Right-click selection is handled by the DrawingInteractionController (which is behind
+    // `enableDrawingInteractions`).
     const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
     expect(app.getGridMode()).toBe("shared");
 
@@ -170,9 +172,8 @@ describe("SpreadsheetApp drawings right-click selection (shared grid)", () => {
       zOrder: 0,
     };
 
-    app.getDocument().setSheetDrawings(sheetId, [drawing]);
-    // Ensure `listDrawingObjectsForSheet()` reflects the newly inserted object (it caches results).
-    (app as any).drawingObjectsCache = null;
+    // Use the public test helper to seed draw objects without relying on internal sync helpers.
+    app.setDrawingObjects([drawing]);
 
     // Right-click within the picture bounds. This should select the drawing but *not* move the active
     // cell (Excel-like behavior in shared-grid mode).

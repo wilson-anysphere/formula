@@ -366,52 +366,58 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
           zOrder: 0,
         },
       ]);
+      // Ensure the app's in-memory drawing cache reflects the seeded DocumentController state.
+      app.setDrawingObjects(doc.getSheetDrawings(sheetId));
 
-      const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
       const rowHeaderWidth = (app as any).rowHeaderWidth as number;
       const colHeaderHeight = (app as any).colHeaderHeight as number;
 
       const startClientX = rowHeaderWidth + 10;
       const startClientY = colHeaderHeight + 10;
 
-      selectionCanvas.dispatchEvent(
+      // In legacy mode the interaction controller is attached to the root (not the selection canvas),
+      // so dispatch events on the root to avoid relying on bubbling semantics in our PointerEvent polyfill.
+      root.dispatchEvent(
         new (globalThis as any).PointerEvent("pointerdown", {
-          bubbles: true,
-          cancelable: true,
           clientX: startClientX,
           clientY: startClientY,
           pointerId: 1,
-          button: 0,
           buttons: 1,
-        }),
-      );
-      selectionCanvas.dispatchEvent(
-        new (globalThis as any).PointerEvent("pointermove", {
           bubbles: true,
           cancelable: true,
+        }),
+      );
+      root.dispatchEvent(
+        new (globalThis as any).PointerEvent("pointermove", {
           clientX: startClientX + 20,
           clientY: startClientY,
           pointerId: 1,
           buttons: 1,
+          bubbles: true,
+          cancelable: true,
         }),
       );
 
       // Drag should have moved the in-memory drawing state.
-      expect(app.getDrawingObjects(sheetId)[0]?.anchor?.pos?.xEmu).not.toBe(0);
+      const moved = app.getDrawingObjects(sheetId).find((o) => o.id === 1);
+      expect(moved?.anchor?.type).toBe("absolute");
+      expect((moved?.anchor as any)?.pos?.xEmu).not.toBe(0);
 
       // Escape should reach the controller's window-level handler and cancel the drag.
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
 
-      expect(app.getDrawingObjects(sheetId)[0]?.anchor?.pos?.xEmu).toBe(0);
+      const cancelled = app.getDrawingObjects(sheetId).find((o) => o.id === 1);
+      expect(cancelled?.anchor?.type).toBe("absolute");
+      expect((cancelled?.anchor as any)?.pos?.xEmu).toBe(0);
 
       // Releasing the pointer after cancel should not re-commit the drag.
-      selectionCanvas.dispatchEvent(
+      root.dispatchEvent(
         new (globalThis as any).PointerEvent("pointerup", {
-          bubbles: true,
-          cancelable: true,
           clientX: startClientX + 20,
           clientY: startClientY,
           pointerId: 1,
+          bubbles: true,
+          cancelable: true,
         }),
       );
 
