@@ -253,6 +253,31 @@ fn open_workbook_model_xlsb_imports_phonetic_guides() -> Result<(), Box<dyn std:
 }
 
 #[test]
+fn open_workbook_model_xlsb_imports_shared_string_phonetic_guides(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Like `open_workbook_model_xlsb_imports_phonetic_guides`, but store the cell text as a shared
+    // string index (`BrtString` / `BrtCellIsst`) rather than an inline string.
+    let base_text = "漢字";
+    let phonetic_text = "かんじ";
+    let bytes = build_minimal_xlsb_with_shared_string_phonetic_cell(base_text, phonetic_text);
+
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("phonetic_shared_string.xlsb");
+    std::fs::write(&path, bytes)?;
+
+    let workbook = formula_io::open_workbook_model(&path)?;
+    let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+
+    let a1 = CellRef::from_a1("A1")?;
+    assert_eq!(sheet.value(a1), CellValue::String(base_text.to_string()));
+
+    let cell = sheet.cell(a1).expect("A1 missing");
+    assert_eq!(cell.phonetic.as_deref(), Some(phonetic_text));
+
+    Ok(())
+}
+
+#[test]
 fn open_workbook_model_sniffs_extensionless_xlsb() {
     let path = xlsb_fixture_path("simple.xlsb");
     let bytes = std::fs::read(&path).expect("read fixture");
@@ -386,6 +411,101 @@ fn build_minimal_xlsb_with_phonetic_cell(base_text: &str, phonetic_text: &str) -
 
     zip.start_file("xl/worksheets/sheet1.bin", options).unwrap();
     zip.write_all(&sheet_bin).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
+fn build_minimal_xlsb_with_shared_string_phonetic_cell(
+    base_text: &str,
+    phonetic_text: &str,
+) -> Vec<u8> {
+    // Shared strings (`sharedStrings.bin`) record ids (subset):
+    // - BrtSST    0x009F
+    // - BrtSI     0x0013
+    // - BrtSSTEnd 0x00A0
+    const BRT_SST: u32 = 0x009F;
+    const BRT_SI: u32 = 0x0013;
+    const BRT_SST_END: u32 = 0x00A0;
+
+    // Worksheet record ids (subset):
+    // - BrtBeginSheetData 0x0091
+    // - BrtEndSheetData   0x0092
+    // - BrtRow            0x0000
+    // - BrtCellIsst       0x0007
+    const BRT_SHEETDATA: u32 = 0x0091;
+    const BRT_SHEETDATA_END: u32 = 0x0092;
+    const BRT_ROW: u32 = 0x0000;
+    const BRT_STRING: u32 = 0x0007;
+
+    // Reuse the workbook/sheet plumbing from `build_minimal_xlsb_with_phonetic_cell`.
+    let workbook_bin = {
+        let mut sheet_rec = Vec::new();
+        sheet_rec.extend_from_slice(&[0u8; 4]);
+        sheet_rec.extend_from_slice(&1u32.to_le_bytes());
+        write_utf16_string(&mut sheet_rec, "rId1");
+        write_utf16_string(&mut sheet_rec, "Sheet1");
+
+        [
+            biff12_record(0x009C /* BrtSheet */, &sheet_rec),
+            biff12_record(0x0090 /* BrtEndSheets */, &[]),
+        ]
+        .concat()
+    };
+
+    let workbook_rels = br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.bin"/></Relationships>"#;
+
+    let shared_strings_bin = {
+        let mut phonetic_bytes = Vec::new();
+        write_utf16_string(&mut phonetic_bytes, phonetic_text);
+
+        // BrtSI payload:
+        //   [flags:u8][text:XLWideString][phonetic tail bytes...]
+        let mut si_payload = Vec::new();
+        si_payload.push(0x02); // phonetic flag
+        write_utf16_string(&mut si_payload, base_text);
+        si_payload.extend_from_slice(&phonetic_bytes);
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&biff12_record(
+            BRT_SST,
+            &[1u32.to_le_bytes(), 1u32.to_le_bytes()].concat(),
+        ));
+        out.extend_from_slice(&biff12_record(BRT_SI, &si_payload));
+        out.extend_from_slice(&biff12_record(BRT_SST_END, &[]));
+        out
+    };
+
+    let sheet_bin = {
+        let mut cell = Vec::new();
+        cell.extend_from_slice(&0u32.to_le_bytes()); // col
+        cell.extend_from_slice(&0u32.to_le_bytes()); // style
+        cell.extend_from_slice(&0u32.to_le_bytes()); // isst
+
+        [
+            biff12_record(BRT_SHEETDATA, &[]),
+            biff12_record(BRT_ROW, &0u32.to_le_bytes()),
+            biff12_record(BRT_STRING, &cell),
+            biff12_record(BRT_SHEETDATA_END, &[]),
+        ]
+        .concat()
+    };
+
+    let cursor = std::io::Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/workbook.bin", options).unwrap();
+    zip.write_all(&workbook_bin).unwrap();
+
+    zip.start_file("xl/_rels/workbook.bin.rels", options).unwrap();
+    zip.write_all(workbook_rels).unwrap();
+
+    zip.start_file("xl/worksheets/sheet1.bin", options).unwrap();
+    zip.write_all(&sheet_bin).unwrap();
+
+    zip.start_file("xl/sharedStrings.bin", options).unwrap();
+    zip.write_all(&shared_strings_bin).unwrap();
 
     zip.finish().unwrap().into_inner()
 }

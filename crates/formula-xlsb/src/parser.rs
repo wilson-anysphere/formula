@@ -1211,7 +1211,7 @@ mod tests {
             &shared_strings,
             Some(&shared_strings_table),
             &ctx,
-            true,
+            false,
             false,
             |cell| {
                 cells.push(cell);
@@ -1808,80 +1808,80 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                             })
                             .unwrap_or_default();
 
-                        let preserved = if preserve_parsed_parts {
-                            shared_strings_table
-                                .and_then(|table| table.get(idx))
-                                .and_then(|s| {
-                                    let has_rich = !s.rich_text.is_plain();
-                                    let has_phonetic = s.phonetic.is_some();
-                                    if has_rich || has_phonetic {
-                                        let rich = if has_rich {
-                                            // Convert our parsed shared-string run boundaries into an
-                                            // XLWideString-style `StrRun` byte array:
-                                            //   [ich: u32 (UTF-16 code units)][ifnt: u16][reserved: u16]
-                                            //
-                                            // This is best-effort: we preserve the original `ifnt`
-                                            // bytes (and any other run-format bytes) opaquely, and
-                                            // recompute `ich` from the decoded string.
-                                            let mut utf16_offsets: Vec<u32> =
-                                                Vec::with_capacity(s.rich_text.char_len() + 1);
-                                            let mut u16_cursor: u32 = 0;
-                                            utf16_offsets.push(0);
-                                            for ch in s.rich_text.text.chars() {
-                                                u16_cursor = u16_cursor
-                                                    .saturating_add(ch.len_utf16() as u32);
-                                                utf16_offsets.push(u16_cursor);
-                                            }
+                        let preserved = shared_strings_table
+                            .and_then(|table| table.get(idx))
+                            .and_then(|s| {
+                                // Match the behavior for inline string records: preserve phonetic
+                                // guides (furigana) so downstream consumers (e.g. `formula-io`
+                                // model conversion) can access them even when
+                                // `preserve_parsed_parts=false` (raw-part preservation off).
+                                //
+                                // Rich text runs can be much larger; only preserve them when
+                                // `preserve_parsed_parts` is enabled.
+                                let has_rich = preserve_parsed_parts && !s.rich_text.is_plain();
+                                let has_phonetic = s.phonetic.is_some();
+                                if has_rich || has_phonetic {
+                                    let rich = if has_rich {
+                                        // Convert our parsed shared-string run boundaries into an
+                                        // XLWideString-style `StrRun` byte array:
+                                        //   [ich: u32 (UTF-16 code units)][ifnt: u16][reserved: u16]
+                                        //
+                                        // This is best-effort: we preserve the original `ifnt`
+                                        // bytes (and any other run-format bytes) opaquely, and
+                                        // recompute `ich` from the decoded string.
+                                        let mut utf16_offsets: Vec<u32> =
+                                            Vec::with_capacity(s.rich_text.char_len() + 1);
+                                        let mut u16_cursor: u32 = 0;
+                                        utf16_offsets.push(0);
+                                        for ch in s.rich_text.text.chars() {
+                                            u16_cursor =
+                                                u16_cursor.saturating_add(ch.len_utf16() as u32);
+                                            utf16_offsets.push(u16_cursor);
+                                        }
 
-                                            let mut runs_bytes: Vec<u8> =
-                                                Vec::with_capacity(s.rich_text.runs.len() * 8);
-                                            for (i, run) in s.rich_text.runs.iter().enumerate() {
-                                                let ich = utf16_offsets
-                                                    .get(run.start)
-                                                    .copied()
-                                                    .unwrap_or(run.start as u32);
-                                                runs_bytes.extend_from_slice(&ich.to_le_bytes());
+                                        let mut runs_bytes: Vec<u8> =
+                                            Vec::with_capacity(s.rich_text.runs.len() * 8);
+                                        for (i, run) in s.rich_text.runs.iter().enumerate() {
+                                            let ich = utf16_offsets
+                                                .get(run.start)
+                                                .copied()
+                                                .unwrap_or(run.start as u32);
+                                            runs_bytes.extend_from_slice(&ich.to_le_bytes());
 
-                                                let fmt =
-                                                    s.run_formats.get(i).map(|v| v.as_slice());
-                                                match fmt.map(|v| v.len()).unwrap_or(0) {
-                                                    0 => runs_bytes.extend_from_slice(&[0u8; 4]),
-                                                    2 => {
-                                                        runs_bytes.extend_from_slice(fmt.unwrap());
-                                                        runs_bytes.extend_from_slice(&[0u8; 2]);
-                                                    }
-                                                    4 => runs_bytes.extend_from_slice(fmt.unwrap()),
-                                                    n => {
-                                                        let fmt = fmt.unwrap();
-                                                        let take = n.min(4);
-                                                        runs_bytes.extend_from_slice(&fmt[..take]);
-                                                        if take < 4 {
-                                                            runs_bytes.extend_from_slice(
-                                                                &[0u8; 4][..4 - take],
-                                                            );
-                                                        }
+                                            let fmt = s.run_formats.get(i).map(|v| v.as_slice());
+                                            match fmt.map(|v| v.len()).unwrap_or(0) {
+                                                0 => runs_bytes.extend_from_slice(&[0u8; 4]),
+                                                2 => {
+                                                    runs_bytes.extend_from_slice(fmt.unwrap());
+                                                    runs_bytes.extend_from_slice(&[0u8; 2]);
+                                                }
+                                                4 => runs_bytes.extend_from_slice(fmt.unwrap()),
+                                                n => {
+                                                    let fmt = fmt.unwrap();
+                                                    let take = n.min(4);
+                                                    runs_bytes.extend_from_slice(&fmt[..take]);
+                                                    if take < 4 {
+                                                        runs_bytes.extend_from_slice(
+                                                            &[0u8; 4][..4 - take],
+                                                        );
                                                     }
                                                 }
                                             }
-                                            Some(crate::strings::OpaqueRichText {
-                                                runs: runs_bytes,
-                                            })
-                                        } else {
-                                            None
-                                        };
+                                        }
+                                        Some(crate::strings::OpaqueRichText { runs: runs_bytes })
+                                    } else {
+                                        None
+                                    };
 
-                                        Some(ParsedXlsbString {
-                                            text: text.clone(),
-                                            rich,
-                                            phonetic: s.phonetic.clone(),
-                                        })
-                                     } else {
-                                         None
-                                     }
-                                })
-                        } else {
-                            None
-                        };
+                                    Some(ParsedXlsbString {
+                                        text: text.clone(),
+                                        rich,
+                                        phonetic: s.phonetic.clone(),
+                                    })
+                                } else {
+                                    None
+                                }
+                            });
                         (CellValue::Text(text), None, preserved)
                     }
                     biff12::FORMULA_STRING => {
