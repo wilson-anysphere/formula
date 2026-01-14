@@ -12,7 +12,7 @@ describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
     await promptAndApplyCustomNumberFormat({
       isEditing: () => true,
       showInputBox,
-      getActiveCellNumberFormat: () => null,
+      getSelectionNumberFormat: () => null,
       applyFormattingToSelection,
     });
 
@@ -31,7 +31,7 @@ describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
     await promptAndApplyCustomNumberFormat({
       isEditing: () => editing,
       showInputBox,
-      getActiveCellNumberFormat: () => null,
+      getSelectionNumberFormat: () => null,
       applyFormattingToSelection,
     });
 
@@ -49,7 +49,7 @@ describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
     await promptAndApplyCustomNumberFormat({
       isEditing: () => false,
       showInputBox,
-      getActiveCellNumberFormat: () => null,
+      getSelectionNumberFormat: () => null,
       applyFormattingToSelection,
     });
 
@@ -70,7 +70,7 @@ describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
     await promptAndApplyCustomNumberFormat({
       isEditing: () => false,
       showInputBox,
-      getActiveCellNumberFormat: () => doc.getCellFormat("Sheet1", "A1").numberFormat ?? null,
+      getSelectionNumberFormat: () => doc.getCellFormat("Sheet1", "A1").numberFormat ?? null,
       applyFormattingToSelection,
     });
 
@@ -89,11 +89,51 @@ describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
     await promptAndApplyCustomNumberFormat({
       isEditing: () => false,
       showInputBox,
-      getActiveCellNumberFormat: () => null,
+      getSelectionNumberFormat: () => null,
       applyFormattingToSelection,
     });
 
     expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBe("0.00 ");
+  });
+
+  it("clears numberFormat when the input is 'General' (case-insensitive)", async () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { numberFormat: "0.00" });
+
+    const showInputBox = vi.fn().mockResolvedValue("General");
+    const applyFormattingToSelection = vi.fn((_, fn) => {
+      fn(doc, "Sheet1", [{ start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }]);
+    });
+
+    await promptAndApplyCustomNumberFormat({
+      isEditing: () => false,
+      showInputBox,
+      getSelectionNumberFormat: () => doc.getCellFormat("Sheet1", "A1").numberFormat ?? null,
+      applyFormattingToSelection,
+    });
+
+    expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBeNull();
+  });
+
+  it("applies across multiple selection ranges", async () => {
+    const doc = new DocumentController();
+    const showInputBox = vi.fn().mockResolvedValue("#,##0");
+    const applyFormattingToSelection = vi.fn((_, fn) => {
+      fn(doc, "Sheet1", [
+        { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+        { start: { row: 2, col: 2 }, end: { row: 2, col: 2 } },
+      ]);
+    });
+
+    await promptAndApplyCustomNumberFormat({
+      isEditing: () => false,
+      showInputBox,
+      getSelectionNumberFormat: () => null,
+      applyFormattingToSelection,
+    });
+
+    expect(doc.getCellFormat("Sheet1", "A1").numberFormat).toBe("#,##0");
+    expect(doc.getCellFormat("Sheet1", "C3").numberFormat).toBe("#,##0");
   });
 
   it("treats the localized General label as a clear-format sentinel", async () => {
@@ -112,7 +152,7 @@ describe("promptAndApplyCustomNumberFormat (ribbon)", () => {
       await promptAndApplyCustomNumberFormat({
         isEditing: () => false,
         showInputBox,
-        getActiveCellNumberFormat: () => doc.getCellFormat("Sheet1", "A1").numberFormat ?? null,
+        getSelectionNumberFormat: () => doc.getCellFormat("Sheet1", "A1").numberFormat ?? null,
         applyFormattingToSelection,
       });
 

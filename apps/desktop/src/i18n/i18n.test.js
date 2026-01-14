@@ -76,17 +76,26 @@ test("ribbon label strings are localizable", () => {
 test("number format quick-pick strings are localizable", () => {
   setLocale("en-US");
   assert.equal(t("quickPick.numberFormat.placeholder"), "Number format");
-  assert.equal(t("prompt.customNumberFormat.code"), "Custom number format code");
+  assert.equal(
+    t("prompt.customNumberFormat.code"),
+    "Enter an Excel custom number format code (e.g. `0.00`, `#,##0`, `$#,##0.00`)",
+  );
   assert.equal(t("command.home.number.moreFormats.custom"), "Custom number format…");
 
   setLocale("de-DE");
   assert.equal(t("quickPick.numberFormat.placeholder"), "Zahlenformat");
-  assert.equal(t("prompt.customNumberFormat.code"), "Benutzerdefinierter Zahlenformatcode");
+  assert.equal(
+    t("prompt.customNumberFormat.code"),
+    "Excel-Zahlenformatcode eingeben (z. B. `0.00`, `#,##0`, `$#,##0.00`)",
+  );
   assert.equal(t("command.home.number.moreFormats.custom"), "Benutzerdefiniertes Zahlenformat…");
 
   setLocale("ar");
   assert.equal(t("quickPick.numberFormat.placeholder"), "تنسيق الأرقام");
-  assert.equal(t("prompt.customNumberFormat.code"), "رمز تنسيق الأرقام المخصص");
+  assert.equal(
+    t("prompt.customNumberFormat.code"),
+    "أدخل رمز تنسيق أرقام مخصص في Excel (مثل `0.00`، `#,##0`، `$#,##0.00`)",
+  );
   assert.equal(t("command.home.number.moreFormats.custom"), "تنسيق أرقام مخصص…");
 });
 

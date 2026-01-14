@@ -11,6 +11,7 @@ import { NUMBER_FORMATS, toggleStrikethrough, toggleSubscript, toggleSuperscript
 import { promptAndApplyCustomNumberFormat } from "../formatting/promptCustomNumberFormat.js";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "../formatting/selectionSizeGuard.js";
 import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
+import { computeSelectionFormatState } from "../ribbon/selectionFormatState.js";
 import { executeCellsStructuralRibbonCommand } from "../ribbon/cellsStructuralCommands.js";
 import { handleHomeCellsInsertDeleteCommand } from "../ribbon/homeCellsCommands.js";
 import { handleInsertPicturesRibbonCommand } from "../main.insertPicturesRibbonCommand.js";
@@ -440,11 +441,30 @@ export function registerDesktopCommands(params: {
           return;
         }
 
+        const getSelectionNumberFormat = (): string | null => {
+          // If the app isn't exposing selection ranges, fall back to the active cell (consistent with
+          // other formatting commands that treat "no selection" as "active cell").
+          if (!Array.isArray(ranges) || ranges.length === 0) {
+            return getActiveCellNumberFormat();
+          }
+          const sheetId = (app as any).getCurrentSheetId?.() ?? null;
+          if (typeof sheetId !== "string" || sheetId.trim() === "") {
+            return getActiveCellNumberFormat();
+          }
+          // Be precise when the selection is within our normal formatting cell cap. When the selection is
+          // a band (full row/col/sheet), the cell count can be enormous; fall back to sampling so the UI
+          // remains responsive.
+          const maxInspectCells = decision.allRangesBand ? 256 : decision.totalCells;
+          const state = computeSelectionFormatState(app.getDocument(), sheetId, ranges as any, { maxInspectCells });
+          return typeof state.numberFormat === "string" ? state.numberFormat : null;
+        };
+
         await promptAndApplyCustomNumberFormat({
           isEditing: isEditingFn,
           showInputBox,
-          getActiveCellNumberFormat,
+          getSelectionNumberFormat,
           applyFormattingToSelection: (label, fn) => applyFormattingToSelection(label, fn),
+          showToast: safeShowToast,
         });
       } finally {
         focusGrid();

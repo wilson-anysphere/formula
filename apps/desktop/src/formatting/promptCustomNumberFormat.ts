@@ -1,6 +1,7 @@
 import type { DocumentController } from "../document/documentController.js";
 import { t } from "../i18n/index.js";
 import type { CellRange } from "./toolbar.js";
+import { formatValueWithNumberFormat } from "./numberFormat.js";
 
 export type ApplyFormattingToSelection = (
   label: string,
@@ -16,13 +17,19 @@ export type ShowInputBox = (options: {
 export async function promptAndApplyCustomNumberFormat(options: {
   isEditing: () => boolean;
   showInputBox: ShowInputBox;
-  getActiveCellNumberFormat: () => string | null;
+  /**
+   * Seed value for the input prompt. Callers should return the current selection's effective
+   * number format when it is a single consistent code; otherwise return null to leave the
+   * prompt empty.
+   */
+  getSelectionNumberFormat: () => string | null;
   applyFormattingToSelection: ApplyFormattingToSelection;
+  showToast?: (message: string, type?: "info" | "warning" | "error") => void;
 }): Promise<void> {
   if (options.isEditing()) return;
 
   const numberFormatLabel = t("quickPick.numberFormat.placeholder");
-  const seed = options.getActiveCellNumberFormat() ?? "";
+  const seed = options.getSelectionNumberFormat() ?? "";
   const input = await options.showInputBox({
     prompt: t("prompt.customNumberFormat.code"),
     value: seed,
@@ -40,6 +47,21 @@ export async function promptAndApplyCustomNumberFormat(options: {
   const localizedGeneral = t("command.format.numberFormat.general").trim().toLowerCase();
   const desired =
     !trimmed || normalized === "general" || (localizedGeneral && normalized === localizedGeneral) ? null : input;
+
+  if (typeof desired === "string") {
+    // Best-effort validation: if our formatter/parser rejects the format code (throws),
+    // surface a warning and do not apply.
+    let valid = true;
+    try {
+      formatValueWithNumberFormat(0, desired);
+    } catch {
+      valid = false;
+    }
+    if (!valid) {
+      options.showToast?.(t("toast.customNumberFormat.invalid"), "warning");
+      return;
+    }
+  }
 
   options.applyFormattingToSelection(numberFormatLabel, (doc, sheetId, ranges) => {
     let applied = true;
