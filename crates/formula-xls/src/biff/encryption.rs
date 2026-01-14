@@ -1388,6 +1388,37 @@ mod tests {
     }
 
     #[test]
+    fn xor_encrypt_decrypt_roundtrip_biff5_across_records() {
+        let password = "pw";
+        // BIFF5 BOF payload: version=0x0500, dt arbitrary.
+        let bof_payload = [0x00, 0x05, 0x05, 0x00];
+
+        // BIFF5 XOR FILEPASS placeholder: key + verifier.
+        let filepass_placeholder = [0u8; 4];
+
+        let r1 = record(0x00FC, &dummy_payload(1000, 0x11));
+        let r2 = record(0x00FD, &dummy_payload(80, 0x22));
+
+        let mut plain = [
+            record(records::RECORD_BOF_BIFF5, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_placeholder),
+            r1,
+            r2,
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut encrypted = plain.clone();
+        encrypt_workbook_stream_for_test(&mut encrypted, password).expect("encrypt");
+
+        let range = filepass_payload_range(&plain);
+        plain[range.clone()].copy_from_slice(&encrypted[range]);
+
+        decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
+        assert_eq!(encrypted, plain);
+    }
+
+    #[test]
     fn rc4_encrypt_decrypt_roundtrip_crosses_1024_boundary_mid_record() {
         let password = "pw";
         let bof_payload = [0x00, 0x06, 0x05, 0x00];
@@ -1401,6 +1432,40 @@ mod tests {
         // Chosen so record2 crosses the 1024-byte block boundary: 1000 + 80.
         let r1 = record(0x00FC, &dummy_payload(1000, 0x30));
         let r2 = record(0x00FD, &dummy_payload(80, 0x40));
+
+        let mut plain = [
+            record(records::RECORD_BOF_BIFF8, &bof_payload),
+            record(records::RECORD_FILEPASS, &filepass_placeholder),
+            r1,
+            r2,
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let mut encrypted = plain.clone();
+        encrypt_workbook_stream_for_test(&mut encrypted, password).expect("encrypt");
+
+        let range = filepass_payload_range(&plain);
+        plain[range.clone()].copy_from_slice(&encrypted[range]);
+
+        decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
+        assert_eq!(encrypted, plain);
+    }
+
+    #[test]
+    fn rc4_encrypt_decrypt_roundtrip_40_bit_key_crosses_1024_boundary_mid_record() {
+        let password = "pw";
+        let bof_payload = [0x00, 0x06, 0x05, 0x00];
+
+        // BIFF8 RC4 FILEPASS placeholder (Standard Encryption / major=1, minor=1 => 40-bit key).
+        let mut filepass_placeholder = vec![0u8; 6 + 16 + 16 + 16];
+        filepass_placeholder[0..2].copy_from_slice(&BIFF8_ENCRYPTION_TYPE_RC4.to_le_bytes());
+        filepass_placeholder[2..4].copy_from_slice(&1u16.to_le_bytes()); // major
+        filepass_placeholder[4..6].copy_from_slice(&1u16.to_le_bytes()); // minor (40-bit)
+
+        // Chosen so record2 crosses the 1024-byte block boundary: 1000 + 80.
+        let r1 = record(0x00FC, &dummy_payload(1000, 0x31));
+        let r2 = record(0x00FD, &dummy_payload(80, 0x41));
 
         let mut plain = [
             record(records::RECORD_BOF_BIFF8, &bof_payload),
