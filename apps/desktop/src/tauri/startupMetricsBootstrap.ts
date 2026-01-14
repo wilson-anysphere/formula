@@ -9,6 +9,7 @@ import { hasTauri as hasTauriRuntime } from "./api";
 
 const BOOTSTRAPPED_KEY = "__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__";
 const LISTENERS_KEY = "__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__";
+const WEBVIEW_REPORTED_KEY = "__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__";
 
 const hasTauri = (() => {
   if (hasTauriRuntime()) return true;
@@ -47,6 +48,14 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
   } catch {
     // Best-effort; instrumentation should never block startup.
   }
+  try {
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke;
+    if (typeof invoke === "function") {
+      g[WEBVIEW_REPORTED_KEY] = true;
+    }
+  } catch {
+    // Ignore: if we can't probe the global, we'll rely on the retry loop below.
+  }
 
   const ensureListenersInstalled = async (): Promise<boolean> => {
     // Best-effort: Tauri's injected JS APIs may not be immediately available at the earliest
@@ -59,6 +68,19 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
         await installStartupTimingsListeners();
       } catch {
         // ignore
+      }
+      // If the `core.invoke` binding becomes available after the first JS tick, send a best-effort
+      // report as soon as possible (still re-emitting again once listeners are installed).
+      if (!g[WEBVIEW_REPORTED_KEY]) {
+        try {
+          const invoke = (globalThis as any).__TAURI__?.core?.invoke;
+          if (typeof invoke === "function") {
+            reportStartupWebviewLoaded();
+            g[WEBVIEW_REPORTED_KEY] = true;
+          }
+        } catch {
+          // ignore
+        }
       }
       if (g[LISTENERS_KEY]) break;
       await new Promise<void>((resolve) => setTimeout(resolve, delayMs));

@@ -14,6 +14,7 @@ describe("startupMetrics", () => {
   const originalListenersInstalled = (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__;
   const originalFirstRenderReported = (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__;
   const originalBootstrapped = (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__;
+  const originalWebviewReported = (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__;
 
   beforeEach(() => {
     const invoke = vi.fn().mockResolvedValue(null);
@@ -27,6 +28,7 @@ describe("startupMetrics", () => {
     (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = undefined;
     (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = undefined;
   });
 
   afterEach(() => {
@@ -44,6 +46,7 @@ describe("startupMetrics", () => {
     (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = originalListenersInstalled;
     (globalThis as any).__FORMULA_STARTUP_FIRST_RENDER_REPORTED__ = originalFirstRenderReported;
     (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = originalBootstrapped;
+    (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = originalWebviewReported;
     vi.restoreAllMocks();
   });
 
