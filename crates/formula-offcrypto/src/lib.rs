@@ -3804,7 +3804,7 @@ fn open_stream_best_effort<F: Seek>(
     ))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod fuzz_tests;
 
 #[cfg(test)]
