@@ -1599,25 +1599,6 @@ fn sheet_data_validations_xml(sheet: &Worksheet) -> String {
     out
 }
 
-fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
-    let mut attrs = String::new();
-    if let Some(base) = sheet.base_col_width {
-        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
-    }
-    if let Some(width) = sheet.default_col_width {
-        let width = trim_float(width as f64);
-        attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
-    }
-    if let Some(height) = sheet.default_row_height {
-        let height = trim_float(height as f64);
-        attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
-    }
-    if attrs.is_empty() {
-        return String::new();
-    }
-    format!(r#"<sheetFormatPr{attrs}/>"#)
-}
-
 fn sheet_protection_xml(sheet: &Worksheet) -> String {
     let prot = &sheet.sheet_protection;
     if !prot.enabled {
