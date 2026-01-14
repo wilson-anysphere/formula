@@ -170,6 +170,8 @@ fn derive_rc4_key_for_block(
         h_final.len()
     );
 
+    // For MS-OFFCRYPTO Standard RC4, the RC4 key length is exactly `key_size_bits / 8` bytes.
+    // (Do not apply the legacy CryptoAPI "40-bit key expanded to 16 bytes with zeros" behavior.)
     h_final[..key_size_bytes].to_vec()
 }
 
