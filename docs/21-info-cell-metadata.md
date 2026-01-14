@@ -297,6 +297,12 @@ This section documents the intended “wiring points” for hosts. Some calls ex
   - `WasmWorkbook.fromJson({ sheets: { Sheet1: …, Sheet2: … } })`
   - `WasmWorkbook.fromXlsxBytes(bytes)` (creates all sheets from the XLSX model)
 - Calculation mode (`INFO("recalc")`): currently always “Manual” in WASM because `formula_engine::Engine` defaults to manual and the setting is not exposed through the WASM API.
+- Workbook file metadata (`CELL("filename")`, `INFO("directory")`):
+  - `EngineClient.setWorkbookFileMetadata(directory, filename)` (via `packages/engine` RPC → `WasmWorkbook.setWorkbookFileMetadata`)
+- Column metadata (`CELL("width")` plumbing):
+  - `EngineClient.setColWidthChars(sheet, col, widthChars)` (preferred) or `EngineClient.setColWidth(col, widthChars, sheet)`
+    - widths are in Excel “character” units (OOXML `col/@width`), not pixels
+  - `EngineClient.setColHidden(col, hidden, sheet)` to set the explicit hidden flag
 
 > In practice most web callers use `EngineClient` (`packages/engine/src/client.ts`) rather than calling `WasmWorkbook` directly; the same sheet-count rule applies to the JSON schema passed to `EngineClient.loadWorkbookFromJson(...)`.
 
@@ -304,7 +310,6 @@ This section documents the intended “wiring points” for hosts. Some calls ex
 
 Worker/RPC methods to add to `packages/engine` (and corresponding WASM exports on `WasmWorkbook`):
 
-- `setWorkbookFileMetadata({ directory?: string, fileName?: string })`
 - `setInfoEnvMetadata({ system?: string, osversion?: string, release?: string, version?: string, memavail?: number, totmem?: number, directory?: string, origin?: string })`
 - formatting / styles:
   - `setStyleTable(styles: StylePatch[])` (or a minimal subset needed for `CELL`)
@@ -313,8 +318,6 @@ Worker/RPC methods to add to `packages/engine` (and corresponding WASM exports o
   - `setColStyleIds(sheetId, updates: Array<{ col: number, styleId: number }>)`
   - `setFormatRunsByCol(sheetId, col, runs: Array<{ startRow: number, endRowExclusive: number, styleId: number }>)`
   - `setCellStyleIds(sheetId, updates: Array<{ address: string, styleId: number }>)`
-- column widths/hidden:
-  - `setColumnProperties(sheetId, updates: Array<{ col: number, width?: number, hidden?: boolean }>)`
 
 ### Desktop/Tauri
 
