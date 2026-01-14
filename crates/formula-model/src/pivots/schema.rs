@@ -98,13 +98,20 @@ impl PivotFieldRef {
 
 impl From<String> for PivotFieldRef {
     fn from(value: String) -> Self {
+        // Mirror `from_unstructured`, but avoid allocating when the input is a plain cache field.
+        if let Some(measure) = parse_dax_measure_ref(&value) {
+            return PivotFieldRef::DataModelMeasure(measure);
+        }
+        if let Some((table, column)) = parse_dax_column_ref(&value) {
+            return PivotFieldRef::DataModelColumn { table, column };
+        }
         PivotFieldRef::CacheFieldName(value)
     }
 }
 
 impl From<&str> for PivotFieldRef {
     fn from(value: &str) -> Self {
-        PivotFieldRef::CacheFieldName(value.to_string())
+        Self::from_unstructured(value)
     }
 }
 impl PartialEq<&str> for PivotFieldRef {
