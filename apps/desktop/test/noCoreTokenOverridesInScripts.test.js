@@ -33,7 +33,7 @@ function getLineNumber(text, index) {
   return text.slice(0, Math.max(0, index)).split("\n").length;
 }
 
-test("desktop UI scripts should not override core design tokens (--space-*, --radius*, --font-*)", () => {
+test("desktop UI scripts should not override core design tokens (--space-*, --radius*, --motion-*, --font-*)", () => {
   const files = walkScriptFiles(srcRoot).filter((file) => {
     const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
     // Demo/sandbox assets are not part of the shipped UI bundle.
@@ -50,7 +50,7 @@ test("desktop UI scripts should not override core design tokens (--space-*, --ra
   // Only match direct `.style.setProperty("--token", ...)` / `.style.removeProperty("--token")`
   // calls so we don't trigger on other string usages like `getPropertyValue("--space-4")`.
   const tokenOp =
-    /\.style\.(?<op>setProperty|removeProperty)\(\s*(["'`])\s*(?<prop>--(?:space-\d+|radius[-\w]*|font-(?:mono|sans)))\s*\2/gi;
+    /\.style\.(?<op>setProperty|removeProperty)\(\s*(["'`])\s*(?<prop>--(?:space-\d+|radius[-\w]*|motion-(?:duration(?:-fast)?|ease)|font-(?:mono|sans)))\s*\2/gi;
 
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
@@ -80,4 +80,3 @@ test("desktop UI scripts should not override core design tokens (--space-*, --ra
       .join("\n")}`,
   );
 });
-
