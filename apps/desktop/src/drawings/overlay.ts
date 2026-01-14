@@ -330,6 +330,7 @@ export class DrawingOverlay {
   private shapeTextCachePruneLength = 0;
   private readonly spatialIndex = new DrawingSpatialIndex();
   private readonly prefetchedImageBitmaps = new Map<string, Promise<ImageBitmap>>();
+  private resizeMemo: { cssWidth: number; cssHeight: number; dpr: number; pixelWidth: number; pixelHeight: number } | null = null;
   private selectedId: number | null = null;
   private renderSeq = 0;
   private renderAbort: AbortController | null = null;
@@ -383,11 +384,31 @@ export class DrawingOverlay {
 
   resize(viewport: Viewport): void {
     if (this.destroyed) return;
-    this.canvas.width = Math.floor(viewport.width * viewport.dpr);
-    this.canvas.height = Math.floor(viewport.height * viewport.dpr);
-    this.canvas.style.width = `${viewport.width}px`;
-    this.canvas.style.height = `${viewport.height}px`;
-    this.ctx.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
+    const cssWidth = Number.isFinite(viewport.width) ? viewport.width : 0;
+    const cssHeight = Number.isFinite(viewport.height) ? viewport.height : 0;
+    const dpr = Number.isFinite(viewport.dpr) && viewport.dpr > 0 ? viewport.dpr : 1;
+
+    const pixelWidth = Math.max(0, Math.floor(cssWidth * dpr));
+    const pixelHeight = Math.max(0, Math.floor(cssHeight * dpr));
+
+    const memo = this.resizeMemo;
+    if (
+      memo &&
+      memo.cssWidth === cssWidth &&
+      memo.cssHeight === cssHeight &&
+      memo.dpr === dpr &&
+      memo.pixelWidth === pixelWidth &&
+      memo.pixelHeight === pixelHeight
+    ) {
+      return;
+    }
+
+    this.resizeMemo = { cssWidth, cssHeight, dpr, pixelWidth, pixelHeight };
+    this.canvas.width = pixelWidth;
+    this.canvas.height = pixelHeight;
+    this.canvas.style.width = `${cssWidth}px`;
+    this.canvas.style.height = `${cssHeight}px`;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   refreshThemeTokens(): void {
@@ -1116,6 +1137,7 @@ export class DrawingOverlay {
     this.shapeTextCache.clear();
     this.shapeTextCachePruneSource = null;
     this.shapeTextCachePruneLength = 0;
+    this.resizeMemo = null;
     this.chartSurfacePruneSource = null;
     this.chartSurfacePruneLength = 0;
     this.chartSurfaceKeep.clear();
