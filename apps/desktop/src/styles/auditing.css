@@ -9,8 +9,8 @@
   position: absolute;
   /* row header width (48px) + offset (8px) */
   left: 56px;
-  bottom: 8px;
-  padding: 4px 8px;
+  bottom: var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--formula-grid-line, var(--border));
   border-radius: var(--radius);
   background: var(--formula-grid-scrollbar-track, var(--bg-tertiary));
@@ -25,14 +25,14 @@
 .auditing-legend__row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
 .auditing-legend__modes {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
@@ -47,7 +47,7 @@
   height: 10px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--formula-grid-line, var(--border));
-  margin-right: 4px;
+  margin-right: var(--space-2);
 }
 
 .auditing-legend__swatch--precedents {
@@ -63,7 +63,7 @@
 }
 
 .auditing-legend__errors {
-  margin-top: 4px;
+  margin-top: var(--space-2);
   opacity: 0.9;
   max-width: 360px;
   white-space: pre-wrap;
