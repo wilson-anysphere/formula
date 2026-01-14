@@ -768,6 +768,7 @@ jobs:
           path: artifacts/desktop-perf-platform-matrix
 
       - name: Publish benchmark results (non-gating)
+        continue-on-error: true
         uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1
         with:
           tool: customSmallerIsBetter
