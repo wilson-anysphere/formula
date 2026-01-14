@@ -389,6 +389,91 @@ fn normalize_chart_ex_kind_hint(raw: &str) -> Option<String> {
     Some(lowercase_first(base))
 }
 
+fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
+    // This helper only feeds diagnostics when ChartEx kind detection fails.
+    // Keep output small + stable, but include enough context to extend detection
+    // later (without spamming logs for large parts).
+    const MAX_HINTS: usize = 12;
+
+    let mut out = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    let push_hint = |out: &mut Vec<String>, seen: &mut HashSet<String>, hint: String| {
+        if out.len() >= MAX_HINTS {
+            return;
+        }
+        if seen.insert(hint.clone()) {
+            out.push(hint);
+        }
+    };
+
+    // 1) Series-level layout hints (common in ChartEx parts that omit explicit
+    // `<*Chart>` nodes).
+    for series in doc.descendants().filter(|n| {
+        if !n.is_element() {
+            return false;
+        }
+        let name = n.tag_name().name();
+        name.eq_ignore_ascii_case("series") || name.eq_ignore_ascii_case("ser")
+    }) {
+        if let Some(raw) = attribute_case_insensitive(series, "layoutId") {
+            if let Some(normalized) = normalize_chart_ex_kind_hint(raw) {
+                push_hint(&mut out, &mut seen, format!("layoutId={normalized}"));
+            } else {
+                let raw = raw.trim();
+                if !raw.is_empty() {
+                    push_hint(&mut out, &mut seen, format!("layoutId={raw}"));
+                }
+            }
+        }
+    }
+
+    // 2) `chartType` attribute hints (seen in some producer variants).
+    for node in doc.descendants().filter(|n| n.is_element()) {
+        if let Some(raw) = attribute_case_insensitive(node, "chartType") {
+            if let Some(normalized) = normalize_chart_ex_kind_hint(raw) {
+                push_hint(&mut out, &mut seen, format!("chartType={normalized}"));
+            } else {
+                let raw = raw.trim();
+                if !raw.is_empty() {
+                    push_hint(&mut out, &mut seen, format!("chartType={raw}"));
+                }
+            }
+        }
+    }
+
+    // 3) Capture a few interesting tag names / type-like attributes under the
+    // plot area (excluding chartData which is unrelated to the chart kind).
+    for node in doc
+        .descendants()
+        .filter(|n| n.is_element())
+        .filter(|n| has_ancestor_named(*n, "plotArea") && !has_ancestor_named(*n, "chartData"))
+    {
+        if out.len() >= MAX_HINTS {
+            break;
+        }
+
+        let name = node.tag_name().name();
+        // Skip common container nodes.
+        if matches!(name, "chartSpace" | "chart" | "plotArea" | "chartData" | "data") {
+            continue;
+        }
+
+        if let Some(val) = attribute_case_insensitive(node, "val") {
+            let val = val.trim();
+            if !val.is_empty() && name.to_ascii_lowercase().contains("type") {
+                push_hint(&mut out, &mut seen, format!("{name}={val}"));
+                continue;
+            }
+        }
+
+        // Otherwise include the tag name itself as a last resort.
+        push_hint(&mut out, &mut seen, format!("tag={name}"));
+    }
+
+    out
+}
+
 #[derive(Debug, Clone, Default)]
 struct ChartExDataDefinition {
     categories: Option<SeriesTextData>,
