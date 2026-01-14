@@ -1940,33 +1940,10 @@ export class ContextManager {
         if (!dlp || !shouldDropAllAttachmentData) return attachmentsForPromptBase;
         if (!Array.isArray(attachmentsForPromptBase)) return attachmentsForPromptBase;
 
-        // Only redact the sheet-name portion when the structured policy decision disallows that
-        // sheet (document + sheet scope). Range-level structured decisions do not necessarily imply
-        // the sheet name itself is sensitive.
+        // Range-level structured decisions should also be able to trigger metadata redaction for the
+        // attachment reference. The reference (including sheet name) is an identifier for the disallowed
+        // content, and may contain non-heuristic sensitive strings.
         const index = getDlpDocumentIndex();
-
-        /**
-         * @param {string} sheetName
-         */
-        const sheetNameDisallowed = (sheetName) => {
-          const raw = String(sheetName ?? "");
-          if (!raw) return false;
-          // Best-effort: if we cannot build the structured index for any reason, be conservative
-          // and treat sheet-name tokens as disallowed under structured DLP redaction.
-          if (!index) return true;
-          const sheetId = resolveDlpSheetId(raw);
-          let classification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
-          classification = maxClassification(classification, index.docClassificationMax);
-          const sheetMax = sheetId ? index.sheetClassificationMaxBySheetId.get(sheetId) : null;
-          if (sheetMax) classification = maxClassification(classification, sheetMax);
-          const decision = evaluatePolicy({
-            action: DLP_ACTION.AI_CLOUD_PROCESSING,
-            classification,
-            policy: dlp.policy,
-            options: { includeRestrictedContent },
-          });
-          return decision.decision !== DLP_DECISION.ALLOW;
-        };
 
         return attachmentsForPromptBase.map((item) => {
           if (!item || typeof item !== "object" || Array.isArray(item)) return item;
@@ -1980,7 +1957,18 @@ export class ContextManager {
             return item;
           }
           if (!parsed.sheetName) return item;
-          if (!sheetNameDisallowed(parsed.sheetName)) return item;
+          const sheetId = resolveDlpSheetId(parsed.sheetName);
+          const range = { start: { row: parsed.startRow, col: parsed.startCol }, end: { row: parsed.endRow, col: parsed.endCol } };
+          const recordClassification = index
+            ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
+            : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+          const recordDecision = evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification: recordClassification,
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          });
+          if (recordDecision.decision === DLP_DECISION.ALLOW) return item;
           return { ...item, reference: rangeToA1({ ...parsed, sheetName: "[REDACTED]" }) };
         });
       })();
@@ -2382,19 +2370,67 @@ export class ContextManager {
                 const raw = String(sheetName ?? "");
                 if (!raw) return false;
                 const sheetId = resolveDlpSheetId(raw);
-                let classification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
-                if (index?.docClassificationMax) {
-                  classification = maxClassification(classification, index.docClassificationMax);
-                }
-                const sheetMax = sheetId ? index?.sheetClassificationMaxBySheetId?.get?.(sheetId) : null;
-                if (sheetMax) classification = maxClassification(classification, sheetMax);
-                const decision = evaluatePolicy({
+                // Best-effort: if we cannot build the structured selector index, fall back to
+                // not redacting non-heuristic sheet names (heuristic redaction still applies).
+                if (!index) return false;
+
+                // Base classification applied to the entire sheet (document + sheet selectors).
+                let baseClassification = maxClassification({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }, index.docClassificationMax);
+                const sheetMax = index.sheetClassificationMaxBySheetId.get(sheetId);
+                if (sheetMax) baseClassification = maxClassification(baseClassification, sheetMax);
+
+                // If the sheet itself is disallowed due to doc/sheet scope, redact the name.
+                const baseDecision = evaluatePolicy({
                   action: DLP_ACTION.AI_CLOUD_PROCESSING,
-                  classification,
+                  classification: baseClassification,
                   policy: dlp.policy,
                   options: { includeRestrictedContent },
                 });
-                return decision.decision !== DLP_DECISION.ALLOW;
+                if (baseDecision.decision !== DLP_DECISION.ALLOW) return true;
+
+                // Otherwise, if any structured selector on the sheet would require redaction,
+                // treat the sheet name as disallowed metadata.
+                const colMap = index.columnClassificationBySheetId.get(sheetId);
+                if (colMap) {
+                  for (const colClassification of colMap.values()) {
+                    throwIfAborted(signal);
+                    const decision = evaluatePolicy({
+                      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+                      classification: maxClassification(baseClassification, colClassification),
+                      policy: dlp.policy,
+                      options: { includeRestrictedContent },
+                    });
+                    if (decision.decision !== DLP_DECISION.ALLOW) return true;
+                  }
+                }
+
+                const rangeRecords = index.rangeRecordsBySheetId.get(sheetId) ?? [];
+                for (const rec of rangeRecords) {
+                  throwIfAborted(signal);
+                  const decision = evaluatePolicy({
+                    action: DLP_ACTION.AI_CLOUD_PROCESSING,
+                    classification: maxClassification(baseClassification, rec.classification),
+                    policy: dlp.policy,
+                    options: { includeRestrictedContent },
+                  });
+                  if (decision.decision !== DLP_DECISION.ALLOW) return true;
+                }
+
+                const cellMap = index.cellClassificationBySheetId.get(sheetId);
+                if (cellMap) {
+                  for (const cellClassification of cellMap.values()) {
+                    throwIfAborted(signal);
+                    const decision = evaluatePolicy({
+                      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+                      classification: maxClassification(baseClassification, cellClassification),
+                      policy: dlp.policy,
+                      options: { includeRestrictedContent },
+                    });
+                    if (decision.decision !== DLP_DECISION.ALLOW) return true;
+                  }
+                }
+
+                return false;
               };
 
               /**
