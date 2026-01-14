@@ -1,6 +1,9 @@
 use std::io::{Cursor, Read as _, Seek as _, SeekFrom, Write as _};
 
-use formula_office_crypto::{decrypt_encrypted_package, is_encrypted_ooxml_ole, OfficeCryptoError};
+use formula_office_crypto::{
+    decrypt_encrypted_package, decrypt_encrypted_package_streams, is_encrypted_ooxml_ole,
+    OfficeCryptoError,
+};
 
 const AGILE_FIXTURE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -81,9 +84,40 @@ fn assert_decrypted_zip_contains_workbook(decrypted: &[u8]) {
     );
 }
 
+fn extract_encryption_streams(ole_bytes: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let cursor = Cursor::new(ole_bytes);
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open cfb");
+
+    let mut encryption_info = Vec::new();
+    ole.open_stream("EncryptionInfo")
+        .or_else(|_| ole.open_stream("/EncryptionInfo"))
+        .expect("open EncryptionInfo stream")
+        .read_to_end(&mut encryption_info)
+        .expect("read EncryptionInfo stream");
+
+    let mut encrypted_package = Vec::new();
+    ole.open_stream("EncryptedPackage")
+        .or_else(|_| ole.open_stream("/EncryptedPackage"))
+        .expect("open EncryptedPackage stream")
+        .read_to_end(&mut encrypted_package)
+        .expect("read EncryptedPackage stream");
+
+    (encryption_info, encrypted_package)
+}
+
 #[test]
 fn decrypts_agile_encrypted_package() {
     let decrypted = decrypt_encrypted_package(AGILE_FIXTURE, "password").expect("decrypt agile");
+    assert_eq!(decrypted.as_slice(), AGILE_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
+fn decrypts_agile_encrypted_package_from_streams() {
+    let (encryption_info, encrypted_package) = extract_encryption_streams(AGILE_FIXTURE);
+    let decrypted =
+        decrypt_encrypted_package_streams(&encryption_info, &encrypted_package, "password")
+            .expect("decrypt agile from streams");
     assert_eq!(decrypted.as_slice(), AGILE_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }
@@ -108,6 +142,16 @@ fn decrypts_agile_unicode_fixture() {
 fn decrypts_standard_encrypted_package() {
     let decrypted =
         decrypt_encrypted_package(STANDARD_FIXTURE, "password").expect("decrypt standard");
+    assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
+fn decrypts_standard_encrypted_package_from_streams() {
+    let (encryption_info, encrypted_package) = extract_encryption_streams(STANDARD_FIXTURE);
+    let decrypted =
+        decrypt_encrypted_package_streams(&encryption_info, &encrypted_package, "password")
+            .expect("decrypt standard from streams");
     assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }
