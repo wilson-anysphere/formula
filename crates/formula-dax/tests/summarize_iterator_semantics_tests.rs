@@ -33,6 +33,18 @@ fn summarize_virtual_row_context_behaves_like_dax_in_iterators() {
         .unwrap();
     assert_eq!(groups, 2.into());
 
+    // Bracket identifiers like `[Region]` should resolve to the virtual row bindings produced by
+    // SUMMARIZE.
+    let regions = engine
+        .evaluate(
+            &model,
+            "CONCATENATEX(SUMMARIZE(Orders, Customers[Region]), [Region], \",\", [Region])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(regions, Value::from("East,West"));
+
     let err = engine
         .evaluate(
             &model,

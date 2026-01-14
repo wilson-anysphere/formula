@@ -598,6 +598,7 @@ impl UnmatchedFactRows {
         }
     }
 
+
     pub(crate) fn extend_into(&self, out: &mut Vec<usize>) {
         match self {
             UnmatchedFactRows::Sparse(rows) => out.extend(rows.iter().copied()),

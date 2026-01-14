@@ -457,6 +457,31 @@ impl DaxEngine {
                 // DAX allows `[Column]` references in row context. Bracketed identifiers
                 // are ambiguous (measure vs. column), so we parse them as `Expr::Measure`
                 // and resolve as a column when no measure is defined.
+                //
+                // For virtual row contexts (e.g. iterators over `SUMMARIZE`), the "current row"
+                // consists of explicit column bindings rather than a physical table row. In that
+                // case, resolve `[Column]` by looking for a matching bound column name in the
+                // innermost virtual frame.
+                if let Some(RowContextFrame::Virtual { bindings }) = row_ctx.stack.last() {
+                    let mut matches = bindings
+                        .iter()
+                        .filter(|((_, c), _)| c == &normalized)
+                        .map(|(_, v)| v);
+                    let first = matches.next();
+                    let second = matches.next();
+                    match (first, second) {
+                        (Some(v), None) => return Ok(v.clone()),
+                        (Some(_), Some(_)) => {
+                            return Err(DaxError::Eval(format!(
+                                "ambiguous column reference [{normalized}] in the current row context"
+                            )))
+                        }
+                        (None, _) => {
+                            // Fall through: if there is an outer physical row context, use it as
+                            // the bracket identifier target (matching existing behavior).
+                        }
+                    }
+                }
                 let Some(current_table) = row_ctx.current_table() else {
                     // Virtual row contexts (e.g. from `SUMMARIZE` or table constructors) do not
                     // have a single "current table". In those cases, attempt to resolve bracketed
