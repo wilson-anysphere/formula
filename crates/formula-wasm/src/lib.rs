@@ -4364,15 +4364,30 @@ impl WasmWorkbook {
         }
 
         #[derive(Debug, Deserialize)]
+        #[serde(untagged)]
+        enum SheetVisibilityJson {
+            String(String),
+            Other(JsonValue),
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[serde(untagged)]
+        enum TabColorJson {
+            Color(TabColor),
+            String(String),
+            Other(JsonValue),
+        }
+
+        #[derive(Debug, Deserialize)]
         struct SheetJson {
             #[serde(default, rename = "rowCount")]
             row_count: Option<u32>,
             #[serde(default, rename = "colCount")]
             col_count: Option<u32>,
             #[serde(default)]
-            visibility: Option<String>,
+            visibility: Option<SheetVisibilityJson>,
             #[serde(default, rename = "tabColor")]
-            tab_color: Option<TabColor>,
+            tab_color: Option<TabColorJson>,
             cells: BTreeMap<String, JsonValue>,
         }
 
@@ -4437,50 +4452,87 @@ impl WasmWorkbook {
         }
 
         for (sheet_name, sheet) in sheets {
+            let SheetJson {
+                row_count,
+                col_count,
+                visibility,
+                tab_color,
+                cells,
+            } = sheet;
             let display_name = wb.ensure_sheet(&sheet_name);
 
-            if let Some(raw) = sheet.visibility.as_deref() {
+            if let Some(raw) = visibility.as_ref().and_then(|v| match v {
+                SheetVisibilityJson::String(s) => Some(s.as_str()),
+                SheetVisibilityJson::Other(_other) => None,
+            }) {
                 let trimmed = raw.trim();
                 if trimmed.is_empty() || trimmed == "visible" {
                     wb.sheet_visibility.remove(&display_name);
                 } else {
                     let vis = match trimmed {
-                        "hidden" => SheetVisibility::Hidden,
-                        "veryHidden" | "very_hidden" => SheetVisibility::VeryHidden,
-                        other => {
-                            return Err(js_err(format!(
-                                "invalid sheet visibility (expected visible|hidden|veryHidden): {other}"
-                            )))
-                        }
+                        "hidden" => Some(SheetVisibility::Hidden),
+                        "veryHidden" | "very_hidden" | "veryhidden" => Some(SheetVisibility::VeryHidden),
+                        _ => None,
                     };
-                    wb.sheet_visibility.insert(display_name.clone(), vis);
+                    match vis {
+                        Some(vis) => {
+                            wb.sheet_visibility.insert(display_name.clone(), vis);
+                        }
+                        None => {
+                            // Backwards/forwards compatible behavior: unknown visibility values are
+                            // treated as the default ("visible") instead of failing the entire
+                            // workbook hydration.
+                            wb.sheet_visibility.remove(&display_name);
+                        }
+                    }
                 }
             }
 
-            if let Some(color) = sheet.tab_color.as_ref() {
-                let is_empty = color.rgb.is_none()
-                    && color.theme.is_none()
-                    && color.indexed.is_none()
-                    && color.tint.is_none()
-                    && color.auto.is_none();
-                if is_empty {
-                    wb.sheet_tab_colors.remove(&display_name);
-                } else {
-                    wb.sheet_tab_colors
-                        .insert(display_name.clone(), color.clone());
+            if let Some(color) = tab_color {
+                match color {
+                    TabColorJson::String(raw) => {
+                        let mut trimmed = raw.trim();
+                        if let Some(stripped) = trimmed.strip_prefix('#') {
+                            trimmed = stripped;
+                        }
+                        if trimmed.is_empty() {
+                            wb.sheet_tab_colors.remove(&display_name);
+                        } else {
+                            wb.sheet_tab_colors.insert(
+                                display_name.clone(),
+                                TabColor::rgb(trimmed.to_uppercase()),
+                            );
+                        }
+                    }
+                    TabColorJson::Color(color) => {
+                        let is_empty = color.rgb.is_none()
+                            && color.theme.is_none()
+                            && color.indexed.is_none()
+                            && color.tint.is_none()
+                            && color.auto.is_none();
+                        if is_empty {
+                            wb.sheet_tab_colors.remove(&display_name);
+                        } else {
+                            wb.sheet_tab_colors
+                                .insert(display_name.clone(), color.clone());
+                        }
+                    }
+                    TabColorJson::Other(_other) => {
+                        // Ignore unknown tabColor types for forwards compatibility.
+                    }
                 }
             }
             // Apply sheet dimensions (when provided) before importing cells so large addresses
             // can be set without pre-populating the full grid.
-            if sheet.row_count.is_some() || sheet.col_count.is_some() {
-                let rows = sheet.row_count.unwrap_or(EXCEL_MAX_ROWS);
-                let cols = sheet.col_count.unwrap_or(EXCEL_MAX_COLS);
+            if row_count.is_some() || col_count.is_some() {
+                let rows = row_count.unwrap_or(EXCEL_MAX_ROWS);
+                let cols = col_count.unwrap_or(EXCEL_MAX_COLS);
                 if rows != EXCEL_MAX_ROWS || cols != EXCEL_MAX_COLS {
                     wb.set_sheet_dimensions_internal(&display_name, rows, cols)?;
                 }
             }
 
-            for (address, input) in sheet.cells {
+            for (address, input) in cells {
                 if !is_scalar_json(&input) {
                     return Err(js_err(format!("invalid cell value: {address}")));
                 }
@@ -6811,6 +6863,36 @@ mod tests {
         let json_str2 = wb2.to_json().unwrap();
         let parsed2: serde_json::Value = serde_json::from_str(&json_str2).unwrap();
         assert_eq!(parsed2["sheetOrder"], json!(["B", "A", "C"]));
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_json_accepts_tab_color_string_and_ignores_unknown_visibility() {
+        // Some snapshot producers represent tab colors as an ARGB string. Be tolerant so older
+        // payloads continue to hydrate after adding structured `tabColor` metadata.
+        let input = json!({
+            "sheets": {
+                "Sheet1": {
+                    "visibility": "not_a_real_visibility",
+                    "tabColor": "ffff0000",
+                    "cells": {}
+                }
+            }
+        })
+        .to_string();
+        let wb = WasmWorkbook::from_json(&input).unwrap();
+        let json_str = wb.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let sheet = parsed["sheets"]["Sheet1"]
+            .as_object()
+            .expect("sheet should serialize as an object");
+
+        assert_eq!(parsed["sheetOrder"], json!(["Sheet1"]));
+        assert!(
+            !sheet.contains_key("visibility"),
+            "unknown visibility should be treated as default/omitted"
+        );
+        assert_eq!(sheet["tabColor"]["rgb"], json!("FFFF0000"));
     }
 
     #[test]
