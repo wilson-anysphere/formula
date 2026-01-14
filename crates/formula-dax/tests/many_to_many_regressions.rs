@@ -233,6 +233,78 @@ fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys() {
 }
 
 #[test]
+fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys_for_columnar_dim() {
+    // Same regression as `blank_foreign_keys_do_not_match_physical_blank_dimension_keys`, but with
+    // a columnar-backed dimension table.
+    let mut model = DataModel::new();
+
+    let schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    // Physical dimension row whose key is BLANK.
+    dim.append_row(&[
+        formula_columnar::Value::Null,
+        formula_columnar::Value::String("PhysicalBlank".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();
+    fact.push_row(vec![2.into(), Value::Blank, 7.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total Amount", "SUM(Fact[Amount])").unwrap();
+
+    // The virtual blank member should include fact rows whose FK is BLANK.
+    let blank_attr = FilterContext::empty().with_column_equals("Dim", "Attr", Value::Blank);
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &blank_attr).unwrap(),
+        7.0.into()
+    );
+
+    // Filtering to the *physical* BLANK key row should NOT match those fact rows.
+    let physical_blank =
+        FilterContext::empty().with_column_equals("Dim", "Attr", "PhysicalBlank".into());
+    assert_eq!(
+        model.evaluate_measure("Total Amount", &physical_blank).unwrap(),
+        Value::Blank
+    );
+}
+
+#[test]
 fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys_with_bidirectional_filtering() {
     // Similar to `blank_foreign_keys_do_not_match_physical_blank_dimension_keys`, but with
     // bidirectional filtering enabled.
@@ -247,6 +319,76 @@ fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys_with_bidirectio
     dim.push_row(vec![Value::Blank, "PhysicalBlank".into()])
         .unwrap();
     model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();
+    fact.push_row(vec![2.into(), Value::Blank, 7.0.into()])
+        .unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Both,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+
+    let filter = FilterContext::empty().with_column_equals("Fact", "Key", Value::Blank);
+    let result = engine
+        .evaluate(
+            &model,
+            r#"COUNTROWS(FILTER(VALUES(Dim[Attr]), Dim[Attr] = "PhysicalBlank"))"#,
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(result, 0.into());
+}
+
+#[test]
+fn blank_foreign_keys_do_not_match_physical_blank_dimension_keys_with_bidirectional_filtering_for_columnar_dim(
+) {
+    // Same regression as `blank_foreign_keys_do_not_match_physical_blank_dimension_keys_with_bidirectional_filtering`,
+    // but with a columnar-backed dimension table.
+    let mut model = DataModel::new();
+
+    let schema = vec![
+        ColumnSchema {
+            name: "Key".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Attr".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut dim = ColumnarTableBuilder::new(schema, options);
+    dim.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String("A".into()),
+    ]);
+    // Physical dimension row whose key is BLANK.
+    dim.append_row(&[
+        formula_columnar::Value::Null,
+        formula_columnar::Value::String("PhysicalBlank".into()),
+    ]);
+    model
+        .add_table(Table::from_columnar("Dim", dim.finalize()))
+        .unwrap();
 
     let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
     fact.push_row(vec![1.into(), 1.into(), 10.0.into()]).unwrap();

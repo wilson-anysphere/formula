@@ -1996,6 +1996,7 @@ fn pivot_planned_row_group_by(
     }
 
     let state_template: Vec<AggState> = agg_specs.iter().map(AggState::new).collect();
+    let base_table_key = normalize_ident(base_table);
     let row_sets = (!filter.is_empty())
         .then(|| crate::engine::resolve_row_sets(model, filter))
         .transpose()?;
