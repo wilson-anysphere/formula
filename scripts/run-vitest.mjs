@@ -77,6 +77,11 @@ if (mode === "run" && shardCount > 1) {
       shell: process.platform === "win32",
     });
 
+    if (res.error) {
+      console.error(res.error);
+      process.exit(1);
+    }
+
     if (res.signal) {
       process.kill(process.pid, res.signal);
       process.exit(1);
@@ -84,6 +89,11 @@ if (mode === "run" && shardCount > 1) {
 
     if (typeof res.status === "number" && res.status !== 0) {
       process.exit(res.status);
+    }
+
+    // A null status indicates the child failed to spawn or terminated in an unexpected way.
+    if (res.status == null) {
+      process.exit(1);
     }
   }
   process.exit(0);
