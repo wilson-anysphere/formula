@@ -86,15 +86,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.alignment.mergeCenter.mergeAcross",
   "home.alignment.mergeCenter.mergeCells",
   "home.alignment.mergeCenter.unmergeCells",
-  "home.number.numberFormat",
-  "home.number.percent",
-  "home.number.accounting",
-  "home.number.date",
-  "home.number.comma",
-  "home.number.increaseDecimal",
-  "home.number.decreaseDecimal",
-  "home.number.formatCells",
-  "home.number.moreFormats.formatCells",
   "home.number.moreFormats.custom",
   "home.cells.format.formatCells",
   "home.cells.format.rowHeight",
@@ -214,30 +205,6 @@ function isExemptViaPattern(commandId: string): boolean {
       kind === "left" ||
       kind === "right"
     );
-  }
-
-  // Number format dropdown menu items.
-  if (commandId.startsWith("home.number.numberFormat.")) {
-    const kind = commandId.slice("home.number.numberFormat.".length);
-    return (
-      kind === "general" ||
-      kind === "number" ||
-      kind === "currency" ||
-      kind === "accounting" ||
-      kind === "percentage" ||
-      kind === "shortDate" ||
-      kind === "longDate" ||
-      kind === "time" ||
-      kind === "fraction" ||
-      kind === "scientific" ||
-      kind === "text"
-    );
-  }
-
-  // Accounting dropdown currency menu items.
-  if (commandId.startsWith("home.number.accounting.")) {
-    const kind = commandId.slice("home.number.accounting.".length);
-    return kind === "usd" || kind === "eur" || kind === "gbp" || kind === "jpy";
   }
 
   return false;
