@@ -347,6 +347,28 @@ function normalizeWorkbookRect(rect) {
 }
 
 /**
+ * Normalize a workbook chunk kind to one of the known `ai-rag` kinds.
+ *
+ * Vector stores can contain arbitrary metadata fields (including `kind`). Under DLP enforcement we treat
+ * unknown kind strings as prompt-unsafe because they can contain non-heuristic secrets (e.g. "TopSecret")
+ * that a no-op redactor cannot detect.
+ *
+ * @param {unknown} kind
+ * @returns {"chunk" | "table" | "namedRange" | "dataRegion" | "formulaRegion"}
+ */
+function normalizeWorkbookChunkKind(kind) {
+  const raw = typeof kind === "string" ? kind.trim() : kind == null ? "" : String(kind).trim();
+  if (!raw) return "chunk";
+  const lowered = raw.toLowerCase();
+  if (lowered === "table") return "table";
+  if (lowered === "namedrange") return "namedRange";
+  if (lowered === "dataregion") return "dataRegion";
+  if (lowered === "formularegion") return "formulaRegion";
+  if (lowered === "chunk") return "chunk";
+  return "chunk";
+}
+
+/**
  * Filter vector-store chunk metadata before returning it to callers under structured DLP redaction.
  *
  * Vector stores (especially third-party ones) may persist additional metadata fields. Those fields can
@@ -374,7 +396,12 @@ function filterWorkbookChunkMetadataForOutput(metadata) {
   /** @type {any} */
   const out = {};
   for (const key of allowedKeys) {
-    if (Object.prototype.hasOwnProperty.call(metadata, key)) out[key] = metadata[key];
+    if (!Object.prototype.hasOwnProperty.call(metadata, key)) continue;
+    if (key === "kind") {
+      out.kind = normalizeWorkbookChunkKind(metadata.kind);
+    } else {
+      out[key] = metadata[key];
+    }
   }
   return out;
 }
@@ -1875,7 +1902,7 @@ export class ContextManager {
      */
     const safeChunkFirstLineFromMetadata = (metadata, options = {}) => {
       const meta = metadata && typeof metadata === "object" ? metadata : {};
-      const kind = String(meta.kind ?? "chunk").toUpperCase();
+      const kind = normalizeWorkbookChunkKind(meta.kind ?? "chunk").toUpperCase();
       const shouldRedactTokens = options.redactTokens === true;
       const title =
         shouldRedactTokens
@@ -2333,7 +2360,7 @@ export class ContextManager {
     throwIfAborted(signal);
     const retrievedChunks = hits.map((hit, idx) => {
       const meta = hit.metadata ?? {};
-      const kind = meta.kind ?? "chunk";
+      const kind = dlp ? normalizeWorkbookChunkKind(meta.kind ?? "chunk") : (meta.kind ?? "chunk");
       const audit = chunkAudits[idx];
       const decision = audit?.decision ?? null;
       const recordDecision = audit?.recordDecision ?? null;
@@ -2415,6 +2442,7 @@ export class ContextManager {
       const { text: _metaText, dlpSheetId: _metaSheetId, ...safeMeta } = meta;
       /** @type {any} */
       const safeMetaOut = { ...safeMeta };
+      if (dlp && Object.prototype.hasOwnProperty.call(safeMetaOut, "kind")) safeMetaOut.kind = kind;
       if (shouldRedactSheetNameToken) safeMetaOut.sheetName = "[REDACTED]";
       if (shouldRedactTitleToken) safeMetaOut.title = "[REDACTED]";
       if (workbookIdTokenDisallowed) safeMetaOut.workbookId = "[REDACTED]";
