@@ -7277,6 +7277,18 @@ registerDesktopCommands({
   applyFormattingToSelection,
   getActiveCellNumberFormat: activeCellNumberFormat,
   getActiveCellIndentLevel: activeCellIndentLevel,
+  formatPainter: {
+    isArmed: () => Boolean(formatPainterState),
+    arm: () => armFormatPainter(),
+    disarm: () => disarmFormatPainter(),
+    onCancel: () => {
+      try {
+        showToast("Format Painter cancelled");
+      } catch {
+        // ignore (toast root missing in non-UI test environments)
+      }
+    },
+  },
   openFormatCells,
   showQuickPick,
   findReplace: {
@@ -7439,7 +7451,6 @@ registerRibbonMacroCommands({
     isTauri: () => isTauriInvokeAvailable(),
   },
 });
-
 registerDataQueriesCommands({
   commandRegistry,
   layoutController: ribbonLayoutController,

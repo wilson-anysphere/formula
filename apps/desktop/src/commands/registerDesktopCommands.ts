@@ -10,9 +10,9 @@ import { NUMBER_FORMATS, toggleStrikethrough, toggleSubscript, toggleSuperscript
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
 import { registerBuiltinFormatFontCommands } from "./registerBuiltinFormatFontCommands.js";
+import { registerFormatPainterCommand } from "./formatPainterCommand.js";
 import { registerFormatAlignmentCommands } from "./registerFormatAlignmentCommands.js";
 import { registerFormatFontDropdownCommands } from "./registerFormatFontDropdownCommands.js";
-import { registerFormatPainterCommand } from "./formatPainterCommand.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./registerPageLayoutCommands.js";
 import { registerWorkbenchFileCommands, type WorkbenchFileCommandHandlers } from "./registerWorkbenchFileCommands.js";

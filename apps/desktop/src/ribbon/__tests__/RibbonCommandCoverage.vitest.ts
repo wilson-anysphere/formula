@@ -166,6 +166,7 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       commandRegistry,
       app: {} as any,
       layoutController,
+      formatPainter: { isArmed: () => false, arm: () => {}, disarm: () => {} },
       themeController: { setThemePreference: () => {} } as any,
       refreshRibbonUiState: () => {},
       applyFormattingToSelection: () => {},
