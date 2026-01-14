@@ -2410,6 +2410,69 @@ test("TAKE rows suggests 1 and -1", async () => {
   );
 });
 
+test("CHOOSECOLS col_num suggests 1 and -1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=CHOOSECOLS(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=CHOOSECOLS(A1:A10, 1"),
+    `Expected CHOOSECOLS to suggest col_num=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=CHOOSECOLS(A1:A10, -1"),
+    `Expected CHOOSECOLS to suggest col_num=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("CHOOSECOLS repeating col_num suggests 1 and -1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=CHOOSECOLS(A1:A10, 1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=CHOOSECOLS(A1:A10, 1, 1"),
+    `Expected CHOOSECOLS to suggest col_num2=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=CHOOSECOLS(A1:A10, 1, -1"),
+    `Expected CHOOSECOLS to suggest col_num2=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("CHOOSEROWS row_num suggests 1 and -1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=CHOOSEROWS(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=CHOOSEROWS(A1:A10, 1"),
+    `Expected CHOOSEROWS to suggest row_num=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=CHOOSEROWS(A1:A10, -1"),
+    `Expected CHOOSEROWS to suggest row_num=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TOCOL ignore suggests 0, 1, 2, 3", async () => {
   const engine = new TabCompletionEngine();
 

@@ -1091,6 +1091,20 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "-1", displayText: "-1 (drop last column(s))", confidence: 0.59 },
     ],
   },
+  CHOOSECOLS: {
+    // col_num
+    1: [
+      { replacement: "1", displayText: "1 (first column)", confidence: 0.62 },
+      { replacement: "-1", displayText: "-1 (last column)", confidence: 0.61 },
+    ],
+  },
+  CHOOSEROWS: {
+    // row_num
+    1: [
+      { replacement: "1", displayText: "1 (first row)", confidence: 0.62 },
+      { replacement: "-1", displayText: "-1 (last row)", confidence: 0.61 },
+    ],
+  },
   TOCOL: {
     // ignore
     1: TOCOL_IGNORE_ENUM_0_TO_3,
