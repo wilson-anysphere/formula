@@ -243,3 +243,66 @@ fn write_data_validations_block<W: std::io::Write>(
     writer.write_event(Event::End(BytesEnd::new(data_validations_tag.as_str())))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use formula_model::{DataValidation, DataValidationAssignment, DataValidationKind, Range};
+
+    fn list_validation_assignment(range: &str) -> DataValidationAssignment {
+        DataValidationAssignment {
+            id: 1,
+            ranges: vec![Range::from_a1(range).unwrap()],
+            validation: DataValidation {
+                kind: DataValidationKind::List,
+                operator: None,
+                formula1: r#""Yes,No""#.to_string(),
+                formula2: None,
+                allow_blank: true,
+                show_input_message: true,
+                show_error_message: true,
+                show_drop_down: false,
+                input_message: None,
+                error_alert: None,
+            },
+        }
+    }
+
+    #[test]
+    fn inserts_before_table_parts_when_missing() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData/><tableParts count="1"><tablePart r:id="rId1"/></tableParts></worksheet>"#;
+        let validations = vec![list_validation_assignment("A1")];
+        let updated = update_worksheet_data_validations_xml(xml, &validations).unwrap();
+
+        let dv_pos = updated.find("<dataValidations").expect("dataValidations inserted");
+        let table_pos = updated.find("<tableParts").expect("tableParts exists");
+        assert!(
+            dv_pos < table_pos,
+            "expected dataValidations before tableParts, got:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn inserts_before_page_margins_when_missing() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>"#;
+        let validations = vec![list_validation_assignment("A1")];
+        let updated = update_worksheet_data_validations_xml(xml, &validations).unwrap();
+
+        let dv_pos = updated.find("<dataValidations").expect("dataValidations inserted");
+        let margins_pos = updated.find("<pageMargins").expect("pageMargins exists");
+        assert!(
+            dv_pos < margins_pos,
+            "expected dataValidations before pageMargins, got:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn removes_existing_data_validations_when_cleared() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><dataValidations count="1"><dataValidation type="list" sqref="A1"><formula1>"Yes,No"</formula1></dataValidation></dataValidations><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>"#;
+        let updated = update_worksheet_data_validations_xml(xml, &[]).unwrap();
+        assert!(
+            !updated.contains("dataValidations"),
+            "expected dataValidations to be removed, got:\n{updated}"
+        );
+    }
+}
