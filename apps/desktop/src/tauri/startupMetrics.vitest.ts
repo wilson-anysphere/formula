@@ -468,6 +468,47 @@ describe("startupMetrics", () => {
     expect(listen.mock.invocationCallOrder.at(-1)!).toBeLessThan(invoke.mock.invocationCallOrder[1]);
   });
 
+  it("waits for listener installation to settle before requesting a re-emit (avoids dropping startup:* events)", async () => {
+    // Ensure we re-evaluate the bootstrap module even if a prior test imported it.
+    vi.resetModules();
+
+    const invoke = vi.fn().mockResolvedValue(null);
+
+    // Simulate slow (async) listener registration: the bootstrap should not call
+    // `reportStartupWebviewLoaded()` the second time until these promises resolve.
+    const listenResolvers: Array<() => void> = [];
+    const listen = vi.fn(() => {
+      return new Promise<() => void>((resolve) => {
+        listenResolvers.push(() => resolve(() => {}));
+      });
+    });
+
+    (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+    (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_WEBVIEW_LOADED_REPORTED__ = undefined;
+
+    await import("./startupMetricsBootstrap");
+
+    // First report happens synchronously at module evaluation time.
+    expect(invoke).toHaveBeenCalledWith("report_startup_webview_loaded");
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    // Allow any scheduled microtasks to run; we should *not* re-report yet because
+    // listeners are still pending.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    // Resolve all listener registrations.
+    for (const resolve of listenResolvers) resolve();
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    // Once listener installation settles, the bootstrap requests a re-emit.
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
   it("retries reporting once core.invoke becomes available (delayed __TAURI__ injection)", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2025-01-01T00:00:00Z"));

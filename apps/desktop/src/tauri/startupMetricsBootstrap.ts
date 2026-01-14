@@ -53,11 +53,14 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
   // Call immediately (synchronously) to minimize skew for any host-side metrics recorded by this
   // IPC. This may emit `startup:*` events before listeners are registered; we call again after
   // listener installation to re-emit cached timings for late listeners.
-  try {
-    reportStartupWebviewLoaded();
-  } catch {
-    // Best-effort; instrumentation should never block startup.
-  }
+  const safeReport = (): void => {
+    try {
+      reportStartupWebviewLoaded();
+    } catch {
+      // Best-effort; instrumentation should never block startup.
+    }
+  };
+  safeReport();
   try {
     if (getTauriInvokeOrNull()) g[WEBVIEW_REPORTED_KEY] = true;
   } catch {
@@ -73,40 +76,45 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
   // deterministically even when promise microtasks are only flushed after `advanceTimersByTime`.
   const deadlineMs = Date.now() + 10_000;
   let delayMs = 1;
+  let listenersInstallPromise: Promise<void> | null = null;
   const tick = (): void => {
-    if (g[LISTENERS_KEY]) return;
     if (Date.now() >= deadlineMs) return;
 
     // If the `core.invoke` binding becomes available after the first JS tick, send a best-effort
     // report as soon as possible (still re-emitting again once listeners are installed).
     if (!g[WEBVIEW_REPORTED_KEY]) {
       if (getTauriInvokeOrNull()) {
-        try {
-          reportStartupWebviewLoaded();
-        } catch {
-          // ignore
-        }
+        safeReport();
         g[WEBVIEW_REPORTED_KEY] = true;
       }
     }
 
-    try {
-      // Fire-and-forget: `installStartupTimingsListeners` sets the global flag synchronously
-      // once the event API is available, and it catches individual listener failures.
-      void installStartupTimingsListeners().catch(() => {});
-    } catch {
-      // ignore
+    if (!listenersInstallPromise) {
+      try {
+        // Fire-and-forget: `installStartupTimingsListeners` catches individual listener failures.
+        const promise = installStartupTimingsListeners();
+        // `installStartupTimingsListeners` only sets the global flag when the event API is available.
+        // Capture the promise in that case so we can wait for all listener registrations to resolve
+        // before re-emitting cached timings.
+        if (g[LISTENERS_KEY]) {
+          listenersInstallPromise = promise;
+          void promise
+            .then(() => {
+              // Re-emit cached timings now that listeners are installed.
+              safeReport();
+            })
+            .catch(() => {
+              // ignore
+            });
+        }
+      } catch {
+        // ignore
+      }
     }
 
-    if (g[LISTENERS_KEY]) {
-      // Re-emit cached timings now that listeners are installed.
-      try {
-        reportStartupWebviewLoaded();
-      } catch {
-        // Best-effort; instrumentation should never block startup.
-      }
-      return;
-    }
+    // Once we've successfully reported *and* we've kicked off listener installation (which will
+    // trigger a re-emit on completion), there is nothing left to poll for.
+    if (g[WEBVIEW_REPORTED_KEY] && listenersInstallPromise) return;
 
     const nextDelay = delayMs;
     delayMs = Math.min(50, delayMs * 2);
