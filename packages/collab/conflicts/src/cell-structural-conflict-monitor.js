@@ -446,15 +446,27 @@ export class CellStructuralConflictMonitor {
   
     /** @type {string[]} */
     const toDelete = [];
-    this._ops.forEach((record, id) => {
-      if (opts.excludeIds?.has(String(id))) return;
-      if (!record || typeof record !== "object") return;
+    let hitDeleteLimit = false;
+    const maxDeletesPerPass = 1000;
+
+    // Iterate manually (instead of `forEach`) so we can early-break once we have
+    // enough deletions to make progress. This avoids scanning the entire map on
+    // every prune pass when large logs accumulate.
+    for (const rawId of this._ops.keys()) {
+      const id = String(rawId);
+      if (opts.excludeIds?.has(id)) continue;
+      const record = this._ops.get(rawId);
+      if (!record || typeof record !== "object") continue;
       const createdAt = Number(record.createdAt);
-      if (!Number.isFinite(createdAt)) return;
+      if (!Number.isFinite(createdAt)) continue;
       if (createdAt < cutoff) {
-        toDelete.push(String(id));
+        toDelete.push(id);
+        if (toDelete.length >= maxDeletesPerPass) {
+          hitDeleteLimit = true;
+          break;
+        }
       }
-    });
+    }
 
     if (toDelete.length === 0) return;
 
@@ -463,6 +475,12 @@ export class CellStructuralConflictMonitor {
         this._ops.delete(id);
       }
     }, this.origin);
+
+    // If we hit our per-pass delete cap, schedule another prune pass so large
+    // backlogs are eventually cleared without requiring new writes.
+    if (hitDeleteLimit) {
+      this._scheduleAgePruneTimer(minIntervalMs);
+    }
   }
 
   /**
@@ -496,18 +514,24 @@ export class CellStructuralConflictMonitor {
     }
     if (!hasExpiredAdded) return;
 
+    const minIntervalMs = Math.max(5_000, Math.min(60_000, Math.floor(ageMs / 10)));
+    this._scheduleAgePruneTimer(minIntervalMs);
+  }
+
+  /**
+   * @param {number} delayMs
+   */
+  _scheduleAgePruneTimer(delayMs) {
     // If a timer is already scheduled, keep it; a single deferred prune is
     // sufficient to eventually clean up any late-arriving expired records.
     if (this._agePruneTimer) return;
-
-    const minIntervalMs = Math.max(5_000, Math.min(60_000, Math.floor(ageMs / 10)));
 
     this._agePruneTimer = setTimeout(() => {
       this._agePruneTimer = null;
       // Force to ensure we actually run even if the timer fires slightly early
       // (and therefore the normal throttle window hasn't fully elapsed yet).
       this._pruneOpLogByAge({ force: true });
-    }, minIntervalMs);
+    }, delayMs);
 
     // In Node tests, avoid keeping the process alive solely for best-effort
     // pruning. Browsers don't support `unref`.
