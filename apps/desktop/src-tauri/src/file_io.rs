@@ -2170,6 +2170,150 @@ pub(crate) fn patch_workbook_main_content_type_in_package(
     Ok(Some(cursor.into_inner()))
 }
 
+fn patch_vba_and_date_system_in_package_streaming(
+    bytes: &[u8],
+    workbook: &Workbook,
+    needs_inject_vba: bool,
+    needs_date_system_update: bool,
+    xlsx_date_system: formula_xlsx::DateSystem,
+) -> anyhow::Result<Vec<u8>> {
+    use std::io::Write;
+    use zip::write::FileOptions;
+    use zip::{CompressionMethod, ZipWriter};
+
+    if !needs_inject_vba && !needs_date_system_update {
+        return Ok(bytes.to_vec());
+    }
+
+    let Some(content_types_xml) = formula_xlsx::read_part_from_reader_limited(
+        Cursor::new(bytes),
+        "[Content_Types].xml",
+        XLSX_CONTENT_TYPES_MAX_BYTES,
+    )
+    .context("read [Content_Types].xml")?
+    else {
+        anyhow::bail!("missing [Content_Types].xml part");
+    };
+
+    let Some(workbook_xml) = formula_xlsx::read_part_from_reader_limited(
+        Cursor::new(bytes),
+        "xl/workbook.xml",
+        XLSX_WORKBOOK_XML_MAX_BYTES,
+    )
+    .context("read xl/workbook.xml")?
+    else {
+        anyhow::bail!("missing xl/workbook.xml part");
+    };
+
+    let Some(workbook_rels_xml) = formula_xlsx::read_part_from_reader_limited(
+        Cursor::new(bytes),
+        "xl/_rels/workbook.xml.rels",
+        XLSX_WORKBOOK_XML_MAX_BYTES,
+    )
+    .context("read xl/_rels/workbook.xml.rels")?
+    else {
+        anyhow::bail!("missing xl/_rels/workbook.xml.rels part");
+    };
+
+    // Include `xl/_rels/vbaProject.bin.rels` when present so macro repair can patch/extend it
+    // (and so we preserve any existing relationships in that part).
+    let vba_project_rels_xml = formula_xlsx::read_part_from_reader_limited(
+        Cursor::new(bytes),
+        "xl/_rels/vbaProject.bin.rels",
+        XLSX_WORKBOOK_XML_MAX_BYTES,
+    )
+    .ok()
+    .flatten();
+
+    // Build a "subset" package containing just the parts we need to update. This allows us to
+    // rely on `XlsxPackage::write_to_bytes()`'s macro-repair logic (to update `[Content_Types].xml`
+    // and `.rels` files) without inflating the full workbook (which may contain very large sheet
+    // XML parts).
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+    zip.start_file("[Content_Types].xml", options)
+        .context("start subset [Content_Types].xml")?;
+    zip.write_all(&content_types_xml)
+        .context("write subset [Content_Types].xml")?;
+
+    zip.start_file("xl/workbook.xml", options)
+        .context("start subset xl/workbook.xml")?;
+    zip.write_all(&workbook_xml)
+        .context("write subset xl/workbook.xml")?;
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .context("start subset xl/_rels/workbook.xml.rels")?;
+    zip.write_all(&workbook_rels_xml)
+        .context("write subset xl/_rels/workbook.xml.rels")?;
+
+    if let Some(xml) = vba_project_rels_xml {
+        zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+            .context("start subset xl/_rels/vbaProject.bin.rels")?;
+        zip.write_all(&xml)
+            .context("write subset xl/_rels/vbaProject.bin.rels")?;
+    }
+
+    let subset_bytes = zip
+        .finish()
+        .context("finalize subset package zip")?
+        .into_inner();
+
+    let subset_limits = XlsxPackageLimits {
+        max_part_bytes: MAX_VBA_PROJECT_BIN_BYTES
+            .max(MAX_VBA_PROJECT_SIGNATURE_BIN_BYTES)
+            .max(XLSX_WORKBOOK_XML_MAX_BYTES as usize)
+            .max(XLSX_CONTENT_TYPES_MAX_BYTES as usize) as u64,
+        // The subset contains at most a handful of XML parts plus the VBA payload (<=16MiB); keep
+        // the budget tight to avoid surprising allocations.
+        max_total_bytes: 64 * 1024 * 1024, // 64MiB
+    };
+
+    let mut pkg = XlsxPackage::from_bytes_limited(&subset_bytes, subset_limits)
+        .context("parse subset package for VBA/date system patching")?;
+
+    if needs_inject_vba {
+        pkg.set_part(
+            "xl/vbaProject.bin",
+            workbook.vba_project_bin.clone().expect("checked is_some"),
+        );
+        if let Some(sig) = workbook.vba_project_signature_bin.clone() {
+            pkg.set_part("xl/vbaProjectSignature.bin", sig);
+        }
+    }
+
+    if needs_date_system_update {
+        pkg.set_workbook_date_system(xlsx_date_system)
+            .context("set workbook date system")?;
+    }
+
+    let repacked_subset = pkg
+        .write_to_bytes()
+        .context("write subset package with VBA/date system updates")?;
+
+    // Re-parse so we capture macro repair outputs (content types + relationship repairs).
+    let repacked_pkg = XlsxPackage::from_bytes_limited(&repacked_subset, subset_limits)
+        .context("parse repacked subset package")?;
+
+    let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
+    for (name, bytes) in repacked_pkg.parts() {
+        let canonical = name.strip_prefix('/').unwrap_or(name).to_string();
+        part_overrides.insert(canonical, PartOverride::Replace(bytes.to_vec()));
+    }
+
+    let mut cursor = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+        Cursor::new(bytes),
+        &mut cursor,
+        &WorkbookCellPatches::default(),
+        &part_overrides,
+    )
+    .context("apply VBA/date system part overrides (streaming)")?;
+
+    Ok(cursor.into_inner())
+}
+
 fn workbook_xml_sheet_order_override(
     origin_bytes: &[u8],
     workbook: &Workbook,
@@ -2759,16 +2903,41 @@ fn sheet_metadata_part_overrides(
             continue;
         };
 
-        let sheet_xml_bytes = formula_xlsx::read_part_from_reader_limited(
+        let sheet_xml_bytes = match formula_xlsx::read_part_from_reader_limited(
             Cursor::new(bytes),
             part_name,
             XLSX_WORKSHEET_XML_MAX_BYTES,
-        )
-        .map_err(|e| anyhow::anyhow!(e.to_string()))
-        .with_context(|| format!("read worksheet part {part_name}"))?
-        .ok_or_else(|| anyhow::anyhow!("missing worksheet part {part_name}"))?;
-        let sheet_xml = std::str::from_utf8(&sheet_xml_bytes)
-            .with_context(|| format!("parse worksheet part {part_name} as utf8"))?;
+        ) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => continue,
+            Err(formula_xlsx::XlsxError::PartTooLarge { part, size, max }) => {
+                // Best-effort: if the worksheet XML is too large to load safely, skip patching
+                // optional worksheet-level metadata (tabColor/cols) rather than failing the entire
+                // save. The original worksheet part will be preserved byte-for-byte by the
+                // streaming patcher.
+                eprintln!(
+                    "warning: dropped oversized worksheet part `{part}` while patching sheet metadata ({size} bytes, max {max})"
+                );
+                continue;
+            }
+            Err(err) => {
+                // Best-effort: invalid/unsupported worksheet XML should not fail save.
+                eprintln!(
+                    "warning: failed to read worksheet part `{part_name}` while patching sheet metadata: {err}"
+                );
+                continue;
+            }
+        };
+
+        let sheet_xml = match std::str::from_utf8(&sheet_xml_bytes) {
+            Ok(xml) => xml,
+            Err(err) => {
+                eprintln!(
+                    "warning: failed to parse worksheet part `{part_name}` as utf8 while patching sheet metadata: {err}"
+                );
+                continue;
+            }
+        };
 
         let mut updated_xml = sheet_xml.to_string();
         let mut changed = false;
@@ -3093,28 +3262,28 @@ pub fn build_xlsx_bytes_blocking(path: &Path, workbook: &Workbook) -> anyhow::Re
         }
 
         if needs_inject_vba {
-            let mut pkg = XlsxPackage::from_bytes_limited(&bytes, XlsxPackageLimits::default())
-                .context("parse workbook package for VBA injection")?;
-            pkg.set_part(
-                "xl/vbaProject.bin",
-                workbook.vba_project_bin.clone().expect("checked is_some"),
-            );
-            if let Some(sig) = workbook.vba_project_signature_bin.clone() {
-                pkg.set_part("xl/vbaProjectSignature.bin", sig);
-            }
-            bytes = pkg
-                .write_to_bytes()
-                .context("write workbook package with injected VBA")?;
+            // Apply macro injection via a streaming part-override rewrite. This avoids inflating
+            // the entire package (which may contain very large worksheet XML parts) just to update
+            // `[Content_Types].xml` / relationships / and add `vbaProject.bin`.
+            bytes = patch_vba_and_date_system_in_package_streaming(
+                &bytes,
+                workbook,
+                needs_inject_vba,
+                needs_date_system_update,
+                xlsx_date_system,
+            )?;
         }
 
-        if needs_date_system_update {
-            let mut pkg = XlsxPackage::from_bytes_limited(&bytes, XlsxPackageLimits::default())
-                .context("parse workbook package for date system update")?;
-            pkg.set_workbook_date_system(xlsx_date_system)
-                .context("set workbook date system")?;
-            bytes = pkg
-                .write_to_bytes()
-                .context("write workbook package with updated date system")?;
+        if !needs_inject_vba && needs_date_system_update {
+            // Apply date system updates via streaming part overrides for the same reason as VBA
+            // injection: avoid loading large packages into memory unnecessarily.
+            bytes = patch_vba_and_date_system_in_package_streaming(
+                &bytes,
+                workbook,
+                needs_inject_vba,
+                needs_date_system_update,
+                xlsx_date_system,
+            )?;
         }
 
         if print_settings_changed {
@@ -3861,6 +4030,85 @@ mod tests {
         output.finish().expect("finish zip").into_inner()
     }
 
+    // Patch a ZIP file's uncompressed size metadata for `entry_name` in both the central
+    // directory header and the local file header.
+    //
+    // This lets us create a tiny ZIP that *claims* one entry inflates beyond our package limits,
+    // without allocating huge buffers in the test.
+    fn patch_zip_entry_uncompressed_size(
+        mut zip_bytes: Vec<u8>,
+        entry_name: &str,
+        new_uncompressed_size: u32,
+    ) -> Vec<u8> {
+        // Locate the end-of-central-directory record (EOCD) by scanning backwards from the end of
+        // the file. The ZIP spec allows up to 64KiB of trailing comment.
+        const EOCD_SIG: [u8; 4] = [0x50, 0x4B, 0x05, 0x06];
+        let min_eocd = zip_bytes.len().saturating_sub(22);
+        let search_min = zip_bytes.len().saturating_sub(22 + 0xFFFF);
+
+        let mut eocd_offset = None;
+        for i in (search_min..=min_eocd).rev() {
+            if zip_bytes.get(i..i + 4) == Some(&EOCD_SIG) {
+                eocd_offset = Some(i);
+                break;
+            }
+        }
+        let eocd_offset = eocd_offset.expect("expected EOCD record in test zip");
+
+        let central_dir_size =
+            u32::from_le_bytes(zip_bytes[eocd_offset + 12..eocd_offset + 16].try_into().unwrap())
+                as usize;
+        let central_dir_offset =
+            u32::from_le_bytes(zip_bytes[eocd_offset + 16..eocd_offset + 20].try_into().unwrap())
+                as usize;
+
+        const CEN_SIG: [u8; 4] = [0x50, 0x4B, 0x01, 0x02];
+        const LFH_SIG: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
+        let mut cursor = central_dir_offset;
+        let end = central_dir_offset + central_dir_size;
+        while cursor < end {
+            assert_eq!(
+                zip_bytes.get(cursor..cursor + 4),
+                Some(CEN_SIG.as_slice()),
+                "expected central directory header signature"
+            );
+
+            let name_len =
+                u16::from_le_bytes(zip_bytes[cursor + 28..cursor + 30].try_into().unwrap()) as usize;
+            let extra_len =
+                u16::from_le_bytes(zip_bytes[cursor + 30..cursor + 32].try_into().unwrap()) as usize;
+            let comment_len =
+                u16::from_le_bytes(zip_bytes[cursor + 32..cursor + 34].try_into().unwrap()) as usize;
+            let local_header_offset =
+                u32::from_le_bytes(zip_bytes[cursor + 42..cursor + 46].try_into().unwrap()) as usize;
+
+            let name_start = cursor + 46;
+            let name_end = name_start + name_len;
+            let name =
+                std::str::from_utf8(&zip_bytes[name_start..name_end]).expect("expected utf-8 name");
+
+            if name == entry_name {
+                // Patch central directory header's uncompressed size (offset 24, 4 bytes).
+                zip_bytes[cursor + 24..cursor + 28]
+                    .copy_from_slice(&new_uncompressed_size.to_le_bytes());
+
+                // Patch local file header's uncompressed size too (offset 22, 4 bytes).
+                assert_eq!(
+                    zip_bytes.get(local_header_offset..local_header_offset + 4),
+                    Some(LFH_SIG.as_slice()),
+                    "expected local file header signature"
+                );
+                zip_bytes[local_header_offset + 22..local_header_offset + 26]
+                    .copy_from_slice(&new_uncompressed_size.to_le_bytes());
+                return zip_bytes;
+            }
+
+            cursor += 46 + name_len + extra_len + comment_len;
+        }
+
+        panic!("test zip did not contain expected entry: {entry_name}");
+    }
+
     fn assert_no_critical_diffs(expected: &Path, actual: &Path) {
         let report = diff_workbooks(expected, actual).expect("diff workbooks");
         let critical = report.count(Severity::Critical);
@@ -4337,6 +4585,114 @@ mod tests {
             .expect("read worksheet parts");
         let names: Vec<String> = parts.iter().map(|p| p.name.clone()).collect();
         assert_eq!(names, vec!["Sheet3", "Sheet1", "Sheet2"]);
+    }
+
+    #[test]
+    fn patch_save_can_inject_vba_without_inflating_oversized_parts() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let origin_path = tmp.path().join("origin.xlsx");
+        let out_path = tmp.path().join("saved.xlsm");
+
+        // Build a small macro-free XLSX so `write_xlsx_blocking` takes the patch-based save path.
+        let mut model = formula_model::Workbook::new();
+        model.add_sheet("Sheet1").expect("add Sheet1");
+
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write xlsx bytes");
+        std::fs::write(&origin_path, cursor.into_inner()).expect("write origin xlsx");
+
+        let mut workbook = read_xlsx_blocking(&origin_path).expect("read origin xlsx");
+        let origin_bytes = workbook
+            .origin_xlsx_bytes
+            .as_ref()
+            .expect("expected origin bytes baseline");
+
+        // Forge the ZIP metadata to claim the worksheet XML inflates beyond `XlsxPackage`'s
+        // per-part limit. The patch-based save path should still be able to inject VBA without
+        // inflating the worksheet part into memory.
+        let oversized_len = formula_xlsx::MAX_XLSX_PACKAGE_PART_BYTES as u32 + 1;
+        let patched =
+            patch_zip_entry_uncompressed_size(origin_bytes.to_vec(), "xl/worksheets/sheet1.xml", oversized_len);
+        workbook.origin_xlsx_bytes = Some(Arc::<[u8]>::from(patched));
+
+        workbook.vba_project_bin = Some(b"fake-vba-project".to_vec());
+
+        let written_bytes = write_xlsx_blocking(&out_path, &workbook).expect("write xlsm workbook");
+
+        let archive = ZipArchive::new(Cursor::new(written_bytes.as_ref())).expect("open written zip");
+        assert!(
+            zip_archive_has_entry(&archive, "xl/vbaProject.bin"),
+            "expected vbaProject.bin to be injected"
+        );
+
+        let content_types = formula_xlsx::read_part_from_reader_limited(
+            Cursor::new(written_bytes.as_ref()),
+            "[Content_Types].xml",
+            XLSX_CONTENT_TYPES_MAX_BYTES,
+        )
+        .expect("read [Content_Types].xml")
+        .expect("expected [Content_Types].xml");
+        let ct_xml = String::from_utf8_lossy(&content_types);
+        assert!(
+            ct_xml.contains("application/vnd.ms-office.vbaProject"),
+            "expected vbaProject content type override"
+        );
+
+        let workbook_rels = formula_xlsx::read_part_from_reader_limited(
+            Cursor::new(written_bytes.as_ref()),
+            "xl/_rels/workbook.xml.rels",
+            XLSX_WORKBOOK_XML_MAX_BYTES,
+        )
+        .expect("read workbook.xml.rels")
+        .expect("expected workbook.xml.rels");
+        let rels_xml = String::from_utf8_lossy(&workbook_rels);
+        assert!(
+            rels_xml.contains("relationships/vbaProject"),
+            "expected workbook.xml.rels to contain a vbaProject relationship"
+        );
+    }
+
+    #[test]
+    fn patch_save_can_update_date_system_without_inflating_oversized_parts() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let origin_path = tmp.path().join("origin.xlsx");
+        let out_path = tmp.path().join("saved.xlsx");
+
+        let mut model = formula_model::Workbook::new();
+        model.add_sheet("Sheet1").expect("add Sheet1");
+
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write xlsx bytes");
+        std::fs::write(&origin_path, cursor.into_inner()).expect("write origin xlsx");
+
+        let mut workbook = read_xlsx_blocking(&origin_path).expect("read origin xlsx");
+        let origin_bytes = workbook
+            .origin_xlsx_bytes
+            .as_ref()
+            .expect("expected origin bytes baseline");
+
+        let oversized_len = formula_xlsx::MAX_XLSX_PACKAGE_PART_BYTES as u32 + 1;
+        let patched =
+            patch_zip_entry_uncompressed_size(origin_bytes.to_vec(), "xl/worksheets/sheet1.xml", oversized_len);
+        workbook.origin_xlsx_bytes = Some(Arc::<[u8]>::from(patched));
+
+        // Force a date system mismatch so the patch-based save path needs to update `xl/workbook.xml`.
+        workbook.date_system = WorkbookDateSystem::Excel1904;
+
+        let written_bytes = write_xlsx_blocking(&out_path, &workbook).expect("write xlsx workbook");
+
+        let workbook_xml = formula_xlsx::read_part_from_reader_limited(
+            Cursor::new(written_bytes.as_ref()),
+            "xl/workbook.xml",
+            XLSX_WORKBOOK_XML_MAX_BYTES,
+        )
+        .expect("read xl/workbook.xml")
+        .expect("expected xl/workbook.xml");
+        let xml = String::from_utf8_lossy(&workbook_xml);
+        assert!(
+            xml.contains("date1904=\"1\"") || xml.contains("date1904='1'"),
+            "expected workbook.xml to have date1904=1, got: {xml}"
+        );
     }
 
     #[test]
