@@ -259,7 +259,7 @@ describe("SecondaryGridView drawings overlay", () => {
 
     const images: ImageStore = { get: () => undefined, set: () => {}, delete: () => {}, clear: () => {} };
 
-    const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue(undefined);
+    const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
 
     const gridView = new SecondaryGridView({
       container,

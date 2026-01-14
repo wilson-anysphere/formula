@@ -211,7 +211,7 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     let app: SpreadsheetApp | null = null;
     let root: HTMLElement | null = null;
     try {
-      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue();
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
 
       root = createRoot();
       const status = {
@@ -468,7 +468,7 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
-      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue(undefined);
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
 
       const root = createRoot();
       const status = {
@@ -518,12 +518,12 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     }
   });
 
-  it("does not surface unhandled rejections when DrawingOverlay.render rejects", async () => {
+  it("does not throw when DrawingOverlay.render throws", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
       const err = new Error("boom");
-      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue(undefined);
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const root = createRoot();
@@ -537,11 +537,11 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
 
       renderSpy.mockClear();
       warnSpy.mockClear();
-      renderSpy.mockRejectedValueOnce(err);
+      renderSpy.mockImplementationOnce(() => {
+        throw err;
+      });
 
       (app as any).renderDrawings();
-      // Let the promise rejection handlers run.
-      await Promise.resolve();
 
       expect(warnSpy).toHaveBeenCalledWith("Drawing overlay render failed", err);
 
@@ -553,12 +553,12 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     }
   });
 
-  it("does not surface unhandled rejections when chart selection overlay render rejects", async () => {
+  it("does not throw when chart selection overlay render throws", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
       const err = new Error("boom");
-      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue(undefined);
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const root = createRoot();
@@ -572,10 +572,11 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
 
       renderSpy.mockClear();
       warnSpy.mockClear();
-      renderSpy.mockRejectedValueOnce(err);
+      renderSpy.mockImplementationOnce(() => {
+        throw err;
+      });
 
       (app as any).renderChartSelectionOverlay();
-      await Promise.resolve();
 
       expect(warnSpy).toHaveBeenCalledWith("Chart selection overlay render failed", err);
 
@@ -854,7 +855,7 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
       // Avoid exercising async image rendering / bitmap decode paths in this unit test; we only
       // care about the interaction math + in-memory anchor updates.
-      vi.spyOn((app as any).drawingOverlay, "render").mockResolvedValue();
+      vi.spyOn((app as any).drawingOverlay, "render").mockImplementation(() => {});
 
       const image: DrawingObject = {
         id: 1,

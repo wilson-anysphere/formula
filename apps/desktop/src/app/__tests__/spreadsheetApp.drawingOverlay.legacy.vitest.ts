@@ -214,12 +214,12 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     }
   });
 
-  it("does not surface unhandled rejections when DrawingOverlay.render rejects", async () => {
+  it("does not throw when DrawingOverlay.render throws", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     try {
       const err = new Error("boom");
-      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue(undefined);
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const root = createRoot();
@@ -233,10 +233,11 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
 
       renderSpy.mockClear();
       warnSpy.mockClear();
-      renderSpy.mockRejectedValueOnce(err);
+      renderSpy.mockImplementationOnce(() => {
+        throw err;
+      });
 
       (app as any).renderDrawings();
-      await Promise.resolve();
 
       expect(warnSpy).toHaveBeenCalledWith("Drawing overlay render failed", err);
 
@@ -248,12 +249,12 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
     }
   });
 
-  it("does not surface unhandled rejections when chart selection overlay render rejects", async () => {
+  it("does not throw when chart selection overlay render throws", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "legacy";
     try {
       const err = new Error("boom");
-      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue(undefined);
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const root = createRoot();
@@ -267,10 +268,11 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
 
       renderSpy.mockClear();
       warnSpy.mockClear();
-      renderSpy.mockRejectedValueOnce(err);
+      renderSpy.mockImplementationOnce(() => {
+        throw err;
+      });
 
       (app as any).renderChartSelectionOverlay();
-      await Promise.resolve();
 
       expect(warnSpy).toHaveBeenCalledWith("Chart selection overlay render failed", err);
 
@@ -631,9 +633,9 @@ describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
       };
 
       const app = new SpreadsheetApp(root, status);
-      // Avoid exercising async image rendering / bitmap decode paths in this unit test; we only
-      // care about the interaction math + cached anchor updates.
-      vi.spyOn((app as any).drawingOverlay, "render").mockResolvedValue();
+      // Avoid exercising bitmap decode paths in this unit test; we only care about the
+      // interaction math + cached anchor updates.
+      vi.spyOn((app as any).drawingOverlay, "render").mockImplementation(() => {});
 
       const image: DrawingObject = {
         id: 1,
