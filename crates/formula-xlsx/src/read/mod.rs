@@ -1333,7 +1333,7 @@ fn load_from_zip_archive<R: Read + Seek>(
     // intentionally tolerant.
     let package = crate::XlsxPackage::from_parts_map(parts);
     if let Ok(chart_parts) = package.pivot_chart_parts() {
-        workbook.pivot_charts = chart_parts
+        let mut pivot_charts: Vec<PivotChartModel> = chart_parts
             .into_iter()
             .filter_map(|chart_part| {
                 let pivot_source_part = chart_part.pivot_source_part?;
@@ -1358,6 +1358,57 @@ fn load_from_zip_archive<R: Read + Seek>(
                 })
             })
             .collect();
+
+        // Best-effort: resolve which worksheet a pivot chart is placed on.
+        //
+        // This is relatively expensive (it scans drawing + sheet relationship parts), so only do
+        // it when we actually discovered pivot chart bindings.
+        if !pivot_charts.is_empty() {
+            let worksheet_id_by_part: HashMap<&str, formula_model::WorksheetId> = sheet_meta
+                .iter()
+                .map(|meta| (meta.path.as_str(), meta.worksheet_id))
+                .collect();
+
+            if let Ok(with_placement) = package.pivot_chart_parts_with_placement() {
+                let mut sheet_id_by_chart_part: HashMap<String, formula_model::WorksheetId> =
+                    HashMap::new();
+                for chart in with_placement {
+                    if chart.chart.pivot_source_part.is_none() {
+                        continue;
+                    }
+
+                    let chart_part_name = chart
+                        .chart
+                        .part_name
+                        .strip_prefix('/')
+                        .unwrap_or(chart.chart.part_name.as_str())
+                        .to_string();
+
+                    let mut candidates: HashSet<formula_model::WorksheetId> = HashSet::new();
+                    for sheet_part in &chart.placed_on_sheets {
+                        if let Some(id) = worksheet_id_by_part.get(sheet_part.as_str()) {
+                            candidates.insert(*id);
+                        }
+                    }
+                    if candidates.len() == 1 {
+                        if let Some(sheet_id) = candidates.into_iter().next() {
+                            sheet_id_by_chart_part.insert(chart_part_name, sheet_id);
+                        }
+                    }
+                }
+
+                for chart in &mut pivot_charts {
+                    let Some(part) = chart.chart_part.as_deref() else {
+                        continue;
+                    };
+                    if let Some(sheet_id) = sheet_id_by_chart_part.get(part) {
+                        chart.sheet_id = Some(*sheet_id);
+                    }
+                }
+            }
+        }
+
+        workbook.pivot_charts = pivot_charts;
     }
     let parts = package.into_parts_map();
 
