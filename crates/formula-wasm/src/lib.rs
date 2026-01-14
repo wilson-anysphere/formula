@@ -6102,7 +6102,9 @@ mod tests {
             row_fields: vec![formula_model::pivots::PivotField::new("Category")],
             column_fields: vec![],
             value_fields: vec![formula_model::pivots::ValueField {
-                source_field: "Amount".to_string(),
+                source_field: formula_model::pivots::PivotFieldRef::CacheFieldName(
+                    "Amount".to_string(),
+                ),
                 name: "Sum of Amount".to_string(),
                 aggregation: formula_model::pivots::AggregationType::Sum,
                 number_format: None,
