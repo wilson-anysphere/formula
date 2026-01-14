@@ -1468,10 +1468,10 @@ function EngineDemoApp() {
       </div>
 
       <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
-        Import XLSX:
+        Import XLSX/XLSM:
         <input
           type="file"
-          accept=".xlsx"
+          accept=".xlsx,.xlsm"
           data-testid="xlsx-file-input"
           disabled={!provider}
           onChange={(event) => {
@@ -1480,7 +1480,7 @@ function EngineDemoApp() {
             const engine = engineRef.current;
             if (!engine) return;
 
-            setEngineStatus("importing xlsx…");
+            setEngineStatus("importing workbook…");
             setProvider(null);
             setActiveCell(null);
 
@@ -1493,7 +1493,7 @@ function EngineDemoApp() {
                 await engine.setCell("A1", "Hello from Sheet2", "Sheet2");
                 await engine.recalculate();
                 const b1 = await engine.getCell("B1");
-                setEngineStatus(`ready (imported xlsx; B1=${b1.value === null ? "" : String(b1.value)})`);
+                setEngineStatus(`ready (imported workbook; B1=${b1.value === null ? "" : String(b1.value)})`);
                 setActiveSheet("Sheet1");
                 previousSheetRef.current = null;
                 setProvider(new EngineCellProvider({ engine, rowCount, colCount, sheet: "Sheet1" }));
