@@ -752,19 +752,23 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
 
     const map = getYMap(raw);
     if (map) {
-      /** @type {Array<[string, unknown]>} */
-      const entries: Array<[string, unknown]> = [];
+      // Legacy schema: encryptedRanges stored as a map keyed by a range id.
+      //
+      // Deterministic precedence when overlaps exist: prefer the lexicographically greatest key.
+      // This is equivalent to sorting keys and scanning in reverse, but avoids allocations and
+      // O(n log n) work on each lookup.
+      let bestKey: string | null = null;
+      let best: EncryptedRange | null = null;
       map.forEach((value, key) => {
-        entries.push([String(key), value]);
+        const keyStr = String(key);
+        const match = scanValue(value, keyStr);
+        if (!match) return;
+        if (bestKey == null || keyStr > bestKey) {
+          bestKey = keyStr;
+          best = match;
+        }
       });
-      // Deterministic ordering for legacy map schema.
-      entries.sort((a, b) => a[0].localeCompare(b[0]));
-      for (let i = entries.length - 1; i >= 0; i -= 1) {
-        const [key, value] = entries[i]!;
-        const match = scanValue(value, key);
-        if (match) return match;
-      }
-      return null;
+      return best;
     }
 
     if (Array.isArray(raw)) {
