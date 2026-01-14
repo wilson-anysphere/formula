@@ -201,7 +201,7 @@ These keys are computed from the cell’s **effective number format string** (`S
 Example number format with a colored negative section:
 
 ```text
-0;[Red](0)
+0;[Red] (0)
 ```
 
 Notes:
