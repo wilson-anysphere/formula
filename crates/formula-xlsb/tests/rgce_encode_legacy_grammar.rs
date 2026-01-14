@@ -98,3 +98,11 @@ fn legacy_encoder_roundtrips_parenthesized_grouping() {
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(normalize("(1+2)*3"), normalize(&decoded));
 }
+
+#[test]
+fn legacy_encoder_roundtrips_string_literal_quote_escaping() {
+    let ctx = WorkbookContext::default();
+    let encoded = encode_rgce_with_context("=\"a\"\"b\"", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("\"a\"\"b\""), normalize(&decoded));
+}
