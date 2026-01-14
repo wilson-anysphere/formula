@@ -347,6 +347,80 @@ test("branchStateFromYjsDoc: reads legacy top-level sheet view fields (frozen pa
   assert.equal(sheet2.get("background_image_id"), undefined);
 });
 
+test("branchStateFromYjsDoc: reads legacy sheet view aliases (background_image + merged_ranges)", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    sheet.set("view", {
+      frozenRows: 0,
+      frozenCols: 0,
+      background_image: "bg.png",
+      merged_ranges: [{ start_row: 0, end_row: 1, start_col: 0, end_col: 2 }],
+    });
+
+    sheets.push([sheet]);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view, {
+    frozenRows: 0,
+    frozenCols: 0,
+    backgroundImageId: "bg.png",
+    mergedRanges: [{ startRow: 0, endRow: 1, startCol: 0, endCol: 2 }],
+    drawings: [],
+  });
+
+  const doc2 = new Y.Doc();
+  applyBranchStateToYjsDoc(doc2, state);
+  const sheet2 = doc2.getArray("sheets").get(0);
+  assert.ok(sheet2 instanceof Y.Map);
+  assert.deepEqual(sheet2.get("view"), {
+    frozenRows: 0,
+    frozenCols: 0,
+    backgroundImageId: "bg.png",
+    mergedRanges: [{ startRow: 0, endRow: 1, startCol: 0, endCol: 2 }],
+  });
+});
+
+test("branchStateFromYjsDoc: reads legacy top-level aliases (background_image + merged_ranges)", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("background_image", "bg.png");
+    sheet.set("merged_ranges", [{ startRow: 0, endRow: 1, startCol: 0, endCol: 2 }]);
+    sheets.push([sheet]);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view, {
+    frozenRows: 0,
+    frozenCols: 0,
+    backgroundImageId: "bg.png",
+    mergedRanges: [{ startRow: 0, endRow: 1, startCol: 0, endCol: 2 }],
+    drawings: [],
+  });
+
+  applyBranchStateToYjsDoc(doc, state);
+  const sheet1 = doc.getArray("sheets").get(0);
+  assert.ok(sheet1 instanceof Y.Map);
+  assert.deepEqual(sheet1.get("view"), {
+    frozenRows: 0,
+    frozenCols: 0,
+    backgroundImageId: "bg.png",
+    mergedRanges: [{ startRow: 0, endRow: 1, startCol: 0, endCol: 2 }],
+  });
+  // Canonicalization should remove legacy top-level keys.
+  assert.equal(sheet1.get("background_image"), undefined);
+  assert.equal(sheet1.get("merged_ranges"), undefined);
+});
+
 test("applyBranchStateToYjsDoc: drops legacy top-level axis sizes when applying snapshot", () => {
   const doc = new Y.Doc();
   doc.transact(() => {

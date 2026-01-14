@@ -281,7 +281,9 @@ export function applyPatch(state, patch) {
           "frozenRows" in meta ||
           "frozenCols" in meta ||
           "backgroundImageId" in meta ||
-          "background_image_id" in meta
+          "background_image_id" in meta ||
+          "backgroundImage" in meta ||
+          "background_image" in meta
         ) {
           // Back-compat: some older patches may have stored view fields directly on the sheet meta.
           const bg =
@@ -289,7 +291,11 @@ export function applyPatch(state, patch) {
               ? meta.backgroundImageId
               : typeof meta.background_image_id === "string" || meta.background_image_id === null
                 ? meta.background_image_id
-                : undefined;
+                : typeof meta.backgroundImage === "string" || meta.backgroundImage === null
+                  ? meta.backgroundImage
+                  : typeof meta.background_image === "string" || meta.background_image === null
+                    ? meta.background_image
+                  : undefined;
           nextMeta.view = structuredClone({
             frozenRows: meta.frozenRows ?? 0,
             frozenCols: meta.frozenCols ?? 0,

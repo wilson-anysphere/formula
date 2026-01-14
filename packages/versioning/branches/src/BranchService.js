@@ -130,11 +130,16 @@ function shouldPreserveSchemaV1SheetView(value, sheetId) {
     "frozenCols" in meta ||
     "backgroundImageId" in meta ||
     "background_image_id" in meta ||
+    "backgroundImage" in meta ||
+    "background_image" in meta ||
     "colWidths" in meta ||
     "rowHeights" in meta ||
     "mergedRanges" in meta ||
     "mergedCells" in meta ||
     "merged_cells" in meta ||
+    "merged_ranges" in meta ||
+    "mergedRegions" in meta ||
+    "merged_regions" in meta ||
     "drawings" in meta
   ) {
     return false;
@@ -464,6 +469,8 @@ export class BranchService {
         if (
           !("backgroundImageId" in rawView) &&
           !("background_image_id" in rawView) &&
+          !("backgroundImage" in rawView) &&
+          !("background_image" in rawView) &&
           currentView.backgroundImageId !== undefined
         ) {
           mergedView.backgroundImageId = structuredClone(currentView.backgroundImageId);
@@ -479,6 +486,9 @@ export class BranchService {
           !("mergedRanges" in rawView) &&
           !("mergedCells" in rawView) &&
           !("merged_cells" in rawView) &&
+          !("merged_ranges" in rawView) &&
+          !("mergedRegions" in rawView) &&
+          !("merged_regions" in rawView) &&
           currentView.mergedRanges !== undefined
         ) {
           mergedView.mergedRanges = structuredClone(currentView.mergedRanges);

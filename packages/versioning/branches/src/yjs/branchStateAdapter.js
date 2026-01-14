@@ -529,13 +529,28 @@ export function branchStateFromYjsDoc(doc) {
     if (view == null && rawView === undefined) {
       const frozenRows = readYMapOrObject(entry, "frozenRows");
       const frozenCols = readYMapOrObject(entry, "frozenCols");
-      const backgroundImageId = readYMapOrObject(entry, "backgroundImageId") ?? readYMapOrObject(entry, "background_image_id");
+      const backgroundImageId =
+        readYMapOrObject(entry, "backgroundImageId") !== undefined
+          ? readYMapOrObject(entry, "backgroundImageId")
+          : readYMapOrObject(entry, "background_image_id") !== undefined
+            ? readYMapOrObject(entry, "background_image_id")
+            : readYMapOrObject(entry, "backgroundImage") !== undefined
+              ? readYMapOrObject(entry, "backgroundImage")
+              : readYMapOrObject(entry, "background_image");
       const colWidths = readYMapOrObject(entry, "colWidths");
       const rowHeights = readYMapOrObject(entry, "rowHeights");
       const mergedRanges =
-        readYMapOrObject(entry, "mergedRanges") ??
-        readYMapOrObject(entry, "mergedCells") ??
-        readYMapOrObject(entry, "merged_cells");
+        readYMapOrObject(entry, "mergedRanges") !== undefined
+          ? readYMapOrObject(entry, "mergedRanges")
+          : readYMapOrObject(entry, "mergedCells") !== undefined
+            ? readYMapOrObject(entry, "mergedCells")
+            : readYMapOrObject(entry, "merged_cells") !== undefined
+              ? readYMapOrObject(entry, "merged_cells")
+              : readYMapOrObject(entry, "merged_ranges") !== undefined
+                ? readYMapOrObject(entry, "merged_ranges")
+                : readYMapOrObject(entry, "mergedRegions") !== undefined
+                  ? readYMapOrObject(entry, "mergedRegions")
+                  : readYMapOrObject(entry, "merged_regions");
       const drawings = readYMapOrObject(entry, "drawings");
       if (
         frozenRows !== undefined ||
@@ -572,10 +587,18 @@ export function branchStateFromYjsDoc(doc) {
     } else if (isRecord(view)) {
       const hasKey =
         Object.prototype.hasOwnProperty.call(view, "backgroundImageId") ||
-        Object.prototype.hasOwnProperty.call(view, "background_image_id");
+        Object.prototype.hasOwnProperty.call(view, "background_image_id") ||
+        Object.prototype.hasOwnProperty.call(view, "backgroundImage") ||
+        Object.prototype.hasOwnProperty.call(view, "background_image");
       if (!hasKey) {
         const topLevelBackgroundImageId =
-          readYMapOrObject(entry, "backgroundImageId") ?? readYMapOrObject(entry, "background_image_id");
+          readYMapOrObject(entry, "backgroundImageId") !== undefined
+            ? readYMapOrObject(entry, "backgroundImageId")
+            : readYMapOrObject(entry, "background_image_id") !== undefined
+              ? readYMapOrObject(entry, "background_image_id")
+              : readYMapOrObject(entry, "backgroundImage") !== undefined
+                ? readYMapOrObject(entry, "backgroundImage")
+                : readYMapOrObject(entry, "background_image");
         if (topLevelBackgroundImageId !== undefined) {
           view.backgroundImageId = yjsValueToJson(topLevelBackgroundImageId) ?? null;
         } else {
@@ -586,19 +609,42 @@ export function branchStateFromYjsDoc(doc) {
       const hasMergedRanges =
         Object.prototype.hasOwnProperty.call(view, "mergedRanges") ||
         Object.prototype.hasOwnProperty.call(view, "mergedCells") ||
-        Object.prototype.hasOwnProperty.call(view, "merged_cells");
+        Object.prototype.hasOwnProperty.call(view, "merged_cells") ||
+        Object.prototype.hasOwnProperty.call(view, "merged_ranges") ||
+        Object.prototype.hasOwnProperty.call(view, "mergedRegions") ||
+        Object.prototype.hasOwnProperty.call(view, "merged_regions");
       if (!hasMergedRanges) {
         const topLevelMergedRanges =
-          readYMapOrObject(entry, "mergedRanges") ??
-          readYMapOrObject(entry, "mergedCells") ??
-          readYMapOrObject(entry, "merged_cells");
+          readYMapOrObject(entry, "mergedRanges") !== undefined
+            ? readYMapOrObject(entry, "mergedRanges")
+            : readYMapOrObject(entry, "mergedCells") !== undefined
+              ? readYMapOrObject(entry, "mergedCells")
+              : readYMapOrObject(entry, "merged_cells") !== undefined
+                ? readYMapOrObject(entry, "merged_cells")
+                : readYMapOrObject(entry, "merged_ranges") !== undefined
+                  ? readYMapOrObject(entry, "merged_ranges")
+                  : readYMapOrObject(entry, "mergedRegions") !== undefined
+                    ? readYMapOrObject(entry, "mergedRegions")
+                    : readYMapOrObject(entry, "merged_regions");
         if (topLevelMergedRanges !== undefined) {
           view.mergedRanges = yjsValueToJson(topLevelMergedRanges) ?? [];
         } else {
           view.mergedRanges = [];
         }
       } else if (!Object.prototype.hasOwnProperty.call(view, "mergedRanges")) {
-        view.mergedRanges = view.mergedCells ?? view.merged_cells ?? [];
+        // Populate the canonical key so BranchService merge/diff logic sees a consistent shape.
+        view.mergedRanges =
+          Object.prototype.hasOwnProperty.call(view, "mergedCells")
+            ? view.mergedCells
+            : Object.prototype.hasOwnProperty.call(view, "merged_cells")
+              ? view.merged_cells
+              : Object.prototype.hasOwnProperty.call(view, "merged_ranges")
+                ? view.merged_ranges
+                : Object.prototype.hasOwnProperty.call(view, "mergedRegions")
+                  ? view.mergedRegions
+                  : Object.prototype.hasOwnProperty.call(view, "merged_regions")
+                    ? view.merged_regions
+                    : [];
       }
 
       if (!Object.prototype.hasOwnProperty.call(view, "drawings")) {
@@ -893,14 +939,19 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
                 key === "view" ||
                 key === "frozenRows" ||
                 key === "frozenCols" ||
-               key === "backgroundImageId" ||
+                key === "backgroundImageId" ||
                key === "background_image_id" ||
+               key === "backgroundImage" ||
+               key === "background_image" ||
                key === "colWidths" ||
                 key === "rowHeights" ||
                 key === "mergedRanges" ||
-                key === "mergedCells" ||
-                key === "merged_cells" ||
-                key === "drawings"
+                 key === "mergedCells" ||
+                 key === "merged_cells" ||
+                 key === "merged_ranges" ||
+                 key === "mergedRegions" ||
+                 key === "merged_regions" ||
+                 key === "drawings"
               ) {
                 continue;
               }

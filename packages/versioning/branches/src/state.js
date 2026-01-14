@@ -78,8 +78,20 @@ function normalizeSheetView(value) {
   const hasBackgroundImageId =
     isRecord(value) &&
     (Object.prototype.hasOwnProperty.call(value, "backgroundImageId") ||
-      Object.prototype.hasOwnProperty.call(value, "background_image_id"));
-  const backgroundImageIdRaw = isRecord(value) ? value.backgroundImageId ?? value.background_image_id : undefined;
+      Object.prototype.hasOwnProperty.call(value, "background_image_id") ||
+      Object.prototype.hasOwnProperty.call(value, "backgroundImage") ||
+      Object.prototype.hasOwnProperty.call(value, "background_image"));
+  const backgroundImageIdRaw = (() => {
+    if (!isRecord(value)) return undefined;
+    // Prefer explicit `backgroundImageId` (even when null) so clear operations can't
+    // resurrect stale legacy aliases via nullish coalescing.
+    if (Object.prototype.hasOwnProperty.call(value, "backgroundImageId")) return value.backgroundImageId;
+    if (Object.prototype.hasOwnProperty.call(value, "background_image_id")) return value.background_image_id;
+    // Legacy/alternate keys used by some clients.
+    if (Object.prototype.hasOwnProperty.call(value, "backgroundImage")) return value.backgroundImage;
+    if (Object.prototype.hasOwnProperty.call(value, "background_image")) return value.background_image;
+    return undefined;
+  })();
   /** @type {string | null} */
   let backgroundImageId = null;
   if (typeof backgroundImageIdRaw === "string") {
@@ -94,9 +106,23 @@ function normalizeSheetView(value) {
     isRecord(value) &&
     (Object.prototype.hasOwnProperty.call(value, "mergedRanges") ||
       Object.prototype.hasOwnProperty.call(value, "mergedCells") ||
-      Object.prototype.hasOwnProperty.call(value, "merged_cells"));
+      Object.prototype.hasOwnProperty.call(value, "merged_cells") ||
+      Object.prototype.hasOwnProperty.call(value, "merged_ranges") ||
+      Object.prototype.hasOwnProperty.call(value, "mergedRegions") ||
+      Object.prototype.hasOwnProperty.call(value, "merged_regions"));
   const mergedRangesRaw = isRecord(value)
-    ? value.mergedRanges ?? value.mergedCells ?? value.merged_cells
+    ? (() => {
+        // Prefer explicit canonical keys (even when null) so clears can't resurrect
+        // via fallback reads.
+        if (Object.prototype.hasOwnProperty.call(value, "mergedRanges")) return value.mergedRanges;
+        if (Object.prototype.hasOwnProperty.call(value, "mergedCells")) return value.mergedCells;
+        if (Object.prototype.hasOwnProperty.call(value, "merged_cells")) return value.merged_cells;
+        // Legacy/alternate keys used by some clients.
+        if (Object.prototype.hasOwnProperty.call(value, "merged_ranges")) return value.merged_ranges;
+        if (Object.prototype.hasOwnProperty.call(value, "mergedRegions")) return value.mergedRegions;
+        if (Object.prototype.hasOwnProperty.call(value, "merged_regions")) return value.merged_regions;
+        return undefined;
+      })()
     : undefined;
 
   /**
