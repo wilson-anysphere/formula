@@ -3379,6 +3379,16 @@ impl FieldIndices {
                     if let Some(idx) = source.field_index(&unquoted) {
                         return Ok(idx);
                     }
+
+                    // Some non-cache sources may store the raw column name without DAX escaping.
+                    // Try that form before attempting quoted encodings.
+                    let unescaped = format!("{table}[{column}]");
+                    if unescaped != unquoted {
+                        if let Some(idx) = source.field_index(&unescaped) {
+                            return Ok(idx);
+                        }
+                    }
+
                     let quoted = dax_quoted_column_ref(table, column);
                     if let Some(idx) = source.field_index(&quoted) {
                         return Ok(idx);
