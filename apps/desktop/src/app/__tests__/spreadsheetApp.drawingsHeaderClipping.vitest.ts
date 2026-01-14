@@ -205,7 +205,8 @@ describe("SpreadsheetApp drawings header clipping", () => {
 
       // Header hit-test should ignore drawings.
       expect((app as any).selectedDrawingId).toBe(null);
-      (app as any).onDrawingPointerDownCapture(
+      // Legacy grid mode handles drawing selection via the bubbling `onPointerDown` handler.
+      (app as any).onPointerDown(
         new PointerEvent("pointerdown", {
           bubbles: true,
           cancelable: true,
@@ -217,7 +218,7 @@ describe("SpreadsheetApp drawings header clipping", () => {
       expect((app as any).selectedDrawingId).toBe(null);
 
       // Body hit-test should still select it.
-      (app as any).onDrawingPointerDownCapture(
+      (app as any).onPointerDown(
         new PointerEvent("pointerdown", {
           bubbles: true,
           cancelable: true,
