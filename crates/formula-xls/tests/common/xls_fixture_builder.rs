@@ -446,6 +446,26 @@ pub fn build_shared_formula_ptgexp_missing_shrfmla_fixture_xls() -> Vec<u8> {
 
 /// Build a BIFF8 `.xls` fixture containing a malformed shared-formula pattern like
 /// [`build_shared_formula_ptgexp_missing_shrfmla_fixture_xls`], but where the follower-cell `PtgExp`
+/// stores the base-cell coordinates with the row/col fields swapped.
+///
+/// The `.xls` importer should still recover the follower formula by materializing from the base
+/// cell's `FORMULA.rgce`.
+pub fn build_shared_formula_ptgexp_swapped_payload_missing_shrfmla_fixture_xls() -> Vec<u8> {
+    let workbook_stream =
+        build_shared_formula_ptgexp_swapped_payload_missing_shrfmla_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a malformed shared-formula pattern like
+/// [`build_shared_formula_ptgexp_missing_shrfmla_fixture_xls`], but where the follower-cell `PtgExp`
 /// stores a non-standard payload width (row u32 + col u16).
 ///
 /// The `.xls` importer should still recover the follower formula by materializing from the base
@@ -8226,6 +8246,15 @@ fn build_shared_formula_ptgexp_missing_shrfmla_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("Shared", &sheet_stream, 1252)
 }
 
+fn build_shared_formula_ptgexp_swapped_payload_missing_shrfmla_workbook_stream() -> Vec<u8> {
+    // Like `build_shared_formula_ptgexp_missing_shrfmla_workbook_stream`, but the follower `PtgExp`
+    // encodes the base row/col fields in swapped order.
+    let xf_cell = 16u16;
+    let sheet_stream =
+        build_shared_formula_ptgexp_swapped_payload_missing_shrfmla_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("SharedSwapped", &sheet_stream, 1252)
+}
+
 fn build_shared_formula_ptgexp_wide_payload_missing_shrfmla_workbook_stream() -> Vec<u8> {
     // Like `build_shared_formula_ptgexp_missing_shrfmla_workbook_stream`, but the follower `PtgExp`
     // uses a non-standard row u32 + col u16 payload width.
@@ -8271,6 +8300,56 @@ fn build_shared_formula_ptgexp_missing_shrfmla_sheet_stream(xf_cell: u16) -> Vec
 
     // Follower formula in B2: `PtgExp` pointing at base cell B1 (row=0, col=1).
     let rgce_ptgexp = vec![0x01, 0x00, 0x00, 0x01, 0x00];
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &rgce_ptgexp),
+    );
+
+    // Intentionally omit SHRFMLA/ARRAY definition records.
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_ptgexp_swapped_payload_missing_shrfmla_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide at least one value cell so the sheet is not completely empty.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 0.0));
+
+    // Base formula in B1: `A1+1` with relative row/col flags set (so it should become `A2+1`
+    // when filled down).
+    let rgce_base = vec![
+        0x24, // PtgRef
+        0x00, 0x00, // rw = 0
+        0x00, 0xC0, // col = 0 | row_rel | col_rel
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x03, // PtgAdd
+    ];
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 1, xf_cell, 0.0, &rgce_base),
+    );
+
+    // Follower formula in B2: `PtgExp` pointing at base cell B1 (row=0, col=1), but with the
+    // row/col fields swapped (row=1, col=0).
+    let rgce_ptgexp = vec![0x01, 0x01, 0x00, 0x00, 0x00];
     push_record(
         &mut sheet,
         RECORD_FORMULA,

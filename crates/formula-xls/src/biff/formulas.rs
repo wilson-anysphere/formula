@@ -676,19 +676,29 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
 
     for (row, col, base_row, base_col, grbit) in ptgexp_cells {
         let cell_ref = CellRef::new(row, col);
+        // Best-effort: some `.xls` producers appear to swap row/col ordering in the PtgExp payload.
+        // If the decoded base cell is missing, try the swapped coordinate before giving up.
+        let (base_row, base_col, base_rgce, base_rgcb) =
+            match rgce_by_cell.get(&(base_row, base_col)) {
+                Some((rgce, rgcb)) => (base_row, base_col, rgce, rgcb),
+                None => match rgce_by_cell.get(&(base_col, base_row)) {
+                    Some((rgce, rgcb)) => (base_col, base_row, rgce, rgcb),
+                    None => {
+                        push_warning_bounded(
+                            &mut warnings,
+                            format!(
+                                "failed to recover shared formula at {}: base cell ({},{}) has no FORMULA record",
+                                cell_ref.to_a1(),
+                                base_row,
+                                base_col
+                            ),
+                        );
+                        continue;
+                    }
+                },
+            };
+
         let base_cell_ref = CellRef::new(base_row, base_col);
-        let Some((base_rgce, base_rgcb)) = rgce_by_cell.get(&(base_row, base_col)) else {
-            push_warning_bounded(
-                &mut warnings,
-                format!(
-                    "failed to recover shared formula at {}: base cell ({},{}) has no FORMULA record",
-                    cell_ref.to_a1(),
-                    base_row,
-                    base_col
-                ),
-            );
-            continue;
-        };
 
         let mut base_rgce_bytes: &[u8] = base_rgce;
         let mut base_rgcb_bytes: &[u8] = base_rgcb;
