@@ -703,6 +703,21 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
   let height = heightAttr;
 
   if (width == null || height == null) {
+    const style = getAttr("style");
+    if (style) {
+      const getStyleProp = (prop: "width" | "height"): number | null => {
+        const re = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`, "i");
+        const match = re.exec(style);
+        if (!match) return null;
+        const raw = String(match[1] ?? "").replace(/!important\\b/i, "").trim();
+        return parseLength(raw);
+      };
+      if (width == null) width = getStyleProp("width");
+      if (height == null) height = getStyleProp("height");
+    }
+  }
+
+  if (width == null || height == null) {
     const viewBox = getAttr("viewBox");
     if (viewBox) {
       const parts = viewBox
