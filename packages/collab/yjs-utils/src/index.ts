@@ -62,6 +62,68 @@ export function isYAbstractType(value: unknown): boolean {
   return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
 }
 
+const patchedItemConstructors = new WeakSet<Function>();
+const patchedContentConstructors = new WeakMap<Function, Function>();
+
+function isYjsItemStruct(value: unknown): value is any {
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as any;
+  if (!("id" in maybe)) return false;
+  if (typeof maybe.length !== "number") return false;
+  if (!("content" in maybe)) return false;
+  if (!("parent" in maybe)) return false;
+  if (!("parentSub" in maybe)) return false;
+  if (typeof maybe.content?.getContent !== "function") return false;
+  return true;
+}
+
+function patchForeignItemConstructor(item: unknown): void {
+  if (!isYjsItemStruct(item)) return;
+  if (item instanceof Y.Item) return;
+  const ctor = (item as any).constructor as Function | undefined;
+  if (!ctor || ctor === Y.Item) return;
+  if (patchedItemConstructors.has(ctor)) return;
+  patchedItemConstructors.add(ctor);
+  try {
+    Object.setPrototypeOf((ctor as any).prototype, Y.Item.prototype);
+    (ctor as any).prototype.constructor = Y.Item;
+  } catch {
+    // Best-effort.
+  }
+}
+
+function patchForeignContentConstructor(content: unknown): void {
+  if (!content || typeof content !== "object") return;
+  const ctor = (content as any).constructor as Function | undefined;
+  if (!ctor) return;
+  if (patchedContentConstructors.has(ctor)) return;
+
+  // Prefer duck typing over constructor names so bundlers that rename constructors
+  // still work. Patch only the content types we know are used by Y.Text methods.
+  let localCtor: Function | null = null;
+  const maybe = content as any;
+  if (typeof maybe.str === "string") {
+    localCtor = Y.ContentString;
+  } else if (typeof maybe.key === "string" && ("value" in maybe || "val" in maybe)) {
+    localCtor = Y.ContentFormat;
+  } else if ("embed" in maybe) {
+    localCtor = Y.ContentEmbed;
+  }
+
+  if (!localCtor || ctor === localCtor) {
+    patchedContentConstructors.set(ctor, ctor);
+    return;
+  }
+
+  patchedContentConstructors.set(ctor, localCtor);
+  try {
+    Object.setPrototypeOf((ctor as any).prototype, (localCtor as any).prototype);
+    (ctor as any).prototype.constructor = localCtor;
+  } catch {
+    // Best-effort.
+  }
+}
+
 export function replaceForeignRootType<T>(params: { doc: Y.Doc; name: string; existing: any; create: () => T }): T {
   const { doc, name, existing, create } = params;
   // If the whole doc was created by a different Yjs module instance (ESM vs CJS),
@@ -83,12 +145,16 @@ export function replaceForeignRootType<T>(params: { doc: Y.Doc; name: string; ex
   if (map instanceof Map) {
     map.forEach((item: any) => {
       for (let n = item; n !== null; n = n.left) {
+        patchForeignItemConstructor(n);
+        patchForeignContentConstructor(n?.content);
         n.parent = t;
       }
     });
   }
 
   for (let n = existing?._start ?? null; n !== null; n = n.right) {
+    patchForeignItemConstructor(n);
+    patchForeignContentConstructor(n?.content);
     n.parent = t;
   }
 
