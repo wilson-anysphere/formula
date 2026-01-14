@@ -36,6 +36,7 @@
           "get_sheet_view_state",
           "get_vba_project",
           "get_workbook_theme_palette",
+          "inspect_workbook_encryption",
           "install_downloaded_update",
           "list_defined_names",
           "list_dir",

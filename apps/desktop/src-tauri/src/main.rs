@@ -1700,6 +1700,7 @@ fn main() {
             clipboard::clipboard_write,
             ed25519_verifier::verify_ed25519_signature,
             commands::open_workbook,
+            commands::inspect_workbook_encryption,
             commands::new_workbook,
             commands::add_sheet,
             commands::add_sheet_with_id,

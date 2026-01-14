@@ -184,6 +184,29 @@ pub struct WorkbookInfo {
     pub sheets: Vec<SheetInfo>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EncryptionTypeDto {
+    Agile,
+    Standard,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptionSummaryDto {
+    pub encryption_type: EncryptionTypeDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash_algorithm: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spin_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_bits: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cipher: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_size: Option<u32>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DefinedNameInfo {
     pub name: String,
@@ -1935,6 +1958,194 @@ fn cell_update_from_state(update: CellUpdateData) -> CellUpdate {
         formula: update.formula,
         display_value: update.display_value,
     }
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn ole_stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> bool {
+    if ole.open_stream(name).is_ok() {
+        return true;
+    }
+    let with_leading_slash = format!("/{name}");
+    ole.open_stream(&with_leading_slash).is_ok()
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn parse_cryptoapi_cipher(alg_id: u32) -> Option<String> {
+    // See `ALG_ID` values (e.g. `CALG_AES_128`) in MS-OFFCRYPTO / CryptoAPI.
+    let name = match alg_id {
+        0x0000_6801 => "RC4",
+        0x0000_6603 => "3DES",
+        0x0000_660E => "AES-128",
+        0x0000_660F => "AES-192",
+        0x0000_6610 => "AES-256",
+        _ => return None,
+    };
+    Some(name.to_string())
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn parse_cryptoapi_hash(alg_id_hash: u32) -> Option<String> {
+    let name = match alg_id_hash {
+        0x0000_8002 => "MD4",
+        0x0000_8003 => "MD5",
+        0x0000_8004 => "SHA1",
+        0x0000_800C => "SHA256",
+        0x0000_800D => "SHA384",
+        0x0000_800E => "SHA512",
+        _ => return None,
+    };
+    Some(name.to_string())
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn parse_ooxml_encryption_info(bytes: &[u8]) -> Result<EncryptionSummaryDto, String> {
+    if bytes.len() < 8 {
+        return Err("EncryptionInfo stream is too short".to_string());
+    }
+    let major = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let minor = u16::from_le_bytes([bytes[2], bytes[3]]);
+
+    match (major, minor) {
+        (4, 4) => {
+            // Agile: version (4 bytes) + flags (4 bytes) + UTF-8 XML encryption descriptor.
+            let mut xml_bytes = &bytes[8..];
+            while xml_bytes.last().is_some_and(|b| *b == 0) {
+                xml_bytes = &xml_bytes[..xml_bytes.len().saturating_sub(1)];
+            }
+            if xml_bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                xml_bytes = &xml_bytes[3..];
+            }
+            let xml = std::str::from_utf8(xml_bytes)
+                .map_err(|e| format!("agile EncryptionInfo descriptor is not valid UTF-8: {e}"))?;
+            let doc = roxmltree::Document::parse(xml)
+                .map_err(|e| format!("agile EncryptionInfo descriptor is not valid XML: {e}"))?;
+
+            let mut hash_algorithm = None;
+            let mut spin_count = None;
+            let mut key_bits = None;
+
+            for node in doc.descendants().filter(|n| n.is_element()) {
+                match node.tag_name().name() {
+                    // Password encryption parameters.
+                    "encryptedKey" => {
+                        if spin_count.is_none() {
+                            spin_count = node
+                                .attribute("spinCount")
+                                .and_then(|raw| raw.parse::<u32>().ok());
+                        }
+                        if hash_algorithm.is_none() {
+                            hash_algorithm =
+                                node.attribute("hashAlgorithm").map(|s| s.to_string());
+                        }
+                        if key_bits.is_none() {
+                            key_bits = node
+                                .attribute("keyBits")
+                                .and_then(|raw| raw.parse::<u32>().ok());
+                        }
+                    }
+                    // Document encryption parameters (also includes `hashAlgorithm` / `keyBits`).
+                    "keyData" => {
+                        if hash_algorithm.is_none() {
+                            hash_algorithm =
+                                node.attribute("hashAlgorithm").map(|s| s.to_string());
+                        }
+                        if key_bits.is_none() {
+                            key_bits = node
+                                .attribute("keyBits")
+                                .and_then(|raw| raw.parse::<u32>().ok());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            Ok(EncryptionSummaryDto {
+                encryption_type: EncryptionTypeDto::Agile,
+                hash_algorithm,
+                spin_count,
+                key_bits,
+                cipher: None,
+                key_size: None,
+            })
+        }
+        // Standard (CryptoAPI) encryption.
+        (3, 2) | (3, 3) => {
+            if bytes.len() < 12 {
+                return Err("EncryptionInfo stream is too short for standard encryption".to_string());
+            }
+            let header_size = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize;
+            let header_start = 12usize;
+            let header_end = header_start.saturating_add(header_size);
+            if bytes.len() < header_end {
+                return Err("EncryptionInfo stream is truncated (header size exceeds stream length)".to_string());
+            }
+            let header = &bytes[header_start..header_end];
+            if header.len() < 32 {
+                return Err("EncryptionInfo standard header is too short".to_string());
+            }
+            let alg_id = u32::from_le_bytes([header[8], header[9], header[10], header[11]]);
+            let alg_id_hash = u32::from_le_bytes([header[12], header[13], header[14], header[15]]);
+            let key_size = u32::from_le_bytes([header[16], header[17], header[18], header[19]]);
+
+            Ok(EncryptionSummaryDto {
+                encryption_type: EncryptionTypeDto::Standard,
+                hash_algorithm: parse_cryptoapi_hash(alg_id_hash),
+                spin_count: None,
+                key_bits: None,
+                cipher: parse_cryptoapi_cipher(alg_id),
+                key_size: (key_size != 0).then_some(key_size),
+            })
+        }
+        _ => Err(format!(
+            "Unsupported workbook encryption version {major}.{minor} (expected 4.4 agile or 3.2 standard)"
+        )),
+    }
+}
+
+/// Inspect an encrypted OOXML workbook (password-protected `.xlsx`) and extract a summary of the
+/// encryption parameters for password prompts.
+///
+/// Returns:
+/// - `Ok(None)` if the workbook does not appear to be an encrypted OOXML container.
+/// - `Ok(Some(...))` if the workbook is encrypted and its `EncryptionInfo` stream can be parsed.
+/// - `Err(...)` on I/O failures or unsupported/invalid encryption info formats.
+#[cfg(any(feature = "desktop", test))]
+#[cfg_attr(feature = "desktop", tauri::command)]
+pub fn inspect_workbook_encryption(path: String) -> Result<Option<EncryptionSummaryDto>, String> {
+    use std::io::{Read, Seek};
+
+    const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
+    let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
+    let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
+        std::path::Path::new(&path),
+        &allowed_roots,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|e| e.to_string())?;
+    if n < OLE_MAGIC.len() || header != OLE_MAGIC {
+        return Ok(None);
+    }
+    file.rewind().map_err(|e| e.to_string())?;
+
+    let mut ole = cfb::CompoundFile::open(file).map_err(|e| e.to_string())?;
+    if !(ole_stream_exists(&mut ole, "EncryptionInfo") && ole_stream_exists(&mut ole, "EncryptedPackage")) {
+        return Ok(None);
+    }
+
+    let mut stream = ole
+        .open_stream("EncryptionInfo")
+        .or_else(|_| ole.open_stream("/EncryptionInfo"))
+        .map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    stream.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    Ok(Some(parse_ooxml_encryption_info(&bytes)?))
 }
 
 #[cfg(feature = "desktop")]
@@ -8892,6 +9103,48 @@ mod tests {
                 .is_some_and(|sheet| sheet.columnar.is_none()),
             "expected XLSX import not to use columnar backing"
         );
+    }
+
+    #[test]
+    fn inspect_workbook_encryption_returns_summary_for_encrypted_ooxml() {
+        use std::io::Cursor;
+
+        let base_dirs = directories::BaseDirs::new().expect("base dirs");
+        let dir = tempfile::Builder::new()
+            .prefix("formula-encrypted-ooxml")
+            .tempdir_in(base_dirs.home_dir())
+            .expect("create temp dir");
+        let path = dir.path().join("encrypted.xlsx");
+
+        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"><keyData keyBits="256" hashAlgorithm="SHA512"/><keyEncryptors><keyEncryptor><encryptedKey spinCount="100000"/></keyEncryptor></keyEncryptors></encryption>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        {
+            let mut stream = ole
+                .create_stream("EncryptionInfo")
+                .expect("create EncryptionInfo stream");
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&4u16.to_le_bytes()); // VersionMajor (agile)
+            bytes.extend_from_slice(&4u16.to_le_bytes()); // VersionMinor (agile)
+            bytes.extend_from_slice(&0x40u32.to_le_bytes()); // Flags
+            bytes.extend_from_slice(xml.as_bytes());
+            stream.write_all(&bytes).expect("write EncryptionInfo");
+        }
+        ole.create_stream("EncryptedPackage")
+            .expect("create EncryptedPackage stream");
+        let ole_bytes = ole.into_inner().into_inner();
+
+        std::fs::write(&path, &ole_bytes).expect("write encrypted workbook");
+
+        let summary = inspect_workbook_encryption(path.to_string_lossy().to_string())
+            .expect("inspect_workbook_encryption should succeed")
+            .expect("expected encryption summary");
+
+        assert_eq!(summary.encryption_type, EncryptionTypeDto::Agile);
+        assert_eq!(summary.hash_algorithm.as_deref(), Some("SHA512"));
+        assert_eq!(summary.spin_count, Some(100000));
+        assert_eq!(summary.key_bits, Some(256));
     }
 
     #[cfg(feature = "parquet")]
