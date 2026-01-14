@@ -143,6 +143,58 @@ fn index_over_reversed_sheet_range_uses_tab_order() {
 }
 
 #[test]
+fn sheet_range_membership_updates_after_reorder() {
+    // Reordering sheets can change which intermediate sheets are included in a 3D span. Ensure
+    // both the AST evaluator and the bytecode backend reflect the updated membership after
+    // `reorder_sheet` triggers a dependency-graph rebuild.
+    fn setup(engine: &mut Engine) {
+        engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+        engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+        engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+        engine.set_cell_value("Sheet4", "A1", 4.0).unwrap();
+
+        // Span boundaries are Sheet1 and Sheet3; Sheet2 is initially between them.
+        engine
+            .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!A1)")
+            .unwrap();
+    }
+
+    let mut engine = Engine::new();
+    setup(&mut engine);
+    assert_eq!(
+        engine.bytecode_compile_report(10),
+        Vec::new(),
+        "expected SUM over 3D span to compile to bytecode"
+    );
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
+
+    // Move Sheet2 outside of the Sheet1..Sheet3 span.
+    assert!(engine.reorder_sheet("Sheet2", 3));
+    assert_eq!(
+        engine.bytecode_compile_report(10),
+        Vec::new(),
+        "expected formula to remain bytecode-compiled after reorder"
+    );
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(4.0));
+
+    // Repeat the same check on the AST evaluator.
+    let mut ast_engine = Engine::new();
+    ast_engine.set_bytecode_enabled(false);
+    setup(&mut ast_engine);
+    ast_engine.recalculate_single_threaded();
+    assert_eq!(ast_engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
+
+    assert!(ast_engine.reorder_sheet("Sheet2", 3));
+    ast_engine.recalculate_single_threaded();
+    assert_eq!(
+        ast_engine.get_cell_value("Summary", "A1"),
+        Value::Number(4.0)
+    );
+}
+
+#[test]
 fn bytecode_sum_over_sheet_range_uses_tab_order_after_reorder_for_error_precedence() {
     // The bytecode backend expands 3D sheet spans at compile time. Ensure that expansion follows
     // workbook tab order (not the textual order of the boundary sheets).
