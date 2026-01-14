@@ -13733,8 +13733,19 @@ fn walk_expr_flags(
                 }
 
                 if spec.name == "INFO" {
-                    if let Some(first) = args.first() {
-                        if matches!(first, Expr::Text(s) if s.trim().eq_ignore_ascii_case("origin")) {
+                    // `INFO("origin")` depends on host-provided worksheet view state (scroll position +
+                    // frozen panes). Detect formulas that could depend on that value so
+                    // `set_sheet_origin` can mark them dirty.
+                    //
+                    // If the key is a constant string, we can be precise; otherwise conservatively
+                    // assume it could evaluate to `"origin"` at runtime.
+                    match args.first() {
+                        Some(Expr::Text(s)) => {
+                            if s.trim().eq_ignore_ascii_case("origin") {
+                                *origin_deps = true;
+                            }
+                        }
+                        Some(_) | None => {
                             *origin_deps = true;
                         }
                     }
