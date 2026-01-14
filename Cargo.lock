@@ -2080,6 +2080,7 @@ dependencies = [
  "base64 0.22.1",
  "calamine 0.26.1",
  "cfb 0.10.0",
+ "chrono",
  "directories",
  "dunce",
  "ed25519-dalek",

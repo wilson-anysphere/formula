@@ -58,6 +58,7 @@ aes-gcm = "0.10"
 base64 = "0.22"
 calamine = "0.26"
 cfb = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 directories = "5.0"
 ed25519-dalek = { version = "2.1", features = ["pkcs8", "rand_core"] }
 futures-util = "0.3"
