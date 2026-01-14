@@ -439,6 +439,41 @@ test("Typing =FINV suggests FINV( and a modern F.INV.RT( alternative", async () 
   );
 });
 
+test("Legacy distribution aliases suggest modern dotted function alternatives", async () => {
+  const engine = new TabCompletionEngine();
+
+  const cases = [
+    { currentInput: "=GAMMAD", legacy: "=GAMMADIST(", modern: "=GAMMA.DIST(" },
+    { currentInput: "=EXPOND", legacy: "=EXPONDIST(", modern: "=EXPON.DIST(" },
+    { currentInput: "=HYPGEOMD", legacy: "=HYPGEOMDIST(", modern: "=HYPGEOM.DIST(" },
+    { currentInput: "=NEGBINOMD", legacy: "=NEGBINOMDIST(", modern: "=NEGBINOM.DIST(" },
+    { currentInput: "=BETAD", legacy: "=BETADIST(", modern: "=BETA.DIST(" },
+    { currentInput: "=BETAI", legacy: "=BETAINV(", modern: "=BETA.INV(" },
+    { currentInput: "=LOGINV", legacy: "=LOGINV(", modern: "=LOGNORM.INV(" },
+    { currentInput: "=FTEST", legacy: "=FTEST(", modern: "=F.TEST(" },
+    { currentInput: "=ZTEST", legacy: "=ZTEST(", modern: "=Z.TEST(" },
+    { currentInput: "=TTEST", legacy: "=TTEST(", modern: "=T.TEST(" },
+  ];
+
+  for (const { currentInput, legacy, modern } of cases) {
+    const suggestions = await engine.getSuggestions({
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    });
+
+    assert.ok(
+      suggestions.some((s) => s.text === legacy),
+      `Expected legacy function completion for ${currentInput} -> ${legacy}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+    assert.ok(
+      suggestions.some((s) => s.text === modern),
+      `Expected modern alternative for ${currentInput} -> ${modern}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("Typing =Vlo suggests Vlookup( (title-style casing)", async () => {
   const engine = new TabCompletionEngine();
 
