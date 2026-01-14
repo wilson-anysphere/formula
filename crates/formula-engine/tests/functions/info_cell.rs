@@ -439,12 +439,12 @@ fn cell_width_omitted_reference_uses_current_cell_and_is_not_circular() {
 }
 
 #[test]
-fn cell_metadata_keys_return_ref_for_out_of_bounds_reference() {
+fn cell_keys_return_ref_for_out_of_bounds_reference() {
     use formula_engine::Engine;
 
     // Restrict the sheet to only column A; reference column B should be out-of-bounds.
     let mut engine = Engine::new();
-    engine.set_sheet_dimensions("Sheet1", 8, 1).unwrap(); // rows 1..=8, cols A only
+    engine.set_sheet_dimensions("Sheet1", 12, 1).unwrap(); // rows 1..=12, cols A only
 
     engine
         .set_cell_formula("Sheet1", "A1", "=CELL(\"protect\",B1)")
@@ -469,6 +469,18 @@ fn cell_metadata_keys_return_ref_for_out_of_bounds_reference() {
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "A8", "=CELL(\"type\",B1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A9", "=CELL(\"row\",B1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A10", "=CELL(\"col\",B1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A11", "=CELL(\"address\",B1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A12", "=CELL(\"filename\",B1)")
         .unwrap();
 
     engine.recalculate_single_threaded();
@@ -503,6 +515,22 @@ fn cell_metadata_keys_return_ref_for_out_of_bounds_reference() {
     );
     assert_eq!(
         engine.get_cell_value("Sheet1", "A8"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A9"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A10"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A11"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A12"),
         Value::Error(ErrorKind::Ref)
     );
 }

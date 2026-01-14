@@ -351,6 +351,13 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
 
     match info_type {
         CellInfoType::Address => {
+            // Mirror `get_cell_value` bounds behavior: out-of-bounds references should surface
+            // `#REF!` rather than fabricating an absolute A1 string.
+            let (rows, cols) = ctx.sheet_dimensions(&reference.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
+
             let abs = abs_a1(addr);
             let include_sheet = match &reference.sheet_id {
                 SheetId::Local(id) => *id != ctx.current_sheet_id(),
@@ -372,8 +379,20 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 _ => Value::Text(abs),
             }
         }
-        CellInfoType::Col => Value::Number((u64::from(addr.col) + 1) as f64),
-        CellInfoType::Row => Value::Number((u64::from(addr.row) + 1) as f64),
+        CellInfoType::Col => {
+            let (rows, cols) = ctx.sheet_dimensions(&reference.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
+            Value::Number((u64::from(addr.col) + 1) as f64)
+        }
+        CellInfoType::Row => {
+            let (rows, cols) = ctx.sheet_dimensions(&reference.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
+            Value::Number((u64::from(addr.row) + 1) as f64)
+        }
         CellInfoType::Contents => {
             let cell_ref = record_explicit_cell(ctx);
 
@@ -539,6 +558,13 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // behavior consistent with other CELL variants: record the reference argument only when
             // it is explicitly provided (to avoid implicit self-edges when reference is omitted).
             let cell_ref = record_explicit_cell(ctx);
+
+            // Mirror `get_cell_value` bounds behavior: out-of-bounds references should surface
+            // `#REF!` rather than returning the workbook filename for an invalid address.
+            let (rows, cols) = ctx.sheet_dimensions(&cell_ref.sheet_id);
+            if addr.row >= rows || addr.col >= cols {
+                return Value::Error(ErrorKind::Ref);
+            }
 
             // Excel returns "" until the workbook has a known filename (i.e. it has been saved).
             let Some(filename) = ctx.workbook_filename().filter(|s| !s.is_empty()) else {
