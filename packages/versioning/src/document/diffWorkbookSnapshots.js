@@ -6,8 +6,22 @@ import { workbookStateFromDocumentSnapshot } from "./workbookState.js";
  * @typedef {"visible" | "hidden" | "veryHidden"} SheetVisibility
  * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewMeta
  * @typedef {{ id: string, name: string | null, visibility: SheetVisibility, tabColor: string | null, view: SheetViewMeta }} SheetMeta
- * @typedef {{ id: string, name: string | null, afterIndex: number }} AddedSheet
- * @typedef {{ id: string, name: string | null, beforeIndex: number }} RemovedSheet
+ * @typedef {{
+ *   id: string,
+ *   name: string | null,
+ *   afterIndex: number,
+ *   visibility: SheetVisibility,
+ *   tabColor: string | null,
+ *   view: SheetViewMeta,
+ * }} AddedSheet
+ * @typedef {{
+ *   id: string,
+ *   name: string | null,
+ *   beforeIndex: number,
+ *   visibility: SheetVisibility,
+ *   tabColor: string | null,
+ *   view: SheetViewMeta,
+ * }} RemovedSheet
  * @typedef {{ id: string, beforeIndex: number, afterIndex: number }} MovedSheet
  * @typedef {{ id: string, field: string, before: any, after: any }} SheetMetaChange
  * @typedef {{ row: number, col: number }} CellRef
@@ -188,15 +202,29 @@ export function diffDocumentWorkbookSnapshots(opts) {
 
   for (const [id, idx] of afterIndex) {
     if (!beforeSheetsById.has(id)) {
-      const sheet = afterSheetsById.get(id) ?? { id, name: null };
-      sheets.added.push({ id, name: sheet.name ?? null, afterIndex: idx });
+      const sheet = afterSheetsById.get(id) ?? { id, name: null, visibility: "visible", tabColor: null, view: { frozenRows: 0, frozenCols: 0 } };
+      sheets.added.push({
+        id,
+        name: sheet.name ?? null,
+        afterIndex: idx,
+        visibility: sheet.visibility ?? "visible",
+        tabColor: sheet.tabColor ?? null,
+        view: sheet.view ?? { frozenRows: 0, frozenCols: 0 },
+      });
     }
   }
 
   for (const [id, idx] of beforeIndex) {
     if (!afterSheetsById.has(id)) {
-      const sheet = beforeSheetsById.get(id) ?? { id, name: null };
-      sheets.removed.push({ id, name: sheet.name ?? null, beforeIndex: idx });
+      const sheet = beforeSheetsById.get(id) ?? { id, name: null, visibility: "visible", tabColor: null, view: { frozenRows: 0, frozenCols: 0 } };
+      sheets.removed.push({
+        id,
+        name: sheet.name ?? null,
+        beforeIndex: idx,
+        visibility: sheet.visibility ?? "visible",
+        tabColor: sheet.tabColor ?? null,
+        view: sheet.view ?? { frozenRows: 0, frozenCols: 0 },
+      });
     }
   }
   for (const [id, afterSheet] of afterSheetsById) {

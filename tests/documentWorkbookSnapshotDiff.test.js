@@ -68,8 +68,12 @@ test("diffDocumentWorkbookSnapshots reports workbook-level metadata changes (JSO
   const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
 
   assert.deepEqual(diff.sheets.renamed, [{ id: "sheet1", beforeName: "Sheet1", afterName: "Renamed" }]);
-  assert.deepEqual(diff.sheets.added, [{ id: "sheet3", name: "Sheet3", afterIndex: 1 }]);
-  assert.deepEqual(diff.sheets.removed, [{ id: "sheet2", name: "Sheet2", beforeIndex: 1 }]);
+  assert.deepEqual(diff.sheets.added, [
+    { id: "sheet3", name: "Sheet3", afterIndex: 1, visibility: "visible", tabColor: null, view: { frozenRows: 0, frozenCols: 0 } },
+  ]);
+  assert.deepEqual(diff.sheets.removed, [
+    { id: "sheet2", name: "Sheet2", beforeIndex: 1, visibility: "visible", tabColor: null, view: { frozenRows: 0, frozenCols: 0 } },
+  ]);
   assert.deepEqual(diff.sheets.moved, []);
 
   assert.deepEqual(

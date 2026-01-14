@@ -13,8 +13,9 @@ type VersionManagerLike = {
   getVersion(versionId: string): Promise<{ snapshot: Uint8Array } | null>;
 };
 
-type AddedSheet = { id: string; name: string | null; afterIndex: number };
-type RemovedSheet = { id: string; name: string | null; beforeIndex: number };
+type SheetViewMeta = { frozenRows: number; frozenCols: number };
+type AddedSheet = { id: string; name: string | null; afterIndex: number; visibility?: string; tabColor?: string | null; view?: SheetViewMeta };
+type RemovedSheet = { id: string; name: string | null; beforeIndex: number; visibility?: string; tabColor?: string | null; view?: SheetViewMeta };
 type RenamedSheet = { id: string; beforeName: string | null; afterName: string | null };
 type MovedSheet = { id: string; beforeIndex: number; afterIndex: number };
 type SheetMetaChange = { id: string; field: string; before: unknown; after: unknown };
@@ -489,6 +490,30 @@ export function VersionHistoryCompareSection({
                                       <span className="collab-version-history__diff-row-label">{t("versionHistory.compare.sheetDetails.index")}</span>{" "}
                                       <span className="collab-version-history__diff-value">{summarizeJson(added.afterIndex)}</span>
                                     </div>
+                                    <div className="collab-version-history__diff-row-value">
+                                      <span className="collab-version-history__diff-row-label">
+                                        {t("versionHistory.compare.sheetMetaField.visibility")}
+                                      </span>{" "}
+                                      <span className="collab-version-history__diff-value">{summarizeJson(added.visibility)}</span>
+                                    </div>
+                                    <div className="collab-version-history__diff-row-value">
+                                      <span className="collab-version-history__diff-row-label">
+                                        {t("versionHistory.compare.sheetMetaField.tabColor")}
+                                      </span>{" "}
+                                      <span className="collab-version-history__diff-value">{summarizeJson(added.tabColor ?? null)}</span>
+                                    </div>
+                                    <div className="collab-version-history__diff-row-value">
+                                      <span className="collab-version-history__diff-row-label">
+                                        {t("versionHistory.compare.sheetMetaField.frozenRows")}
+                                      </span>{" "}
+                                      <span className="collab-version-history__diff-value">{summarizeJson(added.view?.frozenRows ?? 0)}</span>
+                                    </div>
+                                    <div className="collab-version-history__diff-row-value">
+                                      <span className="collab-version-history__diff-row-label">
+                                        {t("versionHistory.compare.sheetMetaField.frozenCols")}
+                                      </span>{" "}
+                                      <span className="collab-version-history__diff-value">{summarizeJson(added.view?.frozenCols ?? 0)}</span>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
@@ -508,6 +533,30 @@ export function VersionHistoryCompareSection({
                                     <div className="collab-version-history__diff-row-value">
                                       <span className="collab-version-history__diff-row-label">{t("versionHistory.compare.sheetDetails.index")}</span>{" "}
                                       <span className="collab-version-history__diff-value">{summarizeJson(removed.beforeIndex)}</span>
+                                    </div>
+                                    <div className="collab-version-history__diff-row-value">
+                                      <span className="collab-version-history__diff-row-label">
+                                        {t("versionHistory.compare.sheetMetaField.visibility")}
+                                      </span>{" "}
+                                      <span className="collab-version-history__diff-value">{summarizeJson(removed.visibility)}</span>
+                                    </div>
+                                    <div className="collab-version-history__diff-row-value">
+                                      <span className="collab-version-history__diff-row-label">
+                                        {t("versionHistory.compare.sheetMetaField.tabColor")}
+                                      </span>{" "}
+                                      <span className="collab-version-history__diff-value">{summarizeJson(removed.tabColor ?? null)}</span>
+                                    </div>
+                                    <div className="collab-version-history__diff-row-value">
+                                      <span className="collab-version-history__diff-row-label">
+                                        {t("versionHistory.compare.sheetMetaField.frozenRows")}
+                                      </span>{" "}
+                                      <span className="collab-version-history__diff-value">{summarizeJson(removed.view?.frozenRows ?? 0)}</span>
+                                    </div>
+                                    <div className="collab-version-history__diff-row-value">
+                                      <span className="collab-version-history__diff-row-label">
+                                        {t("versionHistory.compare.sheetMetaField.frozenCols")}
+                                      </span>{" "}
+                                      <span className="collab-version-history__diff-value">{summarizeJson(removed.view?.frozenCols ?? 0)}</span>
                                     </div>
                                   </div>
                                 </div>
