@@ -41,7 +41,6 @@ formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
 md-5 = "0.10"
 roxmltree = "0.20"
-md-5 = "0.10"
 sha2 = "0.10"
 tempfile = "3.10"
 thiserror = "1.0"
