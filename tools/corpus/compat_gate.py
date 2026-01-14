@@ -232,7 +232,16 @@ def main(argv: list[str] | None = None) -> int:
     checked_str = ", ".join(f"{labels[k]}>={v:.2%}" for k, v in checked.items())
     print(
         f"CORPUS GATE PASS: {checked_str} "
-        f"(open={actual['open']:.2%}, round-trip={actual['round_trip']:.2%})"
+        "("
+        + ", ".join(
+            [
+                f"open={_fmt_pct(actual['open'])}",
+                f"round-trip={_fmt_pct(actual['round_trip'])}",
+                f"calculate={_fmt_pct(actual['calculate'])}",
+                f"render={_fmt_pct(actual['render'])}",
+            ]
+        )
+        + ")"
     )
     return 0
 
