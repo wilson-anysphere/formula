@@ -2855,6 +2855,40 @@ test("FORECAST.ETS.SEASONALITY data_completion suggests 1 and 0", async () => {
   );
 });
 
+test("FunctionRegistry uses correct optional arg ordering for FORECAST.ETS.STAT", () => {
+  const registry = new FunctionRegistry();
+  const spec = registry.getFunction("FORECAST.ETS.STAT");
+  assert.ok(spec, "Expected FORECAST.ETS.STAT to exist in registry");
+
+  assert.equal(spec?.args?.[0]?.name, "values");
+  assert.equal(spec?.args?.[1]?.name, "timeline");
+  assert.equal(spec?.args?.[2]?.name, "seasonality");
+  assert.equal(spec?.args?.[3]?.name, "data_completion");
+  assert.equal(spec?.args?.[4]?.name, "aggregation");
+  assert.equal(spec?.args?.[5]?.name, "statistic_type");
+});
+
+test("FORECAST.ETS.STAT statistic_type suggests 8 (RMSE) and 7 (MAE)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=FORECAST.ETS.STAT(B1:B10, C1:C10, 1, 1, 1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=FORECAST.ETS.STAT(B1:B10, C1:C10, 1, 1, 1, 8"),
+    `Expected FORECAST.ETS.STAT to suggest statistic_type=8, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=FORECAST.ETS.STAT(B1:B10, C1:C10, 1, 1, 1, 7"),
+    `Expected FORECAST.ETS.STAT to suggest statistic_type=7, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("LINEST const suggests TRUE/FALSE with meaning", async () => {
   const engine = new TabCompletionEngine();
 

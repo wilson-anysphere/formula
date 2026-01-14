@@ -1083,10 +1083,12 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "values", type: "range" },
       { name: "timeline", type: "range" },
-      { name: "statistic_type", type: "number" },
+      // Excel accepts the optional args in the same order as the core ETS family:
+      // seasonality, data_completion, aggregation, statistic_type.
       { name: "seasonality", type: "number", optional: true },
       { name: "data_completion", type: "number", optional: true },
       { name: "aggregation", type: "number", optional: true },
+      { name: "statistic_type", type: "number", optional: true },
     ],
   },
   {
