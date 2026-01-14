@@ -222,13 +222,20 @@ pub(crate) fn parse_biff8_array_record(
     for reserved_len in [2usize, 4] {
         let mut c = cursor.clone();
         if let Ok((rgce, rgcb)) = parse_array_with_refu(&mut c, reserved_len) {
-            return Ok(ParsedArrayRecord { rgce, rgcb });
+            // Like SHRFMLA parsing, reject layouts that produce an empty rgce so we don't
+            // accidentally accept a Ref8 payload as RefU (or vice versa) just because the
+            // misaligned bytes happen to yield `cce=0`.
+            if !rgce.is_empty() {
+                return Ok(ParsedArrayRecord { rgce, rgcb });
+            }
         }
     }
     for reserved_len in [2usize, 4] {
         let mut c = cursor.clone();
         if let Ok((rgce, rgcb)) = parse_array_with_ref8(&mut c, reserved_len) {
-            return Ok(ParsedArrayRecord { rgce, rgcb });
+            if !rgce.is_empty() {
+                return Ok(ParsedArrayRecord { rgce, rgcb });
+            }
         }
     }
 
@@ -3193,6 +3200,39 @@ mod tests {
     }
 
     #[test]
+    fn resolves_ptgexp_array_when_base_cell_is_not_range_anchor() {
+        // Regression: array formulas are keyed by the top-left anchor of the ARRAY range. Some
+        // producers still point PtgExp at a non-anchor cell inside that range.
+        //
+        // ARRAY range: B1:B2 (anchor = B1).
+        // Formula cell: B2 has PtgExp(B2) + fArray.
+        let stream = [
+            record(RECORD_ARRAY, &array_payload(0, 1, 1, 1)),
+            record(
+                RECORD_FORMULA,
+                &formula_payload(1, 1, FormulaGrbit::F_ARRAY, &ptgexp(1, 1)),
+            ),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_worksheet_formulas(&stream, 0).expect("parse");
+
+        let mut warnings = Vec::new();
+        let b2 = parsed.formula_cells.get(&CellRef::new(1, 1)).unwrap();
+        assert_eq!(
+            resolve_ptgexp_or_ptgtbl_best_effort(&parsed, b2, &mut warnings),
+            PtgReferenceResolution::Array {
+                base: CellRef::new(0, 1)
+            }
+        );
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
     fn resolves_wide_ptgexp_when_base_cell_is_not_range_anchor() {
         // Like `resolves_ptgexp_when_base_cell_is_not_range_anchor`, but using a non-canonical
         // PtgExp payload width (row u32 + col u16) so it is handled by the dedicated wide-payload
@@ -3232,6 +3272,49 @@ mod tests {
             parsed.warnings
         );
         assert_eq!(parsed.formulas.get(&CellRef::new(1, 1)).map(|s| s.as_str()), Some("1"));
+    }
+
+    #[test]
+    fn resolves_wide_ptgexp_array_when_base_cell_is_not_range_anchor() {
+        // Like `resolves_ptgexp_array_when_base_cell_is_not_range_anchor`, but using a non-canonical
+        // PtgExp payload width (row u32 + col u16) so it is handled by the dedicated wide-payload
+        // recovery path (`parse_biff8_worksheet_ptgexp_formulas`).
+        fn ptgexp_row_u32_col_u16(row: u32, col: u16) -> Vec<u8> {
+            let mut out = Vec::new();
+            out.push(0x01);
+            out.extend_from_slice(&row.to_le_bytes());
+            out.extend_from_slice(&col.to_le_bytes());
+            out
+        }
+
+        // ARRAY range: B1:B2 (anchor = B1). Cell B2 uses `PtgExp(B2)` (non-anchor) with a wide
+        // payload.
+        let stream = [
+            record(RECORD_ARRAY, &array_payload(0, 1, 1, 1)),
+            record(
+                RECORD_FORMULA,
+                &formula_payload(1, 1, 0, &ptgexp_row_u32_col_u16(1, 1)),
+            ),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let ctx = rgce::RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &[],
+            externsheet: &[],
+            supbooks: &[],
+            defined_names: &[],
+        };
+
+        let parsed = parse_biff8_worksheet_ptgexp_formulas(&stream, 0, &ctx).expect("parse");
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+        // ARRAY record rgce is `PtgInt(2)` in this test's synthetic payload.
+        assert_eq!(parsed.formulas.get(&CellRef::new(1, 1)).map(|s| s.as_str()), Some("2"));
     }
 
     #[test]
