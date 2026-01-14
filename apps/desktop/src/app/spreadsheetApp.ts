@@ -4326,14 +4326,20 @@ export class SpreadsheetApp {
     this.imageStore.clear();
     this.remotePresences = [];
     // Axis/viewport caches can hold very large arrays/maps for big sheets.
-    this.rowIndexByVisual = [];
-    this.colIndexByVisual = [];
-    this.visibleRows = [];
-    this.visibleCols = [];
-    this.frozenVisibleRows = [];
-    this.frozenVisibleCols = [];
-    this.rowToVisual.clear();
-    this.colToVisual.clear();
+    //
+    // Shared-grid mode intentionally does not build these caches (they are O(maxRows/maxCols)).
+    // Avoid touching them during teardown as well: some perf regression tests instrument these
+    // fields to ensure they are never accessed when running in shared-grid mode.
+    if (this.gridMode !== "shared") {
+      this.rowIndexByVisual = [];
+      this.colIndexByVisual = [];
+      this.visibleRows = [];
+      this.visibleCols = [];
+      this.frozenVisibleRows = [];
+      this.frozenVisibleCols = [];
+      this.rowToVisual.clear();
+      this.colToVisual.clear();
+    }
 
     // Drop external listener references so disposed apps don't retain UI closures.
     this.selectionListeners.clear();
