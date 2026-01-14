@@ -976,8 +976,8 @@ describe("SpreadsheetApp drawing interaction commits", () => {
         pos: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) },
         size: { cx: pxToEmu(120), cy: pxToEmu(80) },
       },
-      // Malformed transform payload: invalid flip type (adapter should ignore it).
-      transform: { rotationDeg: 30, flipH: "nope" },
+      // Malformed transform payload: invalid rotation type (adapter should ignore the transform).
+      transform: { rotationDeg: "nope", flipH: true },
     };
     doc.setSheetDrawings(sheetId, [rawDrawing]);
 
