@@ -112,6 +112,11 @@ node scripts/check-desktop-version.mjs vX.Y.Z
 # when the updater is active.
 node scripts/check-updater-config.mjs
 
+# Ensures `apps/desktop/src-tauri/capabilities/*.json` only references permission identifiers
+# that exist in the pinned Tauri toolchain (`cargo tauri permission ls`).
+# (Requires the Tauri CLI + platform WebView dependencies; see "Toolchain versions" above.)
+node scripts/check-tauri-permissions.mjs
+
 # Ensures the packaged app registers the `formula://` URL scheme (installer/bundle metadata).
 node scripts/check-desktop-url-scheme.mjs
 
