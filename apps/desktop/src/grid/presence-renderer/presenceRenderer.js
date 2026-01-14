@@ -98,6 +98,7 @@ export class PresenceRenderer {
     this.font = font ?? `12px ${fontFamily}`;
 
     this._badgeWidthCache = new Map();
+    this._badgeTextColorCache = new Map();
     /** @type {Array<{ x: number; y: number; width: number; height: number }>} */
     this._rectScratch = [];
   }
@@ -172,11 +173,10 @@ export class PresenceRenderer {
         );
 
         const name = presence.name ?? t("presence.anonymous");
-        const cacheKey = `${this.font}::${name}`;
-        let textWidth = this._badgeWidthCache.get(cacheKey);
+        let textWidth = this._badgeWidthCache.get(name);
         if (textWidth === undefined) {
           textWidth = ctx.measureText(name).width;
-          this._badgeWidthCache.set(cacheKey, textWidth);
+          this._badgeWidthCache.set(name, textWidth);
         }
 
         const badgeWidth = textWidth + this.badgePaddingX * 2;
@@ -186,7 +186,13 @@ export class PresenceRenderer {
 
         ctx.fillStyle = color;
         ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
-        ctx.fillStyle = pickTextColor(color);
+
+        let textColor = this._badgeTextColorCache.get(color);
+        if (textColor === undefined) {
+          textColor = pickTextColor(color);
+          this._badgeTextColorCache.set(color, textColor);
+        }
+        ctx.fillStyle = textColor;
         ctx.fillText(name, badgeX + this.badgePaddingX, badgeY + this.badgePaddingY);
       }
     }
