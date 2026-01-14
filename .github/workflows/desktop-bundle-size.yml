@@ -309,7 +309,7 @@ jobs:
       - name: Post bundle size report PR comment
         if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v7
         env:
           FORMULA_ENFORCE_BUNDLE_SIZE: ${{ vars.FORMULA_ENFORCE_BUNDLE_SIZE }}
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}

@@ -35,7 +35,7 @@ jobs:
 
       - name: Find related workflow runs (by head_sha)
         id: runs
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v7
         env:
           TARGET_SHA: ${{ github.event.inputs.sha }}
         with:
