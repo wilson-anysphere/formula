@@ -2172,4 +2172,94 @@ mod tests {
             .count();
         assert_eq!(record_count, 2);
     }
+
+    #[test]
+    fn refresh_pivot_cache_falls_back_to_records_filename_when_rels_malformed() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        // Cache source range is A1:B3 (header + 2 records).
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Header1</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Header2</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>1</v></c>
+      <c r="B2" t="inlineStr"><is><t>Alpha</t></is></c>
+    </row>
+    <row r="3">
+      <c r="A3"><v>2</v></c>
+      <c r="B3" t="inlineStr"><is><t>Beta</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="0">
+  <cacheSource type="worksheet">
+    <worksheetSource sheet="Sheet1" ref="A1:B3"/>
+  </cacheSource>
+  <cacheFields count="0"/>
+</pivotCacheDefinition>"#;
+
+        let cache_records_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheDefinition1.xml", options)
+            .unwrap();
+        zip.write_all(cache_definition_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels", options)
+            .unwrap();
+        // Intentionally malformed.
+        zip.write_all(b"this is not xml").unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
+            .unwrap();
+        zip.write_all(cache_records_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+            .expect("refresh");
+
+        let updated_records =
+            std::str::from_utf8(pkg.part("xl/pivotCache/pivotCacheRecords1.xml").unwrap()).unwrap();
+        let doc = Document::parse(updated_records).expect("parse updated cache records");
+        let root = doc.root_element();
+        assert_eq!(root.attribute("count"), Some("2"));
+        let record_count = root
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "r")
+            .count();
+        assert_eq!(record_count, 2);
+    }
 }
