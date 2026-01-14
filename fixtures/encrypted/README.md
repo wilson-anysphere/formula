@@ -34,3 +34,10 @@ we also keep tiny encrypted OOXML fixtures in-repo under `fixtures/encrypted/oox
 `agile.xlsx`, `standard.xlsx`, `agile-empty-password.xlsx`; see `fixtures/encrypted/ooxml/README.md` for passwords and provenance).
 
 For background on Excel encryption formats and terminology, see `docs/21-encrypted-workbooks.md`.
+
+## Regenerating fixtures
+
+Encrypted OOXML fixtures under `fixtures/encrypted/ooxml/` can be regenerated without Excel:
+
+- Preferred/documented workflow (matches committed fixtures): see `fixtures/encrypted/ooxml/README.md`
+- Alternative generator (Apache POI): `tools/encrypted-ooxml-fixtures/generate.sh`
