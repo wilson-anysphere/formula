@@ -8,6 +8,100 @@ function isPlainObject(value) {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * Convert an arbitrary value into a safe JSON-serializable structure without invoking
+ * user-controlled stringification hooks like `toJSON()` / `toString()`.
+ *
+ * This is a defense-in-depth helper: workbook cells can contain rich objects (including
+ * class instances) where `toJSON`/`toString` may be overridden to leak sensitive strings or
+ * throw. We prefer a stable placeholder over calling those hooks.
+ *
+ * @param {unknown} value
+ * @param {WeakSet<object>} stack
+ * @returns {unknown}
+ */
+function safeJsonValue(value, stack) {
+  if (value === null || value === undefined) return null;
+  const t = typeof value;
+  if (t === "string" || t === "number" || t === "boolean") return value;
+  if (t === "bigint") return value.toString();
+  if (t === "symbol") return "Symbol";
+  if (t === "function") return "Function";
+
+  if (t !== "object") return null;
+
+  if (value instanceof Date) {
+    // Avoid calling per-instance overrides (e.g. `date.toISOString = () => "secret"`).
+    let time = NaN;
+    try {
+      time = Date.prototype.getTime.call(value);
+    } catch {
+      time = NaN;
+    }
+    if (!Number.isFinite(time)) return "";
+    try {
+      return Date.prototype.toISOString.call(value);
+    } catch {
+      return "";
+    }
+  }
+
+  if (value instanceof Error) {
+    const message = typeof value.message === "string" ? value.message.trim() : "";
+    const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : "Error";
+    return message ? `${name}: ${message}` : name;
+  }
+
+  // Avoid scanning large binary blobs.
+  if (typeof ArrayBuffer !== "undefined") {
+    if (value instanceof ArrayBuffer) return "[Binary]";
+    if (typeof ArrayBuffer.isView === "function" && ArrayBuffer.isView(value)) return "[Binary]";
+  }
+
+  if (stack.has(value)) return "[Circular]";
+  stack.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((v) => safeJsonValue(v, stack));
+    if (value instanceof Map) {
+      return Array.from(value.entries()).map(([k, v]) => [safeJsonValue(k, stack), safeJsonValue(v, stack)]);
+    }
+    if (value instanceof Set) {
+      return Array.from(value.values()).map((v) => safeJsonValue(v, stack));
+    }
+
+    // Plain object / class instance: serialize enumerable fields, dropping callable hooks.
+    /** @type {Record<string, unknown>} */
+    const out = {};
+    const obj = /** @type {any} */ (value);
+    for (const key of Object.keys(obj).sort()) {
+      const v = obj[key];
+      // Drop stringification hooks so downstream JSON.stringify can't call them.
+      if ((key === "toString" || key === "valueOf" || key === "toJSON") && typeof v === "function") continue;
+      if (typeof v === "function") continue;
+      out[key] = safeJsonValue(v, stack);
+    }
+    return out;
+  } finally {
+    stack.delete(value);
+  }
+}
+
+/**
+ * Safe JSON stringification for cell values.
+ *
+ * Unlike `JSON.stringify(value)` this avoids invoking `toJSON()`, which is user-controlled.
+ *
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function safeJsonStringify(value) {
+  try {
+    return JSON.stringify(safeJsonValue(value, new WeakSet()));
+  } catch {
+    return null;
+  }
+}
+
 function parseImageValue(value) {
   if (!isPlainObject(value)) return null;
   const obj = /** @type {any} */ (value);
@@ -42,11 +136,21 @@ function parseImageValue(value) {
 function formatScalar(value) {
   if (value == null) return "";
   if (value instanceof Date) {
-    const time = value.getTime();
+    // Avoid calling per-instance overrides (e.g. `date.toISOString = () => "secret"`).
+    let time = NaN;
+    try {
+      time = Date.prototype.getTime.call(value);
+    } catch {
+      time = NaN;
+    }
     if (!Number.isFinite(time)) return "";
     // Use ISO format for stability and compactness (better embeddings than
     // Date#toString locale/timezone output).
-    return value.toISOString();
+    try {
+      return Date.prototype.toISOString.call(value);
+    } catch {
+      return "";
+    }
   }
   if (typeof value === "bigint") {
     // BigInts can be extremely long; reuse the string truncation path.
@@ -66,18 +170,15 @@ function formatScalar(value) {
     if (typeof text === "string") return formatScalar(text);
     const image = parseImageValue(value);
     if (image) return formatScalar(image.altText ?? "[Image]");
-    try {
-      const json = JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? String(v) : v));
-      if (typeof json === "string") {
-        // Empty objects are rarely useful in cell context; treat as blank.
-        if (json === "{}") return "";
-        return formatScalar(json);
-      }
-    } catch {
-      // Some objects (circular refs, BigInt, etc) aren't JSON stringifiable.
-      // Fall back to a stable placeholder rather than "[object Object]".
-      return "Object";
+    const json = safeJsonStringify(value);
+    if (typeof json === "string") {
+      // Empty objects are rarely useful in cell context; treat as blank.
+      if (json === "{}") return "";
+      return formatScalar(json);
     }
+    // Some objects (circular refs, BigInt, etc) aren't JSON stringifiable.
+    // Fall back to a stable placeholder rather than "[object Object]".
+    return "Object";
   }
   if (typeof value === "string") {
     const trimmed = value.replace(/\s+/g, " ").trim();
@@ -93,6 +194,8 @@ function formatScalar(value) {
     return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
   }
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+  if (typeof value === "symbol") return "Symbol";
+  if (typeof value === "function") return "Function";
   return String(value);
 }
 
@@ -212,9 +315,31 @@ function inferHeaderRow(cells) {
         continue;
       }
 
-      const trimmed = String(v).trim();
-      if (!trimmed) continue;
-      nonEmpty += 1;
+      // Avoid calling `String(v)` on arbitrary objects; custom `toString()` implementations can
+      // throw or leak sensitive strings. For header-row heuristics we only need to know whether
+      // the cell is non-empty, not its rendered text.
+      const scalarType = typeof v;
+      if (scalarType === "string") {
+        // Should be handled by the `text != null` branch above, but keep this defensive.
+        const trimmed = v.trim();
+        if (!trimmed) continue;
+        nonEmpty += 1;
+        continue;
+      }
+      if (scalarType === "number") {
+        if (!Number.isFinite(v)) continue;
+        nonEmpty += 1;
+        continue;
+      }
+      if (scalarType === "boolean" || scalarType === "bigint" || scalarType === "symbol" || scalarType === "function") {
+        nonEmpty += 1;
+        continue;
+      }
+      if (scalarType === "object") {
+        // Any remaining object-like value counts as non-empty.
+        nonEmpty += 1;
+        continue;
+      }
     }
     return { row, nonEmpty, stringish, firstString };
   }
@@ -289,7 +414,23 @@ function countFormulas(cells) {
   for (const row of cells) {
     if (!Array.isArray(row)) continue;
     for (const cell of row) {
-      if (cell && cell.f != null && String(cell.f).trim() !== "") count += 1;
+      if (!cell || cell.f == null) continue;
+      const f = cell.f;
+      if (typeof f === "string") {
+        if (f.trim() !== "") count += 1;
+        continue;
+      }
+      if (typeof f === "number") {
+        if (Number.isFinite(f)) count += 1;
+        continue;
+      }
+      if (typeof f === "boolean" || typeof f === "bigint" || typeof f === "symbol" || typeof f === "function") {
+        count += 1;
+        continue;
+      }
+      if (typeof f === "object") {
+        count += 1;
+      }
     }
   }
   return count;
@@ -318,9 +459,15 @@ export function chunkToText(chunk, opts) {
   const fullRowCount = chunk.rect.r1 - chunk.rect.r0 + 1;
   const formulaCount = countFormulas(cells);
 
+  const kind =
+    typeof chunk?.kind === "string" && chunk.kind.trim() ? chunk.kind.trim().toUpperCase() : "CHUNK";
+  const title = typeof chunk?.title === "string" ? chunk.title : "";
+  // Sheet names are expected to be strings; avoid coercing arbitrary objects via `String(...)`.
+  const sheetName = typeof chunk?.sheetName === "string" ? chunk.sheetName : "";
+
   const lines = [];
   lines.push(
-    `${chunk.kind.toUpperCase()}: ${chunk.title} (sheet="${chunk.sheetName}", range="${rectA1}", size=${fullRowCount}x${fullColCount}, formulas≈${formulaCount})`
+    `${kind}: ${title} (sheet="${sheetName}", range="${rectA1}", size=${fullRowCount}x${fullColCount}, formulas≈${formulaCount})`
   );
 
   if (sampledRowCount < fullRowCount || sampledColCount < fullColCount) {

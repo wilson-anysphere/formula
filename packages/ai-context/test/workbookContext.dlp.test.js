@@ -929,6 +929,73 @@ test("buildWorkbookContext: does not call custom toString on non-string workbook
   assert.equal(toStringCalls, 0);
 });
 
+test("buildWorkbookContext: does not leak Date.toISOString overrides to embedder under structured DLP REDACT (no-op redactor)", async () => {
+  const secret = "TopSecretDate";
+  const date = new Date("2024-01-02T03:04:05.000Z");
+  Object.defineProperty(date, "toISOString", { value: () => secret, enumerable: false });
+  Object.defineProperty(date, "getTime", {
+    value: () => {
+      throw new Error("getTime override should not be called");
+    },
+    enumerable: false,
+  });
+
+  const workbook = {
+    id: "wb-dlp-date-override",
+    sheets: [
+      {
+        name: "PublicSheet",
+        cells: [
+          [{ v: "Date" }, { v: "Value" }],
+          [{ v: date }, { v: 1 }],
+        ],
+      },
+      {
+        name: "SecretSheet",
+        cells: [[{ v: "Ignore" }]],
+      },
+    ],
+  };
+
+  const embedder = new CapturingEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 1 },
+  });
+
+  await cm.buildWorkbookContext({
+    workbook,
+    query: "Value",
+    topK: 1,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      // Classify a different sheet so overallDecision is REDACT, but the PublicSheet chunk remains allowed.
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "SecretSheet",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  // The embedder sees both indexed chunk texts and the query text. None should include the secret
+  // returned by the per-instance Date override.
+  assert.ok(embedder.seen.length > 0);
+  for (const text of embedder.seen) {
+    assert.doesNotMatch(text, new RegExp(secret));
+  }
+});
+
 test("buildWorkbookContext: structured DLP REDACT conservatively redacts chunk text when structured metadata is missing (no-op redactor)", async () => {
   const cellSecret = "TopSecret";
   const workbook = {

@@ -21,7 +21,15 @@ const DEFAULT_MAX_FORMULA_REGIONS_PER_SHEET = 50;
  * @param {unknown} value
  */
 function encodeIdPart(value) {
-  return encodeURIComponent(String(value));
+  // Avoid calling `String(...)` on arbitrary objects: custom `toString()` implementations
+  // can throw or leak sensitive strings into persisted chunk ids.
+  const raw =
+    typeof value === "string"
+      ? value
+      : typeof value === "number" || typeof value === "boolean" || typeof value === "bigint"
+        ? String(value)
+        : "[invalid]";
+  return encodeURIComponent(raw);
 }
 
 const NON_WHITESPACE_RE = /\S/;
@@ -197,7 +205,11 @@ function packCoordKey(row, col) {
  */
 function sheetMap(workbook) {
   const map = new Map();
-  for (const s of workbook.sheets || []) map.set(s.name, s);
+  for (const s of workbook.sheets || []) {
+    if (!s || typeof s !== "object") continue;
+    if (typeof s.name !== "string" || s.name.trim() === "") continue;
+    map.set(s.name, s);
+  }
   return map;
 }
 
@@ -758,56 +770,58 @@ function chunkWorkbook(workbook, options = {}) {
 
   for (const table of workbook.tables || []) {
     throwIfAborted(signal);
-    const sheet = sheets.get(table.sheetName);
+    const sheetName = typeof table?.sheetName === "string" ? table.sheetName : "";
+    if (!sheetName) continue;
+    const sheet = sheets.get(sheetName);
     if (!sheet) continue;
-    const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(table.sheetName)}::table::${encodeIdPart(
-      table.name
-    )}`;
+    const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(sheetName)}::table::${encodeIdPart(table?.name ?? "")}`;
     chunks.push({
       id,
       workbookId: workbook.id,
-      sheetName: table.sheetName,
+      sheetName,
       kind: "table",
-      title: table.name,
+      title: table?.name ?? "",
       rect: table.rect,
       cells: extractCells(sheet, table.rect, {
         maxRows: extractMaxRows,
         maxCols: extractMaxCols,
         signal,
       }),
-      meta: { tableName: table.name },
+      meta: { tableName: table?.name ?? "" },
     });
-    occupied.push({ sheetName: table.sheetName, rect: table.rect });
+    occupied.push({ sheetName, rect: table.rect });
   }
 
   for (const nr of workbook.namedRanges || []) {
     throwIfAborted(signal);
-    const sheet = sheets.get(nr.sheetName);
+    const sheetName = typeof nr?.sheetName === "string" ? nr.sheetName : "";
+    if (!sheetName) continue;
+    const sheet = sheets.get(sheetName);
     if (!sheet) continue;
-    const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(nr.sheetName)}::namedRange::${encodeIdPart(
-      nr.name
-    )}`;
+    const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(sheetName)}::namedRange::${encodeIdPart(nr?.name ?? "")}`;
     chunks.push({
       id,
       workbookId: workbook.id,
-      sheetName: nr.sheetName,
+      sheetName,
       kind: "namedRange",
-      title: nr.name,
+      title: nr?.name ?? "",
       rect: nr.rect,
       cells: extractCells(sheet, nr.rect, {
         maxRows: extractMaxRows,
         maxCols: extractMaxCols,
         signal,
       }),
-      meta: { namedRange: nr.name },
+      meta: { namedRange: nr?.name ?? "" },
     });
-    occupied.push({ sheetName: nr.sheetName, rect: nr.rect });
+    occupied.push({ sheetName, rect: nr.rect });
   }
 
   for (const sheet of workbook.sheets || []) {
     throwIfAborted(signal);
+    const sheetName = typeof sheet?.name === "string" ? sheet.name : "";
+    if (!sheetName) continue;
     const existingRects = occupied
-      .filter((o) => o.sheetName === sheet.name)
+      .filter((o) => o.sheetName === sheetName)
       .map((o) => o.rect);
 
     const dataDetection = detectRegions(sheet, isNonEmptyCell, {
@@ -846,11 +860,11 @@ function chunkWorkbook(workbook, options = {}) {
 
       const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
       const suffix = region.isTruncationFallback ? `truncated::${coordKey}` : coordKey;
-      const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(sheet.name)}::dataRegion::${suffix}`;
+      const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(sheetName)}::dataRegion::${suffix}`;
       chunks.push({
         id,
         workbookId: workbook.id,
-        sheetName: sheet.name,
+        sheetName,
         kind: "dataRegion",
         title: region.isTruncationFallback
           ? `Data region (truncated) ${rectToA1(rect)}`
@@ -865,7 +879,7 @@ function chunkWorkbook(workbook, options = {}) {
             }
           : undefined,
       });
-      occupied.push({ sheetName: sheet.name, rect });
+      occupied.push({ sheetName, rect });
       existingRects.push(rect);
     }
 
@@ -895,11 +909,11 @@ function chunkWorkbook(workbook, options = {}) {
       const rect = region.rect;
       const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
       const suffix = region.isTruncationFallback ? `truncated::${coordKey}` : coordKey;
-      const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(sheet.name)}::formulaRegion::${suffix}`;
+      const id = `${encodeIdPart(workbook.id)}::${encodeIdPart(sheetName)}::formulaRegion::${suffix}`;
       chunks.push({
         id,
         workbookId: workbook.id,
-        sheetName: sheet.name,
+        sheetName,
         kind: "formulaRegion",
         title: region.isTruncationFallback
           ? `Formula region (truncated) ${rectToA1(rect)}`

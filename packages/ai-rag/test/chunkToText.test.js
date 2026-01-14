@@ -73,6 +73,33 @@ test("chunkToText formats Date values as ISO strings", () => {
   assert.match(text, /Date=2024-01-02T03:04:05\.000Z/);
 });
 
+test("chunkToText does not call per-instance Date#toISOString overrides", () => {
+  const secret = "TopSecretDate";
+  const date = new Date("2024-01-02T03:04:05.000Z");
+  Object.defineProperty(date, "toISOString", {
+    value: () => secret,
+    enumerable: false,
+  });
+  Object.defineProperty(date, "getTime", {
+    value: () => {
+      throw new Error("getTime override should not be called");
+    },
+    enumerable: false,
+  });
+
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
+    cells: [[{ v: "Date" }], [{ v: date }]],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Date=2024-01-02T03:04:05\.000Z/);
+  assert.doesNotMatch(text, new RegExp(secret));
+});
+
 test("chunkToText truncates BigInt values via the string formatting path", () => {
   const big = BigInt("1".repeat(100));
   const chunk = {
@@ -112,6 +139,55 @@ test("chunkToText JSON-stringifies objects containing BigInt properties", () => 
 
   const text = chunkToText(chunk, { sampleRows: 1 });
   assert.match(text, /Meta=\{"big":"1"\}/);
+});
+
+test("chunkToText does not call toJSON on object cell values", () => {
+  const secret = "TopSecretToJson";
+  const value = {
+    toJSON() {
+      return secret;
+    },
+  };
+
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
+    cells: [[{ v: "Meta" }], [{ v: value }]],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.doesNotMatch(text, new RegExp(secret));
+});
+
+test("chunkToText does not call custom toString on chunk sheetName/title", () => {
+  const secret = "TopSecretSheet";
+  let calls = 0;
+  const sheetNameObj = {
+    toString() {
+      calls += 1;
+      return secret;
+    },
+  };
+  const titleObj = {
+    toString() {
+      calls += 1;
+      return secret;
+    },
+  };
+
+  const chunk = {
+    kind: "table",
+    title: titleObj,
+    sheetName: sheetNameObj,
+    rect: { r0: 0, c0: 0, r1: 0, c1: 0 },
+    cells: [[{ v: "A" }]],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.equal(calls, 0);
+  assert.doesNotMatch(text, new RegExp(secret));
 });
 
 test("chunkToText formats Error values with name + message", () => {
