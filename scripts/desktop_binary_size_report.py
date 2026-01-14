@@ -514,6 +514,12 @@ def main() -> int:
                     "status": "error",
                     "error": f"cargo metadata failed: {exc}",
                     "generated_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+                    "runner": {
+                        "os": os.environ.get("RUNNER_OS") or platform.system(),
+                        "arch": os.environ.get("RUNNER_ARCH") or platform.machine(),
+                    },
+                    "git": {"sha": git_sha, "ref": git_ref},
+                    "toolchain": {"rustc": rustc_version, "cargo": cargo_version},
                     "package": package,
                     "bin_name": bin_name,
                     "features": features,
@@ -543,9 +549,9 @@ def main() -> int:
 
     build_ran = False
     if not args.no_build:
+        build_ran = True
         try:
             subprocess.run(build_cmd, cwd=repo_root, check=True)
-            build_ran = True
         except subprocess.CalledProcessError:
             md = _render_markdown(
                 package=package,
@@ -565,7 +571,7 @@ def main() -> int:
                 cargo_bloat_version=None,
                 file_info=None,
                 stripped=None,
-                build_ran=False,
+                build_ran=build_ran,
                 build_cmd=build_cmd,
                 crates_cmd=None,
                 crates_out=None,
@@ -587,10 +593,13 @@ def main() -> int:
                         "status": "error",
                         "error": "build failed",
                         "generated_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+                        "runner": {"os": os.environ.get("RUNNER_OS") or platform.system(), "arch": os.environ.get("RUNNER_ARCH") or platform.machine()},
+                        "git": {"sha": git_sha, "ref": git_ref},
                         "package": package,
                         "bin_name": bin_name,
                         "features": features,
                         "target": target,
+                        "toolchain": {"rustc": rustc_version, "cargo": cargo_version},
                         "build_cmd": build_cmd,
                         "build_ran": build_ran,
                     },
@@ -650,10 +659,13 @@ def main() -> int:
                     "status": "error",
                     "error": "binary not found",
                     "generated_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+                    "runner": {"os": os.environ.get("RUNNER_OS") or platform.system(), "arch": os.environ.get("RUNNER_ARCH") or platform.machine()},
+                    "git": {"sha": git_sha, "ref": git_ref},
                     "package": package,
                     "bin_name": bin_name,
                     "features": features,
                     "target": target,
+                    "toolchain": {"rustc": rustc_version, "cargo": cargo_version},
                     "target_dir": _relpath(target_dir, repo_root),
                     "bin_path": _relpath(default_bin_path, repo_root),
                     "searched_paths": [_relpath(p, repo_root) for p in candidate_bin_paths],
@@ -821,6 +833,7 @@ def main() -> int:
             {
                 "status": "ok",
                 "generated_at": _dt.datetime.now(tz=_dt.timezone.utc).isoformat(),
+                "runner": {"os": os.environ.get("RUNNER_OS") or platform.system(), "arch": os.environ.get("RUNNER_ARCH") or platform.machine()},
                 "git": {"sha": git_sha, "ref": git_ref},
                 "package": package,
                 "bin_name": bin_name,
