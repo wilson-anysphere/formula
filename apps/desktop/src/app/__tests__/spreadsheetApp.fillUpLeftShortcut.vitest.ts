@@ -320,5 +320,45 @@ describe("SpreadsheetApp fill up/left shortcuts", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  it("blocks fill up/left when the workbook is read-only (collab viewer)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+
+    doc.setRangeValues(sheetId, "A1", [["seed"]], { label: "Seed" });
+
+    // Minimal stub so `SpreadsheetApp.isReadOnly()` returns true.
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    const beginBatch = vi.spyOn(doc, "beginBatch");
+    const setCellInput = vi.spyOn(doc, "setCellInput");
+
+    (app as any).selection = {
+      type: "range",
+      ranges: [{ startRow: 0, endRow: 1, startCol: 0, endCol: 0 }], // A1:A2
+      active: { row: 0, col: 0 },
+      anchor: { row: 0, col: 0 },
+      activeRangeIndex: 0,
+    };
+
+    app.fillUp();
+    app.fillLeft();
+
+    expect(beginBatch).not.toHaveBeenCalled();
+    expect(setCellInput).not.toHaveBeenCalled();
+
+    const a1 = doc.getCell(sheetId, { row: 0, col: 0 }) as any;
+    expect(a1.value).toBe("seed");
+
+    app.destroy();
+    root.remove();
+  });
+});

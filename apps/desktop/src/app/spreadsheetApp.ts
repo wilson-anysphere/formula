@@ -5410,6 +5410,13 @@ export class SpreadsheetApp {
   }
 
   fillUp(): void {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     this.applyFillShortcut("up");
   }
@@ -5427,6 +5434,13 @@ export class SpreadsheetApp {
   }
 
   fillLeft(): void {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     this.applyFillShortcut("left");
   }
