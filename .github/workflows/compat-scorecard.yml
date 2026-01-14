@@ -120,12 +120,33 @@ jobs:
           run-id: ${{ steps.runs.outputs.corpus_run_id }}
           github-token: ${{ github.token }}
 
-      - name: Download excel-oracle artifacts
-        if: ${{ steps.runs.outputs.generate == 'true' && steps.runs.outputs.excel_run_id != '' }}
+      - name: Download corpus private summary artifact
+        if: ${{ steps.runs.outputs.generate == 'true' && steps.runs.outputs.corpus_run_id != '' }}
         continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: corpus-private-summary
+          path: artifacts/corpus
+          run-id: ${{ steps.runs.outputs.corpus_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download excel-oracle artifacts
+        if: ${{ steps.runs.outputs.generate == 'true' && steps.runs.outputs.excel_run_id != '' }}
+        continue-on-error: true
+        id: download_excel_summary
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
           name: excel-oracle-summary
+          path: artifacts/excel
+          run-id: ${{ steps.runs.outputs.excel_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download excel-oracle artifacts (fallback)
+        if: ${{ steps.runs.outputs.generate == 'true' && steps.runs.outputs.excel_run_id != '' && steps.download_excel_summary.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: excel-oracle-artifacts
           path: artifacts/excel
           run-id: ${{ steps.runs.outputs.excel_run_id }}
           github-token: ${{ github.token }}
@@ -140,8 +161,13 @@ jobs:
           # when present.
           GITHUB_RUN_ID: ${{ steps.runs.outputs.excel_run_id }}
         run: |
+          CORPUS_SUMMARY="artifacts/corpus/tools/corpus/out/public/summary.json"
+          if [ -f artifacts/corpus/tools/corpus/out/private/summary.json ]; then
+            CORPUS_SUMMARY="artifacts/corpus/tools/corpus/out/private/summary.json"
+          fi
+
           python tools/compat_scorecard.py \
-            --corpus-summary artifacts/corpus/tools/corpus/out/public/summary.json \
+            --corpus-summary "$CORPUS_SUMMARY" \
             --oracle-report artifacts/excel/tests/compatibility/excel-oracle/reports/mismatch-report.json \
             --out-md artifacts/compat_scorecard.md \
             --out-json artifacts/compat_scorecard.json \
