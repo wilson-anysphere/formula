@@ -879,6 +879,8 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.comments.addComment"),
       keywords: ["comment", "add comment", "new comment"],
+      // Viewer roles can read comments but cannot create/update them.
+      when: "spreadsheet.canComment == true",
     },
   );
 

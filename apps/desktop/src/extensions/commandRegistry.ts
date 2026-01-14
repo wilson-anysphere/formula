@@ -5,6 +5,15 @@ export type CommandContribution = {
   icon?: string | null;
   description?: string | null;
   keywords?: string[] | null;
+  /**
+   * Optional context key expression that determines whether this command should be
+   * visible in context-aware UI surfaces (e.g. the command palette).
+   *
+   * Note: `CommandRegistry` itself does not evaluate this expression when executing
+   * commands; callers should enforce permissions at the command implementation
+   * layer as needed.
+   */
+  when?: string | null;
   source: { kind: "builtin" } | { kind: "extension"; extensionId: string };
 };
 
@@ -56,7 +65,13 @@ export class CommandRegistry {
     commandId: string,
     title: string,
     run: (...args: any[]) => any,
-    options?: { category?: string | null; icon?: string | null; description?: string | null; keywords?: string[] | null },
+    options?: {
+      category?: string | null;
+      icon?: string | null;
+      description?: string | null;
+      keywords?: string[] | null;
+      when?: string | null;
+    },
   ): void {
     const id = String(commandId);
     const keywords =
@@ -70,6 +85,7 @@ export class CommandRegistry {
       icon: options?.icon ?? null,
       description: options?.description ?? null,
       keywords,
+      when: options?.when ?? null,
       source: { kind: "builtin" },
       run: async (...args) => run(...args),
     });
@@ -88,6 +104,7 @@ export class CommandRegistry {
       icon?: string | null;
       description?: string | null;
       keywords?: string[] | null;
+      when?: string | null;
     }>,
     executor: (commandId: string, ...args: any[]) => Promise<any>,
   ): void {
@@ -109,6 +126,7 @@ export class CommandRegistry {
         icon: cmd.icon ?? null,
         description: cmd.description ?? null,
         keywords: Array.isArray(cmd.keywords) ? cmd.keywords.filter((kw) => typeof kw === "string" && kw.trim() !== "") : null,
+        when: cmd.when ?? null,
         source: { kind: "extension", extensionId: String(cmd.extensionId) },
         run: async (...args) => executor(id, ...args),
       });

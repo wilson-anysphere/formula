@@ -3,6 +3,7 @@ import type { ContextKeyService } from "../extensions/contextKeys.js";
 
 import { t, tWithVars } from "../i18n/index.js";
 import { markKeybindingBarrier } from "../keybindingBarrier.js";
+import { evaluateWhenClause } from "../extensions/whenClause.js";
 
 import { debounce } from "./debounce.js";
 import {
@@ -503,10 +504,13 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
   function ensureCommandsCache(): void {
     if (!commandsCacheDirty) return;
+    const lookup = contextKeys.asLookup();
     cachedCommands = commandRegistry
       .listCommands()
       // The command palette owns opening itself; avoid showing a no-op entry.
       .filter((cmd) => cmd.commandId !== "workbench.showCommandPalette")
+      // Hide commands whose context key expression is not satisfied (e.g. role/permission gated).
+      .filter((cmd) => evaluateWhenClause(cmd.when, lookup))
       .map((cmd) => prepareCommandForFuzzy(cmd));
     commandsCacheDirty = false;
   }

@@ -217,3 +217,76 @@ describe("createCommandPalette recents integration", () => {
     controller.dispose();
   });
 });
+
+describe("createCommandPalette when clauses", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    vi.stubGlobal("localStorage", createStorageMock());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("filters commands whose when clause is not satisfied (e.g. permission gated)", () => {
+    const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("comments.addComment", "Add Comment", () => {}, {
+      category: "Comments",
+      when: "spreadsheet.canComment == true",
+    });
+    commandRegistry.registerBuiltinCommand("comments.togglePanel", "Toggle Comments", () => {}, { category: "Comments" });
+
+    const contextKeys = new ContextKeyService();
+    contextKeys.set("spreadsheet.canComment", false);
+
+    const controller = createCommandPalette({
+      commandRegistry,
+      contextKeys,
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      // Keep the extension-load timer from firing in this test (it is cleared on close/dispose anyway).
+      extensionLoadDelayMs: 60_000,
+    });
+
+    controller.open();
+
+    const list = document.querySelector<HTMLElement>('[data-testid="command-palette-list"]');
+    expect(list).toBeTruthy();
+    expect(list!.textContent).toContain("Toggle Comments");
+    expect(list!.textContent).not.toContain("Add Comment");
+
+    controller.dispose();
+  });
+
+  it("includes commands whose when clause is satisfied", () => {
+    const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("comments.addComment", "Add Comment", () => {}, {
+      category: "Comments",
+      when: "spreadsheet.canComment == true",
+    });
+    commandRegistry.registerBuiltinCommand("comments.togglePanel", "Toggle Comments", () => {}, { category: "Comments" });
+
+    const contextKeys = new ContextKeyService();
+    contextKeys.set("spreadsheet.canComment", true);
+
+    const controller = createCommandPalette({
+      commandRegistry,
+      contextKeys,
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      // Keep the extension-load timer from firing in this test (it is cleared on close/dispose anyway).
+      extensionLoadDelayMs: 60_000,
+    });
+
+    controller.open();
+
+    const list = document.querySelector<HTMLElement>('[data-testid="command-palette-list"]');
+    expect(list).toBeTruthy();
+    expect(list!.textContent).toContain("Add Comment");
+    expect(list!.textContent).toContain("Toggle Comments");
+
+    controller.dispose();
+  });
+});
