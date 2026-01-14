@@ -113,6 +113,9 @@ jobs:
           toolchain: 1.92.0
 
       - name: Cache Rust (cargo registry + git) (preflight)
+        # Cache restores can fail due to transient GitHub issues or permission settings.
+        # Lockfile validation should still run (just slower), so treat caching as best-effort.
+        continue-on-error: true
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
           cache-targets: "false"
