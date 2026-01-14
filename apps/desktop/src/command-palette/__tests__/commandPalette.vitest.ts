@@ -1,2 +1,0 @@
-import "./commandPalette.test.js";
-

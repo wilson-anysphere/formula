@@ -239,6 +239,11 @@ export default defineConfig({
       // - `pnpm -C apps/desktop test` runs formula-bar coverage
       // - `pnpm -C apps/desktop exec vitest run apps/desktop/src/formula-bar/…` works reliably
       "src/formula-bar/**/*.test.ts",
+      // Command palette tests are `.test.ts` but historically ran via `*.vitest.ts` wrapper
+      // entrypoints. Include them directly so we don't need wrapper files just to satisfy the
+      // desktop-scoped Vitest include list.
+      "src/command-palette/__tests__/commandPalette.test.ts",
+      "src/command-palette/__tests__/shortcutSearch.test.ts",
       "src/ai/tools/**/*.test.ts",
       "src/ai/dlp/__tests__/**/*.test.ts",
       "src/editor/cellEditorOverlay.f4.test.ts",
