@@ -550,14 +550,18 @@ pub(crate) mod tests {
             return h[..key_len].to_vec();
         }
 
-        // CryptoAPI key expansion used by MS-OFFCRYPTO Standard encryption: pad `h` to 64 bytes
-        // with 0x36 and 0x5C, hash each, and concatenate.
-        let mut buf1 = h.clone();
-        buf1.resize(64, 0x36);
-        let mut buf2 = h.clone();
-        buf2.resize(64, 0x5c);
-        let mut out = hash_alg.digest(&buf1);
-        out.extend_from_slice(&hash_alg.digest(&buf2));
+        // CryptoAPI `CryptDeriveKey` expansion used by MS-OFFCRYPTO Standard encryption: pad `h` to
+        // 64 bytes with zeros, XOR with 0x36 and 0x5C, hash each, and concatenate.
+        let mut buf = h.clone();
+        buf.resize(64, 0);
+        let mut ipad = vec![0u8; 64];
+        let mut opad = vec![0u8; 64];
+        for i in 0..64 {
+            ipad[i] = buf[i] ^ 0x36;
+            opad[i] = buf[i] ^ 0x5c;
+        }
+        let mut out = hash_alg.digest(&ipad);
+        out.extend_from_slice(&hash_alg.digest(&opad));
         out.truncate(key_len);
         out
     }

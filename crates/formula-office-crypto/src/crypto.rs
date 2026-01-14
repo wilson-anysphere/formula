@@ -472,18 +472,24 @@ fn crypt_derive_key(hash_alg: HashAlgorithm, hash: &[u8], key_len: usize) -> Zer
         return Zeroizing::new(hash[..key_len].to_vec());
     }
 
-    // MS-OFFCRYPTO's CryptoAPI key derivation extension: hash padded with 0x36/0x5c to 64 bytes,
-    // then hashed again to produce additional material.
-    let mut buf1: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(64));
-    buf1.extend_from_slice(hash);
-    buf1.resize(64, 0x36);
+    // MS-OFFCRYPTO's CryptoAPI key derivation extension: hash padded with zeros to 64 bytes, XORed
+    // with 0x36/0x5C, then hashed to produce additional material.
+    //
+    // This matches the "HMAC-like" `CryptDeriveKey` behavior described in MS-OFFCRYPTO (and matches
+    // reference implementations such as `msoffcrypto-tool`).
+    let mut buf: Zeroizing<[u8; 64]> = Zeroizing::new([0u8; 64]);
+    debug_assert!(hash.len() <= 64);
+    buf[..hash.len()].copy_from_slice(hash);
 
-    let mut buf2: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(64));
-    buf2.extend_from_slice(hash);
-    buf2.resize(64, 0x5C);
+    let mut ipad: Zeroizing<[u8; 64]> = Zeroizing::new([0u8; 64]);
+    let mut opad: Zeroizing<[u8; 64]> = Zeroizing::new([0u8; 64]);
+    for i in 0..64 {
+        ipad[i] = buf[i] ^ 0x36;
+        opad[i] = buf[i] ^ 0x5C;
+    }
 
-    let h1: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&buf1));
-    let h2: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&buf2));
+    let h1: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&ipad[..]));
+    let h2: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&opad[..]));
 
     let mut out: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(h1.len() + h2.len()));
     out.extend_from_slice(&h1);
