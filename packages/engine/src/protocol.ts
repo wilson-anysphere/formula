@@ -322,7 +322,7 @@ export interface PivotCalculatedItem {
 }
 
 export type PivotLayout = "compact" | "outline" | "tabular";
-export type PivotSubtotalPosition = "top" | "bottom" | "none";
+export type PivotSubtotalPosition = "automatic" | "top" | "bottom" | "none";
 
 export interface PivotGrandTotals {
   rows: boolean;
