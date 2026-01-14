@@ -1,15 +1,17 @@
 use std::collections::{BTreeMap, HashMap};
 
 use formula_model::{
-    autofilter::{FilterColumn, FilterCriterion, FilterJoin, FilterValue, SortCondition, SortState},
+    autofilter::{
+        FilterColumn, FilterCriterion, FilterJoin, FilterValue, SortCondition, SortState,
+    },
     CellRef, Hyperlink, HyperlinkTarget, ManualPageBreaks, OutlinePr, Range, SheetPane,
     SheetProtection, SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 
 use super::records;
-use super::worksheet_formulas;
 use super::rgce;
 use super::strings;
+use super::worksheet_formulas;
 
 /// Hard cap on the number of per-cell XF indices tracked per worksheet.
 ///
@@ -386,7 +388,10 @@ pub(crate) fn parse_biff_sheet_protection(
         let record = match record {
             Ok(r) => r,
             Err(err) => {
-                push_sheet_metadata_warning(&mut out.warnings, format!("malformed BIFF record: {err}"));
+                push_sheet_metadata_warning(
+                    &mut out.warnings,
+                    format!("malformed BIFF record: {err}"),
+                );
                 break;
             }
         };
@@ -717,7 +722,10 @@ pub(crate) fn parse_biff_sheet_view_state(
         let record = match next {
             Ok(r) => r,
             Err(err) => {
-                push_sheet_metadata_warning(&mut out.warnings, format!("malformed BIFF record: {err}"));
+                push_sheet_metadata_warning(
+                    &mut out.warnings,
+                    format!("malformed BIFF record: {err}"),
+                );
                 break;
             }
         };
@@ -1224,7 +1232,8 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     // reassemble those payloads before decoding.
     let allows_continuation =
         |record_id: u16| record_id == RECORD_SORT || (record_id >= 0x0850 && record_id <= 0x08FF);
-    let iter = records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+    let iter =
+        records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
     for record in iter {
         let record = match record {
             Ok(record) => record,
@@ -1311,42 +1320,66 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             // robustness.
             RECORD_CONTINUEFRT12 => {
                 // Best-effort continuation for AutoFilter12 payloads.
-                let Some(pending) = pending_autofilter12.as_mut() else {
+                let Some(mut pending) = pending_autofilter12.take() else {
                     continue;
                 };
-                let payload = parse_frt_header(data)
-                    .map(|(_, p)| p)
-                    .unwrap_or(data);
-                if payload.is_empty() {
-                    continue;
+                let header_len = if data.len() >= 8 { 8 } else { 0 };
+                let fragments: Vec<&[u8]> = record.fragments().collect();
+
+                let mut remaining_header = header_len;
+                let mut dropped = false;
+                for frag in fragments {
+                    let payload = if remaining_header > 0 {
+                        if frag.len() <= remaining_header {
+                            remaining_header = remaining_header.saturating_sub(frag.len());
+                            continue;
+                        }
+                        let start = remaining_header;
+                        remaining_header = 0;
+                        &frag[start..]
+                    } else {
+                        frag
+                    };
+
+                    if payload.is_empty() {
+                        continue;
+                    }
+
+                    if pending.fragment_sizes.len() >= records::MAX_LOGICAL_RECORD_FRAGMENTS {
+                        push_warning_bounded_force(
+                            &mut props.warnings,
+                            format!(
+                                "too many ContinueFrt12 fragments (cap={}); dropping continued AutoFilter12",
+                                records::MAX_LOGICAL_RECORD_FRAGMENTS
+                            ),
+                        );
+                        dropped = true;
+                        break;
+                    }
+                    if pending.payload.len().saturating_add(payload.len())
+                        > records::MAX_LOGICAL_RECORD_BYTES
+                    {
+                        push_warning_bounded_force(
+                            &mut props.warnings,
+                            format!(
+                                "AutoFilter12 continued payload too large (cap={} bytes); dropping continued AutoFilter12",
+                                records::MAX_LOGICAL_RECORD_BYTES
+                            ),
+                        );
+                        dropped = true;
+                        break;
+                    }
+
+                    pending.payload.extend_from_slice(payload);
+                    pending.fragment_sizes.push(payload.len());
                 }
-                if pending.fragments >= records::MAX_LOGICAL_RECORD_FRAGMENTS {
-                    push_warning_bounded_force(
-                        &mut props.warnings,
-                        format!(
-                            "too many ContinueFrt12 fragments (cap={}); dropping continued AutoFilter12",
-                            records::MAX_LOGICAL_RECORD_FRAGMENTS
-                        ),
-                    );
-                    pending_autofilter12 = None;
-                    continue;
+
+                if !dropped {
+                    pending_autofilter12 = Some(pending);
                 }
-                if pending.payload.len().saturating_add(payload.len()) > records::MAX_LOGICAL_RECORD_BYTES {
-                    push_warning_bounded_force(
-                        &mut props.warnings,
-                        format!(
-                            "AutoFilter12 continued payload too large (cap={} bytes); dropping continued AutoFilter12",
-                            records::MAX_LOGICAL_RECORD_BYTES
-                        ),
-                    );
-                    pending_autofilter12 = None;
-                    continue;
-                }
-                pending.payload.extend_from_slice(payload);
-                pending.fragments = pending.fragments.saturating_add(1);
             }
             id if id >= 0x0850 && id <= 0x08FF => {
-                let Some((rt, frt_payload)) = parse_frt_header(data) else {
+                let Some((rt, _)) = parse_frt_header(data) else {
                     // Not a valid FRT header; ignore silently.
                     continue;
                 };
@@ -1356,14 +1389,59 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                         saw_autofilter12 = true;
                         // AutoFilter12 records may be continued via one or more ContinueFrt12
                         // records. Stash the payload and decode once any continuations are seen.
-                        pending_autofilter12 = Some(PendingFrtPayload {
-                            payload: frt_payload.to_vec(),
-                            fragments: 1,
-                        });
+                        let fragments: Vec<&[u8]> = record.fragments().collect();
+                        let mut pending = PendingFrtPayload {
+                            payload: Vec::new(),
+                            fragment_sizes: Vec::new(),
+                        };
+                        // FrtHeader is 8 bytes.
+                        let mut remaining_header = 8usize;
+                        for frag in fragments {
+                            let payload = if remaining_header > 0 {
+                                if frag.len() <= remaining_header {
+                                    remaining_header = remaining_header.saturating_sub(frag.len());
+                                    continue;
+                                }
+                                let start = remaining_header;
+                                remaining_header = 0;
+                                &frag[start..]
+                            } else {
+                                frag
+                            };
+
+                            if payload.is_empty() {
+                                continue;
+                            }
+                            // Avoid holding on to pathological payloads in tests where
+                            // MAX_LOGICAL_RECORD_BYTES is small.
+                            if pending.payload.len().saturating_add(payload.len())
+                                > records::MAX_LOGICAL_RECORD_BYTES
+                            {
+                                push_warning_bounded_force(
+                                    &mut props.warnings,
+                                    format!(
+                                        "AutoFilter12 payload too large (cap={} bytes); dropping AutoFilter12",
+                                        records::MAX_LOGICAL_RECORD_BYTES
+                                    ),
+                                );
+                                pending.payload.clear();
+                                pending.fragment_sizes.clear();
+                                break;
+                            }
+                            pending.payload.extend_from_slice(payload);
+                            pending.fragment_sizes.push(payload.len());
+                        }
+
+                        if !pending.payload.is_empty() {
+                            pending_autofilter12 = Some(pending);
+                        }
                     }
                     // Sort12/SortData12 future records are imported separately during AutoFilter
                     // post-processing (see `biff::sort`).
-                    RECORD_SORT12 | RECORD_SORT12_ALT | RECORD_SORTDATA12 | RECORD_SORTDATA12_ALT => {}
+                    RECORD_SORT12
+                    | RECORD_SORT12_ALT
+                    | RECORD_SORTDATA12
+                    | RECORD_SORTDATA12_ALT => {}
                     _ => {}
                 }
             }
@@ -1615,7 +1693,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
 #[derive(Debug)]
 struct PendingFrtPayload {
     payload: Vec<u8>,
-    fragments: usize,
+    fragment_sizes: Vec<usize>,
 }
 
 fn flush_pending_autofilter12_record(
@@ -1628,12 +1706,16 @@ fn flush_pending_autofilter12_record(
         return;
     };
 
-    match decode_autofilter12_record(&pending.payload, codepage) {
+    match decode_autofilter12_record(&pending.payload, &pending.fragment_sizes, codepage) {
         Ok(Some(column)) => {
             columns.entry(column.col_id).or_insert(column);
         }
         Ok(None) | Err(_) => {
-            if !props.warnings.iter().any(|w| w == "unsupported AutoFilter12") {
+            if !props
+                .warnings
+                .iter()
+                .any(|w| w == "unsupported AutoFilter12")
+            {
                 push_warning_bounded(&mut props.warnings, "unsupported AutoFilter12".to_string());
             }
         }
@@ -1755,6 +1837,12 @@ fn parse_frt_header(data: &[u8]) -> Option<(u16, &[u8])> {
     Some((rt, &data[8..]))
 }
 
+// BIFF8 string flags used by `XLUnicodeString`.
+// See [MS-XLS] 2.5.268.
+const STR_FLAG_HIGH_BYTE: u8 = 0x01;
+const STR_FLAG_EXT: u8 = 0x04;
+const STR_FLAG_RICH_TEXT: u8 = 0x08;
+
 /// Best-effort decode of an AutoFilter12 record payload (after `FrtHeader`).
 ///
 /// AutoFilter12 is a BIFF8 Future Record Type (FRT) record used by Excel 2007+ to store
@@ -1769,8 +1857,246 @@ fn parse_frt_header(data: &[u8]) -> Option<(u16, &[u8])> {
 /// If decoding fails, callers should treat the record as unsupported.
 fn decode_autofilter12_record(
     payload: &[u8],
+    fragment_sizes: &[usize],
     codepage: u16,
 ) -> Result<Option<FilterColumn>, String> {
+    fn locate_fragment_offset(
+        fragment_sizes: &[usize],
+        global_offset: usize,
+    ) -> Option<(usize, usize)> {
+        let mut remaining = global_offset;
+        for (idx, &size) in fragment_sizes.iter().enumerate() {
+            if remaining < size {
+                return Some((idx, remaining));
+            }
+            remaining = remaining.saturating_sub(size);
+        }
+        None
+    }
+
+    fn build_fragments<'a>(
+        payload: &'a [u8],
+        fragment_sizes: &[usize],
+    ) -> Result<Vec<&'a [u8]>, String> {
+        if fragment_sizes.is_empty() {
+            return Ok(vec![payload]);
+        }
+        let mut out = Vec::with_capacity(fragment_sizes.len());
+        let mut offset = 0usize;
+        for &size in fragment_sizes {
+            let end = offset
+                .checked_add(size)
+                .ok_or_else(|| "AutoFilter12 fragment size overflow".to_string())?;
+            let frag = payload
+                .get(offset..end)
+                .ok_or_else(|| "AutoFilter12 fragment sizes exceed payload length".to_string())?;
+            out.push(frag);
+            offset = end;
+        }
+        if offset != payload.len() {
+            // Defensive: when fragment sizes don't match, fall back to treating the payload as a
+            // single fragment so we still parse best-effort without panicking.
+            return Ok(vec![payload]);
+        }
+        Ok(out)
+    }
+
+    #[derive(Debug, Clone)]
+    struct FragmentCursor<'a> {
+        fragments: &'a [&'a [u8]],
+        frag_idx: usize,
+        offset: usize,
+    }
+
+    impl<'a> FragmentCursor<'a> {
+        fn new(fragments: &'a [&'a [u8]], frag_idx: usize, offset: usize) -> Self {
+            Self {
+                fragments,
+                frag_idx,
+                offset,
+            }
+        }
+
+        fn remaining_in_fragment(&self) -> usize {
+            self.fragments
+                .get(self.frag_idx)
+                .map(|f| f.len().saturating_sub(self.offset))
+                .unwrap_or(0)
+        }
+
+        fn advance_fragment(&mut self) -> Result<(), String> {
+            self.frag_idx = self
+                .frag_idx
+                .checked_add(1)
+                .ok_or_else(|| "fragment index overflow".to_string())?;
+            self.offset = 0;
+            if self.frag_idx >= self.fragments.len() {
+                return Err("unexpected end of record".to_string());
+            }
+            Ok(())
+        }
+
+        fn read_u8(&mut self) -> Result<u8, String> {
+            loop {
+                let frag = self
+                    .fragments
+                    .get(self.frag_idx)
+                    .ok_or_else(|| "unexpected end of record".to_string())?;
+                if self.offset < frag.len() {
+                    let b = frag[self.offset];
+                    self.offset += 1;
+                    return Ok(b);
+                }
+                self.advance_fragment()?;
+            }
+        }
+
+        fn read_u16_le(&mut self) -> Result<u16, String> {
+            let lo = self.read_u8()?;
+            let hi = self.read_u8()?;
+            Ok(u16::from_le_bytes([lo, hi]))
+        }
+
+        fn read_exact_from_current(&mut self, n: usize) -> Result<&'a [u8], String> {
+            let frag = self
+                .fragments
+                .get(self.frag_idx)
+                .ok_or_else(|| "unexpected end of record".to_string())?;
+            let end = self
+                .offset
+                .checked_add(n)
+                .ok_or_else(|| "offset overflow".to_string())?;
+            if end > frag.len() {
+                return Err("unexpected end of record".to_string());
+            }
+            let out = &frag[self.offset..end];
+            self.offset = end;
+            Ok(out)
+        }
+
+        fn advance_fragment_in_biff8_string(
+            &mut self,
+            is_unicode: &mut bool,
+        ) -> Result<(), String> {
+            self.advance_fragment()?;
+            // When a BIFF8 string spans a CONTINUE boundary, Excel inserts a 1-byte option flags
+            // prefix at the start of the continued fragment. The only relevant bit is `fHighByte`
+            // (unicode vs compressed).
+            let cont_flags = self.read_u8()?;
+            *is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+            Ok(())
+        }
+
+        fn read_biff8_string_bytes(
+            &mut self,
+            mut n: usize,
+            is_unicode: &mut bool,
+        ) -> Result<Vec<u8>, String> {
+            // Read `n` canonical bytes from a BIFF8 continued string payload, skipping the 1-byte
+            // continuation flags prefix that appears at the start of each continued fragment.
+            let mut out = Vec::with_capacity(n);
+            while n > 0 {
+                if self.remaining_in_fragment() == 0 {
+                    self.advance_fragment_in_biff8_string(is_unicode)?;
+                    continue;
+                }
+                let available = self.remaining_in_fragment();
+                let take = n.min(available);
+                let bytes = self.read_exact_from_current(take)?;
+                out.extend_from_slice(bytes);
+                n -= take;
+            }
+            Ok(out)
+        }
+
+        fn skip_biff8_string_bytes(
+            &mut self,
+            mut n: usize,
+            is_unicode: &mut bool,
+        ) -> Result<(), String> {
+            // Skip `n` canonical bytes from a BIFF8 continued string payload, consuming any inserted
+            // continuation flags bytes at fragment boundaries.
+            while n > 0 {
+                if self.remaining_in_fragment() == 0 {
+                    self.advance_fragment_in_biff8_string(is_unicode)?;
+                    continue;
+                }
+                let available = self.remaining_in_fragment();
+                let take = n.min(available);
+                self.offset += take;
+                n -= take;
+            }
+            Ok(())
+        }
+
+        fn read_biff8_unicode_string(&mut self, codepage: u16) -> Result<String, String> {
+            // XLUnicodeString [MS-XLS 2.5.268]
+            let cch = self.read_u16_le()? as usize;
+            let flags = self.read_u8()?;
+
+            let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+
+            let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
+                let bytes = self.read_biff8_string_bytes(2, &mut is_unicode)?;
+                u16::from_le_bytes([bytes[0], bytes[1]]) as usize
+            } else {
+                0
+            };
+
+            let ext_size = if flags & STR_FLAG_EXT != 0 {
+                let bytes = self.read_biff8_string_bytes(4, &mut is_unicode)?;
+                u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize
+            } else {
+                0
+            };
+
+            let mut remaining_chars = cch;
+            let mut out = String::new();
+
+            while remaining_chars > 0 {
+                if self.remaining_in_fragment() == 0 {
+                    // Continuing character bytes into a new CONTINUE fragment: first byte is
+                    // option flags for the continued segment (fHighByte).
+                    self.advance_fragment_in_biff8_string(&mut is_unicode)?;
+                    continue;
+                }
+
+                let bytes_per_char = if is_unicode { 2 } else { 1 };
+                let available_bytes = self.remaining_in_fragment();
+                let available_chars = available_bytes / bytes_per_char;
+                if available_chars == 0 {
+                    return Err("string continuation split mid-character".to_string());
+                }
+
+                let take_chars = remaining_chars.min(available_chars);
+                let take_bytes = take_chars * bytes_per_char;
+                let bytes = self.read_exact_from_current(take_bytes)?;
+
+                if is_unicode {
+                    let mut u16s = Vec::with_capacity(take_chars);
+                    for chunk in bytes.chunks_exact(2) {
+                        u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                    }
+                    out.push_str(&String::from_utf16_lossy(&u16s));
+                } else {
+                    out.push_str(&strings::decode_ansi(codepage, bytes));
+                }
+
+                remaining_chars -= take_chars;
+            }
+
+            let richtext_bytes = richtext_runs
+                .checked_mul(4)
+                .ok_or_else(|| "rich text run count overflow".to_string())?;
+            let extra_len = richtext_bytes
+                .checked_add(ext_size)
+                .ok_or_else(|| "string ext payload length overflow".to_string())?;
+            self.skip_biff8_string_bytes(extra_len, &mut is_unicode)?;
+
+            Ok(out)
+        }
+    }
+
     if payload.len() < 2 {
         return Err("AutoFilter12 payload too short".to_string());
     }
@@ -1782,6 +2108,11 @@ fn decode_autofilter12_record(
     // - [colId:u16][flags:u16][unused:u16][cVals:u16][vals...]
     const MAX_VALUES: usize = 1024;
     let candidates: &[(usize, usize)] = &[(2, 4), (4, 6), (6, 8)];
+
+    let fragments = build_fragments(payload, fragment_sizes)?;
+    // Ensure the fragment size vector matches the actual fragment slice layout used for parsing.
+    // If `build_fragments` fell back to a single fragment, preserve that behavior here.
+    let fragment_sizes: Vec<usize> = fragments.iter().map(|f| f.len()).collect();
 
     for &(count_off, vals_off) in candidates {
         if payload.len() < vals_off {
@@ -1802,18 +2133,19 @@ fn decode_autofilter12_record(
             continue;
         }
 
-        let mut pos = vals_off;
+        let Some((frag_idx, frag_off)) = locate_fragment_offset(&fragment_sizes, vals_off) else {
+            continue;
+        };
+        let mut cursor = FragmentCursor::new(&fragments, frag_idx, frag_off);
         let mut values: Vec<String> = Vec::with_capacity(count.min(16));
         while count > 0 {
-            let rest = payload.get(pos..).unwrap_or_default();
-            let Ok((mut s, used)) = strings::parse_biff8_unicode_string(rest, codepage) else {
+            let Ok(mut s) = cursor.read_biff8_unicode_string(codepage) else {
                 values.clear();
                 break;
             };
             if s.contains('\0') {
                 s.retain(|ch| ch != '\0');
             }
-            pos = pos.saturating_add(used);
             values.push(s);
             count -= 1;
         }
@@ -2090,8 +2422,9 @@ pub(crate) fn parse_biff8_sheet_formulas(
             match resolution {
                 worksheet_formulas::PtgReferenceResolution::Shared { base } => {
                     if let Some(def) = parsed.shrfmla.get(&base) {
-                        resolved_rgce =
-                            super::formulas::materialize_biff8_rgce_from_base(&def.rgce, base, cell.cell);
+                        resolved_rgce = super::formulas::materialize_biff8_rgce_from_base(
+                            &def.rgce, base, cell.cell,
+                        );
                         if resolved_rgce.is_some() {
                             resolved_rgcb = Some(def.rgcb.clone());
                         }
@@ -2113,7 +2446,12 @@ pub(crate) fn parse_biff8_sheet_formulas(
 
         let rgce_bytes = resolved_rgce.as_deref().unwrap_or(&cell.rgce);
         let rgcb_bytes = resolved_rgcb.as_deref().unwrap_or(&cell.rgcb);
-        let decoded = rgce::decode_biff8_rgce_with_base_and_rgcb(rgce_bytes, rgcb_bytes, ctx, Some(decode_base));
+        let decoded = rgce::decode_biff8_rgce_with_base_and_rgcb(
+            rgce_bytes,
+            rgcb_bytes,
+            ctx,
+            Some(decode_base),
+        );
         for warning in decoded.warnings {
             push_warning_bounded(
                 &mut out.warnings,
@@ -3239,7 +3577,7 @@ mod tests {
         // row input: A1
         table_payload.extend_from_slice(&0u16.to_le_bytes()); // rwInpRow
         table_payload.extend_from_slice(&0u16.to_le_bytes()); // colInpRow
-        // col input: B2
+                                                              // col input: B2
         table_payload.extend_from_slice(&1u16.to_le_bytes()); // rwInpCol
         table_payload.extend_from_slice(&1u16.to_le_bytes()); // colInpCol
 
@@ -3461,7 +3799,7 @@ mod tests {
         sort_payload[12..14].copy_from_slice(&0u16.to_le_bytes()); // key col 1
         sort_payload[14..16].copy_from_slice(&0xFFFFu16.to_le_bytes()); // key col 2 (unused)
         sort_payload[16..18].copy_from_slice(&0xFFFFu16.to_le_bytes()); // key col 3 (unused)
-        // orders default to 0 (ascending).
+                                                                        // orders default to 0 (ascending).
 
         let split_at = 10usize;
         stream.extend_from_slice(&record(RECORD_SORT, &sort_payload[..split_at]));
@@ -3477,6 +3815,68 @@ mod tests {
                     descending: false,
                 }]
             })
+        );
+    }
+
+    #[test]
+    fn parses_autofilter12_record_with_unicode_string_split_across_continuefrt12() {
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // AutoFilter12 future record storing one value ("ABCDE") for column 0.
+        //
+        // We split the UTF-16 character bytes across a ContinueFrt12 boundary. Excel inserts a
+        // 1-byte continuation option flags prefix (fHighByte) at the start of the continued
+        // fragment; without fragment-aware parsing that byte corrupts the UTF-16 stream.
+        let mut autofilter12_payload = Vec::new();
+        autofilter12_payload.extend_from_slice(&RECORD_AUTOFILTER12.to_le_bytes()); // FrtHeader.rt
+        autofilter12_payload.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
+        autofilter12_payload.extend_from_slice(&0u32.to_le_bytes()); // reserved
+
+        autofilter12_payload.extend_from_slice(&0u16.to_le_bytes()); // colId
+        autofilter12_payload.extend_from_slice(&1u16.to_le_bytes()); // cVals
+
+        // XLUnicodeString header.
+        autofilter12_payload.extend_from_slice(&5u16.to_le_bytes()); // cch
+        autofilter12_payload.push(STR_FLAG_HIGH_BYTE); // unicode
+
+        // First two characters (A, B) stored in the AutoFilter12 record payload.
+        autofilter12_payload.extend_from_slice(&(b'A' as u16).to_le_bytes());
+        autofilter12_payload.extend_from_slice(&(b'B' as u16).to_le_bytes());
+
+        // ContinueFrt12 payload begins with its own FrtHeader, then the continuation flags byte,
+        // then the remaining characters (CDE).
+        let mut cont_payload = Vec::new();
+        cont_payload.extend_from_slice(&RECORD_CONTINUEFRT12.to_le_bytes()); // FrtHeader.rt
+        cont_payload.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
+        cont_payload.extend_from_slice(&0u32.to_le_bytes()); // reserved
+        cont_payload.push(STR_FLAG_HIGH_BYTE); // continuation option flags (unicode)
+        cont_payload.extend_from_slice(&(b'C' as u16).to_le_bytes());
+        cont_payload.extend_from_slice(&(b'D' as u16).to_le_bytes());
+        cont_payload.extend_from_slice(&(b'E' as u16).to_le_bytes());
+
+        stream.extend_from_slice(&record(RECORD_AUTOFILTER12, &autofilter12_payload));
+        stream.extend_from_slice(&record(RECORD_CONTINUEFRT12, &cont_payload));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let props = parse_biff_sheet_row_col_properties(&stream, 0, 1252).expect("parse");
+        assert!(
+            props.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            props.warnings
+        );
+
+        assert_eq!(
+            props.auto_filter_columns,
+            vec![FilterColumn {
+                col_id: 0,
+                join: FilterJoin::Any,
+                criteria: vec![FilterCriterion::Equals(FilterValue::Text(
+                    "ABCDE".to_string()
+                ))],
+                values: vec!["ABCDE".to_string()],
+                raw_xml: Vec::new(),
+            }]
         );
     }
 
@@ -3708,12 +4108,12 @@ mod tests {
 
         let mut merged2 = Vec::new();
         merged2.extend_from_slice(&2u16.to_le_bytes()); // cAreas
-        // Range that reaches the cap.
+                                                        // Range that reaches the cap.
         merged2.extend_from_slice(&cap_row.to_le_bytes()); // rwFirst
         merged2.extend_from_slice(&cap_row.to_le_bytes()); // rwLast
         merged2.extend_from_slice(&0u16.to_le_bytes()); // colFirst
         merged2.extend_from_slice(&1u16.to_le_bytes()); // colLast
-        // Unique range beyond the cap.
+                                                        // Unique range beyond the cap.
         merged2.extend_from_slice(&beyond_row.to_le_bytes()); // rwFirst
         merged2.extend_from_slice(&beyond_row.to_le_bytes()); // rwLast
         merged2.extend_from_slice(&5u16.to_le_bytes()); // colFirst
@@ -4192,7 +4592,10 @@ mod tests {
         );
 
         assert!(
-            parsed.warnings.iter().any(|w| w.contains("SELECTION record") && w.contains("cap=")),
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("SELECTION record") && w.contains("cap=")),
             "expected selection cap warning, got {:?}",
             parsed.warnings
         );
