@@ -49,18 +49,22 @@ Implemented in `crates/formula-xlsx/src/drawingml/charts/parse_chart_space.rs`.
 `parse_chart_space()` parses a classic DrawingML chart (`<c:chartSpace>`) into
 `formula_model::charts::ChartModel` with best-effort coverage:
 
-- Detects chart kind by the **first** `*Chart` element under `c:plotArea`.
+- Detects chart kind by selecting a **primary** `*Chart` element under `c:plotArea` (the first
+  supported chart-type element, falling back to the first element when all are unknown).
+- Supports **combo charts** where `<c:plotArea>` contains multiple `*Chart` elements by producing
+  `PlotAreaModel::Combo` and tagging each `SeriesModel` with `plot_index` to indicate which subplot
+  it belongs to.
 - Parses:
   - chart title (`c:title`) and legend (`c:legend`) including basic text styling (`c:txPr`)
   - plot-area chart settings (e.g. `barDir`, `grouping`, `varyColors`, `scatterStyle`)
   - axes for `c:catAx` and `c:valAx` (id, position, scaling, number format, tick label position,
-     major gridline presence + some inline styling)
+      major gridline presence + some inline styling)
   - series formulas (`tx`, `cat`, `val`, `xVal`, `yVal`) and cached values (`strCache`, `numCache`)
   - series data label settings (`c:ser/c:dLbls`) including `showVal`, `showCatName`, `showSerName`,
     `dLblPos`, and `numFmt`
   - some inline formatting: `spPr` shape styles, markers, and per-point `c:dPt` overrides
 - Records non-fatal parse limitations as `ChartModel.diagnostics` warnings (for example:
-  `mc:AlternateContent`, `c:extLst`, unsupported axis types, multiple chart types in one plotArea).
+  `mc:AlternateContent` (branch selection is heuristic), `c:extLst`, unsupported chart/axis types).
 
 ### Parsing: `drawingml::charts::parse_chart_ex`
 
@@ -81,11 +85,19 @@ The current parser intentionally produces a **placeholder** `ChartModel`:
 
 From `parse_chart_space()`:
 
+- **Area** (`ChartKind::Area`): `<c:areaChart>` and `<c:area3DChart>`.
 - **Bar/Column** (`ChartKind::Bar`): `<c:barChart>` and `<c:bar3DChart>`.
   - `barDir="col"` vs `barDir="bar"` distinguishes column vs bar.
+- **Bubble** (`ChartKind::Bubble`): `<c:bubbleChart>`.
+- **Doughnut** (`ChartKind::Doughnut`): `<c:doughnutChart>`.
 - **Line** (`ChartKind::Line`): `<c:lineChart>` and `<c:line3DChart>`.
-- **Pie/Doughnut** (`ChartKind::Pie`): `<c:pieChart>`, `<c:pie3DChart>`, `<c:doughnutChart>`.
+- **Pie** (`ChartKind::Pie`): `<c:pieChart>` and `<c:pie3DChart>`.
+- **Radar** (`ChartKind::Radar`): `<c:radarChart>`.
 - **Scatter** (`ChartKind::Scatter`): `<c:scatterChart>`.
+- **Stock** (`ChartKind::Stock`): `<c:stockChart>`.
+- **Surface** (`ChartKind::Surface`): `<c:surfaceChart>` and `<c:surface3DChart>`.
+- **Combo** (`PlotAreaModel::Combo`): multiple chart-type elements overlaid within one plot area
+  (e.g. barChart + lineChart).
 - Everything else becomes `ChartKind::Unknown { name: "<elementName>" }` (series/axes may still be
   extracted).
 
@@ -124,15 +136,16 @@ This list is intentionally written as a work checklist and should map 1:1 to pla
 work in `formula-xlsx` + `formula-model`.
 
 - [ ] **Combo charts**: support plot areas with multiple `*Chart` elements (mixed chart types,
-      secondary axes, mixed stacking/grouping).
-- [ ] **More classic chart types**: area, radar, bubble, stock, surface, etc. (currently become
-      `ChartKind::Unknown`).
+      secondary axes, mixed stacking/grouping). (**chartSpace parsing is implemented**; remaining
+      work is rendering semantics / secondary-axis behavior).
+- [x] **More classic chart types**: area, radar, bubble, stock, surface, doughnut (modeled as
+      first-class `ChartKind`/`PlotAreaModel` variants).
 - [ ] **ChartEx modeling**: parse `cx:chartSpace` into a first-class model (histogram, waterfall,
       treemap, sunburst, funnel, box & whisker, Pareto, …) instead of placeholder `Unknown`.
 - [ ] **ChartStyle / ChartColorStyle parts**: parse and apply `xl/charts/styleN.xml` and
       `xl/charts/colorsN.xml` (currently extracted but not interpreted).
-- [ ] **`mc:AlternateContent` handling**: implement Choice/Fallback selection and preserve the
-      semantics in the model.
+- [ ] **`mc:AlternateContent` handling**: fully honor `mc:Choice/@Requires` (current parsing flattens
+      AlternateContent with heuristic Choice/Fallback selection).
 - [ ] **`c:extLst` handling**: model important extensions (today we only record a warning).
 - [ ] **Literal series data**: support `c:strLit` / `c:numLit` (today we only handle `strRef` /
       `numRef`).
