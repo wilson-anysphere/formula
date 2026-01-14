@@ -283,12 +283,13 @@ require_docker
 
 if [[ "${kind}" == "deb" || "${kind}" == "all" ]]; then
   deb_image="${FORMULA_DEB_SMOKE_IMAGE:-ubuntu:24.04}"
+  deb_dirs=()
+  find_pkg_dirs "deb" ".deb" deb_dirs
+
   echo "::group::Pull .deb smoke test image (${deb_image})"
   docker pull ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} "${deb_image}"
   echo "::endgroup::"
 
-  deb_dirs=()
-  find_pkg_dirs "deb" ".deb" deb_dirs
   for d in "${deb_dirs[@]}"; do
     deb_smoke_test_dir "${d}" "${deb_image}"
   done
@@ -296,12 +297,13 @@ fi
 
 if [[ "${kind}" == "rpm" || "${kind}" == "all" ]]; then
   rpm_image="${FORMULA_RPM_SMOKE_IMAGE:-fedora:40}"
+  rpm_dirs=()
+  find_pkg_dirs "rpm" ".rpm" rpm_dirs
+
   echo "::group::Pull .rpm smoke test image (${rpm_image})"
   docker pull ${DOCKER_PLATFORM:+--platform "${DOCKER_PLATFORM}"} "${rpm_image}"
   echo "::endgroup::"
 
-  rpm_dirs=()
-  find_pkg_dirs "rpm" ".rpm" rpm_dirs
   for d in "${rpm_dirs[@]}"; do
     rpm_smoke_test_dir "${d}" "${rpm_image}"
   done
