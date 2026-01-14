@@ -9,9 +9,16 @@ describe("startup metrics bootstrap wiring", () => {
 
     const bootstrapIdx = source.indexOf('src="/src/tauri/startupMetricsBootstrap.ts"');
     const mainIdx = source.indexOf('src="/src/main.ts"');
+    const headEndIdx = source.indexOf("</head>");
     expect(bootstrapIdx).toBeGreaterThanOrEqual(0);
     expect(mainIdx).toBeGreaterThanOrEqual(0);
     expect(bootstrapIdx).toBeLessThan(mainIdx);
+    expect(headEndIdx).toBeGreaterThanOrEqual(0);
+    expect(bootstrapIdx).toBeLessThan(headEndIdx);
+
+    const bootstrapTag =
+      source.match(/<script\b[^>]*\bsrc=["']\/src\/tauri\/startupMetricsBootstrap\.ts["'][^>]*>/i)?.[0] ?? "";
+    expect(bootstrapTag).toMatch(/\basync\b/i);
   });
 
   it("imports startupMetricsBootstrap as the first runtime import in main.ts (fallback guardrail)", () => {
