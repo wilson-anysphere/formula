@@ -242,7 +242,7 @@ Useful entrypoints when working on encrypted workbook support:
   - Parse `EncryptionInfo`, derive/verify password key:
     `crates/formula-offcrypto`
   - Decrypt `EncryptedPackage`:
-    - Baseline Standard AES-ECB helper: `crates/formula-offcrypto/src/encrypted_package.rs`
+    - Standard AES-ECB (baseline): `crates/formula-offcrypto/src/lib.rs` (`decrypt_encrypted_package_ecb`)
     - CBC-segmented compatibility helper (IV derived from verifier salt + segment index):
       `crates/formula-io/src/offcrypto/encrypted_package.rs`
   - Segment framing helper (size prefix + 0x1000 segment boundaries):
@@ -251,7 +251,7 @@ Useful entrypoints when working on encrypted workbook support:
   - `docs/22-ooxml-encryption.md`
 - **Standard (CryptoAPI) developer notes:**
   - Key derivation + verifier validation: `docs/offcrypto-standard-cryptoapi.md`
-  - `EncryptedPackage` stream framing/segmenting: `docs/offcrypto-standard-encryptedpackage.md`
+  - `EncryptedPackage` stream framing + truncation: `docs/offcrypto-standard-encryptedpackage.md`
 - **Agile encryption primitives (password hash / key+IV derivation):**
   - `crates/formula-xlsx/src/offcrypto/crypto.rs`
 - **Standard (CryptoAPI) RC4 algorithm writeup (KDF, 0x200 block size, test vectors):**

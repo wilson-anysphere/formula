@@ -291,24 +291,30 @@ Verifier nuances (very common bug source):
 
 ### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-ECB)
 
-Standard `EncryptedPackage` decryption (as implemented in `crates/formula-offcrypto`) uses
-**AES-ECB** over the package ciphertext (no IV).
-
-High-level:
+Standard `EncryptedPackage` decryption (as implemented in `crates/formula-offcrypto`) uses **AES-ECB**
+over the package ciphertext (no IV):
 
 ```text
-orig_size = U64LE(encrypted_package[0..8])
-ciphertext = encrypted_package[8..]
-plaintext = AES-ECB-Decrypt(key, ciphertext)  // ciphertext must be 16-byte aligned
-return plaintext[0..orig_size]
+orig_size = U64LE(stream[0:8])
+ciphertext = stream[8:]
+require len(ciphertext) % 16 == 0
+plaintext = AES-ECB-Decrypt(key, ciphertext)
+return plaintext[0:orig_size]
 ```
 
 Notes:
 
-- Some producers pad `ciphertext` well beyond `orig_size` (e.g. to 4096 bytes for tiny packages).
-  Truncation to `orig_size` is authoritative.
-- For broader real-world compatibility across Standard/CryptoAPI AES variants, see
-  `crates/formula-office-crypto` (it attempts multiple schemes and validates by magic bytes).
+- The physical `EncryptedPackage` stream can be **larger** than `orig_size` due to block padding and/or
+  OLE sector slack. Always decrypt the full ciphertext and then **truncate** to `orig_size`.
+  - Example: our `msoffcrypto-tool`-generated `fixtures/encrypted/ooxml/standard.xlsx` has an
+    `EncryptedPackage` ciphertext length of **4096 bytes** even though the decrypted ZIP is much smaller.
+- Implementation pointers:
+  - `crates/formula-offcrypto`: `decrypt_encrypted_package_ecb` (and the convenience wrapper
+    `decrypt_from_bytes`)
+  - `crates/formula-office-crypto`: attempts multiple Standard/CryptoAPI AES variants and validates by
+    checking the decrypted ZIP magic bytes (`PK`) for broader real-world compatibility.
+- See `docs/offcrypto-standard-encryptedpackage.md` for a compact checklist (framing, alignment,
+  truncation).
 
 ## Interop notes / fixture generation
 
