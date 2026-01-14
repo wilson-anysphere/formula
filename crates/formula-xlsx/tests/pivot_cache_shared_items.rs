@@ -112,6 +112,7 @@ fn parses_namespace_prefixed_shared_items() {
         &vec![
             PivotCacheValue::String("East".to_string()),
             PivotCacheValue::Number(2.0),
+            PivotCacheValue::String("ignore-me".to_string()),
             PivotCacheValue::DateTime("2024-01-15T00:00:00Z".to_string()),
         ],
     );

@@ -2080,3 +2080,48 @@ mod timeline_selection_write_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod shared_item_resolver_tests {
+    use super::*;
+    use crate::pivots::{PivotCacheDefinition, PivotCacheField, PivotCacheValue};
+    use pretty_assertions::assert_eq;
+    use std::collections::HashSet;
+
+    #[test]
+    fn slicer_selection_resolves_x_indices_to_shared_items() {
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Region".to_string(),
+                shared_items: Some(vec![
+                    PivotCacheValue::String("East".to_string()),
+                    PivotCacheValue::String("West".to_string()),
+                ]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let selection = SlicerSelectionState {
+            available_items: vec!["0".to_string(), "1".to_string()],
+            selected_items: Some(HashSet::from(["0".to_string()])),
+        };
+
+        let filter = slicer_selection_to_row_filter_with_resolver("Region", &selection, |key| {
+            key.parse::<u32>()
+                .ok()
+                .and_then(|idx| cache_def.resolve_shared_item(0, idx))
+        });
+
+        match filter {
+            RowFilter::Slicer { field, selection } => {
+                assert_eq!(field, "Region");
+                assert_eq!(
+                    selection,
+                    SlicerSelection::Items(HashSet::from([ScalarValue::from("East")]))
+                );
+            }
+            other => panic!("expected RowFilter::Slicer, got {other:?}"),
+        }
+    }
+}

@@ -4,15 +4,17 @@
 //! For in-app pivot computation we also need to turn pivot cache/table metadata
 //! into the engine's self-contained pivot types.
 
+use chrono::NaiveDate;
 use formula_engine::pivot::{
-    AggregationType, CalculatedField, FilterField, GrandTotals, Layout, PivotConfig, PivotField,
-    PivotValue, ShowAsType, SubtotalPosition, ValueField,
+    AggregationType, CalculatedField, FilterField, GrandTotals, Layout, PivotCache, PivotConfig,
+    PivotField, PivotKeyPart, PivotValue, ShowAsType, SortOrder, SubtotalPosition, ValueField,
 };
-use formula_engine::pivot::{PivotKeyPart, SortOrder};
+use formula_model::pivots::ScalarValue;
 use std::collections::HashSet;
 
 use super::cache_records::pivot_cache_datetime_to_naive_date;
 use super::{PivotCacheDefinition, PivotCacheValue, PivotTableDefinition, PivotTableFieldItem};
+use crate::pivots::slicers::{PivotSlicerParts, SlicerSelectionState, TimelineSelectionState};
 
 /// Convert a parsed pivot cache (definition + record iterator) into a pivot-engine
 /// source range.
@@ -67,13 +69,9 @@ fn pivot_cache_value_to_engine_inner(value: PivotCacheValue) -> PivotValue {
         PivotCacheValue::Missing => PivotValue::Blank,
         PivotCacheValue::Error(_) => PivotValue::Blank,
         PivotCacheValue::DateTime(s) => {
-            if s.is_empty() {
-                PivotValue::Blank
-            } else if let Some(date) = pivot_cache_datetime_to_naive_date(&s) {
-                PivotValue::Date(date)
-            } else {
-                PivotValue::Text(s)
-            }
+            pivot_cache_datetime_to_naive_date(&s)
+                .map(PivotValue::Date)
+                .unwrap_or_else(|| if s.is_empty() { PivotValue::Blank } else { PivotValue::Text(s) })
         }
         PivotCacheValue::Index(_) => PivotValue::Blank,
     }
@@ -81,6 +79,173 @@ fn pivot_cache_value_to_engine_inner(value: PivotCacheValue) -> PivotValue {
 
 fn pivot_key_display_string(value: PivotValue) -> String {
     value.to_key_part().display_string()
+}
+
+fn scalar_value_to_engine_key_part(value: &ScalarValue) -> PivotKeyPart {
+    match value {
+        ScalarValue::Blank => PivotKeyPart::Blank,
+        ScalarValue::Text(s) => PivotKeyPart::Text(s.clone()),
+        ScalarValue::Number(n) => PivotKeyPart::Number(PivotValue::canonical_number_bits(n.0)),
+        ScalarValue::Date(d) => PivotKeyPart::Date(*d),
+        ScalarValue::Bool(b) => PivotKeyPart::Bool(*b),
+    }
+}
+
+/// Convert a parsed slicer selection into a pivot-engine filter field.
+///
+/// Callers can supply a resolver that maps slicer item keys (often stored as `x` indices) back into
+/// typed values.
+pub fn slicer_selection_to_engine_filter_with_resolver<F>(
+    field: impl Into<String>,
+    selection: &SlicerSelectionState,
+    mut resolve: F,
+) -> FilterField
+where
+    F: FnMut(&str) -> Option<ScalarValue>,
+{
+    let field = field.into();
+    let allowed = match &selection.selected_items {
+        None => None,
+        Some(items) => {
+            let mut allowed = HashSet::with_capacity(items.len());
+            for item in items {
+                let scalar = resolve(item).unwrap_or_else(|| ScalarValue::from(item.as_str()));
+                allowed.insert(scalar_value_to_engine_key_part(&scalar));
+            }
+            Some(allowed)
+        }
+    };
+
+    FilterField {
+        source_field: field,
+        allowed,
+    }
+}
+
+/// Convert a parsed timeline selection into a pivot-engine filter field.
+///
+/// The pivot engine currently supports only "allowed-set" filters. We implement timeline date
+/// ranges by scanning the pivot cache's unique values for the field and selecting the ones that
+/// fall within the inclusive `[start, end]` range.
+pub fn timeline_selection_to_engine_filter(
+    field: impl Into<String>,
+    selection: &TimelineSelectionState,
+    cache: &PivotCache,
+) -> Option<FilterField> {
+    let field = field.into();
+    let start = selection.start.as_deref().and_then(parse_iso_ymd);
+    let end = selection.end.as_deref().and_then(parse_iso_ymd);
+
+    if start.is_none() && end.is_none() {
+        return None;
+    }
+
+    let values = cache.unique_values.get(&field)?;
+    let mut allowed = HashSet::new();
+    for value in values {
+        let PivotValue::Date(date) = value else {
+            continue;
+        };
+        if start.is_some_and(|s| *date < s) {
+            continue;
+        }
+        if end.is_some_and(|e| *date > e) {
+            continue;
+        }
+        allowed.insert(PivotKeyPart::Date(*date));
+    }
+
+    Some(FilterField {
+        source_field: field,
+        allowed: Some(allowed),
+    })
+}
+
+/// Compute pivot-engine filter fields for slicers/timelines connected to a given pivot table.
+pub fn pivot_slicer_parts_to_engine_filters(
+    pivot_table_part: &str,
+    cache_def: &PivotCacheDefinition,
+    cache: &PivotCache,
+    parts: &PivotSlicerParts,
+) -> Vec<FilterField> {
+    let mut out = Vec::new();
+
+    for slicer in &parts.slicers {
+        if !slicer
+            .connected_pivot_tables
+            .iter()
+            .any(|p| p == pivot_table_part)
+        {
+            continue;
+        }
+        if slicer.selection.selected_items.is_none() {
+            continue;
+        }
+        let Some(field) = slicer.source_name.as_deref() else {
+            continue;
+        };
+        let Some(field_idx) = cache_def.cache_fields.iter().position(|f| f.name == field) else {
+            continue;
+        };
+
+        let filter = slicer_selection_to_engine_filter_with_resolver(
+            field.to_string(),
+            &slicer.selection,
+            |key| {
+                let idx = key.trim().parse::<u32>().ok()?;
+                cache_def.resolve_shared_item(field_idx, idx)
+            },
+        );
+        out.push(filter);
+    }
+
+    for timeline in &parts.timelines {
+        if !timeline
+            .connected_pivot_tables
+            .iter()
+            .any(|p| p == pivot_table_part)
+        {
+            continue;
+        }
+
+        let field = timeline
+            .base_field
+            .and_then(|idx| cache_def.cache_fields.get(idx as usize))
+            .map(|f| f.name.clone())
+            .or_else(|| timeline.source_name.clone());
+        let Some(field) = field else {
+            continue;
+        };
+
+        if let Some(filter) = timeline_selection_to_engine_filter(field, &timeline.selection, cache)
+        {
+            out.push(filter);
+        }
+    }
+
+    out
+}
+
+/// Extend an existing pivot-engine config with slicer/timeline filters for a given pivot table.
+pub fn apply_pivot_slicer_parts_to_engine_config(
+    cfg: &mut PivotConfig,
+    pivot_table_part: &str,
+    cache_def: &PivotCacheDefinition,
+    cache: &PivotCache,
+    parts: &PivotSlicerParts,
+) {
+    cfg.filter_fields.extend(pivot_slicer_parts_to_engine_filters(
+        pivot_table_part,
+        cache_def,
+        cache,
+        parts,
+    ));
+}
+
+fn parse_iso_ymd(value: &str) -> Option<NaiveDate> {
+    let trimmed = value.trim();
+    let ymd = trimmed.get(..10).unwrap_or(trimmed);
+    NaiveDate::parse_from_str(ymd, "%Y-%m-%d").ok()
 }
 /// Convert a parsed pivot table definition into a pivot-engine config.
 ///

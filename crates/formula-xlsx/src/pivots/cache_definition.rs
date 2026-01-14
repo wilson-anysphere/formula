@@ -5,6 +5,11 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
 use quick_xml::Reader;
 
+use chrono::NaiveDate;
+use formula_engine::date::{serial_to_ymd, ExcelDateSystem};
+use formula_model::pivots::ScalarValue;
+
+use super::cache_records::pivot_cache_datetime_to_naive_date;
 use super::PivotCacheValue;
 use crate::openxml::resolve_relationship_target;
 use crate::{XlsxDocument, XlsxError, XlsxPackage};
@@ -108,6 +113,51 @@ impl PivotCacheDefinition {
             .get(shared_idx)
             .cloned()
             .unwrap_or(PivotCacheValue::Missing)
+    }
+
+    /// Resolve a shared item index for a given cache field into a typed [`ScalarValue`].
+    ///
+    /// Excel encodes some pivot cache values (and slicer selections) as indices into a per-field
+    /// `<sharedItems>` table. This helper turns those indices back into typed values so slicer and
+    /// timeline selections match the pivot cache's key semantics.
+    pub fn resolve_shared_item(&self, field_idx: usize, shared_item_index: u32) -> Option<ScalarValue> {
+        let field = self.cache_fields.get(field_idx)?;
+        let item = field
+            .shared_items
+            .as_ref()?
+            .get(shared_item_index as usize)?;
+
+        Some(match item {
+            PivotCacheValue::Missing => ScalarValue::Blank,
+            PivotCacheValue::String(s) => ScalarValue::Text(s.clone()),
+            PivotCacheValue::Number(n) => ScalarValue::from(*n),
+            PivotCacheValue::Bool(b) => ScalarValue::Bool(*b),
+            PivotCacheValue::Error(_) => ScalarValue::Blank,
+            PivotCacheValue::DateTime(s) => {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    ScalarValue::Blank
+                } else if let Some(date) = pivot_cache_datetime_to_naive_date(trimmed) {
+                    ScalarValue::Date(date)
+                } else if let Ok(serial) = trimmed.parse::<f64>() {
+                    let serial = serial.trunc() as i32;
+                    if let Ok(excel_date) = serial_to_ymd(serial, ExcelDateSystem::EXCEL_1900) {
+                        NaiveDate::from_ymd_opt(
+                            excel_date.year,
+                            excel_date.month as u32,
+                            excel_date.day as u32,
+                        )
+                        .map(ScalarValue::Date)
+                        .unwrap_or_else(|| ScalarValue::Text(s.clone()))
+                    } else {
+                        ScalarValue::Text(s.clone())
+                    }
+                } else {
+                    ScalarValue::Text(s.clone())
+                }
+            }
+            PivotCacheValue::Index(idx) => ScalarValue::Text(idx.to_string()),
+        })
     }
 }
 
@@ -234,7 +284,6 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
     let mut nested_buf = Vec::new();
     let mut skip_buf = Vec::new();
     let mut def = PivotCacheDefinition::default();
-
     let mut current_field_idx: Option<usize> = None;
     let mut in_shared_items = false;
 
@@ -247,12 +296,9 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
 
                 if in_shared_items {
                     if let Some(field_idx) = current_field_idx {
-                        if let Some(item) = parse_shared_item_start(
-                            &mut reader,
-                            &e,
-                            &mut nested_buf,
-                            &mut skip_buf,
-                        )? {
+                        if let Some(item) =
+                            parse_shared_item_start(&mut reader, &e, &mut nested_buf, &mut skip_buf)?
+                        {
                             if let Some(field) = def.cache_fields.get_mut(field_idx) {
                                 field
                                     .shared_items
@@ -264,8 +310,10 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
                         skip_to_end(&mut reader, e.name(), &mut skip_buf);
                     }
                 } else if tag.eq_ignore_ascii_case(b"cacheField") {
-                    handle_element(&mut def, &e)?;
+                    let field = parse_cache_field(&e)?;
+                    def.cache_fields.push(field);
                     current_field_idx = def.cache_fields.len().checked_sub(1);
+                    in_shared_items = false;
                 } else if tag.eq_ignore_ascii_case(b"sharedItems") {
                     // `sharedItems` appears as a child of `cacheField`. Record that we should treat
                     // the upcoming elements as shared item values until we hit `</sharedItems>`.
@@ -297,7 +345,8 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
                         }
                     }
                 } else if tag.eq_ignore_ascii_case(b"cacheField") {
-                    handle_element(&mut def, &e)?;
+                    let field = parse_cache_field(&e)?;
+                    def.cache_fields.push(field);
                 } else if tag.eq_ignore_ascii_case(b"sharedItems") {
                     // Empty `<sharedItems/>` list.
                     if let Some(field_idx) = current_field_idx {
@@ -312,7 +361,6 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
             Event::End(e) => {
                 let tag = e.local_name();
                 let tag = tag.as_ref();
-
                 if tag.eq_ignore_ascii_case(b"cacheField") {
                     current_field_idx = None;
                     in_shared_items = false;
@@ -342,7 +390,10 @@ fn parse_shared_item_empty(e: &BytesStart<'_>) -> Option<PivotCacheValue> {
         b"d" => Some(parse_shared_datetime(attr_value_local(e, b"v"))),
         // `<x>` is record-level (shared item index) and should not be treated as a shared item.
         b"x" => None,
-        _ => None,
+        // Preserve unknown tags as text so shared-items indices remain stable.
+        _ => Some(PivotCacheValue::String(
+            attr_value_local(e, b"v").unwrap_or_default(),
+        )),
     }
 }
 
@@ -424,9 +475,15 @@ fn parse_shared_item_start<R: std::io::BufRead>(
             Ok(Some(parse_shared_bool(v)))
         }
         _ => {
-            // Unknown tags should be ignored, but we must still advance the reader.
-            skip_to_end(reader, e.name(), skip_buf);
-            Ok(None)
+            // Preserve unknown tags as text so shared-items indices remain stable.
+            let v = match attr_v {
+                Some(v) => {
+                    skip_to_end(reader, e.name(), skip_buf);
+                    v
+                }
+                None => value_text(reader)?.unwrap_or_default(),
+            };
+            Ok(Some(PivotCacheValue::String(v)))
         }
     }
 }
@@ -695,42 +752,44 @@ fn handle_element(def: &mut PivotCacheDefinition, e: &BytesStart<'_>) -> Result<
 
         def.worksheet_source_sheet = sheet;
         def.worksheet_source_ref = reference.or(name);
-    } else if tag.eq_ignore_ascii_case(b"cacheField") {
-        let mut field = PivotCacheField::default();
-        for attr in e.attributes().with_checks(false) {
-            let attr = attr.map_err(quick_xml::Error::from)?;
-            let key = attr.key.local_name();
-            let key = key.as_ref();
-            let value = attr.unescape_value()?;
-            if key.eq_ignore_ascii_case(b"name") {
-                field.name = value.to_string();
-            } else if key.eq_ignore_ascii_case(b"caption") {
-                field.caption = Some(value.to_string());
-            } else if key.eq_ignore_ascii_case(b"propertyName") {
-                field.property_name = Some(value.to_string());
-            } else if key.eq_ignore_ascii_case(b"numFmtId") {
-                field.num_fmt_id = value.parse::<u32>().ok();
-            } else if key.eq_ignore_ascii_case(b"databaseField") {
-                field.database_field = parse_bool(&value);
-            } else if key.eq_ignore_ascii_case(b"serverField") {
-                field.server_field = parse_bool(&value);
-            } else if key.eq_ignore_ascii_case(b"uniqueList") {
-                field.unique_list = parse_bool(&value);
-            } else if key.eq_ignore_ascii_case(b"formula") {
-                field.formula = Some(value.to_string());
-            } else if key.eq_ignore_ascii_case(b"sqlType") {
-                field.sql_type = value.parse::<i32>().ok();
-            } else if key.eq_ignore_ascii_case(b"hierarchy") {
-                field.hierarchy = value.parse::<u32>().ok();
-            } else if key.eq_ignore_ascii_case(b"level") {
-                field.level = value.parse::<u32>().ok();
-            } else if key.eq_ignore_ascii_case(b"mappingCount") {
-                field.mapping_count = value.parse::<u32>().ok();
-            }
-        }
-        def.cache_fields.push(field);
     }
     Ok(())
+}
+
+fn parse_cache_field(e: &BytesStart<'_>) -> Result<PivotCacheField, XlsxError> {
+    let mut field = PivotCacheField::default();
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr.map_err(quick_xml::Error::from)?;
+        let key = attr.key.local_name();
+        let key = key.as_ref();
+        let value = attr.unescape_value()?;
+        if key.eq_ignore_ascii_case(b"name") {
+            field.name = value.to_string();
+        } else if key.eq_ignore_ascii_case(b"caption") {
+            field.caption = Some(value.to_string());
+        } else if key.eq_ignore_ascii_case(b"propertyName") {
+            field.property_name = Some(value.to_string());
+        } else if key.eq_ignore_ascii_case(b"numFmtId") {
+            field.num_fmt_id = value.parse::<u32>().ok();
+        } else if key.eq_ignore_ascii_case(b"databaseField") {
+            field.database_field = parse_bool(&value);
+        } else if key.eq_ignore_ascii_case(b"serverField") {
+            field.server_field = parse_bool(&value);
+        } else if key.eq_ignore_ascii_case(b"uniqueList") {
+            field.unique_list = parse_bool(&value);
+        } else if key.eq_ignore_ascii_case(b"formula") {
+            field.formula = Some(value.to_string());
+        } else if key.eq_ignore_ascii_case(b"sqlType") {
+            field.sql_type = value.parse::<i32>().ok();
+        } else if key.eq_ignore_ascii_case(b"hierarchy") {
+            field.hierarchy = value.parse::<u32>().ok();
+        } else if key.eq_ignore_ascii_case(b"level") {
+            field.level = value.parse::<u32>().ok();
+        } else if key.eq_ignore_ascii_case(b"mappingCount") {
+            field.mapping_count = value.parse::<u32>().ok();
+        }
+    }
+    Ok(field)
 }
 
 fn parse_bool(value: &str) -> Option<bool> {
@@ -767,6 +826,52 @@ mod tests {
     use super::*;
 
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn parses_shared_items_and_resolves_indices() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheFields count="1">
+    <cacheField name="Field1" numFmtId="0">
+      <sharedItems count="6">
+        <m/>
+        <n v="42"/>
+        <b v="1"/>
+        <s v="Hello"/>
+        <d v="2024-01-15T00:00:00Z"/>
+        <weird v="??"/>
+      </sharedItems>
+    </cacheField>
+  </cacheFields>
+</pivotCacheDefinition>"#;
+
+        let def = parse_pivot_cache_definition(xml).expect("parse");
+        assert_eq!(def.cache_fields.len(), 1);
+        let field = &def.cache_fields[0];
+        assert_eq!(
+            field.shared_items,
+            Some(vec![
+                PivotCacheValue::Missing,
+                PivotCacheValue::Number(42.0),
+                PivotCacheValue::Bool(true),
+                PivotCacheValue::String("Hello".to_string()),
+                PivotCacheValue::DateTime("2024-01-15T00:00:00Z".to_string()),
+                PivotCacheValue::String("??".to_string()),
+            ])
+        );
+
+        assert_eq!(def.resolve_shared_item(0, 0), Some(ScalarValue::Blank));
+        assert_eq!(def.resolve_shared_item(0, 1), Some(ScalarValue::from(42.0)));
+        assert_eq!(def.resolve_shared_item(0, 2), Some(ScalarValue::Bool(true)));
+        assert_eq!(def.resolve_shared_item(0, 3), Some(ScalarValue::from("Hello")));
+        assert_eq!(
+            def.resolve_shared_item(0, 4),
+            Some(ScalarValue::Date(
+                NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()
+            ))
+        );
+        assert_eq!(def.resolve_shared_item(0, 5), Some(ScalarValue::from("??")));
+    }
 
     #[test]
     fn parses_named_source_when_ref_missing() {
