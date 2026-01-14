@@ -331,8 +331,7 @@ fn decrypt_agile_encrypted_package(
     verify_integrity: bool,
 ) -> Result<Vec<u8>, OffcryptoError> {
     // Derive the package "secret key" (keyValue) and validate the password verifier fields.
-    let secret_key =
-        Zeroizing::new(formula_offcrypto::agile::agile_secret_key_from_password(info, password)?);
+    let secret_key = formula_offcrypto::agile::agile_secret_key_from_password(info, password)?;
 
     // Decrypt the segmented package ciphertext.
     let decrypted =
@@ -344,12 +343,12 @@ fn decrypt_agile_encrypted_package(
             )?;
 
             plaintext.copy_from_slice(ciphertext);
-            aes_cbc_decrypt_in_place(&secret_key, &iv, plaintext)
+            aes_cbc_decrypt_in_place(secret_key.as_slice(), &iv, plaintext)
         })?;
 
     // Optional `dataIntegrity` verification.
     if verify_integrity {
-        verify_agile_data_integrity(info, &secret_key, encrypted_package)?;
+        verify_agile_data_integrity(info, secret_key.as_slice(), encrypted_package)?;
     }
 
     Ok(decrypted)
@@ -450,8 +449,8 @@ fn aes_cbc_decrypt(
     ciphertext: &[u8],
     key: &[u8],
     iv: &[u8; 16],
-) -> Result<Vec<u8>, OffcryptoError> {
-    let mut buf = ciphertext.to_vec();
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    let mut buf = Zeroizing::new(ciphertext.to_vec());
     aes_cbc_decrypt_in_place(key, iv, &mut buf)?;
     Ok(buf)
 }

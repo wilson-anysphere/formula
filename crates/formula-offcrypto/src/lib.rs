@@ -2129,41 +2129,42 @@ pub fn make_key_from_password(
         }
     };
 
-    let password_utf16 = password_to_utf16le_bytes(password);
+    // Password-derived material should not linger in heap buffers longer than needed.
+    let password_utf16 = Zeroizing::new(password_to_utf16le_bytes(password));
 
     // h = sha1(salt || password_utf16le)
     let mut hasher = Sha1::new();
     hasher.update(salt);
-    hasher.update(&password_utf16);
-    let mut h: [u8; SHA1_LEN] = hasher.finalize().into();
+    hasher.update(password_utf16.as_slice());
+    let mut h: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(hasher.finalize().into());
 
     // for i in 0..ITER_COUNT: h = sha1(u32le(i) || h)
-    let mut buf = [0u8; 4 + SHA1_LEN];
+    let mut buf: Zeroizing<[u8; 4 + SHA1_LEN]> = Zeroizing::new([0u8; 4 + SHA1_LEN]);
     for i in 0..ITER_COUNT {
         buf[..4].copy_from_slice(&(i as u32).to_le_bytes());
-        buf[4..].copy_from_slice(&h);
-        h = sha1(&buf);
+        buf[4..].copy_from_slice(&h[..]);
+        *h = sha1(&buf[..]);
     }
 
     // h_final = sha1(h || u32le(0))
-    let mut buf0 = [0u8; SHA1_LEN + 4];
-    buf0[..SHA1_LEN].copy_from_slice(&h);
+    let mut buf0: Zeroizing<[u8; SHA1_LEN + 4]> = Zeroizing::new([0u8; SHA1_LEN + 4]);
+    buf0[..SHA1_LEN].copy_from_slice(&h[..]);
     buf0[SHA1_LEN..].copy_from_slice(&0u32.to_le_bytes());
-    let h_final = sha1(&buf0);
+    let h_final: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&buf0[..]));
 
     // key = (sha1((0x36*64) ^ h_final) || sha1((0x5c*64) ^ h_final))[..key_len]
-    let mut buf1 = [0x36u8; 64];
-    let mut buf2 = [0x5cu8; 64];
+    let mut buf1: Zeroizing<[u8; 64]> = Zeroizing::new([0x36u8; 64]);
+    let mut buf2: Zeroizing<[u8; 64]> = Zeroizing::new([0x5cu8; 64]);
     for i in 0..SHA1_LEN {
         buf1[i] ^= h_final[i];
         buf2[i] ^= h_final[i];
     }
-    let x1 = sha1(&buf1);
-    let x2 = sha1(&buf2);
+    let x1: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&buf1[..]));
+    let x2: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&buf2[..]));
 
-    let mut out = [0u8; SHA1_LEN * 2];
-    out[..SHA1_LEN].copy_from_slice(&x1);
-    out[SHA1_LEN..].copy_from_slice(&x2);
+    let mut out: Zeroizing<[u8; SHA1_LEN * 2]> = Zeroizing::new([0u8; SHA1_LEN * 2]);
+    out[..SHA1_LEN].copy_from_slice(&x1[..]);
+    out[SHA1_LEN..].copy_from_slice(&x2[..]);
 
     debug_assert!(key_len <= out.len());
     Ok(out[..key_len].to_vec())
@@ -2193,8 +2194,8 @@ pub fn verify_password(
     aes_ecb_decrypt_in_place(key, &mut verifier)?;
     let expected_hash: [u8; SHA1_LEN] = sha1(&verifier);
 
-    let mut verifier_hash = encrypted_verifier_hash.to_vec();
-    aes_ecb_decrypt_in_place(key, &mut verifier_hash)?;
+    let mut verifier_hash = Zeroizing::new(encrypted_verifier_hash.to_vec());
+    aes_ecb_decrypt_in_place(key, &mut verifier_hash[..])?;
     if verifier_hash.len() < SHA1_LEN {
         return Err(OffcryptoError::InvalidStructure(format!(
             "decrypted verifier hash must be at least 20 bytes, got {}",
@@ -2320,16 +2321,22 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
         }
     };
 
-    let key = make_key_from_password(password, &verifier.salt, header.key_size_bits)?;
+    // Derived keys are sensitive; keep them in a `Zeroizing` buffer so failed password attempts
+    // don't leave key material lingering in heap allocations.
+    let key = Zeroizing::new(make_key_from_password(
+        password,
+        &verifier.salt,
+        header.key_size_bits,
+    )?);
     verify_password(
-        &key,
+        key.as_slice(),
         &verifier.encrypted_verifier,
         &verifier.encrypted_verifier_hash,
     )?;
 
     let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
 
-    decrypt_encrypted_package_ecb(&key, &encrypted_package)
+    decrypt_encrypted_package_ecb(key.as_slice(), &encrypted_package)
 }
 
 /// ECMA-376 Standard Encryption password→key derivation.
@@ -2489,9 +2496,9 @@ pub fn decrypt_ooxml_standard(
     };
 
     let info = StandardEncryptionInfo { header, verifier };
-    let key = standard_derive_key(&info, password)?;
-    standard_verify_key(&info, &key)?;
-    let decrypted = decrypt_standard_encrypted_package(&key, encrypted_package)?;
+    let key = standard_derive_key_zeroizing(&info, password)?;
+    standard_verify_key(&info, key.as_slice())?;
+    let decrypted = decrypt_standard_encrypted_package(key.as_slice(), encrypted_package)?;
 
     // Standard encryption verifier checks protect against wrong passwords, but in practice we see
     // files in the wild that require additional validation (e.g. different schemes). The decrypted
