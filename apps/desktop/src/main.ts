@@ -1,5 +1,6 @@
-// IMPORTANT: keep this as the very first import so the "webview loaded" IPC is sent
-// before the rest of the startup module graph executes (reduces startup metric skew).
+// IMPORTANT: keep this as the very first import so startup timing listeners are installed
+// as early as possible. The Rust host may emit `startup:*` events very early during app
+// load; we ask it to re-emit cached timings once listeners are ready.
 import "./tauri/startupMetricsBootstrap.js";
 
 import { SpreadsheetApp } from "./app/spreadsheetApp";
