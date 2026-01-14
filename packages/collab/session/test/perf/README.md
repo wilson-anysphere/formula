@@ -24,6 +24,8 @@ pnpm test:node session-binder-perf
 - `PERF_BATCH_SIZE` (default `1000`)
 - `PERF_COLS` (default `100`)
 - `PERF_KEY_ENCODING=canonical|legacy|rxc` (default `canonical`) — used for the **Yjs → DocumentController** scenario
+- `PERF_INCLUDE_FORMAT=1` — include cell `format` updates (default: off)
+- `PERF_FORMAT_VARIANTS` (default `4`) — how many distinct formats to cycle through
 - `PERF_SCENARIO=yjs-to-dc|dc-to-yjs|all` (default `all`)
 
 ### Output
@@ -41,4 +43,3 @@ Disabled unless set:
 ### Misc
 
 - `PERF_TIMEOUT_MS` (default `600000`) — test timeout + internal wait timeouts
-

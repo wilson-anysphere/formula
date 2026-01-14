@@ -23,6 +23,8 @@
  *   PERF_COLS=100             # controls row/col distribution (default: 100)
  *   PERF_KEY_ENCODING=canonical|legacy|rxc  # key format for Yjs writes (default: canonical)
  *   PERF_SCENARIO=yjs-to-dc|dc-to-yjs|all   # run only one scenario (default: all)
+ *   PERF_INCLUDE_FORMAT=1     # include `format` updates (default: 0)
+ *   PERF_FORMAT_VARIANTS=4    # number of distinct formats to cycle through (default: 4)
  *   PERF_INCLUDE_GUARDS=0     # set to 0 to disable canRead/canEdit hooks (default: enabled)
  *   PERF_TIMEOUT_MS=600000    # overall test timeout; also used for internal waits (default: 10 min)
  *
@@ -113,6 +115,8 @@ class StyleTableStub {
   constructor() {
     /** @type {Map<string, number>} */
     this._idsByKey = new Map();
+    /** @type {Map<number, any>} */
+    this._formatsById = new Map();
     this._nextId = 1;
   }
 
@@ -125,6 +129,7 @@ class StyleTableStub {
     if (existing) return existing;
     const id = this._nextId++;
     this._idsByKey.set(key, id);
+    this._formatsById.set(id, format);
     return id;
   }
 
@@ -132,7 +137,7 @@ class StyleTableStub {
    * @param {number} id
    */
   get(id) {
-    return null;
+    return this._formatsById.get(id) ?? null;
   }
 }
 
@@ -240,12 +245,17 @@ perfTestYjsToDc(
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);
     const cols = Number.parseInt(process.env.PERF_COLS ?? "100", 10);
     const keyEncoding = (process.env.PERF_KEY_ENCODING ?? "canonical").trim();
+    const includeFormat = process.env.PERF_INCLUDE_FORMAT === "1";
+    const formatVariants = readPositiveInt(process.env.PERF_FORMAT_VARIANTS, 4);
 
     if (!Number.isFinite(totalUpdates) || totalUpdates <= 0) throw new Error("PERF_CELL_UPDATES must be a positive integer");
     if (!Number.isFinite(batchSize) || batchSize <= 0) throw new Error("PERF_BATCH_SIZE must be a positive integer");
     if (!Number.isFinite(cols) || cols <= 0) throw new Error("PERF_COLS must be a positive integer");
     if (!["canonical", "legacy", "rxc"].includes(keyEncoding)) {
       throw new Error('PERF_KEY_ENCODING must be one of: "canonical", "legacy", "rxc"');
+    }
+    if (includeFormat && (!Number.isFinite(formatVariants) || formatVariants <= 0)) {
+      throw new Error("PERF_FORMAT_VARIANTS must be a positive integer");
     }
 
     const [{ bindYjsToDocumentController }, Y] = await Promise.all([import("../../index.js"), import("yjs")]);
@@ -269,6 +279,13 @@ perfTestYjsToDc(
     try {
       const cells = ydoc.getMap("cells");
       const origin = { type: "perf-origin" };
+      const formats = includeFormat
+        ? Array.from({ length: formatVariants }, (_v, i) => ({
+            font: { bold: i % 2 === 0, color: i },
+            fill: { color: i },
+            num: i,
+          }))
+        : null;
 
       if (RUN_PERF && typeof global.gc !== "function") {
         console.warn(
@@ -306,6 +323,7 @@ perfTestYjsToDc(
             // Approximate CollabSession's plain cell schema (value + explicit formula marker).
             cell.set("value", j);
             cell.set("formula", null);
+            if (formats) cell.set("format", formats[j % formats.length]);
           }
         }, origin);
 
@@ -335,7 +353,7 @@ perfTestYjsToDc(
       console.log(
         [
           "",
-          `[binder-perf] updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()} keyEncoding=${keyEncoding}`,
+          `[binder-perf] updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()} keyEncoding=${keyEncoding} format=${includeFormat ? "1" : "0"}`,
           `[binder-perf] time: write=${writeMs.toFixed(1)}ms apply=${applyMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
           `[binder-perf] mem (best-effort): heapUsed start=${formatBytes(startMem.heapUsed)} peak=${formatBytes(peakHeapUsed)} postGC=${formatBytes(postGcMem.heapUsed)}`,
           `[binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
@@ -352,6 +370,7 @@ perfTestYjsToDc(
             batchSize,
             cols,
             keyEncoding,
+            format: includeFormat ? { variants: formatVariants } : null,
             timingMs: { write: writeMs, apply: applyMs, total: totalMs },
             mem: {
               heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
@@ -402,10 +421,15 @@ perfTestDcToYjs(
     const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);
     const cols = Number.parseInt(process.env.PERF_COLS ?? "100", 10);
+    const includeFormat = process.env.PERF_INCLUDE_FORMAT === "1";
+    const formatVariants = readPositiveInt(process.env.PERF_FORMAT_VARIANTS, 4);
 
     if (!Number.isFinite(totalUpdates) || totalUpdates <= 0) throw new Error("PERF_CELL_UPDATES must be a positive integer");
     if (!Number.isFinite(batchSize) || batchSize <= 0) throw new Error("PERF_BATCH_SIZE must be a positive integer");
     if (!Number.isFinite(cols) || cols <= 0) throw new Error("PERF_COLS must be a positive integer");
+    if (includeFormat && (!Number.isFinite(formatVariants) || formatVariants <= 0)) {
+      throw new Error("PERF_FORMAT_VARIANTS must be a positive integer");
+    }
 
     const [{ bindYjsToDocumentController }, Y] = await Promise.all([import("../../index.js"), import("yjs")]);
 
@@ -425,6 +449,14 @@ perfTestDcToYjs(
 
     try {
       const cells = ydoc.getMap("cells");
+      const formats = includeFormat
+        ? Array.from({ length: formatVariants }, (_v, i) => ({
+            font: { bold: i % 2 === 0, color: i },
+            fill: { color: i },
+            num: i,
+          }))
+        : null;
+      const styleIds = formats ? formats.map((fmt) => dc.styleTable.intern(fmt)) : null;
 
       if (RUN_PERF && typeof global.gc !== "function") {
         console.warn(
@@ -446,12 +478,13 @@ perfTestDcToYjs(
         for (let j = i; j < end; j += 1) {
           const row = Math.floor(j / cols);
           const col = j % cols;
+          const styleId = styleIds ? styleIds[j % styleIds.length] : 0;
           deltas.push({
             sheetId: "Sheet1",
             row,
             col,
             before: { value: null, formula: null, styleId: 0 },
-            after: { value: j, formula: null, styleId: 0 },
+            after: { value: j, formula: null, styleId },
           });
         }
 
@@ -482,7 +515,7 @@ perfTestDcToYjs(
       console.log(
         [
           "",
-          `[binder-perf] (doc->yjs) updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()}`,
+          `[binder-perf] (doc->yjs) updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()} format=${includeFormat ? "1" : "0"}`,
           `[binder-perf] time: emit=${emitMs.toFixed(1)}ms binderWrite=${writeMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
           `[binder-perf] mem (best-effort): heapUsed start=${formatBytes(startMem.heapUsed)} peak=${formatBytes(peakHeapUsed)} postGC=${formatBytes(postGcMem.heapUsed)}`,
           `[binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
@@ -498,6 +531,7 @@ perfTestDcToYjs(
             updates: totalUpdates,
             batchSize,
             cols,
+            format: includeFormat ? { variants: formatVariants } : null,
             timingMs: { emit: emitMs, binderWrite: writeMs, total: totalMs },
             mem: {
               heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
