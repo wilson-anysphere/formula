@@ -314,6 +314,42 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     }
   });
 
+  it("propagates shared-grid zoom to drawing render + interaction viewports", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+
+      const drawingsRenderSpy = vi.spyOn((app as any).drawingOverlay, "render");
+      drawingsRenderSpy.mockClear();
+
+      // SpreadsheetApp.setZoom delegates to DesktopSharedGrid which triggers an onScroll callback
+      // (and thus a drawings rerender) when zoom changes.
+      app.setZoom(2);
+
+      expect(drawingsRenderSpy).toHaveBeenCalled();
+      const lastViewport = drawingsRenderSpy.mock.calls.at(-1)?.[1] as any;
+      expect(lastViewport?.zoom).toBe(2);
+
+      // Verify the public viewport helpers also include zoom (used by hit testing + interactions).
+      expect(app.getDrawingRenderViewport().zoom).toBe(2);
+      expect(app.getDrawingInteractionViewport().zoom).toBe(2);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("renders per-sheet drawings + images from DocumentController", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
