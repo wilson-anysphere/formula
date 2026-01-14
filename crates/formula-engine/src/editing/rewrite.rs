@@ -20,8 +20,20 @@ where
     F: FnMut(&str) -> Option<usize>,
 {
     match sheet {
-        None => sheet_name_eq_case_insensitive(ctx_sheet, edit_sheet),
-        Some(SheetRef::Sheet(name)) => sheet_name_eq_case_insensitive(name, edit_sheet),
+        None => match (
+            resolve_sheet_order_index(ctx_sheet),
+            resolve_sheet_order_index(edit_sheet),
+        ) {
+            (Some(ctx_id), Some(edit_id)) => ctx_id == edit_id,
+            _ => sheet_name_eq_case_insensitive(ctx_sheet, edit_sheet),
+        },
+        Some(SheetRef::Sheet(name)) => match (
+            resolve_sheet_order_index(name),
+            resolve_sheet_order_index(edit_sheet),
+        ) {
+            (Some(name_id), Some(edit_id)) => name_id == edit_id,
+            _ => sheet_name_eq_case_insensitive(name, edit_sheet),
+        },
         Some(SheetRef::SheetRange { start, end }) => {
             let Some(start_id) = resolve_sheet_order_index(start) else {
                 return false;

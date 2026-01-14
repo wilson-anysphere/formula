@@ -29,6 +29,53 @@ fn insert_row_above_updates_references_and_moves_cells() {
 }
 
 #[test]
+fn insert_row_above_updates_references_when_sheet_display_name_differs_from_key() {
+    let mut engine = Engine::new();
+    engine.ensure_sheet("sheet1_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=A1").unwrap();
+
+    // Apply the edit using the *display name*.
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "Sheet1".to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+    assert_eq!(engine.get_cell_formula("Sheet1", "B2"), Some("=A2"));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.0));
+}
+
+#[test]
+fn insert_row_above_rewrites_cross_sheet_refs_when_op_uses_sheet_key() {
+    let mut engine = Engine::new();
+    engine.ensure_sheet("sheet1_key");
+    engine.ensure_sheet("sheet2_key");
+    engine.set_sheet_display_name("sheet1_key", "Sheet1");
+    engine.set_sheet_display_name("sheet2_key", "Sheet2");
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=Sheet1!A1")
+        .unwrap();
+
+    // Apply the edit using the *stable sheet key*.
+    engine
+        .apply_operation(EditOp::InsertRows {
+            sheet: "sheet1_key".to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+    assert_eq!(engine.get_cell_formula("Sheet2", "A1"), Some("=Sheet1!A2"));
+}
+
+#[test]
 fn delete_column_updates_references_and_creates_ref_errors() {
     let mut engine = Engine::new();
     engine.set_cell_formula("Sheet1", "C1", "=A1+B1").unwrap();

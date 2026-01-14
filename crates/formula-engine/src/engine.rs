@@ -9226,12 +9226,17 @@ fn build_sheet_order_indices(workbook: &Workbook) -> HashMap<String, usize> {
     // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership.
     // Produce a map from case-insensitive sheet name -> tab order index so formula rewrite helpers
     // can translate sheet spans consistently.
-    let mut out: HashMap<String, usize> = HashMap::with_capacity(workbook.sheet_order.len());
+    // Note: Formulas may reference sheets by either their stable key or their user-visible display
+    // name. Include both aliases so sheet-span rewrites and edit applicability checks can resolve
+    // 3D spans regardless of which naming scheme appears in the formula text.
+    let mut out: HashMap<String, usize> = HashMap::with_capacity(workbook.sheet_order.len() * 2);
     for (order_index, &sheet_id) in workbook.sheet_order.iter().enumerate() {
-        let Some(name) = workbook.sheet_key_name(sheet_id) else {
-            continue;
-        };
-        out.insert(Workbook::sheet_key(name), order_index);
+        if let Some(name) = workbook.sheet_key_name(sheet_id) {
+            out.insert(Workbook::sheet_key(name), order_index);
+        }
+        if let Some(name) = workbook.sheet_name(sheet_id) {
+            out.insert(Workbook::sheet_key(name), order_index);
+        }
     }
     out
 }
