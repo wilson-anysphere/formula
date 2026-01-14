@@ -1323,25 +1323,27 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --local-bundles
 
    Run `lipo -info` on the bundled executable (`Formula.app/Contents/MacOS/formula-desktop`):
 
-   ```bash
-    # Option A: from the updater archive (.app.tar.gz preferred; allow .tar.gz/.tgz).
-    # Avoid picking Linux `.AppImage.tar.gz` if you downloaded all assets into one folder.
-    app_tgz="$(ls *.app.tar.gz *.app.tgz *.tar.gz *.tgz 2>/dev/null | grep -v -i '\\.appimage\\.' | head -n 1)"
-    tar -xzf "$app_tgz"
-    lipo -info "Formula.app/Contents/MacOS/formula-desktop"
+    ```bash
+     # Option A: from the updater archive (.app.tar.gz preferred; allow .tar.gz/.tgz).
+     # Avoid picking Linux `.AppImage.tar.gz` if you downloaded all assets into one folder.
+     app_tgz="$(ls *.app.tar.gz *.app.tgz *.tar.gz *.tgz 2>/dev/null | grep -v -i '\\.appimage\\.' | head -n 1 || true)"
+     test -n "$app_tgz" || { echo "No macOS updater archive found (*.app.tar.gz / *.tar.gz / *.tgz)" >&2; exit 1; }
+     tar -xzf "$app_tgz"
+     lipo -info "Formula.app/Contents/MacOS/formula-desktop"
 
    # Expected output includes both: x86_64 arm64
    ```
 
-    If you only have a `.dmg`, mount it and inspect the `.app` inside:
+     If you only have a `.dmg`, mount it and inspect the `.app` inside:
 
-    ```bash
-    dmg="$(ls *.dmg | head -n 1)"
-    mnt="$(mktemp -d)"
-    hdiutil attach "$dmg" -nobrowse -mountpoint "$mnt"
-    lipo -info "$mnt/Formula.app/Contents/MacOS/formula-desktop"
-    hdiutil detach "$mnt"
-    ```
+     ```bash
+     dmg="$(ls *.dmg 2>/dev/null | head -n 1 || true)"
+     test -n "$dmg" || { echo "No .dmg file found in the current directory" >&2; exit 1; }
+     mnt="$(mktemp -d)"
+     hdiutil attach "$dmg" -nobrowse -mountpoint "$mnt"
+     lipo -info "$mnt/Formula.app/Contents/MacOS/formula-desktop"
+     hdiutil detach "$mnt"
+     ```
 
     Tip: on macOS, you can run the repo helper to validate the DMG (and the `.app.tar.gz` updater
     payload if present), including a universal `lipo` check:
