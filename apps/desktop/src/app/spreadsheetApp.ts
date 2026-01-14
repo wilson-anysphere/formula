@@ -5223,6 +5223,12 @@ export class SpreadsheetApp {
     // drawings bounds must be recomputed.
     const drawingOverlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
     drawingOverlay?.invalidateSpatialIndex();
+
+    // Hit test indices cache sheet-space bounds too; clear so hover/interaction logic stays aligned.
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    this.drawingsInteraction?.invalidateHitTestIndex();
+    this.drawingInteractionController?.invalidateHitTestIndex();
   }
 
   freezePanes(): void {
@@ -8384,6 +8390,13 @@ export class SpreadsheetApp {
     // state, so cached sheet-space bounds must be recomputed.
     const drawingOverlay = (this as any).drawingOverlay as DrawingOverlay | undefined;
     drawingOverlay?.invalidateSpatialIndex();
+    // Invalidate hit-test caches too: like the overlay spatial index, these indices
+    // store sheet-space bounds derived from `drawingGeom`, which is stable by reference
+    // but depends on live CanvasGridRenderer axis sizes.
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    this.drawingsInteraction?.invalidateHitTestIndex();
+    this.drawingInteractionController?.invalidateHitTestIndex();
 
     // Do not allow row/col resize/auto-fit to mutate the sheet while the user is actively editing
     // (cell editor, formula bar, inline edit). This keeps edit state isolated from unrelated

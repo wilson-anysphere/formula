@@ -207,6 +207,18 @@ export class DrawingInteractionController {
   }
 
   /**
+   * Clears cached hit test state so the next pointer interaction recomputes geometry.
+   *
+   * Call this when the underlying grid geometry changes (e.g. row/col resize) while
+   * the `GridGeometry` object reference is stable.
+   */
+  invalidateHitTestIndex(): void {
+    this.hitTestIndex = null;
+    this.hitTestIndexObjects = null;
+    this.hitTestIndexZoom = 1;
+  }
+
+  /**
    * Reset interaction state (drag/resize/rotate + selection).
    *
    * This is intended for integrations that swap out the underlying drawing layer

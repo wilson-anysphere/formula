@@ -216,6 +216,96 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
     }
   });
 
+  it("updates drawing hit-testing geometry when shared-grid column widths change", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const drawingCanvas = (app as any).drawingCanvas as HTMLCanvasElement;
+      expect(drawingCanvas).toBeTruthy();
+
+      const objects: DrawingObject[] = [
+        {
+          id: 1,
+          kind: { type: "image", imageId: "missing" },
+          anchor: {
+            type: "oneCell",
+            from: { cell: { row: 0, col: 1 }, offset: { xEmu: 0, yEmu: 0 } }, // B1
+            size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+          },
+          zOrder: 0,
+        },
+      ];
+
+      const doc = app.getDocument() as any;
+      doc.getSheetDrawings = () => objects;
+
+      const calls = ctxCallsByCanvas.get(drawingCanvas);
+      expect(calls).toBeTruthy();
+      calls!.splice(0, calls!.length);
+
+      // Baseline render.
+      (app as any).renderDrawings();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const firstStroke = calls!.find((call) => call.method === "strokeRect");
+      expect(firstStroke).toBeTruthy();
+      const x1 = Number(firstStroke!.args[0]);
+      const y1 = Number(firstStroke!.args[1]);
+      expect(Number.isFinite(x1)).toBe(true);
+      expect(Number.isFinite(y1)).toBe(true);
+
+      // Cursor should detect the drawing at its current position.
+      expect((app as any).drawingCursorAtPoint(x1 + 1, y1 + 1)).toBe("move");
+
+      // Resize column A (doc col 0 => grid col 1).
+      const sharedGrid = (app as any).sharedGrid;
+      const renderer = sharedGrid.renderer;
+      const index = 1;
+      const prevSize = renderer.getColWidth(index);
+      const nextSize = prevSize + 50;
+      renderer.setColWidth(index, nextSize);
+
+      calls!.splice(0, calls!.length);
+
+      (app as any).onSharedGridAxisSizeChange({
+        kind: "col",
+        index,
+        size: nextSize,
+        previousSize: prevSize,
+        defaultSize: renderer.scroll.cols.defaultSize,
+        zoom: renderer.getZoom(),
+        source: "resize",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const secondStroke = calls!.find((call) => call.method === "strokeRect");
+      expect(secondStroke).toBeTruthy();
+      const x2 = Number(secondStroke!.args[0]);
+      const y2 = Number(secondStroke!.args[1]);
+      expect(x2).toBeCloseTo(x1 + (nextSize - prevSize), 6);
+      expect(y2).toBeCloseTo(y1, 6);
+
+      // Hit testing should use the updated geometry: the old location should no longer hit.
+      expect((app as any).drawingCursorAtPoint(x1 + 1, y1 + 1)).toBeNull();
+      expect((app as any).drawingCursorAtPoint(x2 + 1, y2 + 1)).toBe("move");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("re-renders drawings when shared-grid row heights change", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
