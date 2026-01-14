@@ -15108,6 +15108,17 @@ export class SpreadsheetApp {
         return;
       }
       e.preventDefault();
+      if (!this.canUserComment()) {
+        // Viewer roles can still read comment threads, but should get explicit feedback
+        // that comment creation is not permitted.
+        try {
+          showToast(t("comments.readOnlyHint"), "warning");
+        } catch {
+          // Best-effort; `showToast` depends on DOM globals and a #toast-root.
+        }
+        this.openCommentsPanel();
+        return;
+      }
       this.openCommentsPanel();
       this.focusNewCommentInput();
       return;

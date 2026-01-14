@@ -907,6 +907,23 @@ export function registerBuiltinCommands(params: {
       // Match spreadsheet shortcut behavior: don't trigger comment UX while the user is
       // actively editing a cell/formula (Excel-style).
       if (app.isEditing()) return;
+      // Defense-in-depth: even if some UI surface executes this command while the current
+      // role cannot comment (viewer), surface a message and avoid focusing the disabled
+      // composer.
+      try {
+        const session = app.getCollabSession?.() ?? null;
+        if (session && typeof (session as any).canComment === "function" && !(session as any).canComment()) {
+          try {
+            showToast(t("comments.readOnlyHint"), "warning");
+          } catch {
+            // Best-effort: do not crash if the toast root is missing (tests/minimal harnesses).
+          }
+          app.openCommentsPanel();
+          return;
+        }
+      } catch {
+        // ignore
+      }
       app.openCommentsPanel();
       app.focusNewCommentInput();
     },

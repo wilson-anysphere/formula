@@ -194,4 +194,48 @@ describe("SpreadsheetApp comment permissions", () => {
       else process.env.DESKTOP_GRID_MODE = priorGridMode;
     }
   });
+
+  it("shows a read-only toast and opens the comments panel when viewers press Shift+F2", () => {
+    const priorGridMode = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const toastRoot = document.createElement("div");
+      toastRoot.id = "toast-root";
+      document.body.appendChild(toastRoot);
+
+      const app = new SpreadsheetApp(root, status, { collabMode: true });
+      // Simulate a collab session with viewer permissions.
+      (app as any).collabSession = { canComment: () => false };
+
+      const evt = new KeyboardEvent("keydown", { key: "F2", shiftKey: true, bubbles: true, cancelable: true });
+      root.dispatchEvent(evt);
+
+      expect(evt.defaultPrevented).toBe(true);
+
+      const panel = root.querySelector('[data-testid="comments-panel"]') as HTMLDivElement | null;
+      if (!panel) throw new Error("Missing comments panel");
+      expect(panel.classList.contains("comments-panel--visible")).toBe(true);
+
+      const input = panel.querySelector('[data-testid="new-comment-input"]') as HTMLInputElement | null;
+      if (!input) throw new Error("Missing new comment input");
+      expect(input.disabled).toBe(true);
+
+      const toast = toastRoot.querySelector('[data-testid="toast"]') as HTMLDivElement | null;
+      if (!toast) throw new Error("Missing toast");
+      expect(toast.textContent).toContain("Read-only");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    }
+  });
 });
