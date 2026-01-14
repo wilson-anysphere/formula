@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
+import { stripComments } from "../../__tests__/sourceTextUtils";
+
 describe("desktop updater listener consolidation", () => {
   it("does not register updater UX toast listeners in main.ts (handled by tauri/updaterUi.ts)", () => {
     const mainUrl = new URL("../../main.ts", import.meta.url);
-    const source = readFileSync(mainUrl, "utf8");
+    const source = stripComments(readFileSync(mainUrl, "utf8"));
 
     const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const listenCallRe = (eventName: string) =>

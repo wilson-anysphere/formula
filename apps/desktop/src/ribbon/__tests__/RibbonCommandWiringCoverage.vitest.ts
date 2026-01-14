@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "../../__tests__/sourceTextUtils";
+
 import { CommandRegistry } from "../../extensions/commandRegistry";
 import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState";
 import { panelRegistry } from "../../panels/panelRegistry";
@@ -108,7 +110,7 @@ describe("Ribbon command wiring coverage (Home → Font dropdowns)", () => {
     ];
 
     for (const { label, path } of sources) {
-      const source = readFileSync(path, "utf8");
+      const source = stripComments(readFileSync(path, "utf8"));
 
       // Ensure the old prefix-parsing blocks were removed. (The dropdown trigger ids
       // like `home.font.fillColor` may still exist as fallbacks; only the menu item
@@ -125,8 +127,8 @@ function extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaCom
   const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
   const ribbonHandlersPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
 
-  const mainTsSource = readFileSync(mainTsPath, "utf8");
-  const ribbonHandlersSource = readFileSync(ribbonHandlersPath, "utf8");
+  const mainTsSource = stripComments(readFileSync(mainTsPath, "utf8"));
+  const ribbonHandlersSource = stripComments(readFileSync(ribbonHandlersPath, "utf8"));
   const combinedSource = `${mainTsSource}\n\n${ribbonHandlersSource}`;
   const ids = new Set<string>();
 

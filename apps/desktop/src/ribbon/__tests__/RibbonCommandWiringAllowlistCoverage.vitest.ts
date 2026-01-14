@@ -10,6 +10,7 @@ import { createDefaultLayout } from "../../layout/layoutState.js";
 import type { RibbonSchema } from "../ribbonSchema";
 import { defaultRibbonSchema } from "../ribbonSchema";
 import { extractObjectLiteral, extractTopLevelStringKeys, type OverrideKey } from "./ribbonWiringTestUtils";
+import { stripComments } from "../../__tests__/sourceTextUtils";
 
 function collectRibbonCommandIds(schema: RibbonSchema): string[] {
   const ids = new Set<string>();
@@ -742,8 +743,8 @@ function computeImplementedSchemaCommandIds(schemaCommandIdSet: Set<string>): st
   const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
   const handlerPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
 
-  const mainTsSource = readFileSync(mainTsPath, "utf8");
-  const handlerSource = readFileSync(handlerPath, "utf8");
+  const mainTsSource = stripComments(readFileSync(mainTsPath, "utf8"));
+  const handlerSource = stripComments(readFileSync(handlerPath, "utf8"));
   const combinedSource = `${mainTsSource}\n\n${handlerSource}`;
 
   const addIfSchema = (id: string) => {

@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { stripComments } from "../../__tests__/sourceTextUtils";
+
 describe("startup metrics bootstrap wiring", () => {
   it("loads startupMetricsBootstrap before main.ts in index.html (allows JS to report before the full app graph loads)", () => {
     const indexUrl = new URL("../../../index.html", import.meta.url);
@@ -26,7 +28,7 @@ describe("startup metrics bootstrap wiring", () => {
     // Read the source and assert the bootstrap module is imported first, so the
     // host-side reporting also happens early if `main.ts` is used as an entrypoint.
     const mainUrl = new URL("../../main.ts", import.meta.url);
-    const source = readFileSync(mainUrl, "utf8");
+    const source = stripComments(readFileSync(mainUrl, "utf8"));
 
     // Only consider runtime imports: `import type ...` is erased and does not affect module
     // evaluation order in the built JS bundle.
