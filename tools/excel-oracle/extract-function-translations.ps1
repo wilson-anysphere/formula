@@ -489,6 +489,29 @@ try {
     $orderedTranslations[$k] = [string]$translations[$k]
   }
 
+  # Heuristic sanity check: missing/unsupported functions can silently degrade into identity
+  # mappings (English) which makes the output look "complete" but isn't Excel-accurate.
+  #
+  # Note: the repo normalizer omits identity mappings in committed sources, so this check must run
+  # here on the raw extracted output.
+  $identityCount = 0
+  foreach ($k in $orderedTranslations.Keys) {
+    $canon = [string]$k
+    $loc = [string]$orderedTranslations[$k]
+    if ($canon.ToUpperInvariant() -eq $loc.ToUpperInvariant()) {
+      $identityCount++
+    }
+  }
+  $totalExtracted = [int]$orderedTranslations.Count
+  $identityRate = 0.0
+  if ($totalExtracted -gt 0) {
+    $identityRate = $identityCount / [double]$totalExtracted
+  }
+  Write-Host ("Identity mappings: {0}/{1} ({2}%)" -f $identityCount, $totalExtracted, ([Math]::Round($identityRate * 100, 1)))
+  if ($identityRate -gt 0.45) {
+    Write-Warning ("High identity-mapping rate ({0}%). This usually indicates an incomplete extraction (older Excel build, missing language pack, or unsupported functions) and will cause many localized spellings to fall back to English." -f ([Math]::Round($identityRate * 100, 1)))
+  }
+
   if ($FailOnSkipped -and $skipped.Count -gt 0) {
     $skippedSorted = @($skipped | Sort-Object)
     throw ("Extraction failed because Excel rejected {0} functions: {1}`n" -f $skipped.Count, ($skippedSorted -join ", ")) +
