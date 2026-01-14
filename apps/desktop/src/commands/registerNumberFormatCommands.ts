@@ -32,6 +32,40 @@ function stepDecimalPlacesInNumberFormat(
   // Avoid trying to manipulate date/time format codes.
   if (compact.includes("m/d/yyyy") || compact.includes("yyyy-mm-dd")) return null;
   if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact)) return null;
+  // Avoid mutating explicit text number formats.
+  if (compact === "@") return null;
+
+  // Preserve scientific notation when possible (e.g. `0.00E+00`).
+  const scientificMatch = /E([+-])([0]+)/i.exec(section);
+  if (scientificMatch) {
+    const base = section.slice(0, scientificMatch.index);
+    const decimals = parseDecimalPlaces(base);
+    const nextDecimals =
+      direction === "increase" ? Math.min(10, decimals + 1) : Math.max(0, decimals - 1);
+    if (nextDecimals === decimals) return null;
+
+    const expSign = scientificMatch[1] ?? "+";
+    const expDigits = scientificMatch[2]?.length ?? 0;
+    if (expDigits <= 0) return null;
+
+    const fraction = nextDecimals > 0 ? `.${"0".repeat(nextDecimals)}` : "";
+    return `0${fraction}E${expSign}${"0".repeat(expDigits)}`;
+  }
+
+  // Preserve classic fraction formats (e.g. `# ?/?`, `# ??/??`) by adjusting the number of
+  // `?` placeholders (instead of converting to a decimal format).
+  const trimmed = section.trim();
+  if (/^#\s+\?+\/\?+$/.test(trimmed)) {
+    const slash = trimmed.indexOf("/");
+    if (slash === -1) return null;
+    const denom = trimmed.slice(slash + 1).trim();
+    const digits = denom.length;
+    const nextDigits =
+      direction === "increase" ? Math.min(10, digits + 1) : Math.max(1, digits - 1);
+    if (nextDigits === digits) return null;
+    const qs = "?".repeat(nextDigits);
+    return `# ${qs}/${qs}`;
+  }
 
   const currencyMatch = /[$€£¥]/.exec(section);
   const prefix = currencyMatch?.[0] ?? "";

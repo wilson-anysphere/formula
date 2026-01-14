@@ -91,6 +91,46 @@ describe("handleRibbonCommand", () => {
     expect(style.numberFormat).toBe("h:mm:ss");
   });
 
+  it("preserves scientific notation when stepping decimals", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+
+    handleRibbonCommand(ctx, "format.numberFormat.scientific");
+    expect(doc.getCellFormat("Sheet1", { row: 0, col: 0 }).numberFormat).toBe("0.00E+00");
+
+    handleRibbonCommand(ctx, "format.numberFormat.increaseDecimal");
+
+    const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 });
+    expect(style.numberFormat).toBe("0.000E+00");
+  });
+
+  it("adjusts classic fraction formats when stepping decimals", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+
+    handleRibbonCommand(ctx, "format.numberFormat.fraction");
+    expect(doc.getCellFormat("Sheet1", { row: 0, col: 0 }).numberFormat).toBe("# ?/?");
+
+    handleRibbonCommand(ctx, "format.numberFormat.increaseDecimal");
+    expect(doc.getCellFormat("Sheet1", { row: 0, col: 0 }).numberFormat).toBe("# ??/??");
+
+    handleRibbonCommand(ctx, "format.numberFormat.decreaseDecimal");
+    expect(doc.getCellFormat("Sheet1", { row: 0, col: 0 }).numberFormat).toBe("# ?/?");
+  });
+
+  it("does not convert text formats when stepping decimals", () => {
+    const doc = new DocumentController();
+    const ctx = createCtx(doc);
+
+    handleRibbonCommand(ctx, "format.numberFormat.text");
+    expect(doc.getCellFormat("Sheet1", { row: 0, col: 0 }).numberFormat).toBe("@");
+
+    handleRibbonCommand(ctx, "format.numberFormat.increaseDecimal");
+
+    const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 });
+    expect(style.numberFormat).toBe("@");
+  });
+
   it("returns false for unknown commands", () => {
     const doc = new DocumentController();
     const ctx = createCtx(doc);

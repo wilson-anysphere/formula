@@ -104,4 +104,101 @@ describe("registerNumberFormatCommands", () => {
 
     expect(doc.setRangeFormat).not.toHaveBeenCalled();
   });
+
+  it("preserves scientific notation when stepping decimal places", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const doc = {
+      setRangeFormat: vi.fn(() => true),
+    };
+
+    const sheetId = "Sheet1";
+    const ranges = [{ start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }];
+
+    const applyFormattingToSelection = (
+      _label: string,
+      fn: (doc: any, sheetId: string, ranges: any[]) => void | boolean,
+    ) => {
+      fn(doc as any, sheetId, ranges);
+    };
+
+    registerNumberFormatCommands({
+      commandRegistry,
+      applyFormattingToSelection,
+      getActiveCellNumberFormat: () => "0.00E+00",
+      t: (key) => key,
+      category: "Format",
+    });
+
+    await commandRegistry.executeCommand("format.numberFormat.increaseDecimal");
+
+    expect(doc.setRangeFormat).toHaveBeenCalledWith(
+      sheetId,
+      ranges[0],
+      { numberFormat: "0.000E+00" },
+      { label: "Number format" },
+    );
+  });
+
+  it("adjusts classic fraction formats when stepping decimals", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const doc = {
+      setRangeFormat: vi.fn(() => true),
+    };
+
+    const sheetId = "Sheet1";
+    const ranges = [{ start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }];
+
+    const applyFormattingToSelection = (
+      _label: string,
+      fn: (doc: any, sheetId: string, ranges: any[]) => void | boolean,
+    ) => {
+      fn(doc as any, sheetId, ranges);
+    };
+
+    registerNumberFormatCommands({
+      commandRegistry,
+      applyFormattingToSelection,
+      getActiveCellNumberFormat: () => "# ?/?",
+      t: (key) => key,
+      category: "Format",
+    });
+
+    await commandRegistry.executeCommand("format.numberFormat.increaseDecimal");
+
+    expect(doc.setRangeFormat).toHaveBeenCalledWith(
+      sheetId,
+      ranges[0],
+      { numberFormat: "# ??/??" },
+      { label: "Number format" },
+    );
+  });
+
+  it("does not convert text number formats when stepping decimals", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const doc = {
+      setRangeFormat: vi.fn(() => true),
+    };
+
+    const applyFormattingToSelection = (
+      _label: string,
+      fn: (doc: any, sheetId: string, ranges: any[]) => void | boolean,
+    ) => {
+      fn(doc as any, "Sheet1", [{ start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }]);
+    };
+
+    registerNumberFormatCommands({
+      commandRegistry,
+      applyFormattingToSelection,
+      getActiveCellNumberFormat: () => "@",
+      t: (key) => key,
+      category: "Format",
+    });
+
+    await commandRegistry.executeCommand("format.numberFormat.increaseDecimal");
+
+    expect(doc.setRangeFormat).not.toHaveBeenCalled();
+  });
 });
