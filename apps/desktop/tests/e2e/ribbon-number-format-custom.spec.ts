@@ -58,6 +58,19 @@ test.describe("Ribbon: Home → Number → More → Custom…", () => {
       await expect(dialog).toHaveCount(0);
 
       await expect.poll(() => getA1NumberFormat(page), { timeout: 5_000 }).toBe("#,##0");
+
+      // Re-open the prompt to verify it pre-fills with the newly-applied format and that "General"
+      // clears the custom number format.
+      await ribbon.getByRole("button", { name: /more number formats/i }).click();
+      await ribbon.getByRole("menuitem", { name: /custom number format/i }).click();
+      await expect(dialog).toBeVisible();
+      await expect(field).toHaveValue("#,##0");
+
+      await field.fill("General");
+      await page.getByTestId("input-box-ok").click();
+      await expect(dialog).toHaveCount(0);
+
+      await expect.poll(() => getA1NumberFormat(page), { timeout: 5_000 }).toBeNull();
     });
   }
 });
