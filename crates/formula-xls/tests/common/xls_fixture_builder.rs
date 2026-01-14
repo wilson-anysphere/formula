@@ -701,6 +701,30 @@ pub fn build_array_formula_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a minimal BIFF8 `.xls` fixture containing an array (CSE) formula whose array `rgce`
+/// references a workbook-defined name via `PtgName`.
+///
+/// The fixture contains a single sheet named `ArrayName` with:
+/// - A workbook-defined name `MyName` (NAME index 1)
+/// - An array formula over `B1:B2` whose formula is `MyName+1`
+///
+/// Both cells in the array range have `FORMULA` records whose `rgce` is `PtgExp` referencing the
+/// base cell (`B1`), and the `ARRAY` record stores the shared `rgce` token stream containing
+/// `PtgName`.
+pub fn build_array_formula_ptgname_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_array_formula_ptgname_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a What-If Analysis data table formula.
 ///
 /// BIFF8 encodes legacy `TABLE(...)` formulas as:
@@ -8619,6 +8643,64 @@ fn build_array_formula_ptgarray_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("ArrayConst", &sheet_stream, 1252)
 }
 
+fn build_array_formula_ptgname_workbook_stream() -> Vec<u8> {
+    // Minimal single-sheet workbook containing an array formula whose ARRAY.rgce includes PtgName.
+    //
+    // We intentionally construct a workbook NAME table so BIFF8 formula decoding can resolve the
+    // PtgName index into the defined name string.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "ArrayName");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // External reference tables required by the NAME formula token stream (PtgRef3d).
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(1));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    // One workbook-scoped defined name: MyName -> ArrayName!$A$1.
+    let rgce = ptg_ref3d(0, 0, 0);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("MyName", 0, false, None, &rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_array_formula_ptgname_sheet_stream(xf_cell);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn build_shared_formula_ptgmemarean_workbook_stream() -> Vec<u8> {
     // Minimal single-sheet workbook containing a shared formula where the shared SHRFMLA.rgce
     // includes PtgMemAreaN tokens (one with cce=0 and one with cce=3).
@@ -12713,12 +12795,63 @@ fn build_array_formula_ptgarray_sheet_stream(xf_cell: u16) -> Vec<u8> {
     };
 
     let rgcb = rgcb_array_constant_numbers_2x2(&[1.0, 2.0, 3.0, 4.0]);
-    let mut array_payload =
-        array_record_refu(base_row, 1, base_col as u8, base_col as u8, &array_rgce);
+    let mut array_payload = array_record_refu(base_row, 1, base_col as u8, base_col as u8, &array_rgce);
     array_payload.extend_from_slice(&rgcb);
     push_record(&mut sheet, RECORD_ARRAY, &array_payload);
 
     // B2 formula: PtgExp pointing to base cell B1.
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(1, base_col, xf_cell, 0.0, grbit_array, &ptgexp),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_array_formula_ptgname_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: NUMBER record (ensures calamine surfaces a non-empty range).
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // Set FORMULA.grbit.fArray (0x0010) so parsers recognize the array-formula membership.
+    let grbit_array: u16 = 0x0010;
+
+    // Array formula group: B1:B2, formula `MyName+1`.
+    let base_row = 0u16;
+    let base_col = 1u16; // B
+
+    // B1/B2 formulas: PtgExp pointing at the array base cell (B1).
+    let ptgexp = ptg_exp(base_row, base_col);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(base_row, base_col, xf_cell, 0.0, grbit_array, &ptgexp),
+    );
+
+    // Formula tokens for `MyName+1`: PtgName(1) + PtgInt(1) + PtgAdd.
+    let array_rgce = [ptg_name(1), vec![0x1E, 0x01, 0x00], vec![0x03]].concat();
+    push_record(
+        &mut sheet,
+        RECORD_ARRAY,
+        &array_record_refu(base_row, 1, base_col as u8, base_col as u8, &array_rgce),
+    );
+
     push_record(
         &mut sheet,
         RECORD_FORMULA,
