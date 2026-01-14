@@ -107,6 +107,16 @@ jobs:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@9bc92bc5598b4f3bec5d910d352094982cb0c3b9 # 1.92.0
+
+      - name: Check Cargo.lock is up-to-date (no implicit lockfile updates)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version=1 --manifest-path apps/desktop/src-tauri/Cargo.toml --features desktop >/dev/null
+          cargo metadata --locked --format-version=1 --filter-platform wasm32-unknown-unknown >/dev/null
+
   build:
     name: Build (${{ matrix.label }})
     needs: preflight
@@ -912,6 +922,9 @@ jobs:
           FORMULA_ENFORCE_BUNDLE_SIZE: ${{ vars.FORMULA_ENFORCE_BUNDLE_SIZE }}
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
         run: python scripts/desktop_bundle_size_report.py
+
+      - name: Fail if the build modified tracked files
+        run: git diff --exit-code
 
       - name: Upload desktop bundles
         if: always()
