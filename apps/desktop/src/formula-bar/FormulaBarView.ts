@@ -1230,6 +1230,8 @@ export class FormulaBarView {
   #lastHighlightCursor: number | null = null;
   #lastHighlightGhost: string | null = null;
   #lastHighlightPreviewText: string | null = null;
+  #lastHighlightNeedsEscapeDraft: string | null = null;
+  #lastHighlightNeedsEscape: boolean = false;
   #lastActiveReferenceIndex: number | null = null;
   #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
   #lastColoredReferences: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
@@ -3228,7 +3230,12 @@ export class FormulaBarView {
       // Escaping every token individually incurs a lot of overhead on long formulas. If the
       // underlying draft contains no HTML-significant characters, we can safely emit token
       // text as-is.
-      const needsEscapeDraft = ESCAPE_HTML_TEST_RE.test(draft);
+      let needsEscapeDraft = this.#lastHighlightNeedsEscape;
+      if (this.#lastHighlightNeedsEscapeDraft !== draft) {
+        needsEscapeDraft = ESCAPE_HTML_TEST_RE.test(draft);
+        this.#lastHighlightNeedsEscapeDraft = draft;
+        this.#lastHighlightNeedsEscape = needsEscapeDraft;
+      }
 
       const refs = coloredReferences;
       const canIdentifierBeReference = Boolean(this.model.extractFormulaReferencesOptions()?.resolveName);
