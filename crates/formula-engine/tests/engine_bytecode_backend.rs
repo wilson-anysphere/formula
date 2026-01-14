@@ -7720,10 +7720,17 @@ fn bytecode_compile_diagnostics_compiles_indirect() {
     assert_eq!(stats.total_formula_cells, 1);
     assert_eq!(stats.compiled, 1);
     assert_eq!(stats.fallback, 0);
-    assert!(stats.fallback_reasons.is_empty());
+    assert!(
+        stats.fallback_reasons.is_empty(),
+        "unexpected bytecode fallback reasons: {:?}",
+        stats.fallback_reasons
+    );
 
     let report = engine.bytecode_compile_report(10);
     assert!(report.is_empty(), "unexpected bytecode fallback report: {report:?}");
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
 }
 
 #[test]
@@ -7738,10 +7745,17 @@ fn bytecode_compile_diagnostics_compiles_offset() {
     assert_eq!(stats.total_formula_cells, 1);
     assert_eq!(stats.compiled, 1);
     assert_eq!(stats.fallback, 0);
-    assert!(stats.fallback_reasons.is_empty());
+    assert!(
+        stats.fallback_reasons.is_empty(),
+        "unexpected bytecode fallback reasons: {:?}",
+        stats.fallback_reasons
+    );
 
     let report = engine.bytecode_compile_report(10);
     assert!(report.is_empty(), "unexpected bytecode fallback report: {report:?}");
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
 }
 
 #[test]

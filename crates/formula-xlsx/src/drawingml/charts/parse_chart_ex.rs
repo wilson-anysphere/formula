@@ -412,6 +412,7 @@ fn normalize_chart_ex_kind_hint(raw: &str) -> Option<String> {
 
     Some(lowercase_first(base))
 }
+
 #[derive(Debug, Clone, Default)]
 struct ChartExDataDefinition {
     categories: Option<SeriesTextData>,
