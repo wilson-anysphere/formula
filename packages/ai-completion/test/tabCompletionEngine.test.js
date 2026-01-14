@@ -4286,6 +4286,32 @@ test("PERCENTRANK significance suggests 3, 2, 1 (no 0)", async () => {
   }
 });
 
+test("LOG base suggests 10 and 2 (no 0/1)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=LOG(100, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["10", "2"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Expected LOG to suggest base=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+
+  for (const v of ["0", "1"]) {
+    assert.ok(
+      !suggestions.some((s) => s.text === `${currentInput}${v}`),
+      `Did not expect LOG to suggest base=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("NORM.DIST cumulative suggests TRUE/FALSE", async () => {
   const engine = new TabCompletionEngine();
 

@@ -1381,6 +1381,11 @@ const SIGNIFICANCE_ENUM_3_2_1 = [
   { replacement: "1", displayText: "1 (1 decimal place)", confidence: 0.64 },
 ];
 
+const LOG_BASE_ENUM_10_2 = [
+  { replacement: "10", displayText: "10 (log base 10)", confidence: 0.66 },
+  { replacement: "2", displayText: "2 (log base 2)", confidence: 0.65 },
+];
+
 const VLOOKUP_COL_INDEX_NUM_ENUM_1_2_3 = [
   { replacement: "2", displayText: "2 (2nd column)", confidence: 0.66 },
   { replacement: "1", displayText: "1 (1st column)", confidence: 0.65 },
@@ -1770,6 +1775,10 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   "PERCENTRANK.EXC": {
     // significance
     2: SIGNIFICANCE_ENUM_3_2_1,
+  },
+  LOG: {
+    // base
+    1: LOG_BASE_ENUM_10_2,
   },
   "T.TEST": {
     // tails
