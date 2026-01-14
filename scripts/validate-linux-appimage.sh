@@ -156,6 +156,11 @@ print((conf.get("version") or "").strip())
 PY
     )"
   fi
+  if [ -z "$EXPECTED_VERSION" ] && command -v node >/dev/null 2>&1; then
+    EXPECTED_VERSION="$(
+      node -p 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); String(conf.version ?? "").trim()' "$TAURI_CONF_PATH" 2>/dev/null || true
+    )"
+  fi
   if [ -z "$EXPECTED_VERSION" ]; then
     # Best-effort fallback when python/json parsing isn't available.
     EXPECTED_VERSION="$(sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "$TAURI_CONF_PATH" | head -n 1)"
