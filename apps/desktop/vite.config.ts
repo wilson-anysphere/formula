@@ -280,9 +280,7 @@ export default defineConfig({
       //   pnpm -C apps/desktop vitest run apps/desktop/src/drawings/__tests__/selectionHandles.test.ts
       // works reliably (`apps/desktop/scripts/run-vitest.mjs` normalizes repo-rooted paths like
       // `apps/desktop/src/...` to `src/...` when running via the desktop package script).
-      "src/drawings/__tests__/selectionHandles.test.ts",
-      "src/drawings/__tests__/drawingmlPatch.test.ts",
-      "src/drawings/__tests__/modelAdapters.test.ts",
+      "src/drawings/__tests__/**/*.test.ts",
       // Node-only unit tests for the desktop performance harness live under `tests/performance/`.
       // Include these explicitly while still excluding Playwright e2e specs under `tests/e2e/`.
       "tests/performance/**/*.vitest.ts",
