@@ -338,6 +338,46 @@ impl PivotRegistry {
         });
     }
 
+    /// Rewrite any registered pivot destinations affected by a row/column insertion/deletion on a
+    /// specific worksheet, identified by internal `sheet_id`.
+    ///
+    /// This is preferred over [`PivotRegistry::apply_structural_edit`] when callers have already
+    /// resolved the edited sheet name (which may be either the worksheet's stable key or its
+    /// display name) to a stable sheet id.
+    ///
+    /// Pivot registry entries store only `sheet_id`, so the edited sheet should be matched by id
+    /// to avoid missing shifts when the host addresses a worksheet by a different alias.
+    pub fn apply_structural_edit_with_sheet_id(
+        &mut self,
+        edited_sheet_id: usize,
+        edit: &StructuralEdit,
+        sheet_names: &HashMap<usize, String>,
+    ) {
+        let edit_sheet = match edit {
+            StructuralEdit::InsertRows { sheet, .. }
+            | StructuralEdit::DeleteRows { sheet, .. }
+            | StructuralEdit::InsertCols { sheet, .. }
+            | StructuralEdit::DeleteCols { sheet, .. } => sheet.as_str(),
+        };
+
+        self.entries.retain_mut(|entry| {
+            if sheet_names.get(&entry.sheet_id).is_none() {
+                // Sheet no longer exists; drop stale entry.
+                return false;
+            }
+            if entry.sheet_id != edited_sheet_id {
+                return true;
+            }
+            let Some(new_dest) =
+                rewrite_pivot_destination_for_structural_edit(entry.destination, edit_sheet, edit)
+            else {
+                return false;
+            };
+            entry.destination = new_dest;
+            true
+        });
+    }
+
     /// Rewrite any registered pivot destinations affected by a range move / insert-cells /
     /// delete-cells edit.
     pub fn apply_range_map_edit(
@@ -351,6 +391,36 @@ impl PivotRegistry {
             };
             let Some(new_dest) =
                 rewrite_pivot_destination_for_range_map_edit(entry.destination, ctx_sheet, edit)
+            else {
+                return false;
+            };
+            entry.destination = new_dest;
+            true
+        });
+    }
+
+    /// Rewrite any registered pivot destinations affected by a range move / insert-cells /
+    /// delete-cells edit on a specific worksheet, identified by internal `sheet_id`.
+    ///
+    /// This is preferred over [`PivotRegistry::apply_range_map_edit`] when callers have already
+    /// resolved the edited sheet name (which may be either the worksheet's stable key or its
+    /// display name) to a stable sheet id.
+    pub fn apply_range_map_edit_with_sheet_id(
+        &mut self,
+        edited_sheet_id: usize,
+        edit: &RangeMapEdit,
+        sheet_names: &HashMap<usize, String>,
+    ) {
+        let edit_sheet = edit.sheet.as_str();
+        self.entries.retain_mut(|entry| {
+            if sheet_names.get(&entry.sheet_id).is_none() {
+                return false;
+            }
+            if entry.sheet_id != edited_sheet_id {
+                return true;
+            }
+            let Some(new_dest) =
+                rewrite_pivot_destination_for_range_map_edit(entry.destination, edit_sheet, edit)
             else {
                 return false;
             };
