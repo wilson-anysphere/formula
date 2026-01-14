@@ -491,7 +491,8 @@ jobs:
   merge:
     name: Desktop perf summary (all OS)
     needs: desktop-perf
-    if: always()
+    # Avoid spending compute on scheduled runs in forks.
+    if: (github.event_name != 'schedule' || github.repository == 'wilson-anysphere/formula') && always()
     runs-on: ubuntu-latest
     permissions:
       contents: read
