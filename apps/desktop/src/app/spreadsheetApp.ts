@@ -12600,6 +12600,23 @@ export class SpreadsheetApp {
       target === this.presenceCanvas;
     if (!isGridSurface) return;
 
+    // Drawings render above charts; if a drawing is under the pointer, let drawing interactions/selection win.
+    // This is particularly important in legacy mode where drawing interactions rely on bubbling listeners.
+    const drawings = this.listDrawingObjectsForSheet();
+    if (drawings.length > 0) {
+      this.maybeRefreshRootPosition({ force: true });
+      const x = e.clientX - this.rootLeft;
+      const y = e.clientY - this.rootTop;
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
+        const viewport = this.getDrawingInteractionViewport(sharedViewport);
+        const index = this.getDrawingHitTestIndex(drawings);
+        const drawingBounds = this.drawingHitTestScratchRect;
+        const hit = hitTestDrawingsInto(index, viewport, x, y, drawingBounds);
+        if (hit) return;
+      }
+    }
+
     const hit = this.hitTestChartAtClientPoint(e.clientX, e.clientY);
     if (!hit) {
       // Preserve chart selection on context-click misses so right-clicking the grid can open
