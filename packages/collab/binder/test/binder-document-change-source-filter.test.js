@@ -51,6 +51,16 @@ class TestDocumentController {
     }
     this._emitter.emit("change", { sheetViewDeltas: deltas, source: options.source });
   }
+
+  /**
+   * External cell updates (e.g. collaboration/snapshot restore) should not be written back into Yjs.
+   *
+   * @param {any[]} deltas
+   * @param {{ source?: string }} [options]
+   */
+  applyExternalDeltas(deltas, options = {}) {
+    this._emitter.emit("change", { deltas, source: options.source });
+  }
 }
 
 test("binder ignores DocumentController change events with source=collab (prevents echo from other binders)", async () => {
@@ -119,6 +129,52 @@ test("binder ignores DocumentController change events with source=applyState (pr
     await flushAsync(5);
 
     assert.equal(updateCount, 0);
+  } finally {
+    binder.destroy();
+    doc.destroy();
+  }
+});
+
+test("binder ignores DocumentController cell change events with source=applyState (prevents snapshot restore from overwriting Yjs)", async () => {
+  const doc = new Y.Doc();
+  const { sheets, cells } = getWorkbookRoots(doc);
+
+  doc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+  });
+
+  const documentController = new TestDocumentController();
+  const binder = bindYjsToDocumentController({ ydoc: doc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    let updateCount = 0;
+    doc.on("update", () => {
+      updateCount += 1;
+    });
+
+    await flushAsync(5);
+    updateCount = 0;
+
+    documentController.applyExternalDeltas(
+      [
+        {
+          sheetId: "Sheet1",
+          row: 0,
+          col: 0,
+          before: { value: null, formula: null, styleId: 0 },
+          after: { value: "x", formula: null, styleId: 0 },
+        },
+      ],
+      { source: "applyState" },
+    );
+
+    await flushAsync(5);
+
+    assert.equal(updateCount, 0);
+    assert.equal(cells.get("Sheet1:0:0"), undefined);
   } finally {
     binder.destroy();
     doc.destroy();
