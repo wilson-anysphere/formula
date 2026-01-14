@@ -144,11 +144,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "DESKTOP_STARTUP_RUNS=${{ inputs.startupRuns }}" >> "$GITHUB_ENV"
-          echo "DESKTOP_STARTUP_TIMEOUT_MS=${{ inputs.startupTimeoutMs }}" >> "$GITHUB_ENV"
-          echo "DESKTOP_MEMORY_RUNS=${{ inputs.memoryRuns }}" >> "$GITHUB_ENV"
-          echo "DESKTOP_MEMORY_TIMEOUT_MS=${{ inputs.memoryTimeoutMs }}" >> "$GITHUB_ENV"
-          echo "DESKTOP_MEMORY_SETTLE_MS=${{ inputs.memorySettleMs }}" >> "$GITHUB_ENV"
+
+          write_int_override() {
+            local env_key="$1"
+            local input_name="$2"
+            local value="$3"
+            if [[ -z "$value" ]]; then
+              return 0
+            fi
+            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+              echo "::error::workflow_dispatch input '${input_name}' must be an integer (got: '${value}')" >&2
+              exit 1
+            fi
+            echo "${env_key}=${value}" >> "$GITHUB_ENV"
+          }
+
+          write_int_override "DESKTOP_STARTUP_RUNS" "startupRuns" "${{ inputs.startupRuns }}"
+          write_int_override "DESKTOP_STARTUP_TIMEOUT_MS" "startupTimeoutMs" "${{ inputs.startupTimeoutMs }}"
+          write_int_override "DESKTOP_MEMORY_RUNS" "memoryRuns" "${{ inputs.memoryRuns }}"
+          write_int_override "DESKTOP_MEMORY_TIMEOUT_MS" "memoryTimeoutMs" "${{ inputs.memoryTimeoutMs }}"
+          write_int_override "DESKTOP_MEMORY_SETTLE_MS" "memorySettleMs" "${{ inputs.memorySettleMs }}"
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
