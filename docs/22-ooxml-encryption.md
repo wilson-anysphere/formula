@@ -173,6 +173,11 @@ Representative shape (attributes elided):
 </encryption>
 ```
 
+Note: MS-OFFCRYPTO also permits the three ciphertext blobs under `p:encryptedKey` to be encoded as
+**child elements** with base64 text (instead of attributes), e.g.
+`<p:encryptedKeyValue>...</p:encryptedKeyValue>`. `crates/formula-offcrypto` accepts **both** forms
+and prefers attribute values when both are present.
+
 When debugging decryption bugs, always ask:
 
 - “Am I using the `keyData` salt/hash, or the `p:encryptedKey` salt/hash?”
