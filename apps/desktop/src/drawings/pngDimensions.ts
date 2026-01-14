@@ -238,25 +238,7 @@ export function readBmpDimensions(bytes: Uint8Array): { width: number; height: n
 export function readSvgDimensions(bytes: Uint8Array): { width: number; height: number } | null {
   if (!(bytes instanceof Uint8Array) || bytes.byteLength < 4) return null;
 
-  const maxRead = Math.min(bytes.byteLength, 256 * 1024);
-
-  // Fast-path: SVGs are text-based and should start with `<` (optionally after a UTF-8 BOM/whitespace)
-  // or a UTF-16 BOM. If we don't see that, don't spend time decoding bytes into a string.
-  const utf16Bom =
-    maxRead >= 2 && ((bytes[0] === 0xfe && bytes[1] === 0xff) || (bytes[0] === 0xff && bytes[1] === 0xfe));
-  if (!utf16Bom) {
-    let idx = 0;
-    if (maxRead >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) idx = 3; // UTF-8 BOM
-    while (idx < maxRead) {
-      const b = bytes[idx]!;
-      if (b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d) {
-        idx += 1;
-        continue;
-      }
-      break;
-    }
-    if (idx >= maxRead || bytes[idx] !== 0x3c) return null; // '<'
-  }
+  const len = bytes.byteLength;
 
   const decodeUtf16 = (view: Uint8Array, littleEndian: boolean): string | null => {
     const len = view.byteLength - (view.byteLength % 2);
@@ -310,21 +292,364 @@ export function readSvgDimensions(bytes: Uint8Array): { width: number; height: n
     }
   };
 
-  const text = (() => {
-    if (utf16Bom) {
-      const littleEndian = bytes[0] === 0xff && bytes[1] === 0xfe;
-      return decodeUtf16(bytes.subarray(2, maxRead), littleEndian);
-    }
-    return decodeUtf8(bytes.subarray(0, maxRead));
-  })();
+  const isWhitespaceByte = (b: number): boolean => b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d;
 
-  if (!text) return null;
-  const lower = text.toLowerCase();
-  const svgStart = lower.indexOf("<svg");
-  if (svgStart === -1) return null;
-  const tagEnd = lower.indexOf(">", svgStart);
-  if (tagEnd === -1) return null;
-  const tag = text.slice(svgStart, tagEnd + 1);
+  // Fast-path: SVGs are text-based. If we don't see `<` (optionally after BOM/whitespace) or a UTF-16 BOM,
+  // don't spend time scanning/decoding.
+  const utf16Bom = len >= 2 && ((bytes[0] === 0xfe && bytes[1] === 0xff) || (bytes[0] === 0xff && bytes[1] === 0xfe));
+  const utf16LittleEndian = utf16Bom ? bytes[0] === 0xff && bytes[1] === 0xfe : false;
+
+  const readUtf16CodeUnit = (idx: number): number =>
+    utf16LittleEndian ? bytes[idx]! | (bytes[idx + 1]! << 8) : (bytes[idx]! << 8) | bytes[idx + 1]!;
+
+  if (utf16Bom) {
+    let idx = 2;
+    while (idx + 1 < len) {
+      const cu = readUtf16CodeUnit(idx);
+      if (cu === 0x20 || cu === 0x09 || cu === 0x0a || cu === 0x0d) {
+        idx += 2;
+        continue;
+      }
+      break;
+    }
+    if (idx + 1 >= len) return null;
+    if (readUtf16CodeUnit(idx) !== 0x3c) return null; // '<'
+  } else {
+    let idx = 0;
+    if (len >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) idx = 3; // UTF-8 BOM
+    while (idx < len && isWhitespaceByte(bytes[idx]!)) idx += 1;
+    if (idx >= len) return null;
+    if (bytes[idx] !== 0x3c) return null; // '<'
+  }
+
+  const MAX_TAG_BYTES = 32 * 1024;
+
+  const findSvgTagBytesUtf8 = (): Uint8Array | null => {
+    const asciiLower = (b: number): number => (b >= 0x41 && b <= 0x5a ? b | 0x20 : b);
+
+    const isSvgName = (start: number, end: number): boolean => {
+      const nameLen = end - start;
+      if (nameLen === 3) {
+        return (
+          asciiLower(bytes[start]!) === 0x73 &&
+          asciiLower(bytes[start + 1]!) === 0x76 &&
+          asciiLower(bytes[start + 2]!) === 0x67
+        );
+      }
+      if (nameLen > 4 && bytes[end - 4] === 0x3a) {
+        return (
+          asciiLower(bytes[end - 3]!) === 0x73 &&
+          asciiLower(bytes[end - 2]!) === 0x76 &&
+          asciiLower(bytes[end - 1]!) === 0x67
+        );
+      }
+      return false;
+    };
+
+    const findTagEnd = (start: number): number => {
+      const limit = Math.min(len, start + MAX_TAG_BYTES);
+      let quote = 0;
+      for (let i = start + 1; i < limit; i += 1) {
+        const b = bytes[i]!;
+        if (quote) {
+          if (b === quote) quote = 0;
+          continue;
+        }
+        if (b === 0x22 || b === 0x27) {
+          quote = b;
+          continue;
+        }
+        if (b === 0x3e) return i + 1; // '>'
+      }
+      return -1;
+    };
+
+    let i = 0;
+    if (len >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) i = 3;
+
+    while (i < len) {
+      while (i < len && bytes[i] !== 0x3c) i += 1; // '<'
+      if (i >= len || i + 1 >= len) break;
+
+      const next = bytes[i + 1]!;
+
+      if (next === 0x21) {
+        // Declarations: comments, CDATA, doctype.
+        if (i + 3 < len && bytes[i + 2] === 0x2d && bytes[i + 3] === 0x2d) {
+          // <!-- ... -->
+          let j = i + 4;
+          while (j + 2 < len) {
+            if (bytes[j] === 0x2d && bytes[j + 1] === 0x2d && bytes[j + 2] === 0x3e) {
+              i = j + 3;
+              break;
+            }
+            j += 1;
+          }
+          if (j + 2 >= len) return null;
+          continue;
+        }
+
+        // <![CDATA[ ... ]]>
+        const cdataStart =
+          i + 8 < len &&
+          bytes[i + 2] === 0x5b &&
+          bytes[i + 3] === 0x43 &&
+          bytes[i + 4] === 0x44 &&
+          bytes[i + 5] === 0x41 &&
+          bytes[i + 6] === 0x54 &&
+          bytes[i + 7] === 0x41 &&
+          bytes[i + 8] === 0x5b;
+        if (cdataStart) {
+          let j = i + 9;
+          while (j + 2 < len) {
+            if (bytes[j] === 0x5d && bytes[j + 1] === 0x5d && bytes[j + 2] === 0x3e) {
+              i = j + 3;
+              break;
+            }
+            j += 1;
+          }
+          if (j + 2 >= len) return null;
+          continue;
+        }
+
+        // Other declaration (e.g. <!DOCTYPE ...>): skip until `>` not in quotes and not inside `[ ... ]`.
+        let j = i + 2;
+        let quote = 0;
+        let bracketDepth = 0;
+        while (j < len) {
+          const b = bytes[j]!;
+          if (quote) {
+            if (b === quote) quote = 0;
+          } else if (b === 0x22 || b === 0x27) {
+            quote = b;
+          } else if (b === 0x5b) {
+            bracketDepth += 1;
+          } else if (b === 0x5d && bracketDepth > 0) {
+            bracketDepth -= 1;
+          } else if (b === 0x3e && bracketDepth === 0) {
+            i = j + 1;
+            break;
+          }
+          j += 1;
+        }
+        if (j >= len) return null;
+        continue;
+      }
+
+      if (next === 0x3f) {
+        // Processing instruction: <? ... ?>
+        let j = i + 2;
+        while (j + 1 < len) {
+          if (bytes[j] === 0x3f && bytes[j + 1] === 0x3e) {
+            i = j + 2;
+            break;
+          }
+          j += 1;
+        }
+        if (j + 1 >= len) return null;
+        continue;
+      }
+
+      if (next === 0x2f) {
+        // End tag: </...>
+        const end = findTagEnd(i);
+        if (end === -1) return null;
+        i = end;
+        continue;
+      }
+
+      // Regular start tag.
+      const nameStart = i + 1;
+      let nameEnd = nameStart;
+      const maxNameEnd = Math.min(len, nameStart + 64);
+      while (nameEnd < maxNameEnd) {
+        const b = bytes[nameEnd]!;
+        if (isWhitespaceByte(b) || b === 0x2f || b === 0x3e || b === 0x3f) break;
+        nameEnd += 1;
+      }
+
+      const end = findTagEnd(i);
+      if (end === -1) return null;
+
+      if (nameEnd > nameStart && isSvgName(nameStart, nameEnd)) {
+        return bytes.subarray(i, end);
+      }
+
+      i = end;
+    }
+
+    return null;
+  };
+
+  const findSvgTagBytesUtf16 = (): Uint8Array | null => {
+    const asciiLower = (cu: number): number => (cu >= 0x41 && cu <= 0x5a ? cu | 0x20 : cu);
+    const isWhitespaceCu = (cu: number): boolean => cu === 0x20 || cu === 0x09 || cu === 0x0a || cu === 0x0d;
+
+    const isSvgName = (start: number, end: number): boolean => {
+      const nameLen = (end - start) / 2;
+      if (nameLen === 3) {
+        return (
+          asciiLower(readUtf16CodeUnit(start)) === 0x73 &&
+          asciiLower(readUtf16CodeUnit(start + 2)) === 0x76 &&
+          asciiLower(readUtf16CodeUnit(start + 4)) === 0x67
+        );
+      }
+      if (nameLen > 4 && readUtf16CodeUnit(end - 8) === 0x3a) {
+        return (
+          asciiLower(readUtf16CodeUnit(end - 6)) === 0x73 &&
+          asciiLower(readUtf16CodeUnit(end - 4)) === 0x76 &&
+          asciiLower(readUtf16CodeUnit(end - 2)) === 0x67
+        );
+      }
+      return false;
+    };
+
+    const findTagEnd = (start: number): number => {
+      const limit = Math.min(len - (len % 2), start + MAX_TAG_BYTES);
+      let quote = 0;
+      for (let i = start + 2; i + 1 < limit; i += 2) {
+        const cu = readUtf16CodeUnit(i);
+        if (quote) {
+          if (cu === quote) quote = 0;
+          continue;
+        }
+        if (cu === 0x22 || cu === 0x27) {
+          quote = cu;
+          continue;
+        }
+        if (cu === 0x3e) return i + 2; // '>'
+      }
+      return -1;
+    };
+
+    let i = 2; // skip BOM
+    while (i + 1 < len) {
+      while (i + 1 < len && readUtf16CodeUnit(i) !== 0x3c) i += 2; // '<'
+      if (i + 1 >= len || i + 3 >= len) break;
+
+      const next = readUtf16CodeUnit(i + 2);
+
+      if (next === 0x21) {
+        // Declarations: comments, CDATA, doctype.
+        if (i + 7 < len && readUtf16CodeUnit(i + 4) === 0x2d && readUtf16CodeUnit(i + 6) === 0x2d) {
+          // <!-- ... -->
+          let j = i + 8;
+          while (j + 5 < len) {
+            if (
+              readUtf16CodeUnit(j) === 0x2d &&
+              readUtf16CodeUnit(j + 2) === 0x2d &&
+              readUtf16CodeUnit(j + 4) === 0x3e
+            ) {
+              i = j + 6;
+              break;
+            }
+            j += 2;
+          }
+          if (j + 5 >= len) return null;
+          continue;
+        }
+
+        // <![CDATA[ ... ]]>
+        const cdataStart =
+          i + 17 < len &&
+          readUtf16CodeUnit(i + 4) === 0x5b &&
+          readUtf16CodeUnit(i + 6) === 0x43 &&
+          readUtf16CodeUnit(i + 8) === 0x44 &&
+          readUtf16CodeUnit(i + 10) === 0x41 &&
+          readUtf16CodeUnit(i + 12) === 0x54 &&
+          readUtf16CodeUnit(i + 14) === 0x41 &&
+          readUtf16CodeUnit(i + 16) === 0x5b;
+        if (cdataStart) {
+          let j = i + 18;
+          while (j + 5 < len) {
+            if (
+              readUtf16CodeUnit(j) === 0x5d &&
+              readUtf16CodeUnit(j + 2) === 0x5d &&
+              readUtf16CodeUnit(j + 4) === 0x3e
+            ) {
+              i = j + 6;
+              break;
+            }
+            j += 2;
+          }
+          if (j + 5 >= len) return null;
+          continue;
+        }
+
+        // Other declaration: skip until `>` not in quotes and not inside `[ ... ]`.
+        let j = i + 4;
+        let quote = 0;
+        let bracketDepth = 0;
+        while (j + 1 < len) {
+          const cu = readUtf16CodeUnit(j);
+          if (quote) {
+            if (cu === quote) quote = 0;
+          } else if (cu === 0x22 || cu === 0x27) {
+            quote = cu;
+          } else if (cu === 0x5b) {
+            bracketDepth += 1;
+          } else if (cu === 0x5d && bracketDepth > 0) {
+            bracketDepth -= 1;
+          } else if (cu === 0x3e && bracketDepth === 0) {
+            i = j + 2;
+            break;
+          }
+          j += 2;
+        }
+        if (j + 1 >= len) return null;
+        continue;
+      }
+
+      if (next === 0x3f) {
+        // Processing instruction: <? ... ?>
+        let j = i + 4;
+        while (j + 3 < len) {
+          if (readUtf16CodeUnit(j) === 0x3f && readUtf16CodeUnit(j + 2) === 0x3e) {
+            i = j + 4;
+            break;
+          }
+          j += 2;
+        }
+        if (j + 3 >= len) return null;
+        continue;
+      }
+
+      if (next === 0x2f) {
+        // End tag.
+        const end = findTagEnd(i);
+        if (end === -1) return null;
+        i = end;
+        continue;
+      }
+
+      // Regular start tag.
+      const nameStart = i + 2;
+      let nameEnd = nameStart;
+      const maxNameEnd = Math.min(len - (len % 2), nameStart + 128);
+      while (nameEnd + 1 < maxNameEnd) {
+        const cu = readUtf16CodeUnit(nameEnd);
+        if (isWhitespaceCu(cu) || cu === 0x2f || cu === 0x3e || cu === 0x3f) break;
+        nameEnd += 2;
+      }
+
+      const end = findTagEnd(i);
+      if (end === -1) return null;
+
+      if (nameEnd > nameStart && isSvgName(nameStart, nameEnd)) {
+        return bytes.subarray(i, end);
+      }
+
+      i = end;
+    }
+
+    return null;
+  };
+
+  const tagBytes = utf16Bom ? findSvgTagBytesUtf16() : findSvgTagBytesUtf8();
+  if (!tagBytes) return null;
+
+  const tag = utf16Bom ? decodeUtf16(tagBytes, utf16LittleEndian) : decodeUtf8(tagBytes);
+  if (!tag) return null;
 
   const getAttr = (name: string): string | null => {
     const re = new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, "i");
