@@ -12,6 +12,10 @@ const scriptPath = path.join(repoRoot, "scripts", "ci", "check-desktop-complianc
 function run(config) {
   const tmpdir = mkdtempSync(path.join(os.tmpdir(), "formula-desktop-compliance-"));
   const confPath = path.join(tmpdir, "tauri.conf.json");
+  // The validator resolves paths relative to the tauri.conf.json location. Create
+  // dummy LICENSE/NOTICE files next to the temp config so existence checks pass.
+  writeFileSync(path.join(tmpdir, "LICENSE"), "LICENSE stub\n", "utf8");
+  writeFileSync(path.join(tmpdir, "NOTICE"), "NOTICE stub\n", "utf8");
   writeFileSync(confPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 
   const proc = spawnSync(process.execPath, [scriptPath], {
@@ -32,24 +36,24 @@ test("passes when LICENSE/NOTICE resources + Linux doc files are configured", ()
   const proc = run({
     mainBinaryName: "formula-desktop",
     bundle: {
-      resources: ["../../../LICENSE", "../../../NOTICE"],
+      resources: ["LICENSE", "NOTICE"],
       linux: {
         deb: {
           files: {
-            "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
-            "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE",
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
         },
         rpm: {
           files: {
-            "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
-            "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE",
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
         },
         appimage: {
           files: {
-            "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
-            "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE",
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
         },
       },
@@ -63,24 +67,24 @@ test("fails when bundle.resources is missing NOTICE", () => {
   const proc = run({
     mainBinaryName: "formula-desktop",
     bundle: {
-      resources: ["../../../LICENSE"],
+      resources: ["LICENSE"],
       linux: {
         deb: {
           files: {
-            "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
-            "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE",
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
         },
         rpm: {
           files: {
-            "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
-            "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE",
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
         },
         appimage: {
           files: {
-            "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
-            "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE",
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
         },
       },
@@ -94,24 +98,24 @@ test("fails when Linux doc dir does not match mainBinaryName", () => {
   const proc = run({
     mainBinaryName: "formula-desktop",
     bundle: {
-      resources: ["../../../LICENSE", "../../../NOTICE"],
+      resources: ["LICENSE", "NOTICE"],
       linux: {
         deb: {
           files: {
-            "usr/share/doc/other/LICENSE": "../../../LICENSE",
-            "usr/share/doc/other/NOTICE": "../../../NOTICE",
+            "usr/share/doc/other/LICENSE": "LICENSE",
+            "usr/share/doc/other/NOTICE": "NOTICE",
           },
         },
         rpm: {
           files: {
-            "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
-            "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE",
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
         },
         appimage: {
           files: {
-            "usr/share/doc/formula-desktop/LICENSE": "../../../LICENSE",
-            "usr/share/doc/formula-desktop/NOTICE": "../../../NOTICE",
+            "usr/share/doc/formula-desktop/LICENSE": "LICENSE",
+            "usr/share/doc/formula-desktop/NOTICE": "NOTICE",
           },
         },
       },
@@ -121,4 +125,3 @@ test("fails when Linux doc dir does not match mainBinaryName", () => {
   assert.match(proc.stderr, /bundle\.linux\.deb\.files/i);
   assert.match(proc.stderr, /usr\/share\/doc\/formula-desktop\/LICENSE/i);
 });
-

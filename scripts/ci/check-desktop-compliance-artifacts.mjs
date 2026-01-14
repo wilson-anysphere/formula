@@ -35,6 +35,30 @@ function resourcesInclude(resources, filename) {
 }
 
 /**
+ * @param {string} src
+ * @param {string} filename
+ * @returns {string}
+ */
+function resolveAndAssertFileExists(src, filename) {
+  const base = path.basename(src);
+  if (base !== filename) {
+    die(`expected source path basename to be ${filename} (got ${JSON.stringify(src)})`);
+  }
+
+  const resolved = path.isAbsolute(src) ? src : path.resolve(path.dirname(configPath), src);
+  let stat;
+  try {
+    stat = fs.statSync(resolved);
+  } catch (err) {
+    die(`missing source file for ${filename}: ${resolved}`);
+  }
+  if (!stat.isFile()) {
+    die(`expected source file for ${filename} to be a file: ${resolved}`);
+  }
+  return resolved;
+}
+
+/**
  * @param {unknown} files
  * @param {string} mainBinaryName
  * @param {string} kind
@@ -63,12 +87,7 @@ function validateLinuxFiles(files, mainBinaryName, kind) {
         `bundle.linux.${kind}.files[${JSON.stringify(destPath)}] must be a string source path (got ${typeof src})`,
       );
     }
-    const base = path.basename(src);
-    if (base !== filename) {
-      die(
-        `bundle.linux.${kind}.files[${JSON.stringify(destPath)}] must point at ${filename} (got ${JSON.stringify(src)})`,
-      );
-    }
+    resolveAndAssertFileExists(src, filename);
   }
 }
 
@@ -107,5 +126,20 @@ validateLinuxFiles(asObject(linux.rpm)?.files, mainBinaryName, "rpm");
 
 // Tauri's config key is `appimage` (lowercase).
 validateLinuxFiles(asObject(linux.appimage)?.files, mainBinaryName, "appimage");
+
+// Ensure the declared resources actually exist on disk as files.
+if (!Array.isArray(resources)) {
+  die("bundle.resources must be an array");
+}
+const licenseEntry = resources.find((entry) => typeof entry === "string" && path.basename(entry) === "LICENSE");
+const noticeEntry = resources.find((entry) => typeof entry === "string" && path.basename(entry) === "NOTICE");
+if (typeof licenseEntry !== "string") {
+  die("bundle.resources must contain an entry for LICENSE");
+}
+if (typeof noticeEntry !== "string") {
+  die("bundle.resources must contain an entry for NOTICE");
+}
+resolveAndAssertFileExists(licenseEntry, "LICENSE");
+resolveAndAssertFileExists(noticeEntry, "NOTICE");
 
 console.log(`desktop-compliance: OK (LICENSE/NOTICE bundling configured for ${mainBinaryName})`);
