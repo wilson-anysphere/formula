@@ -124,7 +124,7 @@ fn font(name: &str) -> Vec<u8> {
     out
 }
 
-fn xf_record(font_idx: u16, fmt_idx: u16, is_style_xf: bool) -> [u8; 20] {
+fn xf_record(font_idx: u16, fmt_idx: u16, is_style_xf: bool, alignment: u8) -> [u8; 20] {
     let mut out = [0u8; 20];
     out[0..2].copy_from_slice(&font_idx.to_le_bytes());
     out[2..4].copy_from_slice(&fmt_idx.to_le_bytes());
@@ -136,8 +136,8 @@ fn xf_record(font_idx: u16, fmt_idx: u16, is_style_xf: bool) -> [u8; 20] {
     let flags: u16 = XF_FLAG_LOCKED | if is_style_xf { XF_FLAG_STYLE } else { 0 };
     out[4..6].copy_from_slice(&flags.to_le_bytes());
 
-    // Default BIFF8 alignment: General + Bottom.
-    out[6] = 0x20;
+    // BIFF8 alignment (horizontal + vertical + wrap).
+    out[6] = alignment;
 
     // Attribute flags: apply all so fixture cell XFs don't rely on inheritance.
     out[9] = 0x3F;
@@ -366,15 +366,14 @@ fn build_cryptoapi_encrypted_xls_bytes(password: &str) -> Vec<u8> {
 
     // XF table: keep the usual 16 style XFs so BIFF consumers stay happy.
     for _ in 0..16 {
-        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true, 0x20));
     }
     let xf_cell: u16 = 16;
-    let mut cell_xf = xf_record(0, 0, false);
-    // Make the cell XF "interesting" so the importer assigns a non-default style id. Use a
-    // non-default vertical alignment (Top) to validate that encrypted XF records after FILEPASS
-    // are decrypted + imported.
-    cell_xf[6] = 0x00; // General + Top
-    push_record(&mut globals, RECORD_XF, &cell_xf);
+    // Make the cell XF "interesting" so the decryption integration test can assert that
+    // workbook-global styles (XF) are imported correctly after decrypting the stream.
+    //
+    // Alignment byte 0x00 = General + Top (vertical=top is non-default vs Excel's default bottom).
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false, 0x00));
 
     // BoundSheet with placeholder offset.
     let boundsheet_start = globals.len();
