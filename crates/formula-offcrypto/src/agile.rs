@@ -367,30 +367,54 @@ mod tests {
     }
 
     #[test]
-    fn sha1_verifier_hash_value_padding_is_ignored() {
-        reset_ct_eq_calls();
-
+    fn verifier_hash_value_padding_is_ignored() {
         let verifier_input = b"0123456789abcdef"; // 16 bytes
-        let digest = HashAlgorithm::Sha1.digest(verifier_input); // 20 bytes
 
-        let mut padded = digest.clone();
-        padded.extend([0xA5u8; 12]); // pad to 32 bytes
-        assert_eq!(padded.len(), 32);
+        for alg in [HashAlgorithm::Sha1, HashAlgorithm::Md5] {
+            reset_ct_eq_calls();
 
-        verify_password(verifier_input, &padded, HashAlgorithm::Sha1).expect("verify");
-        assert!(ct_eq_call_count() >= 1, "expected ct_eq to be used");
+            let digest_len = alg.digest_len();
+            let digest = alg.digest(verifier_input);
+            assert_eq!(digest.len(), digest_len);
+
+            // Model AES-CBC padding: verifierHashValue is block-aligned, so producers may store
+            // extra trailing bytes beyond the hash output. Verification should ignore them.
+            let padded_len = if digest_len % 16 == 0 {
+                digest_len + 16
+            } else {
+                ((digest_len + 15) / 16) * 16
+            };
+            let mut padded = digest.clone();
+            padded.resize(padded_len, 0xA5);
+
+            verify_password(verifier_input, &padded, alg).expect("verify");
+            assert!(ct_eq_call_count() >= 1, "expected ct_eq to be used (alg={alg})");
+        }
     }
 
     #[test]
-    fn sha1_hmac_value_padding_is_ignored() {
-        reset_ct_eq_calls();
+    fn hmac_value_padding_is_ignored() {
+        for digest_len in [20usize, 16usize] {
+            reset_ct_eq_calls();
 
-        let computed = (0u8..20).collect::<Vec<_>>();
-        let mut padded = computed.clone();
-        padded.extend([0xA5u8; 12]);
+            let computed = (0u8..digest_len as u8).collect::<Vec<_>>();
 
-        verify_hmac(&computed, &padded).expect("verify");
-        assert!(ct_eq_call_count() >= 1, "expected ct_eq to be used");
+            // Model AES-CBC padding: HMAC values can be stored in block-aligned buffers (e.g.
+            // SHA1=20 padded to 32; some producers may also pad MD5=16 to 32).
+            let padded_len = if digest_len % 16 == 0 {
+                digest_len + 16
+            } else {
+                ((digest_len + 15) / 16) * 16
+            };
+            let mut padded = computed.clone();
+            padded.resize(padded_len, 0xA5);
+
+            verify_hmac(&computed, &padded).expect("verify");
+            assert!(
+                ct_eq_call_count() >= 1,
+                "expected ct_eq to be used (digest_len={digest_len})"
+            );
+        }
     }
 
     #[test]
