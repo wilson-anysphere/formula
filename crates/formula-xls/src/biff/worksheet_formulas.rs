@@ -1392,6 +1392,54 @@ mod tests {
     }
 
     #[test]
+    fn parses_continued_formula_when_cce_and_rgce_cross_fragment_boundaries() {
+        // FORMULA record split across CONTINUE such that the `cce` length field and the `rgce`
+        // bytes both cross fragment boundaries.
+        let rgce: Vec<u8> = vec![0x1E, 0x03, 0x00]; // PtgInt(3)
+        let cce = rgce.len() as u16;
+
+        // FORMULA header: row (2) + col (2) + xf (2) + cached result (8) + grbit (2) + chn (4) +
+        // cce (2) + rgce...
+        let mut formula_prefix = Vec::new();
+        formula_prefix.extend_from_slice(&0u16.to_le_bytes()); // row
+        formula_prefix.extend_from_slice(&0u16.to_le_bytes()); // col
+        formula_prefix.extend_from_slice(&0u16.to_le_bytes()); // xf
+        formula_prefix.extend_from_slice(&[0u8; 8]); // cached result (dummy)
+        formula_prefix.extend_from_slice(&0u16.to_le_bytes()); // grbit (dummy)
+        formula_prefix.extend_from_slice(&0u32.to_le_bytes()); // chn (dummy)
+
+        let cce_bytes = cce.to_le_bytes();
+
+        // Split so that:
+        // - the first CONTINUE boundary occurs after the first byte of cce (so cce crosses),
+        // - the second CONTINUE boundary splits the rgce bytes.
+        let formula_frag1 = [formula_prefix, vec![cce_bytes[0]]].concat();
+        let cont1 = vec![cce_bytes[1], rgce[0]];
+        let cont2 = vec![rgce[1], rgce[2]];
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_FORMULA, &formula_frag1),
+            record(records::RECORD_CONTINUE, &cont1),
+            record(records::RECORD_CONTINUE, &cont2),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_worksheet_formulas(&stream, 0).expect("parse");
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+
+        let cell = CellRef::new(0, 0);
+        let formula = parsed.formula_cells.get(&cell).expect("missing FORMULA");
+        assert_eq!(formula.grbit, FormulaGrbit(0));
+        assert_eq!(formula.rgce, rgce);
+    }
+
+    #[test]
     fn parses_continued_shrfmla_when_cce_and_rgce_cross_fragment_boundaries() {
         // SHRFMLA record split across CONTINUE such that the `cce` length field and the `rgce`
         // bytes both cross fragment boundaries.

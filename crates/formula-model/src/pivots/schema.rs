@@ -310,6 +310,7 @@ pub enum Layout {
 
 impl Default for Layout {
     fn default() -> Self {
+        // Keep the default stable for serialization/back-compat.
         Self::Tabular
     }
 }
