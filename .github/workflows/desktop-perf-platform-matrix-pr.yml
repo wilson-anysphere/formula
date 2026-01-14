@@ -198,6 +198,10 @@ jobs:
             patchelf
 
       - name: Install JS dependencies
+        env:
+          # This workflow does not run Playwright tests, so skip the ~GB browser downloads
+          # performed by `@playwright/test`'s postinstall script.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: pnpm install --frozen-lockfile
 
       - name: Cache wasm-pack binary
