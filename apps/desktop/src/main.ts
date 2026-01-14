@@ -9682,7 +9682,8 @@ const ribbonActions = createRibbonActions({
     });
   },
   toggleAutoFilter: toggleRibbonAutoFilter,
-  clearAutoFilter: clearRibbonAutoFiltersForActiveSheet,
+  // Excel-style: "Clear" clears filter criteria (show all rows) but keeps AutoFilter enabled.
+  clearAutoFilter: clearRibbonAutoFilterCriteriaForActiveSheet,
   reapplyAutoFilter: reapplyRibbonAutoFiltersForActiveSheet,
   applyAutoFilterFromSelection: applyRibbonAutoFilterFromSelection,
   scheduleRibbonSelectionFormatStateUpdate,
