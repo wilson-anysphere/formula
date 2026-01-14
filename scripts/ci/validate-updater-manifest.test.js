@@ -175,10 +175,13 @@ test("fails when latest.json.platforms is missing a required platform key", () =
   assetNames.delete("Formula_0.1.0_x86_64.AppImage");
 
   const result = validatePlatformEntries({ platforms, assetNames });
+  const message = result.errors.join("\n");
   assert.ok(
     result.errors.some((e) => e.includes("Missing required latest.json.platforms keys")),
     `Expected strict platforms key mismatch error, got:\n${result.errors.join("\n\n")}`,
   );
+  assert.match(message, /Missing \(1\):/);
+  assert.match(message, /linux-x86_64/);
 });
 
 test("accepts additional installer-specific platform keys (e.g. windows-x86_64-msi)", () => {
