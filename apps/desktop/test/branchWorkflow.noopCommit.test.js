@@ -75,3 +75,49 @@ test("commitIfDocumentStateChanged commits when doc state differs from branch he
   assert.deepEqual(commitCalls[0], [actor, { nextState: changed, message: "auto: checkout" }]);
 });
 
+test("commitIfDocumentStateChanged treats missing vs null backgroundImageId as no-op", async () => {
+  const baseline = {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: {
+        Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 0 } },
+      },
+    },
+    cells: { Sheet1: {} },
+    metadata: {},
+    namedRanges: {},
+    comments: {},
+  };
+
+  const equivalent = {
+    ...baseline,
+    sheets: {
+      ...baseline.sheets,
+      metaById: {
+        ...baseline.sheets.metaById,
+        Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 0, backgroundImageId: null } },
+      },
+    },
+  };
+
+  /** @type {any[][]} */
+  const commitCalls = [];
+  const branchService = {
+    getCurrentState: async () => baseline,
+    commit: async (...args) => {
+      commitCalls.push(args);
+    },
+  };
+
+  const didCommit = await commitIfDocumentStateChanged({
+    actor: { userId: "u1", role: "owner" },
+    branchService,
+    doc: { id: "doc" },
+    message: "auto: checkout",
+    docToState: () => equivalent,
+  });
+
+  assert.equal(didCommit, false);
+  assert.equal(commitCalls.length, 0);
+});

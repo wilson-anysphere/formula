@@ -50,7 +50,39 @@ export function documentStatesEqual(a: unknown, b: unknown): boolean {
   // states (e.g. missing optional workbook maps) compare equal.
   const normA = normalizeDocumentState(a);
   const normB = normalizeDocumentState(b);
+  // Back-compat/canonicalization: some historical branch histories predate certain sheet view
+  // fields (e.g. worksheet background images). Treat `backgroundImageId: null` and a missing
+  // key as equivalent when deciding whether a commit would be a no-op.
+  canonicalizeBackgroundImageIds(normA);
+  canonicalizeBackgroundImageIds(normB);
   return deepEqualJson(normA, normB);
+}
+
+function canonicalizeBackgroundImageIds(state: unknown): void {
+  if (!isPlainObject(state)) return;
+  const sheets = state.sheets;
+  if (!isPlainObject(sheets)) return;
+  const metaById = sheets.metaById;
+  if (!isPlainObject(metaById)) return;
+  for (const meta of Object.values(metaById)) {
+    if (!isPlainObject(meta)) continue;
+    const view = meta.view;
+    if (!isPlainObject(view)) continue;
+    // Prefer canonical key.
+    if (Object.prototype.hasOwnProperty.call(view, "backgroundImageId")) {
+      const v = (view as any).backgroundImageId;
+      if (v === undefined) (view as any).backgroundImageId = null;
+      continue;
+    }
+    // Back-compat for snake_case encodings.
+    if (Object.prototype.hasOwnProperty.call(view, "background_image_id")) {
+      (view as any).backgroundImageId = (view as any).background_image_id ?? null;
+      delete (view as any).background_image_id;
+      continue;
+    }
+    // Missing key -> treat as explicit clear for equality checks.
+    (view as any).backgroundImageId = null;
+  }
 }
 
 /**
@@ -77,4 +109,3 @@ export async function commitIfDocumentStateChanged<TDoc>({
   await branchService.commit(actor, { nextState, message });
   return true;
 }
-
