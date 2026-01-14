@@ -18,330 +18,105 @@
  *   before *each* iteration.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { parse, resolve } from 'node:path';
-import { createInterface } from 'node:readline';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { buildBenchmarkResultFromValues, type BenchmarkResult } from './benchmark.ts';
 import {
   defaultDesktopBinPath,
-  collectProcessTreePidsLinux,
   findPidForExecutableLinux,
   formatPerfPath,
   getProcessTreeRssBytesLinux,
-  parseStartupLine as parseStartupMetricsLine,
-  repoRoot,
   resolvePerfHome,
+  runOnce as runDesktopOnce,
   shouldUseXvfb,
-  terminateProcessTree,
 } from './desktopStartupUtil.ts';
 
 // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
 const perfHome = resolvePerfHome();
 
-function resolveProfileDirs(profileDir: string): {
-  home: string;
-  tmp: string;
-  xdgConfig: string;
-  xdgCache: string;
-  xdgState: string;
-  xdgData: string;
-  appData: string;
-  localAppData: string;
-} {
-  return {
-    home: profileDir,
-    tmp: resolve(profileDir, 'tmp'),
-    xdgConfig: resolve(profileDir, 'xdg-config'),
-    xdgCache: resolve(profileDir, 'xdg-cache'),
-    xdgState: resolve(profileDir, 'xdg-state'),
-    xdgData: resolve(profileDir, 'xdg-data'),
-    appData: resolve(profileDir, 'AppData', 'Roaming'),
-    localAppData: resolve(profileDir, 'AppData', 'Local'),
-  };
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
-}
-
-async function killPids(pids: number[], signal: NodeJS.Signals): Promise<void> {
-  for (const pid of pids) {
-    try {
-      process.kill(pid, signal);
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ESRCH') continue;
-      // Ignore permission issues (shouldn't happen for our own children, but be defensive).
-      if (code === 'EPERM') continue;
-      throw err;
-    }
-  }
-}
-
-async function isPidAlive(pid: number): Promise<boolean> {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ESRCH') return false;
-    // If we don't have permissions to signal it, assume it's alive.
-    if (code === 'EPERM') return true;
-    return false;
-  }
-}
-
-async function killProcessTreeLinux(rootPid: number, timeoutMs: number): Promise<void> {
-  const initial = await collectProcessTreePidsLinux(rootPid);
-  // Terminate children first so the root can't respawn them during shutdown.
-  const ordered = initial.filter((p) => p !== rootPid).concat(rootPid);
-  await killPids(ordered, 'SIGTERM');
-
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    let anyAlive = false;
-    for (const pid of ordered) {
-      if (await isPidAlive(pid)) {
-        anyAlive = true;
-        break;
-      }
-    }
-    if (!anyAlive) return;
-    await sleep(50);
-  }
-
-  const stillAlive: number[] = [];
-  for (const pid of ordered) {
-    if (await isPidAlive(pid)) stillAlive.push(pid);
-  }
-  await killPids(stillAlive, 'SIGKILL');
-
-  if (stillAlive.length > 0) {
-    const killDeadline = Date.now() + 2000;
-    while (Date.now() < killDeadline) {
-      let anyAlive = false;
-      for (const pid of stillAlive) {
-        if (await isPidAlive(pid)) {
-          anyAlive = true;
-          break;
-        }
-      }
-      if (!anyAlive) break;
-      await sleep(50);
-    }
-  }
-}
-
-async function waitForTti(child: ChildProcess, timeoutMs: number): Promise<number> {
-  return await new Promise<number>((resolvePromise, rejectPromise) => {
-    let done = false;
-
-    const deadline = setTimeout(() => {
-      if (done) return;
-      done = true;
-      cleanup();
-      rejectPromise(new Error(`Timed out after ${timeoutMs}ms waiting for [startup] tti_ms log line`));
-    }, timeoutMs);
-
-    const onLine = (line: string) => {
-      if (done) return;
-      const parsed = parseStartupMetricsLine(line);
-      if (!parsed) return;
-      done = true;
-      cleanup();
-      resolvePromise(parsed.ttiMs);
-    };
-
-    const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
-      if (done) return;
-      done = true;
-      cleanup();
-      rejectPromise(
-        new Error(`Desktop process exited before reporting TTI (code=${code}, signal=${signal})`),
-      );
-    };
-
-    const onError = (err: Error) => {
-      if (done) return;
-      done = true;
-      cleanup();
-      rejectPromise(err);
-    };
-
-    const rlOut = createInterface({ input: child.stdout! });
-    const rlErr = createInterface({ input: child.stderr! });
-    rlOut.on('line', onLine);
-    rlErr.on('line', onLine);
-    // Use `close` (not `exit`) so stdout/stderr are fully drained before we decide whether we
-    // captured the `[startup] ...` line. This avoids false negatives when the process exits
-    // quickly after logging.
-    child.on('close', onClose);
-    child.on('error', onError);
-
-    const cleanup = () => {
-      clearTimeout(deadline);
-      rlOut.close();
-      rlErr.close();
-      child.off('close', onClose);
-      child.off('error', onError);
-    };
-  });
-}
-
-async function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolvePromise, rejectPromise) => {
-    const deadline = setTimeout(() => {
-      cleanup();
-      rejectPromise(new Error(`Timed out after ${timeoutMs}ms waiting for desktop process tree to exit`));
-    }, timeoutMs);
-
-    const onClose = () => {
+    const timer = setTimeout(() => {
       cleanup();
       resolvePromise();
-    };
-
+    }, ms);
     const cleanup = () => {
-      clearTimeout(deadline);
-      child.off('close', onClose);
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
     };
-
-    child.on('close', onClose);
+    const onAbort = () => {
+      cleanup();
+      rejectPromise(new Error('aborted'));
+    };
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort);
+    }
   });
 }
 
-function defangChild(child: ChildProcess): void {
-  // Best-effort: prevent the parent Node process from hanging if the child refuses to exit.
-  // This is a last resort after kill attempts/timeouts.
-  try {
-    child.unref();
-  } catch {
-    // ignore
-  }
-  try {
-    child.stdout?.destroy();
-  } catch {
-    // ignore
-  }
-  try {
-    child.stderr?.destroy();
-  } catch {
-    // ignore
-  }
-}
-
-async function runOnce(
-  binPath: string,
-  timeoutMs: number,
-  settleMs: number,
-  profileDir: string,
-): Promise<number> {
+async function sampleIdleRssMbLinux(options: {
+  binPath: string;
+  timeoutMs: number;
+  settleMs: number;
+  profileDir: string;
+}): Promise<number> {
+  const { binPath, timeoutMs, settleMs, profileDir } = options;
   const useXvfb = shouldUseXvfb();
-  const xvfbPath = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
-  const command = useXvfb ? 'bash' : binPath;
-  const args = useXvfb ? [xvfbPath, binPath] : [];
-  const dirs = resolveProfileDirs(profileDir);
 
-  // Optionally, force a clean state between iterations to avoid cache pollution.
-  if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === '1') {
-    const rootDir = parse(perfHome).root;
-    if (perfHome === rootDir || perfHome === repoRoot) {
-      throw new Error(`Refusing to reset unsafe desktop benchmark home dir: ${perfHome}`);
-    }
-    rmSync(dirs.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
+  let sampledRssMb: number | null = null;
+  let sampleError: Error | null = null;
 
-  mkdirSync(dirs.home, { recursive: true });
-  mkdirSync(dirs.tmp, { recursive: true });
-  mkdirSync(dirs.xdgConfig, { recursive: true });
-  mkdirSync(dirs.xdgCache, { recursive: true });
-  mkdirSync(dirs.xdgState, { recursive: true });
-  mkdirSync(dirs.xdgData, { recursive: true });
-  mkdirSync(dirs.appData, { recursive: true });
-  mkdirSync(dirs.localAppData, { recursive: true });
+  await runDesktopOnce({
+    binPath,
+    timeoutMs,
+    xvfb: useXvfb,
+    profileDir,
+    envOverrides: { FORMULA_PERF_HOME: perfHome },
+    afterCapture: async (child, _metrics, signal) => {
+      try {
+        if (settleMs > 0) {
+          await sleep(settleMs, signal);
+        }
 
-  const child = spawn(command, args, {
-    cwd: repoRoot,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      // Keep perf benchmarks stable/quiet by disabling the automatic startup update check.
-      FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1',
-      // Enable the Rust-side single-line log in release builds.
-      FORMULA_STARTUP_METRICS: '1',
-      // In case the app reads $HOME for config, keep per-run caches out of the real home dir.
-      HOME: dirs.home,
-      USERPROFILE: dirs.home,
-      XDG_CONFIG_HOME: dirs.xdgConfig,
-      XDG_CACHE_HOME: dirs.xdgCache,
-      XDG_STATE_HOME: dirs.xdgState,
-      XDG_DATA_HOME: dirs.xdgData,
-      APPDATA: dirs.appData,
-      LOCALAPPDATA: dirs.localAppData,
-      TMPDIR: dirs.tmp,
-      TEMP: dirs.tmp,
-      TMP: dirs.tmp,
+        const wrapperPid = child.pid;
+        if (!wrapperPid || wrapperPid <= 0) {
+          throw new Error('Failed to spawn desktop process (missing pid)');
+        }
+
+        const resolvedPid = await findPidForExecutableLinux(
+          wrapperPid,
+          binPath,
+          Math.min(2000, timeoutMs),
+          signal,
+        );
+        if (!resolvedPid) {
+          if (useXvfb) {
+            throw new Error('Failed to resolve desktop PID under Xvfb wrapper for RSS sampling');
+          }
+          throw new Error('Failed to resolve desktop PID for RSS sampling');
+        }
+
+        const rssBytes = await getProcessTreeRssBytesLinux(resolvedPid);
+        if (rssBytes <= 0) {
+          throw new Error('Failed to sample desktop RSS (process may have exited)');
+        }
+
+        sampledRssMb = rssBytes / (1024 * 1024);
+      } catch (err) {
+        sampleError = err instanceof Error ? err : new Error(String(err));
+      }
     },
-    // On POSIX, start the app in its own process group so we can signal the entire tree.
-    // Even though this benchmark currently runs on Linux only, keeping this consistent
-    // with other perf runners prevents copy/paste drift.
-    detached: process.platform !== 'win32',
-    windowsHide: true,
+    afterCaptureTimeoutMs: settleMs + 5000,
   });
 
-  if (!child.pid) {
-    child.kill();
-    throw new Error('Failed to spawn desktop process (missing pid)');
-  }
-
-  try {
-    await waitForTti(child, timeoutMs);
-
-    const resolvedPid = await findPidForExecutableLinux(child.pid, binPath, Math.min(2000, timeoutMs));
-    if (!resolvedPid) {
-      if (useXvfb) {
-        throw new Error('Failed to resolve desktop PID under Xvfb wrapper for RSS sampling');
-      }
-      throw new Error('Failed to resolve desktop PID for RSS sampling');
-    }
-    const rootPid = resolvedPid;
-
-    if (settleMs > 0) {
-      await sleep(settleMs);
-    }
-
-    const rssBytes = await getProcessTreeRssBytesLinux(rootPid);
-    if (rssBytes <= 0) {
-      throw new Error('Failed to sample desktop RSS (process may have exited)');
-    }
-    return rssBytes / (1024 * 1024);
-  } finally {
-    // Ensure we clean up even on timeouts / crashes.
-    try {
-      if (process.platform === 'linux') {
-        // Even if the wrapper process already exited, lingering WebView/WebKit helper processes can
-        // remain in the same process group. Best-effort: signal the group first, then fall back to
-        // enumerating the /proc process tree.
-        terminateProcessTree(child, 'graceful');
-        await killProcessTreeLinux(child.pid, 5000);
-        // Last resort: if any processes are still alive in the original process group, force-kill them.
-        terminateProcessTree(child, 'force');
-      } else {
-        terminateProcessTree(child, 'force');
-      }
-    } finally {
-      await waitForExit(child, 5000).catch(() => {
-        // If we failed to cleanly terminate, try a last-resort kill + detach the handles
-        // so the parent process cannot hang indefinitely.
-        terminateProcessTree(child, 'force');
-        defangChild(child);
-        throw new Error('Timed out waiting for desktop process tree to exit after sampling memory');
-      });
-    }
-  }
+  if (sampleError) throw sampleError;
+  if (sampledRssMb == null) throw new Error('Failed to sample desktop RSS');
+  return sampledRssMb;
 }
 
 export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
@@ -389,7 +164,7 @@ export async function runDesktopMemoryBenchmarks(): Promise<BenchmarkResult[]> {
   for (let i = 0; i < runs; i += 1) {
     // eslint-disable-next-line no-console
     console.log(`[desktop-memory] run ${i + 1}/${runs}...`);
-    const rssMb = await runOnce(binPath, timeoutMs, settleMs, profileRoot);
+    const rssMb = await sampleIdleRssMbLinux({ binPath, timeoutMs, settleMs, profileDir: profileRoot });
     values.push(rssMb);
     // eslint-disable-next-line no-console
     console.log(`[desktop-memory]   idleRssMb=${rssMb.toFixed(1)}mb`);
