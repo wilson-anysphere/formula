@@ -10,6 +10,12 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn xlsb_fixture_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../formula-xlsb/tests/fixtures")
+        .join(name)
+}
+
 fn assert_diff_empty(
     expected: &Path,
     actual: &Path,
@@ -75,6 +81,27 @@ fn diff_xlsm_fixtures_against_plain_no_differences() -> Result<()> {
         let encrypted = fixture_path(encrypted);
         assert_diff_empty(&plain, &encrypted, None, Some(PASSWORD))?;
     }
+    Ok(())
+}
+
+#[test]
+fn diff_encrypted_xlsb_against_plain_no_differences() -> Result<()> {
+    let plain = xlsb_fixture_path("simple.xlsb");
+    let plain_bytes = std::fs::read(&plain).context("read plaintext xlsb fixture")?;
+
+    // Keep the KDF work factor low so the test stays fast while still exercising the full
+    // decryption path inside xlsx-diff.
+    let password = "secret";
+    let mut opts = formula_office_crypto::EncryptOptions::default();
+    opts.spin_count = 1_000;
+    let encrypted = formula_office_crypto::encrypt_package_to_ole(&plain_bytes, password, opts)
+        .context("encrypt xlsb fixture into OLE EncryptedPackage container")?;
+
+    let tmp = tempfile::tempdir().context("tempdir")?;
+    let encrypted_path = tmp.path().join("encrypted.xlsb");
+    std::fs::write(&encrypted_path, &encrypted).context("write encrypted xlsb fixture")?;
+
+    assert_diff_empty(&plain, &encrypted_path, None, Some(password))?;
     Ok(())
 }
 
