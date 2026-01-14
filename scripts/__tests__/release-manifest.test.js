@@ -201,6 +201,65 @@ test("mergeTauriUpdaterManifests fails when versions do not match (after normali
   assert.throws(() => mergeTauriUpdaterManifests([a, b]), /version mismatch/i);
 });
 
+test("verify-desktop-release-assets: validateLatestJson fails when a platform URL references a missing release asset", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  const assetsByName = assetsMapFromManifest(manifest);
+
+  const missingAsset = filenameFromUrl(manifest.platforms["windows-aarch64"].url);
+  assert.ok(missingAsset);
+  assetsByName.delete(missingAsset);
+
+  assert.throws(
+    () => validateLatestJson(manifest, "0.1.0", assetsByName),
+    (err) => {
+      assert.ok(err instanceof ActionableError);
+      assert.ok(
+        err.message.includes(missingAsset),
+        `expected error message to mention missing asset ${missingAsset}, got:\n${err.message}`,
+      );
+      return true;
+    },
+  );
+});
+
+test("verify-desktop-release-assets: validateLatestJson requires per-platform signatures (inline or <asset>.sig)", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  const assetsByName = assetsMapFromManifest(manifest);
+
+  // Remove an inline signature without providing a corresponding `.sig` asset.
+  const target = "linux-aarch64";
+  const assetName = filenameFromUrl(manifest.platforms[target].url);
+  assert.ok(assetName);
+  delete manifest.platforms[target].signature;
+
+  assert.throws(
+    () => validateLatestJson(manifest, "0.1.0", assetsByName),
+    (err) => {
+      assert.ok(err instanceof ActionableError);
+      assert.match(err.message, new RegExp(`${assetName}\\.sig`));
+      return true;
+    },
+  );
+});
+
+test("verify-desktop-release-assets: validateLatestJson accepts signature-only-as-asset (<bundle>.sig) when inline signatures are absent", async () => {
+  const manifest = await readJsonFixture("latest.multi-platform.json");
+  const assetsByName = assetsMapFromManifest(manifest);
+
+  for (const entry of Object.values(manifest.platforms)) {
+    if (!entry || typeof entry !== "object") continue;
+    delete entry.signature;
+  }
+
+  // Provide `.sig` assets for every referenced bundle.
+  for (const name of [...assetsByName.keys()]) {
+    assetsByName.set(`${name}.sig`, { name: `${name}.sig` });
+  }
+
+  // Should not throw.
+  validateLatestJson(manifest, "0.1.0", assetsByName, { allowWindowsMsi: true });
+});
+
 test("verify-desktop-release-assets: validateLatestJson fails on missing required platforms", async () => {
   const manifest = await readJsonFixture("latest.missing-platforms.json");
   const assetsByName = assetsMapFromManifest(manifest);
