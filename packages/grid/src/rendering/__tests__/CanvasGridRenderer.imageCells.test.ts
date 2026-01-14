@@ -1076,7 +1076,8 @@ describe("CanvasGridRenderer image cells", () => {
     const createImageBitmapSpy = vi.fn(async () => ({ width: 10, height: 10 } as any));
     vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
 
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="10001" height="1"></svg>`;
+    const prefix = "a".repeat(9_000);
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" width="10001" height="1"></svg>`;
     const imageResolver = vi.fn(async () => createSvgBytes(svg));
 
     const gridCanvas = document.createElement("canvas");
@@ -1143,7 +1144,8 @@ describe("CanvasGridRenderer image cells", () => {
 
     // Ensure `<svg ...>` appears after the initial TYPE_SNIFF_BYTES (32) to exercise the
     // larger SVG header read path in guardPngBlob.
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="10001" height="1"></svg>`;
+    const prefix = "a".repeat(9_000);
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<!--${prefix}-->\n<svg xmlns="http://www.w3.org/2000/svg" width="10001" height="1"></svg>`;
     const bytes = createSvgBytes(svg);
     const imageResolver = vi.fn(async () => new Blob([bytes], { type: "image/svg+xml" }));
 

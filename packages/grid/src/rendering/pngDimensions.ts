@@ -235,7 +235,7 @@ export function readBmpDimensions(bytes: Uint8Array): { width: number; height: n
 export function readSvgDimensions(bytes: Uint8Array): { width: number; height: number } | null {
   if (!(bytes instanceof Uint8Array) || bytes.byteLength < 4) return null;
 
-  const maxRead = Math.min(bytes.byteLength, 8 * 1024);
+  const maxRead = Math.min(bytes.byteLength, 256 * 1024);
 
   // Fast-path: SVGs are text-based and should start with `<` (optionally after a UTF-8 BOM/whitespace)
   // or a UTF-16 BOM. If we don't see that, don't spend time decoding bytes into a string.

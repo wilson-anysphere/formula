@@ -325,7 +325,7 @@ async function guardPngBlob(blob: Blob): Promise<void> {
   } else if (isSvgLike && blob.size > initial.byteLength) {
     // SVG needs more than the initial signature bytes because the `<svg ...>` tag (and width/height)
     // can appear after an XML declaration and comments.
-    const MAX_SVG_SNIFF_BYTES = 8 * 1024;
+    const MAX_SVG_SNIFF_BYTES = 256 * 1024;
     const toRead = Math.min(blob.size, MAX_SVG_SNIFF_BYTES);
     if (toRead > initial.byteLength) {
       const larger = await readSlice(blob.slice(0, toRead));
