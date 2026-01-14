@@ -67,7 +67,9 @@ export function BranchManagerPanel({
   };
 
   useEffect(() => {
-    void reload();
+    void reload().catch(() => {
+      // Best-effort: avoid unhandled rejections from fire-and-forget effect calls.
+    });
   }, [branchService]);
 
   const canManage = useMemo(() => actor.role === "owner" || actor.role === "admin", [actor.role]);
@@ -95,14 +97,18 @@ export function BranchManagerPanel({
         />
         <button
           disabled={!canManage || mutationsDisabled || !newBranchName.trim()}
-          onClick={async () => {
-            try {
-              await branchService.createBranch(actor, { name: newBranchName.trim() });
-              setNewBranchName("");
-              await reload();
-            } catch (e) {
-              setError((e as Error).message);
-            }
+          onClick={() => {
+            void (async () => {
+              try {
+                await branchService.createBranch(actor, { name: newBranchName.trim() });
+                setNewBranchName("");
+                await reload();
+              } catch (e) {
+                setError((e as Error).message);
+              }
+            })().catch((e) => {
+              setError((e as Error)?.message ?? String(e));
+            });
           }}
         >
           {t("branchManager.newBranch.create")}
@@ -127,44 +133,56 @@ export function BranchManagerPanel({
             <div className="branch-manager__item-actions">
               <button
                 disabled={!canManage || mutationsDisabled}
-                onClick={async () => {
-                  const newName = await showInputBox({ prompt: t("branchManager.prompt.rename"), value: b.name });
-                  const trimmed = newName?.trim();
-                  if (!trimmed || trimmed === b.name) return;
-                  try {
-                    await branchService.renameBranch(actor, { oldName: b.name, newName: trimmed });
-                    await reload();
-                  } catch (e) {
-                    setError((e as Error).message);
-                  }
+                onClick={() => {
+                  void (async () => {
+                    const newName = await showInputBox({ prompt: t("branchManager.prompt.rename"), value: b.name });
+                    const trimmed = newName?.trim();
+                    if (!trimmed || trimmed === b.name) return;
+                    try {
+                      await branchService.renameBranch(actor, { oldName: b.name, newName: trimmed });
+                      await reload();
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  })().catch((e) => {
+                    setError((e as Error)?.message ?? String(e));
+                  });
                 }}
               >
                 {t("branchManager.actions.rename")}
               </button>
               <button
                 disabled={!canManage || mutationsDisabled || isCurrent}
-                onClick={async () => {
-                  try {
-                    await branchService.checkoutBranch(actor, { name: b.name });
-                    await reload();
-                  } catch (e) {
-                    setError((e as Error).message);
-                  }
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      await branchService.checkoutBranch(actor, { name: b.name });
+                      await reload();
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  })().catch((e) => {
+                    setError((e as Error)?.message ?? String(e));
+                  });
                 }}
               >
                 {t("branchManager.actions.switch")}
               </button>
               <button
                 disabled={!canManage || mutationsDisabled || b.name === "main" || isCurrent}
-                onClick={async () => {
-                  const ok = await nativeDialogs.confirm(tWithVars("branchManager.confirm.delete", { name: b.name }));
-                  if (!ok) return;
-                  try {
-                    await branchService.deleteBranch(actor, { name: b.name });
-                    await reload();
-                  } catch (e) {
-                    setError((e as Error).message);
-                  }
+                onClick={() => {
+                  void (async () => {
+                    const ok = await nativeDialogs.confirm(tWithVars("branchManager.confirm.delete", { name: b.name }));
+                    if (!ok) return;
+                    try {
+                      await branchService.deleteBranch(actor, { name: b.name });
+                      await reload();
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  })().catch((e) => {
+                    setError((e as Error)?.message ?? String(e));
+                  });
                 }}
               >
                 {t("branchManager.actions.delete")}

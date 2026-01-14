@@ -758,72 +758,77 @@ export function MergeBranchPanel({
                     disabled={mutationsDisabled}
                     data-selected={selectedChoice === "manual"}
                     aria-pressed={selectedChoice === "manual"}
-                    onClick={async () => {
-                      if (mutationsDisabled) return;
-                      try {
-                        if (c.type === "cell") {
-                          // Seed structured editor from ours (merge default).
-                          const seed = c.ours ? { ...c.ours } : null;
-                          const draft = manualCellDrafts.get(idx) ?? initialDraftForCellConflict(c, seed, "ours");
-                          updateManualDraft(draft, c);
-                          return;
-                        }
+                    onClick={() => {
+                      void (async () => {
+                        if (mutationsDisabled) return;
+                        try {
+                          if (c.type === "cell") {
+                            // Seed structured editor from ours (merge default).
+                            const seed = c.ours ? { ...c.ours } : null;
+                            const draft = manualCellDrafts.get(idx) ?? initialDraftForCellConflict(c, seed, "ours");
+                            updateManualDraft(draft, c);
+                            return;
+                          }
 
-                        const manual =
-                          c.type === "move"
-                            ? await showInputBox({
-                                prompt: t("branchMerge.prompt.moveDestination"),
-                                value: c.ours?.to ?? "",
-                              })
-                            : c.type === "sheet" && c.reason === "rename"
+                          const manual =
+                            c.type === "move"
                               ? await showInputBox({
-                                  prompt: t("branchMerge.prompt.manualJson"),
-                                  value: String(c.ours ?? ""),
+                                  prompt: t("branchMerge.prompt.moveDestination"),
+                                  value: c.ours?.to ?? "",
                                 })
-                              : c.type === "sheet" && c.reason === "order"
+                              : c.type === "sheet" && c.reason === "rename"
                                 ? await showInputBox({
                                     prompt: t("branchMerge.prompt.manualJson"),
-                                    value: JSON.stringify(c.ours ?? [], null, 2),
-                                    type: "textarea",
+                                    value: String(c.ours ?? ""),
                                   })
-                                : c.type === "sheet" && c.reason === "presence"
-                                  ? // Presence conflicts can embed large cell maps; avoid
-                                    // pre-populating the prompt with a giant JSON blob.
-                                    await showInputBox({
+                                : c.type === "sheet" && c.reason === "order"
+                                  ? await showInputBox({
                                       prompt: t("branchMerge.prompt.manualJson"),
-                                      value: "",
+                                      value: JSON.stringify(c.ours ?? [], null, 2),
                                       type: "textarea",
                                     })
-                                  : await showInputBox({
-                                      prompt: t("branchMerge.prompt.manualJson"),
-                                      value: JSON.stringify(c.ours ?? null, null, 2),
-                                      type: "textarea",
-                                    });
+                                  : c.type === "sheet" && c.reason === "presence"
+                                    ? // Presence conflicts can embed large cell maps; avoid
+                                      // pre-populating the prompt with a giant JSON blob.
+                                      await showInputBox({
+                                        prompt: t("branchMerge.prompt.manualJson"),
+                                        value: "",
+                                        type: "textarea",
+                                      })
+                                    : await showInputBox({
+                                        prompt: t("branchMerge.prompt.manualJson"),
+                                        value: JSON.stringify(c.ours ?? null, null, 2),
+                                        type: "textarea",
+                                      });
 
-                        if (manual === null) return;
+                          if (manual === null) return;
 
-                        const next: ConflictResolution = { conflictIndex: idx, choice: "manual" };
+                          const next: ConflictResolution = { conflictIndex: idx, choice: "manual" };
 
-                        if (c.type === "move") {
-                          next.manualMoveTo = manual;
-                        } else if (c.type === "sheet" && c.reason === "rename") {
-                          next.manualSheetName = manual.length > 0 ? manual : null;
-                        } else if (c.type === "sheet" && c.reason === "order") {
-                          next.manualSheetOrder = manual ? (JSON.parse(manual) as string[]) : [];
-                        } else if (c.type === "sheet" && c.reason === "presence") {
-                          next.manualSheetState = manual ? JSON.parse(manual) : null;
-                        } else if (c.type === "metadata") {
-                          next.manualMetadataValue = manual ? JSON.parse(manual) : null;
-                        } else if (c.type === "namedRange") {
-                          next.manualNamedRangeValue = manual ? JSON.parse(manual) : null;
-                        } else if (c.type === "comment") {
-                          next.manualCommentValue = manual ? JSON.parse(manual) : null;
+                          if (c.type === "move") {
+                            next.manualMoveTo = manual;
+                          } else if (c.type === "sheet" && c.reason === "rename") {
+                            next.manualSheetName = manual.length > 0 ? manual : null;
+                          } else if (c.type === "sheet" && c.reason === "order") {
+                            next.manualSheetOrder = manual ? (JSON.parse(manual) as string[]) : [];
+                          } else if (c.type === "sheet" && c.reason === "presence") {
+                            next.manualSheetState = manual ? JSON.parse(manual) : null;
+                          } else if (c.type === "metadata") {
+                            next.manualMetadataValue = manual ? JSON.parse(manual) : null;
+                          } else if (c.type === "namedRange") {
+                            next.manualNamedRangeValue = manual ? JSON.parse(manual) : null;
+                          } else if (c.type === "comment") {
+                            next.manualCommentValue = manual ? JSON.parse(manual) : null;
+                          }
+
+                          setResolutions((prev) => new Map(prev).set(idx, next));
+                        } catch (e) {
+                          setError((e as Error).message);
                         }
-
-                        setResolutions((prev) => new Map(prev).set(idx, next));
-                      } catch (e) {
-                        setError((e as Error).message);
-                      }
+                      })().catch((e) => {
+                        // React doesn't await click handlers; avoid unhandled rejections.
+                        setError((e as Error)?.message ?? String(e));
+                      });
                     }}
                   >
                     {t("branchMerge.manual")}
@@ -971,17 +976,21 @@ export function MergeBranchPanel({
             <button onClick={onClose}>{t("branchMerge.cancel")}</button>
             <button
               disabled={mutationsDisabled || preview.conflicts.length !== resolutions.size || hasManualErrors}
-              onClick={async () => {
-                try {
-                  setError(null);
-                  await branchService.merge(actor, {
-                    sourceBranch,
-                    resolutions: Array.from(resolutions.values())
-                  });
-                  onClose();
-                } catch (e) {
-                  setError((e as Error).message);
-                }
+              onClick={() => {
+                void (async () => {
+                  try {
+                    setError(null);
+                    await branchService.merge(actor, {
+                      sourceBranch,
+                      resolutions: Array.from(resolutions.values()),
+                    });
+                    onClose();
+                  } catch (e) {
+                    setError((e as Error).message);
+                  }
+                })().catch((e) => {
+                  setError((e as Error)?.message ?? String(e));
+                });
               }}
             >
               {t("branchMerge.applyMerge")}

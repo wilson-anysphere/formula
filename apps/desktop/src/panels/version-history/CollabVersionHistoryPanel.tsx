@@ -240,32 +240,38 @@ export function CollabVersionHistoryPanel({
           <div className="collab-version-history__create-actions">
             <button
               disabled={busy || mutationsDisabled || !versioningReady || !checkpointName.trim()}
-              onClick={async () => {
-                if (mutationsDisabled) return;
-                if (!collabVersioning) return;
-                const name = checkpointName.trim();
-                if (!name) {
-                  setError(t("versionHistory.errors.checkpointNameRequired"));
-                  return;
-                }
-                try {
-                  setBusy(true);
-                  setError(null);
-                  const created = await collabVersioning.createCheckpoint({
-                    name,
-                    annotations: checkpointAnnotations.trim() ? checkpointAnnotations.trim() : undefined,
-                    locked: checkpointLocked,
-                  });
-                  setCheckpointName("");
-                  setCheckpointAnnotations("");
-                  setCheckpointLocked(false);
-                  await refresh();
-                  setSelectedId(created?.id ?? null);
-                } catch (e) {
-                  setError((e as Error).message);
-                } finally {
+              onClick={() => {
+                void (async () => {
+                  if (mutationsDisabled) return;
+                  if (!collabVersioning) return;
+                  const name = checkpointName.trim();
+                  if (!name) {
+                    setError(t("versionHistory.errors.checkpointNameRequired"));
+                    return;
+                  }
+                  try {
+                    setBusy(true);
+                    setError(null);
+                    const created = await collabVersioning.createCheckpoint({
+                      name,
+                      annotations: checkpointAnnotations.trim() ? checkpointAnnotations.trim() : undefined,
+                      locked: checkpointLocked,
+                    });
+                    setCheckpointName("");
+                    setCheckpointAnnotations("");
+                    setCheckpointLocked(false);
+                    await refresh();
+                    setSelectedId(created?.id ?? null);
+                  } catch (e) {
+                    setError((e as Error).message);
+                  } finally {
+                    setBusy(false);
+                  }
+                })().catch((e) => {
+                  // React doesn't await event handlers; ensure we never surface an unhandled rejection.
+                  setError((e as Error)?.message ?? String(e));
                   setBusy(false);
-                }
+                });
               }}
             >
               {t("versionHistory.actions.createCheckpoint")}
@@ -277,23 +283,28 @@ export function CollabVersionHistoryPanel({
       <div className="collab-version-history__actions">
         <button
           disabled={busy || mutationsDisabled || !versioningReady || !selectedId}
-          onClick={async () => {
-            if (mutationsDisabled) return;
-            if (!collabVersioning) return;
-            const id = selectedId;
-            if (!id) return;
-            const ok = await nativeDialogs.confirm(t("versionHistory.confirm.restoreOverwrite"));
-            if (!ok) return;
-            try {
-              setBusy(true);
-              setError(null);
-              await collabVersioning.restoreVersion(id);
-              await refresh();
-            } catch (e) {
-              setError((e as Error).message);
-            } finally {
+          onClick={() => {
+            void (async () => {
+              if (mutationsDisabled) return;
+              if (!collabVersioning) return;
+              const id = selectedId;
+              if (!id) return;
+              const ok = await nativeDialogs.confirm(t("versionHistory.confirm.restoreOverwrite"));
+              if (!ok) return;
+              try {
+                setBusy(true);
+                setError(null);
+                await collabVersioning.restoreVersion(id);
+                await refresh();
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            })().catch((e) => {
+              setError((e as Error)?.message ?? String(e));
               setBusy(false);
-            }
+            });
           }}
         >
           {t("versionHistory.actions.restoreSelected")}
@@ -302,21 +313,26 @@ export function CollabVersionHistoryPanel({
         {selectedIsCheckpoint ? (
           <button
             disabled={busy || mutationsDisabled || !versioningReady || !selectedId}
-            onClick={async () => {
-              if (mutationsDisabled) return;
-              if (!collabVersioning) return;
-              const id = selectedId;
-              if (!id) return;
-              try {
-                setBusy(true);
-                setError(null);
-                await collabVersioning.setCheckpointLocked(id, !selectedLocked);
-                await refresh();
-              } catch (e) {
-                setError((e as Error).message);
-              } finally {
+            onClick={() => {
+              void (async () => {
+                if (mutationsDisabled) return;
+                if (!collabVersioning) return;
+                const id = selectedId;
+                if (!id) return;
+                try {
+                  setBusy(true);
+                  setError(null);
+                  await collabVersioning.setCheckpointLocked(id, !selectedLocked);
+                  await refresh();
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              })().catch((e) => {
+                setError((e as Error)?.message ?? String(e));
                 setBusy(false);
-              }
+              });
             }}
           >
             {selectedLocked ? t("versionHistory.actions.unlock") : t("versionHistory.actions.lock")}
@@ -325,29 +341,41 @@ export function CollabVersionHistoryPanel({
 
         <button
           disabled={deleteDisabled}
-          onClick={async () => {
-            if (mutationsDisabled) return;
-            if (!collabVersioning) return;
-            const id = selectedId;
-            if (!id) return;
-            const ok = await nativeDialogs.confirm(t("versionHistory.confirm.deleteIrreversible"));
-            if (!ok) return;
-            try {
-              setBusy(true);
-              setError(null);
-              await collabVersioning.deleteVersion(id);
-              await refresh();
-            } catch (e) {
-              setError((e as Error).message);
-            } finally {
+          onClick={() => {
+            void (async () => {
+              if (mutationsDisabled) return;
+              if (!collabVersioning) return;
+              const id = selectedId;
+              if (!id) return;
+              const ok = await nativeDialogs.confirm(t("versionHistory.confirm.deleteIrreversible"));
+              if (!ok) return;
+              try {
+                setBusy(true);
+                setError(null);
+                await collabVersioning.deleteVersion(id);
+                await refresh();
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            })().catch((e) => {
+              setError((e as Error)?.message ?? String(e));
               setBusy(false);
-            }
+            });
           }}
         >
           {t("versionHistory.actions.deleteSelected")}
         </button>
 
-        <button disabled={busy || mutationsDisabled || !versioningReady} onClick={() => void refresh()}>
+        <button
+          disabled={busy || mutationsDisabled || !versioningReady}
+          onClick={() =>
+            void refresh().catch(() => {
+              // Best-effort: avoid unhandled rejections from fire-and-forget refresh.
+            })
+          }
+        >
           {t("versionHistory.actions.refresh")}
         </button>
       </div>

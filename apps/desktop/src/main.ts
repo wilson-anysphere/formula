@@ -7660,18 +7660,26 @@ if (
             updateRecorderUi();
           };
 
-          copyTsButton.onclick = async () => {
-            if (!recorderMod) return;
-            const actions = currentActions();
-            if (actions.length === 0) return;
-            await copyText(recorderMod.generateTypeScriptMacro(actions));
+          copyTsButton.onclick = () => {
+            void (async () => {
+              if (!recorderMod) return;
+              const actions = currentActions();
+              if (actions.length === 0) return;
+              await copyText(recorderMod.generateTypeScriptMacro(actions));
+            })().catch(() => {
+              // Best-effort; avoid unhandled rejections from fire-and-forget DOM handlers.
+            });
           };
 
-          copyPyButton.onclick = async () => {
-            if (!recorderMod) return;
-            const actions = currentActions();
-            if (actions.length === 0) return;
-            await copyText(recorderMod.generatePythonMacro(actions));
+          copyPyButton.onclick = () => {
+            void (async () => {
+              if (!recorderMod) return;
+              const actions = currentActions();
+              if (actions.length === 0) return;
+              await copyText(recorderMod.generatePythonMacro(actions));
+            })().catch(() => {
+              // Best-effort; avoid unhandled rejections from fire-and-forget DOM handlers.
+            });
           };
 
           openScriptEditorButton.onclick = () => {
@@ -7681,14 +7689,21 @@ if (
             openScriptEditor(recorderMod.generateTypeScriptMacro(actions));
           };
 
-          saveButton.onclick = async () => {
-            if (!recorderMod) return;
-            const actions = currentActions();
-            if (actions.length === 0) return;
-            const name = await showInputBox({ prompt: "Macro name:", value: "Recorded Macro" });
-            if (!name) return;
-            saveScriptsToStorage(name, { ts: recorderMod.generateTypeScriptMacro(actions), py: recorderMod.generatePythonMacro(actions) });
-            await refreshRunner();
+          saveButton.onclick = () => {
+            void (async () => {
+              if (!recorderMod) return;
+              const actions = currentActions();
+              if (actions.length === 0) return;
+              const name = await showInputBox({ prompt: "Macro name:", value: "Recorded Macro" });
+              if (!name) return;
+              saveScriptsToStorage(name, {
+                ts: recorderMod.generateTypeScriptMacro(actions),
+                py: recorderMod.generatePythonMacro(actions),
+              });
+              await refreshRunner();
+            })().catch(() => {
+              // Best-effort; avoid unhandled rejections from fire-and-forget DOM handlers.
+            });
           };
 
           updateRecorderUi();
