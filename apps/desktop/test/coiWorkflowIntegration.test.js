@@ -12,33 +12,58 @@ function readWorkflow(repoRoot, name) {
 }
 
 function assertWorkflowUsesNoBuildForCoi(workflowName, text) {
-  /** @type {Array<{ index: number, snippet: string }>} */
+  const lines = text.split(/\r?\n/);
+
+  /** @type {Array<{ line: number, snippet: string, window: string }>} */
   const matches = [];
-  const re = /pnpm\s+-C\s+apps\/desktop\s+check:coi/g;
-  for (const m of text.matchAll(re)) {
-    const idx = m.index ?? -1;
-    if (idx < 0) continue;
-    const lineEnd = text.indexOf("\n", idx);
-    const snippet = (lineEnd === -1 ? text.slice(idx) : text.slice(idx, lineEnd)).trim();
-    matches.push({ index: idx, snippet });
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const m = line.match(/^(\s*)run:\s*(.*)$/);
+    if (!m) continue;
+
+    const indent = m[1]?.length ?? 0;
+    const rest = (m[2] ?? "").trimEnd();
+
+    const isBlock = rest === "|" || rest === "|-" || rest === ">" || rest === ">-";
+    let blockText = rest;
+    if (isBlock) {
+      const body = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        const bodyLine = lines[j] ?? "";
+        const bodyIndent = bodyLine.match(/^\s*/)?.[0]?.length ?? 0;
+        if (bodyLine.trim() !== "" && bodyIndent <= indent) break;
+        body.push(bodyLine);
+      }
+      blockText = body.join("\n");
+    }
+
+    if (!blockText.includes("pnpm -C apps/desktop check:coi")) continue;
+
+    // Capture a small window (line + a few following lines) so we can enforce --no-build even
+    // when a command is wrapped across multiple lines.
+    const window = [line, ...(lines.slice(i + 1, i + 8) ?? [])].join("\n");
+    matches.push({
+      line: i + 1,
+      snippet: line.trim(),
+      window,
+    });
   }
 
-  assert.ok(matches.length > 0, `expected ${workflowName} to invoke pnpm -C apps/desktop check:coi`);
+  assert.ok(matches.length > 0, `expected ${workflowName} to invoke pnpm -C apps/desktop check:coi in a run step`);
 
-  for (const { index, snippet } of matches) {
-    // Look ahead a short window so wrapped/multiline YAML `run: |` commands still match.
-    const window = text.slice(index, Math.min(text.length, index + 200));
+  for (const { window, snippet, line } of matches) {
     assert.ok(
       window.includes("--no-build") || window.includes("FORMULA_COI_NO_BUILD"),
-      `expected ${workflowName} COI invocation to use --no-build (or FORMULA_COI_NO_BUILD). Found: ${snippet}`,
+      `expected ${workflowName}:${line} COI invocation to use --no-build (or FORMULA_COI_NO_BUILD). Found: ${snippet}`,
     );
   }
 
   // Heuristic: ensure a Tauri build step exists somewhere before the first COI invocation so the workflow
   // can reuse already-built artifacts.
-  const firstCoi = matches[0]?.index ?? -1;
+  const firstCoi = (matches[0]?.line ?? 1) - 1;
   const tauriActionRe = /^\s*uses:\s*tauri-apps\/tauri-action\b/m;
-  const firstTauriAction = text.search(tauriActionRe);
+  const firstTauriAction = lines.findIndex((l) => tauriActionRe.test(l ?? ""));
   assert.ok(
     firstTauriAction !== -1 && firstTauriAction < firstCoi,
     `expected ${workflowName} to include a tauri-apps/tauri-action step before the COI check`,
