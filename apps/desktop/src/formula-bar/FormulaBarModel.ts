@@ -92,8 +92,6 @@ export class FormulaBarModel {
         references: FormulaReference[];
       }
     | null = null;
-  #highlightedSpansCache: HighlightSpanLike[] | null = null;
-  #highlightedSpansCacheDraft: string | null = null;
   #rangeInsertion: { start: number; end: number } | null = null;
   #hoveredReference: RangeAddress | null = null;
   #hoveredReferenceText: string | null = null;
@@ -348,13 +346,7 @@ export class FormulaBarModel {
     if (this.#engineToolingFormula === this.#draft && this.#engineHighlightSpans) {
       return this.#engineHighlightSpans;
     }
-    if (this.#highlightedSpansCache && this.#highlightedSpansCacheDraft === this.#draft) {
-      return this.#highlightedSpansCache;
-    }
-    const tokens = this.#tokensForDraft();
-    this.#highlightedSpansCache = tokens;
-    this.#highlightedSpansCacheDraft = this.#draft;
-    return tokens;
+    return this.#tokensForDraft();
   }
 
   #tokensForDraft(): FormulaToken[] {
