@@ -2,8 +2,13 @@
 """
 Verify that the Tauri desktop release binary is stripped (no accidental symbols/debug info).
 
-This is intended for use in `.github/workflows/release.yml` after the Tauri build step so the
-workflow fails fast if debug/symbol data sneaks into shipped release artifacts.
+This is intended for use in CI after the Tauri build step so workflows fail fast if
+debug/symbol data sneaks into shipped release artifacts. It is used by:
+
+- `.github/workflows/release.yml` (tagged releases + dry-run builds)
+- `.github/workflows/desktop-bundle-size.yml` (Linux PR size checks)
+- `.github/workflows/desktop-bundle-dry-run.yml` (cross-platform dry-run bundling)
+- `.github/workflows/windows-arm64-smoke.yml` (Windows ARM64 bundling smoke test)
 """
 
 from __future__ import annotations

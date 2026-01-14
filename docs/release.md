@@ -1685,6 +1685,10 @@ That workflow also runs `python scripts/verify_desktop_binary_stripped.py` after
 to fail early if the produced `formula-desktop` binary is not stripped or if debug/symbol sidecar
 files accidentally end up in `**/release/bundle/**`.
 
+Other CI workflows that build desktop installers (including `.github/workflows/desktop-bundle-dry-run.yml`
+and `.github/workflows/windows-arm64-smoke.yml`) run the same strip verification script so regressions
+are caught before tagging a release.
+
 Note: this is an **installer artifact** budget (DMG/MSI/AppImage/etc), not the **frontend asset
 download size** budget (compressed JS/CSS/WASM; see `node scripts/frontend_asset_size_report.mjs`
 and `pnpm -C apps/desktop check:bundle-size`).
