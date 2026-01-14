@@ -1181,6 +1181,97 @@ fn hash_join_multi_ignores_right_string_values_not_in_left_dictionary() {
 }
 
 #[test]
+fn hash_join_multi_two_string_keys_maps_each_dictionary_and_emits_unmatched_right_rows() {
+    let schema = vec![
+        ColumnSchema {
+            name: "k1".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "k2".to_owned(),
+            column_type: ColumnType::String,
+        },
+    ];
+
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![
+                Value::String(Arc::<str>::from("A")),
+                Value::String(Arc::<str>::from("X")),
+            ],
+            vec![
+                Value::String(Arc::<str>::from("A")),
+                Value::String(Arc::<str>::from("Y")),
+            ],
+            vec![
+                Value::String(Arc::<str>::from("B")),
+                Value::String(Arc::<str>::from("X")),
+            ],
+            vec![
+                Value::String(Arc::<str>::from("B")),
+                Value::String(Arc::<str>::from("Y")),
+            ],
+        ],
+    );
+
+    // Insert in a different order so both dictionaries differ.
+    // Also include rows with values not present in the left dictionaries ("C", "Z"), which should
+    // never match.
+    let right = build_table(
+        schema,
+        vec![
+            vec![
+                Value::String(Arc::<str>::from("B")),
+                Value::String(Arc::<str>::from("Y")),
+            ],
+            vec![
+                Value::String(Arc::<str>::from("A")),
+                Value::String(Arc::<str>::from("X")),
+            ],
+            vec![
+                Value::String(Arc::<str>::from("B")),
+                Value::String(Arc::<str>::from("X")),
+            ],
+            vec![
+                Value::String(Arc::<str>::from("A")),
+                Value::String(Arc::<str>::from("Y")),
+            ],
+            vec![
+                Value::String(Arc::<str>::from("C")),
+                Value::String(Arc::<str>::from("X")),
+            ],
+            vec![
+                Value::String(Arc::<str>::from("A")),
+                Value::String(Arc::<str>::from("Z")),
+            ],
+        ],
+    );
+
+    let inner = left.hash_join_multi(&right, &[0, 1], &[0, 1]).unwrap();
+    assert_eq!(inner.len(), 4);
+    let mut pairs: Vec<(usize, usize)> = inner
+        .left_indices
+        .into_iter()
+        .zip(inner.right_indices.into_iter())
+        .collect();
+    pairs.sort();
+    assert_eq!(pairs, vec![(0, 1), (1, 3), (2, 2), (3, 0)]);
+
+    let full = left
+        .hash_full_outer_join_multi(&right, &[0, 1], &[0, 1])
+        .unwrap();
+    assert_eq!(
+        full.left_indices,
+        vec![Some(0), Some(1), Some(2), Some(3), None, None]
+    );
+    assert_eq!(
+        full.right_indices,
+        vec![Some(1), Some(3), Some(2), Some(0), Some(4), Some(5)]
+    );
+}
+
+#[test]
 fn hash_join_multi_errors_on_mismatched_key_types() {
     let left_schema = vec![
         ColumnSchema {
