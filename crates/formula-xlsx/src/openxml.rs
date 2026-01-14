@@ -44,7 +44,30 @@ pub fn resolve_relationship_target(
             }
             // Resolve the target using the same URI normalization as other code paths (including
             // fragment stripping). Note that a target of just `#fragment` refers to the source part.
-            let resolved = resolve_target(part_name, &rel.target);
+            //
+            // Some producers percent-encode relationship targets (e.g. `sheet%201.xml`) while
+            // writing the actual ZIP entry name unescaped (or vice versa). Try the raw normalized
+            // target first, then fall back to a best-effort percent-decoded candidate if the raw
+            // part is missing.
+            let candidates = crate::path::resolve_target_candidates(part_name, &rel.target);
+            let mut resolved: Option<String> = None;
+            for candidate in &candidates {
+                // Prefer a candidate that matches an *actual* stored part name to keep part-name
+                // strings canonical for downstream callers (some parts are stored unescaped while
+                // relationships use percent-encoding, or vice versa).
+                if package.parts_map().contains_key(candidate)
+                    || package.parts_map().contains_key(format!("/{candidate}").as_str())
+                {
+                    resolved = Some(candidate.clone());
+                    break;
+                }
+            }
+            let resolved = resolved.unwrap_or_else(|| {
+                candidates
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| resolve_target(part_name, &rel.target))
+            });
             if resolved.is_empty() {
                 return Ok(None);
             }
@@ -211,6 +234,27 @@ mod tests {
             resolve_relationship_target(&pkg, "xl/worksheets/sheet1.xml", "rId1")
                 .expect("resolve fragment-only"),
             Some("xl/worksheets/sheet1.xml".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_relationship_target_prefers_percent_decoded_target_when_part_exists() {
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image%201.png"/>
+</Relationships>"#;
+
+        let pkg = build_package(&[
+            ("xl/worksheets/sheet1.xml", br#"<worksheet/>"#),
+            ("xl/worksheets/_rels/sheet1.xml.rels", rels),
+            ("xl/media/image 1.png", b"png-bytes"),
+        ]);
+
+        assert_eq!(
+            resolve_relationship_target(&pkg, "xl/worksheets/sheet1.xml", "rId1")
+                .expect("resolve percent-encoded")
+                .as_deref(),
+            Some("xl/media/image 1.png")
         );
     }
 

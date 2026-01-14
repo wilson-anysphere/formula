@@ -192,6 +192,26 @@ fn resolve_image_target_for_local_image_identifier<'a>(
 /// The extractor is intentionally resilient: missing parts or broken mappings result in skipped cells.
 /// Only invalid ZIP/XML/UTF-8 errors are returned as [`XlsxError`].
 pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCell>, XlsxError> {
+    fn resolve_existing_part(pkg: &XlsxPackage, base_part: &str, target: &str) -> Option<String> {
+        let candidates = crate::path::resolve_target_candidates(base_part, target);
+        // Prefer a candidate that matches an *actual* stored ZIP part name. `XlsxPackage::part`
+        // normalizes percent-encoded names, so it would return bytes for both the raw and decoded
+        // candidates and prevent us from returning canonical part-name strings.
+        for candidate in &candidates {
+            if candidate.is_empty() {
+                continue;
+            }
+            if pkg.parts_map().contains_key(candidate)
+                || pkg.parts_map().contains_key(format!("/{candidate}").as_str())
+            {
+                return Some(candidate.clone());
+            }
+        }
+        candidates
+            .into_iter()
+            .find(|candidate| pkg.part(candidate).is_some())
+    }
+
     // Discover the relevant rich data parts via `xl/_rels/workbook.xml.rels`.
     let relationships = match pkg.part("xl/_rels/workbook.xml.rels") {
         Some(bytes) => openxml::parse_relationships(bytes)?,
@@ -216,20 +236,17 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
             && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_SHEET_METADATA)
                 || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_METADATA))
         {
-            let target = path::resolve_target("xl/workbook.xml", &rel.target);
-            metadata_part = Some(target);
+            metadata_part = resolve_existing_part(pkg, "xl/workbook.xml", &rel.target);
         } else if rich_value_part.is_none()
             && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE)
                 || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_2017))
         {
-            let target = path::resolve_target("xl/workbook.xml", &rel.target);
-            rich_value_part = Some(target);
+            rich_value_part = resolve_existing_part(pkg, "xl/workbook.xml", &rel.target);
         } else if rdrichvalue_part.is_none()
             && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE)
                 || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE_2017))
         {
-            let target = path::resolve_target("xl/workbook.xml", &rel.target);
-            rdrichvalue_part = Some(target);
+            rdrichvalue_part = resolve_existing_part(pkg, "xl/workbook.xml", &rel.target);
         } else if rdrichvaluestructure_part.is_none()
             && (rel
                 .type_uri
@@ -238,15 +255,13 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                     .type_uri
                     .eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE_STRUCTURE_2017))
         {
-            let target = path::resolve_target("xl/workbook.xml", &rel.target);
-            rdrichvaluestructure_part = Some(target);
+            rdrichvaluestructure_part = resolve_existing_part(pkg, "xl/workbook.xml", &rel.target);
         } else if rich_value_rel_part.is_none()
             && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL)
                 || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL_2017_06)
                 || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL_2017))
         {
-            let target = path::resolve_target("xl/workbook.xml", &rel.target);
-            rich_value_rel_part = Some(target);
+            rich_value_rel_part = resolve_existing_part(pkg, "xl/workbook.xml", &rel.target);
         }
     }
 
@@ -287,7 +302,10 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
             if let Some(rels_bytes) = pkg.part(&metadata_rels_part) {
                 let relationships = openxml::parse_relationships(rels_bytes)?;
                 for rel in relationships {
-                    let target = path::resolve_target(metadata_part_name, &rel.target);
+                    let Some(target) = resolve_existing_part(pkg, metadata_part_name, &rel.target)
+                    else {
+                        continue;
+                    };
 
                     if rich_value_part.is_none()
                         && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE)
@@ -446,18 +464,21 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                         let target = target.strip_prefix("./").unwrap_or(target);
                         // Some producers emit `Target="media/image1.png"` (relative to `xl/`)
                         // rather than `Target="../media/image1.png"` (relative to `xl/richData/`).
-                        let target = if target.starts_with("media/") {
-                            format!("xl/{target}")
+                        let resolved = if target.starts_with("media/") {
+                            let absolute = format!("xl/{target}");
+                            resolve_existing_part(pkg, "", &absolute).unwrap_or(absolute)
                         } else if target.starts_with("xl/") {
-                            target.to_string()
+                            resolve_existing_part(pkg, "", target)
+                                .unwrap_or_else(|| target.to_string())
                         } else {
-                            path::resolve_target(rich_value_rel_part, target)
+                            resolve_existing_part(pkg, rich_value_rel_part, target)
+                                .unwrap_or_else(|| path::resolve_target(rich_value_rel_part, target))
                         };
-                        (rel.id, target)
-                    })
-                    .collect()
-            }
-        }
+                        (rel.id, resolved)
+                     })
+                     .collect()
+             }
+         }
         None => HashMap::new(),
     };
 

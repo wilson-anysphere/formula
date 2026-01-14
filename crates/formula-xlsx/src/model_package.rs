@@ -6,8 +6,9 @@ use std::path::Path;
 use formula_model::{Cell, CellRef, CellValue, SheetVisibility, Workbook, Worksheet, WorksheetId};
 
 use crate::package::{XlsxError, XlsxPackage};
-use crate::path::resolve_target;
+use crate::path::{resolve_target, resolve_target_candidates};
 use crate::styles::{StylesPart, StylesPartError};
+use crate::zip_util::zip_part_names_equivalent;
 use crate::xml::{XmlDomError, XmlElement, XmlNode};
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -17,6 +18,46 @@ const REL_TYPE_CHARTSHEET: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet";
 const REL_TYPE_STYLES: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+
+fn resolve_existing_part_name(
+    package: &XlsxPackage,
+    base_part: &str,
+    target: &str,
+) -> Option<String> {
+    let candidates = resolve_target_candidates(base_part, target);
+    // Prefer an exact match to keep part-name strings canonical when possible (some producers
+    // percent-encode relationship targets while storing ZIP entry names unescaped, and vice versa).
+    for candidate in &candidates {
+        if candidate.is_empty() {
+            continue;
+        }
+        if package.parts_map().contains_key(candidate) {
+            return Some(candidate.clone());
+        }
+        let with_slash = format!("/{candidate}");
+        if package.parts_map().contains_key(with_slash.as_str()) {
+            return Some(with_slash);
+        }
+    }
+
+    // Fall back to a linear scan for non-canonical producer output (case/leading slash/percent
+    // encoding differences). This is only used in the `WorkbookPackage` pipeline, which loads a
+    // bounded set of parts once, so the extra work is acceptable.
+    for candidate in &candidates {
+        if candidate.is_empty() {
+            continue;
+        }
+        if let Some((name, _)) = package
+            .parts_map()
+            .iter()
+            .find(|(key, _)| zip_part_names_equivalent(key.as_str(), candidate.as_str()))
+        {
+            return Some(name.clone());
+        }
+    }
+
+    None
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkbookPackageError {
@@ -108,7 +149,21 @@ impl WorkbookPackage {
         let styles_part_name = rels
             .iter()
             .find(|rel| rel.type_ == REL_TYPE_STYLES)
-            .map(|rel| resolve_target(workbook_part, &rel.target))
+            .and_then(|rel| {
+                if let Some(found) = resolve_existing_part_name(&package, workbook_part, &rel.target)
+                {
+                    return Some(found);
+                }
+                // Some broken workbooks omit or mis-point the styles relationship but still store
+                // the canonical `xl/styles.xml` part. Fall back to it when present; otherwise, keep
+                // the resolved target so round-tripping preserves the relationship path.
+                resolve_existing_part_name(&package, "", "xl/styles.xml").or_else(|| {
+                    resolve_target_candidates(workbook_part, &rel.target)
+                        .into_iter()
+                        .next()
+                })
+            })
+            .or_else(|| resolve_existing_part_name(&package, "", "xl/styles.xml"))
             .unwrap_or_else(|| "xl/styles.xml".to_string());
 
         let mut workbook = Workbook::new();
@@ -157,7 +212,13 @@ impl WorkbookPackage {
 
             let target = rel.target.clone();
 
-            let sheet_part_name = resolve_target(workbook_part, &target);
+            let sheet_part_name = resolve_existing_part_name(&package, workbook_part, &target)
+                .unwrap_or_else(|| {
+                    resolve_target_candidates(workbook_part, &target)
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| resolve_target(workbook_part, &target))
+                });
             let sheet_xml = package
                 .part(&sheet_part_name)
                 .ok_or_else(|| WorkbookPackageError::MissingPart(sheet_part_name.clone()))?;

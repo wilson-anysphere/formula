@@ -59,9 +59,10 @@ where
                 continue;
             }
 
-            let target = crate::path::resolve_target(workbook_part, &rel.target);
-            if !target.is_empty() {
-                targets.insert(target);
+            for target in crate::path::resolve_target_candidates(workbook_part, &rel.target) {
+                if !target.is_empty() {
+                    targets.insert(target);
+                }
             }
         }
     }
@@ -115,11 +116,17 @@ pub(crate) fn import_sheet_comments<'a, F>(
             continue;
         }
 
-        let target = crate::path::resolve_target(worksheet_part, &rel.target);
-        if target.is_empty() {
-            continue;
+        let mut bytes = None;
+        for candidate in crate::path::resolve_target_candidates(worksheet_part, &rel.target) {
+            if candidate.is_empty() {
+                continue;
+            }
+            if let Some(found) = get_part(&candidate) {
+                bytes = Some(found);
+                break;
+            }
         }
-        let Some(bytes) = get_part(&target) else {
+        let Some(bytes) = bytes else {
             continue;
         };
 
@@ -138,4 +145,3 @@ pub(crate) fn import_sheet_comments<'a, F>(
         }
     }
 }
-
