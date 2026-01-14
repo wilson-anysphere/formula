@@ -66,6 +66,34 @@ test("deleteSheet undo restores the sheet and its cell contents", () => {
   assert.equal(doc.getCell("Sheet2", "A1").value, "hello");
 });
 
+test("deleteSheet undo restores sheet drawings (stored on sheet view state)", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "keep");
+  doc.setCellValue("Sheet2", "A1", "hello");
+
+  doc.setImage("img1", { bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" }, { label: "Set Image" });
+  const drawing = {
+    id: "d1",
+    zOrder: 0,
+    anchor: { type: "cell", sheetId: "Sheet2", row: 0, col: 0 },
+    kind: { type: "image", imageId: "img1" },
+  };
+  doc.setSheetDrawings("Sheet2", [drawing], { label: "Set Drawings" });
+
+  doc.deleteSheet("Sheet2", { label: "Delete Sheet 2" });
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
+
+  // Undo delete: sheet + drawings should be restored.
+  doc.undo();
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1", "Sheet2"]);
+  assert.deepEqual(doc.getSheetDrawings("Sheet2"), [drawing]);
+  assert.deepEqual(Array.from(doc.getImage("img1")?.bytes ?? []), [1, 2, 3]);
+
+  // Redo delete: sheet removed again.
+  doc.redo();
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1"]);
+});
+
 test("setSheetTabColor -> undo -> redo restores tab color", () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", 1);
