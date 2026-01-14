@@ -7,10 +7,10 @@ use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
     normalize_formula_text, Cell, CellIsOperator, CellRef, CellValue, CfRule, CfRuleKind,
-    DataValidationErrorStyle, DataValidationKind,
-    DataValidationOperator, DateSystem, DefinedNameScope, Hyperlink, HyperlinkTarget,
-    ManualPageBreaks, Outline, PageMargins, PageSetup, Range, Scaling, SheetPrintSettings,
-    SheetVisibility, Workbook, WorkbookWindowState, Worksheet,
+    DataValidationErrorStyle, DataValidationKind, DataValidationOperator, DateSystem,
+    DefinedNameScope, Hyperlink, HyperlinkTarget, ManualPageBreaks, Outline, PageMargins,
+    PageSetup, Range, Scaling, SheetPrintSettings, SheetVisibility, Workbook, WorkbookWindowState,
+    Worksheet,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
