@@ -56,7 +56,22 @@ test("Insert → Pictures ribbon commands are registered in CommandRegistry and 
     );
   }
 
+  // `insert.illustrations.pictures` is the canonical command (currently maps to "This Device").
+  // Keep the more specific ribbon menu ids registered for schema coverage, but hide them from the
+  // command palette to avoid duplicate/overlapping entries.
+  const hiddenIds = [
+    "insert.illustrations.pictures.thisDevice",
+    "insert.illustrations.pictures.stockImages",
+    "insert.illustrations.pictures.onlinePictures",
+    "insert.illustrations.onlinePictures",
+  ];
+  for (const id of hiddenIds) {
+    const idx = commands.indexOf(`registerInsertPicturesCommand(\"${id}\"`);
+    assert.ok(idx >= 0, `Expected to find registerInsertPicturesCommand(...) call for ${id}`);
+    const snippet = commands.slice(idx, idx + 900);
+    assert.match(snippet, /\bwhen:\s*["']false["']/, `Expected ${id} to be hidden via when: "false"`);
+  }
+
   // Sanity check: ribbon should be mounted through the CommandRegistry bridge.
   assert.match(main, /\bcreateRibbonActionsFromCommands\(/);
 });
-

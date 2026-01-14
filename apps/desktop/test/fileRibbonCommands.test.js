@@ -75,6 +75,14 @@ test("File tab ribbon ids are registered in CommandRegistry (no exemptions neede
       new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
       `Expected registerDesktopCommands.ts to register ${id}`,
     );
+    assert.match(
+      commands,
+      new RegExp(
+        `\\bregisterBuiltinCommand\\([\\s\\S]*?["']${escapeRegExp(id)}["'][\\s\\S]*?\\bwhen:\\s*["']false["']`,
+        "m",
+      ),
+      `Expected ${id} to be hidden from the command palette via when: "false" (ribbon-only alias)`,
+    );
     assert.doesNotMatch(
       disabling,
       new RegExp(`["']${escapeRegExp(id)}["']`),
@@ -100,6 +108,14 @@ test("File tab ribbon ids are registered in CommandRegistry (no exemptions neede
       commands,
       new RegExp(`\\bregisterBuiltinCommand\\(\\s*["']${escapeRegExp(id)}["']`),
       `Expected registerDesktopCommands.ts to register ${id} (when pageLayoutHandlers are present)`,
+    );
+    assert.match(
+      commands,
+      new RegExp(
+        `\\bregisterBuiltinCommand\\([\\s\\S]*?["']${escapeRegExp(id)}["'][\\s\\S]*?\\bwhen:\\s*["']false["']`,
+        "m",
+      ),
+      `Expected ${id} to be hidden from the command palette via when: "false" (ribbon-only alias)`,
     );
     assert.doesNotMatch(
       disabling,
