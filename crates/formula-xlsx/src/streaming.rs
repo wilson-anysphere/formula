@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 
@@ -27,6 +28,18 @@ const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
 const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+fn canonicalize_zip_entry_name<'a>(name: &'a str) -> Cow<'a, str> {
+    // ZIP entry names in valid XLSX/XLSM packages should not start with `/` and should use `/`
+    // separators. Some producers emit non-canonical names with a leading slash and/or Windows-style
+    // separators (`\`). Normalize those forms for matching against patch targets.
+    let trimmed = name.trim_start_matches(|c| matches!(c, '/' | '\\'));
+    if trimmed.contains('\\') {
+        Cow::Owned(trimmed.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(trimmed)
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum StreamingPatchError {
@@ -631,12 +644,10 @@ mod macro_strip_streaming {
         // This matches `zip_part_names_equivalent`.
         String::from_utf8_lossy(&crate::zip_util::zip_part_name_lookup_key(name)).into_owned()
     }
-
     fn find_part_name(part_names: &BTreeSet<String>, candidate: &str) -> Option<String> {
         let candidate = canonical_part_name(candidate);
         part_names.get(&candidate).cloned()
     }
-
     pub(super) fn strip_vba_project_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         archive: &mut ZipArchive<R>,
         output: W,
@@ -2220,7 +2231,7 @@ fn resolve_shared_strings_part_name<R: Read + Seek>(
             match open_zip_part(archive, &resolved) {
                 Ok(file) => {
                     let name = file.name();
-                    return Ok(Some(name.strip_prefix('/').unwrap_or(name).to_string()));
+                    return Ok(Some(canonicalize_zip_entry_name(name).into_owned()));
                 }
                 Err(zip::result::ZipError::FileNotFound) => {
                     return Ok(Some(resolved));
@@ -2234,7 +2245,7 @@ fn resolve_shared_strings_part_name<R: Read + Seek>(
     match open_zip_part(archive, "xl/sharedStrings.xml") {
         Ok(file) => {
             let name = file.name();
-            return Ok(Some(name.strip_prefix('/').unwrap_or(name).to_string()));
+            return Ok(Some(canonicalize_zip_entry_name(name).into_owned()));
         }
         Err(zip::result::ZipError::FileNotFound) => {}
         Err(err) => return Err(err.into()),
@@ -2777,8 +2788,9 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             continue;
         }
 
-        let name = file.name().to_string();
-        let canonical_name = name.strip_prefix('/').unwrap_or(name.as_str());
+        let raw_name = file.name().to_string();
+        let canonical_name_cow = canonicalize_zip_entry_name(&raw_name);
+        let canonical_name = canonical_name_cow.as_ref();
 
         // Track worksheet patch targets so we can report `MissingWorksheetPart` accurately even if
         // a caller overrides the part (e.g. removes or replaces it).
@@ -2796,7 +2808,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                     continue;
                 }
                 PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
-                    zip.start_file(name.clone(), options)?;
+                    zip.start_file(raw_name.clone(), options)?;
                     zip.write_all(bytes)?;
                     continue;
                 }
@@ -2810,7 +2822,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                     continue;
                 }
                 PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
-                    zip.start_file(name.clone(), options)?;
+                    zip.start_file(raw_name.clone(), options)?;
                     zip.write_all(bytes)?;
                     continue;
                 }
@@ -2823,7 +2835,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                 .get(canonical_name)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            zip.start_file(name.clone(), options)?;
+            zip.start_file(raw_name.clone(), options)?;
             let indices = shared_string_indices.get(canonical_name);
             let worksheet_meta = worksheet_metadata_by_part
                 .get(canonical_name)
@@ -2841,12 +2853,12 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                 recalc_policy,
             )?;
         } else if let Some(bytes) = updated_parts.get(canonical_name) {
-            zip.start_file(name.clone(), options)?;
+            zip.start_file(raw_name.clone(), options)?;
             zip.write_all(bytes)?;
         } else if shared_strings_part.as_deref() == Some(canonical_name)
             && shared_strings_updated.is_some()
         {
-            zip.start_file(name.clone(), options)?;
+            zip.start_file(raw_name.clone(), options)?;
             zip.write_all(
                 shared_strings_updated
                     .as_deref()
@@ -2854,7 +2866,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             )?;
         } else if let Some(bytes) = pre_read_parts.get(canonical_name) {
             if should_patch_recalc_part(canonical_name, recalc_policy) {
-                zip.start_file(name.clone(), options)?;
+                zip.start_file(raw_name.clone(), options)?;
                 let bytes = maybe_patch_recalc_part(canonical_name, bytes, recalc_policy)?;
                 zip.write_all(&bytes)?;
             } else {
@@ -2865,7 +2877,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         } else if let Some(updated) =
             patch_recalc_part_from_file(canonical_name, &mut file, recalc_policy)?
         {
-            zip.start_file(name.clone(), options)?;
+            zip.start_file(raw_name.clone(), options)?;
             zip.write_all(&updated)?;
         } else {
             // Use raw copy to preserve bytes for unchanged parts and avoid a decompression /
@@ -2991,17 +3003,16 @@ fn plan_package_repair_overrides<R: Read + Seek>(
         if name.ends_with('/') {
             continue;
         }
-        let canonical = name.strip_prefix('/').unwrap_or(name);
-        part_names.insert(canonical.to_string());
+        part_names.insert(canonicalize_zip_entry_name(name).into_owned());
     }
     for (name, op) in part_overrides {
-        let canonical = name.strip_prefix('/').unwrap_or(name);
+        let canonical = canonicalize_zip_entry_name(name);
         match op {
             PartOverride::Remove => {
-                part_names.remove(canonical);
+                part_names.remove(canonical.as_ref());
             }
             PartOverride::Replace(_) | PartOverride::Add(_) => {
-                part_names.insert(canonical.to_string());
+                part_names.insert(canonical.into_owned());
             }
         }
     }
@@ -3336,7 +3347,7 @@ fn list_zip_part_names<R: Read + Seek>(
             continue;
         }
         let name = file.name();
-        out.insert(name.strip_prefix('/').unwrap_or(name).to_string());
+        out.insert(canonicalize_zip_entry_name(name).into_owned());
     }
     Ok(out)
 }
