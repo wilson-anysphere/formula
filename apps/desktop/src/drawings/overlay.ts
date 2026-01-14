@@ -2,6 +2,7 @@ import type { Anchor, DrawingObject, DrawingTransform, ImageEntry, ImageStore, R
 import { ImageBitmapCache } from "./imageBitmapCache";
 import { graphicFramePlaceholderLabel, isGraphicFrame, parseShapeRenderSpec, type ShapeRenderSpec } from "./shapeRenderer";
 import { parseDrawingMLShapeText, type ShapeTextLayout, type ShapeTextRun } from "./drawingml/shapeText";
+import { getDrawingMLPicturePropsFromPicXml } from "./drawingml/pictureProps";
 import {
   getResizeHandleCentersInto,
   getRotationHandleCenterInto,
@@ -934,6 +935,43 @@ export class DrawingOverlay {
               ? this.bitmapCache.getOrRequest(entry, this.onBitmapReady)
               : null;
           if (bitmap) {
+            const picXml = obj.preserved?.["xlsx.pic_xml"];
+            const props = typeof picXml === "string" && picXml.length > 0 ? getDrawingMLPicturePropsFromPicXml(picXml) : null;
+            const crop = props?.crop;
+            const outline = props?.outline;
+
+            // Compute crop in source space (DrawingML `srcRect` uses 0..100000 percentages).
+            let hasCrop = false;
+            let sx = 0;
+            let sy = 0;
+            let sw = 0;
+            let sh = 0;
+            if (crop) {
+              const bw = (bitmap as any).width;
+              const bh = (bitmap as any).height;
+              if (Number.isFinite(bw) && Number.isFinite(bh) && bw > 0 && bh > 0) {
+                const left = (bw * crop.l) / 100_000;
+                const top = (bh * crop.t) / 100_000;
+                const right = (bw * crop.r) / 100_000;
+                const bottom = (bh * crop.b) / 100_000;
+                const croppedW = bw - left - right;
+                const croppedH = bh - top - bottom;
+                if (croppedW > 0 && croppedH > 0) {
+                  hasCrop = true;
+                  sx = left;
+                  sy = top;
+                  sw = croppedW;
+                  sh = croppedH;
+                }
+              }
+            }
+
+            // Compute outline style (DrawingML uses EMU for width; 1pt = 12700 EMU).
+            const outlineColor = outline?.color;
+            const outlineWidthPx =
+              outline?.widthEmu != null && Number.isFinite(outline.widthEmu) ? emuToPx(outline.widthEmu, zoom) : 1;
+            const hasOutline = Boolean(outlineColor) && Number.isFinite(outlineWidthPx) && outlineWidthPx > 0;
+
             pushClipRect(ctx, clipRect);
             try {
               if (hasNonIdentityTransform(obj.transform)) {
@@ -941,21 +979,71 @@ export class DrawingOverlay {
                 try {
                   // Clip to the (possibly rotated/flipped) image bounds so we don't
                   // overdraw neighboring cells when transforms extend beyond the anchor.
-                  ctx.beginPath();
-                  ctx.rect(localRectScratch.x, localRectScratch.y, localRectScratch.width, localRectScratch.height);
-                  ctx.clip();
-                  ctx.drawImage(
-                    bitmap,
-                    localRectScratch.x,
-                    localRectScratch.y,
-                    localRectScratch.width,
-                    localRectScratch.height,
-                  );
+                  //
+                  // Use an extra save/restore around the clip so we can draw the picture
+                  // outline (if present) without being affected by the clip.
+                  ctx.save();
+                  try {
+                    ctx.beginPath();
+                    ctx.rect(localRectScratch.x, localRectScratch.y, localRectScratch.width, localRectScratch.height);
+                    ctx.clip();
+                    if (hasCrop) {
+                      ctx.drawImage(
+                        bitmap,
+                        sx,
+                        sy,
+                        sw,
+                        sh,
+                        localRectScratch.x,
+                        localRectScratch.y,
+                        localRectScratch.width,
+                        localRectScratch.height,
+                      );
+                    } else {
+                      ctx.drawImage(
+                        bitmap,
+                        localRectScratch.x,
+                        localRectScratch.y,
+                        localRectScratch.width,
+                        localRectScratch.height,
+                      );
+                    }
+                  } finally {
+                    ctx.restore();
+                  }
+
+                  if (hasOutline) {
+                    ctx.strokeStyle = outlineColor!;
+                    ctx.lineWidth = outlineWidthPx;
+                    ctx.setLineDash(LINE_DASH_NONE);
+                    ctx.strokeRect(localRectScratch.x, localRectScratch.y, localRectScratch.width, localRectScratch.height);
+                  }
                 } finally {
                   ctx.restore();
                 }
               } else {
-                ctx.drawImage(bitmap, screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
+                if (hasCrop) {
+                  ctx.drawImage(
+                    bitmap,
+                    sx,
+                    sy,
+                    sw,
+                    sh,
+                    screenRectScratch.x,
+                    screenRectScratch.y,
+                    screenRectScratch.width,
+                    screenRectScratch.height,
+                  );
+                } else {
+                  ctx.drawImage(bitmap, screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
+                }
+
+                if (hasOutline) {
+                  ctx.strokeStyle = outlineColor!;
+                  ctx.lineWidth = outlineWidthPx;
+                  ctx.setLineDash(LINE_DASH_NONE);
+                  ctx.strokeRect(screenRectScratch.x, screenRectScratch.y, screenRectScratch.width, screenRectScratch.height);
+                }
               }
             } finally {
               ctx.restore();

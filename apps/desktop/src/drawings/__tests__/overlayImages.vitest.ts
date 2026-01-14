@@ -13,10 +13,17 @@ function createStubCanvasContext(): {
     drawImage: (...args: unknown[]) => calls.push({ method: "drawImage", args }),
     save: () => calls.push({ method: "save", args: [] }),
     restore: () => calls.push({ method: "restore", args: [] }),
+    translate: (...args: unknown[]) => calls.push({ method: "translate", args }),
+    rotate: (...args: unknown[]) => calls.push({ method: "rotate", args }),
+    scale: (...args: unknown[]) => calls.push({ method: "scale", args }),
     beginPath: () => calls.push({ method: "beginPath", args: [] }),
+    moveTo: (...args: unknown[]) => calls.push({ method: "moveTo", args }),
+    lineTo: (...args: unknown[]) => calls.push({ method: "lineTo", args }),
+    closePath: () => calls.push({ method: "closePath", args: [] }),
     rect: (...args: unknown[]) => calls.push({ method: "rect", args }),
     clip: () => calls.push({ method: "clip", args: [] }),
     setLineDash: (...args: unknown[]) => calls.push({ method: "setLineDash", args }),
+    stroke: () => calls.push({ method: "stroke", args: [] }),
     strokeRect: (...args: unknown[]) => calls.push({ method: "strokeRect", args }),
     fillRect: (...args: unknown[]) => calls.push({ method: "fillRect", args }),
     fillText: (...args: unknown[]) => calls.push({ method: "fillText", args }),
@@ -285,5 +292,120 @@ describe("DrawingOverlay images", () => {
     overlay.render([createImageObject(entry.id)], viewport);
     expect(createImageBitmapSpy).toHaveBeenCalledTimes(1);
     expect(calls.some((call) => call.method === "drawImage")).toBe(false);
+  });
+
+  it("renders cropped pictures using the 9-arg drawImage overload when xlsx.pic_xml contains a:srcRect", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const entry: ImageEntry = {
+      id: "img_crop",
+      bytes: new Uint8Array([1, 2, 3]),
+      mimeType: "image/png",
+    };
+    const images: ImageStore = {
+      get: (id) => (id === entry.id ? entry : undefined),
+      set: () => {},
+      delete: () => {},
+      clear: () => {},
+    };
+
+    let resolveBitmap!: (bitmap: ImageBitmap) => void;
+    const bitmapPromise = new Promise<ImageBitmap>((resolve) => {
+      resolveBitmap = resolve;
+    });
+    vi.stubGlobal("createImageBitmap", vi.fn(() => bitmapPromise));
+
+    const overlay = new DrawingOverlay(canvas, images, geom, undefined, vi.fn());
+
+    const obj = createImageObject(entry.id);
+    obj.preserved = {
+      "xlsx.pic_xml": `<xdr:pic><xdr:blipFill><a:srcRect l="10000" t="20000" r="30000" b="0"/></xdr:blipFill></xdr:pic>`,
+    };
+
+    overlay.render([obj], viewport);
+
+    resolveBitmap({ width: 200, height: 100, close: () => {} } as unknown as ImageBitmap);
+    await flushMicrotasks();
+
+    // Focus assertions on the post-decode render.
+    calls.length = 0;
+    overlay.render([obj], viewport);
+
+    const drawCall = calls.find((call) => call.method === "drawImage");
+    expect(drawCall).toBeTruthy();
+    expect(drawCall!.args).toHaveLength(9);
+    const [, sx, sy, sw, sh, dx, dy, dw, dh] = drawCall!.args as number[];
+    expect(sx).toBe(20);
+    expect(sy).toBe(20);
+    expect(sw).toBe(120);
+    expect(sh).toBe(80);
+    expect(dx).toBe(5);
+    expect(dy).toBe(7);
+    expect(dw).toBe(20);
+    expect(dh).toBe(10);
+  });
+
+  it("strokes picture outlines parsed from xlsx.pic_xml, including for transformed drawings", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const entry: ImageEntry = {
+      id: "img_outline",
+      bytes: new Uint8Array([1, 2, 3]),
+      mimeType: "image/png",
+    };
+    const images: ImageStore = {
+      get: (id) => (id === entry.id ? entry : undefined),
+      set: () => {},
+      delete: () => {},
+      clear: () => {},
+    };
+
+    let resolveBitmap!: (bitmap: ImageBitmap) => void;
+    const bitmapPromise = new Promise<ImageBitmap>((resolve) => {
+      resolveBitmap = resolve;
+    });
+    vi.stubGlobal("createImageBitmap", vi.fn(() => bitmapPromise));
+
+    const overlay = new DrawingOverlay(canvas, images, geom, undefined, vi.fn());
+
+    const obj = createImageObject(entry.id);
+    obj.transform = { rotationDeg: 45, flipH: true, flipV: false };
+    obj.preserved = {
+      "xlsx.pic_xml": `<xdr:pic>
+  <xdr:blipFill><a:srcRect l="25000" t="0" r="0" b="0"/></xdr:blipFill>
+  <xdr:spPr>
+    <a:ln w="12700"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln>
+  </xdr:spPr>
+</xdr:pic>`,
+    };
+
+    overlay.render([obj], viewport);
+
+    resolveBitmap({ width: 200, height: 100, close: () => {} } as unknown as ImageBitmap);
+    await flushMicrotasks();
+
+    calls.length = 0;
+    overlay.render([obj], viewport);
+
+    const drawCall = calls.find((call) => call.method === "drawImage");
+    expect(drawCall).toBeTruthy();
+    expect(drawCall!.args).toHaveLength(9);
+    const [, sx, sy, sw, sh, dx, dy, dw, dh] = drawCall!.args as number[];
+    // Crop 25% from the left of a 200x100 bitmap.
+    expect(sx).toBe(50);
+    expect(sy).toBe(0);
+    expect(sw).toBe(150);
+    expect(sh).toBe(100);
+    // Destination should be in the transformed local rect (centered at origin).
+    expect(dx).toBe(-10);
+    expect(dy).toBe(-5);
+    expect(dw).toBe(20);
+    expect(dh).toBe(10);
+
+    const strokeCall = calls.find((call) => call.method === "strokeRect");
+    expect(strokeCall).toBeTruthy();
+    expect(strokeCall!.args).toEqual([-10, -5, 20, 10]);
   });
 });
