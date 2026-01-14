@@ -35,6 +35,10 @@ tools/encrypted-ooxml-fixtures/generate.sh agile "" fixtures/encrypted/ooxml/pla
 
 # Unicode password (NFC normalization form):
 tools/encrypted-ooxml-fixtures/generate.sh agile "pässwörd" fixtures/encrypted/ooxml/plaintext.xlsx /tmp/agile-unicode.xlsx
+
+# Macro-enabled `.xlsm` fixtures:
+tools/encrypted-ooxml-fixtures/generate.sh agile password fixtures/encrypted/ooxml/plaintext-basic.xlsm /tmp/agile-basic.xlsm
+tools/encrypted-ooxml-fixtures/generate.sh standard password fixtures/encrypted/ooxml/plaintext-basic.xlsm /tmp/standard-basic.xlsm
 ```
 
 ## Reproducibility / supply-chain safety
