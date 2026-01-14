@@ -1289,10 +1289,7 @@ mod tests {
             &parts,
         );
         assert_eq!(filters.len(), 1);
-        assert_eq!(
-            filters[0].source_field,
-            PivotFieldRef::CacheFieldName("Region".to_string())
-        );
+        assert_eq!(filters[0].source_field.as_cache_field_name(), Some("Region"));
         assert_eq!(
             filters[0].allowed.as_ref(),
             Some(&HashSet::from([PivotKeyPart::Text("East".to_string())]))

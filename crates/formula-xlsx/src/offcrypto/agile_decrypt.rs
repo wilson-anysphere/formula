@@ -25,14 +25,6 @@ const KEY_ENCRYPTOR_URI_PASSWORD: &str =
 const KEY_ENCRYPTOR_URI_CERTIFICATE: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/certificate";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PasswordKeyIvDerivation {
-    /// Use the raw password `saltValue` (truncated to `blockSize`) as the AES-CBC IV.
-    SaltValue,
-    /// Derive the IV using the standard MS-OFFCRYPTO `derive_iv(salt, blockKey, blockSize)` scheme.
-    Derived,
-}
-
 #[derive(Debug, Clone)]
 struct KeyData {
     salt_value: Vec<u8>,
@@ -66,6 +58,16 @@ struct AgileEncryptionInfo {
     key_data: KeyData,
     data_integrity: Option<DataIntegrity>,
     password_key: PasswordKeyEncryptor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PasswordKeyIvDerivation {
+    /// MS-OFFCRYPTO spec behavior: use `p:encryptedKey.saltValue` truncated to `blockSize`.
+    SaltValue,
+    /// Compatibility behavior observed in some producers: derive the IV via the standard
+    /// `Hash(saltValue || blockKey)` algorithm (using the same block key constants as key
+    /// derivation).
+    Derived,
 }
 
 fn decrypt_agile_package_key_from_password(
@@ -157,7 +159,7 @@ fn decrypt_agile_package_key_from_password(
             verifier_input_iv,
             &password_key.encrypted_verifier_hash_input,
         )
-            .map_err(|e| OffCryptoError::InvalidAttribute {
+        .map_err(|e| OffCryptoError::InvalidAttribute {
                 element: "p:encryptedKey".to_string(),
                 attr: "encryptedVerifierHashInput".to_string(),
                 reason: e.to_string(),
@@ -185,7 +187,7 @@ fn decrypt_agile_package_key_from_password(
             verifier_hash_iv,
             &password_key.encrypted_verifier_hash_value,
         )
-            .map_err(|e| OffCryptoError::InvalidAttribute {
+        .map_err(|e| OffCryptoError::InvalidAttribute {
                 element: "p:encryptedKey".to_string(),
                 attr: "encryptedVerifierHashValue".to_string(),
                 reason: e.to_string(),

@@ -8770,9 +8770,7 @@ mod tests {
             row_fields: vec![PivotField::new("Region")],
             column_fields: Vec::new(),
             value_fields: vec![ValueField {
-                source_field: formula_engine::pivot::PivotFieldRef::CacheFieldName(
-                    "Sales".to_string(),
-                ),
+                source_field: PivotFieldRef::CacheFieldName("Sales".to_string()),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,
@@ -8930,9 +8928,7 @@ mod tests {
             row_fields: vec![PivotField::new("Date")],
             column_fields: Vec::new(),
             value_fields: vec![ValueField {
-                source_field: formula_engine::pivot::PivotFieldRef::CacheFieldName(
-                    "Amount".to_string(),
-                ),
+                source_field: PivotFieldRef::CacheFieldName("Amount".to_string()),
                 name: "Sum of Amount".to_string(),
                 aggregation: AggregationType::Sum,
                 number_format: None,

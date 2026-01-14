@@ -1,4 +1,4 @@
-use formula_engine::pivot::{AggregationType, PivotFieldRef, PivotTable, PivotValue};
+use formula_engine::pivot::{AggregationType, PivotTable, PivotValue};
 use formula_xlsx::pivots::engine_bridge::{
     pivot_cache_to_engine_source, pivot_table_to_engine_config,
 };
@@ -41,14 +41,11 @@ fn converts_pivot_cache_and_table_to_engine_types() {
 
     let cfg = pivot_table_to_engine_config(&table, &cache_def);
     assert_eq!(cfg.row_fields.len(), 1);
-    assert_eq!(
-        cfg.row_fields[0].source_field,
-        PivotFieldRef::CacheFieldName("Region".to_string())
-    );
+    assert_eq!(cfg.row_fields[0].source_field.as_cache_field_name(), Some("Region"));
     assert_eq!(cfg.value_fields.len(), 1);
     assert_eq!(
-        cfg.value_fields[0].source_field,
-        PivotFieldRef::CacheFieldName("Sales".to_string())
+        cfg.value_fields[0].source_field.as_cache_field_name(),
+        Some("Sales")
     );
     assert_eq!(cfg.value_fields[0].aggregation, AggregationType::Sum);
 

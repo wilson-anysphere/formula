@@ -1,5 +1,6 @@
 use formula_engine::functions::lookup;
 use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::pivot::PivotFieldRef;
 use formula_engine::value::EntityValue;
 use formula_engine::Engine;
 use formula_engine::{ErrorKind, Value};

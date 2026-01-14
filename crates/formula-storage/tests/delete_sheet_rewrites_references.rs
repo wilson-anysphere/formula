@@ -45,10 +45,8 @@ fn delete_sheet_rewrites_references_in_formulas_and_metadata() {
         sheet.set_cell(
             CellRef::new(0, 0),
             Cell {
-                value: formula_model::CellValue::Empty,
                 formula: Some("Data!A1".to_string()),
-                phonetic: None,
-                style_id: 0,
+                ..Cell::default()
             },
         );
 

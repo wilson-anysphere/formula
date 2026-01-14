@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 
-use formula_engine::pivot::{AggregationType, PivotFieldRef, PivotTable, PivotValue};
+use formula_engine::pivot::{AggregationType, PivotTable, PivotValue};
 use formula_xlsx::pivots::engine_bridge::{pivot_cache_to_engine_source, pivot_table_to_engine_config};
 use formula_xlsx::{PivotCacheValue, XlsxPackage};
 
@@ -71,14 +71,11 @@ fn pivot_cache_shared_item_indices_flow_through_engine_bridge() {
     let cfg = pivot_table_to_engine_config(&table, &cache_def);
 
     assert_eq!(cfg.row_fields.len(), 1);
-    assert_eq!(
-        cfg.row_fields[0].source_field,
-        PivotFieldRef::CacheFieldName("Region".to_string())
-    );
+    assert_eq!(cfg.row_fields[0].source_field.as_cache_field_name(), Some("Region"));
     assert_eq!(cfg.value_fields.len(), 1);
     assert_eq!(
-        cfg.value_fields[0].source_field,
-        PivotFieldRef::CacheFieldName("Sales".to_string())
+        cfg.value_fields[0].source_field.as_cache_field_name(),
+        Some("Sales")
     );
     assert_eq!(cfg.value_fields[0].aggregation, AggregationType::Sum);
 
