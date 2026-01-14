@@ -279,8 +279,6 @@ fn indirect_external_range_ref_is_ref_error() {
         .unwrap();
     engine.recalculate();
 
-    // Excel's INDIRECT cannot resolve references into external workbooks, so the INDIRECT returns
-    // `#REF!` and SUM propagates it.
     assert_eq!(
         engine.get_cell_value("Sheet1", "A1"),
         Value::Error(formula_engine::ErrorKind::Ref)

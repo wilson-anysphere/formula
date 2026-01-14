@@ -598,6 +598,8 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 ArgValue::Reference(r) => {
                     // Excel semantics: INDIRECT does not resolve references into external workbooks
                     // (even if an external value provider is configured).
+                    // This also avoids introducing dynamic external dependencies that are not yet
+                    // represented in the dependency graph / precedents API.
                     if matches!(&r.sheet_id, crate::functions::SheetId::External(_)) {
                         return Value::Error(ErrorKind::Ref);
                     }

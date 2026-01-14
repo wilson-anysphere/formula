@@ -66,9 +66,14 @@ pub(crate) fn midb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
 }
 
 pub(crate) fn lenb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = array_lift::eval_arg(ctx, &args[0]);
+    // In non-DBCS locales, LENB matches LEN (character count).
+    //
+    // Excel's byte-count semantics depend on the workbook locale/codepage; the engine currently
+    // only models them for DBCS codepages. Keep the default (Windows-1252 / en-US) behavior
+    // identical to LEN until full locale-aware semantics are implemented.
     let codepage = ctx.text_codepage();
-    let dbcs_codepage = matches!(codepage, 932 | 936 | 949 | 950);
+    let text = array_lift::eval_arg(ctx, &args[0]);
+    let dbcs_codepage = is_dbcs_codepage(codepage);
     array_lift::lift1(text, |text| {
         let s = text.coerce_to_string_with_ctx(ctx)?;
         // Excel's `LENB` reports byte counts in DBCS locales/codepages.
@@ -81,6 +86,10 @@ pub(crate) fn lenb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
         };
         Ok(Value::Number(count as f64))
     })
+}
+
+fn is_dbcs_codepage(codepage: u16) -> bool {
+    matches!(codepage, 932 | 936 | 949 | 950)
 }
 
 pub(crate) fn asc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
