@@ -900,6 +900,21 @@ validate_codesign() {
     die "codesign verification failed. Ensure the app is properly signed (and that signing inputs are configured)."
   fi
 
+  # Developer ID distribution should use the hardened runtime (`--options runtime`).
+  # `codesign --verify` checks signature validity, but does not assert the runtime flag is enabled.
+  # Ensure the signed app advertises the hardened runtime in `codesign -dv` output so we don't
+  # accidentally ship a non-hardened build (which can weaken runtime hardening and subtly change
+  # WebView behavior).
+  #
+  # `codesign -dv --verbose=4` prints to stderr; capture and grep for either the explicit runtime
+  # flag (CodeDirectory flags `(runtime)`) or the `Runtime Version=` line.
+  echo "signing: verifying hardened runtime is enabled..."
+  runtime_info="$(codesign -dv --verbose=4 "$app_path" 2>&1 || true)"
+  if ! echo "$runtime_info" | grep -Eq 'Runtime Version=|\\(runtime\\)'; then
+    echo "$runtime_info" >&2 || true
+    die "hardened runtime not detected in codesign metadata (expected Runtime Version=... or CodeDirectory flags including (runtime))."
+  fi
+
   echo "signing: assessing with Gatekeeper (spctl)..."
   if ! spctl --assess --type execute --verbose=2 "$app_path"; then
     die "Gatekeeper (spctl) assessment failed. This often indicates missing/invalid notarization or an invalid signature."

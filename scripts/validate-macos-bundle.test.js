@@ -876,7 +876,7 @@ test(
     writeFakeTool(
       binDir,
       "codesign",
-      `#!/usr/bin/env bash\nset -euo pipefail\necho \"codesign $*\" >> \"${logPath}\"\nexit 0\n`,
+      `#!/usr/bin/env bash\nset -euo pipefail\necho \"codesign $*\" >> \"${logPath}\"\n# validate-macos-bundle.sh probes hardened runtime metadata via:\n#   codesign -dv --verbose=4 <app>\n# Simulate a hardened-runtime signed binary so the validator can pass in unit tests.\ncase \"${"$"}*\" in\n  *\"-dv\"*)\n    echo \"Runtime Version=13.0.0\" >&2\n    echo \"CodeDirectory v=20500 size=0 flags=0x10000(runtime) hashes=0 location=embedded\" >&2\n    ;;\nesac\nexit 0\n`,
     );
     writeFakeTool(
       binDir,
