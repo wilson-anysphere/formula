@@ -51,6 +51,9 @@ describe("formulaLocale", () => {
     expect(normalizeFormulaLocaleId("en-UK")).toBe("en-US");
     expect(normalizeFormulaLocaleId("en-AU")).toBe("en-US");
     expect(normalizeFormulaLocaleId("en-NZ")).toBe("en-US");
+    expect(normalizeFormulaLocaleId("en-IE")).toBe("en-US");
+    expect(normalizeFormulaLocaleId("en-ZA")).toBe("en-US");
+    expect(normalizeFormulaLocaleId("en_IE.UTF-8")).toBe("en-US");
 
     // Ignore BCP-47 variants/extensions.
     expect(normalizeFormulaLocaleId("fr-FR-u-nu-latn")).toBe("fr-FR");
@@ -76,6 +79,7 @@ describe("formulaLocale", () => {
     // Unknown locales stay unknown.
     expect(normalizeFormulaLocaleId("pt-BR")).toBeNull();
     expect(normalizeFormulaLocaleId("it-IT")).toBeNull();
+    expect(normalizeFormulaLocaleId("zz-ZZ")).toBeNull();
     expect(normalizeFormulaLocaleId("")).toBeNull();
   });
 });
