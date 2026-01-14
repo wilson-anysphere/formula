@@ -19,3 +19,4 @@ formula-engine = { path = "../formula-engine", optional = true }
 [dev-dependencies]
 pretty_assertions = "1.4"
 formula-engine = { path = "../formula-engine" }
+proptest = "1"

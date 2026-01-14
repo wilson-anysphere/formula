@@ -2019,6 +2019,7 @@ version = "0.1.0"
 dependencies = [
  "formula-engine",
  "pretty_assertions",
+ "proptest",
  "thiserror 1.0.69",
 ]
 

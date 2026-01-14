@@ -849,7 +849,6 @@ fn decode_rgce_impl(
                         })?);
                     }
                     args.reverse();
-
                     let mut text = String::new();
                     text.push_str(&func_name_text);
                     text.push('(');
