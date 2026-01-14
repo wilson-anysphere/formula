@@ -1,5 +1,6 @@
 export const EMU_PER_INCH = 914_400;
 export const PX_PER_INCH = 96;
+export const EMU_PER_PX = EMU_PER_INCH / PX_PER_INCH;
 
 /**
  * Convert DrawingML's EMU (English Metric Unit) coordinates into CSS pixels.
@@ -12,7 +13,9 @@ export const PX_PER_INCH = 96;
  * @returns {number}
  */
 export function emuToPx(emu) {
-  return (emu / EMU_PER_INCH) * PX_PER_INCH;
+  // Prefer the reduced ratio `EMU_PER_PX` to avoid float drift when round-tripping
+  // between pixels and EMU. (E.g. `(76200 / 914400) * 96` yields `7.999999…`.)
+  return emu / EMU_PER_PX;
 }
 
 /**
@@ -22,6 +25,7 @@ export function emuToPx(emu) {
  * @returns {number}
  */
 export function pxToEmu(px) {
-  return (px / PX_PER_INCH) * EMU_PER_INCH;
+  // Prefer the reduced ratio `EMU_PER_PX` to avoid float drift for common integer
+  // pixel sizes.
+  return px * EMU_PER_PX;
 }
-
