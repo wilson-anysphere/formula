@@ -987,6 +987,8 @@ export class FormulaBarModel {
       ? this.#engineToolingLocaleId
       : (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() || "en-US";
     const argSeparatorText = inferArgSeparator(localeId);
+    // `inferArgSeparator` returns strings like "; " / ", " (with trailing space).
+    // Avoid calling `.trim()` (allocates) in this hot path; the separator is always the first character.
     const argSeparator = argSeparatorText[0] === ";" ? ";" : ",";
 
     const c1 = this.#activeArgumentSpanCache;
@@ -1140,7 +1142,10 @@ function parseSheetQualifiedA1Range(text: string): RangeAddress | null {
 function splitSheetQualifier(input: string): { sheetName: string | null; ref: string } {
   // Keep this local to avoid importing the full `packages/search` barrel (which re-exports the
   // entire search session implementation) just to parse `Sheet1!A1`-style references.
-  const s = String(input).trim();
+  const raw = String(input ?? "");
+  if (!raw) return { sheetName: null, ref: "" };
+  const lastIndex = raw.length - 1;
+  const s = isWhitespaceChar(raw[0] ?? "") || isWhitespaceChar(raw[lastIndex] ?? "") ? raw.trim() : raw;
 
   const quoted = s.match(/^'((?:[^']|'')+)'!(.+)$/);
   if (quoted) {
