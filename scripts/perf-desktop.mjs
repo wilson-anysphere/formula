@@ -433,10 +433,11 @@ function reportSize({ env }) {
   // `pnpm perf:desktop-size` still works in minimal local environments.
   // eslint-disable-next-line no-console
   console.log("\n[desktop-size] Rust binary breakdown (cargo-bloat / llvm-size):\n");
-  runOptional(process.env.PYTHON || "python3", ["scripts/desktop_binary_size_report.py", "--no-build"], {
-    env,
-    label: "desktop_binary_size_report",
-  });
+  const binReport = tryRunPython(["scripts/desktop_binary_size_report.py", "--no-build"], { env });
+  if (!binReport.ran) {
+    // eslint-disable-next-line no-console
+    console.log("[desktop-size] python not found; skipping scripts/desktop_binary_size_report.py");
+  }
 
   const distDir = path.join(repoRoot, "apps", "desktop", "dist");
   if (existsSync(distDir)) {
@@ -553,10 +554,34 @@ function main() {
   const passthroughIdx = process.argv.indexOf("--");
   const forwardedArgs =
     passthroughIdx >= 0 ? process.argv.slice(passthroughIdx + 1) : process.argv.slice(3);
+  const forwardedWantsHelp = forwardedArgs.includes("-h") || forwardedArgs.includes("--help");
 
   if (!cmd || cmd === "-h" || cmd === "--help") {
     usage();
     process.exit(cmd ? 0 : 2);
+  }
+
+  // Convenience: allow `pnpm perf:desktop-startup --help` to show the underlying runner help
+  // without building the app first.
+  if (cmd === "startup" && forwardedWantsHelp) {
+    run(process.execPath, [
+      "scripts/run-node-ts.mjs",
+      "apps/desktop/tests/performance/desktop-startup-runner.ts",
+      ...forwardedArgs,
+    ]);
+    return;
+  }
+  if (cmd === "memory" && forwardedWantsHelp) {
+    run(process.execPath, [
+      "scripts/run-node-ts.mjs",
+      "apps/desktop/tests/performance/desktop-memory-runner.ts",
+      ...forwardedArgs,
+    ]);
+    return;
+  }
+  if (cmd === "size" && forwardedWantsHelp) {
+    usage();
+    return;
   }
 
   const { perfHome, env } = perfEnv();
