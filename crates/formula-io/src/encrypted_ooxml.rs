@@ -642,7 +642,7 @@ fn round_up_to_multiple(value: usize, multiple: usize) -> usize {
 }
 
 fn decrypted_package_reader_standard<R: Read + Seek>(
-    ciphertext_reader: R,
+    mut ciphertext_reader: R,
     plaintext_len: u64,
     encryption_info: &[u8],
     password: &str,
@@ -659,8 +659,11 @@ fn decrypted_package_reader_standard<R: Read + Seek>(
         )),
     })?;
 
-    // The streaming decryptor currently supports Standard/CryptoAPI AES `EncryptedPackage`
-    // decryption via AES-ECB (no IV). (It does not support the RC4 variant in this path.)
+    // The streaming decryptor supports Standard/CryptoAPI AES `EncryptedPackage` decryption via:
+    // - baseline AES-ECB (no IV)
+    // - a non-standard AES-CBC-per-segment mode observed in some producers/fixtures
+    //
+    // (It does not support the RC4 variant in this path.)
     match info.header.alg_id {
         offcrypto::CALG_AES_128 | offcrypto::CALG_AES_192 | offcrypto::CALG_AES_256 => {}
         other => {
@@ -680,11 +683,57 @@ fn decrypted_package_reader_standard<R: Read + Seek>(
         return Err(DecryptError::InvalidPassword);
     }
 
-    Ok(DecryptedPackageReader::new(
-        ciphertext_reader,
-        EncryptionMethod::StandardCryptoApi { key },
-        plaintext_len,
-    ))
+    if plaintext_len == 0 {
+        return Ok(DecryptedPackageReader::new(
+            ciphertext_reader,
+            EncryptionMethod::StandardAesEcb { key },
+            plaintext_len,
+        ));
+    }
+
+    fn derive_standard_segment_iv(salt: &[u8], segment_index: u32) -> [u8; 16] {
+        use sha1::{Digest as _, Sha1};
+        let mut hasher = Sha1::new();
+        hasher.update(salt);
+        hasher.update(segment_index.to_le_bytes());
+        let digest = hasher.finalize();
+        let mut iv = [0u8; 16];
+        iv.copy_from_slice(&digest[..16]);
+        iv
+    }
+
+    // Detect whether the Standard `EncryptedPackage` payload uses AES-ECB or a CBC-per-segment
+    // framing by decrypting the first ciphertext block and checking for the `PK` ZIP signature.
+    let cipher_pos = ciphertext_reader.seek(io::SeekFrom::Current(0))?;
+    let mut first_block = [0u8; 16];
+    ciphertext_reader.read_exact(&mut first_block)?;
+    ciphertext_reader.seek(io::SeekFrom::Start(cipher_pos))?;
+
+    let salt = info.verifier.salt.clone();
+
+    let ecb_ok = {
+        let mut block = first_block;
+        aes_ecb_decrypt_in_place(&key, &mut block).is_ok() && block.starts_with(b"PK")
+    };
+
+    let cbc_ok = {
+        let mut block = first_block;
+        let iv = derive_standard_segment_iv(&salt, 0);
+        decrypt_aes_cbc_no_padding_in_place(&key, &iv, &mut block).is_ok()
+            && block.starts_with(b"PK")
+    };
+
+    let method = if ecb_ok {
+        EncryptionMethod::StandardAesEcb { key }
+    } else if cbc_ok {
+        EncryptionMethod::StandardCryptoApi { key, salt }
+    } else {
+        return Err(DecryptError::InvalidInfo(
+            "unable to detect Standard EncryptedPackage cipher mode (expected ZIP magic)".into(),
+        ));
+    };
+
+    Ok(DecryptedPackageReader::new(ciphertext_reader, method, plaintext_len))
 }
 
 #[derive(Debug, Clone)]

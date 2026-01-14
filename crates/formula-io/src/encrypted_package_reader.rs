@@ -10,15 +10,25 @@ const SEGMENT_SIZE: usize = 0x1000;
 
 #[derive(Debug, Clone)]
 pub(crate) enum EncryptionMethod {
-    /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption.
+    /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption: AES-ECB `EncryptedPackage`.
     ///
-    /// The `EncryptedPackage` ciphertext is encrypted using AES-ECB (no IV, no chaining).
+    /// In the baseline Standard/CryptoAPI AES scheme, the `EncryptedPackage` stream is encrypted
+    /// using AES-ECB (no IV, no chaining).
+    StandardAesEcb {
+        /// AES key bytes (16/24/32).
+        key: Vec<u8>,
+    },
+
+    /// MS-OFFCRYPTO "Standard" (CryptoAPI) encryption: segmented AES-CBC `EncryptedPackage`.
     ///
-    /// For performance, we still decrypt in 4096-byte segments, but decryption must not depend on
-    /// segment boundaries or indices.
+    /// Some producers encrypt `EncryptedPackage` in 4096-byte segments using AES-CBC, with a
+    /// per-segment IV derived as `SHA1(salt || LE32(segment_index))[0..16]`.
+    ///
     StandardCryptoApi {
         /// AES key bytes (16/24/32).
         key: Vec<u8>,
+        /// `EncryptionVerifier.salt` from the Standard `EncryptionInfo` payload.
+        salt: Vec<u8>,
     },
 
     /// MS-OFFCRYPTO "Agile" encryption.
@@ -170,8 +180,16 @@ impl<R: Read + Seek> DecryptedPackageReader<R> {
         self.inner.read_exact(&mut self.scratch)?;
 
         match &self.method {
-            EncryptionMethod::StandardCryptoApi { key } => {
+            EncryptionMethod::StandardAesEcb { key } => {
                 aes_ecb_decrypt_in_place(key, &mut self.scratch)?;
+            }
+            EncryptionMethod::StandardCryptoApi { key, salt } => {
+                let seg_index_u32 = u32::try_from(segment_index).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "segment index exceeds u32")
+                })?;
+                let iv = derive_standard_segment_iv(salt, seg_index_u32);
+                decrypt_aes_cbc_no_padding_in_place(key, &iv, &mut self.scratch)
+                    .map_err(map_aes_cbc_err)?;
             }
             EncryptionMethod::Agile {
                 key,
@@ -260,6 +278,17 @@ fn round_up_to_multiple(value: usize, multiple: usize) -> usize {
     } else {
         value + (multiple - rem)
     }
+}
+
+fn derive_standard_segment_iv(salt: &[u8], segment_index: u32) -> [u8; AES_BLOCK_SIZE] {
+    let mut hasher = sha1::Sha1::new();
+    hasher.update(salt);
+    hasher.update(&segment_index.to_le_bytes());
+    let digest = hasher.finalize();
+
+    let mut iv = [0u8; AES_BLOCK_SIZE];
+    iv.copy_from_slice(&digest[..AES_BLOCK_SIZE]);
+    iv
 }
 
 fn derive_agile_segment_iv(
@@ -355,7 +384,7 @@ mod tests {
         buf
     }
 
-    fn encrypt_standard_cryptoapi_stream(key: &[u8], plaintext: &[u8]) -> Vec<u8> {
+    fn encrypt_standard_cryptoapi_stream(key: &[u8], salt: &[u8], plaintext: &[u8]) -> Vec<u8> {
         let orig_size = plaintext.len() as u64;
         let mut out = Vec::new();
         out.extend_from_slice(&orig_size.to_le_bytes());
@@ -364,13 +393,48 @@ mod tests {
             return out;
         }
 
-        let mut buf = plaintext.to_vec();
-        let rem = buf.len() % AES_BLOCK_SIZE;
-        if rem != 0 {
-            buf.extend(std::iter::repeat(0u8).take(AES_BLOCK_SIZE - rem));
+        let mut segment_index = 0u32;
+        let mut offset = 0usize;
+        while offset < plaintext.len() {
+            let seg_plain_len = (plaintext.len() - offset).min(SEGMENT_SIZE);
+            let seg_cipher_len = round_up_to_multiple(seg_plain_len, AES_BLOCK_SIZE);
+
+            let mut seg = vec![0u8; seg_cipher_len];
+            seg[..seg_plain_len].copy_from_slice(&plaintext[offset..offset + seg_plain_len]);
+
+            let iv = derive_standard_segment_iv(&salt, segment_index);
+            let ciphertext = encrypt_segment_aes_cbc_no_padding(key, &iv, &seg);
+            out.extend_from_slice(&ciphertext);
+
+            offset += seg_plain_len;
+            segment_index += 1;
         }
-        aes_ecb_encrypt_in_place(key, &mut buf);
-        out.extend_from_slice(&buf);
+        out
+    }
+
+    fn encrypt_standard_aes_ecb_stream(key: &[u8], plaintext: &[u8]) -> Vec<u8> {
+        let orig_size = plaintext.len() as u64;
+        let mut out = Vec::new();
+        out.extend_from_slice(&orig_size.to_le_bytes());
+
+        if plaintext.is_empty() {
+            return out;
+        }
+
+        let mut offset = 0usize;
+        while offset < plaintext.len() {
+            let seg_plain_len = (plaintext.len() - offset).min(SEGMENT_SIZE);
+            let seg_cipher_len = round_up_to_multiple(seg_plain_len, AES_BLOCK_SIZE);
+
+            let mut seg = vec![0u8; seg_cipher_len];
+            seg[..seg_plain_len].copy_from_slice(&plaintext[offset..offset + seg_plain_len]);
+
+            aes_ecb_encrypt_in_place(key, &mut seg);
+            out.extend_from_slice(&seg);
+
+            offset += seg_plain_len;
+        }
+
         out
     }
 
@@ -404,14 +468,18 @@ mod tests {
     fn standard_cryptoapi_read_seek_matches_plaintext() {
         let plaintext = patterned_bytes(10_123);
         let key = [7u8; 16];
+        let salt = [0x11u8; 16];
 
-        let encrypted_stream = encrypt_standard_cryptoapi_stream(&key, &plaintext);
+        let encrypted_stream = encrypt_standard_cryptoapi_stream(&key, &salt, &plaintext);
         let ciphertext = &encrypted_stream[8..];
 
         let inner = Cursor::new(ciphertext.to_vec());
         let mut reader = DecryptedPackageReader::new(
             inner,
-            EncryptionMethod::StandardCryptoApi { key: key.to_vec() },
+            EncryptionMethod::StandardCryptoApi {
+                key: key.to_vec(),
+                salt: salt.to_vec(),
+            },
             plaintext.len() as u64,
         );
 
@@ -443,13 +511,10 @@ mod tests {
         let mut buf = vec![0u8; 1];
         assert_eq!(reader.read(&mut buf).unwrap(), 0);
 
-        // Cross-check against full-stream decryption helper.
-        let decrypted = crate::offcrypto::decrypt_standard_encrypted_package_stream(
-            &encrypted_stream,
-            &key,
-            &[],
-        )
-        .expect("full decrypt");
+        // Cross-check against full-stream CBC-segmented decrypt helper.
+        let decrypted =
+            crate::offcrypto::decrypt_encrypted_package_standard_aes_sha1(&encrypted_stream, &key, &salt)
+                .expect("full decrypt");
         assert_eq!(decrypted, plaintext);
     }
 
@@ -490,14 +555,18 @@ mod tests {
             ops in proptest::collection::vec(read_seek_op_strategy(), 0..=64),
         ) {
             let key = [7u8; 16];
+            let salt = [0x11u8; 16];
 
-            let encrypted_stream = encrypt_standard_cryptoapi_stream(&key, &plaintext);
+            let encrypted_stream = encrypt_standard_cryptoapi_stream(&key, &salt, &plaintext);
             let ciphertext = encrypted_stream.get(8..).unwrap_or(&[]);
 
             let inner = Cursor::new(ciphertext.to_vec());
             let mut reader = DecryptedPackageReader::new(
                 inner,
-                EncryptionMethod::StandardCryptoApi { key: key.to_vec() },
+                EncryptionMethod::StandardCryptoApi {
+                    key: key.to_vec(),
+                    salt: salt.to_vec(),
+                },
                 plaintext.len() as u64,
             );
 
@@ -598,11 +667,32 @@ mod tests {
         );
         let ciphertext = encrypted_package[8..].to_vec();
 
-        let mut reader = DecryptedPackageReader::new(
-            Cursor::new(ciphertext),
-            EncryptionMethod::StandardCryptoApi { key },
-            plaintext_len,
-        );
+        let method = if plaintext_len == 0 {
+            EncryptionMethod::StandardAesEcb { key: key.clone() }
+        } else {
+            let first = ciphertext.get(..AES_BLOCK_SIZE).expect("first AES block");
+            let mut ecb = first.to_vec();
+            let ecb_ok =
+                aes_ecb_decrypt_in_place(&key, &mut ecb).is_ok() && ecb.starts_with(b"PK");
+
+            let mut cbc = first.to_vec();
+            let iv = derive_standard_segment_iv(&info.verifier.salt, 0);
+            let cbc_ok = decrypt_aes_cbc_no_padding_in_place(&key, &iv, &mut cbc).is_ok()
+                && cbc.starts_with(b"PK");
+
+            if ecb_ok {
+                EncryptionMethod::StandardAesEcb { key: key.clone() }
+            } else if cbc_ok {
+                EncryptionMethod::StandardCryptoApi {
+                    key: key.clone(),
+                    salt: info.verifier.salt.clone(),
+                }
+            } else {
+                panic!("unable to detect Standard EncryptedPackage cipher mode for fixture");
+            }
+        };
+
+        let mut reader = DecryptedPackageReader::new(Cursor::new(ciphertext), method, plaintext_len);
 
         // Decrypted ZIP local file header starts with `PK`.
         let mut sig = [0u8; 2];
@@ -621,6 +711,56 @@ mod tests {
             xml.contains("<Types"),
             "expected [Content_Types].xml to contain <Types, got: {xml:?}"
         );
+    }
+
+    #[test]
+    fn standard_aes_ecb_read_seek_matches_plaintext() {
+        let plaintext = patterned_bytes(10_000);
+        let key = [5u8; 16];
+
+        let encrypted_stream = encrypt_standard_aes_ecb_stream(&key, &plaintext);
+        let ciphertext = &encrypted_stream[8..];
+
+        let inner = Cursor::new(ciphertext.to_vec());
+        let mut reader = DecryptedPackageReader::new(
+            inner,
+            EncryptionMethod::StandardAesEcb { key: key.to_vec() },
+            plaintext.len() as u64,
+        );
+
+        // Read a middle range.
+        reader.seek(SeekFrom::Start(1234)).unwrap();
+        let mut buf = vec![0u8; 777];
+        reader.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, &plaintext[1234..1234 + buf.len()]);
+
+        // Cross-segment boundary.
+        reader
+            .seek(SeekFrom::Start(SEGMENT_SIZE as u64 - 10))
+            .unwrap();
+        let mut buf = vec![0u8; 40];
+        reader.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, &plaintext[SEGMENT_SIZE - 10..SEGMENT_SIZE - 10 + 40]);
+
+        // Read at end (short).
+        reader.seek(SeekFrom::End(-10)).unwrap();
+        let mut buf = vec![0u8; 32];
+        let n = reader.read(&mut buf).unwrap();
+        assert_eq!(n, 10);
+        assert_eq!(&buf[..10], &plaintext[plaintext.len() - 10..]);
+
+        // Seek past end => EOF.
+        reader
+            .seek(SeekFrom::Start(plaintext.len() as u64 + 5))
+            .unwrap();
+        let mut buf = vec![0u8; 1];
+        assert_eq!(reader.read(&mut buf).unwrap(), 0);
+
+        // Cross-check against full-stream AES-ECB decrypt helper.
+        let decrypted =
+            crate::offcrypto::decrypt_standard_encrypted_package_stream(&encrypted_stream, &key, &[])
+                .expect("full decrypt");
+        assert_eq!(decrypted, plaintext);
     }
 
     #[test]
