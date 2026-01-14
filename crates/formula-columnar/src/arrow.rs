@@ -50,6 +50,7 @@ pub enum ArrowInteropError {
     Arrow(arrow_schema::ArrowError),
     UnsupportedDataType(DataType),
     UnsupportedDictionaryValueType(DataType),
+    InvalidDictionaryKey { key: String, dictionary_len: usize },
     InvalidMetadata { key: &'static str, value: String },
 }
 
@@ -61,6 +62,10 @@ impl std::fmt::Display for ArrowInteropError {
             Self::UnsupportedDictionaryValueType(dt) => {
                 write!(f, "unsupported dictionary value type: {dt:?}")
             }
+            Self::InvalidDictionaryKey { key, dictionary_len } => write!(
+                f,
+                "invalid dictionary key {key} (dictionary has {dictionary_len} values)"
+            ),
             Self::InvalidMetadata { key, value } => {
                 write!(f, "invalid Arrow field metadata {key}={value:?}")
             }
@@ -302,17 +307,35 @@ pub(crate) fn value_from_array(
                             .ok_or_else(|| {
                                 ArrowInteropError::UnsupportedDataType(array.data_type().clone())
                             })?;
-                        let key = dict.keys().value(row) as usize;
-                        let dict_values = dict
-                            .values()
-                            .as_any()
-                            .downcast_ref::<$value_ty>()
-                            .ok_or_else(|| {
-                                ArrowInteropError::UnsupportedDictionaryValueType(
-                                    dict.values().data_type().clone(),
-                                )
-                            })?;
-                        Ok(Value::String(Arc::<str>::from(dict_values.value(key))))
+                        let dictionary_len = dict.values().len();
+                        let raw_key = dict.keys().value(row);
+                        let key: usize = raw_key.try_into().map_err(|_| {
+                            ArrowInteropError::InvalidDictionaryKey {
+                                key: raw_key.to_string(),
+                                dictionary_len,
+                            }
+                        })?;
+                        if key >= dictionary_len {
+                            Err(ArrowInteropError::InvalidDictionaryKey {
+                                key: raw_key.to_string(),
+                                dictionary_len,
+                            })
+                        } else {
+                            let dict_values = dict
+                                .values()
+                                .as_any()
+                                .downcast_ref::<$value_ty>()
+                                .ok_or_else(|| {
+                                    ArrowInteropError::UnsupportedDictionaryValueType(
+                                        dict.values().data_type().clone(),
+                                    )
+                                })?;
+                            if dict_values.is_null(key) {
+                                Ok(Value::Null)
+                            } else {
+                                Ok(Value::String(Arc::<str>::from(dict_values.value(key))))
+                            }
+                        }
                     }};
                 }
 
