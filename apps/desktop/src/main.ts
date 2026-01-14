@@ -9677,10 +9677,36 @@ const DEFAULT_RIBBON_AUTOFILTER_UNIQUE_VALUE_LIMIT = 5_000;
 function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: number }): string {
   const doc = app.getDocument();
   const docAny: any = doc as any;
+  const id = String(sheetId ?? "").trim();
+  if (!id) return "";
+  // Avoid resurrecting deleted sheets: `DocumentController.getCellFormat()` materializes sheets
+  // lazily. Ribbon AutoFilter probes a large number of cells to compute distinct values and
+  // should be side-effect free when UI state briefly holds a stale/deleted sheet id.
+  //
+  // Treat a sheet as "known missing" when the workbook already has some sheets, but the
+  // requested id is present in neither `model.sheets` nor `sheetMeta`.
+  const isSheetKnownMissing = (() => {
+    const sheets: any = docAny?.model?.sheets;
+    const sheetMeta: any = docAny?.sheetMeta;
+    if (
+      sheets &&
+      typeof sheets.has === "function" &&
+      typeof sheets.size === "number" &&
+      sheetMeta &&
+      typeof sheetMeta.has === "function" &&
+      typeof sheetMeta.size === "number"
+    ) {
+      const workbookHasAnySheets = sheets.size > 0 || sheetMeta.size > 0;
+      if (!workbookHasAnySheets) return false;
+      return !sheets.has(id) && !sheetMeta.has(id);
+    }
+    return false;
+  })();
+  if (isSheetKnownMissing) return "";
   const state =
     typeof docAny.peekCell === "function"
-      ? (docAny.peekCell(sheetId, cell) as { value?: unknown; formula?: string | null } | null)
-      : (docAny.getCell(sheetId, cell) as { value?: unknown; formula?: string | null } | null);
+      ? (docAny.peekCell(id, cell) as { value?: unknown; formula?: string | null } | null)
+      : (docAny.getCell(id, cell) as { value?: unknown; formula?: string | null } | null);
 
   const formatValue = (raw: unknown): string => {
     if (raw == null) return "";
@@ -9694,7 +9720,7 @@ function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: 
     if (typeof raw === "boolean") return raw ? "TRUE" : "FALSE";
 
     if (typeof raw === "number" && Number.isFinite(raw)) {
-      const fmt = doc.getCellFormat(sheetId, cell) as any;
+      const fmt = doc.getCellFormat(id, cell) as any;
       const numberFormat = getStyleNumberFormat(fmt);
       if (numberFormat) return formatValueWithNumberFormat(raw, numberFormat);
     }
@@ -9709,7 +9735,7 @@ function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: 
     if (app.getShowFormulas()) {
       return state?.formula ?? "";
     }
-    const computed = app.getCellComputedValueForSheet(sheetId, cell);
+    const computed = app.getCellComputedValueForSheet(id, cell);
     if ((computed == null || computed === "") && state?.value != null) {
       const image = parseImageCellValue(state.value);
       if (image) return image.altText ?? "[Image]";
