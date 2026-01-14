@@ -194,9 +194,33 @@ discover_appimages() {
     return 0
   fi
 
+  # Fast path: avoid traversing an entire Cargo target directory (which can be very
+  # large) by checking the canonical bundle locations directly.
+  #
   # Tauri bundle output resembles:
   #   <target-dir>/<target-triple>/release/bundle/appimage/*.AppImage
   #   <target-dir>/release/bundle/appimage/*.AppImage
+  local nullglob_was_set=0
+  if shopt -q nullglob; then
+    nullglob_was_set=1
+  fi
+  shopt -s nullglob
+
+  local -a matches=(
+    "$base"/release/bundle/appimage/*.AppImage
+    "$base"/*/release/bundle/appimage/*.AppImage
+  )
+
+  if [[ "$nullglob_was_set" -eq 0 ]]; then
+    shopt -u nullglob
+  fi
+
+  if [ "${#matches[@]}" -gt 0 ]; then
+    printf '%s\0' "${matches[@]}"
+    return 0
+  fi
+
+  # Fallback: traverse only when the output layout is unexpected.
   find "$base" \
     -type f \
     -name '*.AppImage' \
