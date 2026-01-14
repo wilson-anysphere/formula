@@ -497,6 +497,20 @@ def _redact_uri_like(text: str) -> str:
             return text
         return f"sha256={_sha256_text(text)}"
 
+    # Network-path reference / UNC-like URLs (`//host/path` or `\\\\host\\share`).
+    # These are often used for internal file shares and can leak corporate hostnames.
+    if text.startswith("//") and parsed.netloc:
+        if _is_safe_schema_host(parsed.hostname):
+            return text
+        return f"sha256={_sha256_text(text)}"
+    if text.startswith("\\\\"):
+        # Normalize to avoid treating `\\` differently from `//` in downstream tooling.
+        normalized = "//" + text.lstrip("\\").replace("\\", "/")
+        parsed2 = urllib.parse.urlparse(normalized)
+        if _is_safe_schema_host(parsed2.hostname):
+            return text
+        return f"sha256={_sha256_text(text)}"
+
     # Non-http schemes (e.g. urn:) are still URI-like; hash them to be safe.
     if parsed.scheme and ":" in text:
         return f"sha256={_sha256_text(text)}"
@@ -543,6 +557,18 @@ def _redact_uri_like_in_text(text: str) -> str:
     # `A1:B2`.
     out = re.sub(
         r"(?:urn|mailto|file|ftp|ftps|tel|smb):[^\s\"'<>]+", _replace_url, out, flags=re.IGNORECASE
+    )
+
+    # Network-path reference / UNC-like URLs (`//host/path`). This can show up for external
+    # relationships where TargetMode=External points at a file share.
+    out = re.sub(r"(?<!:)//[^\s\"'<>]+", _replace_url, out)
+
+    # As a last resort, redact bare domain-like tokens that appear without a scheme.
+    out = re.sub(
+        r"(?:[A-Za-z0-9-]+\.)+(?:com|net|org|io|ai|dev|edu|gov|local|internal|corp)\b[^\s\"'<>]*",
+        _replace_url,
+        out,
+        flags=re.IGNORECASE,
     )
     return out
 
