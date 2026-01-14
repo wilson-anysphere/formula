@@ -52,6 +52,23 @@ test("fork mode: macOS unsigned build passes without updater signatures", () => 
   assert.match(proc.stdout, /passed/i);
 });
 
+test("check-desktop-release-artifacts bounds fallback repo walk (perf guardrail)", () => {
+  const raw = fs.readFileSync(scriptPath, "utf8");
+  const idx = raw.indexOf("Fallback: search for src-tauri directories");
+  assert.ok(idx >= 0, "Expected check-desktop-release-artifacts.mjs to have a fallback target dir discovery.");
+  const snippet = raw.slice(idx, idx + 1200);
+  assert.match(
+    snippet,
+    /maxDepth\s*=\s*\d+/,
+    `Expected fallback repo walk to define a maxDepth bound.\nSaw snippet:\n${snippet}`,
+  );
+  assert.match(
+    snippet,
+    /depth:\s*0/,
+    `Expected fallback repo walk to track traversal depth (avoid unbounded scans).\nSaw snippet:\n${snippet}`,
+  );
+});
+
 test("signed mode: macOS requires latest.json + installer/archive signatures", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "formula-release-artifacts-"));
   const bundleDir = path.join(tmp, "target", "release", "bundle");

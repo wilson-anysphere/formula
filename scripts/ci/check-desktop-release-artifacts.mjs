@@ -202,6 +202,13 @@ function candidateTargetDirs() {
   if (candidates.length > 0) return dedupeRealpaths(candidates);
 
   // Fallback: search for src-tauri directories with tauri.conf.json (skip huge dirs).
+  // This is a last resort: most CI builds should have one of the standard Cargo target
+  // directories present (apps/desktop/src-tauri/target, apps/desktop/target, target, or
+  // CARGO_TARGET_DIR).
+  //
+  // Keep the walk bounded so we don't traverse an entire monorepo tree (or extracted
+  // build artifacts) when something goes wrong in CI.
+  const maxDepth = 8;
   const skipDirNames = new Set([
     ".git",
     "node_modules",
@@ -220,9 +227,11 @@ function candidateTargetDirs() {
   ]);
 
   /** @type {string[]} */
-  const stack = [repoRoot];
+  const stack = [{ dir: repoRoot, depth: 0 }];
   while (stack.length > 0) {
-    const dir = stack.pop();
+    const popped = stack.pop();
+    const dir = popped?.dir;
+    const depth = popped?.depth ?? maxDepth;
     if (!dir) break;
     let entries;
     try {
@@ -233,7 +242,10 @@ function candidateTargetDirs() {
     for (const ent of entries) {
       if (ent.isDirectory()) {
         if (skipDirNames.has(ent.name)) continue;
-        stack.push(path.join(dir, ent.name));
+        const nextDepth = depth + 1;
+        if (nextDepth <= maxDepth) {
+          stack.push({ dir: path.join(dir, ent.name), depth: nextDepth });
+        }
         continue;
       }
       if (ent.isFile() && ent.name === "tauri.conf.json") {
