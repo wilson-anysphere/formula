@@ -164,6 +164,14 @@ test("applyState ignores images with oversized declared byte lengths (defensive)
   assert.equal(doc.getImage("img1"), null);
 });
 
+test("setImage rejects entries exceeding the max byte size (defensive)", () => {
+  const doc = new DocumentController();
+  const bytes = new Uint8Array(10 * 1024 * 1024 + 1);
+  assert.throws(() => {
+    doc.setImage("img1", { bytes, mimeType: "image/png" });
+  }, /too large/i);
+});
+
 test("drawing helpers support numeric ids (overlay-compatible)", () => {
   const doc = new DocumentController();
 

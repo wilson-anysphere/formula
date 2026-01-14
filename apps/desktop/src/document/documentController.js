@@ -127,6 +127,14 @@ function decodeBase64(base64) {
   throw new Error("Base64 decoding is not supported in this environment");
 }
 
+// Keep in sync with `MAX_INSERT_IMAGE_BYTES` (drawings/insertImageLimits.ts). This cap exists to:
+// - prevent unbounded allocations when decoding image bytes from snapshots / external deltas
+// - keep `encodeState()` snapshots within a reasonable size
+//
+// Note: some environments can technically handle larger images, but large byte payloads can
+// degrade performance dramatically and are a common DoS vector when content is not fully trusted.
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MiB
+
 /**
  * Best-effort MIME type inference for workbook images.
  *
@@ -3731,6 +3739,9 @@ export class DocumentController {
     if (!entry || typeof entry !== "object") throw new Error("Image entry must be an object");
     const bytes = entry.bytes;
     if (!(bytes instanceof Uint8Array)) throw new Error("Image entry bytes must be a Uint8Array");
+    if (bytes.byteLength > MAX_IMAGE_BYTES) {
+      throw new Error(`Image too large (${bytes.byteLength} bytes, max ${MAX_IMAGE_BYTES})`);
+    }
 
     const mimeTypeRaw = "mimeType" in entry ? entry.mimeType : undefined;
     let mimeType = undefined;
@@ -6410,13 +6421,6 @@ export class DocumentController {
       return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
     })();
 
-    // Guard against memory / decode DoS when loading snapshots containing image bytes:
-    // - avoid allocating unbounded Uint8Arrays from numeric-key objects / arrays
-    // - avoid decoding huge base64 strings
-    //
-    // Keep in sync with `MAX_INSERT_IMAGE_BYTES` (drawings/insertImageLimits.ts).
-    const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MiB
-
     const parseBytes = (value) => {
       if (value instanceof Uint8Array) {
         if (value.byteLength > MAX_IMAGE_BYTES) return null;
@@ -7080,14 +7084,26 @@ export class DocumentController {
   applyExternalImageDeltas(deltas, options = {}) {
     if (!Array.isArray(deltas) || deltas.length === 0) return;
 
+    const normalizeImageEntryInput = (raw) => {
+      if (!raw) return null;
+      if (!raw.bytes || !(raw.bytes instanceof Uint8Array)) return null;
+      if (raw.bytes.byteLength > MAX_IMAGE_BYTES) return null;
+      /** @type {ImageEntry} */
+      const out = { bytes: raw.bytes };
+      if (raw && Object.prototype.hasOwnProperty.call(raw, "mimeType")) {
+        out.mimeType = raw.mimeType ?? null;
+      }
+      return out;
+    };
+
     /** @type {ImageDelta[]} */
     const filtered = [];
     for (const delta of deltas) {
       if (!delta) continue;
       const imageId = String(delta.imageId ?? "").trim();
       if (!imageId) continue;
-      const before = delta.before ?? null;
-      const after = delta.after ?? null;
+      const before = normalizeImageEntryInput(delta.before);
+      const after = normalizeImageEntryInput(delta.after);
       if (imageEntryEquals(before, after)) continue;
       filtered.push({ imageId, before, after });
     }
@@ -7128,6 +7144,7 @@ export class DocumentController {
     const normalizeImageEntryInput = (raw) => {
       if (!raw) return null;
       if (!raw.bytes || !(raw.bytes instanceof Uint8Array)) return null;
+      if (raw.bytes.byteLength > MAX_IMAGE_BYTES) return null;
       /** @type {ImageEntry} */
       const out = { bytes: raw.bytes };
       if (raw && Object.prototype.hasOwnProperty.call(raw, "mimeType")) {
