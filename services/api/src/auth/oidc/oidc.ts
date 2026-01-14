@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
+import { fetch as undiciFetch } from "undici";
 import jwt, { type Algorithm } from "jsonwebtoken";
 import type { Pool, PoolClient } from "pg";
 import { z } from "zod";
@@ -287,7 +288,7 @@ async function exchangeCodeForTokens(options: {
 
   // TODO(data-residency): OIDC token exchange is an outbound integration.
   // Enforce org data residency once we have a strategy to map IdP endpoints to regions.
-  const res = await fetch(options.tokenEndpoint, {
+  const res = await undiciFetch(options.tokenEndpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body,

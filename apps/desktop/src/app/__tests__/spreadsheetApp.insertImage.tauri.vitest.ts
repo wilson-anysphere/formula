@@ -82,12 +82,30 @@ function createRoot(): HTMLElement {
   return root;
 }
 
-async function waitFor(condition: () => boolean, timeoutMs: number = 1000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+async function waitFor(condition: () => boolean, timeoutMs: number = 5000): Promise<void> {
+  // Use a monotonic clock + MessageChannel ticks so this helper keeps working even if another
+  // test leaks fake timers (which can freeze `Date.now()` and prevent `setTimeout` from firing).
+  const timeoutNs = BigInt(Math.max(0, timeoutMs)) * 1_000_000n;
+  const start = process.hrtime.bigint();
+
+  while (process.hrtime.bigint() - start < timeoutNs) {
     if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await new Promise<void>((resolve) => {
+      if (typeof MessageChannel !== "undefined") {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => {
+          channel.port1.close();
+          channel.port2.close();
+          resolve();
+        };
+        channel.port2.postMessage(null);
+        return;
+      }
+      queueMicrotask(resolve);
+    });
   }
+
   throw new Error("Timed out waiting for condition");
 }
 

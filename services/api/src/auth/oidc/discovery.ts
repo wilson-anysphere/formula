@@ -1,3 +1,5 @@
+import { fetch as undiciFetch } from "undici";
+
 export type OidcDiscoveryDocument = {
   issuer: string;
   authorization_endpoint: string;
@@ -29,7 +31,7 @@ export async function getOidcDiscovery(issuerUrl: string): Promise<OidcDiscovery
   const discoveryUrl = new URL("/.well-known/openid-configuration", normalized).toString();
   // TODO(data-residency): OIDC discovery/token exchange is an outbound integration.
   // Enforce org data residency once we have a strategy to map IdP endpoints to regions.
-  const res = await fetch(discoveryUrl, { signal: AbortSignal.timeout(5000) });
+  const res = await undiciFetch(discoveryUrl, { signal: AbortSignal.timeout(5000) });
   if (!res.ok) {
     throw new Error(`OIDC discovery failed (${res.status})`);
   }

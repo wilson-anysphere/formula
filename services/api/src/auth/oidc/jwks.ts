@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { fetch as undiciFetch } from "undici";
 
 export type Jwk = {
   kty: string;
@@ -22,7 +23,7 @@ export async function getJwksKeys(jwksUri: string): Promise<Jwk[]> {
   const now = Date.now();
   if (cached && now - cached.fetchedAt < JWKS_TTL_MS) return cached.keys;
 
-  const res = await fetch(jwksUri, { signal: AbortSignal.timeout(5000) });
+  const res = await undiciFetch(jwksUri, { signal: AbortSignal.timeout(5000) });
   if (!res.ok) throw new Error(`OIDC JWKS fetch failed (${res.status})`);
   const json = (await res.json()) as { keys?: unknown };
   if (!Array.isArray(json.keys)) throw new Error("OIDC JWKS response missing keys");
@@ -37,4 +38,3 @@ export function jwkToPublicKey(jwk: Jwk): crypto.KeyObject {
   // We intentionally accept the entire JWK payload (incl. kid/use/alg).
   return crypto.createPublicKey({ key: jwk as any, format: "jwk" });
 }
-

@@ -97,6 +97,8 @@ describe('desktopStartupBench cold vs warm', () => {
         NODE_OPTIONS: `--require ${modulePath}`,
 
         FORMULA_DESKTOP_STARTUP_RUNS: '3',
+        // This test can run under heavy parallel load in the monorepo vitest suite; give the
+        // child process ample time to emit the `[startup]` metrics.
         FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: '15000',
         FORMULA_DESKTOP_RSS_IDLE_DELAY_MS: '0',
         FORMULA_DESKTOP_STARTUP_MODE: 'warm',
