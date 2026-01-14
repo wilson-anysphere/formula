@@ -8,7 +8,7 @@ import { SecondaryGridView } from "../secondaryGridView";
 import { DocumentController } from "../../../document/documentController.js";
 import type { DrawingObject, ImageStore } from "../../../drawings/types";
 import { ImageBitmapCache } from "../../../drawings/imageBitmapCache";
-import { pxToEmu } from "../../../drawings/overlay";
+import { DrawingOverlay, pxToEmu } from "../../../drawings/overlay";
 
 function createMockCanvasContext(): CanvasRenderingContext2D {
   const noop = () => {};
@@ -146,6 +146,64 @@ describe("SecondaryGridView drawings overlay", () => {
 
     expect(calls).toContain("strokeRect");
     expect(calls).toContain("fillText");
+
+    gridView.destroy();
+    container.remove();
+  });
+
+  it("passes frozen pane metadata to the drawings overlay viewport", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 300 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 200 });
+    document.body.appendChild(container);
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: () => createMockCanvasContext(),
+    });
+
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    // Freeze 1 row + 2 cols (sheet-level counts; excludes the shared-grid headers).
+    doc.setFrozen(sheetId, 1, 2, { label: "Freeze" });
+
+    const images: ImageStore = { get: () => undefined, set: () => {} };
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => sheetId,
+      rowCount: 20,
+      colCount: 20,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+      getDrawingObjects: () => [],
+      images,
+    });
+
+    const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render");
+    renderSpy.mockClear();
+
+    await (gridView as any).renderDrawings();
+
+    expect(renderSpy).toHaveBeenCalled();
+    const viewport = renderSpy.mock.calls.at(-1)?.[1] as any;
+
+    const renderer = gridView.grid.renderer;
+    const gridViewport = renderer.scroll.getViewportState();
+    const headerOffsetX = renderer.scroll.cols.totalSize(1);
+    const headerOffsetY = renderer.scroll.rows.totalSize(1);
+
+    expect(viewport).toEqual(
+      expect.objectContaining({
+        frozenRows: 1,
+        frozenCols: 2,
+        headerOffsetX,
+        headerOffsetY,
+        frozenWidthPx: gridViewport.frozenWidth,
+        frozenHeightPx: gridViewport.frozenHeight,
+      }),
+    );
 
     gridView.destroy();
     container.remove();
