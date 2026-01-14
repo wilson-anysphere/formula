@@ -62,6 +62,9 @@ pub struct DrawingPart {
     root_attrs: BTreeMap<String, String>,
 }
 
+const PRESERVED_EMBED_REL_ID: &str = "xlsx.embed_rel_id";
+const PRESERVED_PIC_XML: &str = "xlsx.pic_xml";
+
 impl DrawingPart {
     /// Compute the `.rels` part path for a drawing part (e.g. `xl/drawings/_rels/drawing1.xml.rels`).
     pub fn rels_path_for(drawing_path: &str) -> String {
@@ -724,6 +727,34 @@ impl DrawingPart {
         })
     }
 
+    /// Load an existing drawing part's `.rels` without parsing the drawing XML.
+    ///
+    /// This is used by the writer to preserve chart/image relationship entries when rewriting a
+    /// drawing based on [`formula_model::Worksheet::drawings`].
+    pub fn load_for_write(
+        sheet_index: usize,
+        path: &str,
+        parts: &BTreeMap<String, Vec<u8>>,
+    ) -> Result<Self> {
+        let rels_path = drawing_rels_path(path);
+        let rels_bytes = parts
+            .get(&rels_path)
+            .ok_or_else(|| XlsxError::MissingPart(format!("missing drawing rels: {rels_path}")))?;
+        let rels_xml = std::str::from_utf8(rels_bytes)
+            .map_err(|e| XlsxError::Invalid(format!("drawing rels not utf-8: {e}")))?;
+        let relationships = Relationships::from_xml(rels_xml)?;
+
+        Ok(Self {
+            sheet_index,
+            path: path.to_string(),
+            rels_path,
+            objects: Vec::new(),
+            relationships,
+            root_xmlns: BTreeMap::new(),
+            root_attrs: BTreeMap::new(),
+        })
+    }
+
     pub fn create_new(sheet_index: usize) -> Result<(Self, String)> {
         // Default new part names. Callers may rename by updating `path`/`rels_path`.
         let path = format!("xl/drawings/drawing{}.xml", sheet_index + 1);
@@ -762,8 +793,8 @@ impl DrawingPart {
 
         let pic_xml = build_pic_xml(next_object_id, &embed_rel_id, size);
         let mut preserved = std::collections::HashMap::new();
-        preserved.insert("xlsx.embed_rel_id".to_string(), embed_rel_id);
-        preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
+        preserved.insert(PRESERVED_EMBED_REL_ID.to_string(), embed_rel_id);
+        preserved.insert(PRESERVED_PIC_XML.to_string(), pic_xml);
 
         let object = DrawingObject {
             id: DrawingObjectId(next_object_id),
@@ -785,6 +816,8 @@ impl DrawingPart {
         parts: &mut BTreeMap<String, Vec<u8>>,
         workbook: &formula_model::Workbook,
     ) -> Result<()> {
+        self.ensure_relationships_for_objects()?;
+
         // Keep objects ordered by z-order.
         self.objects.sort_by_key(|o| o.z_order);
 
@@ -798,11 +831,16 @@ impl DrawingPart {
                     xml.push_str(raw_xml);
                 }
                 DrawingObjectKind::Image { .. } => {
+                    let fallback_embed = object
+                        .preserved
+                        .get(PRESERVED_EMBED_REL_ID)
+                        .map(|s| s.as_str())
+                        .unwrap_or("rId1");
                     let pic_xml = object
                         .preserved
-                        .get("xlsx.pic_xml")
+                        .get(PRESERVED_PIC_XML)
                         .cloned()
-                        .unwrap_or_else(|| build_pic_xml(object.id.0, "rId1", object.size));
+                        .unwrap_or_else(|| build_pic_xml(object.id.0, fallback_embed, object.size));
                     xml.push_str(&build_anchor_xml(
                         &object.anchor,
                         &pic_xml,
@@ -842,12 +880,99 @@ impl DrawingPart {
                 let image_id = ImageId::new(filename);
                 if let Some(img) = workbook.images.get(&image_id) {
                     parts.insert(target_path, img.bytes.clone());
+                    continue;
+                }
+                if !parts.contains_key(&target_path) {
+                    return Err(XlsxError::Invalid(format!(
+                        "drawing references missing image {image_id:?} ({target_path})"
+                    )));
                 }
             }
         }
 
         Ok(())
     }
+
+    fn ensure_relationships_for_objects(&mut self) -> Result<()> {
+        for object in &mut self.objects {
+            let DrawingObjectKind::Image { image_id } = &object.kind else {
+                continue;
+            };
+
+            let embed_from_pic = object
+                .preserved
+                .get(PRESERVED_PIC_XML)
+                .and_then(|xml| extract_pic_embed_rel_id(xml));
+            let embed_from_meta = object.preserved.get(PRESERVED_EMBED_REL_ID).cloned();
+
+            let embed_rel_id = match (embed_from_meta, embed_from_pic) {
+                (Some(meta), Some(pic)) if meta != pic => {
+                    return Err(XlsxError::Invalid(format!(
+                        "drawing object {} has conflicting embed relationship ids ({PRESERVED_EMBED_REL_ID}={meta:?} vs {PRESERVED_PIC_XML} embed={pic:?})",
+                        object.id.0
+                    )));
+                }
+                (Some(meta), _) => meta,
+                (None, Some(pic)) => pic,
+                (None, None) => {
+                    let id = self.relationships.next_r_id();
+                    object
+                        .preserved
+                        .insert(PRESERVED_EMBED_REL_ID.to_string(), id.clone());
+                    id
+                }
+            };
+
+            let desired_target = format!("../media/{}", image_id.as_str());
+            match self.relationships.get(&embed_rel_id) {
+                Some(rel) => {
+                    if rel.type_ != REL_TYPE_IMAGE {
+                        return Err(XlsxError::Invalid(format!(
+                            "drawing object {} references non-image relationship id {embed_rel_id}",
+                            object.id.0
+                        )));
+                    }
+                }
+                None => {
+                    self.relationships.push(Relationship {
+                        id: embed_rel_id.clone(),
+                        type_: REL_TYPE_IMAGE.to_string(),
+                        target: desired_target.clone(),
+                        target_mode: None,
+                    });
+                }
+            }
+
+            // If the relationship exists but points at a different image, update it.
+            if let Some(rel) = self.relationships.get_mut(&embed_rel_id) {
+                rel.target = desired_target;
+            }
+
+            object
+                .preserved
+                .insert(PRESERVED_EMBED_REL_ID.to_string(), embed_rel_id.clone());
+
+            if !object.preserved.contains_key(PRESERVED_PIC_XML) {
+                let pic_xml = build_pic_xml(object.id.0, &embed_rel_id, object.size);
+                object
+                    .preserved
+                    .insert(PRESERVED_PIC_XML.to_string(), pic_xml);
+            }
+        }
+        Ok(())
+    }
+}
+
+fn extract_pic_embed_rel_id(pic_xml: &str) -> Option<String> {
+    // The preserved `pic_xml` snippet is not a standalone XML document (it relies on root
+    // namespace declarations), so use a simple string search instead of an XML parser.
+    //
+    // Excel emits `r:embed="rIdN"` for image blips.
+    let needle = "r:embed=\"";
+    let start = pic_xml.find(needle)? + needle.len();
+    let rest = &pic_xml[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
 }
 
 const XDR_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";

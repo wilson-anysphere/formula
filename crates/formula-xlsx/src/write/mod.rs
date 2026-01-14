@@ -1097,6 +1097,13 @@ fn build_parts(
             if let Some(drawing_part_path) = existing_drawing_part_path.as_deref() {
                 ensure_drawing_part_content_types(&mut parts, drawing_part_path)?;
             }
+            // If the caller updated `workbook.images` (for example to replace bytes for an existing
+            // `ImageId`), we still need to write those media bytes back to `xl/media/*` even when
+            // the drawing XML itself is unchanged.
+            //
+            // Keep the optimization above (avoid rewriting `xl/drawings/*.xml`) by updating only
+            // the media parts.
+            update_worksheet_drawing_media_parts(&mut parts, &doc.workbook, sheet);
         }
         if !is_new_sheet
             && !tab_color_changed
@@ -8538,6 +8545,33 @@ fn relationship_targets_by_type(rels_xml: &[u8], rel_type: &str) -> Result<Vec<S
         buf.clear();
     }
     Ok(out)
+}
+
+fn update_worksheet_drawing_media_parts(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    workbook: &formula_model::Workbook,
+    sheet: &Worksheet,
+) {
+    for object in &sheet.drawings {
+        let DrawingObjectKind::Image { image_id } = &object.kind else {
+            continue;
+        };
+
+        let Some(img) = workbook.images.get(image_id) else {
+            continue;
+        };
+
+        // DrawingML images typically live in `xl/media/<file name>`. Use the same convention as
+        // the drawing importer (`ImageId` is derived from the target's file name).
+        let part_name = format!("xl/media/{}", image_id.as_str());
+        let needs_update = parts
+            .get(&part_name)
+            .map(|existing| existing.as_slice() != img.bytes.as_slice())
+            .unwrap_or(true);
+        if needs_update {
+            parts.insert(part_name, img.bytes.clone());
+        }
+    }
 }
 
 fn ensure_drawing_part_content_types(

@@ -110,9 +110,7 @@ pub use package::{
     XlsxPackageLimits, MAX_XLSX_PACKAGE_PART_BYTES, MAX_XLSX_PACKAGE_TOTAL_BYTES,
 };
 pub use package_stream::StreamingXlsxPackage;
-pub use patch::{
-    CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches,
-};
+pub use patch::{CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches};
 pub use pivots::{
     cache_records::{pivot_cache_datetime_to_naive_date, PivotCacheRecordsReader, PivotCacheValue},
     graph::{PivotTableInstance, XlsxPivotGraph},
@@ -182,8 +180,8 @@ pub use writer::{
 };
 pub use xml::XmlDomError;
 
-use formula_model::rich_text::RichText;
 use formula_model::drawings::DrawingObject;
+use formula_model::rich_text::RichText;
 use formula_model::{CellRef, CellValue, Comment, ErrorValue, Workbook, WorksheetId};
 
 /// Excel date system used to interpret serialized dates.
