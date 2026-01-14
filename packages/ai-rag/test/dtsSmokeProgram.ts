@@ -42,6 +42,9 @@ async function smoke() {
 
   const store = new InMemoryVectorStore({ dimension: embedder.dimension });
   const storeAsBinary: BinaryStorage = new InMemoryBinaryStorage();
+  await storeAsBinary.save(new Uint8Array([0]));
+  await storeAsBinary.load();
+  await storeAsBinary.remove?.();
   void storeAsBinary;
 
   const record: VectorRecord = { id: "typed", vector: new Float32Array(embedder.dimension), metadata: { workbookId: "wb" } };
@@ -83,6 +86,7 @@ async function smoke() {
     resetOnCorrupt: true,
   });
   await jsonStore.load();
+  await jsonStore.listContentHashes({ workbookId: "wb", signal: abortController.signal });
   await jsonStore.batch(async () => {
     await jsonStore.upsert([{ id: "a", vector: new Float32Array(embedder.dimension), metadata: { workbookId: "wb" } }]);
     await jsonStore.updateMetadata([{ id: "a", metadata: { workbookId: "wb", tag: "json" } }]);
@@ -125,7 +129,13 @@ async function smoke() {
 
   await sqliteStore.list({ includeVector: true, signal: abortController.signal, workbookId: "wb" });
   await sqliteStore.listContentHashes({ workbookId: "wb", signal: abortController.signal });
+  await sqliteStore.get("a");
   await sqliteStore.query(new Float32Array(embedder.dimension), 3, { signal: abortController.signal });
+  await sqliteStore.query(new Float32Array(embedder.dimension), 3, {
+    workbookId: "wb",
+    signal: abortController.signal,
+    filter: (_metadata, _id) => true,
+  });
   await sqliteStore.updateMetadata([{ id: "a", metadata: { workbookId: "wb", tag: "sqlite" } }]);
   const deletedFromSqlite: number = await sqliteStore.deleteWorkbook("wb");
   void deletedFromSqlite;
@@ -137,6 +147,8 @@ async function smoke() {
   const localStorage = new LocalStorageBinaryStorage({ workbookId: "wb", namespace: "ns" });
   const key: string = localStorage.key;
   void key;
+  await localStorage.save(new Uint8Array([1, 2, 3]));
+  await localStorage.load();
   await localStorage.remove();
 
   const chunkedLocalStorage: BinaryStorage = new ChunkedLocalStorageBinaryStorage({ workbookId: "wb", namespace: "ns" });
@@ -189,7 +201,7 @@ async function smoke() {
   // (runtime reads it when present).
   const objectEmbedder = {
     name: "object-embedder",
-    async embedTexts(texts: string[]) {
+    async embedTexts(texts: string[], _options?: { signal?: AbortSignal }) {
       return texts.map(() => new Float32Array(embedder.dimension));
     },
   };
