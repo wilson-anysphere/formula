@@ -373,6 +373,18 @@ fn errors_on_missing_password_for_empty_password_fixture() {
 }
 
 #[test]
+fn errors_on_missing_password_for_standard_fixture() {
+    let standard_path = fixture_path("standard.xlsx");
+
+    let err = open_workbook_model_with_password(&standard_path, None)
+        .expect_err("expected missing password to error");
+    assert!(
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
+    );
+}
+
+#[test]
 fn errors_on_wrong_password_fixtures() {
     let agile_path = fixture_path("agile.xlsx");
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
