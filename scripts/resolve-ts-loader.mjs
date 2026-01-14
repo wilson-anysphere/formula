@@ -138,6 +138,15 @@ export async function load(url, context, defaultLoad) {
   // the on-disk file URL without the suffix.
   const urlObj = new URL(url);
   const pathname = urlObj.pathname;
+  // Vite-style `?raw` imports are used in a few desktop/node contexts (e.g. locale TSVs,
+  // bundled extension entrypoints). Node does not understand these by default, so treat
+  // them as "read the file and export a string".
+  if (urlObj.searchParams.has("raw")) {
+    urlObj.search = "";
+    urlObj.hash = "";
+    const source = await readFile(urlObj, "utf8");
+    return { format: "module", source: `export default ${JSON.stringify(source)};`, shortCircuit: true };
+  }
   if (pathname.endsWith(".ts") || pathname.endsWith(".tsx")) {
     let promise = transpileInFlight.get(url);
     if (!promise) {

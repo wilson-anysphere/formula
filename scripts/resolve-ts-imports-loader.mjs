@@ -36,6 +36,8 @@
  *   run in constrained environments.
  */
 
+import { readFile } from "node:fs/promises";
+
 /**
  * Split a module specifier into `[base, suffix]`, where suffix includes any query or
  * hash fragment (e.g. `?raw`, `#foo`).
@@ -130,4 +132,17 @@ export async function resolve(specifier, context, defaultResolve) {
 
     throw err;
   }
+}
+
+export async function load(url, context, defaultLoad) {
+  const urlObj = new URL(url);
+  // Support Vite-style `?raw` imports when running node:test suites directly against
+  // workspace TypeScript sources.
+  if (urlObj.searchParams.has("raw")) {
+    urlObj.search = "";
+    urlObj.hash = "";
+    const source = await readFile(urlObj, "utf8");
+    return { format: "module", source: `export default ${JSON.stringify(source)};`, shortCircuit: true };
+  }
+  return defaultLoad(url, context, defaultLoad);
 }
