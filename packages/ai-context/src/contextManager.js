@@ -1929,9 +1929,61 @@ export class ContextManager {
         : params.attachments;
       const shouldDropAllAttachmentData =
         Boolean(dlp) && structuredOverallDecision?.decision === DLP_DECISION.REDACT;
-      const attachmentsForPrompt = compactAttachmentsForPrompt(attachmentsForPromptUnsafe, {
+      const attachmentsForPromptBase = compactAttachmentsForPrompt(attachmentsForPromptUnsafe, {
         dropAllData: shouldDropAllAttachmentData,
       });
+      const attachmentsForPrompt = (() => {
+        // When DLP redaction is required due to structured selectors (document/sheet/range/cell),
+        // treat sheet-name tokens embedded in range attachment references as disallowed metadata too.
+        // Those tokens can include non-heuristic sensitive strings (e.g. "TopSecret") that a no-op
+        // redactor cannot detect.
+        if (!dlp || !shouldDropAllAttachmentData) return attachmentsForPromptBase;
+        if (!Array.isArray(attachmentsForPromptBase)) return attachmentsForPromptBase;
+
+        // Only redact the sheet-name portion when the structured policy decision disallows that
+        // sheet (document + sheet scope). Range-level structured decisions do not necessarily imply
+        // the sheet name itself is sensitive.
+        const index = getDlpDocumentIndex();
+
+        /**
+         * @param {string} sheetName
+         */
+        const sheetNameDisallowed = (sheetName) => {
+          const raw = String(sheetName ?? "");
+          if (!raw) return false;
+          // Best-effort: if we cannot build the structured index for any reason, be conservative
+          // and treat sheet-name tokens as disallowed under structured DLP redaction.
+          if (!index) return true;
+          const sheetId = resolveDlpSheetId(raw);
+          let classification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+          classification = maxClassification(classification, index.docClassificationMax);
+          const sheetMax = sheetId ? index.sheetClassificationMaxBySheetId.get(sheetId) : null;
+          if (sheetMax) classification = maxClassification(classification, sheetMax);
+          const decision = evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification,
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          });
+          return decision.decision !== DLP_DECISION.ALLOW;
+        };
+
+        return attachmentsForPromptBase.map((item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+          const type = item.type;
+          const reference = item.reference;
+          if (type !== "range" || typeof reference !== "string") return item;
+          let parsed;
+          try {
+            parsed = parseA1Range(reference);
+          } catch {
+            return item;
+          }
+          if (!parsed.sheetName) return item;
+          if (!sheetNameDisallowed(parsed.sheetName)) return item;
+          return { ...item, reference: rangeToA1({ ...parsed, sheetName: "[REDACTED]" }) };
+        });
+      })();
 
       const schemaRestrictedDecision = dlp
         ? evaluatePolicy({
