@@ -908,6 +908,100 @@ mod tests {
     }
 
     #[test]
+    fn pivot_table_to_engine_config_treats_page_field_negative_item_as_all() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pageFields count="1">
+    <pageField fld="0" item="-1"/>
+  </pageFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Region".to_string(),
+                shared_items: Some(vec![PivotCacheValue::String("East".to_string())]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(
+            cfg.filter_fields,
+            vec![FilterField {
+                source_field: "Region".to_string(),
+                allowed: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn pivot_table_to_engine_config_page_field_out_of_range_item_falls_back_to_all() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pageFields count="1">
+    <pageField fld="0" item="99"/>
+  </pageFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Region".to_string(),
+                shared_items: Some(vec![PivotCacheValue::String("East".to_string())]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(
+            cfg.filter_fields,
+            vec![FilterField {
+                source_field: "Region".to_string(),
+                allowed: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn pivot_table_to_engine_config_canonicalizes_numeric_page_field_items() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pageFields count="1">
+    <pageField fld="0" item="0"/>
+  </pageFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Metric".to_string(),
+                shared_items: Some(vec![PivotCacheValue::Number(-0.0)]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+
+        let allowed = cfg.filter_fields[0]
+            .allowed
+            .as_ref()
+            .expect("expected allowed set for selected page field item");
+
+        assert!(allowed.contains(&PivotKeyPart::Number(0.0_f64.to_bits())));
+        assert!(!allowed.contains(&PivotKeyPart::Number((-0.0_f64).to_bits())));
+    }
+
+    #[test]
     fn maps_descending_sort_type_into_engine_field() {
         let table_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
