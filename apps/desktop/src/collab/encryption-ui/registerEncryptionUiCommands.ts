@@ -64,8 +64,16 @@ function keyIdFromEncryptedCellPayload(session: any, cell: { sheetId: string; ro
       if (!raw || typeof raw !== "object" || typeof (raw as any).get !== "function") continue;
       const enc = (raw as any).get("enc");
       if (enc == null) continue;
-      if (!isEncryptedCellPayload(enc)) continue;
-      const keyId = String((enc as any).keyId ?? "").trim();
+      // Best-effort: treat any object with a string `keyId` as an encrypted payload, even if
+      // the payload schema is unknown/unsupported by this client. This avoids key-id
+      // conflicts (encryptSelectedRange) and allows export flows to still identify which key
+      // id is needed (even if the client cannot decrypt/edit the cell).
+      const keyId =
+        typeof enc === "object" && enc && typeof (enc as any).keyId === "string"
+          ? String((enc as any).keyId ?? "").trim()
+          : isEncryptedCellPayload(enc)
+            ? String((enc as any).keyId ?? "").trim()
+            : "";
       if (keyId) return keyId;
     }
   } catch {
