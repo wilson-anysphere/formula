@@ -27,8 +27,8 @@
 }
 
 .what-if-dialog {
-  width: min(420px, calc(100vw - 32px));
-  max-height: min(640px, calc(100vh - 32px));
+  width: min(420px, calc(100vw - (var(--space-6) * 2)));
+  max-height: min(640px, calc(100vh - (var(--space-6) * 2)));
   overflow: auto;
   border: 1px solid var(--dialog-border);
   border-radius: var(--radius);

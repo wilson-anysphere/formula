@@ -1208,7 +1208,7 @@
 .toast {
   pointer-events: auto;
   min-width: 240px;
-  max-width: min(520px, calc(100vw - 32px));
+  max-width: min(520px, calc(100vw - (var(--space-6) * 2)));
   padding: 8px 10px;
   border-radius: var(--radius);
   border: 1px solid var(--panel-border);

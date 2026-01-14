@@ -6,7 +6,7 @@
 */
 
 dialog.extensions-ui {
-  width: min(520px, calc(100vw - 32px));
+  width: min(520px, calc(100vw - (var(--space-6) * 2)));
 }
 
 .extensions-ui .dialog__field {
