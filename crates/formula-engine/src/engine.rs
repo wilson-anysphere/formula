@@ -9711,80 +9711,6 @@ struct PrefixLowerErrorFlags {
     unknown_sheet: bool,
 }
 
-fn canonical_expr_contains_workbook_prefix(expr: &crate::Expr) -> bool {
-    match expr {
-        crate::Expr::CellRef(r) => r.workbook.is_some(),
-        crate::Expr::ColRef(r) => r.workbook.is_some(),
-        crate::Expr::RowRef(r) => r.workbook.is_some(),
-        crate::Expr::NameRef(r) => r.workbook.is_some(),
-        crate::Expr::StructuredRef(r) => r.workbook.is_some(),
-        crate::Expr::FieldAccess(access) => canonical_expr_contains_workbook_prefix(access.base.as_ref()),
-        crate::Expr::FunctionCall(call) => call
-            .args
-            .iter()
-            .any(|arg| canonical_expr_contains_workbook_prefix(arg)),
-        crate::Expr::Call(call) => {
-            canonical_expr_contains_workbook_prefix(call.callee.as_ref())
-                || call
-                    .args
-                    .iter()
-                    .any(|arg| canonical_expr_contains_workbook_prefix(arg))
-        }
-        crate::Expr::Unary(u) => canonical_expr_contains_workbook_prefix(&u.expr),
-        crate::Expr::Postfix(p) => canonical_expr_contains_workbook_prefix(&p.expr),
-        crate::Expr::Binary(b) => {
-            canonical_expr_contains_workbook_prefix(&b.left)
-                || canonical_expr_contains_workbook_prefix(&b.right)
-        }
-        crate::Expr::Array(arr) => arr
-            .rows
-            .iter()
-            .flatten()
-            .any(|el| canonical_expr_contains_workbook_prefix(el)),
-        crate::Expr::Number(_)
-        | crate::Expr::String(_)
-        | crate::Expr::Boolean(_)
-        | crate::Expr::Error(_)
-        | crate::Expr::Missing => false,
-    }
-}
-
-fn canonical_expr_indirect_literal_is_external_workbook_ref(call: &crate::FunctionCall) -> bool {
-    if call.name.name_upper.as_str() != "INDIRECT" {
-        return false;
-    }
-    let Some(crate::Expr::String(text)) = call.args.first() else {
-        return false;
-    };
-    let a1 = match call.args.get(1) {
-        None => true,
-        Some(crate::Expr::Boolean(v)) => *v,
-        // Can't statically determine reference style.
-        _ => return false,
-    };
-    let ref_text = text.trim();
-    if ref_text.is_empty() {
-        return false;
-    }
-
-    let parsed = crate::parse_formula(
-        ref_text,
-        crate::ParseOptions {
-            locale: crate::LocaleConfig::en_us(),
-            reference_style: if a1 {
-                crate::ReferenceStyle::A1
-            } else {
-                crate::ReferenceStyle::R1C1
-            },
-            normalize_relative_to: None,
-        },
-    );
-    let Ok(parsed) = parsed else {
-        return false;
-    };
-    canonical_expr_contains_workbook_prefix(&parsed.expr)
-}
-
 fn canonical_expr_depends_on_lowering_prefix_error(
     expr: &crate::Expr,
     current_sheet: SheetId,
@@ -9867,14 +9793,6 @@ fn canonical_expr_collect_sheet_prefix_errors(
             );
         }
         crate::Expr::FunctionCall(call) => {
-            // Excel's INDIRECT does not resolve references into external workbooks. When the
-            // external workbook reference is visible at compile time (string literal), force
-            // bytecode fallback so the AST engine produces the Excel-compatible `#REF!`.
-            if !flags.external_reference
-                && canonical_expr_indirect_literal_is_external_workbook_ref(call)
-            {
-                flags.external_reference = true;
-            }
             for arg in &call.args {
                 canonical_expr_collect_sheet_prefix_errors(arg, current_sheet, workbook, flags);
             }
