@@ -673,7 +673,7 @@ impl DaxEngine {
                                 }
                             }
                             Ok(Value::Boolean(false))
-                        }
+                                 }
                                  TableResult::PhysicalAll {
                                      table,
                                      row_count,
@@ -3156,19 +3156,19 @@ impl DaxEngine {
                                      }
                                      out
                                  }
-                                TableResult::Virtual { columns, rows } => {
-                                    if columns.len() != 1 {
-                                        return Err(DaxError::Eval(
-                                            "IN currently only supports one-column tables".into(),
-                                        ));
-                                    }
-                                    rows.into_iter()
-                                        .map(|row_values| {
-                                            row_values.get(0).cloned().unwrap_or(Value::Blank)
-                                        })
-                                        .collect()
-                                }
-                            };
+                                 TableResult::Virtual { columns, rows } => {
+                                     if columns.len() != 1 {
+                                         return Err(DaxError::Eval(
+                                             "IN currently only supports one-column tables".into(),
+                                         ));
+                                     }
+                                     rows.into_iter()
+                                         .map(|row_values| {
+                                             row_values.get(0).cloned().unwrap_or(Value::Blank)
+                                         })
+                                         .collect()
+                                 }
+                             };
 
                             column_filters.push((key, values));
                             Ok(())
