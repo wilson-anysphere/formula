@@ -142,6 +142,12 @@ jobs:
       - name: Apply workflow_dispatch perf overrides
         if: github.event_name == 'workflow_dispatch'
         shell: bash
+        env:
+          INPUT_STARTUP_RUNS: ${{ inputs.startupRuns }}
+          INPUT_STARTUP_TIMEOUT_MS: ${{ inputs.startupTimeoutMs }}
+          INPUT_MEMORY_RUNS: ${{ inputs.memoryRuns }}
+          INPUT_MEMORY_TIMEOUT_MS: ${{ inputs.memoryTimeoutMs }}
+          INPUT_MEMORY_SETTLE_MS: ${{ inputs.memorySettleMs }}
         run: |
           set -euo pipefail
 
@@ -175,11 +181,11 @@ jobs:
             echo "${env_key}=${value}" >> "$GITHUB_ENV"
           }
 
-          write_int_override "DESKTOP_STARTUP_RUNS" "startupRuns" "${{ inputs.startupRuns }}" 1
-          write_int_override "DESKTOP_STARTUP_TIMEOUT_MS" "startupTimeoutMs" "${{ inputs.startupTimeoutMs }}" 1
-          write_int_override "DESKTOP_MEMORY_RUNS" "memoryRuns" "${{ inputs.memoryRuns }}" 1
-          write_int_override "DESKTOP_MEMORY_TIMEOUT_MS" "memoryTimeoutMs" "${{ inputs.memoryTimeoutMs }}" 1
-          write_int_override "DESKTOP_MEMORY_SETTLE_MS" "memorySettleMs" "${{ inputs.memorySettleMs }}" 0
+          write_int_override "DESKTOP_STARTUP_RUNS" "startupRuns" "$INPUT_STARTUP_RUNS" 1
+          write_int_override "DESKTOP_STARTUP_TIMEOUT_MS" "startupTimeoutMs" "$INPUT_STARTUP_TIMEOUT_MS" 1
+          write_int_override "DESKTOP_MEMORY_RUNS" "memoryRuns" "$INPUT_MEMORY_RUNS" 1
+          write_int_override "DESKTOP_MEMORY_TIMEOUT_MS" "memoryTimeoutMs" "$INPUT_MEMORY_TIMEOUT_MS" 1
+          write_int_override "DESKTOP_MEMORY_SETTLE_MS" "memorySettleMs" "$INPUT_MEMORY_SETTLE_MS" 0
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
