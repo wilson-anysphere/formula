@@ -11,6 +11,7 @@ import { createRibbonActionsFromCommands, createRibbonFileActionsFromCommands } 
 import { executeCellsStructuralRibbonCommand } from "./cellsStructuralCommands.js";
 import { handleRibbonCommand as handleRibbonFormattingCommand, handleRibbonToggle as handleRibbonFormattingToggle } from "./commandHandlers.js";
 import { handleHomeCellsInsertDeleteCommand } from "./homeCellsCommands.js";
+import { computeSelectionFormatState } from "./selectionFormatState.js";
 import type { RibbonActions } from "./ribbonSchema.js";
 
 export type RibbonToastType = "info" | "success" | "warning" | "error";
@@ -111,28 +112,36 @@ export function createRibbonActions(deps: RibbonCommandRouterDeps): RibbonAction
 
     // Guard before prompting so users don't enter a format code only to hit selection size caps on apply.
     // (Matches `applyFormattingToSelection` behavior.)
-    {
-      const selection = deps.app.getSelectionRanges();
-      const limits = getGridLimitsForFormatting();
-      const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
-      if (!decision.allowed) {
-        deps.showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
-        safeFocusGrid(deps.app);
-        return;
-      }
-
-      if (deps.app.isReadOnly?.() === true && !decision.allRangesBand) {
-        deps.showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
-        safeFocusGrid(deps.app);
-        return;
-      }
+    const selection = deps.app.getSelectionRanges();
+    const limits = getGridLimitsForFormatting();
+    const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
+    if (!decision.allowed) {
+      deps.showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
+      safeFocusGrid(deps.app);
+      return;
     }
+
+    if (deps.app.isReadOnly?.() === true && !decision.allRangesBand) {
+      deps.showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
+      safeFocusGrid(deps.app);
+      return;
+    }
+
+    const getSelectionNumberFormat = (): string | null => {
+      const ranges = selection;
+      if (!Array.isArray(ranges) || ranges.length === 0) return deps.getActiveCellNumberFormat();
+      // Be exhaustive when selections are under the standard formatting cap, but sample for large band selections.
+      const maxInspectCells = decision.allRangesBand ? 256 : decision.totalCells;
+      const state = computeSelectionFormatState(deps.app.getDocument(), deps.app.getCurrentSheetId(), ranges, { maxInspectCells });
+      return typeof state.numberFormat === "string" ? state.numberFormat : null;
+    };
 
     void promptAndApplyCustomNumberFormat({
       isEditing: () => deps.isSpreadsheetEditing(),
       showInputBox: deps.showInputBox,
-      getActiveCellNumberFormat: deps.getActiveCellNumberFormat,
+      getSelectionNumberFormat,
       applyFormattingToSelection: deps.applyFormattingToSelection,
+      showToast: (message, type) => deps.showToast(message, type),
     }).finally(() => safeFocusGrid(deps.app));
   };
 
