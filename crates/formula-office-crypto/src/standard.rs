@@ -173,11 +173,36 @@ pub(crate) fn verify_password_standard(
                 )));
             }
 
-            let mut verifier_plain = verifier.encrypted_verifier.clone();
-            crate::crypto::rc4_xor_in_place(key0.as_slice(), &mut verifier_plain)?;
+            // RC4 is a stream cipher. CryptoAPI encrypts/decrypts the verifier and verifier hash
+            // using the **same** RC4 stream (continuing the keystream), so we must apply RC4 to the
+            // concatenated bytes rather than resetting the cipher per field.
+            //
+            // Additionally, CryptoAPI/Office represent "40-bit" RC4 keys as a 128-bit key where the
+            // high 88 bits are zero (see `docs/offcrypto-standard-cryptoapi.md`).
+            let rc4_key: Zeroizing<Vec<u8>> = if header.key_bits == 40 {
+                if key0.len() != 5 {
+                    return Err(OfficeCryptoError::InvalidFormat(format!(
+                        "derived RC4 key for keySize=40 must be 5 bytes (got {})",
+                        key0.len()
+                    )));
+                }
+                let mut padded = vec![0u8; 16];
+                padded[..5].copy_from_slice(&key0[..5]);
+                Zeroizing::new(padded)
+            } else {
+                // Other key sizes are passed through directly.
+                key0.clone()
+            };
 
-            let mut verifier_hash_plain = verifier.encrypted_verifier_hash.clone();
-            crate::crypto::rc4_xor_in_place(key0.as_slice(), &mut verifier_hash_plain)?;
+            let mut buf = Vec::with_capacity(
+                verifier.encrypted_verifier.len() + verifier.encrypted_verifier_hash.len(),
+            );
+            buf.extend_from_slice(&verifier.encrypted_verifier);
+            buf.extend_from_slice(&verifier.encrypted_verifier_hash);
+            crate::crypto::rc4_xor_in_place(rc4_key.as_slice(), &mut buf)?;
+
+            let verifier_plain = buf[..16].to_vec();
+            let verifier_hash_plain = buf[16..].to_vec();
             (verifier_plain, verifier_hash_plain)
         }
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
@@ -575,14 +600,26 @@ pub(crate) mod tests {
                     "for RC4, keyLen should be <= hashLen (truncation case)"
                 );
 
-                // Encrypt verifier + verifierHash with RC4 using a fresh cipher for each field.
-                let mut encrypted_verifier = verifier_plain.to_vec();
-                rc4_xor_in_place(&key_ref, &mut encrypted_verifier).expect("rc4 encrypt verifier");
-
+                // Encrypt verifier + verifierHash with RC4 using a **single** stream that continues
+                // across both fields (CryptoAPI behavior). For 40-bit keys, Office uses a 128-bit
+                // key with the high bits zero.
                 let verifier_hash = hash_alg.digest(&verifier_plain);
-                let mut encrypted_verifier_hash = verifier_hash.clone();
-                rc4_xor_in_place(&key_ref, &mut encrypted_verifier_hash)
-                    .expect("rc4 encrypt verifier hash");
+
+                let rc4_key = if key_bits == 40 {
+                    let mut padded = vec![0u8; 16];
+                    padded[..5].copy_from_slice(&key_ref[..5]);
+                    padded
+                } else {
+                    key_ref.clone()
+                };
+
+                let mut buf = Vec::with_capacity(verifier_plain.len() + verifier_hash.len());
+                buf.extend_from_slice(&verifier_plain);
+                buf.extend_from_slice(&verifier_hash);
+                rc4_xor_in_place(&rc4_key, &mut buf).expect("rc4 encrypt verifier+hash");
+
+                let encrypted_verifier = buf[..16].to_vec();
+                let encrypted_verifier_hash = buf[16..].to_vec();
 
                 let header = EncryptionHeader {
                     alg_id: CALG_RC4,
