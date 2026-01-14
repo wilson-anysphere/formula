@@ -1396,8 +1396,19 @@ impl Engine {
     /// the worksheet's OOXML `<sheetFormatPr defaultColWidth="...">` attribute.
     pub fn set_sheet_default_col_width(&mut self, sheet: &str, width: Option<f32>) {
         let sheet_id = self.workbook.ensure_sheet(sheet);
-        if let Some(s) = self.workbook.sheets.get_mut(sheet_id) {
-            s.default_col_width = width;
+        let Some(s) = self.workbook.sheets.get_mut(sheet_id) else {
+            return;
+        };
+
+        if s.default_col_width == width {
+            return;
+        }
+        s.default_col_width = width;
+
+        // Like `set_col_width`, default column width metadata can affect `CELL("width")`. That
+        // function is volatile, so we only need to trigger an auto recalc (no full dirtying).
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
         }
     }
 

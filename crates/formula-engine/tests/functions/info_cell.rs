@@ -287,6 +287,26 @@ fn cell_width_uses_sheet_default_width_when_present() {
 }
 
 #[test]
+fn cell_width_updates_on_sheet_default_width_change_in_automatic_mode() {
+    use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Automatic,
+        ..CalcSettings::default()
+    });
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=CELL(\"width\",A1)")
+        .unwrap();
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 8.0);
+
+    engine.set_sheet_default_col_width("Sheet1", Some(20.0));
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 20.0);
+}
+
+#[test]
 fn cell_width_prefers_per_column_override_and_sets_custom_flag() {
     let mut sheet = TestSheet::new();
     sheet.set_default_col_width(Some(20.0));

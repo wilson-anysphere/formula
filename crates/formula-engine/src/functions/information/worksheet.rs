@@ -419,7 +419,9 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             // column properties, not the referenced cell's value, and recording it can introduce
             // spurious circular references (e.g. `=CELL("width", A1)` in A1).
 
-            // We return the stored column width in Excel "character" units (OOXML `col/@width`).
+            // Excel returns a number whose integer part is the column width (in characters) and
+            // whose first decimal digit is `0` when the column uses the sheet default width or `1`
+            // when it uses an explicit per-column width.
             const EXCEL_STANDARD_COL_WIDTH: f64 = 8.43;
 
             let props = ctx.col_properties(&reference.sheet_id, addr.col);
@@ -427,15 +429,17 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 return Value::Number(0.0);
             }
 
-            let width = match props.and_then(|p| p.width) {
-                Some(w) => w as f64,
+            let (width, is_custom) = match props.and_then(|p| p.width) {
+                Some(w) => (w as f64, true),
                 None => match ctx.sheet_default_col_width(&reference.sheet_id) {
-                    Some(w) => w as f64,
-                    None => EXCEL_STANDARD_COL_WIDTH,
+                    Some(w) => (w as f64, false),
+                    None => (EXCEL_STANDARD_COL_WIDTH, false),
                 },
             };
 
-            Value::Number(width)
+            let chars = width.floor();
+            let flag = if is_custom { 0.1 } else { 0.0 };
+            Value::Number(chars + flag)
         }
         CellInfoType::Protect => {
             // `CELL("protect")` consults cell protection metadata but should avoid recording an
