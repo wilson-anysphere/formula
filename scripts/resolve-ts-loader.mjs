@@ -237,7 +237,7 @@ export async function resolve(specifier, context, defaultResolve) {
                 : `./${target}`;
             const absPath = path.resolve(info.rootDir, cleaned);
             const url = pathToFileURL(absPath).href + suffix;
-            return { url };
+            return { url, shortCircuit: true };
           }
         }
       }
