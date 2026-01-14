@@ -237,9 +237,49 @@ function Expected-SentinelTranslations {
   param([Parameter(Mandatory = $true)][string]$LocaleId)
 
   switch ($LocaleId) {
-    "de-DE" { return @{ SUM = "SUMME"; IF = "WENN"; TRUE = "WAHR"; FALSE = "FALSCH" } }
-    "es-ES" { return @{ SUM = "SUMA"; IF = "SI"; TRUE = "VERDADERO"; FALSE = "FALSO" } }
-    "fr-FR" { return @{ SUM = "SOMME"; IF = "SI"; TRUE = "VRAI"; FALSE = "FAUX" } }
+    # Keep these lists small and high-signal: they exist to catch a common failure mode where Excel
+    # is misconfigured (wrong UI language pack) or too old to recognize modern functions. In those
+    # cases Excel can silently fall back to canonical/English spellings, producing incorrect locale
+    # sources.
+    #
+    # These are warnings only; the extraction loop + `-FailOnSkipped` is the real completeness
+    # enforcement for committed sources.
+    "de-DE" {
+      return @{
+        SUM = "SUMME"
+        IF = "WENN"
+        TRUE = "WAHR"
+        FALSE = "FALSCH"
+        TEXTJOIN = "TEXTVERKETTEN"
+        XLOOKUP = "XVERWEIS"
+        UNIQUE = "EINDEUTIG"
+      }
+    }
+    "es-ES" {
+      return @{
+        SUM = "SUMA"
+        IF = "SI"
+        TRUE = "VERDADERO"
+        FALSE = "FALSO"
+        FILTER = "FILTRAR"
+        TEXTJOIN = "UNIRCADENAS"
+        TEXTSPLIT = "DIVIDIRTEXTO"
+        UNIQUE = "UNICOS"
+        XLOOKUP = "BUSCARX"
+      }
+    }
+    "fr-FR" {
+      return @{
+        SUM = "SOMME"
+        IF = "SI"
+        TRUE = "VRAI"
+        FALSE = "FAUX"
+        FILTER = "FILTRE"
+        TEXTJOIN = "JOINDRE.TEXTE"
+        TEXTSPLIT = "FRACTIONNER.TEXTE"
+        XLOOKUP = "RECHERCHEX"
+      }
+    }
     default { return $null }
   }
 }
@@ -317,6 +357,24 @@ function Warn-IfExcelLocaleSeemsMisconfigured {
     @{ canonical = "TRUE"; formula = "=TRUE()" },
     @{ canonical = "FALSE"; formula = "=FALSE()" }
   )
+
+  # Modern/dynamic-array-era functions are a common failure mode on older Excel builds.
+  # Prefer small array-constant formulas so we don't depend on sheet state.
+  if ($expected.ContainsKey("FILTER")) {
+    $checks += @{ canonical = "FILTER"; formula = '=FILTER({1},{TRUE})' }
+  }
+  if ($expected.ContainsKey("TEXTJOIN")) {
+    $checks += @{ canonical = "TEXTJOIN"; formula = '=TEXTJOIN(",",TRUE,"x")' }
+  }
+  if ($expected.ContainsKey("TEXTSPLIT")) {
+    $checks += @{ canonical = "TEXTSPLIT"; formula = '=TEXTSPLIT("a,b",",")' }
+  }
+  if ($expected.ContainsKey("UNIQUE")) {
+    $checks += @{ canonical = "UNIQUE"; formula = '=UNIQUE({1,2,2})' }
+  }
+  if ($expected.ContainsKey("XLOOKUP")) {
+    $checks += @{ canonical = "XLOOKUP"; formula = '=XLOOKUP(1,{1},{1})' }
+  }
 
   foreach ($c in $checks) {
     $canonical = [string]$c.canonical

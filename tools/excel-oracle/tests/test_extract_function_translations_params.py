@@ -54,6 +54,9 @@ class ExtractFunctionTranslationsScriptTests(unittest.TestCase):
         self.assertIn('IF = "WENN"', text)
         self.assertIn('TRUE = "WAHR"', text)
         self.assertIn('FALSE = "FALSCH"', text)
+        # Modern functions used as additional "is Excel new enough + correctly localized?" checks.
+        self.assertIn('TEXTJOIN = "TEXTVERKETTEN"', text)
+        self.assertIn('XLOOKUP = "XVERWEIS"', text)
 
 
 if __name__ == "__main__":
