@@ -184,6 +184,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
     loop {
         match reader.read_event_into(buf)? {
             Event::Start(e) if super::local_name(e.name().as_ref()) == b"row" => {
+                let e = e.into_owned();
                 let row_num = row_num_from_attrs(&e)?;
                 let has_unknown_attrs = row_has_unknown_attrs(&e)?;
                 let keep_due_to_row_props = sheet.row_properties(row_num.saturating_sub(1)).is_some();
@@ -204,7 +205,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                 )?;
 
                 let mut row_writer = Writer::new(Vec::new());
-                row_writer.write_event(Event::Start(e.into_owned()))?;
+                write_patched_row_tag(&mut row_writer, e, sheet, style_to_xf, row_num, false)?;
                 let outcome = patch_row_contents(
                     doc,
                     sheet_meta,
@@ -231,6 +232,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                 }
             }
             Event::Empty(e) if super::local_name(e.name().as_ref()) == b"row" => {
+                let e = e.into_owned();
                 let row_num = row_num_from_attrs(&e)?;
                 let has_unknown_attrs = row_has_unknown_attrs(&e)?;
                 let keep_due_to_row_props = sheet.row_properties(row_num.saturating_sub(1)).is_some();
@@ -252,7 +254,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
 
                 if peek_row(desired_cells, *desired_idx) != Some(row_num) {
                     if has_unknown_attrs || keep_due_to_row_props {
-                        writer.write_event(Event::Empty(e.into_owned()))?;
+                        write_patched_row_tag(writer, e, sheet, style_to_xf, row_num, true)?;
                     } else {
                         // Drop empty placeholder rows that were introduced solely to hold cells
                         // that are no longer present in the model.
@@ -262,7 +264,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     // Row existed but was empty; expand and insert any desired cells.
                     let row_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                     let mut row_writer = Writer::new(Vec::new());
-                    row_writer.write_event(Event::Start(e.into_owned()))?;
+                    write_patched_row_tag(&mut row_writer, e, sheet, style_to_xf, row_num, false)?;
                     write_remaining_cells_in_row(
                         doc,
                         sheet_meta,
@@ -746,7 +748,6 @@ fn write_new_row<W: Write>(
     let mut row_start = BytesStart::new(tags.row.as_str());
     let row_str = row_num.to_string();
     row_start.push_attribute(("r", row_str.as_str()));
-
     let outline_entry = sheet.outline.rows.entry(row_num);
     let row_props = sheet.row_properties(row_num.saturating_sub(1));
 
@@ -1463,6 +1464,231 @@ fn row_has_unknown_attrs(e: &BytesStart<'_>) -> Result<bool, WriteError> {
         }
     }
     Ok(false)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct RowSemantics {
+    height: Option<f32>,
+    hidden: bool,
+    /// Optional style xf index, gated by `customFormat="1"` semantics.
+    style_xf: Option<u32>,
+}
+
+fn row_semantics_from_model(
+    sheet: &Worksheet,
+    style_to_xf: &HashMap<u32, u32>,
+    row_num: u32,
+) -> RowSemantics {
+    let props = sheet.row_properties(row_num.saturating_sub(1));
+    let height = props.and_then(|p| p.height);
+    let hidden = props.map(|p| p.hidden).unwrap_or(false);
+    let style_xf = props
+        .and_then(|p| p.style_id)
+        .map(|style_id| {
+            if style_id == 0 {
+                0
+            } else {
+                style_to_xf.get(&style_id).copied().unwrap_or(0)
+            }
+        });
+
+    RowSemantics {
+        height,
+        hidden,
+        style_xf,
+    }
+}
+
+fn row_semantics_from_xml(e: &BytesStart<'_>) -> Result<RowSemantics, WriteError> {
+    let mut ht: Option<f32> = None;
+    let mut custom_height: Option<bool> = None;
+    let mut hidden = false;
+    let mut s: Option<u32> = None;
+    let mut custom_format = false;
+
+    for attr in e.attributes() {
+        let attr = attr?;
+        let val = attr.unescape_value()?.into_owned();
+        match attr.key.as_ref() {
+            b"ht" => ht = val.parse::<f32>().ok(),
+            b"customHeight" => custom_height = Some(super::parse_xml_bool(&val)),
+            b"hidden" => hidden = super::parse_xml_bool(&val),
+            b"s" => s = val.parse::<u32>().ok(),
+            b"customFormat" => custom_format = super::parse_xml_bool(&val),
+            _ => {}
+        }
+    }
+
+    let height = if custom_height == Some(false) { None } else { ht };
+    let style_xf = if custom_format { Some(s.unwrap_or(0)) } else { None };
+
+    Ok(RowSemantics {
+        height,
+        hidden,
+        style_xf,
+    })
+}
+
+fn is_xml_whitespace(b: u8) -> bool {
+    matches!(b, b' ' | b'\n' | b'\r' | b'\t')
+}
+
+fn extract_unknown_row_attr_segments(e: &BytesStart<'_>) -> Vec<Vec<u8>> {
+    // `BytesStart`'s underlying buffer contains the original start tag content:
+    // `row r="1" spans="1:2" x14ac:dyDescent="0.25"`.
+    //
+    // We preserve *unknown* attribute segments byte-for-byte by slicing this raw buffer,
+    // while we synthesize managed attributes from the model.
+    //
+    // If parsing fails for any reason, return an empty list (fallback is to rewrite the tag
+    // without preserving unknown attrs).
+    const MANAGED: [&[u8]; 6] = [b"r", b"ht", b"customHeight", b"hidden", b"s", b"customFormat"];
+
+    let raw = e.as_ref();
+    let name_len = e.name().as_ref().len();
+    if raw.len() < name_len {
+        return Vec::new();
+    }
+
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    let mut i = name_len;
+    while i < raw.len() {
+        let seg_start = i;
+        while i < raw.len() && is_xml_whitespace(raw[i]) {
+            i += 1;
+        }
+        if i >= raw.len() {
+            break;
+        }
+
+        let key_start = i;
+        while i < raw.len() && !is_xml_whitespace(raw[i]) && raw[i] != b'=' {
+            i += 1;
+        }
+        let key_end = i;
+
+        while i < raw.len() && is_xml_whitespace(raw[i]) {
+            i += 1;
+        }
+        if i >= raw.len() || raw[i] != b'=' {
+            break;
+        }
+        i += 1;
+        while i < raw.len() && is_xml_whitespace(raw[i]) {
+            i += 1;
+        }
+        if i >= raw.len() {
+            break;
+        }
+
+        let quote = raw[i];
+        if quote != b'"' && quote != b'\'' {
+            break;
+        }
+        i += 1;
+        while i < raw.len() {
+            if raw[i] == quote {
+                i += 1;
+                break;
+            }
+            i += 1;
+        }
+        if i > raw.len() {
+            break;
+        }
+
+        let key = &raw[key_start..key_end];
+        if !MANAGED.iter().any(|managed| managed == &key) {
+            out.push(raw[seg_start..i].to_vec());
+        }
+    }
+
+    out
+}
+
+fn build_patched_row_tag_bytes(
+    e: &BytesStart<'_>,
+    row_num: u32,
+    desired: RowSemantics,
+    empty_element: bool,
+) -> Vec<u8> {
+    let name = e.name();
+    let name = name.as_ref();
+
+    let mut out = Vec::new();
+    out.push(b'<');
+    out.extend_from_slice(name);
+
+    // Managed attrs.
+    out.extend_from_slice(br#" r=""#);
+    out.extend_from_slice(row_num.to_string().as_bytes());
+    out.push(b'"');
+
+    if let Some(height) = desired.height {
+        out.extend_from_slice(br#" ht=""#);
+        out.extend_from_slice(height.to_string().as_bytes());
+        out.push(b'"');
+        out.extend_from_slice(br#" customHeight="1""#);
+    }
+
+    if desired.hidden {
+        out.extend_from_slice(br#" hidden="1""#);
+    }
+
+    if let Some(style_xf) = desired.style_xf {
+        out.extend_from_slice(br#" s=""#);
+        out.extend_from_slice(style_xf.to_string().as_bytes());
+        out.push(b'"');
+        out.extend_from_slice(br#" customFormat="1""#);
+    }
+
+    // Unknown attrs, preserved byte-for-byte.
+    for seg in extract_unknown_row_attr_segments(e) {
+        out.extend_from_slice(&seg);
+    }
+
+    if empty_element {
+        out.extend_from_slice(b"/>");
+    } else {
+        out.push(b'>');
+    }
+    out
+}
+
+fn write_patched_row_tag<W: Write>(
+    writer: &mut Writer<W>,
+    e: BytesStart<'static>,
+    sheet: &Worksheet,
+    style_to_xf: &HashMap<u32, u32>,
+    row_num: u32,
+    empty_element: bool,
+) -> Result<(), WriteError> {
+    // If we can't address the row, preserve it unchanged.
+    if row_num == 0 {
+        if empty_element {
+            writer.write_event(Event::Empty(e))?;
+        } else {
+            writer.write_event(Event::Start(e))?;
+        }
+        return Ok(());
+    }
+
+    let desired = row_semantics_from_model(sheet, style_to_xf, row_num);
+    let original = row_semantics_from_xml(&e)?;
+
+    // If no semantic change is required, preserve the original start tag verbatim.
+    if desired == original {
+        if empty_element {
+            writer.write_event(Event::Empty(e))?;
+        } else {
+            writer.write_event(Event::Start(e))?;
+        }
+        return Ok(());
+    }
+
+    let bytes = build_patched_row_tag_bytes(&e, row_num, desired, empty_element);
+    writer.get_mut().write_all(&bytes)?;
+    Ok(())
 }
 
 fn peek_row(desired_cells: &[(CellRef, &formula_model::Cell)], idx: usize) -> Option<u32> {

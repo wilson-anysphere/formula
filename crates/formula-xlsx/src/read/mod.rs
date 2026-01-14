@@ -2731,9 +2731,12 @@ fn parse_worksheet_into_model(
                 let mut max: Option<u32> = None;
                 let mut width: Option<f32> = None;
                 let mut custom_width: Option<bool> = None;
-                let mut style: Option<u32> = None;
-                let mut custom_format: Option<bool> = None;
                 let mut hidden = false;
+                let mut style: Option<u32> = None;
+                // `customFormat` is not a standard `<col>` attribute in SpreadsheetML, but some
+                // producers emit it alongside `style`. If present and explicitly `0`, treat it as
+                // clearing any default column formatting.
+                let mut custom_format: Option<bool> = None;
 
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -2994,9 +2997,9 @@ fn parse_worksheet_into_model(
                 let mut row_1_based: Option<u32> = None;
                 let mut height: Option<f32> = None;
                 let mut custom_height: Option<bool> = None;
-                let mut style: Option<u32> = None;
-                let mut custom_format: Option<bool> = None;
                 let mut hidden = false;
+                let mut style_xf: Option<u32> = None;
+                let mut custom_format: Option<bool> = None;
 
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -3012,16 +3015,16 @@ fn parse_worksheet_into_model(
                             let v = attr.unescape_value()?;
                             custom_height = Some(parse_xml_bool(&v));
                         }
+                        b"hidden" => {
+                            let v = attr.unescape_value()?;
+                            hidden = parse_xml_bool(&v);
+                        }
                         b"s" => {
-                            style = attr.unescape_value()?.trim().parse::<u32>().ok();
+                            style_xf = attr.unescape_value()?.trim().parse::<u32>().ok();
                         }
                         b"customFormat" => {
                             let v = attr.unescape_value()?;
                             custom_format = Some(parse_xml_bool(&v));
-                        }
-                        b"hidden" => {
-                            let v = attr.unescape_value()?;
-                            hidden = parse_xml_bool(&v);
                         }
                         _ => {}
                     }
@@ -3032,15 +3035,6 @@ fn parse_worksheet_into_model(
                     // unsigned integers and our model supports sheets beyond Excel's UI limits).
                     if row_1_based > 0 {
                         let row = row_1_based - 1;
-                        // Row default formatting (`row/@s`) is separate from per-cell formatting.
-                        // It is needed to interpret Excel serial dates where cells inherit the
-                        // number format from the row.
-                        if custom_format == Some(false) {
-                            worksheet.set_row_style_id(row, None);
-                        } else if let Some(xf_index) = style {
-                            let style_id = styles_part.style_id_for_xf(xf_index);
-                            worksheet.set_row_style_id(row, (style_id != 0).then_some(style_id));
-                        }
                         if custom_height != Some(false) {
                             if let Some(height) = height {
                                 worksheet.set_row_height(row, Some(height));
@@ -3048,6 +3042,15 @@ fn parse_worksheet_into_model(
                         }
                         if hidden {
                             worksheet.set_row_hidden(row, true);
+                        }
+                        // Row default formatting (`row/@s`) is nominally gated by `customFormat`,
+                        // but some producers omit the flag while still intending the style to
+                        // apply. We only treat `customFormat="0"` as an explicit "no style" signal.
+                        if custom_format == Some(false) {
+                            worksheet.set_row_style_id(row, None);
+                        } else if let Some(xf_index) = style_xf {
+                            let style_id = styles_part.style_id_for_xf(xf_index);
+                            worksheet.set_row_style_id(row, (style_id != 0).then_some(style_id));
                         }
                     }
                 }

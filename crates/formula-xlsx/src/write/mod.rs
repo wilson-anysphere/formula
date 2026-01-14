@@ -6133,9 +6133,9 @@ fn patch_worksheet_dimension(
 struct ColXmlProps {
     width: Option<f32>,
     hidden: bool,
+    style_xf: Option<u32>,
     outline_level: u8,
     collapsed: bool,
-    style_xf: Option<u32>,
 }
 
 fn cols_xml_props_from_sheet(
@@ -6188,9 +6188,9 @@ fn cols_xml_props_from_sheet(
             .or_insert_with(|| ColXmlProps {
                 width: None,
                 hidden: entry.hidden.is_hidden(),
+                style_xf: None,
                 outline_level: entry.level,
                 collapsed: entry.collapsed,
-                style_xf: None,
             });
     }
 
@@ -6253,8 +6253,7 @@ fn render_col_range(
         s.push_str(r#" customWidth="1""#);
     }
     if let Some(style_xf) = props.style_xf {
-        s.push_str(&format!(r#" style="{style_xf}""#));
-        s.push_str(r#" customFormat="1""#);
+        s.push_str(&format!(r#" style="{style_xf}" customFormat="1""#));
     }
     if props.hidden {
         s.push_str(r#" hidden="1""#);
