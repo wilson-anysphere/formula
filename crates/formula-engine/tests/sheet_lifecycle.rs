@@ -1,4 +1,5 @@
-use formula_engine::{Engine, SheetLifecycleError};
+use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+use formula_engine::{Engine, SheetLifecycleError, Value};
 use formula_model::{CellRef, Range, Table, TableColumn};
 use pretty_assertions::assert_eq;
 
@@ -82,6 +83,67 @@ fn rename_sheet_rewrites_table_column_formulas_but_not_external_refs() {
     assert_eq!(
         table.columns[0].totals_formula.as_deref(),
         Some("Renamed!A1+'[Book.xlsx]Sheet1'!A1")
+    );
+}
+
+#[test]
+fn rename_sheet_marks_formulatext_dependents_dirty_in_manual_mode() {
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Manual,
+        ..CalcSettings::default()
+    });
+
+    engine.set_cell_value("Sheet1", "A1", 5.0).unwrap();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=Sheet1!A1")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet2", "B1", "=FORMULATEXT(A1)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet2", "B1"),
+        Value::Text("=Sheet1!A1".to_string())
+    );
+
+    assert!(engine.rename_sheet("Sheet1", "Renamed"));
+
+    // Manual mode: rename should mark FORMULATEXT cells dirty; values update on next recalc tick.
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet2", "B1"),
+        Value::Text("=Renamed!A1".to_string())
+    );
+}
+
+#[test]
+fn rename_sheet_refreshes_formulatext_dependents_in_automatic_mode() {
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Automatic,
+        ..CalcSettings::default()
+    });
+    engine.set_cell_value("Sheet1", "A1", 5.0).unwrap();
+    engine
+        .set_cell_formula("Sheet2", "A1", "=Sheet1!A1")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet2", "B1", "=FORMULATEXT(A1)")
+        .unwrap();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet2", "B1"),
+        Value::Text("=Sheet1!A1".to_string())
+    );
+
+    assert!(engine.rename_sheet("Sheet1", "Renamed"));
+
+    // Automatic mode: rename triggers a recalc tick, so FORMULATEXT updates immediately.
+    assert_eq!(
+        engine.get_cell_value("Sheet2", "B1"),
+        Value::Text("=Renamed!A1".to_string())
     );
 }
 

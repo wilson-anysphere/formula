@@ -1030,6 +1030,44 @@ impl Engine {
         id: SheetId,
         new_name: &str,
     ) -> Result<(), SheetLifecycleError> {
+        fn expr_contains_formulatext(expr: &CompiledExpr) -> bool {
+            let mut stack = vec![expr];
+            while let Some(expr) = stack.pop() {
+                match expr {
+                    Expr::FunctionCall { name, args, .. } => {
+                        if name.eq_ignore_ascii_case("FORMULATEXT") {
+                            return true;
+                        }
+                        stack.extend(args.iter());
+                    }
+                    Expr::ArrayLiteral { values, .. } => stack.extend(values.iter()),
+                    Expr::FieldAccess { base, .. } => stack.push(base),
+                    Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => stack.push(expr),
+                    Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
+                        stack.push(left);
+                        stack.push(right);
+                    }
+                    Expr::Call { callee, args } => {
+                        stack.push(callee);
+                        stack.extend(args.iter());
+                    }
+                    Expr::ImplicitIntersection(inner) | Expr::SpillRange(inner) => {
+                        stack.push(inner);
+                    }
+                    Expr::Number(_)
+                    | Expr::Text(_)
+                    | Expr::Bool(_)
+                    | Expr::Blank
+                    | Expr::Error(_)
+                    | Expr::NameRef(_)
+                    | Expr::CellRef(_)
+                    | Expr::RangeRef(_)
+                    | Expr::StructuredRef(_) => {}
+                }
+            }
+            false
+        }
+
         if !self.workbook.sheet_exists(id) {
             return Err(SheetLifecycleError::SheetNotFound);
         }
@@ -1054,18 +1092,32 @@ impl Engine {
         }
 
         // Rewrite stored formulas so future recompiles don't treat references as external.
+        let mut any_formula_rewritten = false;
+        let mut formulatext_cells: Vec<CellKey> = Vec::new();
         let sheet_ids: Vec<SheetId> = self.workbook.sheet_ids_in_order().to_vec();
         for sheet_id in sheet_ids {
             let Some(sheet) = self.workbook.sheets.get_mut(sheet_id) else {
                 continue;
             };
 
-            for cell in sheet.cells.values_mut() {
+            for (addr, cell) in sheet.cells.iter_mut() {
+                if let Some(compiled) = cell.compiled.as_ref() {
+                    if expr_contains_formulatext(compiled.ast()) {
+                        formulatext_cells.push(CellKey {
+                            sheet: sheet_id,
+                            addr: *addr,
+                        });
+                    }
+                }
+
                 let Some(formula) = cell.formula.as_mut() else {
                     continue;
                 };
                 let rewritten =
                     formula_model::rewrite_sheet_names_in_formula(formula, &old_name, new_name);
+                if rewritten != *formula {
+                    any_formula_rewritten = true;
+                }
                 *formula = rewritten;
             }
 
@@ -1135,9 +1187,20 @@ impl Engine {
             }
         }
 
-        // Sheet names can be observed by worksheet information functions (e.g. CELL("address")).
-        // Conservatively mark all compiled formula cells dirty so callers see updated results.
-        self.mark_all_compiled_cells_dirty();
+        // Renaming a worksheet rewrites stored formula text, but it should not change computed
+        // numeric results. Avoid full-workbook dirtying/recalc; instead:
+        // - Trigger a recalculation tick in automatic modes so volatile workbook information
+        //   functions (e.g. `CELL`) can refresh their outputs.
+        // - Mark `FORMULATEXT` formulas dirty when any stored formula text was rewritten so those
+        //   cells can re-read updated formula strings.
+        if any_formula_rewritten {
+            for key in formulatext_cells {
+                self.dirty.insert(key);
+                self.dirty_reasons.remove(&key);
+                self.calc_graph.mark_dirty(cell_id_from_key(key));
+            }
+            self.sync_dirty_from_calc_graph();
+        }
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
