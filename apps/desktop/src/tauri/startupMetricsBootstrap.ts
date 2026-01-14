@@ -10,7 +10,20 @@ import { hasTauri as hasTauriRuntime } from "./api";
 const BOOTSTRAPPED_KEY = "__FORMULA_STARTUP_METRICS_BOOTSTRAPPED__";
 const LISTENERS_KEY = "__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__";
 
-const hasTauri = hasTauriRuntime();
+const hasTauri = (() => {
+  if (hasTauriRuntime()) return true;
+
+  // Fallback: some host environments can delay injecting `__TAURI__` until after the first JS tick.
+  // Chromium-based Tauri WebViews typically include "Tauri" in the user agent; use that as a
+  // low-risk heuristic so we can still retry listener installation without doing work in normal
+  // web builds.
+  try {
+    const ua = (globalThis as any).navigator?.userAgent;
+    return typeof ua === "string" && ua.toLowerCase().includes("tauri");
+  } catch {
+    return false;
+  }
+})();
 
 const g = globalThis as any;
 if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
