@@ -1235,7 +1235,7 @@ jobs:
         # Run against the already-built Tauri artifacts from the previous step.
         # Skip Windows ARM64 cross-compile builds (the produced binary isn't runnable on x64 runners).
         if: >-
-          (runner.os == 'Linux' || (vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0' && vars.FORMULA_COI_CHECK_ALL_PLATFORMS != 'false'))
+          (runner.os == 'Linux' || !contains(fromJson('["0","false","False","FALSE"]'), vars.FORMULA_COI_CHECK_ALL_PLATFORMS))
           && (runner.os != 'Windows' || matrix.rust_target != 'aarch64-pc-windows-msvc')
         run: pnpm -C apps/desktop check:coi -- --no-build
 
