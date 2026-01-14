@@ -882,11 +882,13 @@ describeWasm("EngineWorker null clear semantics", () => {
       await engine.loadWorkbookFromJson(
         JSON.stringify({
           localeId: "de-DE",
+          // `=LOG(8,2)` is ambiguous in de-DE if treated as localized (it would parse as LOG(8.2)).
+          // `formulaLanguage: "canonical"` forces the engine to import it as canonical/en-US syntax.
+          formulaLanguage: "canonical",
           sheets: {
             Sheet1: {
               cells: {
-                // de-DE: semicolon argument separator.
-                A1: "=LOG(8;2)"
+                A1: "=LOG(8,2)"
               }
             }
           }
