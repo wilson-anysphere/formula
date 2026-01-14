@@ -13,7 +13,7 @@ import { defaultRibbonSchema } from "../ribbonSchema";
  * is the central dispatch mechanism for keyboard shortcuts + command palette.
  *
  * This test ensures that when a ribbon control opts in to a *canonical command namespace*
- * (e.g. `clipboard.*`, `edit.*`, `view.*`), that id is actually registered in CommandRegistry.
+ * (e.g. `clipboard.*`, `edit.*`, `view.*`, `audit.*`), that id is actually registered in CommandRegistry.
  *
  * Adding exemptions:
  * - If a ribbon id is intentionally present but not implemented (yet), add it to
@@ -166,7 +166,7 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       commandRegistry,
       app: {} as any,
       layoutController,
-      formatPainter: { isArmed: () => false, arm: () => {}, disarm: () => {} },
+      formatPainter: { isArmed: () => false, arm: () => {}, disarm: () => {}, onCancel: null },
       themeController: { setThemePreference: () => {} } as any,
       refreshRibbonUiState: () => {},
       applyFormattingToSelection: () => {},
@@ -175,7 +175,6 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       openFormatCells: () => {},
       showQuickPick: async () => null,
       findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
-      formatPainter: { isArmed: () => false, arm: () => {}, disarm: () => {}, onCancel: null },
       pageLayoutHandlers: {
         openPageSetupDialog: () => {},
         updatePageSetup: () => {},
