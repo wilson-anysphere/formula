@@ -377,6 +377,20 @@ test('agent-init can be sourced with nounset enabled and IFS unset (bash)', { sk
   assert.equal(out, 'ok');
 });
 
+test('agent-init restores IFS when it is set to a custom value (bash)', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      'IFS=","',
+      'source scripts/agent-init.sh >/dev/null',
+      'printf "%s" "$IFS"',
+    ].join(' && '),
+  );
+
+  assert.equal(out, ',');
+});
+
 test('agent-init does not enable errexit in bash when it was previously disabled', { skip: !hasBash }, () => {
   const out = runBash(
     [
@@ -677,6 +691,20 @@ test('agent-init can be sourced with nounset enabled and IFS unset under /bin/sh
 
   assert.equal(stderr, '');
   assert.equal(stdout, 'ok');
+});
+
+test('agent-init restores IFS when it is set to a custom value under /bin/sh', { skip: !hasSh }, () => {
+  const { stdout, stderr } = runSh(
+    [
+      'export DISPLAY=:99',
+      'IFS=","',
+      '. scripts/agent-init.sh >/dev/null',
+      'printf "%s" "$IFS"',
+    ].join(' && '),
+  );
+
+  assert.equal(stderr, '');
+  assert.equal(stdout, ',');
 });
 
 test('agent-init does not enable errexit in /bin/sh when it was previously disabled', { skip: !hasSh }, () => {
