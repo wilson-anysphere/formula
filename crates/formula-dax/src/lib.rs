@@ -40,7 +40,6 @@ mod engine;
 mod model;
 mod parser;
 mod pivot;
-#[cfg(feature = "pivot-model")]
 mod ident;
 #[cfg(feature = "pivot-model")]
 mod pivot_adapter;
