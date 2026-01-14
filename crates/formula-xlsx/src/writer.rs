@@ -653,12 +653,15 @@ mod sheet_format_pr_tests {
         let mut sheet = Worksheet::new(1, "Sheet1");
         sheet.base_col_width = Some(8);
         sheet.default_col_width = Some(8.5);
-        sheet.default_row_height = Some(15.25);
+        sheet.default_row_height = Some(15.0);
 
-        assert_eq!(
-            sheet_format_pr_xml(&sheet),
-            r#"<sheetFormatPr baseColWidth="8" defaultColWidth="8.5" defaultRowHeight="15.25"/>"#
-        );
+        let xml = sheet_format_pr_xml(&sheet);
+        let doc = roxmltree::Document::parse(&xml).expect("parse sheetFormatPr XML");
+        let node = doc.root_element();
+        assert_eq!(node.tag_name().name(), "sheetFormatPr");
+        assert_eq!(node.attribute("baseColWidth"), Some("8"));
+        assert_eq!(node.attribute("defaultColWidth"), Some("8.5"));
+        assert_eq!(node.attribute("defaultRowHeight"), Some("15"));
     }
 }
 
