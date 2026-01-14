@@ -3255,25 +3255,41 @@ pub fn decrypt_encrypted_package(
     // This surfaces actionable structural errors (truncation / framing) and prevents doing large
     // KDF work on inputs that cannot be decrypted.
     match &info {
-        EncryptionInfo::Standard { .. } => {
-            let header = parse_encrypted_package_header(encrypted_package)?;
+        EncryptionInfo::Standard { header, .. } => {
+            let pkg_header = parse_encrypted_package_header(encrypted_package)?;
             let ciphertext_len = encrypted_package.len() - 8;
-            if ciphertext_len % AES_BLOCK_SIZE != 0 {
-                return Err(OffcryptoError::InvalidCiphertextLength { len: ciphertext_len });
-            }
 
-            let total_size = header.original_size;
+            let total_size = pkg_header.original_size;
             let output_len = usize::try_from(total_size)
                 .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
             // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
             isize::try_from(output_len)
                 .map_err(|_| OffcryptoError::EncryptedPackageSizeOverflow { total_size })?;
 
-            if total_size > ciphertext_len as u64 {
-                return Err(OffcryptoError::EncryptedPackageSizeMismatch {
-                    total_size,
-                    ciphertext_len,
-                });
+            match header.alg_id {
+                // Standard RC4 uses a stream cipher; the ciphertext does not need to be AES block-aligned.
+                CALG_RC4 => {
+                    if ciphertext_len < output_len {
+                        return Err(OffcryptoError::EncryptedPackageSizeMismatch {
+                            total_size,
+                            ciphertext_len,
+                        });
+                    }
+                }
+                // Standard AES variants: ciphertext must be AES-block aligned.
+                CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+                    if ciphertext_len % AES_BLOCK_SIZE != 0 {
+                        return Err(OffcryptoError::InvalidCiphertextLength { len: ciphertext_len });
+                    }
+                    if ciphertext_len < output_len {
+                        return Err(OffcryptoError::EncryptedPackageSizeMismatch {
+                            total_size,
+                            ciphertext_len,
+                        });
+                    }
+                }
+                // `parse_encryption_info` rejects other algorithms.
+                _ => {}
             }
         }
         EncryptionInfo::Agile { .. } => {
