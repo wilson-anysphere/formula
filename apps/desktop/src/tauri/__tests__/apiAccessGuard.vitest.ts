@@ -158,6 +158,38 @@ function collectTauriAliasesFromGlobalAliases(content: string, globalAliases: Se
         if (match[0].length === 0) re.re.lastIndex += 1;
       }
     }
+
+    // Nested destructuring from the global alias:
+    //   const { __TAURI__: { plugin } } = g;
+    //   const { __TAURI__: { plugins: p } } = g;
+    const pluginNestedDestructureFromGlobalAliasDirectRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bplugin\\b(?!\\s*:)[\\s\\S]*?\\}\\s*=\\s*${g}`,
+    );
+    if (pluginNestedDestructureFromGlobalAliasDirectRe.test(content)) tauriPluginRoots.add("plugin");
+    const pluginNestedDestructureFromGlobalAliasRenameRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bplugin\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${g}`,
+      "g",
+    );
+    let nestedMatch: RegExpExecArray | null = null;
+    while ((nestedMatch = pluginNestedDestructureFromGlobalAliasRenameRe.exec(content)) != null) {
+      const name = nestedMatch[1];
+      if (name) tauriPluginRoots.add(name);
+      if (nestedMatch[0].length === 0) pluginNestedDestructureFromGlobalAliasRenameRe.lastIndex += 1;
+    }
+
+    const pluginsNestedDestructureFromGlobalAliasDirectRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bplugins\\b(?!\\s*:)[\\s\\S]*?\\}\\s*=\\s*${g}`,
+    );
+    if (pluginsNestedDestructureFromGlobalAliasDirectRe.test(content)) tauriPluginsRoots.add("plugins");
+    const pluginsNestedDestructureFromGlobalAliasRenameRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bplugins\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${g}`,
+      "g",
+    );
+    while ((nestedMatch = pluginsNestedDestructureFromGlobalAliasRenameRe.exec(content)) != null) {
+      const name = nestedMatch[1];
+      if (name) tauriPluginsRoots.add(name);
+      if (nestedMatch[0].length === 0) pluginsNestedDestructureFromGlobalAliasRenameRe.lastIndex += 1;
+    }
   }
 
   return { tauriRoots, tauriPluginRoots, tauriPluginsRoots };
@@ -171,6 +203,28 @@ function buildBannedResForGlobalAlias(globalAlias: string): RegExp[] {
 
   /** @type {RegExp[]} */
   const out: RegExp[] = [];
+
+  // Nested destructuring directly from the global alias itself:
+  //   const { __TAURI__: { dialog } } = g;
+  out.push(
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\b(?:dialog|event|window)\\b[\\s\\S]*?\\}\\s*=\\s*${g}`,
+    ),
+  );
+
+  // Destructuring from g.__TAURI__ / g["__TAURI__"]:
+  //   const { dialog } = g.__TAURI__;
+  //   const { plugin: { dialog } } = g["__TAURI__"];
+  out.push(
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b(?:dialog|event|window)\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.|\\.)\\s*__TAURI__\\b`,
+    ),
+  );
+  out.push(
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b(?:dialog|event|window)\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]__TAURI__['"]\\s*\\]`,
+    ),
+  );
 
   for (const ns of namespaces) {
     // g.__TAURI__.event/window/dialog
@@ -311,6 +365,37 @@ function collectTauriAliases(content: string): TauriAliasSets {
       if (name) tauriRoots.add(name);
       if (match[0].length === 0) re.lastIndex += 1;
     }
+  }
+
+  // Nested destructuring from the global object:
+  //   const { __TAURI__: { plugin } } = globalThis;
+  //   const { "__TAURI__": { plugins: p } } = (globalThis as any);
+  const pluginNestedDestructureFromGlobalDirectRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bplugin\\b(?!\\s*:)[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}`,
+  );
+  if (pluginNestedDestructureFromGlobalDirectRe.test(content)) tauriPluginRoots.add("plugin");
+  const pluginNestedDestructureFromGlobalRenameRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bplugin\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}`,
+    "g",
+  );
+  while ((match = pluginNestedDestructureFromGlobalRenameRe.exec(content)) != null) {
+    const name = match[1];
+    if (name) tauriPluginRoots.add(name);
+    if (match[0].length === 0) pluginNestedDestructureFromGlobalRenameRe.lastIndex += 1;
+  }
+
+  const pluginsNestedDestructureFromGlobalDirectRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bplugins\\b(?!\\s*:)[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}`,
+  );
+  if (pluginsNestedDestructureFromGlobalDirectRe.test(content)) tauriPluginsRoots.add("plugins");
+  const pluginsNestedDestructureFromGlobalRenameRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bplugins\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}`,
+    "g",
+  );
+  while ((match = pluginsNestedDestructureFromGlobalRenameRe.exec(content)) != null) {
+    const name = match[1];
+    if (name) tauriPluginsRoots.add(name);
+    if (match[0].length === 0) pluginsNestedDestructureFromGlobalRenameRe.lastIndex += 1;
   }
 
   // Capture aliases to the plugin container objects:
@@ -587,6 +672,13 @@ describe("tauri/api guardrails", () => {
 
       // Destructuring patterns: `const { dialog } = globalThis.__TAURI__;`
       /\b(?:const|let|var)\s*\{[\s\S]*?\b(?:dialog|event|window)\b[\s\S]*?\}\s*=\s*(?:\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.|\.)\s*__TAURI__\b|(?:globalThis|window|self)\s*(?:\?\.|\.)\s*__TAURI__\b|__TAURI__\b|\(\s*(?:globalThis|window|self)\s+as\s+any\s*\)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\]|(?:globalThis|window|self)\s*(?:\?\.)?\s*\[\s*['"]__TAURI__['"]\s*\])/,
+
+      // Nested destructuring from the global object:
+      //   const { __TAURI__: { dialog } } = globalThis;
+      //   const { "__TAURI__": { plugin: { window } } } = (window as any);
+      new RegExp(
+        `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\b(?:dialog|event|window)\\b[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}`,
+      ),
     ];
 
     for (const absPath of files) {

@@ -208,6 +208,24 @@ function collectTauriCoreAliases(
     if (match[0].length === 0) coreDestructureRenameRe.lastIndex += 1;
   }
 
+  // Nested destructuring directly from the global object:
+  //   const { __TAURI__: { core } } = globalThis;
+  //   const { "__TAURI__": { core: myCore } } = (globalThis as any);
+  const coreNestedDestructureFromGlobalDirectRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bcore\\b(?!\\s*:)[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}`,
+  );
+  if (coreNestedDestructureFromGlobalDirectRe.test(content)) coreAliases.add("core");
+
+  const coreNestedDestructureFromGlobalRenameRe = new RegExp(
+    `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bcore\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}`,
+    "g",
+  );
+  while ((match = coreNestedDestructureFromGlobalRenameRe.exec(content)) != null) {
+    const name = match[1];
+    if (name) coreAliases.add(name);
+    if (match[0].length === 0) coreNestedDestructureFromGlobalRenameRe.lastIndex += 1;
+  }
+
   for (const globalAlias of globalAliases) {
     const r = escapeRegExp(globalAlias);
     const g = buildAnyCastableRefSource(r);
@@ -270,6 +288,25 @@ function collectTauriCoreAliases(
         if (name) coreAliases.add(name);
         if (match[0].length === 0) re.lastIndex += 1;
       }
+    }
+
+    // Nested destructuring from a global alias:
+    //   const { __TAURI__: { core } } = g;
+    //   const { __TAURI__: { core: myCore } } = g;
+    const coreNestedDestructureFromGlobalAliasDirectRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bcore\\b(?!\\s*:)[\\s\\S]*?\\}\\s*=\\s*${g}`,
+    );
+    if (coreNestedDestructureFromGlobalAliasDirectRe.test(content)) coreAliases.add("core");
+
+    const coreNestedDestructureFromGlobalAliasRenameRe = new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bcore\\b\\s*:\\s*([A-Za-z_$][\\w$]*)\\b[\\s\\S]*?\\}\\s*=\\s*${g}`,
+      "g",
+    );
+    let nestedMatch: RegExpExecArray | null = null;
+    while ((nestedMatch = coreNestedDestructureFromGlobalAliasRenameRe.exec(content)) != null) {
+      const name = nestedMatch[1];
+      if (name) coreAliases.add(name);
+      if (nestedMatch[0].length === 0) coreNestedDestructureFromGlobalAliasRenameRe.lastIndex += 1;
     }
   }
 
@@ -382,6 +419,12 @@ function buildBannedResForGlobalAlias(globalAlias: string): RegExp[] {
     new RegExp(
       `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\bcore\\b[\\s\\S]*?\\binvoke\\b[\\s\\S]*?\\}\\s*=\\s*${g}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]__TAURI__['"]\\s*\\]`,
     ),
+
+    // Nested destructuring from the global alias itself:
+    //   const { __TAURI__: { core: { invoke } } } = g;
+    new RegExp(
+      `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bcore\\b[\\s\\S]*?\\binvoke\\b[\\s\\S]*?\\}\\s*=\\s*${g}`,
+    ),
   ];
 }
 
@@ -414,6 +457,12 @@ describe("tauri/invoke guardrails", () => {
           `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\binvoke\\b[\\s\\S]*?\\}\\s*=\\s*${TAURI_GLOBAL_REF_RE_SOURCE}\\s*(?:\\?\\.)?\\s*\\[\\s*['"]core['"]\\s*\\]`,
         ),
         new RegExp(`\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\bcore\\b[\\s\\S]*?\\binvoke\\b[\\s\\S]*?\\}\\s*=\\s*${TAURI_GLOBAL_REF_RE_SOURCE}`),
+
+        // Nested destructuring from the global object itself:
+        //   const { __TAURI__: { core: { invoke } } } = globalThis;
+        new RegExp(
+          `\\b(?:const|let|var)\\s*\\{[\\s\\S]*?\\b__TAURI__\\b[\\s\\S]*?\\bcore\\b[\\s\\S]*?\\binvoke\\b[\\s\\S]*?\\}\\s*=\\s*${GLOBAL_OBJECT_REF_RE_SOURCE}`,
+        ),
       ];
 
     for (const absPath of files) {
