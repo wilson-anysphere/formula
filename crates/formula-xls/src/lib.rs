@@ -27,7 +27,7 @@
 //! be skipped).
 
 use std::collections::{HashMap, HashSet};
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
 use calamine::{Data, Reader, Sheet, SheetType, SheetVisible, Xls};
@@ -42,6 +42,7 @@ use thiserror::Error;
 mod biff;
 mod ct;
 mod decrypt;
+pub use decrypt::DecryptError;
 pub mod diagnostics;
 mod formula_rewrite;
 
@@ -219,7 +220,7 @@ pub enum ImportError {
     #[error("unsupported `.xls` encryption scheme: {0}")]
     UnsupportedEncryption(String),
     #[error("failed to decrypt `.xls`: {0}")]
-    Decrypt(String),
+    Decrypt(DecryptError),
     #[error("invalid worksheet name: {0}")]
     InvalidSheetName(#[from] formula_model::SheetNameError),
 }
@@ -231,7 +232,7 @@ impl From<decrypt::DecryptError> for ImportError {
             decrypt::DecryptError::UnsupportedEncryption(scheme) => {
                 ImportError::UnsupportedEncryption(scheme)
             }
-            decrypt::DecryptError::InvalidFormat(msg) => ImportError::Decrypt(msg),
+            other => ImportError::Decrypt(other),
         }
     }
 }
@@ -305,6 +306,26 @@ pub fn import_xls_path_with_password(
         password,
         biff::read_workbook_stream_from_xls,
     )
+}
+
+/// Import a password-protected legacy `.xls` workbook from in-memory bytes.
+///
+/// This is intended for non-filesystem contexts (e.g. when a workbook is already loaded into
+/// memory). The returned [`XlsImportResult::source`] path is set to `"<memory>"`.
+pub fn import_xls_bytes_with_password(
+    bytes: &[u8],
+    password: &str,
+) -> Result<XlsImportResult, ImportError> {
+    import_xls_path_with_biff_reader(Path::new("<memory>"), Some(password), |_| {
+        let cursor = Cursor::new(bytes);
+        let mut comp = cfb::CompoundFile::open(cursor).map_err(|err| err.to_string())?;
+        let mut stream = biff::open_xls_workbook_stream(&mut comp)?;
+        let mut workbook_stream = Vec::new();
+        stream
+            .read_to_end(&mut workbook_stream)
+            .map_err(|err| err.to_string())?;
+        Ok(workbook_stream)
+    })
 }
 
 /// Import a legacy `.xls` workbook from disk while treating BIFF workbook-stream parsing as

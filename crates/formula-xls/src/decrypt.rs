@@ -7,7 +7,7 @@ use crate::ct::ct_eq;
 
 /// Errors returned while decrypting password-protected `.xls` BIFF8 workbooks.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
-pub(crate) enum DecryptError {
+pub enum DecryptError {
     #[error("unsupported encryption scheme: {0}")]
     UnsupportedEncryption(String),
     #[error("wrong password")]
