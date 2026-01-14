@@ -31,6 +31,7 @@ fn fill_down_formula_uses_per_cell_origin_and_shares_bytecode_program() {
 
     engine.recalculate_single_threaded();
 
+    let sheet1_id = engine.sheet_id("Sheet1").unwrap();
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(3.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(30.0));
 
@@ -38,11 +39,11 @@ fn fill_down_formula_uses_per_cell_origin_and_shares_bytecode_program() {
         engine.precedents("Sheet1", "C1").unwrap(),
         vec![
             PrecedentNode::Cell {
-                sheet: 0,
+                sheet: sheet1_id,
                 addr: CellAddr { row: 0, col: 0 }
             },
             PrecedentNode::Cell {
-                sheet: 0,
+                sheet: sheet1_id,
                 addr: CellAddr { row: 0, col: 1 }
             }
         ]
@@ -51,11 +52,11 @@ fn fill_down_formula_uses_per_cell_origin_and_shares_bytecode_program() {
         engine.precedents("Sheet1", "C2").unwrap(),
         vec![
             PrecedentNode::Cell {
-                sheet: 0,
+                sheet: sheet1_id,
                 addr: CellAddr { row: 1, col: 0 }
             },
             PrecedentNode::Cell {
-                sheet: 0,
+                sheet: sheet1_id,
                 addr: CellAddr { row: 1, col: 1 }
             }
         ]
@@ -95,6 +96,7 @@ fn whole_column_references_shift_with_fill_and_share_bytecode_program() {
 
     engine.recalculate_single_threaded();
 
+    let sheet1_id = engine.sheet_id("Sheet1").unwrap();
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(103.0));
 
@@ -102,7 +104,7 @@ fn whole_column_references_shift_with_fill_and_share_bytecode_program() {
     assert_eq!(
         engine.precedents("Sheet1", "B1").unwrap(),
         vec![PrecedentNode::Range {
-            sheet: 0,
+            sheet: sheet1_id,
             start: CellAddr { row: 0, col: 0 },
             end: CellAddr {
                 row: max_row,
@@ -113,7 +115,7 @@ fn whole_column_references_shift_with_fill_and_share_bytecode_program() {
     assert_eq!(
         engine.precedents("Sheet1", "C1").unwrap(),
         vec![PrecedentNode::Range {
-            sheet: 0,
+            sheet: sheet1_id,
             start: CellAddr { row: 0, col: 1 },
             end: CellAddr {
                 row: max_row,
@@ -135,8 +137,7 @@ fn whole_column_references_shift_with_fill_and_share_bytecode_program() {
 fn sheet_span_refs_shift_with_fill_and_share_bytecode_program() {
     let mut engine = Engine::new();
 
-    // Fix sheet ids for deterministic precedent assertions:
-    // Summary=0, Sheet1=1, Sheet2=2, Sheet3=3.
+    // Create sheets up-front so 3D spans resolve deterministically.
     engine.ensure_sheet("Summary");
     engine.ensure_sheet("Sheet1");
     engine.ensure_sheet("Sheet2");
@@ -168,6 +169,9 @@ fn sheet_span_refs_shift_with_fill_and_share_bytecode_program() {
 
     engine.recalculate_single_threaded();
 
+    let sheet1_id = engine.sheet_id("Sheet1").unwrap();
+    let sheet2_id = engine.sheet_id("Sheet2").unwrap();
+    let sheet3_id = engine.sheet_id("Sheet3").unwrap();
     assert_eq!(engine.get_cell_value("Summary", "B1"), Value::Number(6.0));
     assert_eq!(engine.get_cell_value("Summary", "B2"), Value::Number(60.0));
 
@@ -175,15 +179,15 @@ fn sheet_span_refs_shift_with_fill_and_share_bytecode_program() {
         engine.precedents("Summary", "B1").unwrap(),
         vec![
             PrecedentNode::Cell {
-                sheet: 1,
+                sheet: sheet1_id,
                 addr: CellAddr { row: 0, col: 0 }
             },
             PrecedentNode::Cell {
-                sheet: 2,
+                sheet: sheet2_id,
                 addr: CellAddr { row: 0, col: 0 }
             },
             PrecedentNode::Cell {
-                sheet: 3,
+                sheet: sheet3_id,
                 addr: CellAddr { row: 0, col: 0 }
             }
         ]
@@ -192,15 +196,15 @@ fn sheet_span_refs_shift_with_fill_and_share_bytecode_program() {
         engine.precedents("Summary", "B2").unwrap(),
         vec![
             PrecedentNode::Cell {
-                sheet: 1,
+                sheet: sheet1_id,
                 addr: CellAddr { row: 1, col: 0 }
             },
             PrecedentNode::Cell {
-                sheet: 2,
+                sheet: sheet2_id,
                 addr: CellAddr { row: 1, col: 0 }
             },
             PrecedentNode::Cell {
-                sheet: 3,
+                sheet: sheet3_id,
                 addr: CellAddr { row: 1, col: 0 }
             }
         ]
@@ -214,4 +218,3 @@ fn sheet_span_refs_shift_with_fill_and_share_bytecode_program() {
     assert_eq!(engine.get_cell_value("Summary", "B1"), Value::Number(6.0));
     assert_eq!(engine.get_cell_value("Summary", "B2"), Value::Number(139.0));
 }
-

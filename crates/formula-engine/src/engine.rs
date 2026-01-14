@@ -14377,6 +14377,18 @@ fn walk_calc_expr(
                                     visiting_names,
                                     lexical_scopes,
                                 );
+                                for a in args.iter().skip(2) {
+                                    walk_calc_expr(
+                                        a,
+                                        current_cell,
+                                        tables_by_sheet,
+                                        workbook,
+                                        spills,
+                                        precedents,
+                                        visiting_names,
+                                        lexical_scopes,
+                                    );
+                                }
                                 return;
                             }
 
