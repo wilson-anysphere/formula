@@ -656,6 +656,48 @@ test("Typing =_xlfn.XLO suggests =_xlfn.XLOOKUP(", async () => {
   );
 });
 
+test("Typing =_xlfn.VLO suggests =_xlfn.VLOOKUP( and a modern _xlfn.XLOOKUP( alternative", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.VLO";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.VLOOKUP("),
+    `Expected an _xlfn.VLOOKUP suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.XLOOKUP("),
+    `Expected an _xlfn.XLOOKUP alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =_xlfn.vlo suggests =_xlfn.vlookup( and a modern _xlfn.xlookup( alternative (lowercase)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.vlo";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.vlookup("),
+    `Expected an _xlfn.vlookup suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.xlookup("),
+    `Expected an _xlfn.xlookup alternative suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =_xlfn.Xlo suggests =_xlfn.Xlookup( (title-style casing)", async () => {
   const engine = new TabCompletionEngine();
 

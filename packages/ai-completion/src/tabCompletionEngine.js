@@ -452,9 +452,17 @@ export class TabCompletionEngine {
       });
 
       // Provide lightweight "modern alternative" suggestions for some legacy functions.
-      const modernTarget = MODERN_FUNCTION_ALTERNATIVES[spec.name];
+      const specName = typeof spec?.name === "string" ? spec.name : "";
+      const isXlfnSpec = specName.toUpperCase().startsWith("_XLFN.");
+      const baseName = isXlfnSpec ? specName.slice("_XLFN.".length) : specName;
+      const modernTarget = MODERN_FUNCTION_ALTERNATIVES[baseName];
       if (modernTarget) {
-        const completedTarget = applyNameCase(modernTarget, prefix);
+        const isXlfnTyped = prefix.toUpperCase().startsWith("_XLFN.");
+        const completedTarget =
+          isXlfnSpec && isXlfnTyped
+            ? // Preserve the user's `_xlfn.` qualifier casing (since we are replacing the whole token).
+              `${prefix.slice(0, "_XLFN.".length)}${applyNameCase(modernTarget, prefix.slice("_XLFN.".length))}`
+            : applyNameCase(modernTarget, prefix);
         const call = `${completedTarget}(`;
         suggestions.push({
           text: replaceSpan(input, token.start, token.end, call),
