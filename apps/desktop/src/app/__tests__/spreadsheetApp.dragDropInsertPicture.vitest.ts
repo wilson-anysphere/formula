@@ -189,6 +189,7 @@ describe("SpreadsheetApp drag/drop image file insertion", () => {
     root.dispatchEvent(event);
 
     expect(insertPicturesFromFiles).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
 
     app.destroy();
     root.remove();

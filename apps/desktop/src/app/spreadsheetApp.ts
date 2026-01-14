@@ -15382,8 +15382,6 @@ export class SpreadsheetApp {
 
   private onGridDragOver(e: DragEvent): void {
     if (this.isEditing()) return;
-    // Prevent showing a "copy" drop affordance when the workbook cannot be edited.
-    if (this.isReadOnly()) return;
     const dt = e.dataTransfer;
     if (!dt) return;
     const types = Array.from(dt.types ?? []);
@@ -15398,7 +15396,9 @@ export class SpreadsheetApp {
 
     e.preventDefault();
     try {
-      dt.dropEffect = "copy";
+      // Keep drop events flowing even in read-only mode (so we can show a permission toast on drop),
+      // but don't show a misleading "copy" affordance.
+      dt.dropEffect = this.isReadOnly() ? "none" : "copy";
     } catch {
       // ignore
     }
@@ -15406,13 +15406,6 @@ export class SpreadsheetApp {
 
   private onGridDrop(e: DragEvent): void {
     if (this.isEditing()) return;
-    if (this.isReadOnly()) {
-      const cell = this.selection.active;
-      showCollabEditRejectedToast([
-        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
-      ]);
-      return;
-    }
     const dt = e.dataTransfer;
     if (!dt) return;
 
@@ -15420,6 +15413,14 @@ export class SpreadsheetApp {
     if (imageFiles.length === 0) return;
 
     e.preventDefault();
+
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
 
     const placeAt = this.pickCellAtClientPoint(e.clientX, e.clientY) ?? this.getActiveCell();
     void Promise.resolve(this.insertPicturesFromFiles(imageFiles, { placeAt })).catch((err) => {
