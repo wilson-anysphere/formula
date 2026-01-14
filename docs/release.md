@@ -1251,7 +1251,7 @@ command -v desktop-file-validate >/dev/null && desktop-file-validate "$desktop_f
 
 # Optional (recommended): run the same desktop-integration validator CI uses for Linux packages.
 # This checks `MimeType=` coverage and that `Exec=` includes a %u/%U/%f/%F placeholder.
-python scripts/ci/verify_linux_desktop_integration.py --package-root "$root"
+python3 scripts/ci/verify_linux_desktop_integration.py --package-root "$root"
 ```
 
 ## 5) Verifying a release
@@ -1609,13 +1609,13 @@ You can run the same checks locally after building:
 # macOS
 app="$(find apps/desktop/src-tauri/target -type d -path '*/release/bundle/macos/*.app' -prune -print -quit)"
 plutil -p "$app/Contents/Info.plist" | head -n 200
-python scripts/ci/verify_macos_bundle_associations.py --info-plist "$app/Contents/Info.plist"
+python3 scripts/ci/verify_macos_bundle_associations.py --info-plist "$app/Contents/Info.plist"
 
 # Linux (.deb)
 deb="$(find apps/desktop/src-tauri/target -type f -path '*/release/bundle/deb/*.deb' -print -quit)"
 tmpdir="$(mktemp -d)"
 dpkg-deb -x "$deb" "$tmpdir"
-python scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir"
+python3 scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir"
 
 # Linux (.rpm)
 rpm="$(find apps/desktop/src-tauri/target -type f -path '*/release/bundle/rpm/*.rpm' -print -quit)"
@@ -1623,7 +1623,7 @@ tmpdir_rpm="$(mktemp -d)"
 # `rpm` is usually a relative path; run `rpm2cpio` from the current directory and only
 # `cd` for the extraction destination.
 rpm2cpio "$rpm" | (cd "$tmpdir_rpm" && cpio -idm --quiet --no-absolute-filenames)
-python scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir_rpm"
+python3 scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir_rpm"
 
 # Windows
 # (Run from a Windows machine/runner; this script uses signtool + Windows Installer COM APIs.)
