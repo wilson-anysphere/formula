@@ -81,6 +81,7 @@ function parseArgs(argv) {
       console.log(
         [
           "Validate macOS hardened-runtime entitlements required by WKWebView/JavaScriptCore.",
+          "This script also guards against accidentally enabling broad/debug entitlements in Developer ID builds.",
           "",
           "Usage:",
           "  node scripts/check-macos-entitlements.mjs",
@@ -90,6 +91,10 @@ function parseArgs(argv) {
           "Defaults:",
           "  --root defaults to the repository root (derived from this script's location).",
           "  --path defaults to the file referenced by bundle.macOS.entitlements in apps/desktop/src-tauri/tauri.conf.json.",
+          "",
+          "Notes:",
+          "  - When com.apple.security.app-sandbox is enabled, the guardrail also requires",
+          "    com.apple.security.network.server (Formula runs an OAuth loopback redirect listener).",
           "",
         ].join("\n"),
       );
