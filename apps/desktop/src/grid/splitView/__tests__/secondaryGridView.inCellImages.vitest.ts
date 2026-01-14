@@ -83,7 +83,7 @@ describe("SecondaryGridView in-cell images", () => {
     const sheetId = "Sheet1";
 
     // Doc coords (0-based). Grid coords will be +1/+1 for headers.
-    doc.setCellValue(sheetId, { row: 0, col: 0 }, { type: "image", value: { imageId: "img1", altText: "Img" } });
+    doc.setCellValue(sheetId, { row: 0, col: 0 }, { type: "image", value: { imageId: " img1 ", altText: " Img " } });
 
     const imageResolver = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" }));
 

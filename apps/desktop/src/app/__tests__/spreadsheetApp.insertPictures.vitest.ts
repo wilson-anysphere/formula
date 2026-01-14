@@ -139,7 +139,7 @@ describe("SpreadsheetApp insertPicturesFromFiles", () => {
     };
 
     const app = createApp(root, status);
-    const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: "image/png" });
+    const file = new File([new Uint8Array([1, 2, 3])], "cat.png", { type: " image/png " });
 
     await app.insertPicturesFromFiles([file]);
 

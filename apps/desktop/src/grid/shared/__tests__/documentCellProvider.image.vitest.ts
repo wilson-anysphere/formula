@@ -8,7 +8,7 @@ describe("DocumentCellProvider image values", () => {
     const doc = new DocumentController();
     doc.setCellValue("Sheet1", "A1", {
       type: "image",
-      value: { imageId: "image1.png", altText: "Logo", width: 128, height: 64 }
+      value: { imageId: " image1.png ", altText: " Logo ", width: 128, height: 64 }
     });
 
     const provider = new DocumentCellProvider({

@@ -8,7 +8,7 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects accepts kind.type case vari
     {
       id: "7",
       zOrder: 0,
-      kind: { type: "Shape", label: "Box" },
+      kind: { type: "Shape", label: " Box " },
       anchor: {
         type: "absolute",
         pos: { xEmu: 0, yEmu: 0 },
@@ -27,7 +27,7 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects accepts kind.type underscor
     {
       id: "7",
       zOrder: 0,
-      kind: { type: "chart_placeholder", relId: "rId1", label: "Chart" },
+      kind: { type: "chart_placeholder", relId: " rId1 ", label: "Chart" },
       anchor: {
         type: "absolute",
         pos: { xEmu: 0, yEmu: 0 },
@@ -41,4 +41,3 @@ test("convertDocumentSheetDrawingsToUiDrawingObjects accepts kind.type underscor
   assert.equal(ui[0]?.kind?.type, "chart");
   assert.equal(ui[0]?.kind?.chartId, "rId1");
 });
-

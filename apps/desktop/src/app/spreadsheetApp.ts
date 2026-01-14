@@ -7603,7 +7603,10 @@ export class SpreadsheetApp {
           }
         }
 
-        const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
+        // `File.type` is commonly empty in some environments (or can contain incidental whitespace).
+        // Normalize to a canonical trimmed value so we don't persist `" image/png "` in the ImageStore.
+        const fileType = typeof file.type === "string" ? file.type.trim() : "";
+        const mimeType = fileType !== "" ? fileType : guessMimeType(file.name);
         const ext = (() => {
           const raw = String(file.name ?? "").split(".").pop()?.toLowerCase();
           return raw && raw !== file.name ? raw : null;
@@ -8158,7 +8161,8 @@ export class SpreadsheetApp {
       if (!(bytes instanceof Uint8Array)) continue;
 
       const mimeTypeRaw: unknown = entry.mimeType;
-      const mimeType = typeof mimeTypeRaw === "string" && mimeTypeRaw.trim() !== "" ? mimeTypeRaw : "application/octet-stream";
+      const mimeType =
+        typeof mimeTypeRaw === "string" && mimeTypeRaw.trim() !== "" ? mimeTypeRaw.trim() : "application/octet-stream";
 
       this.imageStore.set(imageId, { bytes, mimeType });
     }
@@ -27151,11 +27155,17 @@ function parseImageCellPayload(value: unknown): { imageId: string; altText?: str
 
   if (!payload) return null;
 
-  const imageId = payload.imageId ?? payload.image_id ?? payload.id;
-  if (typeof imageId !== "string" || imageId.trim() === "") return null;
+  const imageIdRaw = payload.imageId ?? payload.image_id ?? payload.id;
+  if (typeof imageIdRaw !== "string") return null;
+  const imageId = imageIdRaw.trim();
+  if (imageId === "") return null;
 
   const altTextRaw = payload.altText ?? payload.alt_text ?? payload.alt;
-  const altText = typeof altTextRaw === "string" && altTextRaw.trim() !== "" ? altTextRaw : undefined;
+  let altText: string | undefined;
+  if (typeof altTextRaw === "string") {
+    const trimmed = altTextRaw.trim();
+    if (trimmed !== "") altText = trimmed;
+  }
 
   return { imageId, altText };
 }

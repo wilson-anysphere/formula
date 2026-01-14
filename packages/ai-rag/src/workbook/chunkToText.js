@@ -24,11 +24,17 @@ function parseImageValue(value) {
 
   if (!payload) return null;
 
-  const imageId = payload.imageId ?? payload.image_id ?? payload.id;
-  if (typeof imageId !== "string" || imageId.trim() === "") return null;
+  const imageIdRaw = payload.imageId ?? payload.image_id ?? payload.id;
+  if (typeof imageIdRaw !== "string") return null;
+  const imageId = imageIdRaw.trim();
+  if (imageId === "") return null;
 
   const altTextRaw = payload.altText ?? payload.alt_text ?? payload.alt;
-  const altText = typeof altTextRaw === "string" && altTextRaw.trim() !== "" ? altTextRaw : null;
+  let altText = null;
+  if (typeof altTextRaw === "string") {
+    const trimmed = altTextRaw.trim();
+    if (trimmed !== "") altText = trimmed;
+  }
 
   return { imageId, altText };
 }
