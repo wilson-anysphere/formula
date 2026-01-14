@@ -1350,7 +1350,10 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: '"y"', displayText: '"y" (years)', confidence: 0.65 },
       { replacement: '"ym"', displayText: '"ym" (months, ignoring years)', confidence: 0.64 },
       { replacement: '"yd"', displayText: '"yd" (days, ignoring years)', confidence: 0.63 },
-      { replacement: '"md"', displayText: '"md" (days, ignoring months + years)', confidence: 0.62 },
+      // Keep the less-common "md" unit available when the user starts typing it,
+      // but assign a lower confidence so it doesn't crowd out other suggestions
+      // (including the backend completion) under tight `maxSuggestions` budgets.
+      { replacement: '"md"', displayText: '"md" (days, ignoring months + years)', confidence: 0.2 },
     ],
   },
   CELL: {

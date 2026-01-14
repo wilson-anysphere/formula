@@ -1852,6 +1852,23 @@ test('DATEDIF unit suggests "d", "m", "y", "ym", "yd"', async () => {
   }
 });
 
+test('DATEDIF unit suggests "md" when typing the "\"m\" prefix', async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=DATEDIF(A1, B1, "m';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=DATEDIF(A1, B1, "md"'),
+    `Expected DATEDIF to suggest unit=\"md\" for the \"m\" prefix, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test('DATEDIF unit is not suggested for an unquoted prefix (not a pure insertion)', async () => {
   const engine = new TabCompletionEngine();
 
