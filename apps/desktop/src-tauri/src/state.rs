@@ -5039,8 +5039,13 @@ fn refresh_pivot_registration(
         let mut col_number_formats = vec![None; source_cols];
         for c in 0..source_cols {
             for r in 1..source_rows {
-                if let Some(fmt) = cells[r][c].number_format.as_ref() {
-                    col_number_formats[c] = Some(fmt.clone());
+                if let Some(fmt) = cells[r][c]
+                    .number_format
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    col_number_formats[c] = Some(fmt.to_string());
                     break;
                 }
             }
@@ -5279,19 +5284,51 @@ fn refresh_pivot_registration(
         }
 
         // Write the new pivot output values into the destination range.
+        let value_field_count = pivot.config.value_fields.len();
+        let row_label_width = match pivot.config.layout {
+            formula_engine::pivot::Layout::Compact => 1,
+            formula_engine::pivot::Layout::Outline | formula_engine::pivot::Layout::Tabular => {
+                pivot.config.row_fields.len()
+            }
+        };
+
         for r in 0..row_count {
             for c in 0..col_count {
                 let row = next_range.start_row + r;
                 let col = next_range.start_col + c;
 
                 let pv = &grid[r][c];
-                let desired_number_format = match pv {
-                    PivotValue::Date(_) => row_field_number_formats
+                let desired_number_format = if matches!(pv, PivotValue::Date(_)) {
+                    row_field_number_formats
                         .get(c)
                         .cloned()
                         .unwrap_or(None)
-                        .or_else(|| Some("m/d/yyyy".to_string())),
-                    _ => None,
+                        .filter(|fmt| !fmt.trim().is_empty())
+                        .or_else(|| Some("m/d/yyyy".to_string()))
+                } else if r > 0 && value_field_count > 0 && c >= row_label_width {
+                    let vf_idx = (c - row_label_width) % value_field_count;
+                    let vf = &pivot.config.value_fields[vf_idx];
+                    if let Some(fmt) = vf
+                        .number_format
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        Some(fmt.to_string())
+                    } else if matches!(
+                        vf.show_as.unwrap_or(formula_engine::pivot::ShowAsType::Normal),
+                        formula_engine::pivot::ShowAsType::PercentOfGrandTotal
+                            | formula_engine::pivot::ShowAsType::PercentOfRowTotal
+                            | formula_engine::pivot::ShowAsType::PercentOfColumnTotal
+                            | formula_engine::pivot::ShowAsType::PercentOf
+                            | formula_engine::pivot::ShowAsType::PercentDifferenceFrom
+                    ) {
+                        Some("0.00%".to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
                 };
 
                 let desired_scalar = pivot_value_to_scalar(pv, pivot_date_system);
