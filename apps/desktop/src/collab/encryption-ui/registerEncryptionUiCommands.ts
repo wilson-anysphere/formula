@@ -412,10 +412,37 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
         return;
       }
 
+      const resolveSheetIdForRange = (rangeSheetId: string): string => {
+        const raw = String(rangeSheetId ?? "").trim();
+        if (!raw) return raw;
+
+        // If this looks like a stable sheet id (it resolves to a different display name),
+        // prefer it as-is. This avoids sheet id/name ambiguity when a sheet id happens to
+        // equal another sheet's display name.
+        try {
+          const name = app.getSheetDisplayNameById(raw);
+          if (typeof name === "string" && name && name !== raw) return raw;
+        } catch {
+          // ignore
+        }
+
+        try {
+          const getSheetIdByName = (app as any).getSheetIdByName;
+          if (typeof getSheetIdByName !== "function") return raw;
+          const resolved = getSheetIdByName.call(app, raw);
+          if (typeof resolved === "string" && resolved.trim()) return resolved.trim();
+        } catch {
+          // ignore
+        }
+
+        return raw;
+      };
+
       const selected = await showQuickPick(
         ranges.map((r) => {
           const a1 = rangeToA1({ startRow: r.startRow, startCol: r.startCol, endRow: r.endRow, endCol: r.endCol });
-          const displaySheetName = app.getSheetDisplayNameById(r.sheetId);
+          const sheetId = resolveSheetIdForRange(r.sheetId);
+          const displaySheetName = app.getSheetDisplayNameById(sheetId);
           const label = `${displaySheetName}!${a1}`;
           const description = `Key ID: ${r.keyId}`;
           return { label, description, value: r };
@@ -431,10 +458,10 @@ export function registerEncryptionUiCommands(opts: { commandRegistry: CommandReg
       }
 
       try {
-        selectRange.call(
+       selectRange.call(
           app,
           {
-            sheetId: selected.sheetId,
+            sheetId: resolveSheetIdForRange(selected.sheetId),
             range: {
               startRow: selected.startRow,
               startCol: selected.startCol,
