@@ -349,6 +349,13 @@ fn decrypts_standard_macro_enabled_xlsm_fixture_with_correct_password() {
 }
 
 #[test]
+fn decrypts_standard_fixture_with_correct_password() {
+    let standard_path = fixture_path("standard.xlsx");
+    let wb = open_model_with_password(&standard_path, "password");
+    assert_expected_contents(&wb);
+}
+
+#[test]
 fn errors_on_missing_password_for_empty_password_fixture() {
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
 
