@@ -49,6 +49,50 @@ impl ValueLocaleConfig {
         Self::new(Locale::en_us(), DateOrder::DMY)
     }
 
+    /// Japanese (Japan).
+    ///
+    /// Assumption: Excel commonly displays numeric dates in YMD order in Japanese locales.
+    ///
+    /// Note: `formula-format` does not currently ship a `ja-JP` separator preset, so we
+    /// temporarily reuse `en-US` punctuation for parsing values.
+    #[must_use]
+    pub const fn ja_jp() -> Self {
+        Self::new(Locale::en_us(), DateOrder::YMD)
+    }
+
+    /// Chinese (Simplified, China).
+    ///
+    /// Assumption: YMD date order is the common default.
+    ///
+    /// Note: `formula-format` does not currently ship a `zh-CN` separator preset, so we
+    /// temporarily reuse `en-US` punctuation for parsing values.
+    #[must_use]
+    pub const fn zh_cn() -> Self {
+        Self::new(Locale::en_us(), DateOrder::YMD)
+    }
+
+    /// Korean (Korea).
+    ///
+    /// Assumption: YMD date order is the common default.
+    ///
+    /// Note: `formula-format` does not currently ship a `ko-KR` separator preset, so we
+    /// temporarily reuse `en-US` punctuation for parsing values.
+    #[must_use]
+    pub const fn ko_kr() -> Self {
+        Self::new(Locale::en_us(), DateOrder::YMD)
+    }
+
+    /// Chinese (Traditional, Taiwan).
+    ///
+    /// Assumption: YMD date order is the common default.
+    ///
+    /// Note: `formula-format` does not currently ship a `zh-TW` separator preset, so we
+    /// temporarily reuse `en-US` punctuation for parsing values.
+    #[must_use]
+    pub const fn zh_tw() -> Self {
+        Self::new(Locale::en_us(), DateOrder::YMD)
+    }
+
     #[must_use]
     pub const fn de_de() -> Self {
         Self::new(Locale::de_de(), DateOrder::DMY)
@@ -76,6 +120,12 @@ impl ValueLocaleConfig {
                 Some("gb") | Some("uk") => Some(Self::en_gb()),
                 _ => Some(Self::en_us()),
             },
+            "ja" => Some(Self::ja_jp()),
+            "zh" => match parts.region {
+                Some("tw") | Some("hk") | Some("mo") => Some(Self::zh_tw()),
+                _ => Some(Self::zh_cn()),
+            },
+            "ko" => Some(Self::ko_kr()),
             "de" => Some(Self::de_de()),
             "fr" => Some(Self::fr_fr()),
             "es" => Some(Self::es_es()),

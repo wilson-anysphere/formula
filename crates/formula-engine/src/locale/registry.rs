@@ -343,6 +343,61 @@ pub static EN_US: FormulaLocale = FormulaLocale {
     functions: &EMPTY_FUNCTIONS,
 };
 
+/// Japanese (Japan).
+///
+/// This is a minimal locale registration to allow selecting the workbook locale id (e.g. from
+/// `formula-wasm set_locale_id`) so codepage-driven DBCS semantics can be enabled by higher layers.
+///
+/// Punctuation/function names are currently treated as en-US.
+pub static JA_JP: FormulaLocale = FormulaLocale {
+    id: "ja-JP",
+    config: LocaleConfig::en_us(),
+    is_rtl: false,
+    boolean_true: "TRUE",
+    boolean_false: "FALSE",
+    error_literal_map: &[],
+    functions: &EMPTY_FUNCTIONS,
+};
+
+/// Chinese (Simplified, China).
+///
+/// Minimal locale registration; punctuation/function names are currently treated as en-US.
+pub static ZH_CN: FormulaLocale = FormulaLocale {
+    id: "zh-CN",
+    config: LocaleConfig::en_us(),
+    is_rtl: false,
+    boolean_true: "TRUE",
+    boolean_false: "FALSE",
+    error_literal_map: &[],
+    functions: &EMPTY_FUNCTIONS,
+};
+
+/// Korean (Korea).
+///
+/// Minimal locale registration; punctuation/function names are currently treated as en-US.
+pub static KO_KR: FormulaLocale = FormulaLocale {
+    id: "ko-KR",
+    config: LocaleConfig::en_us(),
+    is_rtl: false,
+    boolean_true: "TRUE",
+    boolean_false: "FALSE",
+    error_literal_map: &[],
+    functions: &EMPTY_FUNCTIONS,
+};
+
+/// Chinese (Traditional, Taiwan).
+///
+/// Minimal locale registration; punctuation/function names are currently treated as en-US.
+pub static ZH_TW: FormulaLocale = FormulaLocale {
+    id: "zh-TW",
+    config: LocaleConfig::en_us(),
+    is_rtl: false,
+    boolean_true: "TRUE",
+    boolean_false: "FALSE",
+    error_literal_map: &[],
+    functions: &EMPTY_FUNCTIONS,
+};
+
 /// German (Germany) matches Excel's common localization:
 /// - `,` decimal separator
 /// - `;` argument separator
@@ -383,6 +438,10 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
 pub fn get_locale(id: &str) -> Option<&'static FormulaLocale> {
     match super::normalize_locale_id(id)? {
         "en-US" => Some(&EN_US),
+        "ja-JP" => Some(&JA_JP),
+        "zh-CN" => Some(&ZH_CN),
+        "ko-KR" => Some(&KO_KR),
+        "zh-TW" => Some(&ZH_TW),
         "de-DE" => Some(&DE_DE),
         "fr-FR" => Some(&FR_FR),
         "es-ES" => Some(&ES_ES),

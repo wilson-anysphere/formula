@@ -75,6 +75,12 @@ fn normalize_locale_id(id: &str) -> Option<&'static str> {
     // For example, `fr-CA` still resolves to `fr-FR`, and `de-AT` resolves to `de-DE`.
     match parts.lang {
         "en" => Some("en-US"),
+        "ja" => Some("ja-JP"),
+        "zh" => match parts.region {
+            Some("tw") | Some("hk") | Some("mo") => Some("zh-TW"),
+            _ => Some("zh-CN"),
+        },
+        "ko" => Some("ko-KR"),
         "de" => Some("de-DE"),
         "fr" => Some("fr-FR"),
         "es" => Some("es-ES"),

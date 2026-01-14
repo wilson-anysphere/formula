@@ -1520,8 +1520,8 @@ fn odd_last_coupon_supports_settlement_before_last_interest_for_other_bases() {
     let system = ExcelDateSystem::EXCEL_1900;
 
     // End-of-month schedule with last_interest at Feb 28 (EOM). For basis=4, the European
-    // DAYS360 between regular coupon dates differs from `360/frequency` (e.g. Aug 31 -> Feb 28 is
-    // 178 days, not 180).
+    // DAYS360 between coupon dates differs from `360/frequency` (e.g. Aug 31 -> Feb 28 is
+    // 178 days, not 180), but Excel still uses a fixed `E = 360/frequency`.
     //
     // Settlement is before last_interest, so at least one regular coupon remains and the pricing
     // logic must include those regular coupons plus the final odd-stub cashflow at maturity.
