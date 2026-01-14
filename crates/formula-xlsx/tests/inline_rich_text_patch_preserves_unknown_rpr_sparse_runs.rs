@@ -93,6 +93,7 @@ fn in_memory_patch_preserves_unknown_inline_rich_rpr_tags_when_patch_value_omits
                 ..Default::default()
             },
         }],
+        phonetic: None,
     };
 
     let mut pkg = XlsxPackage::from_bytes(&bytes)?;
@@ -116,4 +117,3 @@ fn in_memory_patch_preserves_unknown_inline_rich_rpr_tags_when_patch_value_omits
 
     Ok(())
 }
-
