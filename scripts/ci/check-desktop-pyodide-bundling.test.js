@@ -13,6 +13,63 @@ function readJson(relPath) {
   return JSON.parse(readFileSync(absPath, "utf8"));
 }
 
+function readText(relPath) {
+  const absPath = path.join(repoRoot, relPath);
+  return readFileSync(absPath, "utf8");
+}
+
+function extractPyodideVersionFromEnsureScript(src) {
+  const m = src.match(/const\s+PYODIDE_VERSION\s*=\s*['"]([^'"]+)['"]/);
+  assert.ok(m, "Expected ensure-pyodide-assets.mjs to define const PYODIDE_VERSION");
+  return m[1];
+}
+
+function extractPyodideVersionFromRust(src) {
+  const m = src.match(/const\s+PYODIDE_VERSION\s*:\s*&str\s*=\s*"([^"]+)"/);
+  assert.ok(m, "Expected pyodide_assets.rs to define const PYODIDE_VERSION: &str");
+  return m[1];
+}
+
+function extractPyodideVersionFromCdnUrl(src, context) {
+  const m = src.match(/https:\/\/cdn\.jsdelivr\.net\/pyodide\/v([0-9]+\.[0-9]+\.[0-9]+)\/full\//);
+  assert.ok(m, `Expected ${context} to reference a cdn.jsdelivr.net/pyodide/vX.Y.Z/full/ URL`);
+  return m[1];
+}
+
+function extractPyodideVersionFromLocalPyodideUrl(src, context) {
+  const m = src.match(/\/pyodide\/v([0-9]+\.[0-9]+\.[0-9]+)\/full\//);
+  assert.ok(m, `Expected ${context} to reference a /pyodide/vX.Y.Z/full/ URL`);
+  return m[1];
+}
+
+function extractRequiredFilesFromEnsureScript(src) {
+  const m = src.match(/const\s+requiredFiles\s*=\s*\{([\s\S]*?)\n\};/m);
+  assert.ok(m, "Expected ensure-pyodide-assets.mjs to define `const requiredFiles = { ... };`");
+  const body = m[1];
+
+  const entries = new Map();
+  const re = /['"]([^'"]+)['"]\s*:\s*['"]([0-9a-f]{64})['"]/g;
+  for (const match of body.matchAll(re)) {
+    entries.set(match[1], match[2]);
+  }
+  assert.ok(entries.size > 0, "Expected ensure-pyodide-assets.mjs requiredFiles to be non-empty");
+  return entries;
+}
+
+function extractRequiredFilesFromRust(src) {
+  const blockMatch = src.match(/const\s+PYODIDE_REQUIRED_FILES[\s\S]*?=\s*&\[\s*([\s\S]*?)\s*\];/m);
+  assert.ok(blockMatch, "Expected pyodide_assets.rs to define PYODIDE_REQUIRED_FILES");
+  const block = blockMatch[1];
+
+  const entries = new Map();
+  const re = /file_name:\s*"([^"]+)"[\s\S]*?sha256:\s*"([0-9a-f]{64})"/g;
+  for (const match of block.matchAll(re)) {
+    entries.set(match[1], match[2]);
+  }
+  assert.ok(entries.size > 0, "Expected pyodide_assets.rs PYODIDE_REQUIRED_FILES to be non-empty");
+  return entries;
+}
+
 test("desktop dev/build scripts do not bundle Pyodide by default", () => {
   const pkg = readJson("apps/desktop/package.json");
   const scripts = pkg?.scripts ?? {};
@@ -58,4 +115,64 @@ test("maybe-ensure script gates bundling behind FORMULA_BUNDLE_PYODIDE_ASSETS", 
     /ensure-pyodide-assets\.mjs/,
     "Expected maybe-ensure-pyodide-assets.mjs to be able to invoke ensure-pyodide-assets.mjs when opted in",
   );
+});
+
+test("desktop Pyodide version + required assets stay in sync (ensure script / Rust / python-runtime)", () => {
+  const ensureSrc = readText("apps/desktop/scripts/ensure-pyodide-assets.mjs");
+  const rustSrc = readText("apps/desktop/src-tauri/src/pyodide_assets.rs");
+
+  const ensureVersion = extractPyodideVersionFromEnsureScript(ensureSrc);
+  const rustVersion = extractPyodideVersionFromRust(rustSrc);
+  assert.equal(
+    rustVersion,
+    ensureVersion,
+    "Expected apps/desktop/src-tauri/src/pyodide_assets.rs PYODIDE_VERSION to match apps/desktop/scripts/ensure-pyodide-assets.mjs",
+  );
+
+  const pythonMainThreadSrc = readText("packages/python-runtime/src/pyodide-main-thread.js");
+  const pythonWorkerSrc = readText("packages/python-runtime/src/pyodide-worker.js");
+  const pythonMainThreadVersion = extractPyodideVersionFromCdnUrl(
+    pythonMainThreadSrc,
+    "packages/python-runtime/src/pyodide-main-thread.js",
+  );
+  const pythonWorkerVersion = extractPyodideVersionFromCdnUrl(
+    pythonWorkerSrc,
+    "packages/python-runtime/src/pyodide-worker.js",
+  );
+  assert.equal(
+    pythonMainThreadVersion,
+    ensureVersion,
+    "Expected python-runtime main-thread default CDN index URL to match desktop PYODIDE_VERSION",
+  );
+  assert.equal(
+    pythonWorkerVersion,
+    ensureVersion,
+    "Expected python-runtime worker default CDN index URL to match desktop PYODIDE_VERSION",
+  );
+
+  // E2E harness uses a self-hosted `/pyodide/...` URL; keep it aligned so tests don't silently
+  // pin a different version than the runtime downloader.
+  const e2eHtml = readText("apps/desktop/python-runtime-test.html");
+  const e2eVersion = extractPyodideVersionFromLocalPyodideUrl(
+    e2eHtml,
+    "apps/desktop/python-runtime-test.html",
+  );
+  assert.equal(e2eVersion, ensureVersion, "Expected python-runtime-test.html to match desktop PYODIDE_VERSION");
+
+  const ensureFiles = extractRequiredFilesFromEnsureScript(ensureSrc);
+  const rustFiles = extractRequiredFilesFromRust(rustSrc);
+
+  assert.equal(
+    rustFiles.size,
+    ensureFiles.size,
+    "Expected Rust PYODIDE_REQUIRED_FILES to match ensure-pyodide-assets.mjs requiredFiles entry count",
+  );
+
+  for (const [fileName, sha] of ensureFiles.entries()) {
+    assert.equal(
+      rustFiles.get(fileName),
+      sha,
+      `Expected Rust sha256 for ${fileName} to match ensure-pyodide-assets.mjs`,
+    );
+  }
 });
