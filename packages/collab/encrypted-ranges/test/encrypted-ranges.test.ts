@@ -519,6 +519,13 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.keyIdForCell({ sheetId: "Budget", row: 0, col: 0 })).toBe("k1");
     // Case-insensitive.
     expect(policy.keyIdForCell({ sheetId: "budget", row: 0, col: 0 })).toBe("k1");
+
+    // If the sheet is renamed, the policy should keep matching by the *new* display name.
+    doc.transact(() => {
+      sheet.set("name", "Budget 2024");
+    });
+    expect(policy.shouldEncryptCell({ sheetId: "Budget 2024", row: 0, col: 0 })).toBe(true);
+    expect(policy.keyIdForCell({ sheetId: "Budget 2024", row: 0, col: 0 })).toBe("k1");
   });
 
   it("policy helper does not treat other sheets' stable ids as the active sheet name", () => {

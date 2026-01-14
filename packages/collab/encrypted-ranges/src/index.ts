@@ -48,6 +48,48 @@ export type WorkbookTransact = (fn: () => void) => void;
 
 const METADATA_KEY = "encryptedRanges";
 
+type SheetNameCacheVersion = { version: number };
+const sheetNameCacheVersionByDoc = new WeakMap<object, SheetNameCacheVersion>();
+
+function getSheetNameCacheVersionForDoc(doc: unknown, sheets: unknown): SheetNameCacheVersion {
+  const key = doc as unknown as object;
+  let state = sheetNameCacheVersionByDoc.get(key);
+  if (state) return state;
+  state = { version: 0 };
+  sheetNameCacheVersionByDoc.set(key, state);
+
+  try {
+    const sheetsAny = sheets as any;
+    if (sheetsAny && typeof sheetsAny.observeDeep === "function") {
+      sheetsAny.observeDeep((events: any[]) => {
+        // Only bump when sheet identity/display name changes. We intentionally ignore view-state
+        // edits so cached name lookups remain effective even when scroll/frozen pane metadata is
+        // updated frequently.
+        for (const e of Array.isArray(events) ? events : []) {
+          const keysChanged = (e as any)?.keysChanged;
+          if (keysChanged && typeof keysChanged.has === "function") {
+            if (keysChanged.has("name") || keysChanged.has("id")) {
+              state!.version += 1;
+              return;
+            }
+          }
+        }
+      });
+    } else if (sheetsAny && typeof sheetsAny.observe === "function") {
+      // Best-effort fallback (should be rare): if we can't observe deep changes, treat any
+      // sheet-array mutation as invalidating cached name lookups.
+      sheetsAny.observe(() => {
+        state!.version += 1;
+      });
+    }
+  } catch {
+    // Best-effort: if we can't observe, callers will still get correct behavior; caching just
+    // may be stale after renames.
+  }
+
+  return state;
+}
+
 function assertEncryptedRangesSchemaSupported(value: unknown): void {
   if (value == null) return;
   if (getYArray(value)) return;
@@ -764,10 +806,18 @@ export function createEncryptionPolicyFromDoc(doc: Y.Doc): {
   // Cache sheet-id -> display-name lookups per policy instance so we don't repeatedly
   // scan workbook sheet metadata on every cell match.
   const sheetNameByIdCi = new Map<string, string | null>();
+  const sheetCacheVersion = getSheetNameCacheVersionForDoc(doc as any, sheetsRoot as any);
+  let lastSheetCacheVersion = sheetCacheVersion.version;
   let lastSheetCount: number | null = null;
   const resolveSheetNameCached = (id: string): string | null => {
     const trimmed = String(id ?? "").trim();
     if (!trimmed) return null;
+
+    if (sheetCacheVersion.version !== lastSheetCacheVersion) {
+      sheetNameByIdCi.clear();
+      lastSheetCacheVersion = sheetCacheVersion.version;
+    }
+
     try {
       const count = typeof (sheetsRoot as any)?.length === "number" ? (sheetsRoot as any).length : null;
       if (count != null && count !== lastSheetCount) {
