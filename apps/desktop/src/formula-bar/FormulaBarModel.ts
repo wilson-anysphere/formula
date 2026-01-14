@@ -572,7 +572,23 @@ export class FormulaBarModel {
 
   updateRangeSelection(range: RangeAddress, sheetId?: string): void {
     if (!this.#isEditing) return;
-    this.#insertOrReplaceRange(formatRangeReference(range, sheetId), false);
+    const rangeText = formatRangeReference(range, sheetId);
+    const insertion = this.#rangeInsertion;
+    if (
+      insertion &&
+      this.#cursorStart === insertion.end &&
+      this.#cursorEnd === insertion.end &&
+      insertion.end - insertion.start === rangeText.length &&
+      this.#draft.startsWith(rangeText, insertion.start)
+    ) {
+      // Some range selection providers can emit multiple updates with identical ranges.
+      // Avoid re-tokenizing / re-highlighting the full draft when nothing changed.
+      if (this.#aiSuggestion != null) this.#aiSuggestion = null;
+      if (this.#aiSuggestionPreview != null) this.#aiSuggestionPreview = null;
+      return;
+    }
+
+    this.#insertOrReplaceRange(rangeText, false);
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#updateReferenceHighlights();
