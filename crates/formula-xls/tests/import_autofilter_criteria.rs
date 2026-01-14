@@ -7,22 +7,18 @@ mod common;
 
 use common::xls_fixture_builder;
 
-fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
-    formula_xls::import_xls_bytes(bytes).expect("import xls bytes")
-}
-
 #[test]
-fn imports_biff8_autofilter_criteria_from_autofilter_records() {
+fn import_autofilter_criteria() {
     let bytes = xls_fixture_builder::build_autofilter_criteria_fixture_xls();
-    let result = import_fixture(&bytes);
+    let result = formula_xls::import_xls_bytes(&bytes).expect("import xls bytes");
 
     let sheet = result
         .workbook
         .sheet_by_name("FilterCriteria")
         .expect("FilterCriteria missing");
     let af = sheet.auto_filter.as_ref().expect("auto_filter missing");
-    assert_eq!(af.range, Range::from_a1("A1:C5").unwrap());
 
+    assert_eq!(af.range, Range::from_a1("A1:C5").unwrap());
     assert_eq!(
         af.filter_columns,
         vec![
@@ -54,4 +50,14 @@ fn imports_biff8_autofilter_criteria_from_autofilter_records() {
         "unexpected filter columns; warnings={:?}",
         result.warnings
     );
+    assert!(af.sort_state.is_none());
+
+    assert!(
+        !result.warnings.iter().any(|w| w
+            .message
+            .contains("failed to import `.xls` AutoFilter criteria")),
+        "unexpected `.xls` AutoFilter criteria warning; warnings={:?}",
+        result.warnings
+    );
 }
+

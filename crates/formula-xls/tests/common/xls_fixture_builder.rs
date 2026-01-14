@@ -4612,7 +4612,7 @@ pub fn build_autofilter_fixture_xls() -> Vec<u8> {
 
 /// Build a BIFF8 `.xls` fixture containing a single sheet named `FilterCriteria` with:
 /// - a sheet-scoped `_xlnm._FilterDatabase` defined name referencing `$A$1:$C$5`, and
-/// - a BIFF8 `AUTOFILTER` record storing a simple filter criterion for column A.
+/// - BIFF8 `AUTOFILTER` records storing simple filter criteria for columns A and B.
 ///
 /// This exercises import of legacy BIFF8 AutoFilter criteria into `SheetAutoFilter.filter_columns`.
 pub fn build_autofilter_criteria_fixture_xls() -> Vec<u8> {
@@ -15443,8 +15443,6 @@ fn build_autofilter_criteria_workbook_stream() -> Vec<u8> {
 
     // AUTOFILTERINFO: cEntries = 3 (A..C).
     push_record(&mut sheet, RECORD_AUTOFILTERINFO, &3u16.to_le_bytes());
-    // FILTERMODE: present (no payload) to indicate an active filter.
-    push_record(&mut sheet, RECORD_FILTERMODE, &[]);
 
     // AUTOFILTER record: simple text equality filter on column A for "Alice".
     let doper1 = autofilter_doper_string(AUTOFILTER_OP_EQUAL, "Alice");
@@ -16286,6 +16284,37 @@ fn array_record_refu(
     out.extend_from_slice(&0u16.to_le_bytes()); // flags/reserved
     out.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
     out.extend_from_slice(rgce);
+    out
+}
+
+fn doper(vt: u8, grbit: u8, w_oper: u16, value_raw: u32) -> [u8; 8] {
+    // DOPER (best-effort BIFF8 encoding) [MS-XLS 2.5.69]:
+    // [vt:u8][grbit:u8][wOper:u16 LE][value_raw:u32 LE]
+    let mut out = [0u8; 8];
+    out[0] = vt;
+    out[1] = grbit;
+    out[2..4].copy_from_slice(&w_oper.to_le_bytes());
+    out[4..8].copy_from_slice(&value_raw.to_le_bytes());
+    out
+}
+
+fn autofilter_record_payload(
+    i_entry: u16,
+    grbit: u16,
+    doper1: [u8; 8],
+    doper2: [u8; 8],
+    strings: &[&str],
+) -> Vec<u8> {
+    // AUTOFILTER (worksheet substream) payload [MS-XLS 2.4.31] (best-effort):
+    // [iEntry:u16][grbit:u16][DOPER1:8][DOPER2:8][optional XLUnicodeString payloads...]
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&i_entry.to_le_bytes());
+    out.extend_from_slice(&grbit.to_le_bytes());
+    out.extend_from_slice(&doper1);
+    out.extend_from_slice(&doper2);
+    for s in strings {
+        write_unicode_string(&mut out, s);
+    }
     out
 }
 
