@@ -11,6 +11,16 @@ export function sheetChunkIdPrefix(sheetName: string): string;
 export function legacySheetChunkIdPrefix(sheetName: string): string;
 
 /**
+ * Delete all region chunks for a given sheet name (current id scheme), plus best-effort
+ * cleanup of legacy `${sheetName}-region-*` ids when supported by the store.
+ */
+export function deleteSheetRegionChunks(
+  store: any,
+  sheetName: string,
+  options?: { signal?: AbortSignal },
+): Promise<void>;
+
+/**
  * Best-effort cleanup for legacy `${sheetName}-region-*` ids.
  *
  * This helper avoids using the legacy prefix for `deleteByPrefix()` because that
@@ -23,4 +33,3 @@ export function deleteLegacySheetRegionChunks(
   sheetName: string,
   options?: { signal?: AbortSignal },
 ): number;
-

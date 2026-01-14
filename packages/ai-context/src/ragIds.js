@@ -24,6 +24,41 @@ export function legacySheetChunkIdPrefix(sheetName) {
 }
 
 /**
+ * Delete all region chunks for a given sheet name, using the current id scheme.
+ *
+ * Falls back to scanning `store.items` when the store does not implement
+ * `deleteByPrefix` (common in simple in-memory store shapes).
+ *
+ * Also performs a best-effort cleanup of legacy ids.
+ *
+ * @param {any} store
+ * @param {string} sheetName
+ * @param {{ signal?: AbortSignal }} [options]
+ */
+export async function deleteSheetRegionChunks(store, sheetName, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
+
+  if (!store || typeof store !== "object") return;
+
+  const prefix = sheetChunkIdPrefix(sheetName);
+
+  if (typeof store.deleteByPrefix === "function") {
+    await store.deleteByPrefix(prefix, { signal });
+  } else {
+    const items = store.items;
+    if (items && typeof items.keys === "function" && typeof items.delete === "function") {
+      for (const id of Array.from(items.keys())) {
+        throwIfAborted(signal);
+        if (typeof id === "string" && id.startsWith(prefix)) items.delete(id);
+      }
+    }
+  }
+
+  deleteLegacySheetRegionChunks(store, sheetName, { signal });
+}
+
+/**
  * Best-effort cleanup for legacy `${sheetName}-region-...` ids.
  *
  * We avoid `deleteByPrefix(legacySheetChunkIdPrefix(sheetName))` because that prefix is
@@ -59,4 +94,3 @@ export function deleteLegacySheetRegionChunks(store, sheetName, options = {}) {
   }
   return deleted;
 }
-

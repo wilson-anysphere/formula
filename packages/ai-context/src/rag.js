@@ -1,7 +1,7 @@
 import { normalizeRange, parseA1Range, rangeToA1 } from "./a1.js";
 import { extractSheetSchema } from "./schema.js";
 import { throwIfAborted } from "./abort.js";
-import { deleteLegacySheetRegionChunks, sheetChunkIdPrefix } from "./ragIds.js";
+import { deleteSheetRegionChunks, sheetChunkIdPrefix } from "./ragIds.js";
 import { valuesRangeToTsv } from "./tsv.js";
 
 /**
@@ -511,12 +511,7 @@ export class RagIndex {
     // optional row-window start row suffix when splitting is enabled),
     // but the number of regions can change over time. Clear the previous region
     // chunks for this sheet so stale chunks don't linger in the store.
-    if (typeof this.store.deleteByPrefix === "function") {
-      await this.store.deleteByPrefix(sheetChunkIdPrefix(sheet.name), { signal });
-    }
-    // Best-effort cleanup for stale chunks created by older versions of ai-context.
-    // Use a precise match to avoid resurrecting the legacy prefix collision bug.
-    deleteLegacySheetRegionChunks(this.store, sheet.name, { signal });
+    await deleteSheetRegionChunks(this.store, sheet.name, { signal });
 
     throwIfAborted(signal);
     const splitByRowWindows = options.splitByRowWindows ?? options.splitRegions;

@@ -1,6 +1,6 @@
 import { extractSheetSchema } from "./schema.js";
 import { RagIndex } from "./rag.js";
-import { deleteLegacySheetRegionChunks, sheetChunkIdPrefix } from "./ragIds.js";
+import { deleteSheetRegionChunks } from "./ragIds.js";
 import { valuesRangeToTsv } from "./tsv.js";
 import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify } from "./tokenBudget.js";
 import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows, tailSampleRows } from "./sampling.js";
@@ -648,11 +648,8 @@ export class ContextManager {
             // Bound in-memory RAG storage as well as the signature cache. When a sheet's active
             // index entry is evicted from the LRU, delete the sheet's chunks from the vector
             // store so `RagIndex.search()` doesn't keep considering stale sheets forever.
-            if (typeof this.ragIndex?.store?.deleteByPrefix === "function") {
-              throwIfAborted(signal);
-              await this.ragIndex.store.deleteByPrefix(sheetChunkIdPrefix(evictedSheetName), { signal });
-              deleteLegacySheetRegionChunks(this.ragIndex.store, evictedSheetName, { signal });
-            }
+            throwIfAborted(signal);
+            await deleteSheetRegionChunks(this.ragIndex?.store, evictedSheetName, { signal });
           }
         }
       }
