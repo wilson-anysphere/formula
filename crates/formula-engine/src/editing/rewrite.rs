@@ -5,6 +5,7 @@ use crate::{
     CellRef as AstCellRef, ColRef as AstColRef, Coord, Expr, FieldAccessExpr, FunctionCall,
     ParseOptions, PostfixExpr, RowRef as AstRowRef, SerializeOptions, SheetRef, UnaryExpr,
 };
+use formula_model::sheet_name_eq_case_insensitive;
 
 const REF_ERROR: &str = "#REF!";
 
@@ -18,10 +19,12 @@ where
     F: FnMut(&str) -> Option<usize>,
 {
     match sheet {
-        None => ctx_sheet.eq_ignore_ascii_case(edit_sheet),
-        Some(SheetRef::Sheet(name)) => name.eq_ignore_ascii_case(edit_sheet),
+        None => sheet_name_eq_case_insensitive(ctx_sheet, edit_sheet),
+        Some(SheetRef::Sheet(name)) => sheet_name_eq_case_insensitive(name, edit_sheet),
         Some(SheetRef::SheetRange { start, end }) => {
-            if start.eq_ignore_ascii_case(edit_sheet) || end.eq_ignore_ascii_case(edit_sheet) {
+            if sheet_name_eq_case_insensitive(start, edit_sheet)
+                || sheet_name_eq_case_insensitive(end, edit_sheet)
+            {
                 return true;
             }
 

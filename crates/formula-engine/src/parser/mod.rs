@@ -6,6 +6,7 @@ use crate::{
     PostfixExpr, PostfixOp, ReferenceStyle, RowRef, SheetRef, Span, StructuredRef, UnaryExpr,
     UnaryOp,
 };
+use formula_model::sheet_name_eq_case_insensitive;
 
 /// Excel formula limits enforced by this parser.
 ///
@@ -2345,7 +2346,7 @@ impl<'a> Parser<'a> {
                         self.next();
                         let (workbook, start) = split_external_sheet_name(&start_raw);
                         let (_wb2, end) = split_external_sheet_name(&end_raw);
-                        let sheet_ref = if start.eq_ignore_ascii_case(&end) {
+                        let sheet_ref = if sheet_name_eq_case_insensitive(&start, &end) {
                             SheetRef::Sheet(start)
                         } else {
                             SheetRef::SheetRange { start, end }
@@ -2907,7 +2908,7 @@ impl<'a> Parser<'a> {
                             self.next();
                             let (workbook, start) = split_external_sheet_name(&start_raw);
                             let (_wb2, end) = split_external_sheet_name(&end_raw);
-                            let sheet_ref = if start.eq_ignore_ascii_case(&end) {
+                            let sheet_ref = if sheet_name_eq_case_insensitive(&start, &end) {
                                 SheetRef::Sheet(start)
                             } else {
                                 SheetRef::SheetRange { start, end }
@@ -3473,7 +3474,7 @@ impl<'a> Parser<'a> {
                 self.pos = save;
                 return self.parse_structured_ref(None, None, None);
             }
-            if start_sheet.eq_ignore_ascii_case(&end_sheet) {
+            if sheet_name_eq_case_insensitive(&start_sheet, &end_sheet) {
                 SheetRef::Sheet(start_sheet)
             } else {
                 SheetRef::SheetRange {
@@ -3487,7 +3488,9 @@ impl<'a> Parser<'a> {
                 return self.parse_structured_ref(None, None, None);
             }
             match split_sheet_span_name(&start_sheet) {
-                Some((start, end)) if start.eq_ignore_ascii_case(&end) => SheetRef::Sheet(start),
+                Some((start, end)) if sheet_name_eq_case_insensitive(&start, &end) => {
+                    SheetRef::Sheet(start)
+                }
                 Some((start, end)) => SheetRef::SheetRange { start, end },
                 None => SheetRef::Sheet(start_sheet),
             }
@@ -3764,7 +3767,7 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
 fn sheet_ref_from_raw_prefix(raw: &str) -> (Option<String>, SheetRef) {
     let (workbook, sheet) = split_external_sheet_name(raw);
     let sheet_ref = match split_sheet_span_name(&sheet) {
-        Some((start, end)) if start.eq_ignore_ascii_case(&end) => SheetRef::Sheet(start),
+        Some((start, end)) if sheet_name_eq_case_insensitive(&start, &end) => SheetRef::Sheet(start),
         Some((start, end)) => SheetRef::SheetRange { start, end },
         None => SheetRef::Sheet(sheet),
     };

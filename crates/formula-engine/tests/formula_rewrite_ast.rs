@@ -175,3 +175,20 @@ fn structural_edits_rewrite_reversed_sheet_range_refs_when_edit_sheet_in_span() 
     assert!(changed);
     assert_eq!(out, "=SUM(Sheet3:Sheet1!A2)");
 }
+
+#[test]
+fn structural_edits_match_sheet_names_case_insensitively_across_unicode() {
+    // Excel compares sheet names case-insensitively across Unicode (with NFKC normalization).
+    // The sharp s (`ß`) uppercases to `SS`, which should be treated as the same sheet name.
+    let edit = StructuralEdit::InsertRows {
+        sheet: "SS".to_string(),
+        row: 0,
+        count: 1,
+    };
+    let origin = CellAddr::new(0, 0);
+
+    let (out, changed) = rewrite_formula_for_structural_edit("=A1+'ß'!A1", "Other", origin, &edit);
+
+    assert!(changed);
+    assert_eq!(out, "=A1+'ß'!A2");
+}

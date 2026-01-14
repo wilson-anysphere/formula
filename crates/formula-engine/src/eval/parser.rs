@@ -7,6 +7,7 @@ use crate::eval::ast::{
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
+use formula_model::sheet_name_eq_case_insensitive;
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -326,7 +327,7 @@ fn lower_sheet_reference(
         (None, None) => SheetReference::Current,
         (None, Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(s) => SheetReference::Sheet(s.clone()),
-            SheetRef::SheetRange { start, end } if start.eq_ignore_ascii_case(end) => {
+            SheetRef::SheetRange { start, end } if sheet_name_eq_case_insensitive(start, end) => {
                 SheetReference::Sheet(start.clone())
             }
             SheetRef::SheetRange { start, end } => {
@@ -336,7 +337,7 @@ fn lower_sheet_reference(
         (Some(book), Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
             SheetRef::SheetRange { start, end } => {
-                if start.eq_ignore_ascii_case(end) {
+                if sheet_name_eq_case_insensitive(start, end) {
                     SheetReference::External(format!("[{book}]{start}"))
                 } else {
                     SheetReference::External(format!("[{book}]{start}:{end}"))

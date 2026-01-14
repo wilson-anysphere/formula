@@ -5,6 +5,7 @@ use crate::eval::ast::{
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
+use formula_model::sheet_name_eq_case_insensitive;
 use formula_model::EXCEL_MAX_COLS;
 
 /// Excel column limit (0-indexed).
@@ -217,7 +218,7 @@ fn lower_sheet_reference(
         (Some(book), Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
             SheetRef::SheetRange { start, end } => {
-                if start.eq_ignore_ascii_case(end) {
+                if sheet_name_eq_case_insensitive(start, end) {
                     SheetReference::External(format!("[{book}]{start}"))
                 } else {
                     SheetReference::External(format!("[{book}]{start}:{end}"))
@@ -227,7 +228,7 @@ fn lower_sheet_reference(
         (Some(book), None) => SheetReference::External(format!("[{book}]")),
         (None, Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => SheetReference::Sheet(sheet.clone()),
-            SheetRef::SheetRange { start, end } if start.eq_ignore_ascii_case(end) => {
+            SheetRef::SheetRange { start, end } if sheet_name_eq_case_insensitive(start, end) => {
                 SheetReference::Sheet(start.clone())
             }
             SheetRef::SheetRange { start, end } => {
@@ -889,7 +890,7 @@ fn compile_sheet_reference(
         (Some(book), Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),
             SheetRef::SheetRange { start, end } => {
-                if start.eq_ignore_ascii_case(end) {
+                if sheet_name_eq_case_insensitive(start, end) {
                     SheetReference::External(format!("[{book}]{start}"))
                 } else {
                     SheetReference::External(format!("[{book}]{start}:{end}"))
@@ -902,7 +903,7 @@ fn compile_sheet_reference(
                 .map(SheetReference::Sheet)
                 .unwrap_or_else(|| SheetReference::External(sheet.clone())),
             SheetRef::SheetRange { start, end } => {
-                if start.eq_ignore_ascii_case(end) {
+                if sheet_name_eq_case_insensitive(start, end) {
                     return resolve_sheet(start)
                         .map(SheetReference::Sheet)
                         .unwrap_or_else(|| SheetReference::External(start.clone()));

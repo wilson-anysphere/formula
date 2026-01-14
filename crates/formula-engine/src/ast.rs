@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use formula_model::sheet_name_eq_case_insensitive;
 
 /// 0-indexed cell address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -839,7 +840,9 @@ impl SheetRef {
     pub fn as_single_sheet(&self) -> Option<&str> {
         match self {
             SheetRef::Sheet(name) => Some(name),
-            SheetRef::SheetRange { start, end } if start.eq_ignore_ascii_case(end) => Some(start),
+            SheetRef::SheetRange { start, end } if sheet_name_eq_case_insensitive(start, end) => {
+                Some(start)
+            }
             SheetRef::SheetRange { .. } => None,
         }
     }
@@ -1115,7 +1118,7 @@ fn fmt_ref_prefix(
                     out.push('!');
                 }
                 SheetRef::SheetRange { start, end } => {
-                    if start.eq_ignore_ascii_case(end) {
+                    if sheet_name_eq_case_insensitive(start, end) {
                         // Degenerate 3D span within an external workbook.
                         if sheet_name_needs_quotes(start, reference_style) {
                             out.push('\'');
@@ -1162,7 +1165,7 @@ fn fmt_ref_prefix(
                 out.push('!');
             }
             SheetRef::SheetRange { start, end } => {
-                if start.eq_ignore_ascii_case(end) {
+                if sheet_name_eq_case_insensitive(start, end) {
                     fmt_sheet_name(out, start, reference_style);
                 } else {
                     fmt_sheet_range_name(out, start, end, reference_style);

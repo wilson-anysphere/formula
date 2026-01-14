@@ -4,6 +4,7 @@ use crate::eval::{
 };
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, SheetId as FnSheetId};
 use crate::value::{Array, ErrorKind, Value};
+use formula_model::sheet_name_eq_case_insensitive;
 use std::cmp::Ordering;
 
 /// Maximum number of cells the debug trace evaluator will materialize when a formula result is a
@@ -1593,7 +1594,7 @@ impl ParserImpl {
                         kind: SpannedExprKind::Error(ErrorKind::Ref),
                     });
                 };
-                if sheet_part.eq_ignore_ascii_case(&end_name) {
+                if sheet_name_eq_case_insensitive(sheet_part, &end_name) {
                     SheetReference::External(start_name)
                 } else {
                     // Preserve the full span in the sheet key so `resolve_sheet_id` reliably
@@ -1614,7 +1615,7 @@ impl ParserImpl {
                                 kind: SpannedExprKind::Error(ErrorKind::Ref),
                             });
                         };
-                        if sheet_part.eq_ignore_ascii_case(&end) {
+                        if sheet_name_eq_case_insensitive(sheet_part, &end) {
                             SheetReference::External(start)
                         } else {
                             SheetReference::External(format!("{start}:{end}"))
