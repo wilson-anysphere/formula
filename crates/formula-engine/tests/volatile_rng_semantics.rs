@@ -11,6 +11,9 @@ fn setup_rng_sheet(engine: &mut Engine) {
     // Nested volatile calls within a single cell evaluation. The engine should treat each call as
     // a distinct deterministic draw, scoped to the cell evaluation.
     engine.set_cell_formula("Sheet1", "A3", "=RAND()+RAND()").unwrap();
+    // Stronger check for "distinct draws": if RAND() were incorrectly cached within a single cell
+    // evaluation, this would always be zero.
+    engine.set_cell_formula("Sheet1", "A5", "=RAND()-RAND()").unwrap();
 
     // LET should evaluate its bound expression exactly once and reuse the value for each reference
     // of the bound name (Excel semantics).
@@ -20,6 +23,9 @@ fn setup_rng_sheet(engine: &mut Engine) {
 
     // A dependent cell to ensure volatile cell results are stable when referenced.
     engine.set_cell_formula("Sheet1", "B1", "=A1+A2").unwrap();
+    // Repeated references to the same volatile cell should observe a consistent value within a
+    // single recalc pass.
+    engine.set_cell_formula("Sheet1", "B2", "=A1-A1").unwrap();
 
     // A spilled volatile RNG result: 2x2, integer output.
     engine
@@ -79,7 +85,7 @@ fn assert_rand_sum_bounds(value: &Value, label: &str) {
 
 fn snapshot(engine: &Engine) -> Vec<Value> {
     // Include the spill cells explicitly so equality checks catch spill scheduling differences.
-    ["A1", "A2", "A3", "A4", "B1", "C1", "D1", "C2", "D2", "E1"]
+    ["A1", "A2", "A3", "A4", "A5", "B1", "B2", "C1", "D1", "C2", "D2", "E1"]
         .into_iter()
         .map(|addr| engine.get_cell_value("Sheet1", addr))
         .collect()
@@ -103,6 +109,17 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
 
     // Within a single recalc pass, LET bindings should be stable (Excel semantics).
     assert_eq!(single.get_cell_value("Sheet1", "A4"), Value::Bool(true));
+    // Repeated references to the same volatile cell are stable within a recalc pass.
+    assert_eq!(single.get_cell_value("Sheet1", "B2"), Value::Number(0.0));
+    // Multiple RAND() calls within a single cell evaluation should produce distinct draws.
+    match single.get_cell_value("Sheet1", "A5") {
+        Value::Number(n) => {
+            assert!(n.is_finite(), "expected RAND()-RAND() to be finite, got {n}");
+            assert!(n > -1.0 && n < 1.0, "expected RAND()-RAND() in (-1,1), got {n}");
+            assert!(n != 0.0, "expected RAND()-RAND() to be non-zero (distinct draws)");
+        }
+        other => panic!("expected RAND()-RAND() to be a number, got {other:?}"),
+    }
 
     // Basic bounds / type invariants for each RNG function.
     assert_rand_unit_interval(&single.get_cell_value("Sheet1", "A1"), "RAND()");
@@ -154,6 +171,7 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
 
         // Invariants should continue to hold after every recalc.
         assert_eq!(single.get_cell_value("Sheet1", "A4"), Value::Bool(true));
+        assert_eq!(single.get_cell_value("Sheet1", "B2"), Value::Number(0.0));
         assert_rand_unit_interval(&single.get_cell_value("Sheet1", "A1"), "RAND()");
         assert_randbetween_bounds(
             &single.get_cell_value("Sheet1", "A2"),
@@ -204,4 +222,3 @@ fn volatile_rng_semantics_are_stable_within_recalc_and_order_independent() {
         "expected RANDARRAY() spill values to change across recalculations"
     );
 }
-
