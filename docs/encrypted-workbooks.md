@@ -148,17 +148,18 @@ Passwords should not be persisted or logged by default.
 Implementation note (desktop IPC):
 
 - The Tauri backend command `open_workbook` accepts an optional `password` parameter.
-- For encrypted OOXML workbooks, the backend surfaces sentinel error strings prefixed with:
+- For encrypted workbooks (OOXML `EncryptedPackage` and legacy `.xls` `FILEPASS`), the backend surfaces sentinel error strings prefixed with:
   - `PASSWORD_REQUIRED:` (no password provided)
   - `INVALID_PASSWORD:` (wrong password)
   so the frontend can prompt/retry without doing string matching on the rest of the message.
 
 Current desktop limitations:
 
-- Password-aware open is supported for **encrypted OOXML workbooks that decrypt to XLSX/XLSM/XLSB**
-  packages (via the `open_workbook` command’s `password` parameter). The desktop frontend prompts
-  for a password and retries open when it receives `PASSWORD_REQUIRED:` / `INVALID_PASSWORD:` errors.
-- Legacy `.xls` BIFF `FILEPASS` password prompting is not yet wired through the desktop open path.
+- Password-aware open is supported for:
+  - **Encrypted OOXML workbooks** (`EncryptionInfo` + `EncryptedPackage`, decrypting to XLSX/XLSM/XLSB ZIP packages)
+  - **Legacy encrypted `.xls` workbooks** (BIFF `FILEPASS`)
+  via the `open_workbook` command’s `password` parameter. The desktop frontend prompts for a
+  password and retries open when it receives `PASSWORD_REQUIRED:` / `INVALID_PASSWORD:` errors.
 - Encrypted `.xlsb` opens are supported, but because the input on disk is an encrypted OLE/CFB
   container (not a plaintext `.xlsb` ZIP package), the desktop app cannot round-trip `.xlsb` yet and
   forces “Save As”. Save as `.xlsx` instead.
