@@ -7,6 +7,46 @@ import { describe, expect, it, vi } from "vitest";
 import { FormulaBarView } from "./FormulaBarView.js";
 
 describe("FormulaBarView fx function picker", () => {
+  it("does not open when read-only (but may focus the textarea for copy)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onBeginEdit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onBeginEdit });
+    view.setActiveCell({ address: "A1", input: "=SUM(A1)", value: null });
+    view.setReadOnly(true);
+
+    const fxButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-fx-button"]');
+    expect(fxButton).toBeTruthy();
+
+    const cancel = host.querySelector<HTMLButtonElement>(".formula-bar-action-button--cancel");
+    const commit = host.querySelector<HTMLButtonElement>(".formula-bar-action-button--commit");
+    expect(cancel).toBeTruthy();
+    expect(commit).toBeTruthy();
+    expect(cancel!.hidden).toBe(true);
+    expect(commit!.hidden).toBe(true);
+
+    fxButton!.click();
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]');
+    expect(picker).toBeTruthy();
+
+    expect(view.model.isEditing).toBe(false);
+    expect(onBeginEdit).not.toHaveBeenCalled();
+    expect(cancel!.hidden).toBe(true);
+    expect(cancel!.disabled).toBe(true);
+    expect(commit!.hidden).toBe(true);
+    expect(commit!.disabled).toBe(true);
+    expect(picker!.hidden).toBe(true);
+    expect(fxButton!.getAttribute("aria-expanded")).toBe("false");
+
+    // Read-only mode still allows focusing/selecting the formula bar for copy.
+    expect(document.activeElement).toBe(view.textarea);
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
+
+    host.remove();
+  });
+
   it("opens, filters, and inserts the selected function call", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
