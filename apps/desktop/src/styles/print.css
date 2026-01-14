@@ -99,6 +99,11 @@ dialog.page-setup-dialog .page-setup-dialog__select {
   min-width: 0;
   max-width: 100%;
   font: inherit;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
 dialog.page-setup-dialog .page-setup-dialog__input:focus-visible,
@@ -125,7 +130,8 @@ dialog.page-setup-dialog .page-setup-dialog__input--margin {
 }
 
 dialog.page-setup-dialog .page-setup-dialog__controls {
-  margin-top: var(--space-4);
+  --dialog-controls-margin-top: var(--space-4);
+  --dialog-control-radius: var(--radius-sm);
 }
 
 /* --- Print preview overlay ------------------------------------------------ */
