@@ -1,5 +1,6 @@
 import * as Y from "yjs";
-import { getYArray, getYMap, getYText, isYAbstractType, replaceForeignRootType } from "@formula/collab-yjs-utils";
+import { getDocTypeConstructors, getYArray, getYMap, getYText, isYAbstractType, replaceForeignRootType } from "@formula/collab-yjs-utils";
+import type { DocTypeConstructors } from "@formula/collab-yjs-utils";
 
 import type { Comment, CommentAuthor, CommentKind, Reply } from "./types.ts";
 
@@ -231,6 +232,7 @@ export class CommentManager {
     const now = input.now ?? Date.now();
 
     this.transact(() => {
+      const docCtors = getDocTypeConstructors(this.doc);
       const mapConstructor = (() => {
         if (root.kind === "map") return (root.map as any).constructor as new () => any;
 
@@ -241,7 +243,7 @@ export class CommentManager {
         // (if the array already has comments), otherwise derive it from the doc.
         const existingComment = this.getAllYComments(root)[0]?.yComment;
         if (existingComment) return (existingComment as any).constructor as new () => any;
-        return getDocMapConstructor(this.doc);
+        return docCtors.Map;
       })();
 
       const arrayConstructor = (() => {
@@ -256,7 +258,7 @@ export class CommentManager {
         if (existingReplies) return existingReplies.constructor as new () => any;
 
         if (root.kind === "array") return (root.array as any).constructor as new () => any;
-        return getDocArrayConstructor(this.doc);
+        return docCtors.Array;
       })();
 
       const yComment = createYComment({
@@ -849,48 +851,10 @@ function findAvailableRootName(doc: Y.Doc, base: string): string {
   return `${base}_${Date.now()}`;
 }
 
-function getDocArrayConstructor(doc: any): new () => any {
-  const name = findAvailableRootName(doc, "__comments_tmp_array");
-  const tmp = doc.getArray(name);
-  const ctor = tmp.constructor as new () => any;
-  doc.share.delete(name);
-  return ctor;
-}
-
-function getDocMapConstructor(doc: any): new () => any {
-  const name = findAvailableRootName(doc, "__comments_tmp_map");
-  const tmp = doc.getMap(name);
-  const ctor = tmp.constructor as new () => any;
-  doc.share.delete(name);
-  return ctor;
-}
-
-type DocTypeConstructors = {
-  MapCtor: new () => any;
-  ArrayCtor: new () => any;
-  TextCtor: new () => any;
-};
-
-function getDocTypeConstructors(doc: any): DocTypeConstructors {
-  return {
-    MapCtor: getDocMapConstructor(doc),
-    ArrayCtor: getDocArrayConstructor(doc),
-    TextCtor: getDocTextConstructor(doc),
-  };
-}
-
-function getDocTextConstructor(doc: any): new () => any {
-  const name = findAvailableRootName(doc, "__comments_tmp_text");
-  const tmp = doc.getText(name);
-  const ctor = tmp.constructor as new () => any;
-  doc.share.delete(name);
-  return ctor;
-}
-
 function cloneYjsValue(value: any, ctors: DocTypeConstructors): any {
   const map = getYMap(value);
   if (map) {
-    const out = new ctors.MapCtor();
+    const out = new ctors.Map();
     map.forEach((v: any, k: string) => {
       out.set(k, cloneYjsValue(v, ctors));
     });
@@ -899,7 +863,7 @@ function cloneYjsValue(value: any, ctors: DocTypeConstructors): any {
 
   const array = getYArray(value);
   if (array) {
-    const out = new ctors.ArrayCtor();
+    const out = new ctors.Array();
     for (const item of array.toArray()) {
       out.push([cloneYjsValue(item, ctors)]);
     }
@@ -908,7 +872,7 @@ function cloneYjsValue(value: any, ctors: DocTypeConstructors): any {
 
   const text = getYText(value);
   if (text) {
-    const out = new ctors.TextCtor();
+    const out = new ctors.Text();
     out.applyDelta(structuredClone(text.toDelta()));
     return out;
   }
