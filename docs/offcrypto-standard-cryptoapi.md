@@ -387,6 +387,20 @@ For **Standard AES**, the verifier fields are **AES-ECB** (no IV), so there is n
 may decrypt the two ciphertext blobs independently. (The concatenate+decrypt approach below also
 works for AES because ECB has no state.)
 
+Compatibility note (non-Excel producers): some implementations encrypt the verifier fields using
+**AES-CBC (no padding)** instead of ECB. In that case:
+
+* You must treat `EncryptedVerifier || EncryptedVerifierHash` as a single CBC stream (CBC chaining
+  crosses the boundary between the two fields).
+* The IV is commonly derived from the verifier salt and block index 0:
+
+  ```text
+  iv0 = Hash(Salt || LE32(0))[0..16]   // Hash is AlgIDHash (typically SHA-1 for Standard AES)
+  ```
+
+  `formula-io`’s Standard verifier implementation tries **AES-ECB first**, then falls back to this
+  derived-IV CBC mode for compatibility.
+
 Steps:
 
 1. Concatenate ciphertext:
@@ -398,6 +412,7 @@ Steps:
 2. Decrypt `C` with the cipher indicated by `EncryptionHeader.AlgID` using the derived `key`:
 
    * **AES (`CALG_AES_*`)**: AES-ECB over 16-byte blocks (no IV, no padding at the crypto layer).
+     (If you implement the AES-CBC compatibility variant above, decrypt with AES-CBC using `iv0`.)
    * **RC4 (`CALG_RC4`)**: RC4 stream cipher with the derived key.
 
    This produces plaintext `P`.
@@ -464,7 +479,7 @@ For additional `EncryptedPackage` framing/padding guidance and known non-Excel v
 
 ### 7.2) Encryption model (AES vs RC4)
 
-#### 7.2.1) AES (`CALG_AES_*`): AES-ECB (no IV, no segmenting)
+#### 7.2.1) AES (`CALG_AES_*`): AES-ECB (no IV; optional 0x1000 segmenting)
 
 For baseline Standard/CryptoAPI AES encryption, the `EncryptedPackage` ciphertext (after the 8-byte
 size prefix) is **AES-ECB** encrypted with the derived `fileKey` (`block = 0`).
@@ -484,6 +499,27 @@ Notes:
 * Some producers pad the ciphertext to a fixed size (e.g. to 4096 bytes for very small packages).
   Truncation handles this.
 * AES-ECB has no IV. Per-segment IV derivation is for **Agile (4.4)** encryption, not Standard AES.
+
+Even in the ECB baseline, many implementations decrypt `EncryptedPackage` in **0x1000-byte (4096)**
+segments for streaming/bounded memory:
+
+```text
+segmentSize = 0x1000   // 4096
+```
+
+With ECB this is an implementation detail: you can decrypt the ciphertext in any chunking as long as
+it stays AES-block-aligned (multiples of 16 bytes).
+
+Compatibility note (non-Excel producers): some implementations encrypt `EncryptedPackage` in 0x1000
+segments using **AES-CBC** with a per-segment IV derived from the verifier salt:
+
+```text
+iv_i = SHA1(Salt || LE32(i))[0..16]
+plaintext_i = AES-CBC-Decrypt(fileKey, iv_i, ciphertext_i)
+```
+
+This is **not** the Excel-default Standard AES scheme, but `formula-io`’s `EncryptedPackage` helper
+can try it as a fallback when a salt is available (see `docs/offcrypto-standard-encryptedpackage.md`).
 
 #### 7.2.2) RC4 (`CALG_RC4`)
 

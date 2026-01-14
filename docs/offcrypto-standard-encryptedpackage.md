@@ -93,6 +93,19 @@ Implementation pointers:
 * `crates/formula-offcrypto/src/lib.rs`: `decrypt_encrypted_package_ecb`
 * `crates/formula-io/src/offcrypto/encrypted_package.rs`: `decrypt_encrypted_package_standard_aes_to_writer`
 
+## Optional segmentation (0x1000)
+
+Many decryptors process `EncryptedPackage` in **0x1000-byte (4096) plaintext segments** for
+streaming/bounded memory:
+
+```text
+segmentSize = 0x1000   // 4096
+aesBlock    = 16
+```
+
+For the **AES-ECB baseline**, segment boundaries are not cryptographically meaningful: ECB has no IV
+and no chaining, so you may decrypt in any chunk sizes as long as they are multiples of 16 bytes.
+
 ### Non-standard segmented fallback (seen in some producers)
 
 Some non-Excel producers encrypt `EncryptedPackage` as **0x1000-byte segments** using **AES-CBC**
