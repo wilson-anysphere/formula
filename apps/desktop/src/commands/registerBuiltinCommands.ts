@@ -834,7 +834,6 @@ export function registerBuiltinCommands(params: {
       keywords: ["selection pane", "arrange", "objects", "drawings", "charts"],
     },
   );
-
   // --- What-If Analysis / Solver (ribbon ids) ---------------------------------
   // Register the ribbon ids directly so:
   // - the ribbon doesn't have to rely on `main.ts` fallbacks to stay enabled
