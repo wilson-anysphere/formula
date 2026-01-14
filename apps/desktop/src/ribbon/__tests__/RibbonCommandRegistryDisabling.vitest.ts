@@ -174,7 +174,6 @@ describe("CommandRegistry-backed ribbon disabling", () => {
 
     // These are currently handled directly by the desktop ribbon command handler (not via CommandRegistry),
     // so they must be exempt from the registry-backed disabling allowlist.
-    expect(baselineDisabledById["home.editing.fill.series"]).toBeUndefined();
     expect(baselineDisabledById["home.editing.sortFilter.customSort"]).toBeUndefined();
     expect(baselineDisabledById["data.sortFilter.sort.customSort"]).toBeUndefined();
 
@@ -189,11 +188,11 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(baselineDisabledById["home.cells.delete.deleteSheet"]).toBeUndefined();
   });
 
-  it("registers Fill Up/Left ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
+  it("registers Fill Up/Left/Series ribbon ids as CommandRegistry commands (no exemptions needed)", () => {
     const commandRegistry = createDesktopCommandRegistry();
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
 
-    const ids = ["home.editing.fill.up", "home.editing.fill.left"] as const;
+    const ids = ["home.editing.fill.up", "home.editing.fill.left", "home.editing.fill.series"] as const;
     for (const id of ids) {
       expect(commandRegistry.getCommand(id), `Expected '${id}' to be registered`).toBeDefined();
       expect(COMMAND_REGISTRY_EXEMPT_IDS.has(id), `Expected '${id}' to not be exempt`).toBe(false);
@@ -240,7 +239,9 @@ describe("CommandRegistry-backed ribbon disabling", () => {
                     { id: "home.cells.format.organizeSheets", label: "Organize Sheets", ariaLabel: "Organize Sheets" },
                   ],
                 },
-                { id: "home.editing.fill.series", label: "Series", ariaLabel: "Series" },
+                // Exempt command id to prove the exemption list keeps implemented ribbon-only
+                // actions enabled even when the CommandRegistry doesn't register them.
+                { id: "home.cells.insert.insertCells", label: "Insert Cells", ariaLabel: "Insert Cells" },
                 // Non-exempt id to prove the baseline is still working.
                 { id: "totally.unknown", label: "Unknown", ariaLabel: "Unknown" },
               ],
@@ -275,9 +276,9 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     expect(trigger?.disabled).toBe(false);
 
-    const series = container.querySelector<HTMLButtonElement>('[data-command-id="home.editing.fill.series"]');
-    expect(series).toBeInstanceOf(HTMLButtonElement);
-    expect(series?.disabled).toBe(false);
+    const insertCells = container.querySelector<HTMLButtonElement>('[data-command-id="home.cells.insert.insertCells"]');
+    expect(insertCells).toBeInstanceOf(HTMLButtonElement);
+    expect(insertCells?.disabled).toBe(false);
 
     const unknown = container.querySelector<HTMLButtonElement>('[data-command-id="totally.unknown"]');
     expect(unknown).toBeInstanceOf(HTMLButtonElement);

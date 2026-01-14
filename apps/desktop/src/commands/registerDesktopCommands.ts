@@ -111,8 +111,72 @@ export function registerDesktopCommands(params: {
   } = params;
 
   const commandCategoryFormat = t("commandCategory.format");
+  const commandCategoryEditing = t("commandCategory.editing");
+  const isEditingFn =
+    isEditing ?? (() => (typeof (app as any)?.isEditing === "function" ? (app as any).isEditing() : false));
 
   registerAxisSizingCommands({ commandRegistry, app, isEditing, category: commandCategoryFormat });
+
+  // Ribbon-only editing command (Home → Editing → Fill → Series…).
+  // Register it in CommandRegistry so the ribbon does not need an exemption and so the command palette
+  // can invoke it consistently.
+  commandRegistry.registerBuiltinCommand(
+    "home.editing.fill.series",
+    "Series…",
+    async () => {
+      if (isEditingFn()) {
+        app.focus();
+        return;
+      }
+
+      const selectionRanges = app.getSelectionRanges();
+      if (!Array.isArray(selectionRanges) || selectionRanges.length === 0) {
+        app.focus();
+        return;
+      }
+
+      let minRow = Number.POSITIVE_INFINITY;
+      let maxRow = Number.NEGATIVE_INFINITY;
+      let minCol = Number.POSITIVE_INFINITY;
+      let maxCol = Number.NEGATIVE_INFINITY;
+      for (const range of selectionRanges) {
+        const startRow = Math.min(range.startRow, range.endRow);
+        const endRow = Math.max(range.startRow, range.endRow);
+        const startCol = Math.min(range.startCol, range.endCol);
+        const endCol = Math.max(range.startCol, range.endCol);
+        minRow = Math.min(minRow, startRow);
+        maxRow = Math.max(maxRow, endRow);
+        minCol = Math.min(minCol, startCol);
+        maxCol = Math.max(maxCol, endCol);
+      }
+
+      const height = Number.isFinite(minRow) && Number.isFinite(maxRow) ? Math.max(0, maxRow - minRow + 1) : 0;
+      const width = Number.isFinite(minCol) && Number.isFinite(maxCol) ? Math.max(0, maxCol - minCol + 1) : 0;
+      const suggestVertical = height > width;
+
+      type FillDirection = "down" | "right" | "up" | "left";
+      const ordered: FillDirection[] = suggestVertical ? ["down", "up", "right", "left"] : ["right", "left", "down", "up"];
+
+      const picked = await showQuickPick<FillDirection>(
+        ordered.map((dir) => ({ label: `Series ${dir[0]!.toUpperCase()}${dir.slice(1)}`, value: dir })),
+        { placeHolder: "Series direction" },
+      );
+
+      if (!picked) {
+        app.focus();
+        return;
+      }
+
+      app.fillSeries(picked);
+      app.focus();
+    },
+    {
+      category: commandCategoryEditing,
+      icon: null,
+      description: "Fill the selection with a series",
+      keywords: ["fill", "series", "auto fill", "autofill", "excel"],
+    },
+  );
 
   commandRegistry.registerBuiltinCommand(
     "format.toggleStrikethrough",
