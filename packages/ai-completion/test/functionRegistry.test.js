@@ -90,6 +90,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.getArgType("BITLSHIFT", 1), "number", "Expected BITLSHIFT shift_amount to be a number");
   assert.equal(registry.getArgType("BITRSHIFT", 0), "value", "Expected BITRSHIFT number to be value-like");
   assert.equal(registry.getArgType("BITRSHIFT", 1), "number", "Expected BITRSHIFT shift_amount to be a number");
+  assert.equal(registry.getArgType("ISEVEN", 0), "value", "Expected ISEVEN number to be value-like");
+  assert.equal(registry.getArgType("ISODD", 0), "value", "Expected ISODD number to be value-like");
   assert.equal(registry.getArgType("FACT", 0), "value", "Expected FACT number to be value-like");
   assert.equal(registry.getArgType("FACTDOUBLE", 0), "value", "Expected FACTDOUBLE number to be value-like");
   assert.equal(registry.getArgType("COMBIN", 0), "value", "Expected COMBIN number to be value-like");

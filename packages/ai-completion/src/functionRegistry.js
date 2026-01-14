@@ -2534,6 +2534,20 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ISEVEN",
+    description: "Returns TRUE if the number is even.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
+    name: "ISODD",
+    description: "Returns TRUE if the number is odd.",
+    args: [
+      { name: "number", type: "value" },
+    ],
+  },
+  {
     name: "ISOMITTED",
     description: "Returns TRUE if the argument is omitted in a LAMBDA call.",
     args: [
