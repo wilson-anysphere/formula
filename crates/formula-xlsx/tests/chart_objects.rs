@@ -241,6 +241,79 @@ fn detects_and_preserves_chart_ex_part_from_chart_relationships() {
 }
 
 #[test]
+fn falls_back_to_chart_space_model_when_chart_ex_parse_fails() {
+    let bytes = build_workbook_with_chart();
+    let mut package = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let chart_part = package
+        .part_names()
+        .find(|p| p.starts_with("xl/charts/chart") && p.ends_with(".xml"))
+        .expect("chart part present")
+        .to_string();
+    let chart_rels_part = rels_for_part(&chart_part);
+
+    // Inject a ChartEx relationship but provide an invalid chartEx XML part so parsing fails.
+    let mut updated_rels = package
+        .part(&chart_rels_part)
+        .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap())
+        .unwrap_or_else(|| {
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#.to_string()
+        });
+    let insert_idx = updated_rels
+        .rfind("</Relationships>")
+        .expect("closing Relationships tag");
+    updated_rels.insert_str(
+        insert_idx,
+        r#"  <Relationship Id="rId999" Type="http://schemas.microsoft.com/office/2014/relationships/chartEx" Target="chartEx1.xml"/>"#,
+    );
+    package.set_part(chart_rels_part.clone(), updated_rels.into_bytes());
+
+    let invalid_chart_ex_xml = br#"<cx:chartSpace"#.to_vec();
+    package.set_part("xl/charts/chartEx1.xml", invalid_chart_ex_xml.clone());
+    package.set_part(
+        "xl/charts/_rels/chartEx1.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#
+            .to_vec(),
+    );
+
+    let bytes = package.write_to_bytes().unwrap();
+    let package = XlsxPackage::from_bytes(&bytes).unwrap();
+    let chart_objects = package.extract_chart_objects().unwrap();
+    assert_eq!(chart_objects.len(), 1);
+
+    let chart_object = &chart_objects[0];
+    let chart_ex = chart_object
+        .parts
+        .chart_ex
+        .as_ref()
+        .expect("chartEx part detected");
+    assert_eq!(chart_ex.bytes, invalid_chart_ex_xml);
+
+    let model = chart_object.model.as_ref().expect("chart model present");
+    assert!(
+        !model.series.is_empty(),
+        "expected series from chartSpace when chartEx parsing fails"
+    );
+    assert!(
+        !model.axes.is_empty(),
+        "expected axes from chartSpace when chartEx parsing fails"
+    );
+    assert_eq!(
+        model.title.as_ref().map(|t| t.rich_text.text.as_str()),
+        Some("Example Chart")
+    );
+
+    assert!(
+        chart_object.diagnostics.iter().any(|d| {
+            d.level == ChartDiagnosticLevel::Warning
+                && d.message.contains("failed to parse ChartEx part")
+        }),
+        "expected ChartEx parse warning, got diagnostics: {:?}",
+        chart_object.diagnostics
+    );
+}
+
+#[test]
 fn skips_external_chart_relationship_targets_in_drawing_rels() {
     let bytes = build_workbook_with_chart();
     let mut package = XlsxPackage::from_bytes(&bytes).unwrap();
