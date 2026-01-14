@@ -95,7 +95,8 @@ def _redact_text(value: str | None, *, privacy_mode: str) -> str | None:
 
     # Keep repo-relative paths readable. Absolute paths (including Windows drive paths / UNC paths)
     # and URI-like paths (file://, smb://, etc) tend to embed usernames/mount points and should be
-    # redacted.
+    # redacted. Also hash domain-like strings and spreadsheet-ish filenames to avoid leaking
+    # corporate/internal identifiers in private artifacts.
     looks_abs = bool(
         value.startswith(("/", "\\", "~"))
         or value.startswith("//")
@@ -104,6 +105,16 @@ def _redact_text(value: str | None, *, privacy_mode: str) -> str | None:
     if not looks_abs:
         parsed = urllib.parse.urlparse(value)
         looks_abs = bool(parsed.scheme and ":" in value)
+    if not looks_abs:
+        lowered = value.casefold()
+        if "://" in value:
+            looks_abs = True
+        elif re.search(r"\.(com|net|org|io|ai|dev|edu|gov|local|internal|corp)\b", lowered):
+            looks_abs = True
+        elif re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", value):
+            looks_abs = True
+        elif re.search(r"\.(xlsx|xlsm|xlsb|xltx|xltm|xls|csv|tsv)\b", lowered):
+            looks_abs = True
     if not looks_abs:
         return value
 
