@@ -105,11 +105,24 @@ fn sheet_function_reports_tab_order_after_reorder() {
     engine.set_cell_formula("Sheet1", "A1", "=SHEET()").unwrap();
     engine.set_cell_formula("Sheet2", "A1", "=SHEET()").unwrap();
     engine.set_cell_formula("Sheet3", "A1", "=SHEET()").unwrap();
+    // Name + reference forms should also respect tab order.
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=SHEET("Sheet3")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SHEET(Sheet3!A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D1", "=SHEET(Sheet2!A1)")
+        .unwrap();
     engine.recalculate_single_threaded();
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet3", "A1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(2.0));
 
     assert!(engine.reorder_sheet("Sheet3", 0));
     engine.recalculate_single_threaded();
@@ -117,4 +130,7 @@ fn sheet_function_reports_tab_order_after_reorder() {
     assert_eq!(engine.get_cell_value("Sheet3", "A1"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(3.0));
 }
