@@ -29,7 +29,10 @@ impl PivotFieldRef {
     /// - Cache fields use the raw header text.
     /// - Data Model fields use a minimal DAX-like display form (`Table[Column]` / `[Measure]`).
     ///   Note: we intentionally avoid quoting table names here (even when they contain spaces)
-    ///   because pivot caches and UI layers often store/display unquoted table captions.
+    ///   because pivot caches and UI layers often store/display unquoted table captions. The main
+    ///   exception is table names containing `[`; emitting an unquoted `My[Table][Col]` form would
+    ///   be ambiguous and cannot be round-tripped through our DAX-like parser, so we quote the
+    ///   table name in that case (`'My[Table]'[Col]`).
     ///
     /// This is intended for UI labels and for matching against pivot cache column names.
     pub fn canonical_name(&self) -> Cow<'_, str> {
@@ -77,8 +80,8 @@ impl PivotFieldRef {
         match self {
             PivotFieldRef::CacheFieldName(name) => name.clone(),
             // For display, use an unquoted `Table[Column]` form even when the table name contains
-            // spaces/punctuation. This is friendlier for UI labels while still preserving the
-            // `{table,column}` structure.
+            // spaces/punctuation (but quote table names containing `[` to avoid ambiguity). This is
+            // friendlier for UI labels while still preserving the `{table,column}` structure.
             PivotFieldRef::DataModelColumn { table, column } => {
                 let column = escape_dax_bracket_identifier(column);
                 if table.contains('[') {
