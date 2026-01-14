@@ -674,6 +674,61 @@ export async function engineApplyDocumentChange(
     }
   }
 
+  // Apply range-run formatting deltas (compressed per-column formatting layer).
+  //
+  // These are produced by DocumentController when formatting very large rectangles so it can avoid
+  // enumerating every cell. Without syncing these to the engine, Excel-compatible metadata functions
+  // like `CELL("prefix")` cannot observe formatting correctly for cells that do not have explicit
+  // per-cell style ids.
+  let didApplyAnyRangeRuns = false;
+  const setFormatRunsByCol = typeof engine.setFormatRunsByCol === "function" ? engine.setFormatRunsByCol.bind(engine) : null;
+  if (setFormatRunsByCol && rangeRunDeltas.length > 0) {
+    for (const delta of rangeRunDeltas) {
+      const sheetId = typeof (delta as any)?.sheetId === "string" ? (delta as any).sheetId : "";
+      if (!sheetId) continue;
+      const col = Number((delta as any)?.col);
+      if (!Number.isInteger(col) || col < 0 || col >= 16_384) continue;
+
+      const resolvedSheet = typeof options.sheetIdToSheet === "function" ? options.sheetIdToSheet(sheetId) : null;
+      const sheet = typeof resolvedSheet === "string" && resolvedSheet.trim() ? resolvedSheet : sheetId;
+
+      const afterRuns: unknown[] = Array.isArray((delta as any)?.afterRuns) ? (delta as any).afterRuns : [];
+      if (afterRuns.length === 0) {
+        // Clearing all range-run formatting for a column does not require style resolution.
+        await setFormatRunsByCol(sheet, col, []);
+        didApplyAnyRangeRuns = true;
+        continue;
+      }
+
+      if (!canResolveNonZeroStyles) {
+        // Backwards compatibility: if we can't resolve style objects, ignore non-empty run deltas.
+        continue;
+      }
+
+      const runs: Array<{ startRow: number; endRowExclusive: number; styleId: number }> = [];
+      for (const run of afterRuns) {
+        const startRow = Number((run as any)?.startRow);
+        const endRowExclusive = Number((run as any)?.endRowExclusive);
+        const docStyleId = Number((run as any)?.styleId);
+
+        if (!Number.isInteger(startRow) || startRow < 0 || startRow >= 1_048_576) continue;
+        if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow || endRowExclusive > 1_048_576) continue;
+        if (!Number.isInteger(docStyleId) || docStyleId < 0) continue;
+
+        // Skip default-style runs; the engine should treat absence of a run as default formatting.
+        if (docStyleId === 0) continue;
+
+        const engineStyleId = await resolveEngineStyleIdForDocStyleId(engine, ctx!, docStyleId);
+        if (!Number.isInteger(engineStyleId) || engineStyleId <= 0) continue;
+        runs.push({ startRow, endRowExclusive, styleId: engineStyleId });
+      }
+
+      // Always send the full column's run list for the delta. An empty list clears the column.
+      await setFormatRunsByCol(sheet, col, runs);
+      didApplyAnyRangeRuns = true;
+    }
+  }
+
   // Apply sheet view metadata deltas (currently: column widths) into the engine model.
   //
   // DocumentController stores widths in base CSS px (zoom=1). The formula engine model stores
@@ -740,7 +795,8 @@ export async function engineApplyDocumentChange(
 
   if (!shouldRecalculate) return [];
 
-  const didApplyAnyUpdates = didApplyCellInputs || didApplyCellStyles || didApplyAnyLayerStyles || didApplyAnyColWidths;
+  const didApplyAnyUpdates =
+    didApplyCellInputs || didApplyCellStyles || didApplyAnyLayerStyles || didApplyAnyRangeRuns || didApplyAnyColWidths;
   if (!didApplyAnyUpdates && !hasMetadataDeltas && recalcFlag !== true && options.recalculate !== true) return [];
   return await engine.recalculate();
 }
