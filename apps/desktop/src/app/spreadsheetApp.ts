@@ -20164,6 +20164,7 @@ export class SpreadsheetApp {
   private async cutSelectedDrawingToClipboard(): Promise<void> {
     const selectedId = this.selectedDrawingId;
     if (selectedId == null) return;
+    const sheetId = this.sheetId;
 
     await this.copySelectedDrawingToClipboard();
 
@@ -20172,7 +20173,6 @@ export class SpreadsheetApp {
       return translated === "clipboard.cut" ? "Cut" : translated;
     })();
 
-    const sheetId = this.sheetId;
     const selected = this.listDrawingObjectsForSheet(sheetId).find((obj) => obj.id === selectedId) ?? null;
     const imageId = selected?.kind.type === "image" ? selected.kind.imageId : null;
 
@@ -20250,17 +20250,29 @@ export class SpreadsheetApp {
       this.document.endBatch();
     }
 
-    this.selectedDrawingId = null;
-    this.selectedDrawingIndex = null;
-    this.dispatchDrawingSelectionChanged();
-    this.drawingOverlay.setSelectedId(null);
-    this.drawingInteractionController?.setSelectedId(null);
-    this.drawingObjectsCache = null;
-    this.drawingHitTestIndex = null;
-    this.drawingHitTestIndexObjects = null;
-    this.refresh();
-    this.dispatchDrawingsChanged();
-    this.focus();
+    const stillOnSheet = this.sheetId === sheetId;
+    if (stillOnSheet) {
+      const wasCutSelection = this.selectedDrawingId === selectedId;
+      // Only clear selection if the user hasn't changed selection since initiating the cut.
+      if (wasCutSelection) {
+        this.selectedDrawingId = null;
+        this.selectedDrawingIndex = null;
+        this.dispatchDrawingSelectionChanged();
+      }
+      // Always clear interaction controller/overlay selection chrome when the sheet currently has
+      // no selected drawing (e.g. the cut drawing was removed and `renderDrawings()` validated
+      // selection before this async operation completed).
+      if (this.selectedDrawingId == null) {
+        this.drawingOverlay.setSelectedId(null);
+        this.drawingInteractionController?.setSelectedId(null);
+      }
+      this.drawingObjectsCache = null;
+      this.drawingHitTestIndex = null;
+      this.drawingHitTestIndexObjects = null;
+      this.refresh();
+      this.dispatchDrawingsChanged();
+      this.focus();
+    }
   }
 
   private async copySelectionToClipboard(): Promise<void> {

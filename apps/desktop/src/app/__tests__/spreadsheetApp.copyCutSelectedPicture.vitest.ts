@@ -226,6 +226,86 @@ describe("SpreadsheetApp copy/cut selected picture", () => {
     root.remove();
   });
 
+  it("does not delete a picture on a different sheet if the user switches sheets mid-cut", async () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
+    root.focus();
+
+    const doc: any = app.getDocument();
+    const sheet1 = app.getCurrentSheetId();
+    // Ensure Sheet2 exists so we can switch away while the clipboard write is in-flight.
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+
+    const imageId1 = "img-sheet1";
+    const imageId2 = "img-sheet2";
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    (app as any).drawingImages.set({ id: imageId1, bytes: pngBytes, mimeType: "image/png" });
+    (app as any).drawingImages.set({ id: imageId2, bytes: pngBytes, mimeType: "image/png" });
+
+    // Intentionally collide UI ids across sheets: if the cut implementation uses the *current* sheet
+    // after an async clipboard write, it could delete the wrong drawing on Sheet2.
+    doc.setSheetDrawings(sheet1, [
+      {
+        id: 1,
+        kind: { type: "image", imageId: imageId1 },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+        zOrder: 0,
+      },
+    ] satisfies DrawingObject[]);
+    doc.setSheetDrawings("Sheet2", [
+      {
+        id: 1,
+        kind: { type: "image", imageId: imageId2 },
+        anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 0, cy: 0 } },
+        zOrder: 0,
+      },
+    ] satisfies DrawingObject[]);
+
+    app.selectDrawing(1);
+
+    let resolveWrite: (() => void) | null = null;
+    const writePromise = new Promise<void>((resolve) => {
+      resolveWrite = resolve;
+    });
+    const write = vi.fn(async () => writePromise);
+    (app as any).clipboardProviderPromise = Promise.resolve({ write, read: vi.fn(async () => ({})) });
+
+    const focusSpy = vi.spyOn(app, "focus");
+
+    // Start the cut, but keep the clipboard write pending.
+    app.cut();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(write).toHaveBeenCalledTimes(1);
+
+    // Switch sheets while `cutSelectedDrawingToClipboard` is awaiting the clipboard write.
+    app.activateSheet("Sheet2");
+    app.selectDrawing(1);
+
+    // Clear incidental focus calls before resolving the clipboard write.
+    focusSpy.mockClear();
+
+    resolveWrite?.();
+    await app.whenIdle();
+
+    // Cut should apply to the originating sheet, not the newly active sheet.
+    expect(doc.getSheetDrawings(sheet1)).toEqual([]);
+    expect(doc.getSheetDrawings("Sheet2")).toHaveLength(1);
+
+    // Completing the cut should not clear the current sheet's selection or steal focus.
+    expect(app.getCurrentSheetId()).toBe("Sheet2");
+    expect(app.getSelectedDrawingId()).toBe(1);
+    expect(focusSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("does not write oversized pictures to the clipboard", async () => {
     const root = createRoot();
     const status = {
