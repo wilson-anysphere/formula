@@ -1954,8 +1954,7 @@ fn resolve_relationship_targets(
             Ok(Some(target)) => {
                 targets.insert(target);
             }
-            Ok(None) => {}
-            Err(_) => {}
+            Ok(None) | Err(_) => {}
         }
     }
     Ok(targets.into_iter().collect())
