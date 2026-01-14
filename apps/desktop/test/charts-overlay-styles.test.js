@@ -71,16 +71,25 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
   // Charts are rendered on a dedicated canvas layer.
   assert.match(css, /\.grid-canvas--chart\s*\{/);
   assert.match(css, /pointer-events:\s*none\s*;/);
+  assert.match(css, /\.grid-canvas--chart\s*\{[\s\S]*?z-index:\s*var\(--grid-z-chart-overlay,\s*2\)\s*;/);
 
   // Chart selection handles are rendered on a separate overlay canvas.
   assert.match(css, /\.chart-selection-canvas\s*\{/);
   assert.match(css, /\.chart-selection-canvas\s*\{[^}]*pointer-events:\s*none\s*;/);
+  assert.match(
+    css,
+    /\.chart-selection-canvas\s*\{[\s\S]*?z-index:\s*var\(--grid-z-selection-overlay,\s*4\)\s*;/,
+  );
 
   // Drawings (shapes/images) are rendered to a canvas clipped under headers.
   assert.match(css, /\.drawing-layer\s*\{/);
   assert.match(css, /position:\s*absolute\s*;/);
   assert.match(css, /pointer-events:\s*none\s*;/);
   assert.match(css, /overflow:\s*hidden\s*;/);
+  assert.match(
+    css,
+    /\.drawing-layer\s*\{[\s\S]*?z-index:\s*var\(--grid-z-drawings-overlay,\s*var\(--grid-z-drawing-overlay,\s*3\)\)\s*;/,
+  );
 
   // Shared grid drawings overlay canvases (split view) are also non-interactive.
   assert.match(css, /\.grid-canvas--drawings\s*\{[^}]*pointer-events:\s*none\s*;/);
@@ -97,6 +106,9 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
     css,
     /\.grid-canvas--presence\s*\{[\s\S]*?z-index:\s*var\(--grid-z-selection-overlay,\s*4\)\s*;/,
   );
+
+  // Selection overlay participates in the same CSS variable z-index stack.
+  assert.match(css, /\.grid-canvas--selection\s*\{[\s\S]*?z-index:\s*var\(--grid-z-selection-overlay,\s*4\)\s*;/);
 
   // Shared-grid overlay stacking is driven via CSS variables + semantic classes.
   assert.match(css, /--grid-z-chart-overlay\s*:/);
