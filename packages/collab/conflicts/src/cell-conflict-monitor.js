@@ -2,6 +2,14 @@ import * as Y from "yjs";
 import { getMapRoot } from "@formula/collab-yjs-utils";
 import { cellRefFromKey } from "./cell-ref.js";
 
+function safeCellRefFromKey(cellKey) {
+  try {
+    return cellRefFromKey(cellKey);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * @typedef {object} CellConflict
  * @property {string} id
@@ -230,7 +238,8 @@ export class CellConflictMonitor {
       // Auto-resolve when the values are deep-equal.
       if (valuesDeeplyEqual(newValue, oldValue)) return;
 
-      const cell = cellRefFromKey(cellKey);
+      const cell = safeCellRefFromKey(cellKey);
+      if (!cell) return;
       const conflict = /** @type {CellConflict} */ ({
         id: crypto.randomUUID(),
         cell,
@@ -271,7 +280,8 @@ export class CellConflictMonitor {
       return;
     }
 
-    const cell = cellRefFromKey(cellKey);
+    const cell = safeCellRefFromKey(cellKey);
+    if (!cell) return;
     const conflict = /** @type {CellConflict} */ ({
       id: crypto.randomUUID(),
       cell,

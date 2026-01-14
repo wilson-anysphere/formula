@@ -889,9 +889,16 @@ export class CellStructuralConflictMonitor {
    * @param {{ type: "move" | "cell", reason: any, sourceCellKey: string, local: any, remote: any }} input
    */
   _emitConflict(input) {
-    const ref = cellRefFromKey(input.sourceCellKey);
+    let ref;
+    try {
+      ref = cellRefFromKey(input.sourceCellKey);
+    } catch {
+      // Ignore conflicts for malformed/unparseable cell keys. These can be introduced
+      // by corrupted docs or malicious/buggy clients and should not crash observers.
+      return;
+    }
     const addr = `${numberToCol(ref.col)}${ref.row + 1}`;
- 
+
     const conflict = /** @type {CellStructuralConflict} */ ({
       id: crypto.randomUUID(),
       type: input.type,

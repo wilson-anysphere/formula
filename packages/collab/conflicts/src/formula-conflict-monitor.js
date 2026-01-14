@@ -5,6 +5,14 @@ import { resolveFormulaConflict } from "./formula-conflict-resolver.js";
 import { cellRefFromKey } from "./cell-ref.js";
 import { tryEvaluateFormula } from "./formula-eval.js";
 
+function safeCellRefFromKey(cellKey) {
+  try {
+    return cellRefFromKey(cellKey);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * @typedef {object} FormulaConflictBase
  * @property {string} id
@@ -553,7 +561,8 @@ export class FormulaConflictMonitor {
           this._lastLocalContentEditByCellKey.delete(cellKey);
           this._lastLocalValueEditByCellKey.delete(cellKey);
 
-          const cell = cellRefFromKey(cellKey);
+          const cell = safeCellRefFromKey(cellKey);
+          if (!cell) return;
 
           const conflict = /** @type {FormulaConflict} */ ({
             id: crypto.randomUUID(),
@@ -602,7 +611,8 @@ export class FormulaConflictMonitor {
           // Sequential overwrite (remote saw our clear) - ignore.
           if (itemLeftId && idsEqual(newItemOriginId, itemLeftId)) return;
 
-          const cell = cellRefFromKey(cellKey);
+          const cell = safeCellRefFromKey(cellKey);
+          if (!cell) return;
           const conflict = /** @type {FormulaConflict} */ ({
             id: crypto.randomUUID(),
             kind: "content",
@@ -684,7 +694,8 @@ export class FormulaConflictMonitor {
     // local formula write vs remote value write, where the remote value wins and
     // clears the formula (formula=null marker) while also writing a literal value.
     if (this.includeValueConflicts && hasValueChange && lastContent?.kind === "formula" && !remoteFormula && currentValue !== null) {
-      const cell = cellRefFromKey(cellKey);
+      const cell = safeCellRefFromKey(cellKey);
+      if (!cell) return;
       const conflict = /** @type {FormulaConflict} */ ({
         id: crypto.randomUUID(),
         kind: "content",
@@ -723,7 +734,8 @@ export class FormulaConflictMonitor {
       oldModifiedBy === this.localUserId &&
       !formulasRoughlyEqual(localFormula, "")
     ) {
-      const cell = cellRefFromKey(cellKey);
+      const cell = safeCellRefFromKey(cellKey);
+      if (!cell) return;
       const conflict = /** @type {FormulaConflict} */ ({
         id: crypto.randomUUID(),
         kind: "content",
@@ -765,7 +777,8 @@ export class FormulaConflictMonitor {
       return;
     }
 
-    const cell = cellRefFromKey(cellKey);
+    const cell = safeCellRefFromKey(cellKey);
+    if (!cell) return;
 
     const conflict = /** @type {FormulaConflict} */ ({
       id: crypto.randomUUID(),
@@ -854,7 +867,8 @@ export class FormulaConflictMonitor {
         this._lastLocalContentEditByCellKey.delete(cellKey);
         this._lastLocalFormulaEditByCellKey.delete(cellKey);
 
-        const cell = cellRefFromKey(cellKey);
+        const cell = safeCellRefFromKey(cellKey);
+        if (!cell) return;
         const conflict = /** @type {FormulaConflict} */ ({
           id: crypto.randomUUID(),
           kind: "content",
@@ -894,7 +908,8 @@ export class FormulaConflictMonitor {
         // Sequential overwrite (remote saw our value=null marker) - ignore.
         if (itemLeftId && idsEqual(newItemOriginId, itemLeftId)) return;
 
-        const cell = cellRefFromKey(cellKey);
+        const cell = safeCellRefFromKey(cellKey);
+        if (!cell) return;
         const localFormula = currentFormula.trim();
         const conflict = /** @type {FormulaConflict} */ ({
           id: crypto.randomUUID(),
@@ -943,7 +958,8 @@ export class FormulaConflictMonitor {
       // Auto-resolve when the values are deep-equal.
       if (valuesDeeplyEqual(newValue, oldValue)) return;
 
-      const cell = cellRefFromKey(cellKey);
+      const cell = safeCellRefFromKey(cellKey);
+      if (!cell) return;
       const conflict = /** @type {FormulaConflict} */ ({
         id: crypto.randomUUID(),
         kind: "value",
@@ -984,7 +1000,8 @@ export class FormulaConflictMonitor {
     // Auto-resolve when the values are deep-equal.
     if (valuesDeeplyEqual(newValue, lastLocal.value)) return;
 
-    const cell = cellRefFromKey(cellKey);
+    const cell = safeCellRefFromKey(cellKey);
+    if (!cell) return;
     const conflict = /** @type {FormulaConflict} */ ({
       id: crypto.randomUUID(),
       kind: "value",
