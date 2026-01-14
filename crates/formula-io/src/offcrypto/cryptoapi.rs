@@ -174,6 +174,13 @@ pub fn crypt_derive_key(hash_value: &[u8], key_len_bytes: usize, hash_alg: HashA
         hash_len,
         "hash_value len must match hash_alg.hash_len()"
     );
+    assert!(
+        key_len_bytes <= hash_len * 2,
+        "CryptoAPI CryptDeriveKey only yields up to {} bytes of key material for {:?} (requested {})",
+        hash_len * 2,
+        hash_alg,
+        key_len_bytes
+    );
 
     // The MS-OFFCRYPTO Standard mode only uses MD5/SHA-1, both of which have a 64-byte block size.
     // `hash_len` is guaranteed <= 64.
