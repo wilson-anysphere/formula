@@ -3209,7 +3209,7 @@ export class FormulaBarView {
         // - in view mode when we have a name resolver (so hover previews can resolve named ranges), or
         // - in edit mode when identifier tokens can map to extracted references (named ranges).
         // Otherwise they are unstyled and don't participate in reference highlighting.
-        if (kind === "identifier" && !extraClass && !canIdentifierBeReference) {
+        if (!extraClass && (kind === "unknown" || (kind === "identifier" && !canIdentifierBeReference))) {
           return content;
         }
 
