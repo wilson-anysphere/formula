@@ -64,3 +64,39 @@ fn encode_accepts_na_bang_error_literal_in_array_constant() {
     let text = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
     assert_eq!(text, "{#N/A}");
 }
+
+#[test]
+fn encode_decode_roundtrip_array_constant_mixed_types_and_blanks() {
+    // 2x3 array with mixed literal types and blanks.
+    let ctx = WorkbookContext::default();
+    let encoded =
+        encode_rgce_with_context("={1,,\"hi\";TRUE,#DIV/0!,FALSE}", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert!(!encoded.rgcb.is_empty());
+    let text = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
+    assert_eq!(text, "{1,,\"hi\";TRUE,#DIV/0!,FALSE}");
+
+    parse_formula(&format!("={text}"), ParseOptions::default())
+        .expect("formula-engine parses decoded formula");
+}
+
+#[test]
+fn encode_decode_roundtrip_array_constant_string_with_quotes() {
+    let ctx = WorkbookContext::default();
+    let encoded =
+        encode_rgce_with_context("={\"a\"\"b\"}", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(!encoded.rgcb.is_empty());
+    let text = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
+    assert_eq!(text, "{\"a\"\"b\"}");
+}
+
+#[test]
+fn encode_unary_plus_and_minus_in_array_constants() {
+    // Unary `+` is valid syntax but is not preserved by BIFF encoding, which stores the literal
+    // numeric value.
+    let ctx = WorkbookContext::default();
+    let encoded = encode_rgce_with_context("={+1,-2}", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(!encoded.rgcb.is_empty());
+    let text = decode_rgce_with_rgcb(&encoded.rgce, &encoded.rgcb).expect("decode");
+    assert_eq!(text, "{1,-2}");
+}
