@@ -952,6 +952,56 @@ fn cell_filename_and_info_directory_use_workbook_file_metadata() {
 }
 
 #[test]
+fn workbook_file_metadata_updates_info_functions_in_automatic_mode() {
+    use formula_engine::calc_settings::{CalcSettings, CalculationMode};
+    use formula_engine::{Engine, EngineInfo};
+
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Automatic,
+        ..CalcSettings::default()
+    });
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CELL(\"filename\")")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=INFO(\"directory\")")
+        .unwrap();
+
+    // Unsaved workbook defaults.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text(String::new())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    // Workbook file metadata should drive both `CELL("filename")` and `INFO("directory")`.
+    engine.set_workbook_file_metadata(Some("/dir"), Some("Book.xlsx"));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("/dir/[Book.xlsx]Sheet1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Text("/dir/".to_string())
+    );
+
+    // Host overrides should also propagate without requiring full-workbook dirtying.
+    engine.set_engine_info(EngineInfo {
+        directory: Some("/host".to_string()),
+        ..EngineInfo::default()
+    });
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Text("/host/".to_string())
+    );
+}
+
+#[test]
 fn info_directory_prefers_host_override_over_workbook_file_metadata() {
     use formula_engine::{Engine, EngineInfo};
 

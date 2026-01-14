@@ -788,7 +788,9 @@ impl Engine {
             return;
         }
         self.info = info;
-        self.mark_all_compiled_cells_dirty();
+        // `INFO()` is volatile, so any dependent formulas are included in the dependency graph's
+        // volatile closure. We can therefore refresh results with a recalculation tick without
+        // dirtying the entire workbook.
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
@@ -801,7 +803,7 @@ impl Engine {
             return;
         }
         self.info.origin = origin;
-        self.mark_all_compiled_cells_dirty();
+        // `INFO("origin")` is volatile; trigger a recalculation tick in automatic modes.
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
@@ -830,7 +832,7 @@ impl Engine {
             }
         }
 
-        self.mark_all_compiled_cells_dirty();
+        // `INFO("origin")` is volatile; trigger a recalculation tick in automatic modes.
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
@@ -1223,9 +1225,8 @@ impl Engine {
         self.workbook.workbook_filename = filename;
 
         // Workbook metadata can affect worksheet information function outputs (e.g.
-        // `CELL("filename")`) but is not represented in the dependency graph. Conservatively mark
-        // all compiled formula cells dirty so results refresh on the next recalc.
-        self.mark_all_compiled_cells_dirty();
+        // `CELL("filename")` / `INFO("directory")`). These functions are volatile, so a
+        // recalculation tick is sufficient to refresh dependents (no full-workbook dirtying).
         if self.calc_settings.calculation_mode != CalculationMode::Manual {
             self.recalculate();
         }
