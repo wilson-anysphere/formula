@@ -272,7 +272,7 @@ Useful entrypoints when working on encrypted workbook support:
           routed to `formula-xls` and surfaced as:
           - `Error::InvalidPassword` when the password is incorrect
           - `Error::UnsupportedEncryption` for unsupported/invalid `FILEPASS` encryption metadata
- - **OOXML decrypt helpers (Agile + Standard/CryptoAPI):**
+- **OOXML decrypt helpers (Agile + Standard/CryptoAPI):**
   - End-to-end decrypt (OLE wrapper → decrypted ZIP bytes):
     - `crates/formula-office-crypto` (end-to-end decrypt; supports Agile + Standard/CryptoAPI, plus an
       Agile writer)
