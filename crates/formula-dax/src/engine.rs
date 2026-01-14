@@ -668,11 +668,11 @@ impl DaxEngine {
                             }
                             Ok(Value::Boolean(false))
                         }
-                        TableResult::PhysicalAll {
-                            table,
-                            row_count,
-                            visible_cols,
-                        } => {
+                                 TableResult::PhysicalAll {
+                                     table,
+                                     row_count,
+                                     visible_cols,
+                                 } => {
                             let table_ref = model
                                 .table(&table)
                                 .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
