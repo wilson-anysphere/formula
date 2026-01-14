@@ -832,6 +832,8 @@ Branching/merge snapshot note:
 Semantics note:
 
 - `sheets[].view` is **shared workbook state** (similar to formatting), not per-user transient UI state.
+- Read-only roles (`viewer`/`commenter`) may still allow local “view tweaks” in the desktop UI, but those
+  changes are not persisted into Yjs (so they do not sync and can be overwritten by remote state).
 - Per-user ephemeral state (cursor/selection/active sheet/viewport) should use Awareness/presence.
 
 See: [`docs/adr/ADR-0004-collab-sheet-view-and-undo.md`](./adr/ADR-0004-collab-sheet-view-and-undo.md)
