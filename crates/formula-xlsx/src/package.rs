@@ -794,7 +794,7 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
         max_bytes: u64,
     ) -> Result<Vec<u8>, XlsxError> {
         let part = name.strip_prefix('/').unwrap_or(name).to_string();
-        let mut file = open_zip_part(zip, name)?;
+        let file = open_zip_part(zip, name)?;
         if file.is_dir() {
             return Err(XlsxError::Invalid(format!("{name} is a directory")));
         }
