@@ -366,6 +366,9 @@ Implementation note:
     `decrypt_agile_encrypted_package_with_warnings` can report `OffCryptoWarning::MissingDataIntegrity`)
 - `crates/formula-office-crypto` currently requires `<dataIntegrity>` and treats a missing element as
   a malformed wrapper.
+- `crates/formula-offcrypto` can validate `dataIntegrity` when decrypting with
+  `formula_offcrypto::decrypt_encrypted_package` and `DecryptOptions.verify_integrity = true`
+  (default: `false`).
 - `formula-io`’s streaming decrypt reader does not currently validate `dataIntegrity`, so it may
   successfully open some inputs even when integrity metadata is missing or inconsistent.
 
@@ -428,6 +431,7 @@ The Agile decryption errors are designed to be actionable. The most important di
 | `formula_io::Error::InvalidPassword` | Wrong password **or** integrity mismatch (Agile HMAC); callers should treat this as “password incorrect or file corrupted/tampered”. | Retry password; if persistent, treat as corrupted/tampered |
 | `formula_offcrypto::OffcryptoError::InvalidPassword` / `formula_xlsx::offcrypto::OffCryptoError::WrongPassword` | Password verifier mismatch | Retry password |
 | `formula_xlsx::offcrypto::OffCryptoError::IntegrityMismatch` | HMAC mismatch (tampering/corruption) | Re-download file; if persistent, treat as corrupted |
+| `formula_offcrypto::OffcryptoError::IntegrityCheckFailed` | HMAC mismatch (tampering/corruption) when integrity verification is enabled | Re-download file; if persistent, treat as corrupted |
 | `formula_office_crypto::OfficeCryptoError::IntegrityCheckFailed` | HMAC mismatch (tampering/corruption) | Re-download file; if persistent, treat as corrupted |
 | `formula_io::Error::UnsupportedOoxmlEncryption` / `formula_offcrypto::OffcryptoError::UnsupportedVersion` | `EncryptionInfo` version not recognized | Re-save without encryption; or add support |
 | `formula_offcrypto::OffcryptoError::UnsupportedEncryption { encryption_type: ... }` | Encryption type known but not supported by selected decrypt mode | Use correct decrypt mode / add support |
