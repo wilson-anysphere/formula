@@ -172,6 +172,72 @@ test("applyState accepts formula-model style image + drawings payloads", () => {
   assert.ok(drawings[0].kind);
 });
 
+test("applyState accepts legacy top-level drawingsBySheet snapshots", () => {
+  const drawing = {
+    id: "d_legacy",
+    zOrder: 0,
+    kind: { type: "image", imageId: "img_legacy" },
+    anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+  };
+
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+        },
+      ],
+      // Legacy shape: drawings stored in a separate top-level map keyed by sheet id.
+      drawingsBySheet: { Sheet1: [drawing] },
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
+  assert.ok(Array.isArray(doc.getSheetView("Sheet1").drawings));
+});
+
+test("applyState accepts legacy metadata.drawingsBySheet snapshots (branching schema)", () => {
+  const drawing = {
+    id: "d_meta_legacy",
+    zOrder: 1,
+    kind: { type: "image", imageId: "img_meta_legacy" },
+    anchor: { type: "cell", sheetId: "Sheet1", row: 0, col: 0 },
+  };
+
+  const snapshot = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      sheets: [
+        {
+          id: "Sheet1",
+          name: "Sheet1",
+          visibility: "visible",
+          frozenRows: 0,
+          frozenCols: 0,
+          cells: [],
+        },
+      ],
+      metadata: {
+        drawingsBySheet: { Sheet1: [drawing] },
+      },
+    }),
+  );
+
+  const doc = new DocumentController();
+  doc.applyState(snapshot);
+
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
+});
+
 test("applyExternalDrawingDeltas updates sheet drawings without creating undo history", () => {
   const doc = new DocumentController();
   let lastChange = null;
