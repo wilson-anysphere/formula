@@ -9892,8 +9892,9 @@ fn rewrite_defined_name_constants_for_bytecode(
 ///
 /// Note: Excel compares sheet names case-insensitively across Unicode and applies compatibility
 /// normalization (NFKC). The engine preserves the formula's casing in the sheet key for single-sheet
-/// external references, so providers that want Excel-compatible behavior should generally match
-/// sheet keys using the same semantics (see [`formula_model::sheet_name_eq_case_insensitive`]).
+/// external references, so providers that want Excel-compatible behavior should generally match the
+/// **sheet name** portion using the same semantics (see
+/// [`formula_model::sheet_name_eq_case_insensitive`]).
 pub trait ExternalValueProvider: Send + Sync {
     fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value>;
 
