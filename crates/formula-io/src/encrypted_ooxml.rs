@@ -235,8 +235,7 @@ fn decrypt_encrypted_package_standard(
 
             let ciphertext = &encrypted_package[8..];
 
-            let mut try_with_key0 =
-                |key0: &[u8]| -> Result<Option<Vec<u8>>, DecryptError> {
+            let try_with_key0 = |key0: &[u8]| -> Result<Option<Vec<u8>>, DecryptError> {
                     for scheme in schemes {
                         let prefix_ok = decrypt_standard_aes_prefix_is_zip(
                             &info,
