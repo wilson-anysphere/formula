@@ -3182,14 +3182,14 @@ export class FormulaBarView {
           this.#lastAiPreviewRaw = previewRaw;
           this.#lastAiPreviewText = previewText;
         } else {
-          this.#lastAiPreviewRaw = undefined;
-          this.#lastAiPreviewText = "";
+          if (this.#lastAiPreviewRaw !== undefined) this.#lastAiPreviewRaw = undefined;
+          if (this.#lastAiPreviewText !== "") this.#lastAiPreviewText = "";
         }
       }
     } else {
       // Avoid holding onto large preview values once the ghost suggestion is dismissed.
-      this.#lastAiPreviewRaw = undefined;
-      this.#lastAiPreviewText = "";
+      if (this.#lastAiPreviewRaw !== undefined) this.#lastAiPreviewRaw = undefined;
+      if (this.#lastAiPreviewText !== "") this.#lastAiPreviewText = "";
     }
     const draft = this.model.draft;
     const draftVersion = this.model.draftVersion;
