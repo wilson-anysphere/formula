@@ -41,6 +41,18 @@ pub const MAX_PDF_CELLS_PER_CALL: usize = 250_000;
 /// base64 responses rather than CPU time.
 pub const MAX_PDF_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
 
+/// Maximum number of filesystem paths accepted for a single `file-dropped` event payload.
+///
+/// Drag/drop payloads originate from the OS and can be arbitrarily large (e.g. the user drops a
+/// massive directory selection). We cap the emitted path list to keep memory usage deterministic
+/// and avoid sending unexpectedly large payloads over the JS event bridge.
+pub const MAX_FILE_DROPPED_PATHS: usize = 1_000;
+
+/// Maximum size (in bytes) of a single path string accepted for a `file-dropped` payload.
+///
+/// This is a UTF-8 byte length check performed on `PathBuf::to_string_lossy()` output.
+pub const MAX_FILE_DROPPED_PATH_BYTES: usize = 8_192;
+
 /// Maximum size (in bytes) of a marketplace extension package download.
 ///
 /// The desktop backend base64-encodes the downloaded package for IPC, which expands the payload by

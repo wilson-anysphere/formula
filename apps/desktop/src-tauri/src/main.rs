@@ -20,6 +20,7 @@ use desktop::oauth_redirect_ipc::OauthRedirectState;
 #[cfg(target_os = "macos")]
 use desktop::opened_urls;
 use desktop::process_metrics;
+use desktop::resource_limits::{MAX_FILE_DROPPED_PATH_BYTES, MAX_FILE_DROPPED_PATHS};
 use desktop::state::{AppState, CellUpdateData, SharedAppState};
 use desktop::tray_status::{self, TrayStatusState};
 use desktop::updater;
@@ -1968,10 +1969,45 @@ fn main() {
             }
             tauri::WindowEvent::DragDrop(drag_drop) => {
                 if let tauri::DragDropEvent::Drop { paths, .. } = drag_drop {
-                    let payload: Vec<String> = paths
-                        .iter()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .collect();
+                    // SECURITY: only allow `file-dropped` to reach trusted app origins. This
+                    // prevents local filesystem path leakage if the webview navigates to a remote
+                    // (untrusted) origin.
+                    let url = match window.url() {
+                        Ok(url) => url,
+                        Err(err) => {
+                            eprintln!("[file-dropped] failed to read window URL: {err}");
+                            return;
+                        }
+                    };
+
+                    if !desktop::ipc_origin::is_trusted_app_origin(&url) {
+                        eprintln!(
+                            "[file-dropped] blocked drop event for untrusted origin: {url}"
+                        );
+                        return;
+                    }
+
+                    // Bound the payload size so a large drag/drop selection can't allocate an
+                    // unbounded Vec<String>.
+                    let mut payload: Vec<String> =
+                        Vec::with_capacity(paths.len().min(MAX_FILE_DROPPED_PATHS));
+                    for path in paths.iter() {
+                        if payload.len() >= MAX_FILE_DROPPED_PATHS {
+                            break;
+                        }
+
+                        let path_str = path.to_string_lossy();
+                        if path_str.len() > MAX_FILE_DROPPED_PATH_BYTES {
+                            continue;
+                        }
+
+                        payload.push(path_str.into_owned());
+                    }
+
+                    if payload.is_empty() {
+                        return;
+                    }
+
                     let _ = window.emit("file-dropped", payload);
                 }
             }
