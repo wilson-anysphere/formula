@@ -480,7 +480,9 @@ validate_appimage() {
   local has_spreadsheet_mime=0
   local has_xlsx_mime=0
   local has_xlsx_integration=0
+  local has_scheme_mime=0
   local bad_exec_count=0
+  local required_scheme_mime="x-scheme-handler/formula"
 
   local desktop_file
   for desktop_file in "${desktop_files[@]}"; do
@@ -514,6 +516,22 @@ validate_appimage() {
         bad_exec_count=$((bad_exec_count + 1))
       elif ! printf '%s' "$exec_line" | grep -Eq '%[uUfF]'; then
         echo "${SCRIPT_NAME}: error: ${desktop_file#$appdir/} Exec= does not include a file/URL placeholder (%U/%u/%F/%f): ${exec_line}" >&2
+        bad_exec_count=$((bad_exec_count + 1))
+      fi
+    fi
+
+    if printf '%s' "$mime_value" | grep -Fqi "$required_scheme_mime"; then
+      has_scheme_mime=1
+
+      # URL scheme handlers also require a placeholder token (%U/%u/%F/%f) in Exec= so the
+      # OS passes the opened URL into the app.
+      local exec_line
+      exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+      if [ -z "$exec_line" ]; then
+        echo "${SCRIPT_NAME}: error: ${desktop_file#$appdir/} is missing an Exec= entry (required for URL scheme handlers)" >&2
+        bad_exec_count=$((bad_exec_count + 1))
+      elif ! printf '%s' "$exec_line" | grep -Eq '%[uUfF]'; then
+        echo "${SCRIPT_NAME}: error: ${desktop_file#$appdir/} Exec= does not include a URL placeholder (%U/%u/%F/%f): ${exec_line}" >&2
         bad_exec_count=$((bad_exec_count + 1))
       fi
     fi
@@ -573,6 +591,26 @@ validate_appimage() {
 
   if [ "$bad_exec_count" -ne 0 ]; then
     die "One or more .desktop entries had invalid Exec= lines for file association handling"
+  fi
+
+  if [ "$has_scheme_mime" -ne 1 ]; then
+    echo "${SCRIPT_NAME}: error: No .desktop MimeType= entry advertised the expected URL scheme handler (${required_scheme_mime}) for AppImage: $appimage_path" >&2
+    echo "${SCRIPT_NAME}: error: Expected MimeType= to include '${required_scheme_mime};'." >&2
+    echo "${SCRIPT_NAME}: error: MimeType entries found:" >&2
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#$appdir/}"
+      local lines
+      lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" || true)"
+      if [ -n "$lines" ]; then
+        while IFS= read -r l; do
+          echo "  - ${rel}: ${l}" >&2
+        done <<<"$lines"
+      else
+        echo "  - ${rel}: (no MimeType= entry)" >&2
+      fi
+    done
+    die "No .desktop file advertised the URL scheme handler ${required_scheme_mime} for AppImage: $appimage_path"
   fi
 
   if [ "$has_xlsx_mime" -ne 1 ]; then

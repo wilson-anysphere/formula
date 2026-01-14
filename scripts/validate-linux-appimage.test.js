@@ -46,8 +46,8 @@ function writeFakeAppImage(
   } = {},
 ) {
   const desktopMime = withXlsxMime
-    ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;"
-    : "text/plain;";
+    ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;x-scheme-handler/formula;"
+    : "text/plain;x-scheme-handler/formula;";
 
   const desktopBlock = withDesktopFile
     ? [

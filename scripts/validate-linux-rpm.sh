@@ -282,7 +282,9 @@ validate_desktop_mime_associations_extracted() {
   local has_spreadsheet_mime=0
   local has_xlsx_mime=0
   local has_xlsx_integration=0
+  local has_scheme_mime=0
   local bad_exec_count=0
+  local required_scheme_mime="x-scheme-handler/formula"
 
   local desktop_file
   for desktop_file in "${desktop_files[@]}"; do
@@ -316,6 +318,22 @@ validate_desktop_mime_associations_extracted() {
         bad_exec_count=$((bad_exec_count + 1))
       elif ! printf '%s' "$exec_line" | grep -Eq '%[uUfF]'; then
         err "Extracted desktop entry ${desktop_file#${tmpdir}/} Exec= does not include a file/URL placeholder (%U/%u/%F/%f): ${exec_line}"
+        bad_exec_count=$((bad_exec_count + 1))
+      fi
+    fi
+
+    if printf '%s' "$mime_value" | grep -Fqi "$required_scheme_mime"; then
+      has_scheme_mime=1
+
+      # URL scheme handlers also require a placeholder token (%U/%u/%F/%f) in Exec= so the
+      # OS passes the opened URL into the app.
+      local exec_line
+      exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$desktop_file" | head -n 1 || true)"
+      if [ -z "$exec_line" ]; then
+        err "Extracted desktop entry ${desktop_file#${tmpdir}/} is missing an Exec= entry (required for URL scheme handlers)"
+        bad_exec_count=$((bad_exec_count + 1))
+      elif ! printf '%s' "$exec_line" | grep -Eq '%[uUfF]'; then
+        err "Extracted desktop entry ${desktop_file#${tmpdir}/} Exec= does not include a URL placeholder (%U/%u/%F/%f): ${exec_line}"
         bad_exec_count=$((bad_exec_count + 1))
       fi
     fi
@@ -373,6 +391,26 @@ validate_desktop_mime_associations_extracted() {
 
   if [ "$bad_exec_count" -ne 0 ]; then
     err "One or more extracted .desktop entries had invalid Exec= lines for file association handling."
+    return 1
+  fi
+
+  if [ "$has_scheme_mime" -ne 1 ]; then
+    err "No extracted .desktop MimeType= entry advertised the expected URL scheme handler (${required_scheme_mime})."
+    err "Expected MimeType= to include '${required_scheme_mime};'."
+    err "MimeType entries found:"
+    for desktop_file in "${desktop_files[@]}"; do
+      local rel
+      rel="${desktop_file#${tmpdir}/}"
+      local lines
+      lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$desktop_file" || true)"
+      if [ -n "$lines" ]; then
+        while IFS= read -r l; do
+          echo "  - ${rel}: ${l}" >&2
+        done <<<"$lines"
+      else
+        echo "  - ${rel}: (no MimeType= entry)" >&2
+      fi
+    done
     return 1
   fi
 
@@ -633,6 +671,7 @@ validate_container() {
   container_cmd+=$'# Validate file association metadata is present in the installed .desktop entry.\n'
   container_cmd+=$'required_xlsx_mime="'"${REQUIRED_XLSX_MIME}"$'"\n'
   container_cmd+=$'spreadsheet_mime_regex="'"${SPREADSHEET_MIME_REGEX}"$'"\n'
+  container_cmd+=$'required_scheme_mime="x-scheme-handler/formula"\n'
   container_cmd+=$'desktop_files=(/usr/share/applications/*.desktop)\n'
   container_cmd+=$'if [ ! -e "${desktop_files[0]}" ]; then\n'
   container_cmd+=$'  echo "No .desktop files found under /usr/share/applications after RPM install." >&2\n'
@@ -642,6 +681,7 @@ validate_container() {
   container_cmd+=$'has_spreadsheet_mime=0\n'
   container_cmd+=$'has_xlsx_mime=0\n'
   container_cmd+=$'has_xlsx_integration=0\n'
+  container_cmd+=$'has_scheme_mime=0\n'
   container_cmd+=$'bad_exec_count=0\n'
   container_cmd+=$'for f in "${desktop_files[@]}"; do\n'
   container_cmd+=$'  mime_line="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" | head -n 1 || true)"\n'
@@ -665,6 +705,17 @@ validate_container() {
   container_cmd+=$'      bad_exec_count=$((bad_exec_count + 1))\n'
   container_cmd+=$'    elif ! printf "%s" "${exec_line}" | grep -Eq "%[uUfF]"; then\n'
   container_cmd+=$'      echo "Installed desktop entry ${f} Exec= does not include a file/URL placeholder (%U/%u/%F/%f): ${exec_line}" >&2\n'
+  container_cmd+=$'      bad_exec_count=$((bad_exec_count + 1))\n'
+  container_cmd+=$'    fi\n'
+  container_cmd+=$'  fi\n'
+  container_cmd+=$'  if printf "%s" "${mime_value}" | grep -Fqi "${required_scheme_mime}"; then\n'
+  container_cmd+=$'    has_scheme_mime=1\n'
+  container_cmd+=$'    exec_line="$(grep -Ei "^[[:space:]]*Exec[[:space:]]*=" "$f" | head -n 1 || true)"\n'
+  container_cmd+=$'    if [ -z "${exec_line}" ]; then\n'
+  container_cmd+=$'      echo "Installed desktop entry ${f} is missing an Exec= entry (required for URL scheme handlers)" >&2\n'
+  container_cmd+=$'      bad_exec_count=$((bad_exec_count + 1))\n'
+  container_cmd+=$'    elif ! printf "%s" "${exec_line}" | grep -Eq "%[uUfF]"; then\n'
+  container_cmd+=$'      echo "Installed desktop entry ${f} Exec= does not include a URL placeholder (%U/%u/%F/%f): ${exec_line}" >&2\n'
   container_cmd+=$'      bad_exec_count=$((bad_exec_count + 1))\n'
   container_cmd+=$'    fi\n'
   container_cmd+=$'  fi\n'
@@ -693,6 +744,19 @@ validate_container() {
   container_cmd+=$'if [ "${has_spreadsheet_mime}" -ne 1 ]; then\n'
   container_cmd+=$'  echo "No installed .desktop MimeType= entry advertised spreadsheet/xlsx support (file associations missing)." >&2\n'
   container_cmd+=$'  echo "Expected MimeType= to include ${required_xlsx_mime} (xlsx) or another spreadsheet MIME type." >&2\n'
+  container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
+  container_cmd+=$'    lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" || true)"\n'
+  container_cmd+=$'    if [ -n "${lines}" ]; then\n'
+  container_cmd+=$'      while IFS= read -r l; do echo "  - ${f}: ${l}" >&2; done <<<"${lines}"\n'
+  container_cmd+=$'    else\n'
+  container_cmd+=$'      echo "  - ${f}: (no MimeType= entry)" >&2\n'
+  container_cmd+=$'    fi\n'
+  container_cmd+=$'  done\n'
+  container_cmd+=$'  exit 1\n'
+  container_cmd+=$'fi\n'
+  container_cmd+=$'if [ "${has_scheme_mime}" -ne 1 ]; then\n'
+  container_cmd+=$'  echo "No installed .desktop MimeType= entry advertised the expected URL scheme handler (${required_scheme_mime})." >&2\n'
+  container_cmd+=$'  echo "Expected MimeType= to include ${required_scheme_mime};" >&2\n'
   container_cmd+=$'  for f in "${desktop_files[@]}"; do\n'
   container_cmd+=$'    lines="$(grep -Ei "^[[:space:]]*MimeType[[:space:]]*=" "$f" || true)"\n'
   container_cmd+=$'    if [ -n "${lines}" ]; then\n'

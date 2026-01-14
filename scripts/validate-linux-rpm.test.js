@@ -134,12 +134,20 @@ exit 0
   writeFileSync(rpm2cpioPath, rpm2cpioScript, { encoding: "utf8" });
   chmodSync(rpm2cpioPath, 0o755);
 
+  let effectiveMimeTypeLine = mimeTypeLine;
+  if (withMimeType && !effectiveMimeTypeLine.toLowerCase().includes("x-scheme-handler/")) {
+    if (!effectiveMimeTypeLine.trim().endsWith(";")) {
+      effectiveMimeTypeLine = `${effectiveMimeTypeLine};`;
+    }
+    effectiveMimeTypeLine = `${effectiveMimeTypeLine}x-scheme-handler/formula;`;
+  }
+
   const desktopLines = [
     "[Desktop Entry]",
     "Type=Application",
     "Name=Formula",
     execLine,
-    ...(withMimeType ? [mimeTypeLine] : []),
+    ...(withMimeType ? [effectiveMimeTypeLine] : []),
   ];
 
   const cpioScript = `#!/usr/bin/env bash
