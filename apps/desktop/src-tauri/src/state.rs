@@ -2198,37 +2198,50 @@ impl AppState {
     ) -> Result<(), AppStateError> {
         let requested_path = new_path.clone();
         let is_real_save = requested_path.is_some() || new_origin_xlsx_bytes.is_some();
-        let workbook = self
-            .workbook
-            .as_mut()
-            .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let (directory, filename) = {
+            let workbook = self
+                .workbook
+                .as_mut()
+                .ok_or(AppStateError::NoWorkbookLoaded)?;
 
-        if let Some(path) = new_path {
-            workbook.path = Some(path);
-        }
+            if let Some(path) = new_path {
+                workbook.path = Some(path);
+            }
 
-        let ext = workbook
-            .path
-            .as_deref()
-            .and_then(|p| std::path::Path::new(p).extension().and_then(|s| s.to_str()));
+            let ext = workbook
+                .path
+                .as_deref()
+                .and_then(|p| std::path::Path::new(p).extension().and_then(|s| s.to_str()));
 
-        // Allow operators to tighten the retention cap via `FORMULA_MAX_ORIGIN_XLSX_BYTES`.
-        // Never allow relaxing it above the built-in default (even in debug builds).
-        let max_origin_xlsx_bytes =
-            crate::resource_limits::max_origin_xlsx_bytes().min(MAX_ORIGIN_XLSX_BYTES);
+            // Allow operators to tighten the retention cap via `FORMULA_MAX_ORIGIN_XLSX_BYTES`.
+            // Never allow relaxing it above the built-in default (even in debug builds).
+            let max_origin_xlsx_bytes =
+                crate::resource_limits::max_origin_xlsx_bytes().min(MAX_ORIGIN_XLSX_BYTES);
 
-        if ext.is_some_and(|ext| ext.eq_ignore_ascii_case("xlsb")) {
-            workbook.origin_xlsb_path = workbook.path.clone();
-            workbook.origin_xlsx_bytes = None;
-        } else if ext.is_some_and(Self::is_xlsx_family_extension) {
-            workbook.origin_xlsb_path = None;
-            if let Some(bytes) = new_origin_xlsx_bytes {
+            if ext.is_some_and(|ext| ext.eq_ignore_ascii_case("xlsb")) {
+                workbook.origin_xlsb_path = workbook.path.clone();
+                workbook.origin_xlsx_bytes = None;
+            } else if ext.is_some_and(Self::is_xlsx_family_extension) {
+                workbook.origin_xlsb_path = None;
+                if let Some(bytes) = new_origin_xlsx_bytes {
+                    if bytes.len() <= max_origin_xlsx_bytes {
+                        workbook.origin_xlsx_bytes = Some(bytes);
+                    } else {
+                        // Defense-in-depth: avoid retaining arbitrarily large baseline snapshots in
+                        // memory after save. Dropping the baseline forces subsequent saves to use the
+                        // regeneration-based path (instead of patching from stale bytes).
+                        eprintln!(
+                            "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds origin retention limit ({})",
+                            bytes.len(),
+                            max_origin_xlsx_bytes
+                        );
+                        workbook.origin_xlsx_bytes = None;
+                    }
+                }
+            } else if let Some(bytes) = new_origin_xlsx_bytes {
                 if bytes.len() <= max_origin_xlsx_bytes {
                     workbook.origin_xlsx_bytes = Some(bytes);
                 } else {
-                    // Defense-in-depth: avoid retaining arbitrarily large baseline snapshots in
-                    // memory after save. Dropping the baseline forces subsequent saves to use the
-                    // regeneration-based path (instead of patching from stale bytes).
                     eprintln!(
                         "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds origin retention limit ({})",
                         bytes.len(),
@@ -2237,45 +2250,34 @@ impl AppState {
                     workbook.origin_xlsx_bytes = None;
                 }
             }
-        } else if let Some(bytes) = new_origin_xlsx_bytes {
-            if bytes.len() <= max_origin_xlsx_bytes {
-                workbook.origin_xlsx_bytes = Some(bytes);
-            } else {
-                eprintln!(
-                    "[save] dropping origin_xlsx_bytes baseline after save: snapshot {} bytes exceeds origin retention limit ({})",
-                    bytes.len(),
-                    max_origin_xlsx_bytes
-                );
-                workbook.origin_xlsx_bytes = None;
+
+            // Saving establishes a new baseline for "net" changes. Clear the per-cell baseline so
+            // subsequent edits are tracked against this saved state (not the previously opened or
+            // previously saved workbook bytes).
+            workbook.cell_input_baseline.clear();
+            if is_real_save {
+                workbook.original_print_settings = workbook.print_settings.clone();
+                workbook.original_power_query_xml = workbook.power_query_xml.clone();
             }
-        }
+            for sheet in &mut workbook.sheets {
+                sheet.clear_dirty_cells();
+            }
 
-        // Saving establishes a new baseline for "net" changes. Clear the per-cell baseline so
-        // subsequent edits are tracked against this saved state (not the previously opened or
-        // previously saved workbook bytes).
-        workbook.cell_input_baseline.clear();
-        if is_real_save {
-            workbook.original_print_settings = workbook.print_settings.clone();
-            workbook.original_power_query_xml = workbook.power_query_xml.clone();
-        }
-        for sheet in &mut workbook.sheets {
-            sheet.clear_dirty_cells();
-        }
+            // If the saved file is macro-free (`.xlsx`/`.xltx`), macros are not preserved; clear any
+            // in-memory macro payloads so the UI doesn't continue to treat the workbook as
+            // macro-enabled.
+            if ext.is_some_and(Self::is_macro_free_extension) {
+                workbook.vba_project_bin = None;
+                workbook.vba_project_signature_bin = None;
+                workbook.macro_fingerprint = None;
+            }
+            self.dirty = false;
 
-        // If the saved file is macro-free (`.xlsx`/`.xltx`), macros are not preserved; clear any
-        // in-memory macro payloads so the UI doesn't continue to treat the workbook as
-        // macro-enabled.
-        if ext.is_some_and(Self::is_macro_free_extension) {
-            workbook.vba_project_bin = None;
-            workbook.vba_project_signature_bin = None;
-            workbook.macro_fingerprint = None;
-        }
-        self.dirty = false;
+            workbook_file_metadata(workbook)
+        };
 
         // Update workbook file metadata on the formula engine so worksheet information functions
         // like `CELL("filename")` and `INFO("directory")` reflect the latest save path.
-        let (directory, filename) = workbook_file_metadata(workbook);
-        let _ = workbook;
         self.engine
             .set_workbook_file_metadata(directory.as_deref(), filename.as_deref());
         let changes = self.engine.recalculate_with_value_changes_multi_threaded();
@@ -7307,14 +7309,33 @@ mod tests {
             EngineValue::Text(String::new())
         );
 
+        let saved_path = std::env::temp_dir().join("foo.xlsx");
+        let saved_path = saved_path.to_string_lossy().to_string();
         state
-            .mark_saved(Some("/tmp/foo.xlsx".to_string()), None)
+            .mark_saved(Some(saved_path.clone()), None)
             .expect("mark_saved succeeds");
+
+        let mut expected_dir = std::path::Path::new(&saved_path)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(""))
+            .to_string_lossy()
+            .to_string();
+        if !expected_dir.ends_with(std::path::MAIN_SEPARATOR) {
+            expected_dir.push(std::path::MAIN_SEPARATOR);
+        }
+        let expected = format!("{expected_dir}[foo.xlsx]Sheet1");
 
         assert_eq!(
             state.engine.get_cell_value("Sheet1", "A1"),
-            EngineValue::Text("/tmp/[foo.xlsx]Sheet1".to_string())
+            EngineValue::Text(expected.clone())
         );
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        let cell = workbook
+            .sheet(&sheet_id)
+            .expect("sheet exists")
+            .get_cell(0, 0);
+        assert_eq!(cell.computed_value, CellScalar::Text(expected));
     }
 
     #[test]
