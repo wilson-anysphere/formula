@@ -2317,6 +2317,39 @@ test("VLOOKUP range_lookup preserves typed casing for booleans (title-case prefi
   );
 });
 
+test("VLOOKUP range_lookup suggestions work inside grouping parens (preserves typed casing)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=VLOOKUP(A1, A1:B10, 2, (f";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=VLOOKUP(A1, A1:B10, 2, (false"),
+    `Expected VLOOKUP to complete \"(f\" -> \"(false\", got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Argument value enum suggestions do not delete trailing whitespace after grouping parens (pure insertion)", async () => {
+  const engine = new TabCompletionEngine();
+
+  // User typed trailing whitespace after starting a grouped boolean literal. Any completion
+  // would need to delete that whitespace, so the engine should return no suggestions.
+  const currentInput = "=VLOOKUP(A1, A1:B10, 2, (F ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(suggestions.length, 0);
+});
+
 test("Argument value enum suggestions do not delete trailing whitespace (pure insertion)", async () => {
   const engine = new TabCompletionEngine();
 

@@ -783,6 +783,7 @@ export class TabCompletionEngine {
     const spanEnd = parsed.currentArg?.end ?? cursor;
 
     const typedArgText = parsed.currentArg?.text ?? "";
+    const { groupPrefix, innerPrefix } = splitLeadingGroupingParens(typedArgText);
     // If the user typed trailing whitespace (e.g. "TRUE " or "0 "), avoid emitting
     // completions that would need to delete it. The formula bar tab-complete UI
     // only supports pure insertions at the caret.
@@ -791,11 +792,11 @@ export class TabCompletionEngine {
     // unterminated quoted string (e.g. typing `" ` to accept a `" "` enum value).
     // In that case we still allow suggestions because they can be represented as
     // pure insertions at the caret.
-    if (typedArgText.length > 0 && /\s$/.test(typedArgText) && !isInUnclosedDoubleQuotedString(typedArgText)) return [];
+    if (innerPrefix.length > 0 && /\s$/.test(innerPrefix) && !isInUnclosedDoubleQuotedString(innerPrefix)) return [];
 
     // Preserve the user-typed prefix exactly so suggestions are representable as
     // pure insertions at the caret (ghost text).
-    const typedPrefix = typedArgText;
+    const typedPrefix = innerPrefix;
 
     /** @type {Suggestion[]} */
     const suggestions = [];
@@ -815,7 +816,7 @@ export class TabCompletionEngine {
       const replacement = completeIdentifier(rawReplacement, typedPrefix);
       const displayText = entry.displayText ?? replacement;
       suggestions.push({
-        text: replaceSpan(input, spanStart, spanEnd, replacement),
+        text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${replacement}`),
         displayText,
         type: "function_arg",
         confidence: clamp01(entry.confidence + prefixMatchBoost(typedPrefix, replacement)),
@@ -884,7 +885,7 @@ export class TabCompletionEngine {
       if (cellRef.col > 0) {
         const leftA1 = `${columnIndexToLetter(cellRef.col - 1)}${cellRef.row + 1}`;
         suggestions.push({
-          text: replaceSpan(input, spanStart, spanEnd, leftA1),
+          text: replaceSpan(input, spanStart, spanEnd, `${groupPrefix}${leftA1}`),
           displayText: leftA1,
           type: "function_arg",
           confidence: 0.35,
