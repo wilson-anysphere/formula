@@ -6,6 +6,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
 
+function createInMemoryLocalStorage(): Storage {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => {
+      store.set(String(key), String(value));
+    },
+    removeItem: (key: string) => {
+      store.delete(String(key));
+    },
+    clear: () => {
+      store.clear();
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    get length() {
+      return store.size;
+    },
+  } as Storage;
+}
+
 function createMockCanvasContext(): CanvasRenderingContext2D {
   const noop = () => {};
   const gradient = { addColorStop: noop } as any;
@@ -54,6 +74,13 @@ function createRoot(): HTMLElement {
 describe("SpreadsheetApp.insertPicturesFromFiles ids", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
+
+    // JSDOM uses an opaque origin by default, which makes `localStorage` unusable.
+    // SpreadsheetApp expects localStorage to exist (for comments persistence, etc).
+    const storage = createInMemoryLocalStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
+    storage.clear();
 
     // CanvasGridRenderer schedules renders via requestAnimationFrame; ensure it exists in jsdom.
     Object.defineProperty(globalThis, "requestAnimationFrame", {
@@ -125,4 +152,3 @@ describe("SpreadsheetApp.insertPicturesFromFiles ids", () => {
     }
   });
 });
-
