@@ -925,8 +925,17 @@ export interface GoalSeekProgress {
   error: number;
 }
 
-// Suggested binding shape (sync in Rust; host decides whether to run in a worker):
-//   workbook.goalSeek(params, { defaultSheet?: string, onProgress?: (p: GoalSeekProgress) => void }): GoalSeekResult
+export interface GoalSeekOptions {
+  /**
+   * Default sheet name used to resolve CellRefs without an explicit `Sheet!A1` prefix.
+   * (Ignored when params use explicit sheet prefixes.)
+   */
+  sheet?: string;
+  onProgress?: (p: GoalSeekProgress) => void;
+}
+
+// Proposed JS/WASM entrypoint:
+//   workbook.goalSeek(params: GoalSeekParams, options?: GoalSeekOptions): GoalSeekResult
 ```
 
 Validation + edge cases (Rust behavior):
@@ -942,6 +951,8 @@ Validation + edge cases (Rust behavior):
 - Side effects: Goal Seek mutates spreadsheet state as it searches:
   - `changingCell` is overwritten on every iteration and is left at the final returned `solution` value (even when not converged).
   - The model is recalculated after every update, so `targetCell` and dependents reflect the latest candidate.
+- Progress callback:
+  - Rust `solve_with_progress` cannot cancel the solve (progress is report-only); WASM bindings should document that cancellation is not supported for Goal Seek (other than host-level task cancellation).
 
 ### Scenario Manager
 
@@ -1094,8 +1105,17 @@ export interface SimulationResult {
   outputSamples: Record<CellRef, number[]>;
 }
 
-// Suggested binding shape:
-//   workbook.runMonteCarloSimulation(config, { defaultSheet?: string, onProgress?: (p: SimulationProgress) => void }): SimulationResult
+export interface MonteCarloOptions {
+  /**
+   * Default sheet name used to resolve CellRefs without an explicit `Sheet!A1` prefix.
+   * (Ignored when config uses explicit sheet prefixes.)
+   */
+  sheet?: string;
+  onProgress?: (p: SimulationProgress) => void;
+}
+
+// Proposed JS/WASM entrypoint:
+//   workbook.runMonteCarloSimulation(config: SimulationConfig, options?: MonteCarloOptions): SimulationResult
 ```
 
 Validation + edge cases (Rust behavior):
@@ -1121,6 +1141,8 @@ Validation + edge cases (Rust behavior):
   - If samples are empty or min/max are non-finite (shouldn’t happen for valid runs), histogram bins are empty.
 - Progress callback behavior:
   - `run_simulation_with_progress` reports progress roughly every 1% (and always on the final iteration).
+- Progress callback:
+  - Rust `run_simulation_with_progress` cannot cancel the run (progress is report-only); WASM bindings should document that cancellation is not supported for Monte Carlo (other than host-level task cancellation).
 - Side effects: Monte Carlo also mutates spreadsheet state:
   - Each `inputDistributions[*].cell` is overwritten every iteration and is left set to the *last iteration’s* sampled value.
   - The model is recalculated after each sample batch; outputs reflect the last iteration at the end of the run.
