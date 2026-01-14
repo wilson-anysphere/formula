@@ -3704,9 +3704,11 @@ export class FormulaBarView {
     if (this.#referenceElsByIndex == null) {
       // When cursoring through a formula with many references, `querySelectorAll` per-ref-index
       // can become noticeable. Build a full index->elements map once per highlight DOM update.
-      const buckets: Array<HTMLElement[] | undefined> = [];
+      const refsLen = this.model.coloredReferences().length;
+      const buckets: Array<HTMLElement[] | undefined> = refsLen > 0 ? new Array(refsLen) : [];
       const els = this.#highlightEl.querySelectorAll<HTMLElement>("[data-ref-index]");
-      for (const el of els) {
+      for (let i = 0; i < els.length; i += 1) {
+        const el = els[i]!;
         const raw = el.dataset.refIndex;
         if (!raw) continue;
         const parsed = Number(raw);
