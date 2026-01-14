@@ -124,6 +124,8 @@ pnpm dev:sync
 | `SYNC_SERVER_AUTH_MODE` | Auth mode: `opaque` (shared token), `jwt-hs256` (HS256 JWT), or `introspect` (token introspection via API) |
 | `SYNC_SERVER_AUTH_TOKEN` | Shared auth token |
 | `SYNC_SERVER_JWT_SECRET` | JWT secret (HS256) |
+| `SYNC_SERVER_JWT_REQUIRE_SUB` | When `true` (recommended), require a non-empty JWT `sub` claim (user id). Missing `sub` is treated as a shared `"jwt"` user id when allowed. |
+| `SYNC_SERVER_JWT_REQUIRE_EXP` | When `true` (recommended), require a JWT `exp` claim (expiry time). |
 | `SYNC_SERVER_INTROSPECT_URL` | Required when `SYNC_SERVER_AUTH_MODE=introspect` (base API URL for `/internal/sync/introspect`) |
 | `SYNC_SERVER_INTROSPECT_TOKEN` | Required when `SYNC_SERVER_AUTH_MODE=introspect` (shared secret for API internal endpoints; sent as `x-internal-admin-token`) |
 | `SYNC_SERVER_PERSISTENCE_BACKEND` | `leveldb` or `file` |

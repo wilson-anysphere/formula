@@ -338,6 +338,11 @@ Because the JWT payload is unverified and therefore untrusted, desktop treats `r
 fall back to dropping invalid restrictions (and, as a last resort, continuing with safe defaults) rather than
 crashing on startup.
 
+Sync-server note: in `jwt-hs256` auth mode, the server may be configured to require a non-empty `sub`
+(`SYNC_SERVER_JWT_REQUIRE_SUB=1`, recommended). When `sub` is omitted and the server allows it, the
+sync-server will treat the authenticated user id as the shared fallback `"jwt"`, which means presence ids
+and `modifiedBy` attribution will not distinguish between collaborators.
+
 Fallback for opaque / non-JWT tokens:
 
 - If the token is missing or does not look like a JWT payload (or decoding fails), desktop treats the token as **opaque** and falls back to:
