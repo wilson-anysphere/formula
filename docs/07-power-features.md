@@ -1438,7 +1438,7 @@ export interface EvolutionaryOptions {
 }
 
 export interface SolveOptions {
-  method: SolveMethod; // default "grgNonlinear"
+  method?: SolveMethod; // default "grgNonlinear"
   maxIterations?: number; // default 500
   tolerance?: number; // default 1e-8
   applySolution?: boolean; // default true
