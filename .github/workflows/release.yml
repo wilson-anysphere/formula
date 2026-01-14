@@ -1391,6 +1391,29 @@ jobs:
           }
           ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir -RequireExe -RequireMsi
 
+      - name: Verify Windows installer signatures (signtool verify /pa /v)
+        if: runner.os == 'Windows' && ((secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '') || vars.FORMULA_REQUIRE_CODESIGN == '1')
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = "${{ matrix.rust_target }}"
+          if ([string]::IsNullOrWhiteSpace($target)) {
+            throw "windows-sigcheck: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
+          }
+
+          $bundleCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bundleDir) {
+            $candidatesJoined = $bundleCandidates -join "`n"
+            throw "windows-sigcheck: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
+          }
+
+          python scripts/ci/check-windows-installer-signatures.py --bundle-dir "$bundleDir"
+
       - name: Verify Windows ARM64 MSI targets ARM64 (template summary)
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
         shell: pwsh
@@ -1650,67 +1673,6 @@ jobs:
           info="$(lipo -info "$bin_path" | tee /dev/stderr)"
           echo "$info" | grep -qw "x86_64" || { echo "::error::macOS binary is missing x86_64 slice"; exit 1; }
           echo "$info" | grep -qw "arm64" || { echo "::error::macOS binary is missing arm64 slice"; exit 1; }
-
-      - name: Verify Windows installers are Authenticode-signed
-        if: runner.os == 'Windows' && ((secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '') || vars.FORMULA_REQUIRE_CODESIGN == '1')
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          # Use signtool for signature validation; it provides more actionable chain/errors than
-          # `Get-AuthenticodeSignature` and matches the Windows signing toolchain.
-          $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue)?.Source
-          if (-not $signtool) {
-            $kitsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-            if (Test-Path $kitsRoot) {
-              $signtool = Get-ChildItem -Path $kitsRoot -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
-                Sort-Object FullName -Descending |
-                Select-Object -First 1 |
-                ForEach-Object { $_.FullName }
-            }
-          }
-
-          if (-not $signtool) {
-            throw "signtool.exe not found (required to verify Authenticode signatures)."
-          }
-
-          Write-Host "Using signtool: $signtool"
-
-          # Tauri Windows bundles are emitted under src-tauri/target/**/release/bundle/**.
-          # We only enforce signature validity when Windows signing secrets are present (or when
-          # FORMULA_REQUIRE_CODESIGN is enabled) so forks/dry runs skip this check cleanly.
-          # Cargo workspaces typically emit bundles under `<repo>/target/**`, but standalone Tauri
-          # builds may use `apps/desktop/src-tauri/target/**`. Support both so we don't break
-          # releases if the build output layout changes.
-          $searchRoots = @(
-            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target"),
-            (Join-Path $env:GITHUB_WORKSPACE "target")
-          ) | Where-Object { Test-Path $_ }
-
-          if ($searchRoots.Count -eq 0) {
-            throw "Expected build output directory not found. Looked for:`n- apps/desktop/src-tauri/target`n- target"
-          }
-
-          # Wrap in @() so `.Count` behaves consistently even when 0 or 1 files match.
-          $installers = @(Get-ChildItem -Path $searchRoots -Recurse -File -Include *.exe, *.msi |
-            Where-Object { $_.FullName -match '[\\/]release[\\/]bundle[\\/]' })
-
-          if ($installers.Count -eq 0) {
-            throw "No Windows installers (.exe/.msi) found under target/**/release/bundle/**"
-          }
-
-          Write-Host "Found $($installers.Count) installer file(s) to verify:"
-          $installers | ForEach-Object { Write-Host " - $($_.FullName)" }
-
-          foreach ($file in $installers) {
-            Write-Host "::group::signtool verify /pa /v $($file.FullName)"
-            Write-Host "Verifying Authenticode signature for: $($file.FullName)"
-            & $signtool verify /pa /v $file.FullName
-            if ($LASTEXITCODE -ne 0) {
-              throw "codesign-verify: ERROR signtool verification failed for: $($file.FullName)"
-            }
-            Write-Host "::endgroup::"
-          }
 
       - name: Validate macOS bundle (DMG, Info.plist, signing)
         # Always run on macOS so unsigned fork/dry-run builds still validate bundle structure.
