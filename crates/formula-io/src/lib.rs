@@ -3301,18 +3301,17 @@ fn decrypt_encrypted_ooxml_package(
                 let f_aes = flags_raw & 0x0000_0020 != 0;
 
                 if !f_cryptoapi || f_aes != alg_is_aes {
-                    let mut buf = encryption_info.clone();
-                    if buf.len() >= header_start + 4 {
+                    if encryption_info.len() >= header_start + 4 {
                         let mut new_flags = flags_raw | 0x0000_0004; // fCryptoAPI
                         if alg_is_aes {
                             new_flags |= 0x0000_0020; // fAES
                         } else {
                             new_flags &= !0x0000_0020;
                         }
+                        let buf = patched_info.get_or_insert_with(|| encryption_info.clone());
                         buf[header_start..header_start + 4]
                             .copy_from_slice(&new_flags.to_le_bytes());
-                        let patched = patched_info.get_or_insert(buf);
-                        enc_info = patched.as_slice();
+                        enc_info = buf.as_slice();
                         res = formula_office_crypto::decrypt_standard_encrypted_package(
                             enc_info,
                             &encrypted_package,
