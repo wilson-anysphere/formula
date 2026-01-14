@@ -482,6 +482,29 @@ describe("EngineWorker RPC", () => {
     expect(worker.terminated).toBe(true);
   });
 
+  it("rejects new RPCs after terminate() instead of hanging", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    engine.terminate();
+
+    await expect(
+      Promise.race([
+        engine.ping().then(
+          () => "resolved",
+          (err) => err
+        ),
+        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 50))
+      ])
+    ).resolves.not.toBe("timeout");
+
+    await expect(engine.ping()).rejects.toThrow(/terminated/i);
+  });
+
   it("sends lexFormulaPartial requests with formula + options params", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({

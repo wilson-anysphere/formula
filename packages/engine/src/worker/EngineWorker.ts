@@ -152,6 +152,7 @@ export class EngineWorker {
   private portMessageErrorListener: ((event: any) => void) | null = null;
   private workerErrorListener: ((event: any) => void) | null = null;
   private shuttingDown = false;
+  private shutdownReason: Error | null = null;
   private readonly pending = new Map<number, PendingRequest>();
   private nextId = 1;
 
@@ -372,6 +373,7 @@ export class EngineWorker {
       return;
     }
     this.shuttingDown = true;
+    this.shutdownReason = typeof error === "function" ? new Error("worker terminated") : error;
 
     // If the caller fired-and-forgot `setCell`, we may have a microtask-batched `setCells`
     // flush pending. Clearing the update batch avoids posting a message to a closed port
@@ -550,6 +552,11 @@ export class EngineWorker {
   }
 
   setCell(address: string, value: CellScalar, sheet?: string): Promise<void> {
+    if (this.shuttingDown) {
+      const promise = Promise.reject(this.shutdownReason ?? new Error("worker terminated"));
+      void promise.catch(() => {});
+      return promise;
+    }
     this.pendingCellUpdates.push({ address, value: normalizeCellScalar(value), sheet });
     const promise = this.scheduleFlush();
     // `setCell` batching is sometimes fire-and-forget. Attach a no-op rejection handler so a
@@ -1186,6 +1193,9 @@ export class EngineWorker {
     options?: RpcOptions,
     transfer?: Transferable[]
   ): Promise<unknown> {
+    if (this.shuttingDown) {
+      return Promise.reject(this.shutdownReason ?? new Error("worker terminated"));
+    }
     const id = this.nextId++;
     const request: RpcRequest = { type: "request", id, method, params };
 
