@@ -122,6 +122,28 @@ describe("startupMetrics", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("can report first render even if __TAURI__ is injected after the call starts", async () => {
+    const invoke = vi.fn().mockResolvedValue(null);
+    const listen = vi.fn().mockResolvedValue(() => {});
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (globalThis as any).__TAURI__;
+    } catch {
+      (globalThis as any).__TAURI__ = undefined;
+    }
+
+    const promise = markStartupFirstRender();
+
+    // Inject `__TAURI__` after the first microtask. This simulates hosts where the JS API is
+    // attached slightly after module evaluation begins.
+    queueMicrotask(() => {
+      (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+    });
+
+    await promise;
+    expect(invoke).toHaveBeenCalledWith("report_startup_first_render");
+  });
+
   it("boots startup metrics as early side effects (report -> install listeners -> report again)", async () => {
     const invoke = vi.fn().mockResolvedValue(null);
     const listen = vi.fn().mockResolvedValue(() => {});
