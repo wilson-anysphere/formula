@@ -245,6 +245,8 @@ def _render_markdown(
     bin_size_bytes: int | None,
     limit_mb: int | None,
     enforce: bool,
+    rustc_version: str | None,
+    cargo_version: str | None,
     cargo_bloat_version: str | None,
     file_info: str | None,
     stripped: bool | None,
@@ -272,6 +274,10 @@ def _render_markdown(
     lines.append(f"- Features: `{features}`")
     if target:
         lines.append(f"- Target: `{target}`")
+    if rustc_version:
+        lines.append(f"- rustc: `{rustc_version}`")
+    if cargo_version:
+        lines.append(f"- cargo: `{cargo_version}`")
     lines.append(f"- Target dir: `{_relpath(target_dir, repo_root)}`")
     lines.append(f"- Binary path: `{_relpath(bin_path, repo_root)}`")
     if bin_size_bytes is not None:
@@ -435,6 +441,21 @@ def main() -> int:
             args.out.write_text(md, encoding="utf-8")
         return 2
 
+    rustc_version: str | None = None
+    cargo_version: str | None = None
+    try:
+        rustc = _run_capture(["rustc", "--version"], cwd=repo_root)
+        if rustc.returncode == 0:
+            rustc_version = rustc.stdout.strip().splitlines()[0] if rustc.stdout.strip() else None
+    except FileNotFoundError:
+        rustc_version = None
+    try:
+        cargo_ver = _run_capture(["cargo", "--version"], cwd=repo_root)
+        if cargo_ver.returncode == 0:
+            cargo_version = cargo_ver.stdout.strip().splitlines()[0] if cargo_ver.stdout.strip() else None
+    except FileNotFoundError:
+        cargo_version = None
+
     try:
         target_dir = _cargo_target_directory(repo_root)
     except Exception as exc:  # noqa: BLE001
@@ -482,6 +503,8 @@ def main() -> int:
                 bin_size_bytes=bin_path.stat().st_size if bin_path.exists() else None,
                 limit_mb=limit_mb,
                 enforce=enforce,
+                rustc_version=rustc_version,
+                cargo_version=cargo_version,
                 cargo_bloat_version=None,
                 file_info=None,
                 stripped=None,
@@ -521,6 +544,8 @@ def main() -> int:
             bin_size_bytes=None,
             limit_mb=limit_mb,
             enforce=enforce,
+            rustc_version=rustc_version,
+            cargo_version=cargo_version,
             cargo_bloat_version=None,
             file_info=None,
             stripped=None,
@@ -672,6 +697,8 @@ def main() -> int:
         bin_size_bytes=bin_size_bytes,
         limit_mb=limit_mb,
         enforce=enforce,
+        rustc_version=rustc_version,
+        cargo_version=cargo_version,
         cargo_bloat_version=cargo_bloat_version,
         file_info=file_info,
         stripped=stripped,
