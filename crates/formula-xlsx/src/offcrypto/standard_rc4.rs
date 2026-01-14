@@ -10,6 +10,16 @@
 
 use digest::Digest as _;
 
+#[cfg(test)]
+use std::cell::Cell;
+
+// Unit tests run in parallel by default. Use a thread-local counter so tests that reset/inspect
+// the counter don't race each other.
+#[cfg(test)]
+thread_local! {
+    static CT_EQ_CALLS: Cell<usize> = Cell::new(0);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CryptoApiHashAlg {
     Sha1,
@@ -54,6 +64,9 @@ fn password_utf16le_bytes(password: &str) -> Vec<u8> {
 }
 
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    #[cfg(test)]
+    CT_EQ_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
+
     let mut diff = 0u8;
     let max_len = a.len().max(b.len());
     for idx in 0..max_len {
@@ -62,6 +75,16 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
         diff |= av ^ bv;
     }
     diff == 0 && a.len() == b.len()
+}
+
+#[cfg(test)]
+fn reset_ct_eq_calls() {
+    CT_EQ_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+fn ct_eq_call_count() -> usize {
+    CT_EQ_CALLS.with(|calls| calls.get())
 }
 
 /// RC4 stream cipher.
@@ -250,6 +273,32 @@ mod tests {
             return false;
         }
         ct_eq(&computed[..n], &decrypted_hash[..n])
+    }
+
+    #[test]
+    fn standard_cryptoapi_rc4_verifier_uses_constant_time_compare() {
+        let password = "correct horse battery staple";
+        let salt = [
+            0xA9, 0x38, 0x13, 0x7C, 0x20, 0x54, 0xD2, 0xB6, 0x9D, 0x01, 0xFA, 0xEE, 0x8B, 0x3C, 0x47, 0x11,
+        ];
+        let verifier_plaintext = [
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+        ];
+
+        let verifier = build_fixture(
+            password,
+            salt,
+            verifier_plaintext,
+            CryptoApiHashAlg::Sha1,
+            128,
+        );
+
+        reset_ct_eq_calls();
+        assert!(!verifier.verify_password("wrong password"));
+        assert!(
+            ct_eq_call_count() >= 1,
+            "expected ct_eq to be used for verifier digest comparison"
+        );
     }
 
     #[test]
