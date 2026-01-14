@@ -199,6 +199,7 @@ function computeSheetIndexSignature(sheet, options = {}) {
   const signal = options.signal;
   throwIfAborted(signal);
   const origin = normalizeSheetOrigin(sheet?.origin);
+  const sheetName = typeof sheet?.name === "string" ? sheet.name : "";
   const maxChunkRows = options.maxChunkRows ?? DEFAULT_RAG_MAX_CHUNK_ROWS;
   const valuesHash = options.valuesHash ?? stableHashValue(sheet?.values ?? [], { signal });
   const splitRegions = options.splitRegions === true;
@@ -211,7 +212,7 @@ function computeSheetIndexSignature(sheet, options = {}) {
 
   let hash = FNV_OFFSET_64;
   hash = fnv1a64Update(hash, `sig:v${SHEET_INDEX_SIGNATURE_VERSION}\n`);
-  hash = fnv1a64Update(hash, `name:${sheet?.name ?? ""}\n`);
+  hash = fnv1a64Update(hash, `name:${sheetName}\n`);
   hash = fnv1a64Update(hash, `origin:${origin.row},${origin.col}\n`);
   hash = fnv1a64Update(hash, `maxChunkRows:${String(maxChunkRows)}\n`);
   hash = fnv1a64Update(hash, `splitRegions:${splitRegions ? "1" : "0"}\n`);
@@ -237,13 +238,14 @@ function computeSheetSchemaSignature(sheet, options = {}) {
   const signal = options.signal;
   throwIfAborted(signal);
   const origin = normalizeSheetOrigin(sheet?.origin);
+  const sheetName = typeof sheet?.name === "string" ? sheet.name : "";
   const valuesHash = options.valuesHash ?? stableHashValue(sheet?.values ?? [], { signal });
   const tablesHash = stableHashValue(sheet?.tables ?? [], { signal });
   const namedRangesHash = stableHashValue(sheet?.namedRanges ?? [], { signal });
 
   let hash = FNV_OFFSET_64;
   hash = fnv1a64Update(hash, `schema:v${SHEET_SCHEMA_SIGNATURE_VERSION}\n`);
-  hash = fnv1a64Update(hash, `name:${sheet?.name ?? ""}\n`);
+  hash = fnv1a64Update(hash, `name:${sheetName}\n`);
   hash = fnv1a64Update(hash, `origin:${origin.row},${origin.col}\n`);
   hash = fnv1a64Update(hash, "values:");
   hash = fnv1a64Update(hash, valuesHash);
@@ -638,7 +640,7 @@ export class ContextManager {
    * @returns {Promise<T>}
    */
   async _withSheetIndexLock(sheetName, signal, fn) {
-    const key = typeof sheetName === "string" ? sheetName : String(sheetName ?? "");
+    const key = typeof sheetName === "string" ? sheetName : "";
     // Ensure we don't start an index pass while a global sheet-store operation (clear) is running.
     await awaitWithAbort(this._sheetIndexGlobalLock, signal);
     throwIfAborted(signal);
@@ -753,7 +755,7 @@ export class ContextManager {
       ? normalizeNonNegativeInt(options.maxChunksPerRegion, this.maxChunksPerRegion)
       : undefined;
     throwIfAborted(signal);
-    const sheetName = typeof sheet?.name === "string" ? sheet.name : String(sheet?.name ?? "");
+    const sheetName = typeof sheet?.name === "string" ? sheet.name : "";
 
     return await this._withSheetIndexLock(sheetName, signal, async () => {
       return await this._ensureSheetIndexedLocked(sheet, {
@@ -790,7 +792,7 @@ export class ContextManager {
     const chunkRowOverlap = splitRegions ? options.chunkRowOverlap : undefined;
     const maxChunksPerRegion = splitRegions ? options.maxChunksPerRegion : undefined;
     throwIfAborted(signal);
-    const sheetName = typeof sheet?.name === "string" ? sheet.name : String(sheet?.name ?? "");
+    const sheetName = typeof sheet?.name === "string" ? sheet.name : "";
 
     if (!this.cacheSheetIndex) {
       const indexStats = await this.ragIndex.indexSheet(sheet, {
@@ -935,6 +937,12 @@ export class ContextManager {
     throwIfAborted(signal);
     const dlp = normalizeDlpOptions(params.dlp);
     const rawSheet = params.sheet;
+    // Sheet names are expected to be strings. Avoid coercing arbitrary values via `String(...)`
+    // here: custom `toString()` implementations can leak non-heuristic secrets into prompts (or
+    // throw and crash the context build).
+    const rawSheetName = rawSheet && typeof rawSheet === "object" && typeof rawSheet.name === "string" ? rawSheet.name : "";
+    const rawSheetForContext =
+      rawSheet && typeof rawSheet === "object" ? { ...rawSheet, name: rawSheetName } : { name: rawSheetName };
 
     const safeRowCap = normalizeNonNegativeInt(params.limits?.maxContextRows, this.maxContextRows);
     // `values` is a 2D JS array. With Excel-scale sheets, full-row/column selections can
@@ -971,7 +979,7 @@ export class ContextManager {
             col: Number.isInteger(rawSheet.origin.col) && rawSheet.origin.col >= 0 ? rawSheet.origin.col : 0,
           }
         : { row: 0, col: 0 };
-    let sheetForContext = { ...rawSheet, values: valuesForContext };
+    let sheetForContext = { ...rawSheetForContext, values: valuesForContext };
 
     let dlpRedactedCells = 0;
     let dlpSelectionClassification = null;
@@ -1011,7 +1019,7 @@ export class ContextManager {
         return raw;
       };
 
-      const sheetId = resolveDlpSheetId(dlp.sheetId ?? rawSheet.name);
+      const sheetId = resolveDlpSheetId(dlp.sheetId ?? rawSheetName);
       dlpAuditDocumentId = documentId;
       dlpAuditSheetId = sheetId;
 
@@ -1072,7 +1080,7 @@ export class ContextManager {
           type: "ai.context",
           documentId,
           sheetId,
-          sheetName: rawSheet.name,
+          sheetName: rawSheetName,
           decision: structuredDecision,
           selectionClassification: structuredSelectionClassification,
           redactedCellCount: 0,
@@ -1087,7 +1095,7 @@ export class ContextManager {
       const heuristicPolicyClassification = heuristicToPolicyClassification(dlpHeuristic);
       const attachmentsHeuristic = classifyStructuredForDlp(params.attachments ?? [], { signal });
       const attachmentsPolicyClassification = heuristicToPolicyClassification(attachmentsHeuristic);
-      const sheetNameHeuristic = classifyTextForDlp(String(rawSheet?.name ?? ""));
+      const sheetNameHeuristic = classifyTextForDlp(rawSheetName);
       const sheetNamePolicyClassification = heuristicToPolicyClassification(sheetNameHeuristic);
       const sheetMetaHeuristic = classifyStructuredForDlp(
         {
@@ -1124,7 +1132,7 @@ export class ContextManager {
           type: "ai.context",
           documentId,
           sheetId,
-          sheetName: rawSheet.name,
+          sheetName: rawSheetName,
           decision: dlpDecision,
           selectionClassification: dlpSelectionClassification,
           redactedCellCount: 0,
@@ -1168,7 +1176,7 @@ export class ContextManager {
          nextValues = valuesForContext.map((row) => (row ?? []).slice());
        }
 
-      sheetForContext = { ...rawSheet, values: nextValues };
+      sheetForContext = { ...rawSheetForContext, values: nextValues };
 
       // Under REDACT decisions, defensively apply heuristic redaction to the context sheet so:
       //  - schema / sampling / retrieval don't contain raw sensitive strings in structured outputs
@@ -1230,7 +1238,7 @@ export class ContextManager {
          * @param {string} token
          */
         const redactQueryToken = (token) => {
-          const raw = String(token ?? "");
+          const raw = typeof token === "string" ? token : "";
           if (!raw) return;
           nextQuery = replaceAll(nextQuery, raw, "[REDACTED]");
           const encoded = encodeURIComponent(raw);
@@ -1242,7 +1250,7 @@ export class ContextManager {
 
         // Treat the sheet name as a disallowed metadata token under structured DLP redaction.
         // (Note: this does not affect the returned A1 range strings; it only keeps embedding inputs safe.)
-        const sheetNameToken = String(rawSheet?.name ?? "");
+        const sheetNameToken = rawSheetName;
         if (
           sheetNameToken &&
           (nextQuery.includes(sheetNameToken) ||
@@ -1259,7 +1267,7 @@ export class ContextManager {
         if (Array.isArray(rawSheet?.tables)) {
           for (const t of rawSheet.tables) {
             throwIfAborted(signal);
-            const name = String(t?.name ?? "");
+            const name = typeof t?.name === "string" ? t.name : "";
             if (!name) continue;
             if (!nextQuery.includes(name) && !nextQuery.includes(encodeURIComponent(name))) continue;
             redactQueryToken(name);
@@ -1268,7 +1276,7 @@ export class ContextManager {
         if (Array.isArray(rawSheet?.namedRanges)) {
           for (const r of rawSheet.namedRanges) {
             throwIfAborted(signal);
-            const name = String(r?.name ?? "");
+            const name = typeof r?.name === "string" ? r.name : "";
             if (!name) continue;
             if (!nextQuery.includes(name) && !nextQuery.includes(encodeURIComponent(name))) continue;
             redactQueryToken(name);
@@ -1283,7 +1291,7 @@ export class ContextManager {
     // relevant chunks. Both steps must run under the per-sheet lock so concurrent calls
     // cannot swap out the underlying store between indexing and retrieval (which could
     // otherwise leak unredacted content under DLP REDACT decisions).
-    const sheetName = typeof sheetForContext?.name === "string" ? sheetForContext.name : String(sheetForContext?.name ?? "");
+    const sheetName = typeof sheetForContext?.name === "string" ? sheetForContext.name : "";
     const { schema, retrieved } = await this._withSheetIndexLock(sheetName, signal, async () => {
       const { schema } = await this._ensureSheetIndexedLocked(sheetForContext, {
         signal,
@@ -1327,7 +1335,7 @@ export class ContextManager {
             continue;
           }
           // Canonicalize to match `extractSheetSchema` output.
-          const canonical = rangeToA1({ ...parsed, sheetName: rawSheet.name });
+           const canonical = rangeToA1({ ...parsed, sheetName: rawSheetName });
           if (canonical) explicitTableRanges.add(canonical);
         }
       }
@@ -1337,7 +1345,7 @@ export class ContextManager {
        * @param {unknown} rangeA1
        */
       const redactA1SheetName = (rangeA1) => {
-        const raw = String(rangeA1 ?? "");
+        const raw = typeof rangeA1 === "string" ? rangeA1 : "";
         if (!raw || !redactedSheetName) return raw;
         try {
           const parsed = parseA1Range(raw);
@@ -1353,7 +1361,7 @@ export class ContextManager {
        * @param {unknown} rangeA1
        */
       const recordDecisionForA1Range = (rangeA1) => {
-        const raw = String(rangeA1 ?? "");
+        const raw = typeof rangeA1 === "string" ? rangeA1 : "";
         if (!raw) return null;
         let parsed;
         try {
@@ -1364,7 +1372,7 @@ export class ContextManager {
         }
         const rangeRef = {
           documentId: dlpAuditDocumentId ?? dlp.documentId,
-          sheetId: dlpAuditSheetId ?? dlp.sheetId ?? rawSheet.name,
+           sheetId: dlpAuditSheetId ?? dlp.sheetId ?? rawSheetName,
           range: {
             start: { row: parsed.startRow, col: parsed.startCol },
             end: { row: parsed.endRow, col: parsed.endCol },
@@ -1383,7 +1391,7 @@ export class ContextManager {
         ? schema.tables.map((t) => {
             const decision = recordDecisionForA1Range(t?.range);
             const safeRange = redactA1SheetName(t?.range);
-            const isExplicit = explicitTableRanges.has(String(t?.range ?? ""));
+            const isExplicit = explicitTableRanges.has(typeof t?.range === "string" ? t.range : "");
             if (decision && decision.decision !== DLP_DECISION.ALLOW) return { ...t, name: "[REDACTED]", range: safeRange };
             if (redactAllExplicitSchemaNames && isExplicit) return { ...t, name: "[REDACTED]", range: safeRange };
             return { ...t, range: safeRange };
@@ -1421,7 +1429,7 @@ export class ContextManager {
       return (retrieved ?? []).map((hit) => {
         if (!hit || typeof hit !== "object") return hit;
         const rawRange = /** @type {any} */ (hit).range;
-        const raw = String(rawRange ?? "");
+        const raw = typeof rawRange === "string" ? rawRange : "";
         if (!raw) return hit;
         try {
           const parsed = parseA1Range(raw);
@@ -1439,7 +1447,12 @@ export class ContextManager {
     switch (params.samplingStrategy) {
       case "stratified": {
         sampled = stratifiedSampleRows(dataForSampling, sampleRows, {
-          getStratum: (row) => String(row[params.stratifyByColumn ?? 0] ?? ""),
+          getStratum: (row) => {
+            const v = row?.[params.stratifyByColumn ?? 0];
+            if (typeof v === "string") return v;
+            if (typeof v === "number" || typeof v === "boolean" || typeof v === "bigint") return String(v);
+            return "";
+          },
           seed: 1,
         });
         break;
@@ -1535,7 +1548,7 @@ export class ContextManager {
             parsed = parseA1Range(reference);
           } catch {
             // Best-effort: if the reference includes the raw sheet name, strip it entirely.
-            const sheetNameRaw = String(rawSheet?.name ?? "");
+            const sheetNameRaw = rawSheetName;
             if (sheetNameRaw && reference.includes(sheetNameRaw)) {
               return { ...item, reference: "[REDACTED]" };
             }
@@ -1661,8 +1674,8 @@ export class ContextManager {
       dlp.auditLogger?.log({
         type: "ai.context",
         documentId: dlpAuditDocumentId ?? dlp.documentId,
-        sheetId: dlpAuditSheetId ?? dlp.sheetId ?? rawSheet.name,
-        sheetName: rawSheet.name,
+        sheetId: dlpAuditSheetId ?? dlp.sheetId ?? rawSheetName,
+        sheetName: rawSheetName,
         decision: dlpDecision,
         selectionClassification: dlpSelectionClassification,
         redactedCellCount: dlpRedactedCells,
@@ -2186,7 +2199,7 @@ export class ContextManager {
        * @param {string} token
        */
       const redactQueryToken = (token) => {
-        const raw = String(token ?? "");
+        const raw = typeof token === "string" ? token : "";
         if (!raw) return;
         nextQuery = replaceAll(nextQuery, raw, "[REDACTED]");
         const encoded = encodeURIComponent(raw);
@@ -2213,13 +2226,14 @@ export class ContextManager {
         options: { includeRestrictedContent },
       });
       if (structuredOverallDecisionForQuery.decision !== DLP_DECISION.ALLOW) {
-        redactQueryToken(String(params.workbook.id ?? ""));
+        const workbookIdToken = typeof params.workbook?.id === "string" ? params.workbook.id : "";
+        if (workbookIdToken) redactQueryToken(workbookIdToken);
       }
 
       // Sheet names.
       for (const s of params.workbook.sheets ?? []) {
         throwIfAborted(signal);
-        const sheetName = String(s?.name ?? "");
+        const sheetName = typeof s?.name === "string" ? s.name : "";
         if (!sheetName) continue;
         if (
           !nextQuery.includes(sheetName) &&
@@ -2236,20 +2250,20 @@ export class ContextManager {
       // Table/namedRange names.
       for (const t of params.workbook.tables ?? []) {
         throwIfAborted(signal);
-        const name = String(t?.name ?? "");
+        const name = typeof t?.name === "string" ? t.name : "";
         if (!name) continue;
         if (!nextQuery.includes(name) && !nextQuery.includes(encodeURIComponent(name))) continue;
-        const sheetName = String(t?.sheetName ?? "");
+        const sheetName = typeof t?.sheetName === "string" ? t.sheetName : "";
         if (sheetNameDisallowed(sheetName) || rectDisallowed(sheetName, t?.rect)) {
           redactQueryToken(name);
         }
       }
       for (const r of params.workbook.namedRanges ?? []) {
         throwIfAborted(signal);
-        const name = String(r?.name ?? "");
+        const name = typeof r?.name === "string" ? r.name : "";
         if (!name) continue;
         if (!nextQuery.includes(name) && !nextQuery.includes(encodeURIComponent(name))) continue;
-        const sheetName = String(r?.sheetName ?? "");
+        const sheetName = typeof r?.sheetName === "string" ? r.sheetName : "";
         if (sheetNameDisallowed(sheetName) || rectDisallowed(sheetName, r?.rect)) {
           redactQueryToken(name);
         }
@@ -2660,7 +2674,7 @@ export class ContextManager {
               if (!t || typeof t !== "object") continue;
               if (t.name !== target) continue;
               matched = true;
-              const sheetName = String(t.sheetName ?? "");
+              const sheetName = typeof t.sheetName === "string" ? t.sheetName : "";
               if (sheetNameDisallowed(sheetName)) {
                 return { ...item, reference: "[REDACTED]" };
               }
@@ -2841,16 +2855,16 @@ export class ContextManager {
         .slice()
         .sort(
           (a, b) =>
-            String(a?.sheetName ?? "").localeCompare(String(b?.sheetName ?? "")) ||
-            String(a?.name ?? "").localeCompare(String(b?.name ?? "")),
+            (typeof a?.sheetName === "string" ? a.sheetName : "").localeCompare(typeof b?.sheetName === "string" ? b.sheetName : "") ||
+            (typeof a?.name === "string" ? a.name : "").localeCompare(typeof b?.name === "string" ? b.name : ""),
         )
         .slice(0, maxTables);
       const namedRangesForSchema = rawNamedRanges
         .slice()
         .sort(
           (a, b) =>
-            String(a?.sheetName ?? "").localeCompare(String(b?.sheetName ?? "")) ||
-            String(a?.name ?? "").localeCompare(String(b?.name ?? "")),
+            (typeof a?.sheetName === "string" ? a.sheetName : "").localeCompare(typeof b?.sheetName === "string" ? b.sheetName : "") ||
+            (typeof a?.name === "string" ? a.name : "").localeCompare(typeof b?.name === "string" ? b.name : ""),
         )
         .slice(0, maxNamedRanges);
       const schema = extractWorkbookSchema(
@@ -3454,9 +3468,9 @@ function compactSheetSchemaForPrompt(schema, options = {}) {
     dataRegions: dataRegions.slice(0, maxRegions).map((r) => ({
       range: typeof r?.range === "string" ? r.range : "",
       hasHeader: Boolean(r?.hasHeader),
-      headers: Array.isArray(r?.headers) ? r.headers.map((h) => String(h ?? "")) : [],
+      headers: Array.isArray(r?.headers) ? r.headers.map((h) => (typeof h === "string" ? h : "")) : [],
       inferredColumnTypes: Array.isArray(r?.inferredColumnTypes)
-        ? r.inferredColumnTypes.map((t) => String(t ?? "mixed"))
+        ? r.inferredColumnTypes.map((t) => (typeof t === "string" ? t : "mixed"))
         : [],
       rowCount: Number.isFinite(r?.rowCount) ? Math.max(0, Math.floor(r.rowCount)) : 0,
       columnCount: Number.isFinite(r?.columnCount) ? Math.max(0, Math.floor(r.columnCount)) : 0,

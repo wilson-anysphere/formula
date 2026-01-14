@@ -452,6 +452,52 @@ test("buildContext: structured DLP REDACT also redacts sheet names in attachment
   assert.match(attachmentDataSection, /\[REDACTED\]/);
 });
 
+test("buildContext: structured DLP REDACT does not call custom toString on non-string sheet.name (no-op redactor)", async () => {
+  let toStringCalls = 0;
+  const sheetNameObj = {
+    toString() {
+      toStringCalls += 1;
+      return "TopSecretSheet";
+    },
+  };
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const out = await cm.buildContext({
+    sheet: {
+      // Non-string sheet names should be treated as prompt-unsafe (avoid calling `toString()`).
+      name: sheetNameObj,
+      values: [["Hello"]],
+    },
+    query: "ignore",
+    dlp: {
+      documentId: "doc-1",
+      // Provide an explicit sheet id so structured selectors can still apply even if the
+      // user-facing sheet name is malformed/non-string.
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: "doc-1",
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.equal(toStringCalls, 0);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.doesNotMatch(out.promptContext, /TopSecretSheet/);
+});
+
 test("buildContext: attachment-only sensitive patterns can trigger DLP REDACT (even when sheet window is public)", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000_000,

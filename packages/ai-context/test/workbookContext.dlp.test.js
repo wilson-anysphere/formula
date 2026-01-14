@@ -868,6 +868,67 @@ test("buildWorkbookContext: structured DLP REDACT does not leak non-string sheet
   assert.doesNotMatch(JSON.stringify(out.retrieved), new RegExp(sheetSecret));
 });
 
+test("buildWorkbookContext: does not call custom toString on non-string workbook sheet/table metadata while redacting query tokens (no-op redactor)", async () => {
+  let toStringCalls = 0;
+  const dangerous = {
+    toString() {
+      toStringCalls += 1;
+      return "TopSecretSheet";
+    },
+  };
+
+  const workbook = {
+    id: "wb-dlp-query-tostring",
+    sheets: [
+      {
+        name: dangerous,
+        // Needs at least 2 connected non-empty cells for ai-rag region detection to produce a chunk,
+        // but we skip indexing in this test. Keep some shape anyway.
+        cells: [[{ v: "Hello" }, { v: "World" }]],
+      },
+    ],
+    // Malformed metadata entries: these should never trigger `toString()` during prompt formatting
+    // or query token redaction under DLP.
+    tables: [{ name: dangerous, sheetName: dangerous, rect: { r0: 0, c0: 0, r1: 0, c1: 1 } }],
+    namedRanges: [{ name: dangerous, sheetName: dangerous, rect: { r0: 0, c0: 0, r1: 0, c1: 0 } }],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    redactor: (t) => t, // no-op redactor
+    workbookRag: { vectorStore, embedder, topK: 1 },
+  });
+
+  await cm.buildWorkbookContext({
+    workbook,
+    query: "hello",
+    topK: 1,
+    skipIndexing: true,
+    skipIndexingWithDlp: true,
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Internal", redactDisallowed: true }),
+      // Any non-empty structured record list triggers query-token redaction logic.
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "OtherSheet",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.equal(toStringCalls, 0);
+});
+
 test("buildWorkbookContext: structured DLP REDACT conservatively redacts chunk text when structured metadata is missing (no-op redactor)", async () => {
   const cellSecret = "TopSecret";
   const workbook = {
