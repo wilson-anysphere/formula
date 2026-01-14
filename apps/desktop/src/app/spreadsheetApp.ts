@@ -3779,8 +3779,18 @@ export class SpreadsheetApp {
       }
       if (payload?.source === "applyState") {
         // `DocumentController.applyState` can delete sheets without emitting sheetMetaDeltas.
-        // Reconcile the outline map against the current sheet ids to avoid leaking stale state.
-        const existing = new Set(this.document.getSheetIds());
+        // Reconcile the outline map against the snapshot sheet set to avoid leaking stale state.
+        //
+        // Note: `applyState` keeps removed sheets in `model.sheets` until the end of the method,
+        // so `getSheetIds()` during the synchronous `change` event can still include soon-to-be-
+        // deleted sheet ids. However, `sheetMeta` is cleared and repopulated with only the sheets
+        // that will survive the snapshot before the event is emitted, so prefer it as the
+        // authoritative "existing sheet" set when available.
+        const docAny = this.document as any;
+        const sheetMeta: unknown = docAny?.sheetMeta;
+        const existing = new Set<string>(
+          sheetMeta instanceof Map ? Array.from(sheetMeta.keys()) : this.document.getSheetIds(),
+        );
         for (const key of this.outlinesBySheet.keys()) {
           if (!existing.has(key)) this.outlinesBySheet.delete(key);
         }

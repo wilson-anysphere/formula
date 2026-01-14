@@ -130,8 +130,13 @@ describe("SpreadsheetApp applyState active sheet fallback", () => {
       seedThreeSheets(app);
       const doc = app.getDocument();
       const activateSpy = vi.spyOn(app, "activateSheet");
+      const outlinesBySheet = (app as any).outlinesBySheet as Map<string, unknown>;
 
       app.activateSheet("Sheet2");
+      // Ensure per-sheet outline state is created for Sheet2 so we can verify it is cleaned up when
+      // applyState removes the sheet.
+      app.hideRows([0]);
+      expect(outlinesBySheet.has("Sheet2")).toBe(true);
       activateSpy.mockClear();
 
       const snapshotDoc = new DocumentController();
@@ -143,9 +148,11 @@ describe("SpreadsheetApp applyState active sheet fallback", () => {
 
       expect(app.getCurrentSheetId()).toBe("Sheet3");
       expect(activateSpy).toHaveBeenCalledWith("Sheet3");
+      // applyState deletes sheets after emitting its change event; ensure per-sheet caches do not
+      // retain state for removed sheets.
+      expect(outlinesBySheet.has("Sheet2")).toBe(false);
     } finally {
       app.destroy();
     }
   });
 });
-
