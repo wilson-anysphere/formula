@@ -27,6 +27,8 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
+      - name: "Guard: TOML files parse cleanly"
+        run: python3 scripts/ci/check-toml-validity.py
       - name: "Guard: workflow actions are pinned to commit SHAs"
         run: bash scripts/ci/check-gha-action-sha-pins.sh .github/workflows
       - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
