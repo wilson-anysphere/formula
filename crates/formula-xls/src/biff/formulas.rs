@@ -395,7 +395,12 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
                 existing.clone()
             } else {
                 let base_coord = rgce::CellCoord::new(anchor.row, anchor.col);
-                let decoded = rgce::decode_biff8_rgce_with_base(&def.rgce, ctx, Some(base_coord));
+                let decoded = rgce::decode_biff8_rgce_with_base_and_rgcb(
+                    &def.rgce,
+                    &def.rgcb,
+                    ctx,
+                    Some(base_coord),
+                );
                 for w in decoded.warnings {
                     push_warning_bounded(
                         &mut warnings,

@@ -671,6 +671,26 @@ pub fn build_array_formula_external_refs_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a minimal BIFF8 `.xls` fixture containing an array (CSE) formula whose array `rgce`
+/// includes a `PtgArray` constant that must be decoded from trailing `rgcb` bytes in the `ARRAY`
+/// record.
+///
+/// The fixture contains a single sheet named `ArrayConst` with an array formula over `B1:B2` whose
+/// decoded formula includes `{1,2;3,4}`.
+pub fn build_array_formula_ptgarray_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_array_formula_ptgarray_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_table_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -8064,6 +8084,14 @@ fn build_array_formula_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream("Array", &sheet_stream, 1252)
 }
 
+fn build_array_formula_ptgarray_workbook_stream() -> Vec<u8> {
+    // Minimal single-sheet workbook containing an array formula (`ARRAY` + `PtgExp`) whose ARRAY
+    // record includes trailing `rgcb` data for a `PtgArray` constant.
+    let xf_cell = 16u16;
+    let sheet_stream = build_array_formula_ptgarray_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("ArrayConst", &sheet_stream, 1252)
+}
+
 fn build_shared_formula_ptgmemarean_workbook_stream() -> Vec<u8> {
     // Minimal single-sheet workbook containing a shared formula where the shared SHRFMLA.rgce
     // includes PtgMemAreaN tokens (one with cce=0 and one with cce=3).
@@ -11952,6 +11980,86 @@ fn build_array_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
         &mut sheet,
         RECORD_FORMULA,
         &formula_cell(1, base_col, xf_cell, 0.0, &ptg_exp(base_row, base_col)),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_array_formula_ptgarray_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    // Array formula range B1:B2.
+    //
+    // Both cells contain PtgExp, and the array formula body is stored in the `ARRAY` record along
+    // with trailing `rgcb` bytes needed to decode a `PtgArray` constant.
+    //
+    // Expected decoded formula (same for B1 and B2):
+    //   `A1+SUM({1,2;3,4})`
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Provide numeric inputs in A1/A2 so the references are within the sheet's used range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
+    // Set FORMULA.grbit.fArray (0x0010) so parsers recognize the array-formula membership.
+    let grbit_array: u16 = 0x0010;
+
+    let base_row = 0u16;
+    let base_col = 1u16; // B
+
+    // B1 formula: PtgExp pointing to itself (rw=0,col=1).
+    let ptgexp = ptg_exp(base_row, base_col);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(base_row, base_col, xf_cell, 0.0, grbit_array, &ptgexp),
+    );
+
+    // Array formula body stored in ARRAY record.
+    let array_rgce = {
+        let mut v = Vec::new();
+        // PtgRefN: row_off=0, col_off=-1 relative to the array base cell (B1) => A1.
+        v.push(0x2C);
+        v.extend_from_slice(&0u16.to_le_bytes()); // row_off = 0
+        v.extend_from_slice(&0xFFFFu16.to_le_bytes()); // col_off = -1 (14-bit), row+col relative
+
+        // PtgArray (array constant; data stored in trailing rgcb).
+        v.push(0x20);
+        v.extend_from_slice(&[0u8; 7]); // reserved
+
+        // PtgFuncVar: SUM(argc=1).
+        v.push(0x22);
+        v.push(1);
+        v.extend_from_slice(&4u16.to_le_bytes());
+
+        // PtgAdd.
+        v.push(0x03);
+        v
+    };
+
+    let rgcb = rgcb_array_constant_numbers_2x2(&[1.0, 2.0, 3.0, 4.0]);
+    let mut array_payload =
+        array_record_refu(base_row, 1, base_col as u8, base_col as u8, &array_rgce);
+    array_payload.extend_from_slice(&rgcb);
+    push_record(&mut sheet, RECORD_ARRAY, &array_payload);
+
+    // B2 formula: PtgExp pointing to base cell B1.
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell_with_grbit(1, base_col, xf_cell, 0.0, grbit_array, &ptgexp),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
