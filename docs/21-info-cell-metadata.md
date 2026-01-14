@@ -349,6 +349,7 @@ This section documents the “wiring points” for hosts.
 - Sheet display names (affects `CELL("address")` and the sheet component of `CELL("filename")`):
   - `EngineClient.setSheetDisplayName(sheetId, name)`
   - This is metadata-only: it does **not** rewrite stored formulas and does **not** change the engine-facing sheet id/key.
+  - If your engine-facing sheet ids/keys are not valid Excel tab names (e.g. UUIDs), the engine will still generate an Excel-valid default display name (typically `Sheet{n}`). Use `setSheetDisplayName` to control what `CELL("address")`/`CELL("filename")` emit.
   - For Excel-like rename semantics (rewrite formulas that reference a sheet), use `EngineClient.renameSheet(oldName, newName)` when available.
 
 - Sheet dimensions (worksheet bounds; affects `CELL(..., reference)` out-of-bounds `#REF!` behavior and whole-row/whole-column references like `A:A` / `1:1`):
