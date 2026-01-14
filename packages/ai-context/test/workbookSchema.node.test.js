@@ -120,6 +120,23 @@ test("extractWorkbookSchema: accepts Map-shaped workbook metadata (tables + name
   ]);
 });
 
+test("extractWorkbookSchema: does not call custom toString() on Map keys", () => {
+  let toStringCalls = 0;
+  const keyObj = {
+    toString() {
+      toStringCalls += 1;
+      return "TopSecretSheet";
+    },
+  };
+
+  const sheets = new Map();
+  sheets.set(keyObj, [[{ v: "Hello" }]]);
+
+  const schema = extractWorkbookSchema({ id: "wb-map-key-tostring", sheets });
+  assert.equal(toStringCalls, 0);
+  assert.deepStrictEqual(schema.sheets, []);
+});
+
 test("extractWorkbookSchema: accepts sheet maps keyed by sheet name (values are matrices)", () => {
   const workbook = {
     id: "wb-sheet-map",

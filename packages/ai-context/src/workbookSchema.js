@@ -61,7 +61,15 @@ function normalizeCollectionEntries(value) {
   if (Array.isArray(value)) return value.map((v) => ({ key: "", value: v }));
   if (value instanceof Map) {
     return Array.from(value.entries()).map(([k, v]) => ({
-      key: typeof k === "string" ? k : k == null ? "" : String(k),
+      // Avoid calling `String(...)` on arbitrary objects: Map keys can be user-controlled in
+      // third-party hosts, and custom `toString()` implementations can throw or leak sensitive
+      // strings. Keep primitive keys, drop everything else.
+      key:
+        typeof k === "string"
+          ? k
+          : typeof k === "number" || typeof k === "boolean" || typeof k === "bigint"
+            ? String(k)
+            : "",
       value: v,
     }));
   }
