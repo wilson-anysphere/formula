@@ -1509,6 +1509,7 @@ export class SpreadsheetApp {
   private chartTheme: ChartTheme = FALLBACK_CHART_THEME;
   private selectedChartId: string | null = null;
   private readonly chartModels = new Map<string, ChartModel>();
+  private readonly chartRenderKeep = new Set<string>();
   private readonly chartRenderer: ChartRendererAdapter;
   /**
    * Chart ids whose cached `ChartModel.series[*].{categories,values,xValues,yValues}.cache`
@@ -4737,30 +4738,17 @@ export class SpreadsheetApp {
       this.ensureViewportMappingCurrent();
     }
 
-    const intersects = (
-      a: { x: number; y: number; width: number; height: number },
-      b: { x: number; y: number; width: number; height: number },
-    ): boolean => {
-      return !(
-        a.x + a.width < b.x ||
-        b.x + b.width < a.x ||
-        a.y + a.height < b.y ||
-        b.y + b.height < a.y
-      );
-    };
-
     const layout = this.chartOverlayLayout(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
     const { frozenRows, frozenCols } = this.getFrozen();
+    const rectScratch = this.chartCursorScratchRect;
 
     let hasVisibleDirtyChart = false;
     for (const chart of charts) {
       if (chart.sheetId !== sheetId) continue;
       if (!this.dirtyChartIds.has(chart.id)) continue;
 
-      const rect = this.chartAnchorToViewportRect(chart.anchor);
+      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch);
       if (!rect) continue;
-
-      const chartRect = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
 
       const fromRow =
         chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
@@ -4774,14 +4762,24 @@ export class SpreadsheetApp {
           : inFrozenRows && !inFrozenCols
             ? layout.paneRects.topRight
             : !inFrozenRows && inFrozenCols
-              ? layout.paneRects.bottomLeft
-              : layout.paneRects.bottomRight;
+               ? layout.paneRects.bottomLeft
+               : layout.paneRects.bottomRight;
 
       if (pane.width <= 0 || pane.height <= 0) continue;
-      if (intersects(chartRect, pane)) {
-        hasVisibleDirtyChart = true;
-        break;
+      const chartLeft = rect.left;
+      const chartTop = rect.top;
+      const chartRight = chartLeft + rect.width;
+      const chartBottom = chartTop + rect.height;
+      if (
+        chartRight < pane.x ||
+        pane.x + pane.width < chartLeft ||
+        chartBottom < pane.y ||
+        pane.y + pane.height < chartTop
+      ) {
+        continue;
       }
+      hasVisibleDirtyChart = true;
+      break;
     }
 
     if (!hasVisibleDirtyChart) return;
@@ -14111,25 +14109,12 @@ export class SpreadsheetApp {
     if (charts.length === 0) return null;
     const sheetId = this.sheetId;
 
-    const intersect = (
-      a: { left: number; top: number; width: number; height: number },
-      b: { left: number; top: number; width: number; height: number },
-    ): { left: number; top: number; width: number; height: number } | null => {
-      const left = Math.max(a.left, b.left);
-      const top = Math.max(a.top, b.top);
-      const right = Math.min(a.left + a.width, b.left + b.width);
-      const bottom = Math.min(a.top + a.height, b.top + b.height);
-      const width = right - left;
-      const height = bottom - top;
-      if (width <= 0 || height <= 0) return null;
-      return { left, top, width, height };
-    };
-
     const { frozenRows, frozenCols } = this.getFrozen();
+    const rectScratch = this.chartCursorScratchRect;
     for (let i = charts.length - 1; i >= 0; i -= 1) {
       const chart = charts[i]!;
       if (chart.sheetId !== sheetId) continue;
-      const rect = this.chartAnchorToViewportRect(chart.anchor);
+      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch);
       if (!rect) continue;
       const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
       const fromCol = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
@@ -14145,14 +14130,17 @@ export class SpreadsheetApp {
               : "bottomRight";
       const paneRect = layout.paneRects[paneKey];
 
-      const visible = intersect(rect, { left: paneRect.x, top: paneRect.y, width: paneRect.width, height: paneRect.height });
-      if (!visible) continue;
-      if (x < visible.left || x > visible.left + visible.width) continue;
-      if (y < visible.top || y > visible.top + visible.height) continue;
+      const leftVisible = Math.max(rect.left, paneRect.x);
+      const topVisible = Math.max(rect.top, paneRect.y);
+      const rightVisible = Math.min(rect.left + rect.width, paneRect.x + paneRect.width);
+      const bottomVisible = Math.min(rect.top + rect.height, paneRect.y + paneRect.height);
+      if (rightVisible <= leftVisible || bottomVisible <= topVisible) continue;
+      if (x < leftVisible || x > rightVisible) continue;
+      if (y < topVisible || y > bottomVisible) continue;
 
       return {
         chart,
-        rect,
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
         pane: { key: paneKey, rect: paneRect },
         pointInCellArea: { x, y },
       };
@@ -14165,11 +14153,12 @@ export class SpreadsheetApp {
     rect: { left: number; top: number; width: number; height: number };
     pointInCellArea: { x: number; y: number };
   }): ResizeHandle | null {
-    return hitTestResizeHandle(
-      { x: hit.rect.left, y: hit.rect.top, width: hit.rect.width, height: hit.rect.height },
-      hit.pointInCellArea.x,
-      hit.pointInCellArea.y,
-    );
+    const bounds = this.chartCursorScratchBounds;
+    bounds.x = hit.rect.left;
+    bounds.y = hit.rect.top;
+    bounds.width = hit.rect.width;
+    bounds.height = hit.rect.height;
+    return hitTestResizeHandle(bounds, hit.pointInCellArea.x, hit.pointInCellArea.y);
   }
 
   private onChartPointerDownCapture(e: PointerEvent): void {
@@ -14687,7 +14676,8 @@ export class SpreadsheetApp {
 
     const charts = this.chartStore.listCharts();
     const activeSheetId = this.sheetId;
-    const keep = new Set<string>();
+    const keep = this.chartRenderKeep;
+    keep.clear();
 
     if (!this.sharedGrid) {
       // Keep frozen pane geometry current for quadrant clipping.
@@ -14700,80 +14690,9 @@ export class SpreadsheetApp {
     ctx.scale(this.dpr, this.dpr);
     ctx.clearRect(0, 0, this.width, this.height);
 
-    const layout = (() => {
-      if (this.sharedGrid) {
-        const viewport = this.sharedGrid.renderer.scroll.getViewportState();
-        const headerRows = this.sharedHeaderRows();
-        const headerCols = this.sharedHeaderCols();
-        const headerWidth = headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
-        const headerHeight = headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
-
-        const headerWidthClamped = Math.min(headerWidth, viewport.width);
-        const headerHeightClamped = Math.min(headerHeight, viewport.height);
-
-        const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
-        const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
-
-        const frozenContentWidth = Math.max(0, frozenWidthClamped - headerWidthClamped);
-        const frozenContentHeight = Math.max(0, frozenHeightClamped - headerHeightClamped);
-
-        const cellAreaWidth = Math.max(0, viewport.width - headerWidthClamped);
-        const cellAreaHeight = Math.max(0, viewport.height - headerHeightClamped);
-
-        const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
-        const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
-
-        return {
-          originX: headerWidthClamped,
-          originY: headerHeightClamped,
-          frozenContentWidth,
-          frozenContentHeight,
-          scrollableWidth,
-          scrollableHeight,
-          cellAreaWidth,
-          cellAreaHeight,
-        };
-      }
-
-      const cellAreaWidth = Math.max(0, this.width - this.rowHeaderWidth);
-      const cellAreaHeight = Math.max(0, this.height - this.colHeaderHeight);
-      const frozenWidth = Math.min(cellAreaWidth, this.frozenWidth);
-      const frozenHeight = Math.min(cellAreaHeight, this.frozenHeight);
-      const scrollableWidth = Math.max(0, cellAreaWidth - frozenWidth);
-      const scrollableHeight = Math.max(0, cellAreaHeight - frozenHeight);
-      return {
-        originX: this.rowHeaderWidth,
-        originY: this.colHeaderHeight,
-        frozenContentWidth: frozenWidth,
-        frozenContentHeight: frozenHeight,
-        scrollableWidth,
-        scrollableHeight,
-        cellAreaWidth,
-        cellAreaHeight,
-      };
-    })();
-
-    const paneRects = {
-      topLeft: { x: 0, y: 0, width: layout.frozenContentWidth, height: layout.frozenContentHeight },
-      topRight: {
-        x: layout.frozenContentWidth,
-        y: 0,
-        width: layout.scrollableWidth,
-        height: layout.frozenContentHeight,
-      },
-      bottomLeft: {
-        x: 0,
-        y: layout.frozenContentHeight,
-        width: layout.frozenContentWidth,
-        height: layout.scrollableHeight,
-      },
-      bottomRight: {
-        x: layout.frozenContentWidth,
-        y: layout.frozenContentHeight,
-        width: layout.scrollableWidth,
-        height: layout.scrollableHeight,
-      },
-    };
+    const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
+    const layout = this.chartOverlayLayout(sharedViewport);
+    const paneRects = layout.paneRects;
 
     const { frozenRows, frozenCols } = this.getFrozen();
 
@@ -14892,16 +14811,9 @@ export class SpreadsheetApp {
       return false;
     };
 
-    const intersects = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }): boolean => {
-      return !(
-        a.x + a.width < b.x ||
-        b.x + b.width < a.x ||
-        a.y + a.height < b.y ||
-        b.y + b.height < a.y
-      );
-    };
-
     let provider: ReturnType<typeof createProvider> | null = null;
+    const rectScratch = this.chartCursorScratchRect;
+    const chartRectScratch = this.chartCursorScratchBounds;
 
     ctx.save();
     // Chart anchors are computed in cell-area coordinates; translate under headers once.
@@ -14910,10 +14822,12 @@ export class SpreadsheetApp {
     for (const chart of charts) {
       if (chart.sheetId !== activeSheetId) continue;
       keep.add(chart.id);
-      const rect = this.chartAnchorToViewportRect(chart.anchor);
+      const rect = this.chartAnchorToViewportRect(chart.anchor, rectScratch);
       if (!rect) continue;
-
-      const chartRect = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+      const chartX = rect.left;
+      const chartY = rect.top;
+      const chartW = rect.width;
+      const chartH = rect.height;
 
       const fromRow = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromRow : Number.POSITIVE_INFINITY;
       const fromCol = chart.anchor.kind === "oneCell" || chart.anchor.kind === "twoCell" ? chart.anchor.fromCol : Number.POSITIVE_INFINITY;
@@ -14929,7 +14843,19 @@ export class SpreadsheetApp {
           : paneRects.bottomRight;
 
       if (pane.width <= 0 || pane.height <= 0) continue;
-      if (!intersects(chartRect, pane)) continue;
+      if (
+        chartX + chartW < pane.x ||
+        pane.x + pane.width < chartX ||
+        chartY + chartH < pane.y ||
+        pane.y + pane.height < chartY
+      ) {
+        continue;
+      }
+
+      chartRectScratch.x = chartX;
+      chartRectScratch.y = chartY;
+      chartRectScratch.width = chartW;
+      chartRectScratch.height = chartH;
 
       const isDirty = this.dirtyChartIds.has(chart.id);
       const shouldUpdateModel = renderContent || isDirty || !this.chartModels.has(chart.id);
@@ -14987,7 +14913,7 @@ export class SpreadsheetApp {
       ctx.rect(pane.x, pane.y, pane.width, pane.height);
       ctx.clip();
       try {
-        this.chartRenderer.renderToCanvas(ctx, chart.id, chartRect);
+        this.chartRenderer.renderToCanvas(ctx, chart.id, chartRectScratch);
       } catch {
         // Best-effort: ignore chart rendering failures so one bad chart doesn't block overlays.
       }
