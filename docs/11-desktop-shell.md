@@ -55,6 +55,10 @@ Notes:
 
 - `webview_loaded_ms` is recorded in Rust from a Tauri page-load callback (`PageLoadEvent::Finished`). It is intentionally
   independent of renderer JS bootstrap/TTI work.
+- `first_render_ms` is reported from the frontend via `report_startup_first_render` after the grid becomes visible.
+  As a guardrail (especially for benchmark runs), `markStartupTimeToInteractive()` will also best-effort call
+  `report_startup_first_render` before `report_startup_tti` if the first-render mark has not yet been reported, so the
+  Rust `[startup] ...` line includes `first_render_ms`.
 - Tauri does not guarantee early events are queued before JS listeners are installed. The frontend calls
   `reportStartupWebviewLoaded()` as early as possible (to reduce skew) and then calls it again after installing
   listeners (see `startupMetricsBootstrap.ts`) to prompt the host to (re-)emit the cached startup metrics.
