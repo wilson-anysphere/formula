@@ -67,7 +67,8 @@
 
 .presence-collaborators__overflow {
   justify-content: center;
-  color: var(--text-secondary);
+  color: inherit;
+  opacity: 0.75;
 }
 
 .presence-collaborators__dot {
@@ -92,6 +93,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-secondary);
+  color: inherit;
+  opacity: 0.75;
   font-size: 11px;
+}
+
+@media (forced-colors: active), (prefers-contrast: more) {
+  .presence-collaborators__overflow,
+  .presence-collaborators__sheet {
+    opacity: 1;
+  }
+}
+
+:root[data-theme="high-contrast"] .presence-collaborators__overflow,
+:root[data-theme="high-contrast"] .presence-collaborators__sheet {
+  opacity: 1;
 }

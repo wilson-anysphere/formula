@@ -946,6 +946,16 @@ a:visited {
   cursor: default;
 }
 
+@media (forced-colors: active), (prefers-contrast: more) {
+  .formula-table-filter-button {
+    opacity: 1;
+  }
+}
+
+:root[data-theme="high-contrast"] .formula-table-filter-button {
+  opacity: 1;
+}
+
 .panel {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
