@@ -66,3 +66,36 @@ test("release workflow verifies the produced desktop binary is stripped", async 
   );
 });
 
+test("release workflow uploads dry-run desktop bundles via non-recursive release/bundle globs", async () => {
+  const text = await readWorkflow();
+  const lines = text.split(/\r?\n/);
+
+  const needle = "Upload desktop bundles (dry run)";
+  const idx = lines.findIndex((line) => line.includes(needle));
+  assert.ok(
+    idx >= 0,
+    `Expected ${path.relative(repoRoot, workflowPath)} to contain a step named: ${needle}`,
+  );
+
+  const snippet = yamlListItemBlock(lines, idx);
+
+  // Avoid `**/release/bundle/**` patterns here: Cargo target directories can be large, and recursive
+  // globbing during artifact upload can noticeably slow CI.
+  assert.doesNotMatch(
+    snippet,
+    /target\/\*\*\/release\/bundle\/\*\*/,
+    `Expected dry-run bundle upload step to avoid target/**/release/bundle/** patterns.\nSaw snippet:\n${snippet}`,
+  );
+
+  for (const required of [
+    "target/release/bundle/**",
+    "target/*/release/bundle/**",
+    "apps/desktop/src-tauri/target/release/bundle/**",
+    "apps/desktop/src-tauri/target/*/release/bundle/**",
+  ]) {
+    assert.ok(
+      snippet.includes(required),
+      `Expected dry-run bundle upload step to include "${required}".\nSaw snippet:\n${snippet}`,
+    );
+  }
+});

@@ -122,3 +122,33 @@ test("desktop-bundle-dry-run workflow restores tauri.conf.json before asserting 
     `Expected ${restoreNeedle} to appear before ${diffNeedle} so CI-only config patches don't fail the reproducibility guard.`,
   );
 });
+
+test("desktop-bundle-dry-run workflow uploads bundles without recursive target/** globs", async () => {
+  const text = await readWorkflow();
+  const lines = text.split(/\r?\n/);
+
+  const needle = "Upload desktop bundles";
+  const idx = lines.findIndex((line) => line.includes(needle));
+  assert.ok(idx >= 0, `Expected ${path.relative(repoRoot, workflowPath)} to include step: ${needle}`);
+
+  const snippet = yamlListItemBlock(lines, idx);
+
+  // Avoid patterns like `target/**/release/bundle/**/*.dmg`: recursive globs over Cargo target dirs
+  // can be surprisingly slow in CI. Prefer predictable release/bundle locations.
+  assert.doesNotMatch(
+    snippet,
+    /target\/\*\*\/release\/bundle\/\*\*\/\*\.dmg/i,
+    `Expected upload step to avoid recursive target/**/release/bundle/**/*.dmg globs.\nSaw snippet:\n${snippet}`,
+  );
+
+  assert.match(
+    snippet,
+    /apps\/desktop\/src-tauri\/target\/release\/bundle\/dmg\/\*\.dmg/,
+    `Expected upload step to include the non-recursive DMG path pattern.\nSaw snippet:\n${snippet}`,
+  );
+  assert.match(
+    snippet,
+    /apps\/desktop\/src-tauri\/target\/\*\/release\/bundle\/dmg\/\*\.dmg/,
+    `Expected upload step to include the target-triple DMG path pattern.\nSaw snippet:\n${snippet}`,
+  );
+});
