@@ -1801,7 +1801,6 @@ export class SpreadsheetApp {
       }
     | null = null;
   private chartDragAbort: AbortController | null = null;
-
   private commentsPanel!: HTMLDivElement;
   private commentsPanelThreads!: HTMLDivElement;
   private commentsPanelCell!: HTMLDivElement;

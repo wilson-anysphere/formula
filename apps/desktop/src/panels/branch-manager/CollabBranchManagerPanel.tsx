@@ -236,28 +236,6 @@ export function CollabBranchManagerPanel({
     } as any;
   }, [actor, branchService, session, reservedRootGuardError]);
 
-  if (error) {
-    return (
-      <div className="collab-branch-manager">
-        {storeWarning ? <div className="collab-panel__message collab-panel__message--warning">{storeWarning}</div> : null}
-        {banner}
-        <div className="collab-panel__message collab-panel__message--error">{error}</div>
-      </div>
-    );
-  }
-
-  if (!ready) {
-    return (
-      <div className="collab-branch-manager">
-        {storeWarning ? <div className="collab-panel__message collab-panel__message--warning">{storeWarning}</div> : null}
-        {banner}
-        <div role="status" className="collab-panel__message">
-          {t("branchManager.loading")}
-        </div>
-      </div>
-    );
-  }
-
   if (mergeSource) {
     return (
       <div className="collab-branch-manager">
@@ -279,6 +257,12 @@ export function CollabBranchManagerPanel({
     <div className="collab-branch-manager">
       {storeWarning ? <div className="collab-panel__message collab-panel__message--warning">{storeWarning}</div> : null}
       {banner}
+      {error ? <div className="collab-panel__message collab-panel__message--error">{error}</div> : null}
+      {!ready && !error ? (
+        <div role="status" className="collab-panel__message">
+          {t("branchManager.loading")}
+        </div>
+      ) : null}
       <BranchManagerPanel
         actor={actor}
         branchService={workflow}

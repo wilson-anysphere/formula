@@ -22,6 +22,9 @@ export function AddStepMenu(props: {
   aiContext: { query: Query; preview: DataTable | ArrowTableAdapter | null };
 }) {
   const [intent, setIntent] = useState("");
+  // Keep a synchronous copy of the latest intent so we can respond to key events
+  // even when React state updates from `input` events haven't flushed yet.
+  const intentRef = useRef("");
   const [suggestions, setSuggestions] = useState<QueryOperation[] | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -315,15 +318,31 @@ export function AddStepMenu(props: {
     });
   }, [menuOpen]);
 
-  async function runAiSuggest(): Promise<void> {
-    const trimmed = intent.trim();
+  const updateIntent = (next: string) => {
+    // Avoid double-handling when both `input` and React's normalized `change` fire.
+    if (next === intentRef.current) return;
+    intentRef.current = next;
+    setIntent(next);
+    if (aiLoading) {
+      // Treat edits during loading as a cancellation of the in-flight request:
+      // ignore its eventual response and stop showing a loading state.
+      aiRequestIdRef.current += 1;
+      setAiLoading(false);
+    }
+    if (aiError) setAiError(null);
+    if (suggestions) setSuggestions(null);
+  };
+
+  async function runAiSuggest(overrideIntent?: string): Promise<void> {
+    const trimmed = (overrideIntent ?? intentRef.current ?? intent).trim();
     if (!trimmed) return;
+    if (!props.onAiSuggest) return;
     const requestId = (aiRequestIdRef.current += 1);
     setAiLoading(true);
     setAiError(null);
     setSuggestions(null);
     try {
-      const ops = await props.onAiSuggest?.(trimmed, props.aiContext);
+      const ops = await props.onAiSuggest(trimmed, props.aiContext);
       if (requestId !== aiRequestIdRef.current) return;
       setSuggestions(ops ?? []);
     } catch (err) {
@@ -386,23 +405,18 @@ export function AddStepMenu(props: {
         <div>
           <input
             value={intent}
-            onChange={(e) => {
-              setIntent(e.target.value);
-              if (aiLoading) {
-                // Treat edits during loading as a cancellation of the in-flight request:
-                // ignore its eventual response and stop showing a loading state.
-                aiRequestIdRef.current += 1;
-                setAiLoading(false);
-              }
-              if (aiError) setAiError(null);
-              if (suggestions) setSuggestions(null);
-            }}
+            // React normalizes `onChange` for text inputs to fire on `input` events, but
+            // some tests dispatch only `input` and rely on immediate availability of the
+            // typed value. Handle both to be robust.
+            onChange={(e) => updateIntent(e.currentTarget.value)}
+            onInput={(e) => updateIntent((e.currentTarget as HTMLInputElement).value)}
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
               if (aiLoading) return;
-              if (!intent.trim()) return;
+              const trimmed = e.currentTarget.value.trim();
+              if (!trimmed) return;
               e.preventDefault();
-              void runAiSuggest();
+              void runAiSuggest(trimmed);
             }}
             placeholder={t("queryEditor.addStep.aiPlaceholder")}
             className="query-editor-add-step__ai-input"

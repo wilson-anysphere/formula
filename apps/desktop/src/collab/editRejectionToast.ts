@@ -93,6 +93,11 @@ export function showCollabEditRejectedToast(rejected: any[]): void {
   if (!Array.isArray(rejected) || rejected.length === 0) return;
 
   // Tests (and some desktop integration points) recreate `#toast-root` between runs.
+  if (lastToastRoot && !lastToastRoot.isConnected) {
+    lastToastRoot = null;
+    lastToastMessage = null;
+    lastToastTime = 0;
+  }
   // Reset throttle state when that happens so we don't accidentally suppress the
   // first toast in a fresh UI mount.
   const toastRoot = (() => {

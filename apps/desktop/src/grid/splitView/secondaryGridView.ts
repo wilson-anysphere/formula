@@ -1167,12 +1167,12 @@ export class SecondaryGridView {
     // NOTE: DocumentController always includes `imageDeltas: []` in change payloads, even when no
     // images changed. Guard on non-empty arrays so unrelated changes don't trigger extra drawings
     // renders.
-    if (
-      (Array.isArray(payload?.imagesDeltas) && payload.imagesDeltas.length > 0) ||
-      (Array.isArray(payload?.imageDeltas) && payload.imageDeltas.length > 0)
-    ) {
-      return true;
-    }
+    const imageDeltas = Array.isArray(payload?.imageDeltas)
+      ? payload.imageDeltas
+      : Array.isArray(payload?.imagesDeltas)
+        ? payload.imagesDeltas
+        : null;
+    if (imageDeltas && imageDeltas.length > 0) return true;
 
     if (payload?.drawingsChanged === true || payload?.imagesChanged === true) return true;
 

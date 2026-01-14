@@ -1015,7 +1015,6 @@ export async function engineApplyDocumentChange(
   if (didApplyAnyRangeRuns && options.recalculate !== false) {
     shouldRecalculate = true;
   }
-
   if (!shouldRecalculate) return [];
 
   const didApplyAnyUpdates =

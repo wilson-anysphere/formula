@@ -898,7 +898,6 @@ export class DrawingOverlay {
 
           const imageId = obj.kind.imageId;
           const entry = this.images.get(imageId);
-
           if (!entry) {
             // Best-effort: hydrate missing bytes from a persistent store (e.g. IndexedDB). Do not
             // await here: awaiting would delay placeholder rendering until the async lookup
@@ -926,9 +925,9 @@ export class DrawingOverlay {
               ctx.fillText("missing image", screenRectScratch.x + 4, screenRectScratch.y + 14);
             } finally {
               ctx.restore();
+            }
+            continue;
           }
-          continue;
-        }
 
           const bitmap =
             screenRectScratch.width > 0 && screenRectScratch.height > 0

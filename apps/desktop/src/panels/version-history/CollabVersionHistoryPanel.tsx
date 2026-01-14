@@ -171,47 +171,34 @@ export function CollabVersionHistoryPanel({
   const selectedLocked = selectedIsCheckpoint ? Boolean(selectedVersion?.checkpointLocked) : false;
   const selectedAnnotations = selectedIsCheckpoint ? (selectedVersion?.checkpointAnnotations ?? "") : "";
 
+  const versioningReady = Boolean(collabVersioning);
+
   const deleteDisabled = useMemo(() => {
     if (busy) return true;
     if (mutationsDisabled) return true;
+    if (!versioningReady) return true;
     if (!selectedId) return true;
     if (selectedIsCheckpoint && selectedLocked) return true;
     return false;
-  }, [busy, mutationsDisabled, selectedId, selectedIsCheckpoint, selectedLocked]);
-
-  if (loadError) {
-    return (
-      <div>
-        {banner}
-        <div className="collab-panel__message collab-panel__message--error">
-          {tWithVars("versionHistory.panel.unavailableWithMessage", { message: loadError })}
-        </div>
-      </div>
-    );
-  }
-
-  if (!collabVersioning) {
-    if (mutationsDisabled) {
-      return (
-        <div className="collab-version-history">
-          <h3 className="collab-version-history__title">{t("panels.versionHistory.title")}</h3>
-          {banner}
-        </div>
-      );
-    }
-    return (
-      <div className="collab-panel__message">
-        {banner}
-        {t("versionHistory.panel.loading")}
-      </div>
-    );
-  }
+  }, [busy, mutationsDisabled, versioningReady, selectedId, selectedIsCheckpoint, selectedLocked]);
 
   return (
     <div className="collab-version-history">
       <h3 className="collab-version-history__title">{t("panels.versionHistory.title")}</h3>
 
       {banner}
+
+      {loadError ? (
+        <div className="collab-panel__message collab-panel__message--error">
+          {tWithVars("versionHistory.panel.unavailableWithMessage", { message: loadError })}
+        </div>
+      ) : null}
+
+      {!versioningReady && !mutationsDisabled && !loadError ? (
+        <div role="status" className="collab-panel__message">
+          {t("versionHistory.panel.loading")}
+        </div>
+      ) : null}
 
       {error ? <div className="collab-version-history__error">{error}</div> : null}
 
@@ -253,9 +240,10 @@ export function CollabVersionHistoryPanel({
 
           <div className="collab-version-history__create-actions">
             <button
-              disabled={busy || mutationsDisabled || !checkpointName.trim()}
+              disabled={busy || mutationsDisabled || !versioningReady || !checkpointName.trim()}
               onClick={async () => {
                 if (mutationsDisabled) return;
+                if (!collabVersioning) return;
                 const name = checkpointName.trim();
                 if (!name) {
                   setError(t("versionHistory.errors.checkpointNameRequired"));
@@ -289,9 +277,10 @@ export function CollabVersionHistoryPanel({
 
       <div className="collab-version-history__actions">
         <button
-          disabled={busy || mutationsDisabled || !selectedId}
+          disabled={busy || mutationsDisabled || !versioningReady || !selectedId}
           onClick={async () => {
             if (mutationsDisabled) return;
+            if (!collabVersioning) return;
             const id = selectedId;
             if (!id) return;
             const ok = await nativeDialogs.confirm(t("versionHistory.confirm.restoreOverwrite"));
@@ -313,9 +302,10 @@ export function CollabVersionHistoryPanel({
 
         {selectedIsCheckpoint ? (
           <button
-            disabled={busy || mutationsDisabled || !selectedId}
+            disabled={busy || mutationsDisabled || !versioningReady || !selectedId}
             onClick={async () => {
               if (mutationsDisabled) return;
+              if (!collabVersioning) return;
               const id = selectedId;
               if (!id) return;
               try {
@@ -338,6 +328,7 @@ export function CollabVersionHistoryPanel({
           disabled={deleteDisabled}
           onClick={async () => {
             if (mutationsDisabled) return;
+            if (!collabVersioning) return;
             const id = selectedId;
             if (!id) return;
             const ok = await nativeDialogs.confirm(t("versionHistory.confirm.deleteIrreversible"));
@@ -357,7 +348,7 @@ export function CollabVersionHistoryPanel({
           {t("versionHistory.actions.deleteSelected")}
         </button>
 
-        <button disabled={busy || mutationsDisabled} onClick={() => void refresh()}>
+        <button disabled={busy || mutationsDisabled || !versioningReady} onClick={() => void refresh()}>
           {t("versionHistory.actions.refresh")}
         </button>
       </div>

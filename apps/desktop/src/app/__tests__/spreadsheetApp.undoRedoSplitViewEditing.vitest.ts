@@ -125,7 +125,8 @@ describe("SpreadsheetApp undo/redo edit-mode guards", () => {
     const app = new SpreadsheetApp(root, status);
     const sheetId = app.getCurrentSheetId();
     const doc: any = app.getDocument() as any;
-    // Avoid the SpreadsheetApp constructor's seeded navigation/demo cells (A1:D5).
+    // SpreadsheetApp seeds some demo/navigation cells (A1:D5) when not in collab mode.
+    // Use a cell outside the seeded range so undo returns to a truly blank state.
     const cell = { row: 10, col: 10 };
 
     const initialValue = doc.getCell(sheetId, cell).value;
