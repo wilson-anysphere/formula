@@ -722,7 +722,7 @@ The backend buffers early redirects in memory (`OauthRedirectState` in `apps/des
 ##### Troubleshooting
 
 - **Provider rejects `formula://…` redirect URIs:** use a loopback redirect and register one of `http://127.0.0.1:<port>/<path>`, `http://localhost:<port>/<path>`, or `http://[::1]:<port>/<path>` with the provider.
-- **Provider rejects a specific loopback host:** some providers only allow `localhost` (and not `127.0.0.1` or `::1`) in their allowlist UI. Pick the loopback host form your provider supports.
+- **Provider rejects a specific loopback host:** some providers only allow `localhost` (and not `127.0.0.1` or `[::1]`) in their allowlist UI. Pick the loopback host form your provider supports.
 - **Provider requires an `https://` redirect URI:** loopback capture is `http://` only; use a custom-scheme deep link or a different auth approach if `http://` loopback redirects are disallowed.
 - **Deep link doesn’t trigger / app isn’t opened by `formula://…`:** verify the OS has a protocol handler registered for `formula://`.
   - On Linux/Windows, the desktop host attempts best-effort runtime registration on startup and logs `[deep-link] failed to register deep link handlers: ...` if it fails.
