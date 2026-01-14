@@ -1072,6 +1072,58 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn standard_rc4_password_verifier_uses_constant_time_compare() {
+        reset_ct_eq_calls();
+
+        // Build a minimal RC4 verifier and ensure the wrong-password path still uses `ct_eq` for
+        // digest comparison.
+        let password = "Password";
+        let wrong_password = "wrong-password";
+        let salt: [u8; 16] = [0x11u8; 16];
+        let verifier_plain: [u8; 16] = *b"formula-rc4-test";
+
+        let hash_alg = HashAlgorithm::Sha1;
+        let key_bits = 128u32;
+        let alg_id_hash = 0x0000_8004u32; // CALG_SHA1
+
+        let key0 = derive_key_ref(
+            hash_alg,
+            key_bits,
+            &salt,
+            password,
+            0,
+            StandardKeyDerivation::Rc4,
+        );
+
+        let verifier_hash = hash_alg.digest(&verifier_plain);
+        let mut verifier_buf = Vec::with_capacity(verifier_plain.len() + verifier_hash.len());
+        verifier_buf.extend_from_slice(&verifier_plain);
+        verifier_buf.extend_from_slice(&verifier_hash);
+        rc4_xor_in_place(&key0, &mut verifier_buf).expect("rc4 encrypt verifier");
+
+        let header = EncryptionHeader {
+            alg_id: CALG_RC4,
+            alg_id_hash,
+            key_bits,
+            provider_type: 0,
+            csp_name: String::new(),
+        };
+        let verifier = EncryptionVerifier {
+            salt: salt.to_vec(),
+            encrypted_verifier: verifier_buf[..16].to_vec(),
+            verifier_hash_size: verifier_hash.len() as u32,
+            encrypted_verifier_hash: verifier_buf[16..].to_vec(),
+        };
+
+        let err = verify_password_standard(&header, &verifier, wrong_password).expect_err("wrong pw");
+        assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+        assert!(
+            ct_eq_call_count() > 0,
+            "expected constant-time compare helper to be invoked"
+        );
+    }
+
     fn derive_key_ref(
         hash_alg: HashAlgorithm,
         key_bits: u32,
