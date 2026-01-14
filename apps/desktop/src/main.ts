@@ -68,6 +68,7 @@ import { getPanelPlacement } from "./layout/layoutState.js";
 import { SecondaryGridView } from "./grid/splitView/secondaryGridView.js";
 import { resolveDesktopGridMode } from "./grid/shared/desktopGridMode.js";
 import { resolveEnableDrawingInteractions } from "./drawings/drawingInteractionsFlag.js";
+import { FORMULA_AUDITING_RIBBON_COMMAND_IDS } from "./commands/formulaAuditingCommandIds.js";
 import { getPanelTitle, panelRegistry, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { GoalSeekDialog } from "./panels/what-if/GoalSeekDialog.js";
@@ -2180,9 +2181,9 @@ const RIBBON_DISABLED_BY_ID_WHILE_READ_ONLY: Record<string, true> = (() => {
   delete out["audit.togglePrecedents"];
   delete out["audit.toggleDependents"];
   delete out["audit.toggleTransitive"];
-  delete out["formulas.formulaAuditing.tracePrecedents"];
-  delete out["formulas.formulaAuditing.traceDependents"];
-  delete out["formulas.formulaAuditing.removeArrows"];
+  for (const id of FORMULA_AUDITING_RIBBON_COMMAND_IDS) {
+    delete out[id];
+  }
 
   // View-only mutations (axis sizing) should remain enabled in read-only.
   delete out["home.cells.format"];
