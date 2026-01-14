@@ -693,6 +693,64 @@ describe("DocumentCellProvider formatting integration", () => {
     );
   });
 
+  it("does not emit additional range invalidations after invalidateAll is triggered", () => {
+    class FakeDocument {
+      private readonly listeners = new Set<(payload: any) => void>();
+
+      getCell = vi.fn(() => ({ value: "hello", formula: null }));
+
+      on(event: string, listener: (payload: any) => void): () => void {
+        if (event !== "change") return () => {};
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+      }
+
+      emitChange(payload: any): void {
+        for (const listener of this.listeners) listener(payload);
+      }
+    }
+
+    const doc = new FakeDocument();
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const docRows = 1000;
+    const docCols = 1000;
+    const provider = new DocumentCellProvider({
+      document: doc as any,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: docRows + headerRows,
+      colCount: docCols + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const updates: any[] = [];
+    const unsubscribe = provider.subscribe((update) => updates.push(update));
+
+    // Prime a sheet cache so `invalidateDocCells` would otherwise take the scan path.
+    provider.getCell(headerRows + 0, headerCols + 0);
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+
+    doc.emitChange({
+      deltas: [],
+      sheetViewDeltas: [],
+      // Create two invalidation spans. The row span is huge (1M cells) and should trigger invalidateAll,
+      // and we should not additionally emit a separate column invalidation after that.
+      rowStyleDeltas: [{ sheetId: "Sheet1", startRow: 0, endRowExclusive: docRows }],
+      colStyleDeltas: [{ sheetId: "Sheet1", col: 0 }],
+      sheetStyleDeltas: [],
+      formatDeltas: [],
+      rangeRunDeltas: []
+    });
+
+    unsubscribe();
+
+    expect(updates).toEqual([{ type: "invalidateAll" }]);
+  });
+
   it("caches layered-format style resolution by style-id tuple", () => {
     const doc = new DocumentController();
 

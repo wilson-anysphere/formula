@@ -729,7 +729,7 @@ export class DocumentCellProvider implements CellProvider {
     for (const listener of this.listeners) listener({ type: "invalidateAll" });
   }
 
-  invalidateDocCells(range: { startRow: number; endRow: number; startCol: number; endCol: number }): void {
+  invalidateDocCells(range: { startRow: number; endRow: number; startCol: number; endCol: number }): boolean {
     const { headerRows, headerCols } = this.options;
     const gridRange: CellRange = {
       startRow: range.startRow + headerRows,
@@ -774,7 +774,7 @@ export class DocumentCellProvider implements CellProvider {
         const hugeInvalidationThreshold = Math.max(this.sheetCacheMaxSize, maxDirectEvictions * 2);
         if (cellCount >= hugeInvalidationThreshold) {
           this.invalidateAll();
-          return;
+          return true;
         }
         for (const key of cache.keys()) {
           const row = Math.floor(key / CACHE_KEY_COL_STRIDE);
@@ -792,6 +792,7 @@ export class DocumentCellProvider implements CellProvider {
     }
 
     for (const listener of this.listeners) listener({ type: "cells", range: gridRange });
+    return false;
   }
 
   prefetch(_range: CellRange): void {
@@ -1537,7 +1538,7 @@ export class DocumentCellProvider implements CellProvider {
         // redraw without forcing a full-sheet invalidation for common row/col formatting operations.
         for (const range of invalidateRanges) {
           if (range.endRow <= range.startRow || range.endCol <= range.startCol) continue;
-          this.invalidateDocCells(range);
+          if (this.invalidateDocCells(range)) return;
         }
       });
     }
