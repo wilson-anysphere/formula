@@ -106,7 +106,7 @@ function serializeErrorForTransport(error) {
   try {
     if (error && typeof error === "object") {
       if (typeof error.name === "string" && error.name.trim().length > 0) {
-        payload.name = String(error.name);
+        payload.name = error.name.trim();
       }
       if (Object.prototype.hasOwnProperty.call(error, "code")) {
         const code = error.code;
@@ -143,7 +143,7 @@ function __handleMessage(message) {
       const err = new Error(errorMessage);
       if (payload?.stack) err.stack = String(payload.stack);
       if (typeof payload?.name === "string" && payload.name.trim().length > 0) {
-        err.name = String(payload.name);
+        err.name = payload.name.trim();
       }
       if (payload && Object.prototype.hasOwnProperty.call(payload, "code")) {
         err.code = payload.code;
@@ -155,9 +155,10 @@ function __handleMessage(message) {
       const { id, commandId, args } = message;
       Promise.resolve()
         .then(async () => {
-          const handler = state.commandHandlers.get(commandId);
+          const key = typeof commandId === "string" ? commandId.trim() : String(commandId ?? "");
+          const handler = state.commandHandlers.get(key);
           if (!handler) {
-            throw new Error(`Command not registered: ${commandId}`);
+            throw new Error(`Command not registered: ${key}`);
           }
           return handler(...(Array.isArray(args) ? args : []));
         })
@@ -187,9 +188,10 @@ function __handleMessage(message) {
       const { id, functionName, args } = message;
       Promise.resolve()
         .then(async () => {
-          const handler = state.customFunctionHandlers.get(functionName);
+          const key = typeof functionName === "string" ? functionName.trim() : String(functionName ?? "");
+          const handler = state.customFunctionHandlers.get(key);
           if (!handler) {
-            throw new Error(`Custom function not registered: ${functionName}`);
+            throw new Error(`Custom function not registered: ${key}`);
           }
           return handler(...(Array.isArray(args) ? args : []));
         })
@@ -219,13 +221,13 @@ function __handleMessage(message) {
       const { id, connectorId, method, args } = message;
       Promise.resolve()
         .then(async () => {
-          const key = String(connectorId ?? "");
+          const key = String(connectorId ?? "").trim();
           const impl = state.dataConnectorHandlers.get(key);
           if (!impl) {
             throw new Error(`Data connector not registered: ${key}`);
           }
 
-          const methodName = String(method ?? "");
+          const methodName = String(method ?? "").trim();
           if (!DATA_CONNECTOR_METHODS.has(methodName)) {
             throw new Error(`Unsupported data connector method: ${methodName}`);
           }
@@ -259,7 +261,7 @@ function __handleMessage(message) {
       return;
     }
     case "panel_message": {
-      const panelId = String(message.panelId ?? "");
+      const panelId = String(message.panelId ?? "").trim();
       const handlers = state.panelMessageHandlers.get(panelId);
       if (!handlers) return;
       for (const handler of handlers) {
@@ -335,10 +337,11 @@ function normalizeNonEmptyWorkbookPath(value) {
   if (typeof value !== "string") {
     throw new Error("Workbook path must be a non-empty string");
   }
-  if (value.trim().length === 0) {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
     throw new Error("Workbook path must be a non-empty string");
   }
-  return value;
+  return trimmed;
 }
 
 // When the host omits `formulas`, we synthesize a null matrix so the runtime matches the
@@ -624,31 +627,37 @@ const sheets = {
 
 const commands = {
   async registerCommand(id, handler) {
-    if (typeof id !== "string" || id.trim().length === 0) {
+    if (typeof id !== "string") {
+      throw new Error("Command id must be a non-empty string");
+    }
+    const commandId = id.trim();
+    if (commandId.length === 0) {
       throw new Error("Command id must be a non-empty string");
     }
     if (typeof handler !== "function") {
       throw new Error("Command handler must be a function");
     }
 
-    state.commandHandlers.set(id, handler);
-    await rpcCall("commands", "registerCommand", [id]);
+    state.commandHandlers.set(commandId, handler);
+    await rpcCall("commands", "registerCommand", [commandId]);
 
     return new DisposableImpl(() => {
-      state.commandHandlers.delete(id);
-      rpcCall("commands", "unregisterCommand", [id]).catch(notifyError);
+      state.commandHandlers.delete(commandId);
+      rpcCall("commands", "unregisterCommand", [commandId]).catch(notifyError);
     });
   },
 
   async executeCommand(id, ...args) {
-    return rpcCall("commands", "executeCommand", [String(id), ...args]);
+    const commandId = typeof id === "string" ? id.trim() : String(id);
+    return rpcCall("commands", "executeCommand", [commandId, ...args]);
   }
 };
 
 const functions = {
   async register(name, def) {
-    const fnName = String(name);
-    if (fnName.trim().length === 0) throw new Error("Function name must be a non-empty string");
+    const fnNameRaw = String(name);
+    const fnName = fnNameRaw.trim();
+    if (fnName.length === 0) throw new Error("Function name must be a non-empty string");
     if (!def || typeof def !== "object") throw new Error("Function definition must be an object");
     if (typeof def.handler !== "function") throw new Error("Function definition must include handler()");
 
@@ -673,8 +682,9 @@ const functions = {
 
 const dataConnectors = {
   async register(connectorId, impl) {
-    const id = String(connectorId);
-    if (id.trim().length === 0) {
+    const raw = String(connectorId);
+    const id = raw.trim();
+    if (id.length === 0) {
       throw new Error("Data connector id must be a non-empty string");
     }
     if (!impl || typeof impl !== "object") {
@@ -720,13 +730,13 @@ const ui = {
   },
 
   async registerContextMenu(menuId, items) {
-    const id = String(menuId);
-    if (id.trim().length === 0) throw new Error("Menu id must be a non-empty string");
+    const id = String(menuId).trim();
+    if (id.length === 0) throw new Error("Menu id must be a non-empty string");
     if (!Array.isArray(items)) throw new Error("Menu items must be an array");
 
     const result = await rpcCall("ui", "registerContextMenu", [id, items]);
-    const registrationId = String(result?.id ?? "");
-    if (registrationId.trim().length === 0) {
+    const registrationId = String(result?.id ?? "").trim();
+    if (registrationId.length === 0) {
       throw new Error("Failed to register context menu: missing registration id");
     }
 
@@ -736,8 +746,17 @@ const ui = {
   },
 
   async createPanel(id, options) {
-    const result = await rpcCall("ui", "createPanel", [String(id), options ?? {}]);
-    return new PanelImpl(result?.id ?? String(id));
+    if (typeof id !== "string") {
+      throw new Error("Panel id must be a non-empty string");
+    }
+    const panelId = id.trim();
+    if (panelId.length === 0) {
+      throw new Error("Panel id must be a non-empty string");
+    }
+
+    const result = await rpcCall("ui", "createPanel", [panelId, options ?? {}]);
+    const resolvedId = typeof result?.id === "string" && result.id.trim().length > 0 ? result.id.trim() : panelId;
+    return new PanelImpl(resolvedId);
   }
 };
 

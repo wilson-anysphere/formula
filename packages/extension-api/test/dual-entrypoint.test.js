@@ -34,6 +34,24 @@ function createMockHost() {
     const args = Array.isArray(message?.args) ? message.args : [];
 
     switch (key) {
+      case "commands.registerCommand":
+      case "commands.unregisterCommand":
+      case "commands.executeCommand":
+      case "functions.register":
+      case "functions.unregister":
+      case "dataConnectors.register":
+      case "dataConnectors.unregister":
+      case "ui.unregisterContextMenu":
+      case "ui.setPanelHtml":
+      case "ui.postMessageToPanel":
+      case "ui.disposePanel":
+        return null;
+      case "ui.registerContextMenu":
+        // Return an id with whitespace to ensure the runtime trims it before using it.
+        return { id: ` menu:${String(args[0])} ` };
+      case "ui.createPanel":
+        // Echo back the panel id, again with whitespace to test trimming.
+        return { id: ` ${String(args[0])} ` };
       case "cells.getSelection":
       case "cells.getRange":
         return {
@@ -243,6 +261,17 @@ test("dual entrypoint: CJS + ESM stay in lockstep", async (t) => {
       ]
     );
 
+    calls.length = 0;
+    await workbookEsm.saveAs("  /tmp/book3.xlsx  ");
+    assert.equal(workbookEsm.path, "/tmp/book3.xlsx");
+    assert.deepEqual(
+      calls.filter((m) => m.type === "api_call").map(stripApiCall),
+      [
+        { type: "api_call", namespace: "workbook", method: "saveAs", args: ["/tmp/book3.xlsx"] },
+        { type: "api_call", namespace: "workbook", method: "getActiveWorkbook", args: [] }
+      ]
+    );
+
     // Workbook path validation should reject non-string/empty/whitespace args without sending RPC calls.
     calls.length = 0;
     await assert.rejects(() => cjsApi.workbook.openWorkbook(123), {
@@ -285,6 +314,107 @@ test("dual entrypoint: CJS + ESM stay in lockstep", async (t) => {
       message: "Workbook path must be a non-empty string"
     });
     assert.equal(calls.filter((m) => m.type === "api_call").length, 0);
+
+    // Id normalization: canonicalize trimmed strings for ids so host↔extension lookups remain stable.
+    calls.length = 0;
+    const cmdDisposable = await cjsApi.commands.registerCommand(" test.command ", async (value) => value);
+    assert.deepEqual(calls.filter((m) => m.type === "api_call").map(stripApiCall), [
+      { type: "api_call", namespace: "commands", method: "registerCommand", args: ["test.command"] }
+    ]);
+
+    calls.length = 0;
+    cjsApi.__handleMessage({ type: "execute_command", id: "exec-1", commandId: "test.command", args: [42] });
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(calls.some((m) => m.type === "command_result" && m.id === "exec-1" && m.result === 42));
+
+    calls.length = 0;
+    cmdDisposable.dispose();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(
+      calls
+        .filter((m) => m.type === "api_call")
+        .map(stripApiCall)
+        .some((m) => m.namespace === "commands" && m.method === "unregisterCommand" && m.args[0] === "test.command")
+    );
+
+    calls.length = 0;
+    const fnDisposable = await cjsApi.functions.register(" testFn ", {
+      handler: async () => "ok"
+    });
+    assert.ok(
+      calls
+        .filter((m) => m.type === "api_call")
+        .map(stripApiCall)
+        .some((m) => m.namespace === "functions" && m.method === "register" && m.args[0] === "testFn")
+    );
+
+    calls.length = 0;
+    cjsApi.__handleMessage({ type: "invoke_custom_function", id: "fn-1", functionName: "testFn", args: [] });
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(calls.some((m) => m.type === "custom_function_result" && m.id === "fn-1" && m.result === "ok"));
+
+    calls.length = 0;
+    fnDisposable.dispose();
+    await new Promise((r) => setTimeout(r, 0));
+
+    calls.length = 0;
+    const connectorDisposable = await cjsApi.dataConnectors.register(" testConnector ", {
+      browse: async () => ({ items: ["a", "b"] }),
+      query: async () => ({ rows: [] })
+    });
+    assert.ok(
+      calls
+        .filter((m) => m.type === "api_call")
+        .map(stripApiCall)
+        .some((m) => m.namespace === "dataConnectors" && m.method === "register" && m.args[0] === "testConnector")
+    );
+
+    calls.length = 0;
+    cjsApi.__handleMessage({
+      type: "invoke_data_connector",
+      id: "dc-1",
+      connectorId: "testConnector",
+      method: "browse",
+      args: []
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(
+      calls.some(
+        (m) => m.type === "data_connector_result" && m.id === "dc-1" && m.result && m.result.items?.length === 2
+      )
+    );
+
+    calls.length = 0;
+    connectorDisposable.dispose();
+    await new Promise((r) => setTimeout(r, 0));
+
+    calls.length = 0;
+    const menuDisposable = await cjsApi.ui.registerContextMenu(" cell/context ", [{ command: "test.command" }]);
+    assert.ok(
+      calls
+        .filter((m) => m.type === "api_call")
+        .map(stripApiCall)
+        .some((m) => m.namespace === "ui" && m.method === "registerContextMenu" && m.args[0] === "cell/context")
+    );
+
+    calls.length = 0;
+    menuDisposable.dispose();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(
+      calls
+        .filter((m) => m.type === "api_call")
+        .map(stripApiCall)
+        .some(
+          (m) => m.namespace === "ui" && m.method === "unregisterContextMenu" && m.args[0] === "menu:cell/context"
+        )
+    );
+
+    const panel = await cjsApi.ui.createPanel(" panel-1 ", { title: "Panel" });
+    assert.equal(panel.id, "panel-1");
+    const received = [];
+    panel.webview.onDidReceiveMessage((m) => received.push(m));
+    cjsApi.__handleMessage({ type: "panel_message", panelId: " panel-1 ", message: { hello: 1 } });
+    assert.deepEqual(received, [{ hello: 1 }]);
 
     // Sheet shaping + helper methods.
     const sheetCjs = await cjsApi.sheets.getActiveSheet();
