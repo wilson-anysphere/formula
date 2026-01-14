@@ -36,7 +36,7 @@ function getTauriShellOpenOrNull(): ((url: string) => Promise<void>) | null {
 /**
  * Open a URL in the host OS browser (Tauri) when available.
  *
- * - Desktop/Tauri: uses the Rust command `open_external_url` via `__TAURI__.core.invoke(...)`.
+ * - Desktop/Tauri: uses the Rust command `open_external_url` via the Tauri IPC bridge (`core.invoke`).
  * - Web builds: falls back to `window.open(..., "noopener,noreferrer")`.
  *
  * Security: blocks `javascript:`, `data:`, and `file:` URLs regardless of environment.
@@ -72,7 +72,7 @@ export async function shellOpen(url: string): Promise<void> {
   if (tauri) {
     // If we're running under Tauri we should *never* silently fall back to `window.open`,
     // which would navigate inside the webview instead of the system browser.
-    throw new Error("Tauri invoke API unavailable (expected __TAURI__.core.invoke)");
+    throw new Error("Tauri invoke API unavailable (expected core.invoke)");
   }
 
   throw new Error("No shellOpen implementation available in this environment");

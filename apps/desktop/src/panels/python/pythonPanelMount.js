@@ -1,6 +1,7 @@
 import { PyodideRuntime } from "@formula/python-runtime";
 import { DocumentControllerBridge } from "@formula/python-runtime/document-controller";
 import { normalizeFormulaTextOpt } from "@formula/engine";
+import { getTauriInvokeOrNull } from "../../tauri/invoke.js";
 const PYODIDE_INDEX_URL = globalThis.__pyodideIndexURL || "/pyodide/v0.25.1/full/";
 const DEFAULT_NATIVE_PERMISSIONS = { filesystem: "none", network: "none" };
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -55,7 +56,7 @@ function normalizeUpdates(raw) {
 
 function getTauriInvoke(explicit) {
   if (typeof explicit === "function") return explicit;
-  return globalThis.__TAURI__?.core?.invoke;
+  return getTauriInvokeOrNull();
 }
 
 /**

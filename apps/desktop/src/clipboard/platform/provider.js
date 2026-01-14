@@ -16,6 +16,8 @@
  * }} ClipboardProvider
  */
 
+import { getTauriInvokeOrNull } from "../../tauri/invoke.js";
+
 // NOTE: Clipboard items can contain extremely large rich payloads (especially images).
 // Guard against unbounded memory usage by skipping oversized formats.
 //
@@ -581,7 +583,7 @@ export async function createClipboardProvider() {
  * @returns {ClipboardProvider}
  */
 function createTauriClipboardProvider() {
-  const tauriInvoke = globalThis.__TAURI__?.core?.invoke;
+  const tauriInvoke = getTauriInvokeOrNull();
   const tauriClipboard = globalThis.__TAURI__?.clipboard;
 
   return {

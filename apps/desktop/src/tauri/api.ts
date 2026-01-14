@@ -1,3 +1,9 @@
+import {
+  getTauriInvokeOrNull as getTauriInvokeOrNullRuntime,
+  getTauriInvokeOrThrow as getTauriInvokeOrThrowRuntime,
+  hasTauriInvoke as hasTauriInvokeRuntime,
+} from "./invoke.js";
+
 export type TauriDialogOpen = (options?: Record<string, unknown>) => Promise<string | string[] | null>;
 export type TauriDialogSave = (options?: Record<string, unknown>) => Promise<string | null>;
 export type TauriDialogConfirm = (message: string, options?: Record<string, unknown>) => Promise<boolean>;
@@ -42,22 +48,15 @@ export function hasTauri(): boolean {
 }
 
 export function getTauriInvokeOrNull(): TauriInvoke | null {
-  const tauri = getTauriGlobalOrNull();
-  const core = safeGetProp(tauri, "core");
-  const invoke = safeGetProp(core, "invoke") as TauriInvoke | undefined;
-  return typeof invoke === "function" ? invoke : null;
+  return getTauriInvokeOrNullRuntime() as TauriInvoke | null;
 }
 
 export function getTauriInvokeOrThrow(): TauriInvoke {
-  const invoke = getTauriInvokeOrNull();
-  if (!invoke) {
-    throw new Error("Tauri invoke API not available");
-  }
-  return invoke;
+  return getTauriInvokeOrThrowRuntime() as TauriInvoke;
 }
 
 export function hasTauriInvoke(): boolean {
-  return getTauriInvokeOrNull() != null;
+  return hasTauriInvokeRuntime();
 }
 
 function getTauriDialogNamespaceOrNull(): any | null {
