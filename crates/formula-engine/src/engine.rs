@@ -678,6 +678,47 @@ impl Engine {
         self.workbook.ensure_sheet(sheet);
     }
 
+    /// Reorder a worksheet within the workbook's tab order.
+    ///
+    /// 3D sheet spans like `Sheet1:Sheet3!A1` are defined in terms of workbook tab order, so
+    /// reordering sheets can change both formula semantics and dependency sets. The engine
+    /// conservatively rebuilds the dependency graph (recompiling bytecode formulas) so any
+    /// pre-expanded sheet spans are refreshed.
+    pub fn reorder_sheet(&mut self, sheet: &str, new_index: usize) -> bool {
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return false;
+        };
+        if new_index >= self.workbook.sheet_order.len() {
+            return false;
+        }
+        let Some(current) = self
+            .workbook
+            .sheet_order
+            .iter()
+            .position(|&id| id == sheet_id)
+        else {
+            return false;
+        };
+        if current == new_index {
+            return true;
+        }
+
+        let before_order = self.workbook.sheet_order.clone();
+        let moved = self.workbook.sheet_order.remove(current);
+        self.workbook.sheet_order.insert(new_index, moved);
+
+        if self.rebuild_graph().is_err() {
+            // Reordering should not introduce new parse errors (formulas are unchanged), but if
+            // rebuilding fails for any reason, restore the previous order and best-effort rebuild
+            // to keep the engine in a consistent state.
+            self.workbook.sheet_order = before_order;
+            let _ = self.rebuild_graph();
+            return false;
+        }
+
+        true
+    }
+
     /// Insert (or reuse) a style in the workbook's style table, returning its stable id.
     pub fn intern_style(&mut self, style: Style) -> u32 {
         self.workbook.styles.intern(style)
@@ -13674,13 +13715,8 @@ mod tests {
         assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(6.0));
 
         // Reorder the tab order so Sheet4 falls within the Sheet1:Sheet3 span.
-        let sheet2_id = engine.workbook.sheet_id("Sheet2").unwrap();
-        let sheet3_id = engine.workbook.sheet_id("Sheet3").unwrap();
-        let sheet4_id = engine.workbook.sheet_id("Sheet4").unwrap();
-        engine.workbook.sheet_order = vec![sheet1_id, sheet4_id, sheet2_id, sheet3_id];
-
-        // Rebuild so the bytecode backend re-lowers 3D spans against the new sheet order.
-        engine.rebuild_graph().unwrap();
+        // This also rebuilds the dependency graph so bytecode-expanded spans refresh.
+        assert!(engine.reorder_sheet("Sheet4", 1));
 
         let compiled_b1_after = engine.workbook.sheets[sheet1_id]
             .cells
