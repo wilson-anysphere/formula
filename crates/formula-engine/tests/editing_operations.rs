@@ -84,6 +84,81 @@ fn copy_range_adjusts_relative_references() {
 }
 
 #[test]
+fn copy_range_adjusts_external_workbook_cell_references() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=[Book.xlsx]Sheet1!A1")
+        .unwrap();
+
+    engine
+        .apply_operation(EditOp::CopyRange {
+            sheet: "Sheet1".to_string(),
+            src: range("B1"),
+            dst_top_left: cell("B2"),
+        })
+        .unwrap();
+
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "B1"),
+        Some("=[Book.xlsx]Sheet1!A1")
+    );
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "B2"),
+        Some("=[Book.xlsx]Sheet1!A2")
+    );
+}
+
+#[test]
+fn fill_adjusts_external_workbook_range_references() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SUM([Book.xlsx]Sheet1!A1:B2)")
+        .unwrap();
+
+    engine
+        .apply_operation(EditOp::Fill {
+            sheet: "Sheet1".to_string(),
+            src: range("C1"),
+            dst: range("C1:C2"),
+        })
+        .unwrap();
+
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "C1"),
+        Some("=SUM([Book.xlsx]Sheet1!A1:B2)")
+    );
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "C2"),
+        Some("=SUM([Book.xlsx]Sheet1!A2:B3)")
+    );
+}
+
+#[test]
+fn copy_range_does_not_adjust_external_workbook_absolute_references() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=[Book.xlsx]Sheet1!$A$1")
+        .unwrap();
+
+    engine
+        .apply_operation(EditOp::CopyRange {
+            sheet: "Sheet1".to_string(),
+            src: range("B1"),
+            dst_top_left: cell("B2"),
+        })
+        .unwrap();
+
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "B1"),
+        Some("=[Book.xlsx]Sheet1!$A$1")
+    );
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "B2"),
+        Some("=[Book.xlsx]Sheet1!$A$1")
+    );
+}
+
+#[test]
 fn copy_range_to_far_row_grows_sheet_dimensions() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 42.0).unwrap();
