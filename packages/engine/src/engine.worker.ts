@@ -49,6 +49,16 @@ type WasmWorkbookInstance = {
   setRange(range: string, values: CellScalar[][], sheet?: string): void;
   recalculate(sheet?: string): unknown;
   setEngineInfo?: (info: unknown) => void;
+  // Legacy engine-info setters (pre `setEngineInfo`). These are retained by `crates/formula-wasm`
+  // for backward compatibility. The worker will fan out `setEngineInfo` calls to these when
+  // `setEngineInfo` itself is missing.
+  setInfoSystem?: (system: string | null | undefined) => void;
+  setInfoDirectory?: (directory: string | null | undefined) => void;
+  setInfoOSVersion?: (osversion: string | null | undefined) => void;
+  setInfoRelease?: (release: string | null | undefined) => void;
+  setInfoVersion?: (version: string | null | undefined) => void;
+  setInfoMemAvail?: (memavail: number | null | undefined) => void;
+  setInfoTotMem?: (totmem: number | null | undefined) => void;
   setInfoOrigin?: (origin: string | null) => void;
   setInfoOriginForSheet?: (sheet: string, origin: string | null) => void;
   applyOperation?: (op: unknown) => unknown;
@@ -936,10 +946,41 @@ async function handleRequest(message: WorkerInboundMessage, generation: number):
               result = null;
               break;
             case "setEngineInfo":
-              if (typeof (wb as any).setEngineInfo !== "function") {
-                throw new Error("setEngineInfo: WasmWorkbook.setEngineInfo is not available in this WASM build");
+              if (typeof (wb as any).setEngineInfo === "function") {
+                (wb as any).setEngineInfo(params.info);
+              } else {
+                // Backward compatibility: older WASM builds exposed per-field `setInfo*` setters
+                // instead of the batched `setEngineInfo` API.
+                const info = params.info as any;
+                if (!info || typeof info !== "object") {
+                  throw new Error("setEngineInfo: WasmWorkbook.setEngineInfo is not available in this WASM build");
+                }
+
+                const hasKey = (key: string): boolean =>
+                  Object.prototype.hasOwnProperty.call(info, key) || (typeof Reflect?.has === "function" && Reflect.has(info, key));
+
+                let handled = false;
+                const setLegacy = (key: string, methodName: string) => {
+                  if (!hasKey(key)) return;
+                  const method = (wb as any)[methodName] as unknown;
+                  if (typeof method !== "function") return;
+                  handled = true;
+                  method.call(wb, info[key]);
+                };
+
+                setLegacy("system", "setInfoSystem");
+                // Some older builds may have exposed `setInfoDirectory`; prefer it when present.
+                setLegacy("directory", "setInfoDirectory");
+                setLegacy("osversion", "setInfoOSVersion");
+                setLegacy("release", "setInfoRelease");
+                setLegacy("version", "setInfoVersion");
+                setLegacy("memavail", "setInfoMemAvail");
+                setLegacy("totmem", "setInfoTotMem");
+
+                if (!handled && Object.keys(info).length > 0) {
+                  throw new Error("setEngineInfo: WasmWorkbook.setEngineInfo is not available in this WASM build");
+                }
               }
-              (wb as any).setEngineInfo(params.info);
               result = null;
               break;
             case "setInfoOrigin":

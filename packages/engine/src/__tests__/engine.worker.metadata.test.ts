@@ -752,6 +752,33 @@ describe("engine.worker workbook metadata RPCs", () => {
     }
   });
 
+  it("falls back to legacy setInfo* methods when setEngineInfo is missing", async () => {
+    (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
+    const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookLegacyEngineInfo.mjs", import.meta.url).href;
+    const { port, dispose } = await setupWorker({ wasmModuleUrl });
+
+    try {
+      await sendRequest(port, { type: "request", id: 0, method: "newWorkbook", params: {} });
+
+      const resp = await sendRequest(port, {
+        type: "request",
+        id: 1,
+        method: "setEngineInfo",
+        params: { info: { system: "mac", osversion: "14.0", memavail: 123 } }
+      });
+      expect(resp.ok).toBe(true);
+
+      expect((globalThis as any).__ENGINE_WORKER_TEST_CALLS__).toEqual([
+        ["setInfoSystem", "mac"],
+        ["setInfoOSVersion", "14.0"],
+        ["setInfoMemAvail", 123]
+      ]);
+    } finally {
+      dispose();
+      delete (globalThis as any).__ENGINE_WORKER_TEST_CALLS__;
+    }
+  });
+
   it("trims sheet names for setColFormatRuns", async () => {
     (globalThis as any).__ENGINE_WORKER_TEST_CALLS__ = [];
     const wasmModuleUrl = new URL("./fixtures/mockWasmWorkbookMetadata.mjs", import.meta.url).href;
