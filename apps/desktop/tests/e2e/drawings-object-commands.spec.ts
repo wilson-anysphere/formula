@@ -53,10 +53,16 @@ test.describe("Drawing object commands", () => {
 
     const afterDup = await getDrawingObjects(page);
     expect(afterDup).toHaveLength(2);
-    expect(afterDup.map((o) => o.id).sort((a: number, b: number) => a - b)).toEqual([1, 2]);
+    const ids = afterDup.map((o) => o.id);
+    // The seeded demo drawing uses id=1. Duplicates should get a new globally-unique id
+    // (not necessarily `max+1`), so assert only uniqueness + inclusion of the original id.
+    expect(ids).toContain(1);
+    expect(new Set(ids).size).toBe(2);
+    const dupId = ids.find((id) => id !== 1);
+    expect(typeof dupId).toBe("number");
 
     const orig = afterDup.find((o) => o.id === 1);
-    const dup = afterDup.find((o) => o.id === 2);
+    const dup = afterDup.find((o) => o.id === dupId);
     expect(dup).toBeTruthy();
     expect(orig).toBeTruthy();
     expect(dup.anchor.type).toBe(orig.anchor.type);
@@ -76,7 +82,7 @@ test.describe("Drawing object commands", () => {
     }
 
     // Duplicate selects the cloned object; Delete should remove it.
-    await expect.poll(() => getSelectedDrawingId(page)).toBe(2);
+    await expect.poll(() => getSelectedDrawingId(page)).toBe(dupId!);
     await page.keyboard.press("Delete");
 
     await expect.poll(() => getDrawingObjects(page)).toHaveLength(1);
