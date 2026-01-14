@@ -1372,6 +1372,7 @@ impl<'de> Deserialize<'de> for LimitedCellValue {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct RangeCellEdit {
     pub value: Option<LimitedCellValue>,
     pub formula: Option<LimitedCellFormula>,
@@ -8933,6 +8934,16 @@ mod tests {
             serde_json::from_str::<RangeCellEdit>(&json).expect_err("expected size limit to fail");
         assert!(
             err.to_string().contains("cell value string") && err.to_string().contains(&max.to_string()),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn cell_edit_ipc_rejects_unknown_range_cell_edit_fields() {
+        let err = serde_json::from_str::<RangeCellEdit>(r#"{"value":1,"extra":[1,2,3]}"#)
+            .expect_err("expected unknown field to be rejected");
+        assert!(
+            err.to_string().contains("unknown field") && err.to_string().contains("extra"),
             "unexpected error: {err}"
         );
     }
