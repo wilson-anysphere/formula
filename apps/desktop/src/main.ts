@@ -186,15 +186,7 @@ import {
 import { tryInsertCollabSheet } from "./sheets/collabSheetMutations";
 import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
 import { createAddSheetCommand, createDeleteActiveSheetCommand } from "./sheets/sheetCommands";
-import {
-  NUMBER_FORMATS,
-  toggleBold,
-  toggleItalic,
-  toggleStrikethrough,
-  toggleUnderline,
-  toggleWrap,
-  type CellRange,
-} from "./formatting/toolbar.js";
+import { NUMBER_FORMATS, type CellRange } from "./formatting/toolbar.js";
 import { computeFilterHiddenRows, computeUniqueFilterValues, RibbonAutoFilterStore } from "./sort-filter/ribbonAutoFilter.js";
 import { PageSetupDialog, PrintPreviewDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
 import { AutoFilterDropdown, type TableViewRow } from "./table/index.js";
