@@ -497,6 +497,13 @@ def _redact_uri_like(text: str) -> str:
             return text
         return f"sha256={_sha256_text(text)}"
 
+    # Absolute filesystem paths can appear in external relationship targets (e.g. linked workbooks)
+    # and can leak usernames/mount points. Hash common OS-level path prefixes.
+    if text.startswith("/") and re.search(
+        r"^/(Users|home|mnt|Volumes|private|var|opt)/", text, flags=re.IGNORECASE
+    ):
+        return f"sha256={_sha256_text(text)}"
+
     # Network-path reference / UNC-like URLs (`//host/path` or `\\\\host\\share`).
     # These are often used for internal file shares and can leak corporate hostnames.
     if text.startswith("//") and parsed.netloc:
@@ -570,6 +577,16 @@ def _redact_uri_like_in_text(text: str) -> str:
         out,
         flags=re.IGNORECASE,
     )
+
+    # Common absolute filesystem path prefixes that can appear in external relationship targets.
+    out = re.sub(
+        r"/(?:Users|home|mnt|Volumes|private|var|opt)/[^\s\"'<>]+",
+        _replace_url,
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(r"\b[A-Za-z]:/[^\s\"'<>]+", _replace_url, out)
+    out = re.sub(r"~/(?:[^\s\"'<>]+)", _replace_url, out)
     return out
 
 
