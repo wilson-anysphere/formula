@@ -45,6 +45,32 @@ require_cmd rpm
 require_cmd rpm2cpio
 require_cmd cpio
 
+TAURI_CONF_PATH="${repo_root}/apps/desktop/src-tauri/tauri.conf.json"
+EXPECTED_DESKTOP_VERSION=""
+if [[ -f "${TAURI_CONF_PATH}" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    EXPECTED_DESKTOP_VERSION="$(
+      python3 - "$TAURI_CONF_PATH" <<'PY' 2>/dev/null || true
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    conf = json.load(f)
+print((conf.get("version") or "").strip())
+PY
+    )"
+  fi
+
+  if [[ -z "${EXPECTED_DESKTOP_VERSION}" ]]; then
+    # Best-effort fallback when python/json parsing isn't available.
+    EXPECTED_DESKTOP_VERSION="$(
+      sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "${TAURI_CONF_PATH}" | head -n 1
+    )"
+  fi
+fi
+if [[ -z "${EXPECTED_DESKTOP_VERSION}" ]]; then
+  fail "Unable to determine expected desktop version from ${TAURI_CONF_PATH}"
+fi
+
 target_dirs=()
 
 # Respect `CARGO_TARGET_DIR` if set (common in CI caching setups). Cargo interprets relative paths
@@ -267,6 +293,27 @@ for deb in "${debs[@]}"; do
   echo "::group::verify-linux-package-deps: dpkg -I $(basename "$deb")"
   dpkg -I "$deb"
   echo "::endgroup::"
+
+  deb_version="$(dpkg-deb -f "$deb" Version 2>/dev/null || true)"
+  if [ -z "$deb_version" ]; then
+    fail "could not read Version field from .deb: $deb"
+  fi
+  deb_version="$(printf '%s' "$deb_version" | head -n 1 | tr -d '\r')"
+  # Trim whitespace without introducing extra dependencies (keep this script lightweight).
+  deb_version="${deb_version#"${deb_version%%[![:space:]]*}"}"
+  deb_version="${deb_version%"${deb_version##*[![:space:]]}"}"
+  deb_version_no_epoch="${deb_version}"
+  if [[ "$deb_version_no_epoch" == *:* ]]; then
+    # Debian version format: [epoch:]upstream[-revision]
+    deb_version_no_epoch="${deb_version_no_epoch#*:}"
+  fi
+  deb_upstream_version="${deb_version_no_epoch}"
+  if [[ "$deb_upstream_version" == *-* ]]; then
+    deb_upstream_version="${deb_upstream_version%-*}"
+  fi
+  if [[ "$deb_upstream_version" != "$EXPECTED_DESKTOP_VERSION" ]]; then
+    fail "$deb: version mismatch (dpkg Version). Expected ${EXPECTED_DESKTOP_VERSION}, found ${deb_version}"
+  fi
 
   depends="$(dpkg-deb -f "$deb" Depends 2>/dev/null || true)"
   if [ -z "$depends" ]; then
