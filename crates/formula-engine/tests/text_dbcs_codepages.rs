@@ -118,19 +118,13 @@ fn kana_conversions_are_cp932_only() {
     let mut sheet = TestSheet::new();
     sheet.set_text_codepage(936);
     assert_eq!(sheet.eval(r#"=ASC("ガ")"#), Value::Text("ガ".to_string()));
-    assert_eq!(
-        sheet.eval(r#"=DBCS("ｶﾞ")"#),
-        Value::Text("ｶﾞ".to_string())
-    );
+    assert_eq!(sheet.eval(r#"=DBCS("ｶﾞ")"#), Value::Text("ｶﾞ".to_string()));
 }
 
 #[test]
 fn kana_conversions_still_apply_under_cp932() {
     let mut sheet = TestSheet::new();
     sheet.set_text_codepage(932);
-    assert_eq!(
-        sheet.eval(r#"=DBCS("ｶﾞ")"#),
-        Value::Text("ガ".to_string())
-    );
+    assert_eq!(sheet.eval(r#"=DBCS("ｶﾞ")"#), Value::Text("ガ".to_string()));
     assert_eq!(sheet.eval(r#"=ASC("ガ")"#), Value::Text("ｶﾞ".to_string()));
 }

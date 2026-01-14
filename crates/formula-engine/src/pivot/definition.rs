@@ -248,11 +248,9 @@ impl PivotTableDefinition {
 
         // Destination top-left cell behaves like a cell reference.
         if sheet_matches(&self.destination.sheet, edit_sheet, resolve_sheet_id) {
-            if let Some(cell) = rewrite_cell_ref_for_structural_edit(
-                self.destination.cell,
-                edit_sheet,
-                edit,
-            ) {
+            if let Some(cell) =
+                rewrite_cell_ref_for_structural_edit(self.destination.cell, edit_sheet, edit)
+            {
                 self.destination.cell = cell;
             } else {
                 // If the destination anchor is deleted, clamp it to the edit start.
@@ -280,8 +278,7 @@ impl PivotTableDefinition {
         // Update (or invalidate) last output footprint.
         if let Some(prev) = self.last_output_range {
             if sheet_matches(&self.destination.sheet, edit_sheet, resolve_sheet_id) {
-                self.last_output_range =
-                    rewrite_range_for_structural_edit(prev, edit_sheet, edit);
+                self.last_output_range = rewrite_range_for_structural_edit(prev, edit_sheet, edit);
                 if self.last_output_range.is_none() {
                     self.needs_refresh = true;
                 }
@@ -301,11 +298,9 @@ impl PivotTableDefinition {
         let prev_output = self.last_output_range;
 
         if sheet_matches(&self.destination.sheet, edit_sheet, resolve_sheet_id) {
-            if let Some(cell) = rewrite_cell_ref_for_range_map_edit(
-                self.destination.cell,
-                edit_sheet,
-                edit,
-            ) {
+            if let Some(cell) =
+                rewrite_cell_ref_for_range_map_edit(self.destination.cell, edit_sheet, edit)
+            {
                 self.destination.cell = cell;
             } else {
                 // Deleted/moved out of bounds; best-effort clamp to origin of deleted region.
@@ -330,8 +325,7 @@ impl PivotTableDefinition {
 
         if let Some(prev) = self.last_output_range {
             if sheet_matches(&self.destination.sheet, edit_sheet, resolve_sheet_id) {
-                self.last_output_range =
-                    rewrite_range_for_range_map_edit(prev, edit_sheet, edit);
+                self.last_output_range = rewrite_range_for_range_map_edit(prev, edit_sheet, edit);
                 if self.last_output_range.is_none() {
                     self.needs_refresh = true;
                 }

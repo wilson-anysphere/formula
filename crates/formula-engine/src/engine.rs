@@ -5765,7 +5765,8 @@ impl Engine {
                     if bc.sheet_dims_generation != sheet_dims_generation {
                         continue;
                     }
-                    if !bc.program.range_refs.is_empty() || !bc.program.multi_range_refs.is_empty() {
+                    if !bc.program.range_refs.is_empty() || !bc.program.multi_range_refs.is_empty()
+                    {
                         needs_levels = true;
                         break;
                     }
@@ -5893,15 +5894,16 @@ impl Engine {
                     }
                     CompiledFormula::Bytecode(bc) => {
                         if bc.sheet_dims_generation != sheet_dims_generation {
-                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
-                                &snapshot,
-                                ctx,
-                                recalc_ctx,
-                                date_system,
-                                value_locale,
-                                locale_config.clone(),
-                            )
-                            .with_text_codepage(text_codepage);
+                            let evaluator =
+                                crate::eval::Evaluator::new_with_date_system_and_locales(
+                                    &snapshot,
+                                    ctx,
+                                    recalc_ctx,
+                                    date_system,
+                                    value_locale,
+                                    locale_config.clone(),
+                                )
+                                .with_text_codepage(text_codepage);
                             evaluator.eval_formula(&bc.ast)
                         } else {
                             let cols = cols_by_sheet.get(key.sheet).unwrap_or(&empty_cols);
@@ -6000,7 +6002,8 @@ impl Engine {
                 };
 
                 if let CompiledFormula::Bytecode(bc) = &compiled {
-                    if !bc.program.range_refs.is_empty() || !bc.program.multi_range_refs.is_empty() {
+                    if !bc.program.range_refs.is_empty() || !bc.program.multi_range_refs.is_empty()
+                    {
                         needs_column_cache = true;
                     }
                 }
@@ -6021,7 +6024,11 @@ impl Engine {
                 all_tasks.extend(parallel_tasks.iter().cloned());
                 all_tasks.extend(serial_tasks.iter().cloned());
                 all_tasks.extend(dynamic_tasks.iter().cloned());
-                Some(BytecodeColumnCache::build(sheet_count, &snapshot, &all_tasks))
+                Some(BytecodeColumnCache::build(
+                    sheet_count,
+                    &snapshot,
+                    &all_tasks,
+                ))
             } else {
                 None
             };
@@ -11724,9 +11731,11 @@ impl crate::eval::ValueResolver for Snapshot {
 
     fn external_sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
         let provider = self.external_value_provider.as_ref()?;
-        provider
-            .sheet_order(workbook)
-            .or_else(|| provider.workbook_sheet_names(workbook).map(|names| names.as_ref().to_vec()))
+        provider.sheet_order(workbook).or_else(|| {
+            provider
+                .workbook_sheet_names(workbook)
+                .map(|names| names.as_ref().to_vec())
+        })
     }
 
     fn workbook_sheet_names(&self, workbook: &str) -> Option<Arc<[String]>> {
@@ -13093,9 +13102,11 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
 
     fn external_sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
         let provider = self.snapshot.external_value_provider.as_ref()?;
-        provider
-            .sheet_order(workbook)
-            .or_else(|| provider.workbook_sheet_names(workbook).map(|names| names.as_ref().to_vec()))
+        provider.sheet_order(workbook).or_else(|| {
+            provider
+                .workbook_sheet_names(workbook)
+                .map(|names| names.as_ref().to_vec())
+        })
     }
 
     fn get_value_on_sheet(
