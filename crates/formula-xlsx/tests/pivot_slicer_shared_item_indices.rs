@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use formula_engine::pivot::{
-    AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
-    PivotFieldRef, SubtotalPosition, ValueField,
+    AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotFieldRef, PivotTable,
+    PivotValue, SubtotalPosition, ValueField,
 };
 use formula_xlsx::pivots::engine_bridge::{
     pivot_cache_to_engine_source, slicer_selection_to_engine_filter_with_resolver,

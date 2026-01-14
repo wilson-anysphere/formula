@@ -1916,13 +1916,13 @@ mod engine_filter_field_tests {
             selected_items: None,
         };
 
-         let actual =
-             slicer_selection_to_engine_filter_field_with_resolver("Region", &selection, |_| None);
- 
-         let expected = formula_engine::pivot::FilterField {
-             source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
-             allowed: None,
-         };
+        let actual =
+            slicer_selection_to_engine_filter_field_with_resolver("Region", &selection, |_| None);
+
+        let expected = formula_engine::pivot::FilterField {
+            source_field: PivotFieldRef::CacheFieldName("Region".to_string()),
+            allowed: None,
+        };
 
         assert_eq!(actual, expected);
     }
