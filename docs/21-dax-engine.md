@@ -357,6 +357,12 @@ Measures are registered with:
 model.add_measure("Total Sales", "SUM(Fact[Amount])")?;
 ```
 
+Measure name normalization notes:
+
+- Measure names are stored/lookuped case-insensitively via `normalize_ident`.
+- `DataModel::add_measure` / `DataModel::evaluate_measure` normalize names by stripping a single outer
+  bracket pair and trimming whitespace (`[Total]` and `Total` refer to the same measure).
+
 They are evaluated in a **filter context** and do not store per-row results.
 
 #### Implicit context transition for measures
