@@ -4006,62 +4006,35 @@ impl WasmWorkbook {
             }
         }
 
-        // Import workbook styles (including number formats) so pivot extraction and worksheet
-        // information functions (`CELL("format")`, etc.) can interpret Excel serial dates.
+        // Import worksheet column/row properties (width/hidden/default style) and default column
+        // width.
         //
-        // Note: The WASM DTO surface does not currently expose style edits, so we only apply style
-        // ids for cells that have values/formulas and for row/column defaults.
-        let mut style_id_map: Vec<u32> = Vec::with_capacity(model.styles.styles.len());
-        style_id_map.push(0);
-        for style in model.styles.styles.iter().skip(1) {
-            style_id_map.push(wb.engine.intern_style(style.clone()));
-        }
-
-        // Best-effort column width overrides (Excel character units).
-        //
-        // These are persisted in OOXML (`col/@width`) and are needed for workbook info functions
-        // like `CELL("width")`.
-        for sheet in &model.sheets {
-            for (&col, props) in &sheet.col_properties {
-                if let Some(width) = props.width {
-                    wb.set_col_width_chars_internal(&sheet.name, col, Some(width))?;
-                }
-                if props.hidden {
-                    wb.engine.set_col_hidden(&sheet.name, col, true);
-                }
-            }
-        }
-
-        // Row/column default styles.
+        // These are persisted in OOXML (`col/@width`, `col/@hidden`, `col/@style`, `row/@s`, and
+        // `<sheetFormatPr defaultColWidth="...">`) and are needed for workbook info functions like
+        // `CELL("format")` and `CELL("width")`.
         for sheet in &model.sheets {
             let sheet_name = wb
                 .resolve_sheet(&sheet.name)
                 .expect("sheet just ensured must resolve")
                 .to_string();
 
-            for (&row, props) in &sheet.row_properties {
-                let Some(old_style_id) = props.style_id else {
-                    continue;
-                };
-                let mapped = style_id_map
-                    .get(old_style_id as usize)
-                    .copied()
-                    .unwrap_or(0);
-                if mapped != 0 {
-                    wb.engine.set_row_style_id(&sheet_name, row, Some(mapped));
-                }
-            }
+            wb.engine
+                .set_sheet_default_col_width(&sheet_name, sheet.default_col_width);
 
             for (&col, props) in &sheet.col_properties {
-                let Some(old_style_id) = props.style_id else {
+                if col >= EXCEL_MAX_COLS {
                     continue;
-                };
-                let mapped = style_id_map
-                    .get(old_style_id as usize)
-                    .copied()
-                    .unwrap_or(0);
-                if mapped != 0 {
-                    wb.engine.set_col_style_id(&sheet_name, col, Some(mapped));
+                }
+                if let Some(width) = props.width {
+                    wb.set_col_width_chars_internal(&sheet_name, col, Some(width))?;
+                }
+                wb.engine.set_col_hidden(&sheet_name, col, props.hidden);
+                wb.engine.set_col_style_id(&sheet_name, col, props.style_id);
+            }
+
+            for (&row, props) in &sheet.row_properties {
+                if let Some(style_id) = props.style_id {
+                    wb.engine.set_row_style_id(&sheet_name, row, Some(style_id));
                 }
             }
         }
@@ -4075,26 +4048,6 @@ impl WasmWorkbook {
                 .to_string();
             wb.engine
                 .set_sheet_tables(&sheet_name, sheet.tables.clone());
-        }
-
-        // Import row/column style layers (layered formatting).
-        for sheet in &model.sheets {
-            let sheet_name = wb
-                .resolve_sheet(&sheet.name)
-                .expect("sheet just ensured must resolve")
-                .to_string();
-            for (row, props) in &sheet.row_properties {
-                if let Some(style_id) = props.style_id {
-                    wb.engine
-                        .set_row_style_id(&sheet_name, *row, Some(style_id));
-                }
-            }
-            for (col, props) in &sheet.col_properties {
-                if let Some(style_id) = props.style_id {
-                    wb.engine
-                        .set_col_style_id(&sheet_name, *col, Some(style_id));
-                }
-            }
         }
 
         // Best-effort defined names.
@@ -4147,6 +4100,14 @@ impl WasmWorkbook {
                 let address = cell_ref.to_a1();
                 let phonetic = cell.phonetic.as_deref().map(|s| s.to_string());
 
+                // Apply formatting, including style-only cells.
+                let style_id = cell.style_id;
+                if style_id != 0 {
+                    wb.engine
+                        .set_cell_style_id(&sheet_name, &address, style_id)
+                        .map_err(|err| js_err(err.to_string()))?;
+                }
+
                 // Skip style-only cells (not representable in this WASM DTO surface).
                 let has_formula = cell.formula.is_some();
                 let has_value = !cell.value.is_empty();
@@ -4190,26 +4151,11 @@ impl WasmWorkbook {
                 wb.engine
                     .set_cell_value(&sheet_name, &address, cell_value_to_engine(&cell.value))
                     .map_err(|err| js_err(err.to_string()))?;
-
-                // Apply cell formatting metadata for non-empty cells.
-                if cell.style_id != 0 {
-                    let mapped = style_id_map
-                        .get(cell.style_id as usize)
-                        .copied()
-                        .unwrap_or(0);
-                    if mapped != 0 {
-                        wb.engine
-                            .set_cell_style_id(&sheet_name, &address, mapped)
-                            .map_err(|err| js_err(err.to_string()))?;
-                    }
-                }
-
-                if let Some(p) = cell.phonetic.as_ref() {
+                if let Some(phonetic) = &phonetic {
                     wb.engine
-                        .set_cell_phonetic(&sheet_name, &address, Some(p.clone()))
+                        .set_cell_phonetic(&sheet_name, &address, Some(phonetic.clone()))
                         .map_err(|err| js_err(err.to_string()))?;
                 }
-
                 if let Some(formula) = cell.formula.as_deref() {
                     // `formula-model` stores formulas without a leading '='.
                     let display = display_formula_text(formula);
@@ -4217,14 +4163,6 @@ impl WasmWorkbook {
                         // Best-effort: if the formula fails to parse (unsupported syntax), leave the
                         // cached value and still store the display formula in the input map.
                         let _ = wb.engine.set_cell_formula(&sheet_name, &address, &display);
-
-                        if let Some(phonetic) = &phonetic {
-                            let _ = wb.engine.set_cell_phonetic(
-                                &sheet_name,
-                                &address,
-                                Some(phonetic.to_string()),
-                            );
-                        }
 
                         let sheet_cells = wb
                             .sheets
@@ -4235,12 +4173,6 @@ impl WasmWorkbook {
                     }
                 }
 
-                if let Some(phonetic) = &phonetic {
-                    let _ = wb
-                        .engine
-                        .set_cell_phonetic(&sheet_name, &address, Some(phonetic.to_string()));
-                }
-
                 // Non-formula cell; store scalar value as input.
                 let sheet_cells = wb
                     .sheets
@@ -4249,9 +4181,6 @@ impl WasmWorkbook {
                 sheet_cells.insert(address, cell_value_to_scalar_json_input(&cell.value));
             }
         }
-
-        // Propagate workbook calculation settings into the engine.
-        wb.engine.set_calc_settings(model.calc_settings.clone());
 
         if wb.sheets.is_empty() {
             wb.ensure_sheet(DEFAULT_SHEET);
