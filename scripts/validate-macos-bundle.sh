@@ -278,8 +278,8 @@ PY
   CURRENT_MOUNT_DEV="$(printf '%s' "$parsed" | sed -n '1p')"
   CURRENT_MOUNT_POINT="$(printf '%s' "$parsed" | sed -n '2p')"
 
-  if [ -z "$CURRENT_MOUNT_DEV" ] || [ -z "$CURRENT_MOUNT_POINT" ]; then
-    die "mounted DMG but got empty mount metadata from hdiutil output: $dmg"
+  if [ -z "$CURRENT_MOUNT_POINT" ]; then
+    die "mounted DMG but got empty mount point from hdiutil output: $dmg"
   fi
 }
 
