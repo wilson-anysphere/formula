@@ -68,6 +68,13 @@ generated artifacts that must stay in sync:
   - For Spanish (`es-ES`), locale sources must come from a full-catalog Excel extraction (do not
     replace with partial online translation tables); see
     [`crates/formula-engine/src/locale/data/README.md`](./crates/formula-engine/src/locale/data/README.md).
+- Locale error-literal translation TSVs (`crates/formula-engine/src/locale/data/*.errors.tsv`):
+  - Regenerate committed exports from upstream sources:
+    - `pnpm generate:locale-error-tsvs`
+    - `pnpm check:locale-error-tsvs`
+  - See [`crates/formula-engine/src/locale/data/README.md`](./crates/formula-engine/src/locale/data/README.md)
+    for the TSV format, completeness requirements, and how to extract upstream spellings from a real
+    Excel install (`tools/excel-oracle/extract-error-literals.ps1`).
 
 ## Code of Conduct
 
