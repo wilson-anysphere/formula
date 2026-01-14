@@ -238,10 +238,29 @@ export interface PivotSchema {
   recordCount: number;
 }
 
+/**
+ * Canonical reference to a pivot field in `formula_model::pivots`.
+ *
+ * Notes:
+ * - For worksheet/range-backed pivots, `PivotFieldRef` is serialized as a plain string (the header
+ *   name). We keep that backward compatible representation here via the `string` variant.
+ * - For Data Model pivots, refs are structured objects to remove ambiguity:
+ *   - `{ table, column }` for columns
+ *   - `{ measure }` for measures
+ *
+ * The Rust deserializer also accepts `{ name }` as an alternate measure shape for backward
+ * compatibility with earlier payloads.
+ */
+export type PivotFieldRef =
+  | string
+  | { table: string; column: string }
+  | { measure: string }
+  | { name: string };
+
 export type PivotSortOrder = "ascending" | "descending" | "manual";
 
 export interface PivotField {
-  sourceField: string;
+  sourceField: PivotFieldRef;
   sortOrder?: PivotSortOrder;
   // Note: manual sort values are represented in Rust as `PivotKeyPart` (including
   // numeric variants encoded as raw f64 bit-pattern u64s). That is not currently
@@ -274,17 +293,17 @@ export type PivotShowAsType =
   | "rankDescending";
 
 export interface PivotValueField {
-  sourceField: string;
+  sourceField: PivotFieldRef;
   name: string;
   aggregation: PivotAggregationType;
   numberFormat?: string;
   showAs?: PivotShowAsType;
-  baseField?: string;
+  baseField?: PivotFieldRef;
   baseItem?: string;
 }
 
 export interface PivotFilterField {
-  sourceField: string;
+  sourceField: PivotFieldRef;
   // Allowed values are represented in Rust as `HashSet<PivotKeyPart>` which is not
   // currently representable losslessly in JS (it serializes numeric keys as raw
   // u64 bit patterns). For now treat as an opaque payload.
