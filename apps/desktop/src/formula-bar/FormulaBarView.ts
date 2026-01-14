@@ -1234,7 +1234,7 @@ export class FormulaBarView {
   #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
   #lastColoredReferences: ReturnType<FormulaBarModel["coloredReferences"]> | null = null;
   #lastHintIsFormulaEditing: boolean | null = null;
-  #lastHintSyntaxKey: string | null = null;
+  #lastHintSyntaxError: ReturnType<FormulaBarModel["syntaxError"]> | null = null;
   #lastHint: ReturnType<FormulaBarModel["functionHint"]> | null = null;
   #lastHintArgPreviewKey: string | null = null;
   #lastHintArgPreviewRhs: string | null = null;
@@ -3510,8 +3510,8 @@ export class FormulaBarView {
       }
     }
 
-    const syntaxKey = syntaxError ? `${syntaxError.span?.start ?? ""}:${syntaxError.span?.end ?? ""}:${syntaxError.message}` : "";
     const nextHintIsFormulaEditing = isFormulaEditing;
+    const nextHintSyntaxError = syntaxError;
     const nextHint = hint;
     const nextArgPreviewKey = wantsArgPreview ? argPreviewKey : null;
     const nextArgPreviewRhs = wantsArgPreview
@@ -3522,14 +3522,14 @@ export class FormulaBarView {
 
     const hintChanged =
       nextHintIsFormulaEditing !== this.#lastHintIsFormulaEditing ||
-      syntaxKey !== this.#lastHintSyntaxKey ||
+      nextHintSyntaxError !== this.#lastHintSyntaxError ||
       nextHint !== this.#lastHint ||
       nextArgPreviewKey !== this.#lastHintArgPreviewKey ||
       nextArgPreviewRhs !== this.#lastHintArgPreviewRhs;
 
     if (hintChanged) {
       this.#lastHintIsFormulaEditing = nextHintIsFormulaEditing;
-      this.#lastHintSyntaxKey = syntaxKey;
+      this.#lastHintSyntaxError = nextHintSyntaxError;
       this.#lastHint = nextHint;
       this.#lastHintArgPreviewKey = nextArgPreviewKey;
       this.#lastHintArgPreviewRhs = nextArgPreviewRhs;
