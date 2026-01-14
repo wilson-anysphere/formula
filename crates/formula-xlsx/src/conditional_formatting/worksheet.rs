@@ -16,6 +16,11 @@ const X14_CONDITIONAL_FORMATTING_EXT_URI: &str = "{78C0D931-6437-407d-A8EE-F0AAD
 const NS_X14: &str = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
 const NS_XM: &str = "http://schemas.microsoft.com/office/excel/2006/main";
 
+fn normalize_cf_formula(formula: &str) -> String {
+    let normalized = formula_model::normalize_formula_text(formula).unwrap_or_default();
+    crate::formula_text::add_xlfn_prefixes(&normalized)
+}
+
 fn insert_before_tag(name: &[u8]) -> bool {
     matches!(
         name,
@@ -533,8 +538,9 @@ fn write_cf_rule<W: std::io::Write>(
 
             let formula_tag = crate::xml::prefixed_tag(prefix, "formula");
             for formula in formulas {
+                let normalized = normalize_cf_formula(formula);
                 writer.write_event(Event::Start(BytesStart::new(formula_tag.as_str())))?;
-                writer.write_event(Event::Text(BytesText::new(formula.as_str())))?;
+                writer.write_event(Event::Text(BytesText::new(normalized.as_str())))?;
                 writer.write_event(Event::End(BytesEnd::new(formula_tag.as_str())))?;
             }
             writer.write_event(Event::End(BytesEnd::new(cf_rule_tag.as_str())))?;
@@ -554,9 +560,10 @@ fn write_cf_rule<W: std::io::Write>(
             }
             writer.write_event(Event::Start(start))?;
 
+            let normalized = normalize_cf_formula(formula);
             let formula_tag = crate::xml::prefixed_tag(prefix, "formula");
             writer.write_event(Event::Start(BytesStart::new(formula_tag.as_str())))?;
-            writer.write_event(Event::Text(BytesText::new(formula.as_str())))?;
+            writer.write_event(Event::Text(BytesText::new(normalized.as_str())))?;
             writer.write_event(Event::End(BytesEnd::new(formula_tag.as_str())))?;
             writer.write_event(Event::End(BytesEnd::new(cf_rule_tag.as_str())))?;
         }
@@ -721,6 +728,12 @@ fn write_cfvo<W: std::io::Write>(writer: &mut Writer<W>, tag: &str, cfvo: &Cfvo)
     let mut el = BytesStart::new(tag);
     el.push_attribute(("type", cfvo_type_to_ooxml(cfvo.type_)));
     if let Some(val) = cfvo.value.as_deref() {
+        if cfvo.type_ == CfvoType::Formula {
+            let normalized = normalize_cf_formula(val);
+            el.push_attribute(("val", normalized.as_str()));
+            writer.write_event(Event::Empty(el))?;
+            return Ok(());
+        }
         el.push_attribute(("val", val));
     }
     writer.write_event(Event::Empty(el))?;
@@ -1082,6 +1095,41 @@ mod tests {
             expr_cf.attribute("id"),
             None,
             "office2007 expression rules should not have synthesized ids"
+        );
+    }
+
+    #[test]
+    fn writes_xlfn_prefixes_in_conditional_formatting_formulas() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+        let expr = expr_rule("A1:A1", "=SEQUENCE(3)");
+
+        let mut data_bar = x14_data_bar_rule("B1:B3");
+        if let CfRuleKind::DataBar(ref mut db) = data_bar.kind {
+            db.max = Cfvo {
+                type_: CfvoType::Formula,
+                value: Some("=SEQUENCE(3)".to_string()),
+            };
+        } else {
+            panic!("expected DataBar rule");
+        }
+
+        let updated = update_worksheet_conditional_formatting_xml(xml, &[expr, data_bar]).unwrap();
+
+        assert!(
+            updated.contains("<formula>_xlfn.SEQUENCE(3)</formula>"),
+            "expected _xlfn prefix in cfRule/formula, got:\n{updated}"
+        );
+        assert!(
+            updated.contains(r#"<cfvo type="formula" val="_xlfn.SEQUENCE(3)""#),
+            "expected _xlfn prefix in base cfvo/@val, got:\n{updated}"
+        );
+        assert!(
+            updated.contains(r#"<x14:cfvo type="formula" val="_xlfn.SEQUENCE(3)""#),
+            "expected _xlfn prefix in x14:cfvo/@val, got:\n{updated}"
+        );
+        assert!(
+            !updated.contains("=_xlfn.SEQUENCE"),
+            "writer must not introduce a leading '=' in conditional formatting formulas, got:\n{updated}"
         );
     }
 

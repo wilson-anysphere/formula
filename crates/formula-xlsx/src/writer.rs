@@ -807,15 +807,24 @@ fn render_cf_rule(rule: &CfRule, local_to_global_dxf: Option<&[u32]>) -> Option<
     }
 
     let (type_attr, body) = match &rule.kind {
-        CfRuleKind::Expression { formula } => (
-            "expression",
-            format!(r#"<formula>{}</formula>"#, escape_xml(formula)),
-        ),
+        CfRuleKind::Expression { formula } => {
+            let normalized = formula_model::normalize_formula_text(formula).unwrap_or_default();
+            let file_formula = crate::formula_text::add_xlfn_prefixes(&normalized);
+            (
+                "expression",
+                format!(r#"<formula>{}</formula>"#, escape_xml(&file_formula)),
+            )
+        }
         CfRuleKind::CellIs { operator, formulas } => {
             let op = cell_is_operator_attr(*operator);
             let mut inner = String::new();
             for f in formulas {
-                inner.push_str(&format!(r#"<formula>{}</formula>"#, escape_xml(f)));
+                let normalized = formula_model::normalize_formula_text(f).unwrap_or_default();
+                let file_formula = crate::formula_text::add_xlfn_prefixes(&normalized);
+                inner.push_str(&format!(
+                    r#"<formula>{}</formula>"#,
+                    escape_xml(&file_formula)
+                ));
             }
             attrs.push_str(&format!(r#" operator="{op}""#));
             ("cellIs", inner)
@@ -1560,6 +1569,30 @@ fn sheet_data_validations_xml(sheet: &Worksheet) -> String {
 
     out.push_str("</dataValidations>");
     out
+}
+
+fn sheet_format_pr_xml(sheet: &Worksheet) -> String {
+    if sheet.default_row_height.is_none()
+        && sheet.default_col_width.is_none()
+        && sheet.base_col_width.is_none()
+    {
+        return String::new();
+    }
+
+    let mut attrs = String::new();
+    if let Some(base) = sheet.base_col_width {
+        attrs.push_str(&format!(r#" baseColWidth="{base}""#));
+    }
+    if let Some(width) = sheet.default_col_width {
+        let width = trim_float(width as f64);
+        attrs.push_str(&format!(r#" defaultColWidth="{width}""#));
+    }
+    if let Some(height) = sheet.default_row_height {
+        let height = trim_float(height as f64);
+        attrs.push_str(&format!(r#" defaultRowHeight="{height}""#));
+    }
+
+    format!(r#"<sheetFormatPr{attrs}/>"#)
 }
 
 fn sheet_protection_xml(sheet: &Worksheet) -> String {

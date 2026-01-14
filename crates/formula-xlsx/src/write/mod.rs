@@ -5474,14 +5474,22 @@ fn render_cf_rule(rule: &CfRule, priority: u32, local_to_global_dxf: Option<&[u3
     let (type_attr, body, extra_attrs) = match &rule.kind {
         CfRuleKind::Expression { formula } => (
             "expression",
-            format!(r#"<formula>{}</formula>"#, escape_text(formula)),
+            {
+                let file_formula =
+                    crate::formula_text::add_xlfn_prefixes(strip_leading_equals(formula));
+                format!(r#"<formula>{}</formula>"#, escape_text(&file_formula))
+            },
             String::new(),
         ),
         CfRuleKind::CellIs { operator, formulas } => {
             let op = cell_is_operator_attr(*operator);
             let mut inner = String::new();
             for f in formulas {
-                inner.push_str(&format!(r#"<formula>{}</formula>"#, escape_text(f)));
+                let file_formula = crate::formula_text::add_xlfn_prefixes(strip_leading_equals(f));
+                inner.push_str(&format!(
+                    r#"<formula>{}</formula>"#,
+                    escape_text(&file_formula)
+                ));
             }
             ("cellIs", inner, format!(r#" operator="{op}""#))
         }
