@@ -96,7 +96,15 @@ function unwrapPossiblyTaggedEnum(
           ? ["onecell", "twocell", "absolute", "cell"]
           : [];
     if (knownVariants.length > 0) {
-      const matches = recordKeys.filter((key) => knownVariants.includes(normalizeEnumTag(key)));
+      const normalizeForMatch = (key: string): string => {
+        let normalized = normalizeEnumTag(key);
+        // Back-compat: tolerate variant tags that include common suffixes (e.g. `AbsoluteAnchor`,
+        // `shapeKind`). This mirrors the normalization applied in the specific adapters.
+        if (normalized.endsWith("anchor")) normalized = normalized.slice(0, -"anchor".length);
+        if (normalized.endsWith("kind")) normalized = normalized.slice(0, -"kind".length);
+        return normalized;
+      };
+      const matches = recordKeys.filter((key) => knownVariants.includes(normalizeForMatch(key)));
       if (matches.length === 1) {
         const tag = matches[0]!;
         return { tag, value: (input as JsonRecord)[tag] };

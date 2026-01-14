@@ -27,6 +27,29 @@ test("unwrapPossiblyTaggedEnum tolerates object-valued metadata keys alongside a
   assert.deepEqual(uiAnchor, { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 20 } });
 });
 
+test("unwrapPossiblyTaggedEnum tolerates camelCase anchor variant tags with an Anchor suffix alongside metadata objects", () => {
+  const uiAnchor = convertModelAnchorToUiAnchor({
+    meta: { foo: 1 },
+    absoluteAnchor: { pos: { x_emu: 0, y_emu: 0 }, ext: { cx: 10, cy: 20 } },
+  });
+
+  assert.deepEqual(uiAnchor, { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 10, cy: 20 } });
+});
+
+test("unwrapPossiblyTaggedEnum tolerates camelCase kind variant tags with a Kind suffix alongside metadata objects", () => {
+  const rawXml = "<xdr:sp/>";
+  const model = {
+    id: 1,
+    kind: { meta: { foo: 1 }, shapeKind: { raw_xml: rawXml } },
+    anchor: { Absolute: { pos: { x_emu: 0, y_emu: 0 }, ext: { cx: 10, cy: 20 } } },
+    z_order: 0,
+  };
+
+  const ui = convertModelDrawingObjectToUiDrawingObject(model, { sheetId: "Sheet1" });
+  assert.equal(ui.kind.type, "shape");
+  assert.equal(ui.kind.rawXml ?? ui.kind.raw_xml, rawXml);
+});
+
 test("convertModelDrawingObjectToUiDrawingObject tolerates chart placeholders missing rel ids when rawXml indicates a chart", () => {
   const rawXml =
     '<xdr:graphicFrame xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing">' +
@@ -45,4 +68,3 @@ test("convertModelDrawingObjectToUiDrawingObject tolerates chart placeholders mi
   assert.equal(ui.kind.type, "chart");
   assert.equal(ui.kind.chartId, "Sheet1:2");
 });
-
