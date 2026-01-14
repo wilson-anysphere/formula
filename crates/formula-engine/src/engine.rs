@@ -11601,7 +11601,13 @@ mod tests {
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let addr = parse_a1("A1").unwrap();
-        let snapshot = Snapshot::from_workbook(&engine.workbook, &engine.spills, None, None);
+        let snapshot = Snapshot::from_workbook(
+            &engine.workbook,
+            &engine.spills,
+            None,
+            None,
+            engine.info.clone(),
+        );
 
         assert_eq!(snapshot.get_cell_value(sheet_id, addr), Value::Blank);
         assert_eq!(snapshot.cell_style_id(sheet_id, addr), style_id);

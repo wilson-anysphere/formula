@@ -2243,10 +2243,96 @@ fn wrap_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], wrap_rows: b
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::date::ExcelDateSystem;
     use crate::value::{EntityValue, RecordValue};
+    use crate::functions::{Reference, SheetId};
+    use chrono::Utc;
+    use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
+
+    struct DummyContext;
+
+    impl FunctionContext for DummyContext {
+        fn eval_arg(&self, _expr: &CompiledExpr) -> ArgValue {
+            unreachable!("not needed for sort_key tests")
+        }
+
+        fn eval_scalar(&self, _expr: &CompiledExpr) -> Value {
+            unreachable!("not needed for sort_key tests")
+        }
+
+        fn eval_formula(&self, _expr: &CompiledExpr) -> Value {
+            unreachable!("not needed for sort_key tests")
+        }
+
+        fn eval_formula_with_bindings(
+            &self,
+            _expr: &CompiledExpr,
+            _bindings: &HashMap<String, Value>,
+        ) -> Value {
+            unreachable!("not needed for sort_key tests")
+        }
+
+        fn capture_lexical_env(&self) -> HashMap<String, Value> {
+            HashMap::new()
+        }
+
+        fn apply_implicit_intersection(&self, _reference: &Reference) -> Value {
+            unreachable!("not needed for sort_key tests")
+        }
+
+        fn get_cell_value(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Value {
+            Value::Blank
+        }
+
+        fn iter_reference_cells<'a>(
+            &'a self,
+            _reference: &'a Reference,
+        ) -> Box<dyn Iterator<Item = CellAddr> + 'a> {
+            Box::new(std::iter::empty())
+        }
+
+        fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
+            Utc::now()
+        }
+
+        fn date_system(&self) -> ExcelDateSystem {
+            ExcelDateSystem::EXCEL_1900
+        }
+
+        fn current_sheet_id(&self) -> usize {
+            0
+        }
+
+        fn current_cell_addr(&self) -> CellAddr {
+            CellAddr { row: 0, col: 0 }
+        }
+
+        fn sheet_dimensions(&self, _sheet_id: &SheetId) -> (u32, u32) {
+            (EXCEL_MAX_ROWS, EXCEL_MAX_COLS)
+        }
+
+        fn push_local_scope(&self) {}
+
+        fn pop_local_scope(&self) {}
+
+        fn set_local(&self, _name: &str, _value: ArgValue) {}
+
+        fn make_lambda(&self, _params: Vec<String>, _body: CompiledExpr) -> Value {
+            Value::Error(ErrorKind::Value)
+        }
+
+        fn eval_lambda(&self, _lambda: &Lambda, _args: Vec<ArgValue>) -> Value {
+            Value::Error(ErrorKind::Value)
+        }
+
+        fn volatile_rand_u64(&self) -> u64 {
+            0
+        }
+    }
 
     fn stable_sort_order(values: &[Value]) -> Vec<usize> {
-        let keys: Vec<_> = values.iter().map(sort_key).collect();
+        let ctx = DummyContext;
+        let keys: Vec<_> = values.iter().map(|value| sort_key(&ctx, value)).collect();
         let mut order: Vec<usize> = (0..values.len()).collect();
         order.sort_by(|&a, &b| {
             let ord = compare_sort_keys(&keys[a], &keys[b], false);
