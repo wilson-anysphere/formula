@@ -14263,7 +14263,7 @@ export class SpreadsheetApp {
     this.scrollbarDrag = { axis, pointerId: e.pointerId, grabOffset, thumbTravel, trackStart, maxScroll };
 
     try {
-      (thumb as HTMLElement).setPointerCapture(e.pointerId);
+      (thumb as any).setPointerCapture?.(e.pointerId);
     } catch {
       // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
     }
