@@ -462,6 +462,7 @@ impl Workbook {
         self.sheet_order.insert(new_index, sheet_id);
         true
     }
+
     /// Returns the sheet ids referenced by an Excel-style 3D sheet span (`Sheet1:Sheet3`).
     ///
     /// This respects the current workbook tab order and supports reversed spans.
@@ -862,18 +863,22 @@ impl Engine {
         if new_index >= self.workbook.sheet_order.len() {
             return false;
         }
-        let before_order = self.workbook.sheet_order.clone();
+
+        let Some(original_index) = self.workbook.sheet_order_index(sheet_id) else {
+            return false;
+        };
+        if original_index == new_index {
+            return true;
+        }
+
         if !self.workbook.reorder_sheet(sheet_id, new_index) {
             return false;
-        }
-        if self.workbook.sheet_order == before_order {
-            return true;
         }
         if self.recompile_all_defined_names().is_err() || self.rebuild_graph().is_err() {
             // Reordering should not introduce new parse errors (formulas are unchanged), but if
             // rebuilding fails for any reason, restore the previous order and best-effort rebuild
             // to keep the engine in a consistent state.
-            self.workbook.sheet_order = before_order;
+            let _ = self.workbook.reorder_sheet(sheet_id, original_index);
             let _ = self.recompile_all_defined_names();
             let _ = self.rebuild_graph();
             return false;
@@ -1423,6 +1428,7 @@ impl Engine {
         self.workbook.pivots.insert(pivot_id, def);
         result
     }
+
     /// Returns the configured worksheet dimensions for `sheet` (row/column count).
     ///
     /// When unset, sheets default to Excel-compatible dimensions
