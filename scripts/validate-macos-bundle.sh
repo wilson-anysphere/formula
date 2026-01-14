@@ -69,6 +69,9 @@ Validate macOS desktop release artifacts produced by Tauri (.dmg, optionally .ap
 
 This script must run on macOS (it uses hdiutil/codesign/spctl/xcrun).
 
+This repo ships **universal** macOS artifacts (Intel + Apple Silicon). This script enforces that the
+app binary contains both `x86_64` and `arm64` slices (via `lipo -info`).
+
 Options:
   --dmg <path>   Validate a specific DMG (skip artifact discovery)
   -h, --help     Show help

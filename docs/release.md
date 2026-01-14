@@ -397,7 +397,7 @@ CI guardrail (tagged releases when secrets are configured):
 - The release workflow validates that the produced macOS artifacts are **notarized + stapled** so they pass Gatekeeper:
   - `xcrun stapler validate` (requires a stapled notarization ticket)
   - `spctl --assess` (Gatekeeper evaluation)
-  - See `scripts/validate-macos-bundle.sh` (also checks basic bundle metadata like the `formula://` URL scheme).
+  - See `scripts/validate-macos-bundle.sh` (also checks basic bundle metadata like the `formula://` URL scheme and verifies the app is **universal** via `lipo`).
 
 #### Hardened runtime entitlements (WKWebView / WASM)
 
@@ -472,10 +472,17 @@ then revert the change—do not commit it).
     - Network features work (e.g. updater check / HTTPS fetches).
     - Cross-origin isolation still works in the packaged app (see `pnpm -C apps/desktop check:coi`).
 
-For CI-style bundle verification (DMG mount + Info.plist sanity + optional codesign/notarization checks), you can also run:
+For CI-style bundle verification (DMG mount + Info.plist sanity + universal `lipo` check + optional codesign/notarization checks), you can also run:
 
 ```bash
 bash scripts/validate-macos-bundle.sh
+```
+
+Note: this repo’s **release** artifacts are built as **universal** macOS bundles. If you’re building
+locally and want this script to pass, build with the universal target:
+
+```bash
+cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build --target universal-apple-darwin
 ```
 
 #### Troubleshooting: blank window / crashes in a signed build
