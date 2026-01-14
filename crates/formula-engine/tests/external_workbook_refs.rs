@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Default)]
 struct TestExternalProvider {
     values: Mutex<HashMap<(String, CellAddr), Value>>,
+    sheet_order: Mutex<HashMap<String, Vec<String>>>,
 }
 
 impl TestExternalProvider {
@@ -15,6 +16,13 @@ impl TestExternalProvider {
             .expect("lock poisoned")
             .insert((sheet.to_string(), addr), value.into());
     }
+
+    fn set_sheet_order(&self, workbook: &str, order: impl Into<Vec<String>>) {
+        self.sheet_order
+            .lock()
+            .expect("lock poisoned")
+            .insert(workbook.to_string(), order.into());
+    }
 }
 
 impl ExternalValueProvider for TestExternalProvider {
@@ -23,6 +31,14 @@ impl ExternalValueProvider for TestExternalProvider {
             .lock()
             .expect("lock poisoned")
             .get(&(sheet.to_string(), addr))
+            .cloned()
+    }
+
+    fn sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+        self.sheet_order
+            .lock()
+            .expect("lock poisoned")
+            .get(workbook)
             .cloned()
     }
 }
@@ -217,6 +233,89 @@ fn degenerate_external_3d_sheet_range_ref_resolves_via_provider() {
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(41.0));
+}
+
+#[test]
+fn external_3d_sheet_span_with_quoted_sheet_names_expands_via_provider_sheet_order() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Sheet 1".to_string(),
+            "Sheet 2".to_string(),
+            "Sheet 3".to_string(),
+        ],
+    );
+    for (sheet, value) in [("Sheet 1", 1.0), ("Sheet 2", 2.0), ("Sheet 3", 3.0)] {
+        provider.set(
+            &format!("[Book.xlsx]{sheet}"),
+            CellAddr { row: 0, col: 0 },
+            value,
+        );
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]'Sheet 1':'Sheet 3'!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+}
+
+#[test]
+fn external_3d_sheet_span_matches_endpoints_case_insensitively() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+    for (sheet, value) in [("Sheet1", 1.0), ("Sheet2", 2.0), ("Sheet3", 3.0)] {
+        provider.set(
+            &format!("[Book.xlsx]{sheet}"),
+            CellAddr { row: 0, col: 0 },
+            value,
+        );
+    }
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]sheet1:sheet3!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+}
+
+#[test]
+fn external_3d_sheet_span_with_missing_endpoint_is_ref_error() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set_sheet_order(
+        "Book.xlsx",
+        vec![
+            "Sheet1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet3".to_string(),
+        ],
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM([Book.xlsx]Sheet1:Sheet4!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(formula_engine::ErrorKind::Ref)
+    );
 }
 
 #[test]

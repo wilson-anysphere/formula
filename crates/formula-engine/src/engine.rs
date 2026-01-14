@@ -7226,6 +7226,12 @@ impl crate::eval::ValueResolver for Snapshot {
             .and_then(|provider| provider.get(sheet, addr))
     }
 
+    fn external_sheet_order(&self, workbook: &str) -> Option<Vec<String>> {
+        self.external_value_provider
+            .as_ref()
+            .and_then(|provider| provider.sheet_order(workbook))
+    }
+
     fn sheet_id(&self, name: &str) -> Option<usize> {
         self.sheet_names_by_id
             .iter()
@@ -7639,6 +7645,20 @@ fn rewrite_defined_name_constants_for_bytecode(
 
 pub trait ExternalValueProvider: Send + Sync {
     fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value>;
+
+    /// Return the sheet order for an external workbook.
+    ///
+    /// This is required to expand external-workbook 3D spans like
+    /// `"[Book.xlsx]Sheet1:Sheet3!A1"`. Implementations should return sheet names in workbook
+    /// order (without the `[Book.xlsx]` prefix).
+    ///
+    /// The input `workbook` is the raw name inside the bracketed prefix (e.g. `"Book.xlsx"`).
+    ///
+    /// Returning `None` indicates that the sheet order is not available, in which case external
+    /// 3D spans evaluate to `#REF!`.
+    fn sheet_order(&self, _workbook: &str) -> Option<Vec<String>> {
+        None
+    }
 }
 
 pub trait ExternalDataProvider: Send + Sync {
@@ -10122,14 +10142,14 @@ fn walk_expr_flags(
         }
         Expr::CellRef(r) => {
             if let SheetReference::External(key) = &r.sheet {
-                if crate::eval::is_valid_external_sheet_key(key) {
+                if crate::eval::split_external_sheet_key(key).is_some() {
                     *volatile = true;
                 }
             }
         }
         Expr::RangeRef(r) => {
             if let SheetReference::External(key) = &r.sheet {
-                if crate::eval::is_valid_external_sheet_key(key) {
+                if crate::eval::split_external_sheet_key(key).is_some() {
                     *volatile = true;
                 }
             }

@@ -1581,12 +1581,12 @@ impl ParserImpl {
             self.expect(TokenKind::Bang)?;
             if crate::eval::is_valid_external_sheet_key(&start_name) {
                 // Excel treats `[Book]Sheet1:Sheet3!A1` as an external workbook 3D span where the
-                // bracketed workbook prefix applies to both endpoints. We don't support external
-                // workbook 3D spans today, but we still want debug tracing to behave like the main
-                // engine for degenerate spans like `[Book]Sheet1:Sheet1!A1`.
+                // bracketed workbook prefix applies to both endpoints. We preserve the span in the
+                // external sheet key (`[Book]Sheet1:Sheet3`) so evaluation can expand it using the
+                // provider's external sheet order.
                 //
                 // When the endpoint sheet names match, collapse to the single external sheet key
-                // (`[Book]Sheet1`) so evaluation can consult the external provider.
+                // (`[Book]Sheet1`) so evaluation can consult the external provider directly.
                 let Some((_, sheet_part)) = start_name.split_once(']') else {
                     return Ok(SpannedExpr {
                         span: Span::new(sheet_tok.span.start, end_tok.span.end),
@@ -2752,8 +2752,32 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
                 Some((start..=end).map(FnSheetId::Local).collect())
             }
-            SheetReference::External(key) => crate::eval::is_valid_external_sheet_key(key)
-                .then(|| vec![FnSheetId::External(key.clone())]),
+            SheetReference::External(key) => {
+                if crate::eval::is_valid_external_sheet_key(key) {
+                    return Some(vec![FnSheetId::External(key.clone())]);
+                }
+
+                let (workbook, start, end) = crate::eval::split_external_sheet_span_key(key)?;
+                let order = self.resolver.external_sheet_order(workbook)?;
+                let start_idx = order
+                    .iter()
+                    .position(|s| crate::value::cmp_case_insensitive(s, start) == Ordering::Equal)?;
+                let end_idx = order
+                    .iter()
+                    .position(|s| crate::value::cmp_case_insensitive(s, end) == Ordering::Equal)?;
+                let (start_idx, end_idx) = if start_idx <= end_idx {
+                    (start_idx, end_idx)
+                } else {
+                    (end_idx, start_idx)
+                };
+
+                Some(
+                    order[start_idx..=end_idx]
+                        .iter()
+                        .map(|sheet| FnSheetId::External(format!("[{workbook}]{sheet}")))
+                        .collect(),
+                )
+            }
         }
     }
 

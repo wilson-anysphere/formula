@@ -206,6 +206,17 @@ pub trait ValueResolver {
     fn get_external_value(&self, _sheet: &str, _addr: CellAddr) -> Option<Value> {
         None
     }
+    /// Return the sheet order for an external workbook.
+    ///
+    /// This is used to expand external-workbook 3D spans like `[Book.xlsx]Sheet1:Sheet3!A1`,
+    /// which must be resolved by workbook sheet order. Implementations should return sheet names
+    /// (without the `[Book.xlsx]` prefix) in workbook order.
+    ///
+    /// Returning `None` indicates that the sheet order is unavailable, in which case external
+    /// 3D spans evaluate to `#REF!`.
+    fn external_sheet_order(&self, _workbook: &str) -> Option<Vec<String>> {
+        None
+    }
     /// Optional external data provider used by RTD / CUBE* functions.
     fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
         None
@@ -1069,7 +1080,33 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 Some((start..=end).map(FnSheetId::Local).collect())
             }
             SheetReference::External(key) => {
-                is_valid_external_sheet_key(key).then(|| vec![FnSheetId::External(key.clone())])
+                if is_valid_external_sheet_key(key) {
+                    return Some(vec![FnSheetId::External(key.clone())]);
+                }
+
+                // External-workbook 3D spans are represented as a single key string (e.g.
+                // `"[Book.xlsx]Sheet1:Sheet3"`). Expand these into per-sheet external keys using
+                // workbook sheet order supplied by the resolver.
+                let (workbook, start, end) = split_external_sheet_span_key(key)?;
+                let order = self.resolver.external_sheet_order(workbook)?;
+                let start_idx = order
+                    .iter()
+                    .position(|s| cmp_case_insensitive(s, start) == Ordering::Equal)?;
+                let end_idx = order
+                    .iter()
+                    .position(|s| cmp_case_insensitive(s, end) == Ordering::Equal)?;
+                let (start_idx, end_idx) = if start_idx <= end_idx {
+                    (start_idx, end_idx)
+                } else {
+                    (end_idx, start_idx)
+                };
+
+                Some(
+                    order[start_idx..=end_idx]
+                        .iter()
+                        .map(|sheet| FnSheetId::External(format!("[{workbook}]{sheet}")))
+                        .collect(),
+                )
             }
         }
     }
@@ -1368,27 +1405,36 @@ fn intersect_ranges(a: &ResolvedRange, b: &ResolvedRange) -> Option<ResolvedRang
 }
 
 pub(crate) fn is_valid_external_sheet_key(key: &str) -> bool {
-    if !key.starts_with('[') {
-        return false;
-    }
-    let Some(end) = key.find(']') else {
+    let Some((_workbook, sheet)) = split_external_sheet_key(key) else {
         return false;
     };
+
+    // Note: This validator is intentionally strict and only accepts *single-sheet* external keys
+    // (e.g. `"[Book.xlsx]Sheet1"`). External-workbook 3D spans are represented as
+    // `"[Book.xlsx]Sheet1:Sheet3"` and are expanded separately using workbook sheet order.
+    !sheet.contains(':')
+}
+
+pub(crate) fn split_external_sheet_key(key: &str) -> Option<(&str, &str)> {
+    if !key.starts_with('[') {
+        return None;
+    }
+    let end = key.find(']')?;
     let workbook = &key[1..end];
     let sheet = &key[end + 1..];
     if workbook.is_empty() || sheet.is_empty() {
-        return false;
+        return None;
     }
+    Some((workbook, sheet))
+}
 
-    // Excel 3D sheet spans are written as `Sheet1:Sheet3!A1` and require workbook sheet order to
-    // expand. We currently cannot represent external-workbook 3D spans (`[Book]Sheet1:Sheet3!A1`)
-    // with the `ExternalValueProvider` interface, so treat these as invalid to surface `#REF!`
-    // rather than silently querying the provider with a misleading key.
-    if sheet.contains(':') {
-        return false;
+pub(crate) fn split_external_sheet_span_key(key: &str) -> Option<(&str, &str, &str)> {
+    let (workbook, sheet_part) = split_external_sheet_key(key)?;
+    let (start, end) = sheet_part.split_once(':')?;
+    if start.is_empty() || end.is_empty() {
+        return None;
     }
-
-    true
+    Some((workbook, start, end))
 }
 
 impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
