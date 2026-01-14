@@ -153,3 +153,53 @@ fn xmatch_wildcards_compare_against_record_display_field() {
         assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
     }
 }
+
+#[test]
+fn xlookup_wildcards_compare_record_display_fields_for_pattern_and_candidate() {
+    for bytecode_enabled in [false, true] {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "A1",
+                Value::Record(RecordValue {
+                    display: "CandidateFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("Apple"))]),
+                }),
+            )
+            .unwrap();
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "B1",
+                Value::Record(RecordValue {
+                    display: "PatternFallback".to_string(),
+                    display_field: Some("Name".to_string()),
+                    fields: HashMap::from([("Name".to_string(), Value::from("App*"))]),
+                }),
+            )
+            .unwrap();
+        engine.set_cell_value("Sheet1", "C1", 42.0).unwrap();
+
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "D1",
+                r#"=XLOOKUP(B1, A1:A1, C1:C1, "not found", 2)"#,
+            )
+            .unwrap();
+        engine.recalculate_single_threaded();
+
+        if bytecode_enabled {
+            assert!(
+                engine.bytecode_program_count() > 0,
+                "expected XLOOKUP formula to compile to bytecode for this test"
+            );
+        }
+
+        assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(42.0));
+    }
+}
