@@ -151,6 +151,27 @@ test("fails when updater asset types do not match platform expectations (Linux .
   );
 });
 
+test("fails when updater asset types do not match platform expectations (Linux .rpm)", () => {
+  const proc = runLocal({
+    version: "0.0.0",
+    platforms: {
+      "darwin-x86_64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "darwin-aarch64": { url: "https://example.com/Formula.app.tar.gz", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/Formula_x64.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/Formula_arm64.msi", signature: "sig" },
+      // Linux updater should point to an AppImage, not a deb/rpm package.
+      "linux-x86_64": { url: "https://example.com/app.rpm", signature: "sig" },
+      "linux-aarch64": { url: "https://example.com/Formula_arm64.AppImage", signature: "sig" },
+    },
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.ok(
+    proc.stderr.includes("Updater asset type mismatch in latest.json.platforms"),
+    `stderr did not include expected asset type mismatch; got:\n${proc.stderr}`,
+  );
+});
+
 test("fails when multiple targets share the same updater URL (collision)", () => {
   const url = "https://example.com/app.msi";
   const proc = runLocal({
