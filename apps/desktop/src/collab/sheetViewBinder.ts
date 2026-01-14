@@ -411,6 +411,7 @@ export function bindSheetViewToCollabSession(options: {
   if (!session) throw new Error("bindSheetViewToCollabSession requires { session }");
   if (!documentController) throw new Error("bindSheetViewToCollabSession requires { documentController }");
 
+  const ownsOrigin = options?.origin == null;
   const binderOrigin = options?.origin ?? { type: "document-controller:sheet-view-binder" };
   session.localOrigins?.add?.(binderOrigin);
 
@@ -741,7 +742,9 @@ export function bindSheetViewToCollabSession(options: {
       destroyed = true;
       unsubscribe?.();
       session.sheets.unobserveDeep(handleSheetsDeepChange);
-      session.localOrigins?.delete?.(binderOrigin);
+      if (ownsOrigin) {
+        session.localOrigins?.delete?.(binderOrigin);
+      }
     },
   };
 }

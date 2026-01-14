@@ -49,5 +49,29 @@ describe("bindSheetViewToCollabSession (backgroundImageId)", () => {
 
     binder.destroy();
   });
-});
 
+  it("does not remove a provided origin token from session.localOrigins on destroy", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    sheets.push([sheetMap]);
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const sharedOrigin = { type: "shared-origin" };
+    const localOrigins = new Set<any>([sharedOrigin]);
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins, isReadOnly: () => false } as any,
+      documentController: document,
+      origin: sharedOrigin,
+    });
+
+    binder.destroy();
+
+    expect(localOrigins.has(sharedOrigin)).toBe(true);
+  });
+});
