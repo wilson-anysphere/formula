@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use formula_model::{CellRef, CellValue};
 use formula_xlsx::{
     load_from_bytes_with_password, read_workbook_model_from_bytes_with_password, ReadError,
-    XlsxError, XlsxPackage,
+    WorkbookKind, XlsxError, XlsxPackage,
 };
 
 fn fixture_path(rel: &str) -> PathBuf {
@@ -43,6 +43,11 @@ fn assert_excel_plaintext_contents(workbook: &formula_model::Workbook) {
         sheet.value(CellRef::from_a1("B1").unwrap()),
         CellValue::String("ipsum".to_string())
     );
+}
+
+fn assert_basic_macro_workbook_contents(workbook: &formula_model::Workbook) {
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
 }
 
 #[test]
@@ -154,6 +159,13 @@ fn xlsm_fixtures_surface_invalid_password_errors() {
     for encrypted_name in ["agile-basic.xlsm", "standard-basic.xlsm"] {
         let encrypted = read_fixture(encrypted_name);
 
+        let err = read_workbook_model_from_bytes_with_password(&encrypted, "wrong")
+            .expect_err("expected invalid password error");
+        assert!(
+            matches!(err, ReadError::InvalidPassword),
+            "{encrypted_name}: expected ReadError::InvalidPassword, got {err:?}"
+        );
+
         let err =
             load_from_bytes_with_password(&encrypted, "wrong").expect_err("expected failure");
         assert!(
@@ -167,6 +179,34 @@ fn xlsm_fixtures_surface_invalid_password_errors() {
             matches!(err, XlsxError::InvalidPassword),
             "{encrypted_name}: expected XlsxError::InvalidPassword, got {err:?}"
         );
+    }
+}
+
+#[test]
+fn workbook_and_document_loaders_decrypt_agile_and_standard_xlsm_fixtures() {
+    for encrypted_name in ["agile-basic.xlsm", "standard-basic.xlsm"] {
+        let encrypted = read_fixture(encrypted_name);
+
+        let model = read_workbook_model_from_bytes_with_password(&encrypted, "password")
+            .unwrap_or_else(|err| {
+                panic!("read_workbook_model_from_bytes_with_password({encrypted_name}): {err:?}")
+            });
+        assert_basic_macro_workbook_contents(&model);
+
+        let doc = load_from_bytes_with_password(&encrypted, "password")
+            .unwrap_or_else(|err| panic!("load_from_bytes_with_password({encrypted_name}): {err:?}"));
+        assert_basic_macro_workbook_contents(&doc.workbook);
+        assert_eq!(
+            doc.workbook_kind(),
+            WorkbookKind::MacroEnabledWorkbook,
+            "{encrypted_name}: expected macro-enabled WorkbookKind"
+        );
+
+        let vba = doc
+            .parts()
+            .get("xl/vbaProject.bin")
+            .expect("expected decrypted xlsm to preserve xl/vbaProject.bin");
+        assert!(!vba.is_empty(), "expected vbaProject.bin to be non-empty");
     }
 }
 
