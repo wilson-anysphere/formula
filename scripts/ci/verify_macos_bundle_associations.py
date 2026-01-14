@@ -198,14 +198,14 @@ def extract_url_schemes(plist: dict[str, Any]) -> set[str]:
             continue
         schemes = entry.get("CFBundleURLSchemes")
         if isinstance(schemes, str):
-            scheme = _normalize_scheme(schemes)
+            scheme = schemes.strip().lower()
             if scheme:
                 out.add(scheme)
         elif isinstance(schemes, list):
             for scheme in schemes:
                 if not isinstance(scheme, str):
                     continue
-                normalized = _normalize_scheme(scheme)
+                normalized = scheme.strip().lower()
                 if normalized:
                     out.add(normalized)
     return out

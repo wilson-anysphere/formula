@@ -163,6 +163,15 @@ test("passes when deep-link schemes includes 'formula://' (normalized)", () => {
   assert.match(proc.stdout, /preflight passed/i);
 });
 
+test("fails when macOS Info.plist declares an invalid URL scheme value like 'formula://'", () => {
+  const config = baseConfig();
+  const plist = basePlistWithFormulaScheme().replace("<string>formula</string>", "<string>formula://</string>");
+  const proc = runWithConfigAndPlist(config, plist);
+  assert.notEqual(proc.status, 0, "expected non-zero exit status");
+  assert.match(proc.stderr, /Invalid macOS URL scheme registration/i);
+  assert.match(proc.stderr, /formula:\/\//i);
+});
+
 test("passes when deep-link desktop config is an array of protocol objects", () => {
   const config = baseConfig();
   config.plugins["deep-link"].desktop = [{ schemes: ["formula"] }];

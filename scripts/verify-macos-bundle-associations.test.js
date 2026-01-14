@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -239,6 +239,23 @@ test(
 
     const proc = runValidator({ configPath, infoPlistPath });
     assert.equal(proc.status, 0, proc.stderr);
+  },
+);
+
+test(
+  "verify_macos_bundle_associations fails when Info.plist declares an invalid scheme value like formula://",
+  { skip: !hasPython3 },
+  () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), "formula-macos-assoc-test-"));
+    const configPath = writeConfig(tmp);
+    const infoPlistPath = writeInfoPlist(tmp, { includeXlsxDocumentType: true, includeUrlScheme: true });
+    const raw = readFileSync(infoPlistPath, "utf8").replace("<string>formula</string>", "<string>formula://</string>");
+    writeFileSync(infoPlistPath, raw, "utf8");
+
+    const proc = runValidator({ configPath, infoPlistPath });
+    assert.notEqual(proc.status, 0, "expected non-zero exit status");
+    assert.match(proc.stderr, /Missing URL schemes/i);
+    assert.match(proc.stderr, /formula/);
   },
 );
 

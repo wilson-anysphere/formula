@@ -631,9 +631,20 @@ function main() {
     const observedSchemes = new Set(
       schemeBlocks
         .flatMap((block) => extractPlistStrings(block))
-        .map((s) => String(s).trim().replace(/[:/]+$/, "").toLowerCase())
+        // CFBundleURLSchemes values should contain only the scheme name (e.g. "formula"),
+        // not a full "formula://" URL. Do not normalize these beyond whitespace/case so we
+        // catch malformed Info.plist entries.
+        .map((s) => String(s).trim().toLowerCase())
         .filter(Boolean),
     );
+    const invalidObservedSchemes = Array.from(observedSchemes).filter((s) => /[:/]/.test(s));
+    if (invalidObservedSchemes.length > 0) {
+      errBlock("Invalid macOS URL scheme registration (Info.plist)", [
+        "Expected CFBundleURLSchemes entries to be scheme names (no ':' or '/' characters).",
+        `Invalid scheme value(s): ${invalidObservedSchemes.sort().join(", ")}`,
+        "Fix: update apps/desktop/src-tauri/Info.plist CFBundleURLTypes/CFBundleURLSchemes.",
+      ]);
+    }
     const missingSchemes = Array.from(expectedSchemes).filter((s) => !observedSchemes.has(s));
     if (schemeBlocks.length === 0 || missingSchemes.length > 0) {
       errBlock("Missing macOS URL scheme registration (Info.plist)", [
