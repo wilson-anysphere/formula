@@ -4,6 +4,7 @@ import { ImageBitmapCache } from "../imageBitmapCache";
 import type { ImageEntry } from "../types";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -16,6 +17,34 @@ function makeEntry(id = "img_1"): ImageEntry {
 }
 
 describe("ImageBitmapCache", () => {
+  it("clears the negative cache on invalidate so callers can retry immediately", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const cache = new ImageBitmapCache({ negativeCacheMs: 10_000 });
+    const entry = makeEntry();
+
+    const err = new Error("decode failed");
+    const bitmap = {} as ImageBitmap;
+
+    const createImageBitmapMock = vi.fn().mockRejectedValueOnce(err).mockResolvedValueOnce(bitmap);
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    await expect(cache.get(entry)).rejects.toBe(err);
+    // Ensure the cache's internal bookkeeping has a chance to run.
+    await Promise.resolve();
+
+    // Negative cache should prevent tight retry loops (no new decode attempt yet).
+    await expect(cache.get(entry)).rejects.toBe(err);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(1);
+
+    // When the bytes are replaced, callers typically invalidate the cache entry.
+    cache.invalidate(entry.id);
+
+    await expect(cache.get(entry)).resolves.toBe(bitmap);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+  });
+
   it("removes a failed decode from the cache and allows a subsequent retry", async () => {
     const cache = new ImageBitmapCache({ negativeCacheMs: 0 });
     const entry = makeEntry();
