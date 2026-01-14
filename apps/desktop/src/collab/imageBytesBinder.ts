@@ -178,6 +178,16 @@ function encodeBase64(bytes: Uint8Array): string | null {
 }
 
 function decodeBase64(base64Raw: string, maxBytes: number): Uint8Array | null {
+  // Fast length guard before we perform any normalization that could allocate large intermediate
+  // strings (trim/replace). In adversarial collaborative documents a malicious peer could insert an
+  // extremely long base64 string and attempt to DoS clients by forcing them to repeatedly normalize
+  // and decode it.
+  //
+  // Base64 expands bytes by ~4/3 plus padding. Allow generous overhead for optional `data:` prefixes
+  // and whitespace/newlines.
+  const roughMaxChars = Math.ceil(((maxBytes + 2) * 4) / 3) + 128;
+  if (base64Raw.length > roughMaxChars * 2) return null;
+
   const base64 = normalizeBase64String(base64Raw);
   if (!base64) return null;
 
