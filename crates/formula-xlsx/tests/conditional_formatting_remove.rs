@@ -5,6 +5,8 @@ use formula_xlsx::{load_from_bytes, XlsxPackage};
 fn assert_clearing_conditional_formatting_removes_worksheet_blocks(
     fixture_name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    const X14_CF_URI: &str = "{78C0D931-6437-407d-A8EE-F0AAD7539E65}";
+
     let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
@@ -45,6 +47,10 @@ fn assert_clearing_conditional_formatting_removes_worksheet_blocks(
     assert!(
         !sheet_xml.contains("conditionalFormattings"),
         "expected sheet1.xml to remove x14 conditionalFormattings blocks, got: {sheet_xml}"
+    );
+    assert!(
+        !sheet_xml.contains(X14_CF_URI),
+        "expected sheet1.xml to remove x14 conditional formatting <ext uri=...> block (uri={X14_CF_URI}), got: {sheet_xml}"
     );
 
     Ok(())
