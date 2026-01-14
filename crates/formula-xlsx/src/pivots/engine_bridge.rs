@@ -832,7 +832,7 @@ mod tests {
             ],
             ..Default::default()
         };
-
+ 
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
         assert_eq!(
@@ -869,7 +869,7 @@ mod tests {
             ],
             ..Default::default()
         };
-
+ 
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
         assert_eq!(
