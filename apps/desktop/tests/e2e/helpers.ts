@@ -136,6 +136,7 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       networkChanged = true;
       resolveNetworkChanged?.();
     };
+
     try {
       // Desktop e2e relies on waiting for `__formulaApp` (and `whenIdle`) rather than the
       // window `load` event. Under heavy load, waiting for `load` can occasionally hang
@@ -159,19 +160,23 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
           throw new Error("net::ERR_NETWORK_CHANGED");
         }),
       ]);
+
       // `__formulaApp` is assigned early in `main.ts` so tests can still introspect failures,
       // but that means we need to explicitly wait for the app to settle before interacting.
-      await page.evaluate(async ({ waitForIdle, idleTimeoutMs }) => {
-        const app = window.__formulaApp as any;
-        if (!waitForIdle) return;
-        if (app && typeof app.whenIdle === "function") {
-          if (typeof idleTimeoutMs === "number" && idleTimeoutMs > 0) {
-            await Promise.race([app.whenIdle(), new Promise<void>((r) => setTimeout(r, idleTimeoutMs))]);
-          } else {
-            await app.whenIdle();
+      await page.evaluate(
+        async ({ waitForIdle, idleTimeoutMs }) => {
+          const app = window.__formulaApp as any;
+          if (!waitForIdle) return;
+          if (app && typeof app.whenIdle === "function") {
+            if (typeof idleTimeoutMs === "number" && idleTimeoutMs > 0) {
+              await Promise.race([app.whenIdle(), new Promise<void>((r) => setTimeout(r, idleTimeoutMs))]);
+            } else {
+              await app.whenIdle();
+            }
           }
-        }
-      }, { waitForIdle, idleTimeoutMs });
+        },
+        { waitForIdle, idleTimeoutMs },
+      );
 
       // The desktop build includes a built-in "formula.e2e-events" extension used by other
       // Playwright specs (e.g. `extension-events.spec.ts`). That extension writes to
@@ -206,6 +211,18 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
           // ignore storage errors (disabled/quota/etc.)
         }
       });
+
+      // If the desktop shell threw during startup (uncaught exception), the app can partially
+      // mount (e.g. titlebar/grid) while leaving other regions (ribbon/sheet tabs) uninitialized.
+      // Surface those failures early with the collected diagnostics so flaky "element not found"
+      // assertions are easier to debug.
+      if (pageErrors.length > 0) {
+        const diag = await formatStartupDiagnostics();
+        page.off("console", onConsole);
+        page.off("pageerror", onPageError);
+        page.off("requestfailed", onRequestFailed);
+        throw new Error(`Desktop startup failed with page errors.${diag}`);
+      }
 
       page.off("console", onConsole);
       page.off("pageerror", onPageError);

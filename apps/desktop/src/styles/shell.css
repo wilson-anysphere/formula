@@ -351,8 +351,8 @@ dialog.print-preview-dialog::backdrop {
   display: flex;
   flex-direction: column;
   flex-wrap: nowrap;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-4);
+  gap: var(--space-0);
+  padding: var(--space-1) var(--space-3);
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -370,8 +370,8 @@ dialog.print-preview-dialog::backdrop {
 .statusbar__main {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-4);
+  flex-wrap: nowrap;
+  gap: var(--space-3);
   min-width: 0;
 }
 
@@ -439,9 +439,12 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar-mode {
-  padding: calc(var(--space-1) / 2) var(--space-4);
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: var(--space-0) var(--space-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--bg-primary);
   color: var(--text-secondary);
   font-weight: 600;
@@ -451,9 +454,12 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar-readonly {
-  padding: var(--space-1) var(--space-4);
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: var(--space-0) var(--space-2);
   border: 1px solid var(--warning);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--bg-primary);
   color: var(--warning);
   font-weight: 600;
@@ -466,15 +472,15 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar button {
-  padding: var(--space-0) var(--space-4);
-  height: 22px;
+  padding: var(--space-0) var(--space-3);
+  height: 20px;
   border: 1px solid var(--border);
   background: var(--bg-primary);
   color: var(--text-primary);
   border-radius: var(--radius-sm);
   cursor: pointer;
   font: inherit;
-  line-height: 20px;
+  line-height: 18px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -504,14 +510,14 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar select {
-  padding: var(--space-0) var(--space-4);
-  height: 22px;
+  padding: var(--space-0) var(--space-3);
+  height: 20px;
   border: 1px solid var(--border);
   background: var(--bg-primary);
   color: var(--text-primary);
   border-radius: var(--radius-sm);
   font: inherit;
-  line-height: 20px;
+  line-height: 18px;
   min-width: 0;
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
@@ -539,10 +545,16 @@ dialog.print-preview-dialog::backdrop {
 
 @media (max-width: 760px) {
   .statusbar__main {
-    gap: var(--space-3);
+    gap: var(--space-2);
   }
 
   .statusbar [data-testid="status-zoom"] {
+    display: none;
+  }
+
+  .statusbar [data-testid="open-version-history-panel"],
+  .statusbar [data-testid="open-branch-manager-panel"],
+  .statusbar [data-testid="open-marketplace-panel-statusbar"] {
     display: none;
   }
 

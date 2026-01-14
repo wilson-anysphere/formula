@@ -87,6 +87,7 @@ import { getOpenFileFilters, isOpenWorkbookPath } from "./file_dialog_filters.js
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import type { CollabSession } from "@formula/collab-session";
+import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import {
@@ -1337,6 +1338,21 @@ if (!formulaBarRoot) {
   throw new Error("Missing #formula-bar container");
 }
 const formulaBarRootEl = formulaBarRoot;
+
+const sheetTabsRoot = document.getElementById("sheet-tabs");
+if (!sheetTabsRoot) {
+  throw new Error("Missing #sheet-tabs container");
+}
+const sheetTabsRootEl = sheetTabsRoot;
+// The shell uses `.sheet-bar` (with an inner `.sheet-tabs` strip) for styling.
+// Normalize older HTML scaffolds that used `.sheet-tabs` on the container itself.
+sheetTabsRootEl.classList.add("sheet-bar");
+sheetTabsRootEl.classList.remove("sheet-tabs");
+
+// Sheet tab mounting is triggered by `SpreadsheetApp.onEditStateChange`, which invokes listeners
+// immediately with the current edit state. Declare the React root eagerly so early subscribers
+// (including Playwright bootstrap code) don't trip the temporal dead zone for `let` bindings.
+let sheetTabsReactRoot: ReturnType<typeof createRoot> | null = null;
 
 const statusBarRoot = document.querySelector<HTMLElement>(".statusbar");
 if (!statusBarRoot) {
@@ -3290,18 +3306,6 @@ window.addEventListener("unload", () => {
 let updateContextKeys: (selection?: SelectionState | null) => void = () => {};
 
 // --- Sheet tabs (Excel-like multi-sheet UI) -----------------------------------
-
-const sheetTabsRoot = document.getElementById("sheet-tabs");
-if (!sheetTabsRoot) {
-  throw new Error("Missing #sheet-tabs container");
-}
-const sheetTabsRootEl = sheetTabsRoot;
-// The shell uses `.sheet-bar` (with an inner `.sheet-tabs` strip) for styling.
-// Normalize older HTML scaffolds that used `.sheet-tabs` on the container itself.
-sheetTabsRootEl.classList.add("sheet-bar");
-sheetTabsRootEl.classList.remove("sheet-tabs");
-
-let sheetTabsReactRoot: ReturnType<typeof createRoot> | null = null;
 let stopSheetStoreListener: (() => void) | null = null;
 // During `DocumentController.applyState` restores, the sheet store is re-ordered to match
 // the restored sheet order. Avoid feeding those intermediate store moves back into the
@@ -8840,6 +8844,84 @@ function sanitizeFilename(raw: string): string {
     .replace(/[\\/:*?"<>|]+/g, "_")
     .trim();
   return cleaned || "export";
+}
+
+function handleExportDelimitedText(args: { delimiter: string; extension: string; mime: string; label: string }): void {
+  try {
+    // Export should reflect the latest user input (including in-progress edits that haven't been
+    // committed into the DocumentController yet).
+    commitAllPendingEditsForCommand();
+    if (isSpreadsheetEditing()) return;
+
+    if (typeof document === "undefined" || typeof Blob === "undefined") return;
+    if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return;
+
+    const sheetId = app.getCurrentSheetId();
+    const sheetName =
+      typeof (app as any)?.getCurrentSheetDisplayName === "function"
+        ? (app as any).getCurrentSheetDisplayName()
+        : workbookSheetStore.getName(sheetId) ?? sheetId;
+    const doc = app.getDocument();
+    const limits = getGridLimitsForFormatting();
+    const active = app.getActiveCell();
+
+    const clipBandSelectionToUsedRange = (range0: CellRange): CellRange => {
+      const normalized: CellRange = {
+        start: { row: Math.min(range0.start.row, range0.end.row), col: Math.min(range0.start.col, range0.end.col) },
+        end: { row: Math.max(range0.start.row, range0.end.row), col: Math.max(range0.start.col, range0.end.col) },
+      };
+
+      const activeCellFallback0: CellRange = {
+        start: { row: active.row, col: active.col },
+        end: { row: active.row, col: active.col },
+      };
+
+      const isFullHeight = normalized.start.row === 0 && normalized.end.row === limits.maxRows - 1;
+      const isFullWidth = normalized.start.col === 0 && normalized.end.col === limits.maxCols - 1;
+      if (!isFullHeight && !isFullWidth) return normalized;
+
+      const used = doc.getUsedRange(sheetId);
+      if (!used) return activeCellFallback0;
+
+      const startRow = Math.max(normalized.start.row, used.startRow);
+      const endRow = Math.min(normalized.end.row, used.endRow);
+      const startCol = Math.max(normalized.start.col, used.startCol);
+      const endCol = Math.min(normalized.end.col, used.endCol);
+      const clipped =
+        startRow <= endRow && startCol <= endCol
+          ? { start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } }
+          : null;
+      return clipped ?? activeCellFallback0;
+    };
+
+    const exportRange0 = clipBandSelectionToUsedRange(selectionBoundingBox0Based());
+    const dlp = createDesktopDlpContext({ documentId: workbookId });
+
+    const text = exportDocumentRangeToCsv(doc, sheetId, exportRange0, {
+      delimiter: args.delimiter,
+      dlp: { documentId: dlp.documentId, classificationStore: dlp.classificationStore, policy: dlp.policy },
+    });
+
+    const blob = new Blob([text], { type: args.mime });
+    const url = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${sanitizeFilename(sheetName)}.${args.extension}`;
+      a.rel = "noopener";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  } catch (err) {
+    console.error(`Failed to export ${args.label}:`, err);
+    showToast(`Failed to export ${args.label}: ${String(err)}`, "error");
+  } finally {
+    app.focus();
+  }
 }
 
 type TauriPageSetup = {

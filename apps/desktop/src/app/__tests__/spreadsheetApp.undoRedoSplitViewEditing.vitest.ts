@@ -128,6 +128,7 @@ describe("SpreadsheetApp undo/redo edit-mode guards", () => {
     // Avoid the SpreadsheetApp constructor's seeded navigation/demo cells (A1:D5).
     const cell = { row: 10, col: 10 };
 
+    const initialValue = doc.getCell(sheetId, cell).value;
     doc.setCellInput(sheetId, cell, "Hello", { label: "Edit" });
     expect(app.getUndoRedoState().canUndo).toBe(true);
 
@@ -145,7 +146,7 @@ describe("SpreadsheetApp undo/redo edit-mode guards", () => {
     expect(app.getUndoRedoState().canUndo).toBe(true);
 
     expect(app.undo()).toBe(true);
-    expect(doc.getCell(sheetId, cell).value).toBe(null);
+    expect(doc.getCell(sheetId, cell).value).toBe(initialValue);
 
     app.destroy();
     root.remove();

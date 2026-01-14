@@ -127,7 +127,7 @@ export class PresenceManager {
         this._broadcastNow();
       },
       throttleMs,
-      { now, setTimeout: setTimeoutFn, clearTimeout: clearTimeoutFn },
+      { now, setTimeout: this._setTimeout, clearTimeout: this._clearTimeout },
     );
   }
 
@@ -137,7 +137,9 @@ export class PresenceManager {
 
   _clearStaleEvictionTimer() {
     if (this._staleEvictionTimeoutId === null) return;
-    this._clearTimeout(this._staleEvictionTimeoutId);
+    if (typeof this._clearTimeout === "function") {
+      this._clearTimeout(this._staleEvictionTimeoutId);
+    }
     this._staleEvictionTimeoutId = null;
   }
 
