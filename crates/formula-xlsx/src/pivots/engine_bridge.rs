@@ -551,7 +551,7 @@ pub fn pivot_table_to_engine_config_with_styles(
             let show_as = map_show_data_as(df.show_data_as.as_deref());
 
             // `dataField@baseField` is an index into the cache fields list.
-            let base_field: Option<PivotFieldRef> = df.base_field.and_then(|base_field_idx| {
+            let base_field = df.base_field.and_then(|base_field_idx| {
                 cache_def
                     .cache_fields
                     .get(base_field_idx as usize)
@@ -575,14 +575,13 @@ pub fn pivot_table_to_engine_config_with_styles(
                         item,
                     )))
                 });
-
             Some(ValueField {
                 source_field: source_field_name.into(),
                 name,
                 aggregation,
                 number_format: df.num_fmt_id.and_then(|id| resolve_pivot_num_fmt_id(id, styles)),
                 show_as,
-                base_field: base_field.map(Into::into),
+                base_field,
                 base_item,
             })
         })
