@@ -669,6 +669,63 @@ fn iso_prefix(value: &str) -> Option<&str> {
     }
 }
 
+fn parse_excel_serial_best_effort(value: &str) -> Option<i32> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Be conservative: only accept numbers that look like a plain integer or fixed-point decimal
+    // (no exponents, no thousands separators).
+    let mut saw_digit = false;
+    let mut saw_dot = false;
+    for (idx, b) in trimmed.bytes().enumerate() {
+        match b {
+            b'0'..=b'9' => {
+                saw_digit = true;
+            }
+            b'.' => {
+                if saw_dot {
+                    return None;
+                }
+                saw_dot = true;
+            }
+            b'+' | b'-' => {
+                // Only allow a leading sign.
+                if idx != 0 {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    if !saw_digit {
+        return None;
+    }
+
+    let serial = trimmed.parse::<f64>().ok()?;
+    if !serial.is_finite() {
+        return None;
+    }
+
+    // Timeline selections are date-based; ignore any fractional time component.
+    let serial = serial.trunc();
+    if serial < i32::MIN as f64 || serial > i32::MAX as f64 {
+        return None;
+    }
+    Some(serial as i32)
+}
+
+fn serial_decimal_places(value: &str) -> Option<usize> {
+    let trimmed = value.trim();
+    let dot_idx = trimmed.find('.')?;
+    let frac = trimmed.get(dot_idx + 1..)?;
+    if frac.is_empty() || !frac.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(frac.len())
+}
+
 fn parse_timeline_date_input(value: &str, date_system: DateSystem) -> Option<NaiveDate> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -687,7 +744,7 @@ fn parse_timeline_date_input(value: &str, date_system: DateSystem) -> Option<Nai
     }
 
     // Excel serial.
-    let Ok(serial) = trimmed.parse::<i32>() else {
+    let Some(serial) = parse_excel_serial_best_effort(trimmed) else {
         return None;
     };
     let Ok(date) = serial_to_ymd(serial, date_system.to_engine_date_system()) else {
@@ -704,7 +761,7 @@ fn detect_timeline_date_repr(existing: &str) -> TimelineDateRepr {
     if trimmed.len() == 8 && trimmed.as_bytes().iter().all(|b| b.is_ascii_digit()) {
         return TimelineDateRepr::CompactYmd;
     }
-    if !trimmed.is_empty() && trimmed.as_bytes().iter().all(|b| b.is_ascii_digit()) {
+    if parse_excel_serial_best_effort(trimmed).is_some() {
         return TimelineDateRepr::Serial;
     }
     TimelineDateRepr::Iso
@@ -735,7 +792,14 @@ fn apply_desired_date_to_existing(
             Some(date) => {
                 let excel_date = ExcelDate::new(date.year(), date.month() as u8, date.day() as u8);
                 match ymd_to_serial(excel_date, date_system.to_engine_date_system()) {
-                    Ok(serial) => serial.to_string(),
+                    Ok(serial) => {
+                        let mut out = serial.to_string();
+                        if let Some(places) = serial_decimal_places(trimmed) {
+                            out.push('.');
+                            out.extend(std::iter::repeat('0').take(places));
+                        }
+                        out
+                    }
                     Err(_) => desired.iso.clone(),
                 }
             }
@@ -2254,7 +2318,7 @@ fn normalize_timeline_date(value: &str, date_system: ExcelDateSystem) -> Option<
     }
 
     // Fallback: interpret as an Excel serial date using the workbook date system.
-    if let Ok(serial) = trimmed.parse::<i32>() {
+    if let Some(serial) = parse_excel_serial_best_effort(trimmed) {
         if let Ok(date) = serial_to_ymd(serial, date_system) {
             return Some(format!(
                 "{:04}-{:02}-{:02}",
@@ -3634,6 +3698,19 @@ mod timeline_selection_write_tests {
     }
 
     #[test]
+    fn timeline_selection_parses_decimal_serials_using_workbook_date_system() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">
+  <selection startDate="1.0" endDate="2.00"/>
+</timelineCacheDefinition>"#;
+
+        let parsed = parse_timeline_selection(xml, DateSystem::V1904.to_engine_date_system())
+            .expect("parse selection");
+        assert_eq!(parsed.start.as_deref(), Some("1904-01-02"));
+        assert_eq!(parsed.end.as_deref(), Some("1904-01-03"));
+    }
+
+    #[test]
     fn timeline_selection_updates_numeric_serials_using_workbook_date_system() {
         // When a timeline persists selection endpoints as numeric serials, keep that representation
         // when patching so Excel continues to interpret it correctly.
@@ -3658,6 +3735,32 @@ mod timeline_selection_write_tests {
         let updated_str = std::str::from_utf8(&updated).expect("utf8");
         assert!(updated_str.contains("startDate=\"3\""), "{updated_str}");
         assert!(updated_str.contains("endDate=\"4\""), "{updated_str}");
+    }
+
+    #[test]
+    fn timeline_selection_updates_decimal_serials_using_workbook_date_system() {
+        // Some producers serialize timeline selection endpoints as fixed-point numbers (e.g.
+        // `1.0`). Keep that representation when patching so Excel continues to interpret it.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">
+  <selection startDate="1.0" endDate="2.00"/>
+</timelineCacheDefinition>"#;
+
+        let selection = TimelineSelectionState {
+            start: Some("1904-01-04".to_string()),
+            end: Some("1904-01-05".to_string()),
+        };
+
+        let updated =
+            patch_timeline_selection_xml(xml, &selection, DateSystem::V1904).expect("patch xml");
+        let parsed = parse_timeline_selection(&updated, DateSystem::V1904.to_engine_date_system())
+            .expect("parse selection");
+        assert_eq!(parsed.start.as_deref(), Some("1904-01-04"));
+        assert_eq!(parsed.end.as_deref(), Some("1904-01-05"));
+
+        let updated_str = std::str::from_utf8(&updated).expect("utf8");
+        assert!(updated_str.contains("startDate=\"3.0\""), "{updated_str}");
+        assert!(updated_str.contains("endDate=\"4.00\""), "{updated_str}");
     }
 
     #[test]
