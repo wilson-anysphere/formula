@@ -95,6 +95,8 @@ fn resolves_pivot_cache_parts_for_pivot_table() {
 
 #[test]
 fn pivot_graph_tolerates_malformed_workbook_relationships() {
+    // Malformed `xl/_rels/workbook.xml.rels` should not prevent pivot discovery, and cache parts
+    // should still be resolved via the `pivotCacheDefinition{cacheId}.xml` naming convention.
     let bytes = build_synthetic_pivot_package_with_malformed_workbook_rels();
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
 
@@ -120,8 +122,78 @@ fn pivot_graph_tolerates_malformed_workbook_relationships() {
     );
 }
 
+#[test]
+fn pivot_graph_falls_back_when_sheet_rels_are_malformed() {
+    // Malformed `xl/worksheets/_rels/sheet1.xml.rels` should not error, and the pivot table should
+    // still be returned via the fallback scan of `xl/pivotTables/*.xml`.
+    let bytes = build_synthetic_pivot_package_with_malformed_sheet_rels();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+
+    let graph = pkg.pivot_graph().expect("resolve pivot graph");
+    assert_eq!(graph.pivot_tables.len(), 1);
+
+    let table = &graph.pivot_tables[0];
+    assert_eq!(table.pivot_table_part, "xl/pivotTables/pivotTable1.xml");
+    assert_eq!(table.sheet_part, None);
+}
+
+#[test]
+fn pivot_graph_tolerates_malformed_cache_definition_rels() {
+    // Malformed cache definition `.rels` should not error. When we cannot resolve the cache records
+    // part from relationships and the conventional filename doesn't exist, we should return the
+    // pivot table but leave `cache_records_part` unset.
+    let bytes = build_synthetic_pivot_package_with_malformed_cache_definition_rels();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+
+    let graph = pkg.pivot_graph().expect("resolve pivot graph");
+    assert_eq!(graph.pivot_tables.len(), 1);
+
+    let table = &graph.pivot_tables[0];
+    assert_eq!(table.pivot_table_part, "xl/pivotTables/pivotTable1.xml");
+    assert_eq!(
+        table.cache_definition_part.as_deref(),
+        Some("xl/pivotCache/pivotCacheDefinition1.xml")
+    );
+    assert_eq!(table.cache_records_part, None);
+}
+
 fn build_synthetic_pivot_package() -> Vec<u8> {
-    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    build_synthetic_pivot_package_with_overrides(
+        VALID_WORKBOOK_RELS.as_bytes(),
+        VALID_WORKSHEET_RELS.as_bytes(),
+        VALID_CACHE_DEFINITION_RELS.as_bytes(),
+        true,
+    )
+}
+
+fn build_synthetic_pivot_package_with_malformed_workbook_rels() -> Vec<u8> {
+    build_synthetic_pivot_package_with_overrides(
+        b"<Relationships",
+        VALID_WORKSHEET_RELS.as_bytes(),
+        VALID_CACHE_DEFINITION_RELS.as_bytes(),
+        true,
+    )
+}
+
+fn build_synthetic_pivot_package_with_malformed_sheet_rels() -> Vec<u8> {
+    build_synthetic_pivot_package_with_overrides(
+        VALID_WORKBOOK_RELS.as_bytes(),
+        b"<Relationships",
+        VALID_CACHE_DEFINITION_RELS.as_bytes(),
+        true,
+    )
+}
+
+fn build_synthetic_pivot_package_with_malformed_cache_definition_rels() -> Vec<u8> {
+    build_synthetic_pivot_package_with_overrides(
+        VALID_WORKBOOK_RELS.as_bytes(),
+        VALID_WORKSHEET_RELS.as_bytes(),
+        b"<Relationships",
+        false,
+    )
+}
+
+const VALID_WORKBOOK_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheets>
@@ -132,136 +204,72 @@ fn build_synthetic_pivot_package() -> Vec<u8> {
   </pivotCaches>
 </workbook>"#;
 
-    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const VALID_WORKBOOK_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/>
 </Relationships>"#;
 
-    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const VALID_WORKSHEET_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheetData/>
 </worksheet>"#;
 
-    let worksheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const VALID_WORKSHEET_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/>
 </Relationships>"#;
 
-    let pivot_table_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const VALID_PIVOT_TABLE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
   name="PivotTable1" cacheId="1"/>"#;
 
-    let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const VALID_CACHE_DEFINITION_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="0"/>"#;
 
-    let cache_definition_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const VALID_CACHE_DEFINITION_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords" Target="pivotCacheRecords1.xml"/>
 </Relationships>"#;
 
-    let cache_records_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const VALID_CACHE_RECORDS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#;
 
+fn build_synthetic_pivot_package_with_overrides(
+    workbook_rels: &[u8],
+    worksheet_rels: &[u8],
+    cache_definition_rels: &[u8],
+    include_cache_records: bool,
+) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(cursor);
     let options = zip::write::FileOptions::<()>::default()
         .compression_method(zip::CompressionMethod::Deflated);
 
-    for (name, xml) in [
-        ("xl/workbook.xml", workbook_xml),
+    for (name, bytes) in [
+        ("xl/workbook.xml", VALID_WORKBOOK_XML.as_bytes()),
         ("xl/_rels/workbook.xml.rels", workbook_rels),
-        ("xl/worksheets/sheet1.xml", worksheet_xml),
+        ("xl/worksheets/sheet1.xml", VALID_WORKSHEET_XML.as_bytes()),
         ("xl/worksheets/_rels/sheet1.xml.rels", worksheet_rels),
-        ("xl/pivotTables/pivotTable1.xml", pivot_table_xml),
+        ("xl/pivotTables/pivotTable1.xml", VALID_PIVOT_TABLE_XML.as_bytes()),
         (
             "xl/pivotCache/pivotCacheDefinition1.xml",
-            cache_definition_xml,
+            VALID_CACHE_DEFINITION_XML.as_bytes(),
         ),
         (
             "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
             cache_definition_rels,
         ),
-        ("xl/pivotCache/pivotCacheRecords1.xml", cache_records_xml),
     ] {
         zip.start_file(name, options).unwrap();
-        zip.write_all(xml.as_bytes()).unwrap();
+        zip.write_all(bytes).unwrap();
     }
 
-    zip.finish().unwrap().into_inner()
-}
-
-fn build_synthetic_pivot_package_with_malformed_workbook_rels() -> Vec<u8> {
-    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets>
-    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
-  </sheets>
-  <pivotCaches>
-    <pivotCache cacheId="1" r:id="rId2"/>
-  </pivotCaches>
-</workbook>"#;
-
-    // Intentionally malformed: missing `/>` on the final Relationship element. The pivot graph
-    // resolver should treat relationship parse errors as "no relationships" and still discover
-    // pivot parts by scanning the package.
-    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"
-</Relationships>"#;
-
-    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheetData/>
-</worksheet>"#;
-
-    let worksheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/>
-</Relationships>"#;
-
-    let pivot_table_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-  name="PivotTable1" cacheId="1"/>"#;
-
-    let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="0"/>"#;
-
-    let cache_definition_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords" Target="pivotCacheRecords1.xml"/>
-</Relationships>"#;
-
-    let cache_records_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#;
-
-    let cursor = Cursor::new(Vec::new());
-    let mut zip = zip::ZipWriter::new(cursor);
-    let options = zip::write::FileOptions::<()>::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-
-    for (name, xml) in [
-        ("xl/workbook.xml", workbook_xml),
-        ("xl/_rels/workbook.xml.rels", workbook_rels),
-        ("xl/worksheets/sheet1.xml", worksheet_xml),
-        ("xl/worksheets/_rels/sheet1.xml.rels", worksheet_rels),
-        ("xl/pivotTables/pivotTable1.xml", pivot_table_xml),
-        (
-            "xl/pivotCache/pivotCacheDefinition1.xml",
-            cache_definition_xml,
-        ),
-        (
-            "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
-            cache_definition_rels,
-        ),
-        ("xl/pivotCache/pivotCacheRecords1.xml", cache_records_xml),
-    ] {
-        zip.start_file(name, options).unwrap();
-        zip.write_all(xml.as_bytes()).unwrap();
+    if include_cache_records {
+        zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
+            .unwrap();
+        zip.write_all(VALID_CACHE_RECORDS_XML.as_bytes()).unwrap();
     }
 
     zip.finish().unwrap().into_inner()

@@ -82,9 +82,11 @@ impl XlsxPackage {
             }
 
             if let Some(sheet_xml) = self.part(&sheet_part) {
-                for rid in parse_sheet_pivot_table_relationship_ids(sheet_xml)? {
-                    if let Some(rel) = rel_map.get(rid.as_str()) {
-                        pivot_parts.insert(resolve_target(&sheet_part, &rel.target));
+                if let Ok(rids) = parse_sheet_pivot_table_relationship_ids(sheet_xml) {
+                    for rid in rids {
+                        if let Some(rel) = rel_map.get(rid.as_str()) {
+                            pivot_parts.insert(resolve_target(&sheet_part, &rel.target));
+                        }
                     }
                 }
             }
@@ -197,13 +199,19 @@ fn sheet_name_by_part(package: &XlsxPackage) -> Result<HashMap<String, String>, 
         Some(bytes) => bytes,
         None => return Ok(HashMap::new()),
     };
-    let workbook_xml = String::from_utf8(workbook_xml.to_vec())?;
-    let sheets = parse_workbook_sheets(&workbook_xml)?;
+    let workbook_xml = match String::from_utf8(workbook_xml.to_vec()) {
+        Ok(xml) => xml,
+        Err(_) => return Ok(HashMap::new()),
+    };
+    let sheets = match parse_workbook_sheets(&workbook_xml) {
+        Ok(sheets) => sheets,
+        Err(_) => return Ok(HashMap::new()),
+    };
 
     let rels_part = rels_for_part(workbook_part);
     let workbook_rels = match package.part(&rels_part) {
         Some(bytes) => parse_relationships(bytes).unwrap_or_default(),
-        None => return Ok(HashMap::new()),
+        None => Vec::new(),
     };
     let rel_map: HashMap<_, _> = workbook_rels
         .iter()
@@ -317,7 +325,7 @@ fn cache_records_part(
         None => return Ok(None),
     };
 
-    let relationships = parse_relationships(rels_xml)?;
+    let relationships = parse_relationships(rels_xml).unwrap_or_default();
     for rel in relationships {
         if rel.type_uri == REL_TYPE_PIVOT_CACHE_RECORDS {
             return Ok(Some(resolve_target(cache_definition_part, &rel.target)));
