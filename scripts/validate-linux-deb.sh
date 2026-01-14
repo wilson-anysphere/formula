@@ -607,6 +607,8 @@ validate_container() {
     # shared-mime-info definition under /usr/share/mime/packages and relies on
     # shared-mime-info triggers to rebuild /usr/share/mime/globs2.
     test -f /usr/share/mime/packages/app.formula.desktop.xml
+    grep -F "application/vnd.apache.parquet" /usr/share/mime/packages/app.formula.desktop.xml
+    grep -F "*.parquet" /usr/share/mime/packages/app.formula.desktop.xml
     grep -Eq "application/vnd\\.apache\\.parquet:.*\\*\\.parquet" /usr/share/mime/globs2
 
     # Validate desktop integration metadata is present in the installed .desktop entry.
