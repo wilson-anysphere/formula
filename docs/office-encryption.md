@@ -413,9 +413,11 @@ Excel can also vary algorithms via “Advanced” encryption options; our suppor
 defaults above.
 
 ### Generating fixtures (recommended)
-Repo note: the committed encrypted OOXML fixtures under `fixtures/encrypted/ooxml/` are generated
-using Python + [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) (see
-`fixtures/encrypted/ooxml/README.md` for the exact tool versions, passwords, and regeneration notes).
+Repo note: most committed encrypted OOXML fixtures under `fixtures/encrypted/ooxml/` are generated
+using Python + [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool), but some fixtures are
+generated via Apache POI (for example `standard-4.2.xlsx`, `standard-unicode.xlsx`). See
+`fixtures/encrypted/ooxml/README.md` for the canonical per-fixture provenance + exact tool
+versions/passwords.
 
 To generate fixtures for regression tests:
 
@@ -444,12 +446,14 @@ To identify the scheme without full parsing:
   * `minor == 2` and `major ∈ {2,3,4}` ⇒ Standard (CryptoAPI; commonly 3.2)
 
 ### Defaults for *writing* encrypted OOXML (`formula-office-crypto`)
-This repo does not yet re-encrypt workbooks on save in the `formula-io` export path (round-tripping
-an encrypted workbook will eventually require emitting a new `EncryptionInfo` + `EncryptedPackage`
-wrapper).
+With the `formula-io/encrypted-workbooks` feature enabled, Formula can decrypt Office-encrypted
+workbooks to an in-memory ZIP package and (optionally) **re-encrypt** on save while preserving
+non-encryption OLE streams/storages (see
+`formula_io::open_workbook_with_password_and_preserved_ole` +
+`OpenedWorkbookWithPreservedOle::save_preserving_encryption`).
 
-However, `crates/formula-office-crypto` implements an **Agile encryption writer**
-(`formula_office_crypto::encrypt_package_to_ole`) that is used for round-trip tests. Its defaults
+The underlying writer lives in `crates/formula-office-crypto`
+(`formula_office_crypto::encrypt_package_to_ole`) and is used for round-trip tests. Its defaults
 are the repo’s current “recommended writer settings” unless a compatibility requirement dictates
 otherwise:
 
@@ -465,13 +469,12 @@ otherwise:
   - Generate a random 16-byte verifier input (`verifierHashInput`).
   - Emit `dataIntegrity` (HMAC) in the XML descriptor (note: not all decrypt paths validate it yet).
 
-- **Standard writer:** not implemented yet in `formula-office-crypto`. If we add it, the intended
-  defaults are:
-  - AES-128 (`CALG_AES_128`) + SHA-1 (`CALG_SHA1`)
-  - Iteration count is effectively fixed at 50,000 in the key derivation.
-  - `EncryptedPackage` encryption: **AES-ECB** (no IV). Ciphertext is block-aligned (pad plaintext to
-    16-byte blocks when encrypting), and plaintext is truncated to the 8-byte `orig_size` prefix
-    after decrypting (see `docs/offcrypto-standard-encryptedpackage.md`).
+- **Standard writer:** supported via `EncryptOptions { scheme: Standard, .. }` with:
+  - SHA-1 (`CALG_SHA1`) and a fixed `spinCount=50,000`
+  - AES-128/192/256 (`CALG_AES_128`/`_192`/`_256`) + **AES-ECB** `EncryptedPackage` (no IV)
+  - `EncryptionInfo` header version **3.2** (commonly accepted by Office tooling)
+  - `EncryptedPackage` is zero-padded to 16-byte blocks, and plaintext is truncated to the 8-byte
+    `orig_size` prefix after decrypting (see `docs/offcrypto-standard-encryptedpackage.md`).
 
 These defaults are intended for **interoperability** with Excel, not for novel cryptographic
 design.
