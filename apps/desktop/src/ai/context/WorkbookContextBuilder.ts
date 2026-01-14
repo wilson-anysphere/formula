@@ -329,6 +329,16 @@ export interface WorkbookContextBuilderOptions {
   documentController: DocumentController;
   spreadsheet: SpreadsheetApi;
   /**
+   * When enabled, the underlying ToolExecutor will treat formula cells as having a computed value
+   * (via `cell.value`) instead of always treating them as `null`.
+   *
+   * This is opt-in because many backends (including the in-memory workbook) do not evaluate formulas,
+   * and because computed formula values can be a DLP inference channel if dependencies are not traced.
+   * ToolExecutor enforces conservative DLP gating (formula values are only surfaced when the selected
+   * range decision is pure `ALLOW`).
+   */
+  includeFormulaValues?: boolean;
+  /**
    * Optional resolver that maps stable sheet ids to user-facing display names
    * (and reverse).
    *
@@ -456,6 +466,7 @@ export class WorkbookContextBuilder {
     this.options = {
       ...options,
       sheetNameResolver: options.sheetNameResolver ?? null,
+      includeFormulaValues: options.includeFormulaValues ?? false,
       maxSheets: Math.max(1, options.maxSheets ?? 10),
       maxSchemaRows: Math.max(1, options.maxSchemaRows ?? (isInlineEdit ? 100 : 200)),
       maxSchemaCols: Math.max(1, options.maxSchemaCols ?? (isInlineEdit ? 30 : 50)),
@@ -582,6 +593,7 @@ export class WorkbookContextBuilder {
       const executor = new ToolExecutor(this.options.spreadsheet, {
         default_sheet: defaultSheetForTools,
         sheet_name_resolver: this.options.sheetNameResolver ?? null,
+        include_formula_values: this.options.includeFormulaValues,
         dlp,
         max_read_range_cells: maxReadRangeCells,
         max_read_range_chars: 200_000,

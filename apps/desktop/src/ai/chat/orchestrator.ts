@@ -304,6 +304,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
   // actually reduce latency for multi-turn chats.
   //
   // DLP safety: only reuse the builder when the DLP inputs (policy/classifications/includeRestrictedContent)
+  // are unchanged, and when tool execution options that affect read results (e.g. include_formula_values)
   // are unchanged. If the user changes policy/classifications during a session we recreate the builder so
   // data cached under a less-restrictive setting can't leak under a stricter one.
   let cachedContextBuilder: WorkbookContextBuilder | null = null;
@@ -317,6 +318,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
       ragService: contextProvider as any,
       schemaProvider: options.schemaProvider ?? null,
       sheetNameResolver: options.sheetNameResolver ?? null,
+      includeFormulaValues: Boolean(options.toolExecutorOptions?.include_formula_values),
       mode: "chat",
       model: options.model,
       contextWindowTokens,
@@ -412,9 +414,10 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     try {
       throwIfAborted(signal);
       const dlpKey = computeDlpCacheKey(dlp);
-      if (!cachedContextBuilder || cachedContextBuilderDlpKey !== dlpKey) {
+      const contextBuilderKey = `${dlpKey}|formula_values:${options.toolExecutorOptions?.include_formula_values ? "1" : "0"}`;
+      if (!cachedContextBuilder || cachedContextBuilderDlpKey !== contextBuilderKey) {
         cachedContextBuilder = createContextBuilder();
-        cachedContextBuilderDlpKey = dlpKey;
+        cachedContextBuilderDlpKey = contextBuilderKey;
       }
       workbookContext = await withAbort(
         signal,
@@ -525,7 +528,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
       preview_options: options.previewOptions,
       executor_options: {
         default_sheet: activeSheetId,
-        sheet_name_resolver: options.toolExecutorOptions?.sheet_name_resolver ?? options.sheetNameResolver ?? null
+        sheet_name_resolver: options.toolExecutorOptions?.sheet_name_resolver ?? options.sheetNameResolver ?? null,
+        include_formula_values: options.toolExecutorOptions?.include_formula_values ?? false
       },
       on_approval_required: async (request: PreviewApprovalRequest) => {
         return (

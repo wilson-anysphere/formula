@@ -53,6 +53,32 @@ describe("WorkbookContextBuilder", () => {
     toolExecutorConstructorCalls = 0;
   });
 
+  it("can include computed formula values in data blocks when includeFormulaValues is enabled", async () => {
+    const documentController = new DocumentController();
+    // Simulate an imported workbook cell that contains both a formula and a cached/computed value.
+    documentController.model.setCell("Sheet1", 0, 0, { value: 2, formula: "=1+1", styleId: 0 });
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_formula_values",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      includeFormulaValues: true,
+    });
+
+    const ctx = await builder.build({
+      activeSheetId: "Sheet1",
+      selectedRange: { sheetId: "Sheet1", range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } },
+    });
+
+    const selectionBlock = ctx.payload.blocks.find((b) => b.kind === "selection");
+    expect(selectionBlock).toBeTruthy();
+    expect(selectionBlock?.values).toEqual([[2]]);
+  });
+
   it("extracts a schema-first summary from a sheet with headers", async () => {
     const documentController = new DocumentController();
     documentController.setRangeValues("Sheet1", "A1", [
