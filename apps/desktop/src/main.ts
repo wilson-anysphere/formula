@@ -221,7 +221,6 @@ import {
   type SnapshotCell,
 } from "./workbook/mergeFormattingIntoSnapshot.js";
 import { coerceSavePathToXlsx, getWorkbookFileMetadataFromWorkbookInfo } from "./workbook/workbookFileMetadata.js";
-import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
 
 // ---------------------------------------------------------------------------
 // Startup instrumentation + two-phase boot
@@ -8197,6 +8196,7 @@ registerDesktopCommands({
   app,
   layoutController: ribbonLayoutController,
   isEditing: isSpreadsheetEditing,
+  commitPendingEditsForCommand: commitAllPendingEditsForCommand,
   focusAfterSheetNavigation: focusAfterSheetNavigationFromCommandRef,
   getVisibleSheetIds: () => listSheetsForUi().map((sheet) => sheet.id),
   sheetStructureHandlers: {
@@ -8522,57 +8522,6 @@ function sanitizeFilename(raw: string): string {
     .replace(/[\\/:*?"<>|]+/g, "_")
     .trim();
   return cleaned || "export";
-}
-
-function handleExportDelimitedText(args: { delimiter: string; extension: string; mime: string; label: string }): void {
-  try {
-    // Ensure exports reflect the latest user input. If a cell edit is in progress, it may not yet
-    // have been committed into the DocumentController.
-    commitAllPendingEditsForCommand();
-
-    const sheetId = app.getCurrentSheetId();
-    const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
-    const doc = app.getDocument();
-    const limits = getGridLimitsForFormatting();
-
-    const active = app.getActiveCell();
-    const activeCellFallback: CellRange = {
-      start: { row: active.row, col: active.col },
-      end: { row: active.row, col: active.col },
-    };
-
-    let range = selectionBoundingBox0Based();
-
-    // Exporting full-row/full-column/full-sheet selections at Excel scale would attempt to
-    // materialize millions/billions of empty cells. Clip those band selections to the used
-    // range when possible, and otherwise fall back to exporting the active cell.
-    const isFullHeight = range.start.row === 0 && range.end.row === limits.maxRows - 1;
-    const isFullWidth = range.start.col === 0 && range.end.col === limits.maxCols - 1;
-    if (isFullHeight || isFullWidth) {
-      const used = doc.getUsedRange(sheetId);
-      if (used) {
-        const startRow = Math.max(range.start.row, used.startRow);
-        const endRow = Math.min(range.end.row, used.endRow);
-        const startCol = Math.max(range.start.col, used.startCol);
-        const endCol = Math.min(range.end.col, used.endCol);
-        const clipped =
-          startRow <= endRow && startCol <= endCol
-            ? { start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } }
-            : null;
-        range = clipped ?? activeCellFallback;
-      } else {
-        range = activeCellFallback;
-      }
-    }
-
-    const csv = exportDocumentRangeToCsv(doc, sheetId, range, { delimiter: args.delimiter });
-    const bytes = new TextEncoder().encode(csv);
-    downloadBytes(bytes, `${sanitizeFilename(sheetName)}.${args.extension}`, args.mime);
-    app.focus();
-  } catch (err) {
-    console.error(`Failed to export ${args.label}:`, err);
-    showToast(`Failed to export ${args.label}: ${String(err)}`, "error");
-  }
 }
 
 type TauriPageSetup = {

@@ -101,6 +101,15 @@ export function registerDesktopCommands(params: {
    * split-view secondary editor state, so callers should pass that in when available.
    */
   isEditing?: (() => boolean) | null;
+  /**
+   * Optional hook to commit any in-progress edits before running commands that need the latest
+   * document state (e.g. exports).
+   *
+   * Defaults to calling `app.commitPendingEditsForCommand()` when available. `main.ts` should pass
+   * its `commitAllPendingEditsForCommand()` helper so split-view secondary pane edits are also
+   * included.
+   */
+  commitPendingEditsForCommand?: (() => void) | null;
   focusAfterSheetNavigation?: (() => void) | null;
   getVisibleSheetIds?: (() => string[]) | null;
   ensureExtensionsLoaded?: (() => Promise<void>) | null;
@@ -147,6 +156,7 @@ export function registerDesktopCommands(params: {
     app,
     layoutController,
     isEditing = null,
+    commitPendingEditsForCommand: commitPendingEditsForCommandHandler = null,
     focusAfterSheetNavigation = null,
     getVisibleSheetIds = null,
     ensureExtensionsLoaded = null,
@@ -190,12 +200,31 @@ export function registerDesktopCommands(params: {
       // `showToast` requires a DOM #toast-root; ignore in tests/headless.
     }
   };
+  const commitEditsForCommand = (): void => {
+    try {
+      if (commitPendingEditsForCommandHandler) {
+        commitPendingEditsForCommandHandler();
+        return;
+      }
+      if (typeof (app as any)?.commitPendingEditsForCommand === "function") {
+        (app as any).commitPendingEditsForCommand();
+      }
+    } catch {
+      // ignore (tests/headless)
+    }
+  };
   const sanitizeFilename = (raw: string): string => {
     const cleaned = String(raw ?? "")
       // Windows-reserved + generally-illegal filename characters.
       .replace(/[\\/:*?"<>|]+/g, "_")
       .trim();
     return cleaned || "export";
+  };
+  const canDownloadText = (): boolean => {
+    if (typeof document === "undefined") return false;
+    if (typeof Blob === "undefined") return false;
+    if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return false;
+    return true;
   };
   const downloadText = (text: string, filename: string, mime: string): void => {
     // Download behavior is browser-specific. Make this best-effort so unit tests/non-browser
@@ -803,7 +832,9 @@ export function registerDesktopCommands(params: {
  
   const exportDelimitedText = (args: { delimiter: string; extension: string; mime: string; label: string }): void => {
     try {
+      commitEditsForCommand();
       if (isEditingFn()) return;
+      if (!canDownloadText()) return;
  
       const sheetId = app.getCurrentSheetId();
       const sheetName = typeof (app as any)?.getCurrentSheetDisplayName === "function" ? (app as any).getCurrentSheetDisplayName() : sheetId;
