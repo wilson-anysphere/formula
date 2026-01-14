@@ -7,8 +7,8 @@ use crate::crypto::{
 };
 use crate::error::OfficeCryptoError;
 use crate::util::{
-    checked_vec_len, ct_eq, decode_utf16le_nul_terminated, read_u32_le, read_u64_le,
-    EncryptionInfoHeader,
+    checked_vec_len, ct_eq, decode_utf16le_nul_terminated, parse_encrypted_package_original_size,
+    read_u32_le, EncryptionInfoHeader,
 };
 // CryptoAPI algorithm identifiers (MS-OFFCRYPTO Standard / CryptoAPI encryption).
 #[allow(dead_code)]
@@ -548,12 +548,7 @@ pub(crate) fn decrypt_standard_encrypted_package(
     encrypted_package: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
-    if encrypted_package.len() < 8 {
-        return Err(OfficeCryptoError::InvalidFormat(
-            "EncryptedPackage stream too short".to_string(),
-        ));
-    }
-    let total_size = read_u64_le(encrypted_package, 0)?;
+    let total_size = parse_encrypted_package_original_size(encrypted_package)?;
     let expected_len = checked_vec_len(total_size)?;
     let ciphertext = &encrypted_package[8..];
 

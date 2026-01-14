@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{Cursor, Read as _, Seek as _, SeekFrom, Write as _};
 
 use formula_office_crypto::{decrypt_encrypted_package, OfficeCryptoError};
 
@@ -57,6 +57,34 @@ fn decrypts_agile_encrypted_package() {
 fn decrypts_standard_encrypted_package() {
     let decrypted =
         decrypt_encrypted_package(STANDARD_FIXTURE, "password").expect("decrypt standard");
+    assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
+    assert_decrypted_zip_contains_workbook(&decrypted);
+}
+
+#[test]
+fn decrypts_standard_encrypted_package_when_size_header_high_dword_is_reserved() {
+    // Some producers treat the 8-byte EncryptedPackage size prefix as (u32 size, u32 reserved).
+    // Mutate the high DWORD to a non-zero value and ensure decrypt still succeeds.
+    let cursor = Cursor::new(STANDARD_FIXTURE.to_vec());
+    let mut ole = cfb::CompoundFile::open(cursor).expect("open cfb");
+
+    {
+        let mut stream = ole
+            .open_stream("EncryptedPackage")
+            .or_else(|_| ole.open_stream("/EncryptedPackage"))
+            .expect("open EncryptedPackage");
+
+        let mut header = [0u8; 8];
+        stream.read_exact(&mut header).expect("read size prefix");
+        header[4..8].copy_from_slice(&1u32.to_le_bytes());
+        stream
+            .seek(SeekFrom::Start(0))
+            .expect("seek EncryptedPackage to start");
+        stream.write_all(&header).expect("write size prefix");
+    }
+
+    let ole_bytes = ole.into_inner().into_inner();
+    let decrypted = decrypt_encrypted_package(&ole_bytes, "password").expect("decrypt standard");
     assert_eq!(decrypted.as_slice(), STANDARD_PLAINTEXT);
     assert_decrypted_zip_contains_workbook(&decrypted);
 }

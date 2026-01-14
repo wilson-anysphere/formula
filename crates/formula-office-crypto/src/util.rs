@@ -136,13 +136,31 @@ pub(crate) fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, OfficeCryp
     Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
-pub(crate) fn read_u64_le(bytes: &[u8], offset: usize) -> Result<u64, OfficeCryptoError> {
-    let b = bytes
-        .get(offset..offset + 8)
-        .ok_or_else(|| OfficeCryptoError::InvalidFormat("unexpected EOF".to_string()))?;
-    Ok(u64::from_le_bytes([
-        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-    ]))
+/// Parse the 8-byte plaintext size prefix at the start of an `EncryptedPackage` stream.
+///
+/// MS-OFFCRYPTO describes this field as a `u64le`, but some producers/libraries treat it as
+/// `(u32 totalSize, u32 reserved)` (often with `reserved = 0`). When the high DWORD is non-zero but
+/// the combined 64-bit value is not plausible for the available ciphertext, fall back to the low
+/// DWORD for compatibility.
+pub(crate) fn parse_encrypted_package_original_size(
+    encrypted_package: &[u8],
+) -> Result<u64, OfficeCryptoError> {
+    if encrypted_package.len() < 8 {
+        return Err(OfficeCryptoError::InvalidFormat(
+            "EncryptedPackage stream too short".to_string(),
+        ));
+    }
+
+    let len_lo = read_u32_le(encrypted_package, 0)? as u64;
+    let len_hi = read_u32_le(encrypted_package, 4)? as u64;
+    let size_u64 = len_lo | (len_hi << 32);
+
+    let ciphertext_len = encrypted_package.len().saturating_sub(8) as u64;
+    Ok(if len_hi != 0 && size_u64 > ciphertext_len && len_lo <= ciphertext_len {
+        len_lo
+    } else {
+        size_u64
+    })
 }
 
 pub(crate) fn decode_utf16le_nul_terminated(bytes: &[u8]) -> Result<String, OfficeCryptoError> {

@@ -16,7 +16,9 @@ use crate::crypto::{
     HashAlgorithm,
 };
 use crate::error::OfficeCryptoError;
-use crate::util::{checked_vec_len, ct_eq, read_u64_le, EncryptionInfoHeader};
+use crate::util::{
+    checked_vec_len, ct_eq, parse_encrypted_package_original_size, EncryptionInfoHeader,
+};
 use zeroize::Zeroizing;
 
 const BLOCK_KEY_VERIFIER_HASH_INPUT: &[u8; 8] = b"\xFE\xA7\xD2\x76\x3B\x4B\x9E\x79";
@@ -141,12 +143,7 @@ pub(crate) fn decrypt_agile_encrypted_package(
     password: &str,
     opts: &crate::DecryptOptions,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
-    if encrypted_package.len() < 8 {
-        return Err(OfficeCryptoError::InvalidFormat(
-            "EncryptedPackage stream too short".to_string(),
-        ));
-    }
-    let total_size = read_u64_le(encrypted_package, 0)?;
+    let total_size = parse_encrypted_package_original_size(encrypted_package)?;
     let expected_len = checked_vec_len(total_size)?;
     let ciphertext = &encrypted_package[8..];
 
