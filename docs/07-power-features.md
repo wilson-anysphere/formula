@@ -982,7 +982,9 @@ Validation + edge cases (Rust behavior):
   - If a sign-changing bracket cannot be found within `maxBracketExpansions`, the call succeeds but returns `status: "NoBracketFound"`.
 - If a Newton step would produce a non-finite next input (NaN/±Inf), the call succeeds but returns `status: "NumericalFailure"`.
 - Side effects: Goal Seek mutates spreadsheet state as it searches:
-  - `changingCell` is overwritten on every iteration and is left at the final returned `solution` value (even when not converged).
+  - `changingCell` is overwritten on every step.
+    - For `status: "Converged"` and `status: "MaxIterationsReached"`, the model ends with `changingCell == solution`.
+    - For `status: "NoBracketFound"` and `status: "NumericalFailure"`, the returned `solution` is best-effort, but the model may be left at the **last evaluated probe/bracketing value** rather than at `solution` (callers who need a strict end state should explicitly write `solution` back into the cell after the call).
   - The model is recalculated after every update, so `targetCell` and dependents reflect the latest candidate.
   - Engine-backed note: `GoalSeek` sets the changing cell via `WhatIfModel::set_cell_value(CellValue::Number(...))`.
     - For `EngineWhatIfModel` / `formula-wasm`, this overwrites the cell as a literal value and clears any existing formula in `changingCell`.
@@ -1010,8 +1012,9 @@ WASM binding validation rules (current `formula-wasm` implementation):
 
 WASM binding side effects / integration notes:
 
-- `goalSeek` mutates the workbook state and updates the `changingCell` input to the final `solution` value (as a number).
+- `goalSeek` mutates the workbook state and updates the `changingCell` input to the returned `solution` value (as a number).
   - If the cell previously had a “rich” input (`setCellRich`), it is cleared so `getCell` reflects the scalar input.
+  - Note: the current binding does **not** explicitly reapply `solution` to the underlying engine state after the solve finishes. For the common `Converged`/`MaxIterationsReached` statuses this is fine (the algorithm ends at `solution`), but for `NoBracketFound`/`NumericalFailure` a host that needs strict consistency may want to follow up with `setCell(changingCell, solution, sheet)`.
 - The wasm `goalSeek` API runs recalculation internally but does **not** return a `recalculate()`-style cell change list. Hosts should call `getCell`/`getRange` (or similar) to refresh any UI state after a goal seek run.
 
 Progress events:
