@@ -1,6 +1,6 @@
 use formula_columnar::{
-    AggSpec, BitVec, ColumnSchema, ColumnType, ColumnarTable, ColumnarTableBuilder, PageCacheConfig,
-    JoinType, QueryError, TableOptions, Value,
+    AggSpec, BitVec, ColumnSchema, ColumnType, ColumnarTable, ColumnarTableBuilder, JoinType,
+    PageCacheConfig, QueryError, TableOptions, Value,
 };
 use std::sync::Arc;
 
@@ -1281,4 +1281,47 @@ fn hash_join_multi_with_type_supports_inner_left_and_full_outer() {
         full.right_indices,
         vec![Some(0), None, None, Some(1), Some(2), Some(3)]
     );
+}
+
+#[test]
+fn single_key_join_wrappers_match_multi_key_variants() {
+    let schema = vec![ColumnSchema {
+        name: "k".to_owned(),
+        column_type: ColumnType::String,
+    }];
+
+    let left = build_table(
+        schema.clone(),
+        vec![
+            vec![Value::String(Arc::<str>::from("A"))],
+            vec![Value::Null],
+            vec![Value::String(Arc::<str>::from("B"))],
+        ],
+    );
+    let right = build_table(
+        schema,
+        vec![
+            vec![Value::String(Arc::<str>::from("A"))],
+            vec![Value::String(Arc::<str>::from("C"))],
+            vec![Value::Null],
+        ],
+    );
+
+    let left_join = left.hash_left_join(&right, 0, 0).unwrap();
+    let left_join_multi = left.hash_left_join_multi(&right, &[0], &[0]).unwrap();
+    assert_eq!(left_join, left_join_multi);
+
+    let full = left.hash_full_outer_join(&right, 0, 0).unwrap();
+    let full_multi = left
+        .hash_full_outer_join_multi(&right, &[0], &[0])
+        .unwrap();
+    assert_eq!(full, full_multi);
+
+    let typed = left
+        .hash_join_with_type(&right, 0, 0, JoinType::Left)
+        .unwrap();
+    let typed_multi = left
+        .hash_join_multi_with_type(&right, &[0], &[0], JoinType::Left)
+        .unwrap();
+    assert_eq!(typed, typed_multi);
 }

@@ -641,6 +641,39 @@ impl ColumnarTable {
         crate::query::hash_join(self, right, left_on, right_on)
     }
 
+    /// Hash join on a single key column (left join).
+    pub fn hash_left_join(
+        &self,
+        right: &ColumnarTable,
+        left_on: usize,
+        right_on: usize,
+    ) -> Result<crate::query::JoinResult<usize, Option<usize>>, crate::query::QueryError> {
+        crate::query::hash_left_join(self, right, left_on, right_on)
+    }
+
+    /// Hash join on a single key column (full outer join).
+    pub fn hash_full_outer_join(
+        &self,
+        right: &ColumnarTable,
+        left_on: usize,
+        right_on: usize,
+    ) -> Result<crate::query::JoinResult<Option<usize>, Option<usize>>, crate::query::QueryError> {
+        crate::query::hash_full_outer_join(self, right, left_on, right_on)
+    }
+
+    /// Hash join on a single key column with a runtime join type.
+    ///
+    /// This is a convenience API that always returns optional indices, regardless of join type.
+    pub fn hash_join_with_type(
+        &self,
+        right: &ColumnarTable,
+        left_on: usize,
+        right_on: usize,
+        join_type: crate::query::JoinType,
+    ) -> Result<crate::query::JoinResult<Option<usize>, Option<usize>>, crate::query::QueryError> {
+        crate::query::hash_join_with_type(self, right, left_on, right_on, join_type)
+    }
+
     /// Hash join on multiple key columns (inner join).
     pub fn hash_join_multi(
         &self,

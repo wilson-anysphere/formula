@@ -2849,7 +2849,7 @@ pub fn group_by_mask(
     Ok(engine.finish())
 }
 
-/// Output of `hash_join`.
+/// Output of hash joins.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct JoinResult<L = usize, R = usize> {
     pub left_indices: Vec<L>,
@@ -3051,6 +3051,44 @@ pub fn hash_join(
     }
 
     Ok(out)
+}
+
+/// Hash join on a single key column (left join).
+///
+/// Rows from the left table with no match (or NULL key) are included with `None` for the right
+/// index.
+pub fn hash_left_join(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_on: usize,
+    right_on: usize,
+) -> Result<JoinResult<usize, Option<usize>>, QueryError> {
+    hash_left_join_multi(left, right, &[left_on], &[right_on])
+}
+
+/// Hash join on a single key column (full outer join).
+///
+/// Unmatched rows from either side are included with `None` for the missing partner index.
+pub fn hash_full_outer_join(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_on: usize,
+    right_on: usize,
+) -> Result<JoinResult<Option<usize>, Option<usize>>, QueryError> {
+    hash_full_outer_join_multi(left, right, &[left_on], &[right_on])
+}
+
+/// Hash join on a single key column with a runtime join type.
+///
+/// This is a convenience API that always returns optional indices, regardless of join type.
+pub fn hash_join_with_type(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_on: usize,
+    right_on: usize,
+    join_type: JoinType,
+) -> Result<JoinResult<Option<usize>, Option<usize>>, QueryError> {
+    hash_join_multi_with_type(left, right, &[left_on], &[right_on], join_type)
 }
 
 struct JoinKeyPlan {

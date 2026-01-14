@@ -103,9 +103,10 @@ pub use crate::encoding::{
     U32SequenceEncoding, U64SequenceEncoding, ValueEncodedChunk,
 };
 pub use crate::query::{
-    filter_mask, filter_table, group_by, group_by_mask, group_by_rows, hash_join, AggOp, AggSpec,
-    hash_full_outer_join_multi, hash_join_multi, hash_join_multi_with_type, hash_left_join_multi,
-    CmpOp, FilterExpr, FilterValue, GroupByEngine, GroupByResult, JoinResult, JoinType, QueryError,
+    filter_mask, filter_table, group_by, group_by_mask, group_by_rows, hash_full_outer_join,
+    hash_full_outer_join_multi, hash_join, hash_join_multi, hash_join_multi_with_type,
+    hash_join_with_type, hash_left_join, hash_left_join_multi, AggOp, AggSpec, CmpOp, FilterExpr,
+    FilterValue, GroupByEngine, GroupByResult, JoinResult, JoinType, QueryError,
 };
 pub use crate::stats::ColumnStats;
 pub use crate::table::{
