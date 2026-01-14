@@ -41,6 +41,13 @@ function isRecord(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function readYMapOrObject(value: any, key: string): any {
   const map = getYMap(value);
   if (map) return map.get(key);
@@ -84,6 +91,16 @@ function readAxisOverrides(raw: unknown): Record<string, number> | undefined {
       out[String(idx)] = normalized;
     });
     return Object.keys(out).length > 0 ? out : undefined;
+  }
+
+  // Support Y.Array (or duck-typed equivalents) by converting to a JS array.
+  const maybeArray = (raw as any)?.toArray;
+  if (!Array.isArray(raw) && typeof maybeArray === "function") {
+    try {
+      raw = maybeArray.call(raw);
+    } catch {
+      // ignore
+    }
   }
 
   if (Array.isArray(raw)) {
@@ -464,7 +481,7 @@ function ensureNestedYMap(parent: any, key: string): Y.Map<any> {
   })();
 
   // Best-effort: if the existing value was a plain object, preserve entries.
-  if (isRecord(existing)) {
+  if (isPlainObject(existing)) {
     for (const [k, v] of Object.entries(existing)) {
       next.set(k, v);
     }
@@ -472,6 +489,29 @@ function ensureNestedYMap(parent: any, key: string): Y.Map<any> {
 
   parent?.set?.(key, next);
   return next;
+}
+
+function ensureAxisOverridesYMap(parent: any, key: string): { map: Y.Map<any>; created: boolean } {
+  const existing = parent?.get?.(key);
+  const existingMap = getYMap(existing);
+  if (existingMap) return { map: existingMap, created: false };
+
+  // Prefer constructing nested Yjs types using the parent's constructor to tolerate
+  // mixed-module environments (ESM + CJS) where multiple `yjs` instances exist.
+  const ParentCtor = (parent as any)?.constructor as { new (): any } | undefined;
+  const next = (() => {
+    if (typeof ParentCtor === "function" && ParentCtor !== Object) {
+      try {
+        return new ParentCtor();
+      } catch {
+        // Fall through.
+      }
+    }
+    return new Y.Map();
+  })();
+
+  parent?.set?.(key, next);
+  return { map: next, created: true };
 }
 
 function applyAxisDelta(map: Y.Map<any>, before?: Record<string, number>, after?: Record<string, number>): void {
@@ -726,11 +766,27 @@ export function bindSheetViewToCollabSession(options: {
               }
             }
 
-            const colWidthsMap = ensureNestedYMap(viewMap, "colWidths");
-            const rowHeightsMap = ensureNestedYMap(viewMap, "rowHeights");
+            const beforeColWidths = before?.colWidths;
+            const afterColWidths = after.colWidths;
+            if (beforeColWidths || afterColWidths) {
+              if (afterColWidths) {
+                const { map: colWidthsMap, created } = ensureAxisOverridesYMap(viewMap, "colWidths");
+                applyAxisDelta(colWidthsMap, created ? undefined : beforeColWidths, afterColWidths);
+              } else {
+                viewMap.delete("colWidths");
+              }
+            }
 
-            applyAxisDelta(colWidthsMap, before?.colWidths, after.colWidths);
-            applyAxisDelta(rowHeightsMap, before?.rowHeights, after.rowHeights);
+            const beforeRowHeights = before?.rowHeights;
+            const afterRowHeights = after.rowHeights;
+            if (beforeRowHeights || afterRowHeights) {
+              if (afterRowHeights) {
+                const { map: rowHeightsMap, created } = ensureAxisOverridesYMap(viewMap, "rowHeights");
+                applyAxisDelta(rowHeightsMap, created ? undefined : beforeRowHeights, afterRowHeights);
+              } else {
+                viewMap.delete("rowHeights");
+              }
+            }
 
             if (!nextMergedRanges) {
               if (prevMergedRanges) {

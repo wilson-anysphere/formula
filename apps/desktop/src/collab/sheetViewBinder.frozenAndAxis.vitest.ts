@@ -164,4 +164,102 @@ describe("bindSheetViewToCollabSession (frozen + axis overrides)", () => {
 
     binder.destroy();
   });
+
+  it("migrates legacy axis overrides into nested Y.Maps when applying unrelated view changes", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+    // Legacy encodings sometimes store axis overrides at the sheet root and omit `view`.
+    sheetMap.set("colWidths", [
+      [1, 100],
+      [2, 200],
+    ]);
+    sheetMap.set("rowHeights", [
+      [0, 25],
+      [1, 30],
+    ]);
+    sheets.push([sheetMap]);
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    // Initial hydration should read the legacy top-level keys.
+    expect(document.getSheetView(sheetId).colWidths).toEqual({ "1": 100, "2": 200 });
+    expect(document.getSheetView(sheetId).rowHeights).toEqual({ "0": 25, "1": 30 });
+
+    // A local update that does not touch colWidths/rowHeights should not erase them from Yjs.
+    // Instead, the binder should migrate them into the nested `view` maps so future reads prefer
+    // the canonical schema.
+    document.setFrozen(sheetId, 1, 0);
+
+    const viewMap = sheetMap.get("view") as Y.Map<any>;
+    expect(viewMap).toBeInstanceOf(Y.Map);
+
+    const colWidths = viewMap.get("colWidths") as Y.Map<any>;
+    const rowHeights = viewMap.get("rowHeights") as Y.Map<any>;
+    expect(colWidths).toBeInstanceOf(Y.Map);
+    expect(rowHeights).toBeInstanceOf(Y.Map);
+
+    expect(colWidths.get("1")).toBe(100);
+    expect(colWidths.get("2")).toBe(200);
+    expect(rowHeights.get("0")).toBe(25);
+    expect(rowHeights.get("1")).toBe(30);
+
+    binder.destroy();
+  });
+
+  it("migrates Y.Array axis overrides into nested Y.Maps without copying internal Yjs fields", () => {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray<Y.Map<any>>("sheets");
+
+    const sheetId = "sheet-1";
+    const sheetMap = new Y.Map<any>();
+    sheetMap.set("id", sheetId);
+
+    doc.transact(() => {
+      const view = new Y.Map<any>();
+      const colWidths = new Y.Array<any>();
+      colWidths.push([
+        [1, 100],
+        { index: 2, size: 200 },
+      ]);
+      view.set("colWidths", colWidths);
+      sheetMap.set("view", view);
+      sheets.push([sheetMap]);
+    });
+
+    const document = new DocumentController();
+    document.addSheet({ sheetId, name: "Sheet1" });
+
+    const binder = bindSheetViewToCollabSession({
+      session: { doc, sheets, localOrigins: new Set(), isReadOnly: () => false } as any,
+      documentController: document,
+    });
+
+    expect(document.getSheetView(sheetId).colWidths).toEqual({ "1": 100, "2": 200 });
+
+    // Trigger a local sheet view delta (without changing col widths) which causes the binder to
+    // ensure nested maps exist. This should migrate the Y.Array into a Y.Map without copying
+    // internal Y.Array fields like `_item` or `_prelimContent`.
+    document.setFrozen(sheetId, 1, 0);
+
+    const viewMap = sheetMap.get("view") as Y.Map<any>;
+    const migrated = viewMap.get("colWidths") as Y.Map<any>;
+    expect(migrated).toBeInstanceOf(Y.Map);
+    expect(migrated.get("1")).toBe(100);
+    expect(migrated.get("2")).toBe(200);
+    // Internal Y.Array fields should not appear as keys.
+    expect(migrated.get("_item")).toBe(undefined);
+    expect(migrated.get("_prelimContent")).toBe(undefined);
+
+    binder.destroy();
+  });
 });
